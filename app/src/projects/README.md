@@ -53,9 +53,10 @@ touches it is `src/db/repositories/projects-repository.ts`.
 ## Deactivating and the jobs
 
 Deactivating a project stops new reviews and discards its **waiting** (unclaimed) jobs; a job that a
-runner already holds (running) finishes. This module knows nothing about jobs. The jobs module (CR-27)
-implements `ProjectHooks.onProjectDeactivated(event, executor)` and returns it from `getProjectHooks()`
-in `shared.ts`:
+runner already holds (running) finishes. This module knows nothing about jobs. The jobs module
+implements `ProjectHooks.onProjectDeactivated(event, executor)` (`createJobProjectHooks` in
+`src/jobs/project-hooks.ts`, which cancels the waiting jobs of the repository) and `getProjectHooks()` in
+`shared.ts` returns it:
 
 - It runs in the transaction that switches the project off. Write with `executor` (never the outer
   connection, see `src/db/README.md`), set the waiting jobs of the project's repository to `cancelled`,
@@ -64,8 +65,9 @@ in `shared.ts`:
   already, so it must be idempotent; a repeated click finishes what a crashed call left.
 - Race to keep in mind for the jobs module: the webhook route checks for an active project before it
   hands a trigger to the intake, and the intake enqueues afterwards. A trigger that passed the check
-  just before the deactivation can enqueue a job after the hook ran. `claim` (CR-28) should therefore
-  also skip jobs whose repository has no active project (the claim is the line the runner cannot cross).
+  just before the deactivation can enqueue a job after the hook ran. The `claim` of the runner API
+  therefore asks again (`createProjectClaimGuard`, `src/runner-api`): a job whose repository has no
+  active project is cancelled there (the claim is the line the runner cannot cross).
 
 ## Webhooks
 

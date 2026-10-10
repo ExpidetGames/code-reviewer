@@ -20,6 +20,10 @@ export async function register(): Promise<void> {
     db: getDatabase(),
     config: loadAuthConfig(process.env).access,
   });
+  const { warnAboutRunnerToken } = await import("./runner-api/startup.ts");
+  warnAboutRunnerToken(process.env);
+  const { warnAboutDebounce } = await import("./webhooks/debounce-config.ts");
+  warnAboutDebounce(process.env);
   const { runStartupSync } = await import("./integrations/sync/startup.ts");
   void runStartupSync();
 }

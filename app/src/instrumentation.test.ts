@@ -1,6 +1,6 @@
 // Pins down the start of the server: the LLM configuration is checked, a missing key only warns and
 // the rest of the start (database, pins, sync) goes on. The other modules of the start are replaced
-// by recorders; the LLM check is the real one.
+// by recorders; the LLM check is the real one, and so is the runner token check (it must stay quiet).
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const calls: string[] = [];
@@ -24,6 +24,8 @@ import { register } from "./instrumentation.ts";
 beforeEach(() => {
   calls.length = 0;
   vi.stubEnv("NEXT_RUNTIME", "nodejs");
+  // A usable runner token, so the start has nothing to say about the runner API (CR-28).
+  vi.stubEnv("RUNNER_TOKEN", "dummy-runner-token-0123456789abcdef");
 });
 
 afterEach(() => {

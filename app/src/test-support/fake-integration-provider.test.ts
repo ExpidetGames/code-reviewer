@@ -46,6 +46,8 @@ function createSubject(provider: IntegrationProvider): ConformanceSubject {
     command: null,
     args: null,
     actor: { login: "alice", externalId: "1" },
+    draft: false,
+    state: "open",
   };
   return {
     provider,
