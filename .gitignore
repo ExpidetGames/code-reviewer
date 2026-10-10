@@ -35,3 +35,20 @@ __pycache__/
 .DS_Store
 .idea/
 .vscode/
+
+# Keys, certificates and local databases must never be committed
+*.pem
+*.key
+*.p12
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal
+
+# Test output
+playwright-report/
+test-results/
+.pyright/
