@@ -7,7 +7,7 @@ from collections.abc import Iterator
 from typing import Any
 
 import pytest
-from fake_app import RUNNER_TOKEN, FakeApp, Scripted, claim_response
+from fake_app import RUNNER_TOKEN, FakeApp, RawServer, Scripted, claim_response
 
 from code_reviewer_runner.job_loop.api import (
     ApiRejected,
@@ -186,3 +186,45 @@ def test_a_heartbeat_interval_longer_than_the_lease_allows_is_shortened(app: Fak
     claimed = asyncio.run(client(app).claim())
 
     assert claimed is not None and claimed.heartbeat_interval == 60
+
+
+GARBAGE = [
+    pytest.param(b"GARBAGE\r\n\r\n", id="not an HTTP answer"),
+    pytest.param(b"HTTP/1.1 2", id="status line cut off"),
+    pytest.param(b"", id="closed without an answer"),
+]
+
+
+@pytest.mark.parametrize("answer", GARBAGE)
+def test_an_answer_that_is_not_http_is_unavailable_for_every_call(answer: bytes) -> None:
+    server = RawServer(answer)
+    try:
+        api = HttpRunnerApi(server.url, RUNNER_TOKEN, "client-test", request_timeout=5)
+
+        with pytest.raises(ApiUnavailable):
+            asyncio.run(api.claim())
+        with pytest.raises(ApiUnavailable):
+            asyncio.run(api.heartbeat(JOB_ID, "lease-1234567890"))
+        with pytest.raises(ApiUnavailable):
+            asyncio.run(api.complete(JOB_ID, "lease-1234567890", RESULT))
+    finally:
+        server.close()
+
+
+def test_a_text_with_a_lone_surrogate_is_sent_as_an_escape_and_arrives(app: FakeApp) -> None:
+    result = {**RESULT, "logTail": "broken \ud800 text"}
+
+    asyncio.run(client(app).complete(JOB_ID, "lease-1234567890", result))
+
+    assert app.completions[0]["result"]["logTail"] == "broken \ud800 text"
+
+
+def test_a_claim_answer_that_is_cut_off_is_unavailable() -> None:
+    server = RawServer(b'HTTP/1.1 200 OK\r\nContent-Length: 500\r\n\r\n{"version": 1, ')
+    try:
+        api = HttpRunnerApi(server.url, RUNNER_TOKEN, "client-test", request_timeout=5)
+
+        with pytest.raises(ApiUnavailable):
+            asyncio.run(api.claim())
+    finally:
+        server.close()

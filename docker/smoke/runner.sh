@@ -28,6 +28,26 @@ output=$(docker run --rm "$image" --version)
   fail "expected 'code-reviewer-runner $expected', got '$output'"
 printf '    %s\n' "$output"
 
+# CR-29: a process that kills its jobs' process groups needs an init process that reaps the orphans.
+step "the entry point starts with tini, so killed helpers do not stay as zombies"
+entrypoint=$(docker inspect --format '{{json .Config.Entrypoint}}' "$image")
+[[ "$entrypoint" == '["/usr/bin/tini","--","code-reviewer-runner"]' ]] ||
+  fail "expected tini in front of the job loop, got $entrypoint"
+# A job's helpers are killed with their process group and re-parented to PID 1; none may stay a zombie.
+zombie_check='
+import os, signal, subprocess, time
+job = subprocess.Popen(["sh", "-c", "sleep 30 & sleep 30 & wait"], start_new_session=True)
+time.sleep(0.5)
+os.killpg(job.pid, signal.SIGKILL)
+job.wait()
+time.sleep(1)
+zombies = [d for d in os.listdir("/proc") if d.isdigit()
+           and open(f"/proc/{d}/stat").read().rsplit(")", 1)[1].split()[0] == "Z"]
+print(len(zombies))
+'
+zombies=$(docker run --rm --entrypoint /usr/bin/tini "$image" -- python -c "$zombie_check")
+[ "$zombies" = "0" ] || fail "$zombies zombie process(es) after ending a process group under tini"
+
 # CR-29: the entry point is the job loop; without its configuration it says so and stops.
 step "the job loop refuses to start without its configuration and does not leak the token"
 loop_token="smoke-runner-token-0123456789-abcdef-0123456789"

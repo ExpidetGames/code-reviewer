@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from fake_app import RUNNER_TOKEN, FakeApp, claim_response
+from fake_app import RUNNER_TOKEN, FakeApp, RawServer, claim_response
 from process_support import API_KEY, FAKE_JOB, TOKEN, gone, job_id, job_input, reports
 
 from code_reviewer_runner.job_loop.api import HttpRunnerApi
@@ -347,3 +347,35 @@ def test_two_hundred_megabytes_of_output_stay_bounded_and_the_result_is_cut(
     assert result["ok"] is True
     assert len(result["logTail"]) <= 4096
     assert grown_mb < 100
+
+
+# CR-29-T11: an app (or a proxy in front of it) that answers nonsense is just an app that is down.
+def test_an_app_that_answers_garbage_makes_the_loop_wait_instead_of_dying(tmp_path: Path) -> None:
+    server = RawServer(b"GARBAGE\r\n\r\n")
+    settings = LoopSettings(
+        api_url=server.url,
+        token=RUNNER_TOKEN,
+        runner_id="garbage-test",
+        poll_interval=0.05,
+        job_command=(sys.executable, str(FAKE_JOB), "ok", str(tmp_path)),
+    )
+
+    async def go() -> None:
+        loop = RunnerLoop(
+            settings,
+            HttpRunnerApi(server.url, RUNNER_TOKEN, "garbage-test", request_timeout=5),
+            SubprocessLauncher(1.0),
+            environment={"PATH": os.environ["PATH"]},
+        )
+        task = asyncio.create_task(loop.run())
+        await asyncio.sleep(1.0)
+        survived = not task.done()
+        loop.request_force()
+        await asyncio.wait_for(task, 10)
+        assert survived, "the loop must keep running"
+
+    try:
+        asyncio.run(go())
+        assert server.connections == 1  # then it waits at least five seconds before the next try
+    finally:
+        server.close()

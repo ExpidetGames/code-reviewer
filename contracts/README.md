@@ -56,8 +56,8 @@ A `complete` request must stay under 64 KiB serialized, or the app answers `413`
 finish (the lease runs out and it is tried again). The largest document the schema allows can exceed
 that, because `logTail` (8192 characters) and `errorMessage` (2000) may hold characters that take
 several bytes in JSON; with `ensure_ascii` (the runner's output mode) a non-ASCII character takes 6 to 12
-bytes. The runner keeps `logTail` at 4 KB. The job loop (CR-29, `job_loop/reporting.py`) sends UTF-8, caps
-the result **before** serializing and keeps the body under 48 KB.
+bytes. The runner keeps `logTail` at 4 KB. The job loop (CR-29, `job_loop/reporting.py`) sends ASCII-escaped JSON, caps
+the result **before** serializing and keeps the body under 48 KB (measured in that form).
 
 ## A shutdown is not a result
 

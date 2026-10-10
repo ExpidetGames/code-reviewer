@@ -47,11 +47,11 @@ Rules (the CR-29 decisions; tests in `tests/unit/test_job_loop*.py` and `tests/i
   and the lease tokens, and cut to 4 KB; the body of `complete` stays under 48 KB (the app refuses 64 KiB).
   Only the newest 256 KB of stdout and 64 KB of stderr are kept, however much the process writes.
 - **`complete` is repeated** with growing pauses while the app cannot be reached, for up to 10
-  minutes (the lease is 2 minutes, so the app has taken the job back by then). A `409` ends the
-  attempts. A `400` or `413` is answered once with the bare verdict (no log). The answer
+  minutes (the lease is 2 minutes, so the app has taken the job back by then). While the result is being resent the loop keeps sending heartbeats, so the lease cannot lapse and no other runner can take the job a second time; a lost lease (409) stops the attempts. A `409` ends the
+  attempts. A `400` or `413` is answered once with the bare verdict (no log). An answer that is not HTTP (garbage, a cut-off body) counts as the app being unavailable. The answer
   `status: "queued"` (after a shutdown report) is accepted.
 - **Back-off.** When the app is down or answers 5xx, 429 or 401 to a claim, the loop waits 5, 10, 20, 40,
-  then 60 seconds (or the `Retry-After` of a `503`) and starts over after a successful claim. Running
+  then 60 seconds (never below 5 seconds, even with a shorter poll interval; or the `Retry-After` of a `503`) and starts over after a successful claim. Running
   jobs are not touched.
 - **Shutdown.** `SIGTERM` or `SIGINT`: no new claims, running jobs may finish for
   `RUNNER_SHUTDOWN_GRACE_SECONDS`; then they are ended and reported as `failed` with `runner_shutdown`,
@@ -59,6 +59,13 @@ Rules (the CR-29 decisions; tests in `tests/unit/test_job_loop*.py` and `tests/i
   A second signal skips the wait. The exit code is 0.
 - **No secrets in logs.** The loop logs ids, codes and counts, never the input of a job. Every line
   passes a masker that knows the runner token, the lease tokens and the credentials of the running jobs.
+- **The image and compose.** The entry point is `tini` (PID 1) in front of the loop, so the helpers of a
+  killed job are reaped and `docker stop` reaches the loop as SIGTERM; `init: true` is not needed.
+  Compose must give the container a `stop_grace_period` of **at least 90 seconds** (60 s grace period
+  + 5 s between SIGTERM and SIGKILL + up to 10 s to report `runner_shutdown`; Docker's default of 10 s
+  would SIGKILL the runner before the jobs are reported). `PR_AGENT_COMMAND` must never be set in a
+  production compose file: the job, with its credentials, would go to that command (the loop logs a
+  warning at start when it is set).
 - The codes the loop adds to the ones of the table below: `runner_shutdown`. `timeout` and
   `runner_error` are also reported by the loop itself.
 

@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 import pytest
+from pr_agent.git_providers.github_provider import GithubProvider
 from support import API_KEY, TOKEN, make_job, make_job_dict
 
 from code_reviewer_runner.identity_patch import apply_identity_patch
@@ -39,13 +40,11 @@ def test_a_github_job_becomes_the_pr_agent_settings_of_a_github_user_mode_provid
 def test_the_bot_identity_of_the_job_is_what_the_identity_patch_gives_pr_agent() -> None:
     job = make_job()
 
-    class Provider:
-        def _resolve_user_login(self) -> str:
-            return ""
-
-    undo = apply_identity_patch(job.git.bot_login, provider_class=Provider)
+    # No __init__: constructing the provider would build a GitHub client.
+    provider: Any = object.__new__(GithubProvider)
+    undo = apply_identity_patch(job.git.bot_login)
     try:
-        login: Any = Provider()._resolve_user_login()  # pyright: ignore[reportPrivateUsage]
+        login: Any = provider._resolve_user_login()  # pyright: ignore[reportPrivateUsage]
     finally:
         undo()
 

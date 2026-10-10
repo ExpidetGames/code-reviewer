@@ -42,6 +42,8 @@ def clean_text(text: str, redactor: TextRedactor, limit: int) -> str:
     """Printable, redacted text, the newest `limit` characters of it."""
     text = _ESCAPE_SEQUENCE.sub("", text.replace("\r\n", "\n"))
     text = _CONTROL.sub(" ", text)
+    # A lone surrogate (from a broken byte sequence) cannot be encoded; it must not poison the body.
+    text = text.encode("utf-8", errors="replace").decode("utf-8")
     text = redactor.redact(text)
     return text[-limit:] if len(text) > limit else text
 
@@ -186,7 +188,7 @@ def result_from_outcome(
 def fit_request(result: Result) -> Result:
     """Shrink the log tail until the `complete` body is small enough; never loses the verdict."""
     current = dict(result)
-    while len(json.dumps(current, ensure_ascii=False).encode("utf-8")) > MAX_REQUEST_BYTES:
+    while len(json.dumps(current)) > MAX_REQUEST_BYTES:
         tail = current["logTail"]
         if not tail:
             current["errorMessage"] = ""

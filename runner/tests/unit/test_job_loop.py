@@ -636,8 +636,185 @@ def test_secrets_of_a_job_are_masked_in_the_result_and_in_the_runner_log(
         for secret in (TOKEN, API_KEY, RUNNER_TOKEN):
             assert secret not in body
             assert secret not in caplog.text
+        # The lease token is in the request that carries it, but not in what the result says.
+        assert claim.lease_token not in json.dumps([entry[2] for entry in harness.api.completions])
         assert claim.lease_token not in caplog.text
         await harness.stop()
 
     caplog.set_level(logging.DEBUG, logger="code_reviewer_runner.loop")
+    run(scenario)
+
+
+# CR-29-T12: the heart keeps beating while the result is retried, so the lease cannot lapse and
+# another runner cannot take the same job.
+def test_heartbeats_continue_while_the_result_is_retried_until_the_app_takes_it() -> None:
+    async def scenario() -> None:
+        harness = Harness(complete_retry_window=600.0, backoff_max=60.0)
+        claim = make_claim(1)
+        harness.api.claims = [claim]
+        harness.api.complete_errors = [ApiUnavailable("down") for _ in range(10)]
+        await harness.start()
+        only(harness.launcher.processes).finish()
+        await settle()
+        assert harness.api.heartbeats == []
+
+        await harness.clock.advance(300)
+
+        # Longer than the two minute lease, and still beating every 30 seconds.
+        assert len(harness.api.heartbeats) == 10
+        assert len(harness.api.completions) == 10  # the app has not taken it yet
+        await harness.clock.advance(10)
+        assert len(harness.api.completions) == 11  # the first answer after the outage
+        beats = len(harness.api.heartbeats)
+        await harness.clock.advance(300)
+        assert len(harness.api.heartbeats) == beats  # nothing more once the result is in
+        await harness.stop()
+
+    run(scenario)
+
+
+def test_a_lease_lost_while_the_result_is_retried_stops_the_retries() -> None:
+    async def scenario() -> None:
+        harness = Harness()
+        harness.api.claims = [make_claim(1)]
+        harness.api.complete_errors = [ApiUnavailable("down") for _ in range(100)]
+        harness.api.heartbeat_errors = [LeaseLost("gone", 409)]
+        await harness.start()
+        only(harness.launcher.processes).finish()
+        await settle()
+
+        await harness.clock.advance(400)
+        sent = len(harness.api.completions)
+        await harness.clock.advance(400)
+
+        assert sent <= 8
+        assert len(harness.api.completions) == sent
+        await harness.stop()
+
+    run(scenario)
+
+
+def test_a_long_retry_after_is_bounded_by_the_retry_window() -> None:
+    async def scenario() -> None:
+        harness = Harness(complete_retry_window=100.0)
+        harness.api.claims = [make_claim(1)]
+        harness.api.complete_errors = [ApiUnavailable("busy", 503, retry_after=900.0)]
+        await harness.start()
+        only(harness.launcher.processes).finish()
+        await settle()
+
+        await harness.clock.advance(100)
+
+        assert len(harness.api.completions) == 2
+        await harness.stop()
+
+    run(scenario)
+
+
+def test_a_second_stop_signal_ends_the_wait_between_two_attempts_to_send_a_result() -> None:
+    async def scenario() -> None:
+        harness = Harness(shutdown_grace=600.0)
+        harness.api.claims = [make_claim(1)]
+        harness.api.complete_errors = [ApiUnavailable("busy", 503, retry_after=900.0)]
+        await harness.start()
+        only(harness.launcher.processes).finish()
+        await settle()
+        harness.loop.request_stop()
+        await settle()
+        assert harness.task is not None and not harness.task.done()
+
+        harness.loop.request_force()
+        await settle()
+
+        assert harness.task.done()
+        assert len(harness.api.completions) == 1
+
+    run(scenario)
+
+
+# CR-29: an unexpected error in the heartbeat does not stop the beating.
+def test_a_heartbeat_that_fails_in_an_unexpected_way_does_not_stop_the_beating(
+    caplog: Any,
+) -> None:
+    async def scenario() -> None:
+        harness = Harness()
+        harness.api.claims = [make_claim(1)]
+        harness.api.heartbeat_errors = [RuntimeError(f"boom {TOKEN}")]  # type: ignore[list-item]
+        await harness.start()
+        process = only(harness.launcher.processes)
+
+        await harness.clock.advance(95)
+
+        assert len(harness.api.heartbeats) == 3
+        assert not process.terminated
+        assert "RuntimeError" in caplog.text
+        assert TOKEN not in caplog.text
+        await harness.stop()
+
+    caplog.set_level(logging.DEBUG, logger="code_reviewer_runner.loop")
+    run(scenario)
+
+
+# CR-29: a lone surrogate in the input or in the output is not a poison value.
+def test_a_question_with_a_lone_surrogate_is_passed_on_and_reported_normally() -> None:
+    async def scenario() -> None:
+        harness = Harness()
+        harness.api.claims = [make_claim(1, command="ask", args=["why \ud800 this?"])]
+        await harness.start()
+        process = only(harness.launcher.processes)
+        assert json.loads(process.spec.stdin)["args"] == ["why \ud800 this?"]
+
+        process.finish(outcome(stdout=result_line(logTail="broken \ud800 text")))
+        await settle()
+
+        (_, _, result) = harness.api.completions[0]
+        assert result["ok"] is True
+        result["logTail"].encode("utf-8")  # does not raise
+        await harness.stop()
+
+    run(scenario)
+
+
+def test_any_failure_to_start_the_process_is_reported_as_a_runner_error() -> None:
+    async def scenario() -> None:
+        harness = Harness()
+        harness.launcher.fail_with = RuntimeError("not an OSError")  # type: ignore[assignment]
+        harness.api.claims = [make_claim(1)]
+        await harness.start()
+
+        (_, _, result) = harness.api.completions[0]
+        assert (result["ok"], result["errorCode"]) == (False, "runner_error")
+        await harness.stop()
+
+    run(scenario)
+
+
+def test_the_pause_after_a_failed_claim_never_starts_below_five_seconds() -> None:
+    async def scenario() -> None:
+        harness = Harness(poll_interval=0.1)
+        harness.api.claims = [ApiUnavailable("down", 503), ApiUnavailable("down", 503)]
+        await harness.start()
+
+        await harness.clock.advance(4.9)
+        assert harness.api.claim_calls == 1
+        await harness.clock.advance(0.2)
+        assert harness.api.claim_calls == 2
+        await harness.stop()
+
+    run(scenario)
+
+
+def test_a_job_command_other_than_the_entry_point_is_announced_with_a_warning(
+    caplog: Any,
+) -> None:
+    async def scenario() -> None:
+        harness = Harness(job_command=("/fakes/fake_pr_agent.py", "--mode", "succeed"))
+        await harness.start()
+
+        assert "PR_AGENT_COMMAND is set" in caplog.text
+        assert "/fakes/fake_pr_agent.py" in caplog.text
+        assert "--mode" not in caplog.text
+        await harness.stop()
+
+    caplog.set_level(logging.WARNING, logger="code_reviewer_runner.loop")
     run(scenario)

@@ -26,6 +26,7 @@ from typing import Any
 
 from code_reviewer_runner.job import JobError, parse_job
 from code_reviewer_runner.job_loop.api import (
+    MAX_RETRY_AFTER_SECONDS,
     ApiError,
     ApiRejected,
     ApiUnavailable,
@@ -51,15 +52,16 @@ from code_reviewer_runner.job_loop.reporting import (
     minimal,
     result_from_outcome,
 )
-from code_reviewer_runner.job_loop.settings import LoopSettings
+from code_reviewer_runner.job_loop.settings import LoopSettings, default_job_command
 from code_reviewer_runner.pr_agent_config import PASSTHROUGH_VARIABLES
 from code_reviewer_runner.result import ErrorCode
 
 TIMEOUT_VARIABLE = "RUNNER_JOB_TIMEOUT_SECONDS"
+# The pause after a failure never starts below this, however short the poll interval is.
+MIN_BACKOFF_SECONDS = 5.0
 # A shutdown report is tried for this long; the process is going away either way.
 SHUTDOWN_REPORT_WINDOW_SECONDS = 10.0
 _FIRST_RETRY_SECONDS = 1.0
-MAX_RETRY_AFTER_SECONDS = 15 * 60.0
 
 
 class Backoff:
@@ -136,7 +138,7 @@ class RunnerLoop:
     async def run(self) -> None:
         """Run until a stop is requested and every job is reported or given up."""
         settings = self._settings
-        backoff = Backoff(settings.poll_interval, settings.backoff_max)
+        backoff = Backoff(max(MIN_BACKOFF_SECONDS, settings.poll_interval), settings.backoff_max)
         self._log.info(
             "runner %s started: %d slots, poll interval %gs, job timeout %gs",
             settings.runner_id,
@@ -144,6 +146,12 @@ class RunnerLoop:
             settings.poll_interval,
             settings.job_timeout,
         )
+        if tuple(settings.job_command) != default_job_command():
+            self._log.warning(
+                "PR_AGENT_COMMAND is set: jobs, with their credentials on stdin, go to %s instead "
+                "of the runner entry point. This is meant for test stacks, never for production.",
+                settings.job_command[0] if settings.job_command else "(empty)",
+            )
         while not self._stopping.is_set():
             if len(self._tasks) >= settings.concurrency:
                 await self._pause(None, wake_on_finish=True)
@@ -264,16 +272,18 @@ class RunnerLoop:
             await self._report(claimed, result, window=self._settings.complete_retry_window)
             return
         self._log.info("job %s claimed: %s", claimed.id, job.command.value)
-        spec = ProcessSpec(
-            argv=self._settings.job_command,
-            env=self._child_environment(),
-            stdin=json.dumps(claimed.input, ensure_ascii=False).encode("utf-8"),
-        )
         try:
+            # ASCII escapes: a lone surrogate in a text cannot break the encoding, and the job
+            # process reads the same JSON.
+            spec = ProcessSpec(
+                argv=self._settings.job_command,
+                env=self._child_environment(),
+                stdin=json.dumps(claimed.input).encode("ascii"),
+            )
             process = await self._launcher.start(spec)
-        except OSError as error:
+        except Exception as error:
             self._log.error(
-                "job %s: cannot start the job process (%s)", claimed.id, error.__class__
+                "job %s: cannot start the job process (%s)", claimed.id, type(error).__name__
             )
             result = failure_result(
                 ErrorCode.RUNNER_ERROR.value,
@@ -377,9 +387,11 @@ class RunnerLoop:
             except LeaseLost:
                 lost.set()
                 return
-            except ApiError as error:
-                # A missed beat is not yet a lost lease (it is two minutes long): keep going.
-                self._log.warning("job %s: heartbeat failed: %s", claimed.id, error)
+            except Exception as error:
+                # A missed beat is not yet a lost lease (it is two minutes long): keep going. Only
+                # the class of an unexpected error is logged, its text may hold part of the input.
+                detail = str(error) if isinstance(error, ApiError) else type(error).__name__
+                self._log.warning("job %s: heartbeat failed (%s)", claimed.id, detail)
 
     def _log_outcome(self, claimed: ClaimedJob, result: Result, outcome: ProcessOutcome) -> None:
         if result["ok"]:
@@ -394,12 +406,51 @@ class RunnerLoop:
     async def _report(
         self, claimed: ClaimedJob, result: Result, *, window: float, shutdown: bool = False
     ) -> None:
+        """Deliver the result. The heart keeps beating until the app has it (or we give up): a
+        lease that lapses meanwhile would let another runner take the job a second time."""
+        lost = asyncio.Event()
+        beating = asyncio.ensure_future(self._heartbeats(claimed, lost))
+        try:
+            await self._deliver(claimed, result, window=window, shutdown=shutdown, lost=lost)
+        finally:
+            beating.cancel()
+            await asyncio.gather(beating, return_exceptions=True)
+
+    async def _sleep_unless(
+        self, seconds: float, lost: asyncio.Event, *, until_hard_stop: bool
+    ) -> bool:
+        """Sleep; False if something ended the wait early (lost lease, or the end of the grace)."""
+        sleeper = asyncio.ensure_future(self._clock.sleep(seconds))
+        waiters: list[asyncio.Future[Any]] = [sleeper, asyncio.ensure_future(lost.wait())]
+        if until_hard_stop:
+            waiters.append(asyncio.ensure_future(self._hard_stop.wait()))
+        try:
+            await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            slept = sleeper.done() and not sleeper.cancelled()
+            for waiter in waiters:
+                waiter.cancel()
+            await asyncio.gather(*waiters, return_exceptions=True)
+        return slept
+
+    async def _deliver(
+        self,
+        claimed: ClaimedJob,
+        result: Result,
+        *,
+        window: float,
+        shutdown: bool,
+        lost: asyncio.Event,
+    ) -> None:
         """Send the result until the app takes it, tells us it will never take it, or time is up."""
         body = fit_request(result)
         began = self._clock.monotonic()
         delay = _FIRST_RETRY_SECONDS
         reduced = False
         while True:
+            if lost.is_set():
+                self._log.info("job %s: the lease is lost, the result is not sent", claimed.id)
+                return
             try:
                 reply = await self._api.complete(claimed.id, claimed.lease_token, body)
             except LeaseLost:
@@ -422,18 +473,21 @@ class RunnerLoop:
                 )
                 return
             except ApiUnavailable as error:
-                waited = self._clock.monotonic() - began
-                if waited + delay > window or (self._hard_stop.is_set() and not shutdown):
+                remaining = window - (self._clock.monotonic() - began)
+                if remaining <= 0 or (self._hard_stop.is_set() and not shutdown):
                     self._log.error(
                         "job %s: the result could not be delivered (%s); the lease will run out",
                         claimed.id,
                         error,
                     )
                     return
+                pause = min(max(delay, error.retry_after or 0.0), remaining)
                 self._log.warning(
-                    "job %s: %s; sending the result again in %gs", claimed.id, error, delay
+                    "job %s: %s; sending the result again in %gs", claimed.id, error, pause
                 )
-                await self._clock.sleep(max(delay, error.retry_after or 0.0))
+                if not await self._sleep_unless(pause, lost, until_hard_stop=not shutdown):
+                    self._log.warning("job %s: stopped waiting to send the result", claimed.id)
+                    return
                 delay = min(delay * 2, self._settings.backoff_max)
                 continue
             if reply.status == "queued":

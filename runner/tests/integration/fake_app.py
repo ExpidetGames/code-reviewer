@@ -7,6 +7,7 @@ per call to simulate 5xx, a lost lease and the like.
 
 import json
 import re
+import socket
 import threading
 from collections import defaultdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -185,3 +186,35 @@ class FakeApp:
                     return True
             time.sleep(0.02)
         return False
+
+
+class RawServer:
+    """A loopback server that answers every connection with fixed bytes, then closes it."""
+
+    def __init__(self, answer: bytes) -> None:
+        self._answer = answer
+        self._listener = socket.socket()
+        self._listener.bind(("127.0.0.1", 0))
+        self._listener.listen(8)
+        self.url = f"http://127.0.0.1:{self._listener.getsockname()[1]}"
+        self.connections = 0
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+        self._thread.start()
+
+    def _serve(self) -> None:
+        while True:
+            try:
+                connection, _ = self._listener.accept()
+            except OSError:
+                return
+            self.connections += 1
+            with connection:
+                connection.settimeout(2)
+                try:
+                    connection.recv(65536)
+                    connection.sendall(self._answer)
+                except OSError:
+                    pass
+
+    def close(self) -> None:
+        self._listener.close()

@@ -14,6 +14,7 @@ No error carries a value of the request or the response: they hold secrets.
 """
 
 import asyncio
+import http.client
 import json
 import re
 import urllib.error
@@ -21,7 +22,6 @@ import urllib.request
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
-from urllib.parse import urlsplit
 
 from code_reviewer_runner import __version__
 from code_reviewer_runner.job_loop.jsonvalues import as_object
@@ -137,8 +137,6 @@ class HttpRunnerApi:
         self._timeout = request_timeout
         # No proxy: the token must only go to the app, and the app is reached directly.
         self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirects)
-        host = urlsplit(self._base_url).netloc
-        self._host = host
 
     # -- the three calls ----------------------------------------------------------------------
 
@@ -184,11 +182,7 @@ class HttpRunnerApi:
         return job_id
 
     def _send(self, path: str, body: Mapping[str, Any] | None) -> _Reply:
-        data = (
-            json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-            if body is not None
-            else b""
-        )
+        data = json.dumps(body, separators=(",", ":")).encode("ascii") if body is not None else b""
         request = urllib.request.Request(
             f"{self._base_url}/api/runners/v1{path}",
             data=data,
@@ -212,7 +206,7 @@ class HttpRunnerApi:
             except Exception:
                 body_bytes = b""
             return _Reply(error.code, dict(error.headers), body_bytes)
-        except (urllib.error.URLError, OSError, ValueError) as error:
+        except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError) as error:
             # The class of the error is enough: its text can hold the URL.
             raise ApiUnavailable(f"no answer from the app ({type(error).__name__})") from None
 

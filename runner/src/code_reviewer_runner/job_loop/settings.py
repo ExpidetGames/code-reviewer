@@ -36,7 +36,7 @@ class SettingsError(Exception):
     """A variable is missing or unusable. The message names the variable, never its value."""
 
 
-def _default_job_command() -> tuple[str, ...]:
+def default_job_command() -> tuple[str, ...]:
     """One PR-Agent process per job: the entry point of CR-10 (`code-reviewer-run-job`)."""
     return (sys.executable, "-m", "code_reviewer_runner.runner")
 
@@ -59,7 +59,7 @@ class LoopSettings:
     request_timeout: float = 30.0
     # How long a finished job's result is retried when the app cannot be reached.
     complete_retry_window: float = 600.0
-    job_command: tuple[str, ...] = field(default_factory=_default_job_command)
+    job_command: tuple[str, ...] = field(default_factory=default_job_command)
 
 
 def _number(
@@ -104,7 +104,7 @@ def _job_command(environment: Mapping[str, str]) -> tuple[str, ...]:
     """`PR_AGENT_COMMAND` replaces the job entry point, for test stacks with a fake PR-Agent."""
     raw = environment.get("PR_AGENT_COMMAND", "").strip()
     if not raw:
-        return _default_job_command()
+        return default_job_command()
     try:
         parts = shlex.split(raw)
     except ValueError:
