@@ -32,6 +32,25 @@ describe("checking the LLM configuration when the server starts", () => {
     expect(line).not.toContain("\n");
   });
 
+  it("warns once about a wrong optional variable, names it, and says the default is used", () => {
+    const warn = vi.fn();
+
+    checkLlmConfigOnStart({
+      env: {
+        LLM_PROVIDER: "openrouter",
+        LLM_API_KEY: KEY,
+        LLM_MODEL: "bad model",
+      },
+      warn,
+    });
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    const line = String(warn.mock.calls[0]?.[0]);
+    expect(line).toContain("LLM_OPTIONS_IGNORED");
+    expect(line).toContain("LLM_MODEL_INVALID (LLM_MODEL)");
+    expect(line).not.toContain("LLM_NOT_CONFIGURED");
+  });
+
   // CR-26-T07
   it("never prints a value, not even a wrong one", () => {
     const warn = vi.fn();

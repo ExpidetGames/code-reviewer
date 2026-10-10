@@ -15,7 +15,8 @@ describe("describing the LLM access for the UI", () => {
     expect(status).toEqual({
       configured: true,
       provider: "openrouter",
-      model: "deepseek/deepseek-v3.2",
+      model: "anthropic/claude-haiku-5.5",
+      warnings: [],
     });
   });
 
@@ -28,6 +29,24 @@ describe("describing the LLM access for the UI", () => {
     expect(status).toEqual({
       configured: false,
       issues: [{ code: "LLM_API_KEY_MISSING", variable: "LLM_API_KEY" }],
+      warnings: [],
+    });
+  });
+
+  it("lists a wrong optional variable as a warning of a working configuration", () => {
+    const status = describeLlmStatus(
+      loadLlmConfig({
+        LLM_PROVIDER: "openrouter",
+        LLM_API_KEY: KEY,
+        LLM_MODEL: "bad model",
+      }),
+    );
+
+    expect(status).toEqual({
+      configured: true,
+      provider: "openrouter",
+      model: "anthropic/claude-haiku-5.5",
+      warnings: [{ code: "LLM_MODEL_INVALID", variable: "LLM_MODEL" }],
     });
   });
 

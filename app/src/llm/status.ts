@@ -3,8 +3,19 @@
 import type { LlmConfigIssue, LlmConfigState, LlmProvider } from "./config.ts";
 
 export type LlmStatus =
-  | { configured: true; provider: LlmProvider; model: string }
-  | { configured: false; issues: readonly LlmConfigIssue[] };
+  | {
+      configured: true;
+      provider: LlmProvider;
+      model: string;
+      /** Optional variables that were wrong and are ignored (the default is used instead). */
+      warnings: readonly LlmConfigIssue[];
+    }
+  | {
+      configured: false;
+      /** What stops reviews: the provider or the key. */
+      issues: readonly LlmConfigIssue[];
+      warnings: readonly LlmConfigIssue[];
+    };
 
 export function describeLlmStatus(state: LlmConfigState): LlmStatus {
   if (state.status === "configured")
@@ -12,6 +23,11 @@ export function describeLlmStatus(state: LlmConfigState): LlmStatus {
       configured: true,
       provider: state.config.provider,
       model: state.config.model,
+      warnings: state.warnings,
     };
-  return { configured: false, issues: state.issues };
+  return {
+    configured: false,
+    issues: state.issues,
+    warnings: state.warnings,
+  };
 }

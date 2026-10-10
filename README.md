@@ -75,7 +75,7 @@ How it works: `app/src/auth/README.md`.
 One shared LLM account serves the whole instance: set `LLM_PROVIDER=openrouter` and `LLM_API_KEY`
 (optionally `LLM_MODEL`, `LLM_MAX_TOKENS`) as environment variables, see `app/.env.example`. Without
 them the app still starts and shows a configuration error; every job then fails with
-`llm_not_configured`. The key is never logged, stored or shown. How it works: `app/src/llm/README.md`.
+`llm_not_configured`. The default model is `anthropic/claude-haiku-5.5`. The key is never logged, stored or shown. How it works: `app/src/llm/README.md`.
 
 ## Run the runner locally
 
