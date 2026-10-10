@@ -52,6 +52,7 @@ const commandTrigger: ReviewTrigger = {
   kind: "command",
   command: "ask",
   args: "why?",
+  commentId: "99001",
 };
 
 const accessFields: GitAccess = {
@@ -93,6 +94,16 @@ describe("the normalized type guards", () => {
     expect(isReviewTrigger(opened)).toBe(true);
     expect(isReviewTrigger({ ...opened, kind: "updated" })).toBe(true);
     expect(isReviewTrigger(commandTrigger)).toBe(true);
+  });
+
+  it("requires a command trigger to name its comment", () => {
+    expect(isReviewTrigger({ ...commandTrigger, commentId: undefined })).toBe(
+      false,
+    );
+    expect(isReviewTrigger({ ...commandTrigger, commentId: "" })).toBe(false);
+    expect(isReviewTrigger({ ...commandTrigger, commentId: 99001 })).toBe(
+      false,
+    );
   });
 
   it("requires a pull request trigger to say whether the pull request is a draft and open", () => {
