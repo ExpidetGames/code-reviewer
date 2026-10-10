@@ -51,6 +51,7 @@ async function startRoutes() {
       ALLOW_TEST_GITHUB_ENDPOINTS: "true",
     }),
     RUNNER_TOKEN,
+    LLM_PROVIDER: "openrouter",
     LLM_API_KEY: LLM_KEY,
     LLM_MODEL: "vendor/test-model",
   };

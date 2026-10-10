@@ -3,7 +3,7 @@
 // The credentials are created here, at claim time, and nowhere else (never when the job is queued):
 // the job is claimed first (so it has a holder and a lease), then, in this order,
 //
-//   1. the claim guard may refuse it (a hook for "the project is off", see claim-guard.ts),
+//   1. the claim guard may refuse it (the project is off, see claim-guard.ts),
 //   2. the LLM access must be configured,
 //   3. the pull request must still exist and be open (`getPullRequest`),
 //   4. the git credentials are created for exactly this repository (`jobAccess`, the only call that
@@ -30,10 +30,13 @@ import type {
 } from "../integrations/types.ts";
 import type { JobQueue } from "../jobs/job-queue.ts";
 import type { ClaimResult, Job } from "../jobs/job-types.ts";
+import { revealLlmAccess, type LlmAccessResult } from "../llm/access.ts";
 import {
-  revealLlmAccess,
-  type LlmAccessResult,
-} from "./temporary-llm-access.ts";
+  MAX_LLM_CONTEXT_TOKENS,
+  MIN_LLM_CONTEXT_TOKENS,
+  MODEL_NAME_PATTERN,
+} from "../llm/config.ts";
+import type { ClaimedKeys } from "./claimed-keys.ts";
 import type { ClaimGuard } from "./claim-guard.ts";
 import {
   RUNNER_API_VERSION,
@@ -74,23 +77,26 @@ export const CLAIM_RELEASE_REASONS = [
 /** When the platform does not say how long to wait. */
 export const DEFAULT_RETRY_AFTER_SECONDS = 30;
 const MAX_RETRY_AFTER_SECONDS = 900;
+/** How long a claim that is being cancelled waits in the queue before it could be taken again. */
+const CANCEL_PARKING_MS = 60 * 60 * 1000;
 /** How many jobs one claim request may end at claim time before it answers 204 and lets the runner ask again. */
 const MAX_REFUSED_PER_REQUEST = 25;
 /** The question of an `ask` job: the runner refuses more (and none). */
 const MAX_QUESTION_CHARS = 4000;
-/** What the runner accepts as `llm.model` and `llm.maxTokens` (runner job.py). */
-const MODEL = /^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,199}$/;
-const MIN_CONTEXT_TOKENS = 1000;
-const MAX_CONTEXT_TOKENS = 10_000_000;
 
 export type ClaimDeps = {
-  queue: Pick<JobQueue, "claimNext" | "complete" | "release">;
+  queue: Pick<
+    JobQueue,
+    "claimNext" | "complete" | "release" | "cancelWaitingForRepository"
+  >;
   repositories: Pick<RepositoriesRepository, "get">;
   integrations: Pick<IntegrationsRepository, "get">;
   registry: IntegrationRegistry;
   guard: ClaimGuard;
   jobOptions: JobOptionsSource;
   loadLlm: () => LlmAccessResult;
+  /** Where the key handed out with a claim is noted, so a rotated key can still be masked. */
+  claimedKeys: Pick<ClaimedKeys, "remember">;
   now: () => Date;
   logger: RunnerApiLogger;
   heartbeatIntervalSeconds: number;
@@ -98,11 +104,11 @@ export type ClaimDeps = {
 
 type Prepared =
   | { kind: "ready"; response: ClaimResponse }
-  | { kind: "refused"; errorCode: string }
+  | { kind: "refused"; errorCode: string; cancel: boolean }
   | { kind: "retry"; reason: string; retryAfterSeconds: number };
 
-function refuse(errorCode: string): Prepared {
-  return { kind: "refused", errorCode };
+function refuse(errorCode: string, cancel = false): Prepared {
+  return { kind: "refused", errorCode, cancel };
 }
 
 function retryAfterOf(error: unknown): number {
@@ -144,14 +150,14 @@ function llmOptionsOf(
   const { model, maxTokens } = options.llm ?? {};
   const chosen: { model?: string; maxTokens?: number } = {};
   if (model !== undefined && model !== null) {
-    if (!MODEL.test(model)) return null;
+    if (!MODEL_NAME_PATTERN.test(model)) return null;
     chosen.model = model;
   }
   if (maxTokens !== undefined && maxTokens !== null) {
     if (
       !Number.isInteger(maxTokens) ||
-      maxTokens < MIN_CONTEXT_TOKENS ||
-      maxTokens > MAX_CONTEXT_TOKENS
+      maxTokens < MIN_LLM_CONTEXT_TOKENS ||
+      maxTokens > MAX_LLM_CONTEXT_TOKENS
     )
       return null;
     chosen.maxTokens = maxTokens;
@@ -174,7 +180,8 @@ async function prepare(
   const { job, leaseToken } = claimed;
 
   const decision = await deps.guard.check(job);
-  if (!decision.allow) return refuse(decision.errorCode);
+  if (!decision.allow)
+    return refuse(decision.errorCode, decision.outcome === "cancel");
 
   const llm = deps.loadLlm();
   if (!llm.ok) return refuse(llm.errorCode);
@@ -259,6 +266,10 @@ async function prepare(
   if (git.provider !== "github" || git.botLogin === null)
     return refuse("git_access_failed");
 
+  // The instance's model and context window are the defaults; the review settings of the project
+  // replace them. The job never carries `fallbackModels`: the MVP has no fallback chain.
+  const llmAccess = revealLlmAccess(llm.access);
+  const maxTokens = llmOptions.maxTokens ?? llmAccess.contextWindowTokens;
   const input: RunnerJobInput = {
     prUrl,
     command: job.command,
@@ -270,11 +281,10 @@ async function prepare(
       botLogin: git.botLogin,
     },
     llm: {
-      ...revealLlmAccess(llm.access),
-      ...(llmOptions.model === undefined ? {} : { model: llmOptions.model }),
-      ...(llmOptions.maxTokens === undefined
-        ? {}
-        : { maxTokens: llmOptions.maxTokens }),
+      provider: llmAccess.provider,
+      model: llmOptions.model ?? llmAccess.model,
+      apiKey: llmAccess.apiKey,
+      ...(maxTokens === null ? {} : { maxTokens }),
     },
     env: options.env,
   };
@@ -317,6 +327,39 @@ async function endJob(
   );
 }
 
+/**
+ * Ends a claimed job as cancelled, the way a deactivation ends a waiting one. A running job cannot
+ * become `cancelled`, so the claim is given back first (a lost attempt, due in an hour so that no
+ * other runner takes it in between), then every waiting job of the repository is cancelled with the
+ * code. On the last allowed attempt `release` fails the job with the code instead. Throws if the
+ * queue fails; the caller gives the job back.
+ */
+async function cancelJob(
+  deps: ClaimDeps,
+  claimed: NonNullable<ClaimResult>,
+  runnerId: string,
+  errorCode: string,
+): Promise<void> {
+  const released = await deps.queue.release(
+    claimed.job.id,
+    claimed.leaseToken,
+    errorCode,
+    { retryAt: new Date(deps.now().getTime() + CANCEL_PARKING_MS) },
+  );
+  if (released.status === "not_holder") {
+    deps.logger.error(
+      `[runner-api] claim runner=${runnerId} job=${claimed.job.id} could not be cancelled at claim: not_holder`,
+    );
+    return;
+  }
+  const cancelled = await deps.queue.cancelWaitingForRepository(
+    claimed.job.repositoryId,
+  );
+  deps.logger.info(
+    `[runner-api] claim runner=${runnerId} job=${claimed.job.id} cancelled at claim: ${errorCode} (${cancelled} waiting job(s) of the repository cancelled, job ${released.status})`,
+  );
+}
+
 /** Gives the job back after an unexpected failure, so it is not stuck under a lease nobody uses. */
 async function giveBack(
   deps: ClaimDeps,
@@ -352,7 +395,9 @@ export async function handleClaim(
       const prepared = await prepare(deps, claimed);
 
       if (prepared.kind === "refused") {
-        await endJob(deps, claimed, runnerId, prepared.errorCode);
+        if (prepared.cancel)
+          await cancelJob(deps, claimed, runnerId, prepared.errorCode);
+        else await endJob(deps, claimed, runnerId, prepared.errorCode);
         continue;
       }
 
@@ -371,6 +416,10 @@ export async function handleClaim(
         });
       }
 
+      deps.claimedKeys.remember(
+        claimed.job.id,
+        prepared.response.job.input.llm.apiKey,
+      );
       deps.logger.info(
         `[runner-api] claim runner=${runnerId} job=${claimed.job.id} command=${claimed.job.command}`,
       );

@@ -19,7 +19,8 @@ The runner (Python, `runner/`) asks the app for work over HTTP: it **claims** a 
 | `token-auth.ts`, `startup.ts`      | The `RUNNER_TOKEN` check (constant time, at least 32 characters) and the hint at server start                                                                                                                   |
 | `redact.ts`                        | Removes anything that looks like a credential from a result before it is stored                                                                                                                                 |
 | `responses.ts`                     | Every answer: `Cache-Control: no-store`, the error form `{ error: { code, message } }`                                                                                                                          |
-| `claim-guard.ts`, `job-options.ts` | The two hooks (below)                                                                                                                                                                                           |
+| `claim-guard.ts`, `job-options.ts` | The two hooks (below); `project-claim-guard.ts` and `review-settings-job-options.ts` are what the running server plugs in                                                                                       |
+| `claimed-keys.ts`                  | In memory only: the LLM key handed out with the claim of each job, so a rotated key can still be masked in its result                                                                                           |
 | `contract.ts`                      | The TypeScript types and code lists of the contract                                                                                                                                                             |
 | `shared.ts`                        | The wiring of the running server (`getRunnerApi()`, `withRunnerApi`); the route files under `src/app/api/runners/v1/` only call `withRunnerApi`, which answers a failure while setting up in the usual 500 form |
 
@@ -69,13 +70,17 @@ Every answer, including `204`, carries `Cache-Control: no-store`.
 for that job, in this order:
 
 1. **The claim guard** may refuse it (below).
-2. **LLM access** must be configured (`src/runner-api/temporary-llm-access.ts`: `LLM_PROVIDER` default `openrouter`,
-   `LLM_MODEL` default `anthropic/claude-haiku-5.5`, `LLM_API_KEY`). Otherwise the job ends as `failed`
-   with `llm_not_configured`. **Operations:** this fails every job a runner claims, up to 25 per request,
-   for good; fixing the setting later does not revive them (they have to be queued again, for example by
-   a new commit or a comment). Set `LLM_API_KEY` before the first runner connects.
-   **Options** of the job come next (`JobOptionsSource`, below): the model and context size of a
-   project replace the defaults, and the options go into `env`.
+2. **LLM access** must be configured: the shared LLM configuration of `src/llm` (`getLlmAccess()`, read
+   from the environment on every claim): `LLM_PROVIDER` (required, `openrouter`) and `LLM_API_KEY`
+   (required); `LLM_MODEL` (default `anthropic/claude-haiku-5.5`) and `LLM_MAX_TOKENS` are optional.
+   Otherwise the job ends as `failed` with `llm_not_configured`. **Operations:** this fails every job a
+   runner claims, up to 25 per request, for good; fixing the setting later does not revive them (they
+   have to be queued again, for example by a new commit or a comment). Set `LLM_PROVIDER` and
+   `LLM_API_KEY` before the first runner connects.
+   **Options** of the job come next (`JobOptionsSource`, below): the model and token budget of the
+   review settings replace the instance's model and context window (`llm.model`, `llm.maxTokens`), and
+   the other options go into `env`. `llm.baseUrl` and `llm.fallbackModels` are never sent (the LLM
+   configuration has no base URL, and the MVP has no fallback chain).
 3. **The pull request** is read through the provider's `getPullRequest`. A pull request that does not
    exist ends the job with `pr_not_found`, one that is closed or merged with `pull_request_closed`;
    `prUrl` in the response is the URL the provider reports.
@@ -84,9 +89,10 @@ for that job, in this order:
    job is queued, and nothing is cached or kept. The token is revealed (`revealGitAccess`) into the
    response and the local value is dropped with it.
 
-A job that cannot run for a reason that will not go away (guard, LLM not configured, pull request
+A job that cannot run for a reason that will not go away (LLM not configured, pull request
 gone, connection removed or suspended, repository not part of the installation, permissions missing)
-ends as `failed` with a stable code (`CLAIM_FAILURE_CODES` in `claim.ts`), the runner is not told, and
+ends as `failed` with a stable code (`CLAIM_FAILURE_CODES` in `claim.ts`; a guard may name its own code),
+the runner is not told, and
 the next job is tried (up to 25 per request, then `204`). If ending the job itself fails (a database
 error), the job is given back like after any other unexpected error. A reason that may pass (GitHub rate limiting
 or down, the pull request could not be read) gives the job back with `release`: it counts as a lost
@@ -124,37 +130,53 @@ The body is `{ leaseToken, result }`. `result` is what `code-reviewer-run-job` p
 ## Hooks that other tickets fill in
 
 - **`ClaimGuard`** (`claim-guard.ts`): `check(job)` returns `{ allow: true }` or
-  `{ allow: false, errorCode }`. The default allows everything. It exists for projects (CR-5): a job
-  whose repository has no active project (the project was switched off after the job was queued) must
-  not run. When the CR-5 and CR-6 epics meet, `shared.ts` gets a guard that asks the projects and
-  returns `project_deactivated`. A refused job ends as `failed` with that code. (The queue has no
-  operation that cancels a claimed job; if `cancelled` is wanted for this case, that is a small addition
-  to `src/jobs` at that time.)
+  `{ allow: false, errorCode, outcome? }`. The running server uses `createProjectClaimGuard`
+  (`project-claim-guard.ts`): a job whose repository has no active project (the project was switched
+  off after the job was queued, or the deactivation raced with the claim) is not handed out. Its
+  outcome is `cancel`: the claim is given back (`release`, a lost attempt, due in an hour so no other
+  runner takes it) and `cancelWaitingForRepository` cancels every waiting job of the repository, so the
+  job ends as `cancelled` with `project_deactivated`, exactly like a job that was waiting when the
+  project was switched off (on the last allowed attempt `release` fails it with the same code). The
+  default outcome `fail` ends the job as `failed` with the guard's code. No credentials are created
+  for a refused job. The other half of the rule is `createJobProjectHooks` (`src/jobs/project-hooks.ts`),
+  wired in `src/projects/shared.ts`: deactivating a project cancels its waiting jobs in the same
+  transaction; running jobs finish.
 - **`JobOptionsSource`** (`job-options.ts`): `optionsFor(job)` returns the options of one job, so they
   can differ per repository: `env` (the extra options of the four PR-Agent tools, `PR_REVIEWER__*`,
   `PR_DESCRIPTION__*`, `PR_CODE_SUGGESTIONS__*`, `PR_QUESTIONS__*`) and optionally
-  `llm: { model, maxTokens, fallbackModels }`. A `model` replaces the model of the LLM access, a
-  `maxTokens` (a whole number from 1000 to 10 000 000) becomes `llm.maxTokens`; a null or missing value
-  is left out of the job (the runner refuses a `maxTokens` that is not a whole number).
-  `fallbackModels` is accepted and not handed on, because the job has no field for it yet. The default
-  source is empty. CR-25 plugs its `toRunnerSettings` in here. A key outside the four families ends the
-  job as `job_env_invalid`, a model or size the runner would refuse as `job_llm_options_invalid`. The
-  key pattern is `RUNNER_ENV_KEY_PATTERN` in `contract.ts`; CR-25 defines the same constant under the
-  same name next to `toRunnerSettings`, so when the two branches are merged one of them imports the
-  other.
-- **`src/runner-api/temporary-llm-access.ts`** is the minimum the claim needs. It lives apart from the LLM configuration of CR-26 (`src/llm/`) until the integration ticket CR-46 replaces it.
+  `llm: { model, maxTokens, fallbackModels }`. The running server uses
+  `createReviewSettingsJobOptionsSource` (`review-settings-job-options.ts`): the review settings of the
+  job's repository (project over global defaults over built-in values, read at claim time) go through
+  `toRunnerSettings`. The values are text of the type PR-Agent's option has (`"5"`, `"true"`); an option
+  that is off is left out. A `model` replaces the model of the LLM access, a `maxTokens` (a whole number
+  from 1000 to 10 000 000) becomes `llm.maxTokens` and wins over `LLM_MAX_TOKENS`; a null or missing
+  value is left out of the job. `fallbackModels` is accepted and **not handed on**: no fallback chain is
+  decided for the MVP. A key outside the four families ends the job as `job_env_invalid`, a model or
+  size the runner would refuse as `job_llm_options_invalid`. The key pattern is
+  `RUNNER_ENV_KEY_PATTERN` in `contract.ts` (one option name per key, no second `__`): the only
+  definition in the app, equal to `JobEnv` in the contract file and to the runner's `_ENV_KEY`; the
+  review settings import it.
+- **`claimed-keys.ts`**: the claim notes the key it handed out; `complete` masks the key of the claim
+  and the current key (`redact.ts`, `maskSecretInText` of `src/llm`) in the log, the error message and
+  the other text fields before the result is stored. The note lives in the memory of the process only
+  (capped, oldest first; a restart forgets it, and masking then falls back to the current key and to the
+  shape of a credential), because a key is never written to the database.
 
 ## Before this is used in production
 
-The runner API must not process jobs in production before the trigger policy (CR-31) and the project
-gate (CR-24, CR-5) are on the same branch, or old jobs would run with paid model calls
-(`src/jobs/README.md`, "For the tickets that build on it"). Until then the default guard allows all.
+The runner API must not process jobs in production before the trigger policy (CR-31) is on the same
+branch, or old jobs would run with paid model calls (`src/jobs/README.md`, "For the tickets that build
+on it"). The project gate (CR-24, CR-5) is wired in.
 
 ## Tests
 
 - `integration-tests/http/runner-api-claim.integration.test.ts`, `-report`, `-security` and
   `-route-files`: the real handlers with a real SQLite file and the fake GitHub; the route files with
   the wiring of the running server and a delivery that goes through the webhook route first.
+- `integration-tests/http/runner-api-projects.integration.test.ts`: the wiring to the projects, the
+  review settings and the LLM configuration (CR-46).
 - `integration-tests/compatibility/runner-api-contract.integration.test.ts`: the contract.
-- `token-auth.test.ts`, `requests.test.ts`, `redact.test.ts`, `temporary-llm-access.test.ts`: unit tests.
-- The harness is `src/test-support/runner-api-harness.ts`.
+- `token-auth.test.ts`, `requests.test.ts`, `redact.test.ts`, `claimed-keys.test.ts`, `project-claim-guard.test.ts`: unit tests.
+- The harness is `src/test-support/runner-api-harness.ts`; `projects: true` wires the guard and the
+  options like the running server (real project service and review settings), otherwise every job may
+  run and has no extra options.

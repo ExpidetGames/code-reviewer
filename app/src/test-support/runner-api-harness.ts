@@ -7,7 +7,8 @@ import { createRepositoriesRepository } from "../db/repositories/repositories-re
 import { createDefaultIntegrationRegistry } from "../integrations/registry.ts";
 import type { JobQueueLimits } from "../jobs/job-limits.ts";
 import type { JobQueue } from "../jobs/job-queue.ts";
-import { loadLlmAccess } from "../runner-api/temporary-llm-access.ts";
+import { resolveLlmAccess } from "../llm/access.ts";
+import { loadLlmConfig } from "../llm/config.ts";
 import { createRunnerApi } from "../runner-api/api.ts";
 import {
   allowAllClaimGuard,
@@ -18,9 +19,18 @@ import {
   emptyJobOptionsSource,
   type JobOptionsSource,
 } from "../runner-api/job-options.ts";
+import { createClaimedKeys } from "../runner-api/claimed-keys.ts";
+import { createProjectClaimGuard } from "../runner-api/project-claim-guard.ts";
 import { knownSecretsFromEnv } from "../runner-api/redact.ts";
+import { createReviewSettingsJobOptionsSource } from "../runner-api/review-settings-job-options.ts";
 import { configuredRunnerToken } from "../runner-api/token-auth.ts";
 import type { RunnerApiLogger } from "../runner-api/logger.ts";
+import { createAppSettingsRepository } from "../db/repositories/app-settings-repository.ts";
+import { createProjectsRepository } from "../db/repositories/projects-repository.ts";
+import { createJobProjectHooks } from "../jobs/project-hooks.ts";
+import { createProjectService } from "../projects/service.ts";
+import { createReviewSettingsService } from "../review-settings/service.ts";
+import { builtInReviewSettings } from "../review-settings/settings.ts";
 import { startGithubAppHarness } from "./github-app-harness.ts";
 import { createJobQueueFixture, sha } from "./jobs.ts";
 
@@ -41,6 +51,12 @@ export async function startRunnerApiHarness(
   options: {
     guard?: ClaimGuard;
     jobOptions?: JobOptionsSource;
+    /**
+     * Wires the guard and the job options like the running server does: a job runs only while its
+     * repository has an active project, and its options are the review settings. Explicit `guard` and
+     * `jobOptions` win. Without this, every job may run and has no extra options.
+     */
+    projects?: boolean;
     /** Wraps the job queue the API uses, for example to make one call fail. */
     wrapQueue?: (queue: JobQueue) => JobQueue;
     limits?: Partial<JobQueueLimits>;
@@ -109,14 +125,34 @@ export async function startRunnerApiHarness(
     info: (line) => infoLines.push(line),
     error: (line) => errorLines.push(line),
   };
+  const projectService = createProjectService({
+    projects: createProjectsRepository(fixture.db, fixture.clock.now),
+    hooks: createJobProjectHooks(),
+  });
+  const appSettings = createAppSettingsRepository(fixture.db);
+  const reviewSettings = createReviewSettingsService({
+    appSettings,
+    projects: createProjectsRepository(fixture.db, fixture.clock.now),
+    builtIn: () => builtInReviewSettings(env.LLM_MODEL ?? TEST_LLM_MODEL),
+  });
+  const claimedKeys = createClaimedKeys();
   const api = createRunnerApi({
     queue: options.wrapQueue?.(fixture.queue) ?? fixture.queue,
     repositories: createRepositoriesRepository(fixture.db, fixture.clock.now),
     integrations: createIntegrationsRepository(fixture.db, fixture.clock.now),
     registry,
-    guard: options.guard ?? allowAllClaimGuard,
-    jobOptions: options.jobOptions ?? emptyJobOptionsSource,
-    loadLlm: () => loadLlmAccess(env),
+    guard:
+      options.guard ??
+      (options.projects === true
+        ? createProjectClaimGuard({ projects: projectService })
+        : allowAllClaimGuard),
+    jobOptions:
+      options.jobOptions ??
+      (options.projects === true
+        ? createReviewSettingsJobOptionsSource({ settings: reviewSettings })
+        : emptyJobOptionsSource),
+    loadLlm: () => resolveLlmAccess(loadLlmConfig(env)),
+    claimedKeys,
     now: fixture.clock.now,
     logger,
     heartbeatIntervalSeconds: 30,
@@ -212,6 +248,9 @@ export async function startRunnerApiHarness(
     githubClock: github.clock,
     env,
     registry,
+    /** The project service (with the job queue's deactivation hook) and the review settings service. */
+    projectService,
+    reviewSettings,
     api,
     claim,
     claimed,

@@ -106,3 +106,28 @@ describe("the secrets the app knows", () => {
     ).toStrictEqual(["llm-key-value"]);
   });
 });
+
+describe("removing a key that was rotated", () => {
+  // CR-46-T07
+  it("removes the key of the claim and the current key from one text", () => {
+    const text =
+      "old key claim-key-0123456789 and new key current-key-9876543210";
+
+    expect(
+      redactText(text, ["current-key-9876543210", "claim-key-0123456789"]),
+    ).toBe(`old key ${REDACTED} and new key ${REDACTED}`);
+  });
+
+  it("removes a key in its JSON-escaped and base64 form too", () => {
+    const secret = 'key"with\\quote-0123456789';
+    const base64 = Buffer.from(secret, "utf8").toString("base64");
+
+    const cleaned = redactText(
+      `body ${JSON.stringify({ k: secret })} header Basic ${base64}`,
+      [secret],
+    );
+
+    expect(cleaned).not.toContain(secret.slice(4));
+    expect(cleaned).not.toContain(base64);
+  });
+});
