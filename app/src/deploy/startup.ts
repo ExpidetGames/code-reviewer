@@ -5,8 +5,6 @@
 // the provider uses (src/integrations/providers/github-app/config.ts, reached through the registry),
 // so the two cannot disagree. A problem is reported with variable names only, never with a value (they are secrets).
 
-import { findGithubAppConfigProblem } from "../integrations/registry.ts";
-
 export const DEPLOY_ERROR_CODES = ["DEPLOY_CONFIG_INVALID"] as const;
 export type DeployErrorCode = (typeof DEPLOY_ERROR_CODES)[number];
 
@@ -25,7 +23,9 @@ function has(env: Env, name: string): boolean {
 }
 
 /** The problems of the deployment settings, each naming only the variables concerned. */
-export function findDeploymentConfigProblems(env: Env): string[] {
+export async function findDeploymentConfigProblems(
+  env: Env,
+): Promise<string[]> {
   const problems: string[] = [];
 
   if (!has(env, "RUNNER_TOKEN")) problems.push("RUNNER_TOKEN is not set");
@@ -36,8 +36,14 @@ export function findDeploymentConfigProblems(env: Env): string[] {
 
   // The GitHub App settings have exactly one reader, the provider's loader; this check only asks it
   // whether the settings are usable (it names variables, never values).
-  const githubAppProblem = findGithubAppConfigProblem(env);
-  if (githubAppProblem !== null) problems.push(githubAppProblem);
+  // Imported here, not at the top: only a production start needs the provider code.
+  const { findGithubAppConfigProblem } =
+    await import("../integrations/registry.ts");
+  const githubApp = findGithubAppConfigProblem(env);
+  if (githubApp !== null)
+    problems.push(
+      `GitHub App settings ${githubApp.kind}: ${githubApp.variables.join(", ")}`,
+    );
 
   return problems;
 }
@@ -47,13 +53,13 @@ export function findDeploymentConfigProblems(env: Env): string[] {
  * readable line (the error code and the variable names), not a stack trace. Other environments
  * (the dev server) are not checked, so the sign in can be tried without a GitHub App.
  */
-export function checkDeploymentConfigOnStart({
+export async function checkDeploymentConfigOnStart({
   env = process.env,
   log = console.error,
   exit = (code) => process.exit(code),
-}: StartOptions = {}): void {
+}: StartOptions = {}): Promise<void> {
   if (env.NODE_ENV !== "production") return;
-  const problems = findDeploymentConfigProblems(env);
+  const problems = await findDeploymentConfigProblems(env);
   if (problems.length === 0) return;
   log(
     `[deploy] ${DEPLOY_ERROR_CODES[0]}: The deployment configuration is incomplete or invalid: ${problems.join("; ")}.`,
