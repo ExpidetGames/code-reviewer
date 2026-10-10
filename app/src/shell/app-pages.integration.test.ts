@@ -42,12 +42,26 @@ vi.mock("../auth/access-runtime.ts", async (importOriginal) => ({
 import { signOut } from "../auth/actions.ts";
 import ProjectsPage from "../app/(app)/projects/page.tsx";
 import RunsPage from "../app/(app)/runs/page.tsx";
+import RunDetailPage from "../app/(app)/runs/[id]/page.tsx";
 import SettingsPage from "../app/(app)/settings/page.tsx";
 import ProjectSettingsPage from "../app/(app)/projects/[repositoryId]/page.tsx";
 
 const APP_PAGES = [
   { path: "/projects", render: ProjectsPage },
-  { path: "/runs", render: RunsPage },
+  {
+    path: "/runs",
+    render: () =>
+      RunsPage({ searchParams: Promise.resolve({}) } as Parameters<
+        typeof RunsPage
+      >[0]),
+  },
+  {
+    path: "/runs/some-run",
+    render: () =>
+      RunDetailPage({
+        params: Promise.resolve({ id: "some-run" }),
+      } as Parameters<typeof RunDetailPage>[0]),
+  },
   { path: "/settings", render: SettingsPage },
   {
     path: "/projects/some-repository",

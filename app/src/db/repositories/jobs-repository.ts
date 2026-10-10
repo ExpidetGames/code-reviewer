@@ -120,7 +120,8 @@ export type JobsRepository = {
   list(filter?: JobListFilter): Promise<Job[]>;
 };
 
-function toJob(row: JobsTable): Job {
+/** A stored row as the rest of the app sees it; also used by the read side (`runs-repository.ts`). */
+export function toJob(row: JobsTable): Job {
   if (!isJobStatus(row.status))
     throw new Error(
       `Stored job ${row.id} has the unknown status "${row.status}".`,
