@@ -2,24 +2,27 @@
 # Anything not listed here can end up in the "builder" stage, but only the standalone output is
 # copied into the final image.
 
-# Never in an image: environment files, keys, certificates, local databases
+# Never in an image: environment files, keys, certificates, local databases. Dockerignore patterns
+# without a leading **/ only match the root of the context, so every one has both forms.
 .env
 .env.*
 **/.env
 **/.env.*
-*.pem
-*.key
-*.p12
-*.db
-*.db-shm
-*.db-wal
-*.sqlite
-*.sqlite3
-*.sqlite-shm
-*.sqlite-wal
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/*.sqlite
+**/*.sqlite3
+**/*.sqlite-shm
+**/*.sqlite-wal
 
 # Version control and editor files
 .git
+**/.git
 .gitignore
 .github
 .vscode

@@ -5,7 +5,10 @@ name: Publish images
 # have no registry access. This workflow is the only one with the right to write packages.
 #
 # Both images are built and smoke tested first; only when both pass does the job log in and push,
-# so a broken build never moves a tag (and never publishes just one of the two images).
+# so a failing build or smoke test never moves a tag. The pushes themselves are ordered so that the
+# floating tags (development, latest) move last: first the sha-<short> tags of both images, then
+# the floating tags of both. If a push fails half way, some sha tags may exist, but no floating tag
+# points at a half published release.
 on:
   push:
     branches: [development, main]
@@ -13,7 +16,9 @@ on:
 permissions:
   contents: read
 
-# Publishes of one branch run one after the other and are never cancelled half way.
+# Publishes of one branch run one at a time and a running publish is never cancelled. GitHub keeps
+# only the newest waiting run per group, so when pushes come in quickly an intermediate commit may
+# get no sha tag; the floating tag always ends on the newest commit.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
@@ -89,17 +94,16 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Push the app image
+      # Commit tags of both images first, floating tags last.
+      - name: Push the commit tags
         env:
           SHA_TAG: ${{ steps.tags.outputs.sha_tag }}
-          CHANNEL_TAG: ${{ steps.tags.outputs.channel_tag }}
         run: |
           docker push "$APP_IMAGE:$SHA_TAG"
-          docker push "$APP_IMAGE:$CHANNEL_TAG"
-      - name: Push the runner image
+          docker push "$RUNNER_IMAGE:$SHA_TAG"
+      - name: Push the floating tags
         env:
-          SHA_TAG: ${{ steps.tags.outputs.sha_tag }}
           CHANNEL_TAG: ${{ steps.tags.outputs.channel_tag }}
         run: |
-          docker push "$RUNNER_IMAGE:$SHA_TAG"
+          docker push "$APP_IMAGE:$CHANNEL_TAG"
           docker push "$RUNNER_IMAGE:$CHANNEL_TAG"

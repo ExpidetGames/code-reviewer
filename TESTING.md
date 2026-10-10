@@ -172,7 +172,7 @@ server runs, that `/data/app.db` exists, belongs to the unprivileged user and ho
 migration, and that the log reports no database error. `runner.sh <image>` checks `--version` against
 `runner/pyproject.toml`, the user, a writable `/tmp` and home directory. Both run the secrets scan of
 `lib.sh` (no `.env*`, `.git`, key or database files, no private key material, no secret-looking
-variable in the image configuration or build history). Containers and volumes are removed on exit,
+variable in the image configuration or build history). The scans run as root in a throwaway container and the script stops if a scan itself fails (docker, `find` or `grep` error), so a broken scan can never pass as a clean one; the key content scan covers project-owned paths only, not third-party packages. Containers and volumes are removed on exit,
 also after a failure. What is not covered: the real push to GHCR and pulling from the deployment
 server (manual, see the PR of the image ticket), and PR-Agent in the runner image (planned with the
 PR-Agent ticket: installed version equals the pinned one, a job through the fake PR-Agent).
@@ -249,7 +249,7 @@ filter never blocks a merge. Branch protection is a GitHub setting and is not st
 smoke tests both, and only then logs in to GHCR with the run's `GITHUB_TOKEN` (the only secret it
 references) and pushes `ghcr.io/expidetgames/code-reviewer-app` and `-runner` with the tags
 `sha-<7 character commit hash>` and `development` (branch `development`) or `latest` (branch `main`).
-It is the only workflow with `packages: write`, granted to that job alone. A failing build or smoke
+It pushes the commit tags of both images first and the floating tags last, so no floating tag points at a half published release. It is the only workflow with `packages: write`, granted to that job alone. A failing build or smoke
 test stops the job before the login, so no tag moves. The structure of both files is pinned by
 `app/src/ci/images-workflow.test.ts`; `app/src/ci/dockerfiles.test.ts` pins the runtime versions,
 digests, user and `.dockerignore` rules of the Dockerfiles.

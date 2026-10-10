@@ -41,9 +41,15 @@ in_image "$image" sh -c 'touch /tmp/smoke-write && touch "$HOME/smoke-write"' ||
 
 # CR-17-T09
 step "the image holds no environment files, git data, keys or secrets"
-assert_image_has_no_secrets "$image"
-leftovers=$(in_image "$image" find /opt/venv /home -name 'tests' -o -name 'test_*.py' -o -name '.venv' | grep -v '/site-packages/' || true)
-[ -z "$leftovers" ] || fail "tests are inside the image:
-$leftovers"
+assert_image_has_no_secrets "$image" "/opt/venv/lib/python*/site-packages/code_reviewer_runner /home /root /tmp"
+# Only our own package is checked for tests: third-party packages may ship a tests directory.
+scan_in_image "$image" "0" sh -c \
+  "find /opt/venv/lib/python*/site-packages/code_reviewer_runner /home -name tests -o -name 'test_*.py' -o -name '*_test.py' -o -name conftest.py"
+[ -z "$SCAN_OUTPUT" ] || fail "tests are inside the image:
+$SCAN_OUTPUT"
+# shellcheck disable=SC2016 # $dir must expand inside the container, not here
+scan_in_image "$image" "0" sh -c 'for dir in /build /src /tests; do [ ! -e "$dir" ] || echo "$dir"; done'
+[ -z "$SCAN_OUTPUT" ] || fail "build directories are inside the image:
+$SCAN_OUTPUT"
 
 step "runner image smoke test passed"

@@ -45,26 +45,55 @@ assert_image_user_is_numeric_non_root() {
   printf '    image user: %s\n' "$user"
 }
 
+# Runs a scan command in a throwaway root container of the image (root, so that no file is hidden
+# by a permission error) and puts its standard output into SCAN_OUTPUT. The scan itself must
+# succeed: the smoke test stops unless the exit status is one of the allowed ones (a space
+# separated list). A scan that fails to run must never look like a scan that found nothing.
+# Usage: scan_in_image <image> "<allowed statuses>" <command> [args...]
+SCAN_OUTPUT=""
+scan_in_image() {
+  local image=$1 allowed=$2 status stderr_file
+  shift 2
+  stderr_file=$(mktemp)
+  if SCAN_OUTPUT=$(docker run --rm --user 0 --entrypoint "$1" "$image" "${@:2}" 2>"$stderr_file"); then
+    status=0
+  else
+    status=$?
+  fi
+  if [[ " $allowed " != *" $status "* ]]; then
+    cat "$stderr_file" >&2
+    rm -f "$stderr_file"
+    fail "the scan '$*' failed in $image with exit status $status (allowed: $allowed)"
+  fi
+  rm -f "$stderr_file"
+}
+
+readonly PRIVATE_KEY_MARKER='-----BEGIN [A-Z ]*PRIVATE KEY-----'
+
 # CR-17-T09: nothing that must stay out of an image is inside it, and its configuration and build
 # history carry no secrets. This is the proof that the .dockerignore files work.
+# Usage: assert_image_has_no_secrets <image> "<paths of our own files for the key content scan>"
+# The paths are the places that hold project-owned files (application directory, data, home
+# directories, the project's own Python package). Third-party packages (node_modules,
+# site-packages) are left out on purpose: their documentation and test fixtures legitimately
+# contain key headers. A path that does not exist makes the scan fail, which keeps the list honest.
 assert_image_has_no_secrets() {
-  local image=$1 found
+  local image=$1 content_paths=$2
   # The operating system's CA bundles (public root certificates, also certifi's cacert.pem) are
-  # expected; anything else with a key or certificate extension is not.
-  found=$(in_image "$image" find / -xdev \
+  # expected; anything else with a key or certificate extension is not. find must exit 0.
+  scan_in_image "$image" "0" find / -xdev \
     \( -path /etc/ssl -o -path /usr/lib/ssl -o -path /usr/share/ca-certificates \) -prune -o \
     \( -name '.env' -o -name '.env.*' -o -name '.git' -o -name '*.pem' -o -name '*.p12' \
     -o -name '*.pfx' -o -name '*.key' -o -name '*.db' -o -name '*.sqlite' -o -name '*.sqlite3' \
-    -o -name 'id_rsa*' -o -name 'id_ed25519*' \) ! -name cacert.pem -print 2>/dev/null) || true
-  [ -z "$found" ] || fail "$image contains files that must not be in an image:
-$found"
+    -o -name 'id_rsa*' -o -name 'id_ed25519*' \) ! -name cacert.pem -print
+  [ -z "$SCAN_OUTPUT" ] || fail "$image contains files that must not be in an image:
+$SCAN_OUTPUT"
 
-  # Content scan of the places that hold our own files (not the operating system, whose npm or
-  # Python documentation mentions the marker in prose).
-  found=$(in_image "$image" grep -rIl -e '-----BEGIN [A-Z ]*PRIVATE KEY-----' \
-    /srv /data /home /root /tmp /opt 2>/dev/null) || true
-  [ -z "$found" ] || fail "$image contains private key material:
-$found"
+  # grep exits 0 when it found a file, 1 when it found none, 2 on any error (a missing path).
+  scan_in_image "$image" "0 1" sh -c \
+    "grep -rIl -e '$PRIVATE_KEY_MARKER' --exclude-dir=node_modules $content_paths"
+  [ -z "$SCAN_OUTPUT" ] || fail "$image contains private key material:
+$SCAN_OUTPUT"
 
   local config history
   config=$(docker image inspect --format '{{json .Config.Env}} {{json .Config.Labels}} {{json .Config.Cmd}} {{json .Config.Entrypoint}}' "$image")

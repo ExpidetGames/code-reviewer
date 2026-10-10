@@ -178,10 +178,11 @@ describe("Publish workflow triggers", () => {
     expect(indexOf("docker push")).toBeGreaterThan(
       indexOf("docker/smoke/runner.sh"),
     );
+    // Commit tags of both images first, the floating tags (development, latest) last.
     expect(lines.filter((line) => line.startsWith("docker push"))).toEqual([
       'docker push "$APP_IMAGE:$SHA_TAG"',
-      'docker push "$APP_IMAGE:$CHANNEL_TAG"',
       'docker push "$RUNNER_IMAGE:$SHA_TAG"',
+      'docker push "$APP_IMAGE:$CHANNEL_TAG"',
       'docker push "$RUNNER_IMAGE:$CHANNEL_TAG"',
     ]);
   });
@@ -213,7 +214,7 @@ describe("Publish workflow triggers", () => {
   });
 
   // CR-17-T02
-  it("never cancels a publish that is running and publishes the commits of a branch in order", () => {
+  it("never cancels a running publish and runs the publishes of one branch one at a time", () => {
     expect(publish.workflow.concurrency?.["cancel-in-progress"]).toBe(false);
     expect(publish.workflow.concurrency?.group).toContain("github.ref");
   });

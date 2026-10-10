@@ -27,7 +27,7 @@ assert_image_user_is_numeric_non_root "$image"
 
 # CR-17-T09
 step "the image holds no environment files, git data, keys or secrets"
-assert_image_has_no_secrets "$image"
+assert_image_has_no_secrets "$image" "/srv/app /data /home /root /tmp"
 leftovers=$(in_image "$image" find /srv/app -path /srv/app/node_modules -prune -o \
   \( -name '*.test.*' -o -name '*.e2e.ts' -o -name 'src' -o -name 'e2e' -o -name 'test-support' \) -print)
 [ -z "$leftovers" ] || fail "tests or sources are inside the image:
@@ -48,7 +48,7 @@ port=$(docker port "$container" 3000/tcp | head -n 1 | sed 's/.*://')
 # CR-17-T04
 step "waiting for the start page on port $port"
 deadline=$((SECONDS + WAIT_SECONDS))
-until body=$(curl --silent --fail --max-time 3 "http://127.0.0.1:$port/" 2>/dev/null); do
+until body=$(curl --silent --fail --location --max-time 3 "http://127.0.0.1:$port/" 2>/dev/null); do
   state=$(docker inspect --format '{{.State.Status}}' "$container")
   if [ "$state" != "running" ]; then
     docker logs "$container" >&2 || true
@@ -86,6 +86,12 @@ uid=$(docker exec "$container" awk '/^Uid:/ { print $2 }' /proc/1/status)
 printf '    main process uid: %s\n' "$uid"
 
 # CR-17-T08: created and migrated, no permission error in the log.
+# Next.js writes its runtime cache (ISR, image optimization) below .next/cache; the unprivileged
+# user must be able to create it.
+step "the unprivileged user can write the Next.js cache directory"
+docker exec "$container" sh -c 'touch /srv/app/.next/cache/smoke-write && rm /srv/app/.next/cache/smoke-write' ||
+  fail "/srv/app/.next/cache is not writable for the unprivileged user"
+
 step "the database was created and migrated in the volume"
 docker exec "$container" test -f /data/app.db || fail "/data/app.db was not created"
 owner=$(docker exec "$container" stat --format '%u' /data/app.db)
@@ -96,8 +102,10 @@ migrations=$(docker exec "$container" node --no-warnings -e '
   console.log(db.prepare("select count(*) as n from kysely_migration").get().n);
 ')
 [ "$migrations" -ge 1 ] || fail "no migration is recorded in the database"
-if docker logs "$container" 2>&1 | grep -Eq 'DATABASE_[A-Z_]+|MIGRATION_FAILED|EACCES|SQLITE_CANTOPEN'; then
-  docker logs "$container" >&2
+# Captured first: with "grep -q" in a pipeline, docker logs could get SIGPIPE and hide a match.
+logs=$(docker logs "$container" 2>&1)
+if grep -Eq 'MIGRATION_FAILED|DATABASE_LOCKED|DATABASE_OPEN_FAILED|DATABASE_DIRECTORY_UNAVAILABLE|DATABASE_CONFIG_INVALID|EACCES|EPERM|SQLITE_CANTOPEN|SQLITE_READONLY' <<<"$logs"; then
+  printf '%s\n' "$logs" >&2
   fail "the container log reports a database error"
 fi
 printf '    %s migration(s) recorded\n' "$migrations"

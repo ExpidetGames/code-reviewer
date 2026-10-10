@@ -43,9 +43,11 @@ ENV NODE_ENV=production \
     DATABASE_PATH=/data/app.db
 
 # Fixed numeric ids so that volume permissions are predictable. /data is the database directory:
-# the app does not create it (a missing mount must not silently start an empty database), and a
-# named volume mounted there inherits this owner on first use. For a bind mount, make the host
-# directory writable for uid 10001.
+# the app never creates it itself (a wrong DATABASE_PATH must not silently start an empty database),
+# and a named volume mounted there inherits this owner on first use. For a bind mount, make the
+# host directory writable for uid 10001. Without any mount, Docker creates an anonymous volume for
+# /data (VOLUME below), so the app starts but the data is easy to lose: deployments must mount a
+# named volume.
 RUN groupadd --system --gid 10001 app \
     && useradd --system --uid 10001 --gid app --no-create-home --shell /usr/sbin/nologin app \
     && mkdir /data \
@@ -55,6 +57,9 @@ WORKDIR /srv/app
 COPY --from=builder --chown=root:root /build/.next/standalone ./
 COPY --from=builder --chown=root:root /build/.next/static ./.next/static
 COPY --from=builder --chown=root:root /build/public ./public
+# The sources stay root-owned and read-only for the app; only the runtime cache (ISR, image
+# optimization) is writable.
+RUN mkdir -p .next/cache && chown -R app:app .next/cache
 
 USER 10001:10001
 VOLUME /data

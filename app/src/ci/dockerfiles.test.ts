@@ -39,7 +39,6 @@ const dockerfiles = [
 ] as const;
 
 describe("Dockerfile runtime versions", () => {
-  // CR-17-T04
   it("builds and runs the app on the Node major version of .nvmrc", () => {
     const major = read(".nvmrc").trim().replace(/^v/, "").split(".")[0];
 
@@ -48,7 +47,6 @@ describe("Dockerfile runtime versions", () => {
     );
   });
 
-  // CR-17-T06
   it("runs the runner on the Python version of runner/.python-version", () => {
     const version = read("runner/.python-version").trim();
 
@@ -160,6 +158,23 @@ describe("Dockerfile app runtime", () => {
   });
 
   // CR-17-T04
+  it("gives the unprivileged user a writable Next.js cache directory below the otherwise root-owned application", () => {
+    const lines = instructions(appDockerfile);
+
+    expect(lines).toContain(
+      "RUN mkdir -p .next/cache && chown -R app:app .next/cache",
+    );
+    expect(
+      lines.filter((line) => line.startsWith("COPY --from=builder")),
+    ).not.toHaveLength(0);
+    for (const copy of lines.filter((line) =>
+      line.startsWith("COPY --from=builder"),
+    )) {
+      expect(copy, copy).toContain("--chown=root:root");
+    }
+  });
+
+  // CR-17-T04
   it("serves on port 3000 from the standalone server", () => {
     const lines = instructions(appDockerfile);
 
@@ -189,13 +204,18 @@ describe(".dockerignore files", () => {
     ({ path }) => {
       const entries = patterns(path);
 
+      // Without **/ a pattern only matches the root of the context, not public/x.pem.
       for (const pattern of [
         ".env",
         ".env.*",
-        "*.pem",
-        "*.key",
-        "*.db",
+        "**/.env",
+        "**/.env.*",
+        "**/*.pem",
+        "**/*.key",
+        "**/*.p12",
+        "**/*.db",
         ".git",
+        "**/.git",
       ]) {
         expect(entries, pattern).toContain(pattern);
       }
