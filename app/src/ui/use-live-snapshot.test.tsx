@@ -3,6 +3,7 @@
 // change any more, a failed request keeps the last data and the next one runs on time, and new server
 // data wins over what was fetched before.
 import { act, cleanup, render } from "@testing-library/react";
+import { Activity } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RequestResult } from "./json-request.ts";
 import { useLiveSnapshot } from "./use-live-snapshot.ts";
@@ -176,5 +177,26 @@ describe("polling for fresh data", () => {
     unmount();
     await pass(60_000);
     expect(fetchLatest).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops while Next.js keeps the page mounted but hidden and asks at once when it is shown again", async () => {
+    const fetchLatest = vi.fn(async () => ok({ state: "running", n: 1 }));
+    const page = (mode: "visible" | "hidden") => (
+      <Activity mode={mode}>
+        <Probe initial={{ state: "running", n: 0 }} fetchLatest={fetchLatest} />
+      </Activity>
+    );
+    const { container, rerender } = render(page("visible"));
+    await pass(3000);
+    expect(fetchLatest).toHaveBeenCalledTimes(1);
+
+    rerender(page("hidden"));
+    await pass(30_000);
+    expect(fetchLatest).toHaveBeenCalledTimes(1);
+
+    rerender(page("visible"));
+    await pass(0);
+    expect(fetchLatest).toHaveBeenCalledTimes(2);
+    expect(container.textContent).toBe("running:1");
   });
 });

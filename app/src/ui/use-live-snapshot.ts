@@ -48,6 +48,10 @@ export function useLiveSnapshot<T>(
     callbacks.current = { fetchLatest, isSettled };
   });
 
+  // True once polling has started at least once: a later start is a page that is shown again or one
+  // with new server data, and it asks at once instead of waiting a whole interval.
+  const startedBefore = useRef(false);
+
   useEffect(() => {
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -95,7 +99,9 @@ export function useLiveSnapshot<T>(
       void poll();
     }
 
-    schedule();
+    if (startedBefore.current && delayNow() !== null) void poll();
+    else schedule();
+    startedBefore.current = true;
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       stopped = true;
