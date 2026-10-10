@@ -31,6 +31,7 @@ async function startHarness() {
   const queue = createJobQueue(h.db);
   const repositories = createRepositoriesRepository(h.db);
   const logLines: string[] = [];
+  const routeLog: string[] = [];
   const intake = createJobQueueReviewTriggerIntake({
     queue,
     repositories,
@@ -45,7 +46,10 @@ async function startHarness() {
     deliveries: h.deliveries,
     sync: h.sync,
     intake,
-    logger: { info: () => undefined, error: () => undefined },
+    logger: {
+      info: (line) => routeLog.push(line),
+      error: (line) => routeLog.push(line),
+    },
   });
   const send = (
     fixture: string,
@@ -61,7 +65,7 @@ async function startHarness() {
           : { deliveryId: options.deliveryId }),
       }),
     );
-  return { h, queue, intake, send, logLines };
+  return { h, queue, intake, send, logLines, routeLog };
 }
 
 function addOpenPullRequest(h: Awaited<ReturnType<typeof startHarness>>["h"]) {
@@ -165,7 +169,7 @@ describe("a pull request delivery with the job queue behind the route", () => {
   });
 
   it("answers 500 and releases the delivery when the repository is not synchronized yet, so a redelivery works", async () => {
-    const { h, queue, send } = await startHarness();
+    const { h, queue, send, routeLog } = await startHarness();
     await h.seedInstallation();
     await h.db.deleteFrom("repositories").execute();
 
@@ -175,6 +179,9 @@ describe("a pull request delivery with the job queue behind the route", () => {
     expect(await failed.json()).toEqual({ error: "WEBHOOK_PROCESSING_FAILED" });
     expect(await queue.list()).toEqual([]);
     expect(await h.snapshotTables()).toMatchObject({ deliveries: [] });
+    expect(routeLog.join("\n")).toContain(
+      "JobQueueError: JOB_REPOSITORY_UNKNOWN: No repository row for acme/widgets",
+    );
   });
 });
 
@@ -201,6 +208,37 @@ describe("a comment delivery with the job queue behind the route", () => {
         status: "queued",
       },
     ]);
+  });
+
+  it("drops a command whose arguments are too long instead of failing the delivery again and again", async () => {
+    const { h, queue, intake, logLines } = await startHarness();
+    const integration = await h.seedInstallation();
+
+    await intake.enqueueReviewTrigger(
+      {
+        kind: "command",
+        command: "ask",
+        args: "SECRET-QUESTION ".repeat(1000),
+        repo: {
+          integrationId: integration.id,
+          externalId: "7001",
+          fullName: "acme/widgets",
+          url: "https://github.test/acme/widgets",
+        },
+        prNumber: 7,
+        prUrl: "https://github.test/acme/widgets/pull/7",
+        headSha: OPENED_HEAD,
+        actor: { login: "bob", externalId: "1002" },
+      },
+      integration,
+      { deliveryId: "d-1", event: "issue_comment" },
+    );
+
+    expect(await queue.list()).toEqual([]);
+    const logged = logLines.join("\n");
+    expect(logged).toContain("trigger dropped");
+    expect(logged).toContain("fields=args:too_long");
+    expect(logged).not.toContain("SECRET-QUESTION");
   });
 
   it("does not log the arguments of a command", async () => {

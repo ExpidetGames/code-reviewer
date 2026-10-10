@@ -64,9 +64,28 @@ export function createJobQueueReviewTriggerIntake(
           `No repository row for ${trigger.repo.fullName} in integration ${integration.id}.`,
         );
 
-      const result = await deps.queue.enqueue(
-        jobInputForTrigger(trigger, repository.id, source),
-      );
+      let result;
+      try {
+        result = await deps.queue.enqueue(
+          jobInputForTrigger(trigger, repository.id, source),
+        );
+      } catch (error) {
+        // Input the queue refuses will be refused every time: rejecting would make the route answer
+        // 500 and release the delivery, and every redelivery would fail the same way. The trigger is
+        // dropped with a log line (field names and codes only, never values). The one case that can
+        // happen is a comment whose arguments are over `JOB_ARGS_MAX_LENGTH`; cutting them down
+        // with a note is the comment commands ticket (CR-32).
+        if (
+          error instanceof JobQueueError &&
+          error.code === "JOB_INPUT_INVALID"
+        ) {
+          deps.logger.error(
+            `[webhook] trigger dropped, the job is not valid fields=${error.fieldErrors.map((field) => `${field.field}:${field.code}`).join(",")} repo=${trigger.repo.fullName} pr=${trigger.prNumber} delivery=${source.deliveryId}`,
+          );
+          return;
+        }
+        throw error;
+      }
       const why =
         result.status === "existing" ? ` reason=${result.reason}` : "";
       deps.logger.info(

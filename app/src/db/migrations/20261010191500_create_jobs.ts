@@ -2,11 +2,13 @@
 // deleted by the queue; a job that is replaced or dropped keeps its row with status `superseded` or
 // `cancelled`, so the history stays readable.
 //
-// Three partial unique indexes carry the queue's promises even if code around them is wrong:
+// Three unique indexes (two of them partial) carry the queue's promises even if code around them is wrong:
 //
-// - one job per webhook delivery id (an enqueue repeated for the same delivery finds its job);
+// - one job per webhook delivery id (an enqueue repeated for the same delivery finds its job; the
+//   column is null for a manual job, and a unique index allows any number of nulls);
 // - one automatic job per (repository, pull request, head commit, command) while that job is waiting,
-//   running or finished (a superseded or cancelled job frees the slot);
+//   running or finished (a superseded or cancelled job frees the slot); the status list is
+//   SLOT_HOLDING_STATUSES in src/jobs/job-status.ts, and a test compares the two;
 // - at most one running job per pull request.
 //
 // The jobs refer to `repositories`, not to projects: the check that a repository has an active
@@ -34,6 +36,7 @@ export const migration: Migration = {
       .addColumn("run_after", "text", (column) => column.notNull())
       .addColumn("attempts", "integer", (column) => column.notNull())
       .addColumn("runner_id", "text")
+      .addColumn("lease_token", "text")
       .addColumn("claimed_at", "text")
       .addColumn("heartbeat_at", "text")
       .addColumn("lease_expires_at", "text")
@@ -52,7 +55,6 @@ export const migration: Migration = {
       .on("jobs")
       .column("delivery_id")
       .unique()
-      .where("delivery_id", "is not", null)
       .execute();
 
     await db.schema

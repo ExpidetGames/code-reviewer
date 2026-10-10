@@ -113,6 +113,10 @@ and knows nothing about jobs. The intake of the running app is `createJobQueueRe
   request, head commit and command; a newer commit replaces the waiting job) is described in
   `src/jobs/README.md`. That is the replay protection the signature cannot give: a captured signed body
   replayed under a new delivery id finds the job of the head commit and creates nothing.
+- A trigger the queue can never accept (today only: a command whose arguments are over 10 000
+  characters) is dropped with an error log line naming the field and code, not the value, and the
+  intake resolves. Rejecting would make the route answer `500` and release the delivery, and every
+  redelivery would fail the same way. Truncating the arguments is the comment commands ticket (CR-32).
 - A trigger for a repository the app has no row for (the delivery outran the synchronization) makes
   the intake reject with `JOB_REPOSITORY_UNKNOWN`; the route answers `500` and releases the delivery,
   so "Redeliver" works after the sync.

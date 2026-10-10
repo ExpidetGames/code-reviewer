@@ -18,6 +18,11 @@ export type JobFieldErrorCode = (typeof JOB_FIELD_ERROR_CODES)[number];
 export type JobFieldError = { field: string; code: JobFieldErrorCode };
 
 export class JobQueueError extends Error {
+  /**
+   * The message names the code, repositories and fields, never a value from a pull request, so it
+   * may appear in logs (see `hasSafeMessage` in src/integrations/errors.ts).
+   */
+  readonly safeMessage = true as const;
   readonly code: JobQueueErrorCode;
   readonly fieldErrors: JobFieldError[];
 
@@ -26,7 +31,7 @@ export class JobQueueError extends Error {
     message: string,
     options: { fieldErrors?: JobFieldError[]; cause?: unknown } = {},
   ) {
-    super(message, { cause: options.cause });
+    super(`${code}: ${message}`, { cause: options.cause });
     this.name = "JobQueueError";
     this.code = code;
     this.fieldErrors = options.fieldErrors ?? [];

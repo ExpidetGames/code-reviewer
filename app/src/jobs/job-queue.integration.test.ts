@@ -2,7 +2,9 @@
 // create a second job, what a runner is handed and in which order, how leases and runtimes run out,
 // and how a job is finished. Concurrent callers (two processes) are in
 // job-queue-concurrency.integration.test.ts.
+import { sql } from "kysely";
 import { describe, expect, it } from "vitest";
+import { SLOT_HOLDING_STATUSES } from "./job-status.ts";
 import { JobQueueError } from "./errors.ts";
 import { createJobQueueFixture, sha, T0 } from "../test-support/jobs.ts";
 
@@ -91,12 +93,12 @@ describe("enqueueing a job", () => {
     expect(await fixture.queue.list()).toEqual([]);
   });
 
-  it("refuses a repository that does not exist and writes nothing", async () => {
+  it("refuses a repository that does not exist with a stable code and writes nothing", async () => {
     const fixture = await createJobQueueFixture();
 
     await expect(
       fixture.enqueue({ repositoryId: "no-such-repository" }),
-    ).rejects.toMatchObject({ code: "SQLITE_CONSTRAINT_FOREIGNKEY" });
+    ).rejects.toMatchObject({ code: "JOB_REPOSITORY_UNKNOWN" });
     expect(await fixture.queue.list()).toEqual([]);
   });
 });
@@ -204,7 +206,7 @@ describe("handing a job to a runner", () => {
     await fixture.queue.claimNext("runner-a");
     fixture.clock.advance(SECOND);
     const second = await fixture.enqueueNew({ headSha: sha("b") });
-    await fixture.queue.complete(first.id, "runner-a", {
+    await fixture.queue.complete(first.id, await fixture.tokenOf(first.id), {
       ok: true,
       result: {},
     });
@@ -295,7 +297,7 @@ describe("replacing and deduplicating jobs", () => {
     const first = await fixture.enqueueNew({});
     await fixture.queue.claimNext("runner-a");
     expect(await fixture.enqueue({})).toMatchObject({ reason: "same_head" });
-    await fixture.queue.complete(first.id, "runner-a", {
+    await fixture.queue.complete(first.id, await fixture.tokenOf(first.id), {
       ok: false,
       errorCode: "llm_unavailable",
     });
@@ -341,10 +343,14 @@ describe("replacing and deduplicating jobs", () => {
     const fixture = await createJobQueueFixture();
     const automatic = await fixture.enqueueNew({});
     await fixture.queue.claimNext("runner-a");
-    await fixture.queue.complete(automatic.id, "runner-a", {
-      ok: true,
-      result: {},
-    });
+    await fixture.queue.complete(
+      automatic.id,
+      await fixture.tokenOf(automatic.id),
+      {
+        ok: true,
+        result: {},
+      },
+    );
 
     const manual = await fixture.enqueue({ triggerKind: "manual" });
     const comment = await fixture.enqueue({
@@ -489,7 +495,7 @@ describe("leases that run out", () => {
   it("hands a job whose lease ran out to the next runner, counts the lost attempt and drops the old holder", async () => {
     const fixture = await createJobQueueFixture();
     const job = await fixture.enqueueNew({});
-    await fixture.queue.claimNext("runner-a");
+    const first = await fixture.queue.claimNext("runner-a");
     fixture.clock.advance(2 * MINUTE);
 
     const claimed = await fixture.queue.claimNext("runner-b");
@@ -501,11 +507,12 @@ describe("leases that run out", () => {
       attempts: 1,
       claimedAt: fixture.clock.now().toISOString(),
     });
-    expect(await fixture.queue.heartbeat(job.id, "runner-a")).toEqual({
-      status: "not_holder",
-    });
+    expect(claimed?.leaseToken).not.toBe(first?.leaseToken);
     expect(
-      await fixture.queue.complete(job.id, "runner-a", {
+      await fixture.queue.heartbeat(job.id, first?.leaseToken ?? ""),
+    ).toEqual({ status: "not_holder" });
+    expect(
+      await fixture.queue.complete(job.id, first?.leaseToken ?? "", {
         ok: true,
         result: {},
       }),
@@ -529,7 +536,10 @@ describe("leases that run out", () => {
 
     for (let beat = 0; beat < 6; beat++) {
       fixture.clock.advance(90 * SECOND);
-      const result = await fixture.queue.heartbeat(job.id, "runner-a");
+      const result = await fixture.queue.heartbeat(
+        job.id,
+        await fixture.tokenOf(job.id),
+      );
       expect(result).toMatchObject({
         status: "ok",
         job: {
@@ -564,7 +574,7 @@ describe("leases that run out", () => {
     });
     expect(await fixture.queue.claimNext("runner-d")).toBeNull();
     expect(
-      await fixture.queue.complete(job.id, "runner-c", {
+      await fixture.queue.complete(job.id, await fixture.tokenOf(job.id), {
         ok: true,
         result: {},
       }),
@@ -608,12 +618,12 @@ describe("leases that run out", () => {
 
     for (let minute = 1; minute <= 24; minute++) {
       fixture.clock.advance(MINUTE);
-      await fixture.queue.heartbeat(job.id, "runner-a");
+      await fixture.queue.heartbeat(job.id, await fixture.tokenOf(job.id));
       expect(await fixture.queue.claimNext("runner-b")).toBeNull();
     }
     expect((await fixture.queue.get(job.id))?.status).toBe("running");
     fixture.clock.advance(MINUTE);
-    await fixture.queue.heartbeat(job.id, "runner-a");
+    await fixture.queue.heartbeat(job.id, await fixture.tokenOf(job.id));
 
     expect(await fixture.queue.claimNext("runner-b")).toBeNull();
     expect(await fixture.queue.get(job.id)).toMatchObject({
@@ -621,7 +631,9 @@ describe("leases that run out", () => {
       errorCode: "timeout",
       finishedAt: fixture.clock.now().toISOString(),
     });
-    expect(await fixture.queue.heartbeat(job.id, "runner-a")).toEqual({
+    expect(
+      await fixture.queue.heartbeat(job.id, await fixture.tokenOf(job.id)),
+    ).toEqual({
       status: "not_holder",
     });
   });
@@ -634,7 +646,7 @@ describe("leases that run out", () => {
     // The first runner vanished 18 minutes ago; its job goes to the second runner.
     await fixture.queue.claimNext("runner-b");
     fixture.clock.advance(10 * MINUTE);
-    await fixture.queue.heartbeat(job.id, "runner-b");
+    await fixture.queue.heartbeat(job.id, await fixture.tokenOf(job.id));
 
     await fixture.queue.claimNext("runner-c");
 
@@ -667,10 +679,14 @@ describe("finishing a job", () => {
     await fixture.queue.claimNext("runner-a");
     fixture.clock.advance(MINUTE);
 
-    const completed = await fixture.queue.complete(job.id, "runner-a", {
-      ok: true,
-      result: { commentUrl: "https://github.test/c/1", durationMs: 4200 },
-    });
+    const completed = await fixture.queue.complete(
+      job.id,
+      await fixture.tokenOf(job.id),
+      {
+        ok: true,
+        result: { commentUrl: "https://github.test/c/1", durationMs: 4200 },
+      },
+    );
 
     expect(completed).toMatchObject({
       status: "completed",
@@ -689,11 +705,15 @@ describe("finishing a job", () => {
     const job = await fixture.enqueueNew({});
     await fixture.queue.claimNext("runner-a");
 
-    const completed = await fixture.queue.complete(job.id, "runner-a", {
-      ok: false,
-      errorCode: "llm_output_invalid",
-      result: { logTail: "..." },
-    });
+    const completed = await fixture.queue.complete(
+      job.id,
+      await fixture.tokenOf(job.id),
+      {
+        ok: false,
+        errorCode: "llm_output_invalid",
+        result: { logTail: "..." },
+      },
+    );
 
     expect(completed).toMatchObject({
       status: "completed",
@@ -710,13 +730,21 @@ describe("finishing a job", () => {
     const job = await fixture.enqueueNew({});
     await fixture.queue.claimNext("runner-a");
     const outcome = { ok: true as const, result: { a: 1, b: [1, 2] } };
-    await fixture.queue.complete(job.id, "runner-a", outcome);
+    await fixture.queue.complete(
+      job.id,
+      await fixture.tokenOf(job.id),
+      outcome,
+    );
     const before = await fixture.queue.get(job.id);
 
-    const again = await fixture.queue.complete(job.id, "runner-a", {
-      ok: true,
-      result: { b: [1, 2], a: 1 },
-    });
+    const again = await fixture.queue.complete(
+      job.id,
+      await fixture.tokenOf(job.id),
+      {
+        ok: true,
+        result: { b: [1, 2], a: 1 },
+      },
+    );
 
     expect(again).toMatchObject({ status: "already_completed" });
     expect(await fixture.queue.get(job.id)).toEqual(before);
@@ -726,43 +754,57 @@ describe("finishing a job", () => {
     const fixture = await createJobQueueFixture();
     const job = await fixture.enqueueNew({});
     await fixture.queue.claimNext("runner-a");
-    await fixture.queue.complete(job.id, "runner-a", {
+    await fixture.queue.complete(job.id, await fixture.tokenOf(job.id), {
       ok: true,
       result: { a: 1 },
     });
 
-    const other = await fixture.queue.complete(job.id, "runner-a", {
-      ok: true,
-      result: { a: 2 },
-    });
-    const failure = await fixture.queue.complete(job.id, "runner-a", {
-      ok: false,
-      errorCode: "x",
-    });
+    const other = await fixture.queue.complete(
+      job.id,
+      await fixture.tokenOf(job.id),
+      {
+        ok: true,
+        result: { a: 2 },
+      },
+    );
+    const failure = await fixture.queue.complete(
+      job.id,
+      await fixture.tokenOf(job.id),
+      {
+        ok: false,
+        errorCode: "x",
+      },
+    );
 
     expect(other).toMatchObject({ status: "outcome_conflict" });
     expect(failure).toMatchObject({ status: "outcome_conflict" });
     expect((await fixture.queue.get(job.id))?.result).toEqual({ a: 1 });
   });
 
-  it("refuses a runner that does not hold the job, a job that waits and one that does not exist", async () => {
+  it("refuses a token that is not the current claim, a job that waits and one that does not exist", async () => {
     const fixture = await createJobQueueFixture();
     const job = await fixture.enqueueNew({});
     const outcome = { ok: true as const, result: {} };
 
-    expect(await fixture.queue.complete(job.id, "runner-a", outcome)).toEqual({
-      status: "not_holder",
-    });
-    await fixture.queue.claimNext("runner-a");
-    expect(await fixture.queue.complete(job.id, "runner-b", outcome)).toEqual({
-      status: "not_holder",
-    });
+    expect(await fixture.queue.complete(job.id, "some-token", outcome)).toEqual(
+      {
+        status: "not_holder",
+      },
+    );
+    const claimed = await fixture.queue.claimNext("runner-a");
+    expect(await fixture.queue.complete(job.id, "some-token", outcome)).toEqual(
+      {
+        status: "not_holder",
+      },
+    );
     expect(
-      await fixture.queue.complete("missing", "runner-a", outcome),
-    ).toEqual({
-      status: "not_holder",
-    });
-    expect(await fixture.queue.heartbeat(job.id, "runner-b")).toEqual({
+      await fixture.queue.complete(
+        "missing",
+        claimed?.leaseToken ?? "",
+        outcome,
+      ),
+    ).toEqual({ status: "not_holder" });
+    expect(await fixture.queue.heartbeat(job.id, "some-token")).toEqual({
       status: "not_holder",
     });
     expect((await fixture.queue.get(job.id))?.status).toBe("running");
@@ -774,10 +816,14 @@ describe("finishing a job", () => {
     await fixture.queue.claimNext("runner-a");
     fixture.clock.advance(5 * MINUTE);
 
-    const completed = await fixture.queue.complete(job.id, "runner-a", {
-      ok: true,
-      result: {},
-    });
+    const completed = await fixture.queue.complete(
+      job.id,
+      await fixture.tokenOf(job.id),
+      {
+        ok: true,
+        result: {},
+      },
+    );
 
     expect(completed).toMatchObject({ status: "completed" });
   });
@@ -848,10 +894,14 @@ describe("dropping waiting jobs", () => {
       });
     expect((await fixture.queue.get(other.id))?.status).toBe("queued");
     expect(
-      await fixture.queue.complete(running.id, "runner-a", {
-        ok: true,
-        result: {},
-      }),
+      await fixture.queue.complete(
+        running.id,
+        await fixture.tokenOf(running.id),
+        {
+          ok: true,
+          result: {},
+        },
+      ),
     ).toMatchObject({ status: "completed" });
   });
 
@@ -896,5 +946,290 @@ describe("listing jobs", () => {
       b.id,
       c.id,
     ]);
+  });
+});
+
+describe("a runner that stalled and came back", () => {
+  it("cannot heartbeat, complete or release the job once the same runner id holds it again under a new claim", async () => {
+    const fixture = await createJobQueueFixture();
+    const job = await fixture.enqueueNew({});
+    const stale = await fixture.queue.claimNext("runner-a");
+    // The runner stalls past its lease, then polls again under the same id.
+    fixture.clock.advance(3 * MINUTE);
+    const fresh = await fixture.queue.claimNext("runner-a");
+    expect(fresh?.job).toMatchObject({
+      id: job.id,
+      runnerId: "runner-a",
+      attempts: 1,
+    });
+    const staleToken = stale?.leaseToken ?? "";
+
+    expect(await fixture.queue.heartbeat(job.id, staleToken)).toEqual({
+      status: "not_holder",
+    });
+    expect(
+      await fixture.queue.complete(job.id, staleToken, {
+        ok: true,
+        result: {},
+      }),
+    ).toEqual({ status: "not_holder" });
+    expect(
+      await fixture.queue.release(job.id, staleToken, "runner_shutdown"),
+    ).toEqual({
+      status: "not_holder",
+    });
+
+    // The stale execution changed nothing, and the new one is the holder.
+    expect(await fixture.queue.get(job.id)).toEqual(fresh?.job);
+    expect(
+      await fixture.queue.heartbeat(job.id, fresh?.leaseToken ?? ""),
+    ).toMatchObject({ status: "ok" });
+    expect(
+      await fixture.queue.complete(job.id, fresh?.leaseToken ?? "", {
+        ok: true,
+        result: { fresh: true },
+      }),
+    ).toMatchObject({ status: "completed", job: { result: { fresh: true } } });
+  });
+
+  it("is told it lost the job even when it reports after the new execution finished", async () => {
+    const fixture = await createJobQueueFixture();
+    const job = await fixture.enqueueNew({});
+    const stale = await fixture.queue.claimNext("runner-a");
+    fixture.clock.advance(3 * MINUTE);
+    const fresh = await fixture.queue.claimNext("runner-a");
+    await fixture.queue.complete(job.id, fresh?.leaseToken ?? "", {
+      ok: true,
+      result: { fresh: true },
+    });
+
+    const late = await fixture.queue.complete(job.id, stale?.leaseToken ?? "", {
+      ok: true,
+      result: { fresh: false },
+    });
+
+    expect(late).toEqual({ status: "not_holder" });
+    expect((await fixture.queue.get(job.id))?.result).toEqual({ fresh: true });
+  });
+
+  it("hands out a different lease token with every claim", async () => {
+    const fixture = await createJobQueueFixture();
+    await fixture.enqueueNew({ prNumber: 1 });
+    await fixture.enqueueNew({ prNumber: 2 });
+
+    const first = await fixture.queue.claimNext("runner-a");
+    const second = await fixture.queue.claimNext("runner-a");
+
+    expect(first?.leaseToken).toMatch(/^[0-9a-f-]{36}$/);
+    expect(second?.leaseToken).not.toBe(first?.leaseToken);
+    expect(JSON.stringify(first?.job)).not.toContain(first?.leaseToken ?? "x");
+  });
+});
+
+describe("the hard limit seen from the holder", () => {
+  it("fails the job with timeout on the first heartbeat after the limit and tells the holder it lost the job, without any claim", async () => {
+    const fixture = await createJobQueueFixture();
+    const job = await fixture.enqueueNew({});
+    const claimed = await fixture.queue.claimNext("runner-a");
+    fixture.clock.advance(24 * MINUTE);
+    expect(
+      await fixture.queue.heartbeat(job.id, claimed?.leaseToken ?? ""),
+    ).toMatchObject({ status: "ok" });
+    fixture.clock.advance(MINUTE);
+
+    const beat = await fixture.queue.heartbeat(
+      job.id,
+      claimed?.leaseToken ?? "",
+    );
+
+    expect(beat).toEqual({ status: "not_holder" });
+    expect(await fixture.queue.get(job.id)).toMatchObject({
+      status: "failed",
+      errorCode: "timeout",
+    });
+  });
+});
+
+describe("giving a claimed job back", () => {
+  it("puts the job back in the queue as a lost attempt and drops the holder", async () => {
+    const fixture = await createJobQueueFixture();
+    const job = await fixture.enqueueNew({});
+    const claimed = await fixture.queue.claimNext("runner-a");
+
+    const released = await fixture.queue.release(
+      job.id,
+      claimed?.leaseToken ?? "",
+      "runner_shutdown",
+    );
+
+    expect(released).toMatchObject({
+      status: "requeued",
+      job: {
+        status: "queued",
+        attempts: 1,
+        runnerId: null,
+        claimedAt: null,
+        leaseExpiresAt: null,
+        errorCode: null,
+      },
+    });
+    expect(
+      await fixture.queue.heartbeat(job.id, claimed?.leaseToken ?? ""),
+    ).toEqual({ status: "not_holder" });
+    expect((await fixture.queue.claimNext("runner-b"))?.job.id).toBe(job.id);
+  });
+
+  it("holds the job back until the time given", async () => {
+    const fixture = await createJobQueueFixture();
+    const job = await fixture.enqueueNew({});
+    const claimed = await fixture.queue.claimNext("runner-a");
+    const retryAt = new Date(T0.getTime() + 30 * SECOND);
+
+    await fixture.queue.release(
+      job.id,
+      claimed?.leaseToken ?? "",
+      "git_unavailable",
+      {
+        retryAt,
+      },
+    );
+
+    expect(await fixture.queue.claimNext("runner-b")).toBeNull();
+    fixture.clock.set(retryAt);
+    expect((await fixture.queue.claimNext("runner-b"))?.job.id).toBe(job.id);
+  });
+
+  it("fails the job with the given reason on the last allowed attempt, like a lapsed lease", async () => {
+    const fixture = await createJobQueueFixture();
+    const job = await fixture.enqueueNew({});
+
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const claimed = await fixture.queue.claimNext("runner-a");
+      expect(
+        await fixture.queue.release(
+          job.id,
+          claimed?.leaseToken ?? "",
+          "git_unavailable",
+        ),
+      ).toMatchObject({ status: "requeued", job: { attempts: attempt } });
+    }
+    const last = await fixture.queue.claimNext("runner-a");
+    const released = await fixture.queue.release(
+      job.id,
+      last?.leaseToken ?? "",
+      "git_unavailable",
+    );
+
+    expect(released).toMatchObject({
+      status: "failed",
+      job: { status: "failed", errorCode: "git_unavailable", attempts: 3 },
+    });
+    expect(await fixture.queue.claimNext("runner-a")).toBeNull();
+  });
+
+  it("refuses a give-back without a reason and from someone who does not hold the job", async () => {
+    const fixture = await createJobQueueFixture();
+    const job = await fixture.enqueueNew({});
+    const claimed = await fixture.queue.claimNext("runner-a");
+
+    await expect(
+      fixture.queue.release(job.id, claimed?.leaseToken ?? "", " "),
+    ).rejects.toMatchObject({
+      code: "JOB_INPUT_INVALID",
+      fieldErrors: [{ field: "reason", code: "required" }],
+    });
+    expect(await fixture.queue.release(job.id, "wrong", "x")).toEqual({
+      status: "not_holder",
+    });
+    expect((await fixture.queue.get(job.id))?.status).toBe("running");
+  });
+});
+
+describe("jobs a person asked for", () => {
+  it("are not replaced by a newer automatic job", async () => {
+    const fixture = await createJobQueueFixture();
+    const comment = await fixture.enqueueNew({
+      triggerKind: "comment",
+      headSha: sha("a"),
+    });
+    const manualImprove = await fixture.enqueueNew({
+      triggerKind: "manual",
+      command: "improve",
+    });
+
+    const automatic = await fixture.enqueue({ headSha: sha("b") });
+
+    expect(automatic).toMatchObject({
+      status: "created",
+      supersededJobIds: [],
+    });
+    expect((await fixture.queue.get(comment.id))?.status).toBe("queued");
+    expect((await fixture.queue.get(manualImprove.id))?.status).toBe("queued");
+  });
+
+  it("pull a waiting job that is held back by a debounce forward to now", async () => {
+    const fixture = await createJobQueueFixture();
+    const debounced = await fixture.enqueueNew({
+      runAfter: new Date(T0.getTime() + 90 * SECOND),
+    });
+    fixture.clock.advance(10 * SECOND);
+
+    const manual = await fixture.enqueue({ triggerKind: "manual" });
+
+    expect(manual).toMatchObject({
+      status: "existing",
+      reason: "already_active",
+      job: { id: debounced.id, runAfter: fixture.clock.now().toISOString() },
+    });
+    expect((await fixture.queue.claimNext("runner-a"))?.job.id).toBe(
+      debounced.id,
+    );
+  });
+
+  it("leave the run-after time of a waiting job alone when it is due already, and of a webhook duplicate", async () => {
+    const fixture = await createJobQueueFixture();
+    const held = await fixture.enqueueNew({
+      runAfter: new Date(T0.getTime() + 90 * SECOND),
+    });
+
+    const duplicate = await fixture.enqueue({ headSha: held.headSha });
+
+    expect(duplicate).toMatchObject({ reason: "same_head" });
+    expect((await fixture.queue.get(held.id))?.runAfter).toBe(
+      new Date(T0.getTime() + 90 * SECOND).toISOString(),
+    );
+  });
+});
+
+describe("listing jobs with a limit", () => {
+  it("returns at most the limit, oldest first, and a default limit when none is given", async () => {
+    const fixture = await createJobQueueFixture();
+    const jobs = [];
+    for (let pr = 1; pr <= 5; pr++) {
+      jobs.push(await fixture.enqueueNew({ prNumber: pr }));
+      fixture.clock.advance(SECOND);
+    }
+
+    const limited = await fixture.queue.list({ limit: 2 });
+
+    expect(limited.map((job) => job.id)).toEqual([jobs[0]?.id, jobs[1]?.id]);
+    expect(await fixture.queue.list()).toHaveLength(5);
+    expect(await fixture.queue.list({ limit: 0 })).toHaveLength(1);
+  });
+});
+
+describe("the automatic slot index", () => {
+  it("spells out the same statuses as the slot-holding statuses of the code", async () => {
+    const fixture = await createJobQueueFixture();
+
+    const { rows } = await sql<{ sql: string }>`
+      select sql from sqlite_master where name = 'jobs_automatic_per_head_unique'`.execute(
+      fixture.db,
+    );
+
+    const listed = [...(rows[0]?.sql.matchAll(/'([a-z]+)'/g) ?? [])]
+      .map((match) => match[1])
+      .filter((value) => value !== "webhook");
+    expect(listed.sort()).toEqual([...SLOT_HOLDING_STATUSES].sort());
   });
 });

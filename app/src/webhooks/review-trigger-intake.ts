@@ -28,6 +28,8 @@ export type ReviewTriggerIntake = {
    *   delivery id alone. The delivery id is not covered by GitHub's signature, so a captured signed
    *   body replayed with a new id passes the route; and the same event can legitimately come twice
    *   under different ids (two identical comments). Replay protection is that dedupe.
+   * - A trigger that can never be accepted (invalid for every retry) is dropped and logged rather
+   *   than rejected: a rejection makes every redelivery fail the same way.
    * - It is quick: the route answers GitHub (which waits 10 seconds) after it returns.
    * - `trigger.args` and every other text in the trigger come from a pull request or a comment and
    *   are untrusted data.

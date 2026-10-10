@@ -24,7 +24,12 @@ import type { Database, JobsTable } from "../schema.ts";
  */
 export async function claimOldestDueJob(
   executor: Kysely<Database>,
-  claim: { runnerId: string; now: Date; leaseExpiresAt: Date },
+  claim: {
+    runnerId: string;
+    leaseToken: string;
+    now: Date;
+    leaseExpiresAt: Date;
+  },
 ): Promise<JobsTable | undefined> {
   const now = formatTimestamp(claim.now);
   const leaseExpiresAt = formatTimestamp(claim.leaseExpiresAt);
@@ -32,6 +37,7 @@ export async function claimOldestDueJob(
     update jobs
     set status = 'running',
         runner_id = ${claim.runnerId},
+        lease_token = ${claim.leaseToken},
         claimed_at = ${now},
         heartbeat_at = ${now},
         lease_expires_at = ${leaseExpiresAt},

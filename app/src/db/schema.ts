@@ -145,6 +145,11 @@ export interface JobsTable {
   /** How many attempts were lost (a lease ran out, a claim was given back). */
   attempts: number;
   runner_id: string | null;
+  /**
+   * Random value of the current claim; required to heartbeat, complete or release the job. Cleared
+   * when the job is requeued, kept on a finished job so that a repeated report is recognised.
+   */
+  lease_token: string | null;
   claimed_at: string | null;
   heartbeat_at: string | null;
   lease_expires_at: string | null;

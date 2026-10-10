@@ -17,7 +17,8 @@ if (!databasePath || !nowIso)
   throw new Error("Usage: jobs-child.ts <claim|enqueue> <db> <nowIso> <arg>");
 
 console.log("ready");
-createInterface({ input: process.stdin }).once("line", async (line) => {
+const lines = createInterface({ input: process.stdin });
+lines.once("line", async (line) => {
   const startAt = Number(line.split(" ")[1]);
   while (Date.now() < startAt);
   const db = openDatabase({ path: databasePath, busyTimeoutMs: 5000 });
@@ -25,18 +26,25 @@ createInterface({ input: process.stdin }).once("line", async (line) => {
     const queue = createJobQueue(db, { now: () => new Date(nowIso) });
     if (command === "claim") {
       const claimed = await queue.claimNext(String(argument));
-      console.log(JSON.stringify({ job: claimed?.job ?? null }));
+      console.log(
+        JSON.stringify({
+          job: claimed?.job ?? null,
+          leaseToken: claimed?.leaseToken ?? null,
+        }),
+      );
     } else if (command === "enqueue") {
       const input = JSON.parse(String(argument)) as EnqueueJobInput;
       console.log(JSON.stringify(await queue.enqueue(input)));
     } else {
       throw new Error(`Unknown command: ${command}`);
     }
-    process.exit(0);
+    process.exitCode = 0;
   } catch (error) {
     console.log(JSON.stringify({ error: String(error) }));
-    process.exit(1);
+    process.exitCode = 1;
   } finally {
     await db.destroy();
+    // Nothing else keeps the process alive, so it ends with the exit code set above.
+    lines.close();
   }
 });

@@ -46,7 +46,10 @@ describe("claiming from two processes", () => {
     const fixture = await createJobQueueFixture();
     const job = await fixture.enqueueNew({});
 
-    const answers = await runTogether<{ job: Job | null }>([
+    const answers = await runTogether<{
+      job: Job | null;
+      leaseToken: string | null;
+    }>([
       claimArgs(fixture.databasePath, T0, "runner-a"),
       claimArgs(fixture.databasePath, T0, "runner-b"),
     ]);
@@ -64,7 +67,10 @@ describe("claiming from two processes", () => {
     const one = await fixture.enqueueNew({ prNumber: 1 });
     const two = await fixture.enqueueNew({ prNumber: 2 });
 
-    const answers = await runTogether<{ job: Job | null }>([
+    const answers = await runTogether<{
+      job: Job | null;
+      leaseToken: string | null;
+    }>([
       claimArgs(fixture.databasePath, T0, "runner-a"),
       claimArgs(fixture.databasePath, T0, "runner-b"),
     ]);
@@ -79,7 +85,10 @@ describe("claiming from two processes", () => {
     await fixture.enqueueNew({ headSha: sha("a") });
     await fixture.enqueueNew({ headSha: sha("b"), command: "improve" });
 
-    const answers = await runTogether<{ job: Job | null }>([
+    const answers = await runTogether<{
+      job: Job | null;
+      leaseToken: string | null;
+    }>([
       claimArgs(fixture.databasePath, T0, "runner-a"),
       claimArgs(fixture.databasePath, T0, "runner-b"),
     ]);
@@ -92,10 +101,13 @@ describe("claiming from two processes", () => {
   it("hands a job with an expired lease to exactly one of two runners and counts one lost attempt", async () => {
     const fixture = await createJobQueueFixture();
     const job = await fixture.enqueueNew({});
-    await fixture.queue.claimNext("runner-a");
+    const first = await fixture.queue.claimNext("runner-a");
     const later = new Date(T0.getTime() + 3 * 60 * 1000);
 
-    const answers = await runTogether<{ job: Job | null }>([
+    const answers = await runTogether<{
+      job: Job | null;
+      leaseToken: string | null;
+    }>([
       claimArgs(fixture.databasePath, later, "runner-b"),
       claimArgs(fixture.databasePath, later, "runner-c"),
     ]);
@@ -103,11 +115,15 @@ describe("claiming from two processes", () => {
     const winners = answers.filter((answer) => answer.job !== null);
     expect(winners).toHaveLength(1);
     expect(winners[0]?.job).toMatchObject({ id: job.id, attempts: 1 });
+    expect(winners[0]?.leaseToken).toEqual(expect.any(String));
+    expect(winners[0]?.leaseToken).not.toBe(first?.leaseToken);
     expect(await fixture.queue.get(job.id)).toMatchObject({
       attempts: 1,
       runnerId: winners[0]?.job?.runnerId,
     });
-    expect(await fixture.queue.heartbeat(job.id, "runner-a")).toEqual({
+    expect(
+      await fixture.queue.heartbeat(job.id, first?.leaseToken ?? ""),
+    ).toEqual({
       status: "not_holder",
     });
   });

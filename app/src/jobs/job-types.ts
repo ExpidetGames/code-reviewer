@@ -105,7 +105,11 @@ export type JobErrorCode = (typeof JOB_ERROR_CODES)[number];
 
 export type HeartbeatResult =
   | { status: "ok"; job: Job }
-  /** The runner does not hold the job (lost the lease, finished, or never had it). */
+  /**
+   * The caller does not hold the job: its lease token is not the current one (the lease was lost and
+   * the job requeued or handed on, even to the same runner id), the job is finished, or it ran past
+   * the hard limit (it is failed with `timeout` by this very call). The runner must stop.
+   */
   | { status: "not_holder" };
 
 export type CompleteResult =
@@ -116,4 +120,17 @@ export type CompleteResult =
   | { status: "outcome_conflict"; job: Job }
   | { status: "not_holder" };
 
-export type ClaimResult = { job: Job } | null;
+export type ReleaseResult =
+  /** The job is waiting again with one more lost attempt. */
+  | { status: "requeued"; job: Job }
+  /** That was the last allowed attempt: the job is failed with the given reason. */
+  | { status: "failed"; job: Job }
+  | { status: "not_holder" };
+
+/**
+ * A claimed job and the proof that the caller holds it. The lease token is random, new for every
+ * claim and cleared when the job is requeued, so a stale execution of the same job (even by the same
+ * runner id) can no longer heartbeat, complete or release it. It is deliberately not part of `Job`:
+ * it is handed to the holder once and never listed or logged.
+ */
+export type ClaimResult = { job: Job; leaseToken: string } | null;

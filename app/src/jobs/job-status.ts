@@ -21,11 +21,9 @@ export const JOB_STATUSES = [
 export type JobStatus = (typeof JOB_STATUSES)[number];
 
 const TRANSITIONS: Record<JobStatus, readonly JobStatus[]> = {
-  // `failed` straight from `queued`: a job that cannot be started (for example no LLM key
-  // configured) is failed when it is claimed, and a claim that goes wrong is undone by `running`
-  // to `queued`.
-  queued: ["running", "superseded", "cancelled", "failed"],
-  // `queued` again only when the lease ran out or the claim was given back.
+  queued: ["running", "superseded", "cancelled"],
+  // `queued` again only when the lease ran out or the runner gave the job back (`release`); both
+  // count a lost attempt, and the last allowed one fails the job instead.
   running: ["succeeded", "failed", "queued"],
   succeeded: [],
   failed: [],
@@ -46,7 +44,15 @@ export function statusesThatCanBecome(to: JobStatus): JobStatus[] {
   return JOB_STATUSES.filter((from) => canTransition(from, to));
 }
 
-/** A job in one of these never changes again. */
-export function isTerminalStatus(status: JobStatus): boolean {
-  return TRANSITIONS[status].length === 0;
-}
+/**
+ * The statuses in which an automatic job occupies its (pull request, head commit, command) slot. A
+ * superseded or cancelled job frees the slot. The partial unique index
+ * `jobs_automatic_per_head_unique` (migration `20261010191500_create_jobs`) spells out the same list;
+ * a test compares the two.
+ */
+export const SLOT_HOLDING_STATUSES: readonly JobStatus[] = [
+  "queued",
+  "running",
+  "succeeded",
+  "failed",
+];

@@ -8,7 +8,7 @@
 // a job already?" and the insert that follows it cannot be separated by another writer.
 import "server-only";
 import { isDeepStrictEqual } from "node:util";
-import type { Kysely } from "kysely";
+import type { ExpressionBuilder, Kysely } from "kysely";
 import { REVIEW_COMMANDS, type JsonValue } from "../../integrations/types.ts";
 import {
   DEFAULT_JOB_QUEUE_LIMITS,
@@ -16,6 +16,7 @@ import {
 } from "../../jobs/job-limits.ts";
 import type { ValidEnqueueInput } from "../../jobs/job-input.ts";
 import {
+  SLOT_HOLDING_STATUSES,
   isJobStatus,
   statusesThatCanBecome,
   type JobStatus,
@@ -27,7 +28,9 @@ import {
   type EnqueueResult,
   type HeartbeatResult,
   type Job,
+  type JobErrorCode,
   type JobOutcome,
+  type ReleaseResult,
 } from "../../jobs/job-types.ts";
 import { decodeJson, encodeJson, formatTimestamp } from "../codecs.ts";
 import type { Database, JobsTable } from "../schema.ts";
@@ -47,35 +50,51 @@ export type JobListFilter = {
   repositoryId?: string;
   prNumber?: number;
   status?: JobStatus | JobStatus[];
+  /** At most this many jobs, oldest first. Defaults to 100 and is capped at 500. */
+  limit?: number;
 };
+
+export const JOB_LIST_DEFAULT_LIMIT = 100;
+export const JOB_LIST_MAX_LIMIT = 500;
 
 export type JobsRepositoryOptions = {
   now?: () => Date;
   newId?: () => string;
+  /** The random lease token of a claim. */
+  newToken?: () => string;
   limits?: Partial<JobQueueLimits>;
 };
-
-/** The statuses in which an automatic job occupies its (pull request, head commit, command) slot. */
-const SLOT_HOLDING_STATUSES: JobStatus[] = [
-  "queued",
-  "running",
-  "succeeded",
-  "failed",
-];
 
 export type JobsRepository = {
   /** Inserts a job unless the dedupe rules say one exists already; see the README of `src/jobs`. */
   enqueue(input: ValidEnqueueInput): Promise<EnqueueResult>;
-  /** Expires stale leases and runtimes, then hands the oldest due job to the runner (or null). */
+  /**
+   * Expires stale leases and runtimes, then hands the oldest due job to the runner (or null). The
+   * result carries the lease token the runner must present from then on.
+   */
   claimNext(runnerId: string): Promise<ClaimResult>;
-  /** Extends the lease of a job the runner holds. */
-  heartbeat(jobId: string, runnerId: string): Promise<HeartbeatResult>;
-  /** Finishes a job the runner holds. Reporting the same outcome again is not an error. */
+  /**
+   * Extends the lease of the claim `leaseToken` belongs to. A job past the hard limit is failed with
+   * `timeout` by this call and answers `not_holder`.
+   */
+  heartbeat(jobId: string, leaseToken: string): Promise<HeartbeatResult>;
+  /** Finishes the claim `leaseToken` belongs to. Reporting the same outcome again is not an error. */
   complete(
     jobId: string,
-    runnerId: string,
+    leaseToken: string,
     outcome: JobOutcome,
   ): Promise<CompleteResult>;
+  /**
+   * Gives a claimed job back. It counts as a lost attempt, exactly like a lapsed lease: the job is
+   * waiting again (at `retryAt`, default now), or failed with `reason` if it was the last allowed
+   * attempt.
+   */
+  release(
+    jobId: string,
+    leaseToken: string,
+    reason: string,
+    options?: { retryAt?: Date },
+  ): Promise<ReleaseResult>;
   /** Deals with leases and runtimes that ran out. `claimNext` does this first on every call. */
   expireStaleJobs(): Promise<ExpiryReport>;
   /** Cancels every waiting job of a repository (its project was deactivated); returns how many. */
@@ -130,12 +149,37 @@ function toJob(row: JobsTable): Job {
   };
 }
 
+/** Which running jobs an attempt-losing statement applies to. */
+type RunningScope = {
+  /** Only jobs whose lease ran out at or before this timestamp. */
+  leaseExpiredBefore?: string;
+  /** Only this job, and only while `leaseToken` is its current claim. */
+  claim?: { jobId: string; leaseToken: string };
+};
+
+function runningWhere(scope: RunningScope) {
+  return (eb: ExpressionBuilder<Database, "jobs">) =>
+    eb.and([
+      eb("status", "=", "running"),
+      ...(scope.leaseExpiredBefore === undefined
+        ? []
+        : [eb("lease_expires_at", "<=", scope.leaseExpiredBefore)]),
+      ...(scope.claim === undefined
+        ? []
+        : [
+            eb("id", "=", scope.claim.jobId),
+            eb("lease_token", "=", scope.claim.leaseToken),
+          ]),
+    ]);
+}
+
 export function createJobsRepository(
   db: Kysely<Database>,
   options: JobsRepositoryOptions = {},
 ): JobsRepository {
   const now = options.now ?? (() => new Date());
   const newId = options.newId ?? (() => crypto.randomUUID());
+  const newToken = options.newToken ?? (() => crypto.randomUUID());
   const limits = { ...DEFAULT_JOB_QUEUE_LIMITS, ...options.limits };
 
   // A transaction cannot start another one; inside one, just use it.
@@ -145,72 +189,104 @@ export function createJobsRepository(
     return db.isTransaction ? run(db) : db.transaction().execute(run);
   }
 
-  async function expire(
+  /**
+   * One attempt of a running job is lost (its lease ran out, or its holder gave it back). This is the
+   * single rule for that: on the last allowed attempt the job fails with `errorCode`, otherwise it
+   * goes back to the queue and its holder is dropped. Runner and claim time stay on a failed job (and
+   * so does the lease token), so a late report from the old holder is recognised and refused.
+   */
+  async function loseAttempt(
     executor: Kysely<Database>,
-    current: Date,
-  ): Promise<ExpiryReport> {
-    const timestamp = formatTimestamp(current);
-    const report: ExpiryReport = { requeued: 0, leaseExpired: 0, timedOut: 0 };
-
-    // The last allowed attempt: its lost lease fails the job. Runner and claim time stay on the row
-    // so that a late `complete` from the old runner is recognised and refused.
-    const failedLeases = await executor
+    scope: RunningScope,
+    errorCode: string,
+    timestamp: string,
+    runAfter?: string,
+  ): Promise<{ failed: number; requeued: number }> {
+    const failed = await executor
       .updateTable("jobs")
       .set((eb) => ({
         status: "failed",
         attempts: eb("attempts", "+", 1),
-        error_code: "lease_expired",
+        error_code: errorCode,
         lease_expires_at: null,
         finished_at: timestamp,
         updated_at: timestamp,
       }))
-      .where("status", "=", "running")
-      .where("lease_expires_at", "<=", timestamp)
+      .where(runningWhere(scope))
       .where("attempts", ">=", limits.maxAttempts - 1)
       .executeTakeFirst();
-    report.leaseExpired = Number(failedLeases.numUpdatedRows);
 
-    // Every other lost lease: back in the queue, the old runner is no longer the holder.
     const requeued = await executor
       .updateTable("jobs")
       .set((eb) => ({
         status: "queued",
         attempts: eb("attempts", "+", 1),
         runner_id: null,
+        lease_token: null,
         claimed_at: null,
         heartbeat_at: null,
         lease_expires_at: null,
+        ...(runAfter === undefined ? {} : { run_after: runAfter }),
         updated_at: timestamp,
       }))
-      .where("status", "=", "running")
-      .where("lease_expires_at", "<=", timestamp)
+      .where(runningWhere(scope))
       .executeTakeFirst();
-    report.requeued = Number(requeued.numUpdatedRows);
 
-    // A job whose runner keeps the lease alive but never finishes.
+    return {
+      failed: Number(failed.numUpdatedRows),
+      requeued: Number(requeued.numUpdatedRows),
+    };
+  }
+
+  /** Fails running jobs that were claimed longer ago than the hard limit allows. */
+  async function failTimedOut(
+    executor: Kysely<Database>,
+    scope: RunningScope,
+    current: Date,
+  ): Promise<number> {
+    const timestamp = formatTimestamp(current);
     const startedBefore = formatTimestamp(
       new Date(current.getTime() - limits.maxRuntimeMs),
     );
-    const timedOut = await executor
+    const result = await executor
       .updateTable("jobs")
       .set({
         status: "failed",
-        error_code: "timeout",
+        error_code: "timeout" satisfies JobErrorCode,
         lease_expires_at: null,
         finished_at: timestamp,
         updated_at: timestamp,
       })
-      .where("status", "=", "running")
+      .where(runningWhere(scope))
       .where("claimed_at", "<=", startedBefore)
       .executeTakeFirst();
-    report.timedOut = Number(timedOut.numUpdatedRows);
+    return Number(result.numUpdatedRows);
+  }
 
-    return report;
+  async function expire(
+    executor: Kysely<Database>,
+    current: Date,
+  ): Promise<ExpiryReport> {
+    const timestamp = formatTimestamp(current);
+    const lost = await loseAttempt(
+      executor,
+      { leaseExpiredBefore: timestamp },
+      "lease_expired" satisfies JobErrorCode,
+      timestamp,
+    );
+    // A job whose runner keeps the lease alive but never finishes. Lost leases come first: a job
+    // whose runner vanished long ago is retried, not failed for taking long.
+    const timedOut = await failTimedOut(executor, {}, current);
+    return {
+      requeued: lost.requeued,
+      leaseExpired: lost.failed,
+      timedOut,
+    };
   }
 
   async function cancelWaiting(
     where: { repositoryId: string; prNumber?: number },
-    errorCode: string,
+    errorCode: JobErrorCode,
   ): Promise<number> {
     const timestamp = formatTimestamp(now());
     let query = db
@@ -264,7 +340,7 @@ export function createJobsRepository(
           const sameHead = await samePullRequest()
             .where("head_sha", "=", input.headSha)
             .where("trigger_kind", "=", "webhook")
-            .where("status", "in", SLOT_HOLDING_STATUSES)
+            .where("status", "in", [...SLOT_HOLDING_STATUSES])
             .executeTakeFirst();
           if (sameHead !== undefined)
             return {
@@ -280,12 +356,25 @@ export function createJobsRepository(
             .orderBy("created_at")
             .orderBy("id")
             .executeTakeFirst();
-          if (active !== undefined)
+          if (active !== undefined) {
+            // A person does not wait for a debounce: a waiting job that was held back (an automatic
+            // job after `synchronize`) is due now.
+            const pulledForward =
+              active.status === "queued" &&
+              active.run_after > timestamp &&
+              (await trx
+                .updateTable("jobs")
+                .set({ run_after: timestamp, updated_at: timestamp })
+                .where("id", "=", active.id)
+                .where("status", "=", "queued")
+                .returningAll()
+                .executeTakeFirst());
             return {
               status: "existing",
-              job: toJob(active),
+              job: toJob(pulledForward || active),
               reason: "already_active",
             };
+          }
         }
 
         // 3. The new job.
@@ -307,6 +396,7 @@ export function createJobsRepository(
             run_after: formatTimestamp(input.runAfter ?? current),
             attempts: 0,
             runner_id: null,
+            lease_token: null,
             claimed_at: null,
             heartbeat_at: null,
             lease_expires_at: null,
@@ -320,13 +410,16 @@ export function createJobsRepository(
           .returningAll()
           .executeTakeFirstOrThrow();
 
-        // 4. An automatic job replaces the jobs that still wait for the same command on this pull
-        // request: they would review an older state. A running job is left alone.
+        // 4. An automatic job replaces the waiting automatic jobs of the same pull request, command
+        // and arguments: they would review an older state. Jobs a person asked for are never
+        // replaced (they skip the debounce an automatic job waits out), and a running job is left
+        // alone.
         let supersededJobIds: string[] = [];
         if (input.triggerKind === "webhook") {
           const waiting = await samePullRequest()
             .select("id")
             .where("args", "=", input.args)
+            .where("trigger_kind", "=", "webhook")
             .where("status", "in", statusesThatCanBecome("superseded"))
             .where("id", "!=", id)
             .execute();
@@ -353,38 +446,43 @@ export function createJobsRepository(
       return inTransaction(async (trx) => {
         const current = now();
         await expire(trx, current);
+        const leaseToken = newToken();
         const row = await claimOldestDueJob(trx, {
           runnerId,
+          leaseToken,
           now: current,
           leaseExpiresAt: new Date(current.getTime() + limits.leaseMs),
         });
-        return row === undefined ? null : { job: toJob(row) };
+        return row === undefined ? null : { job: toJob(row), leaseToken };
       });
     },
 
-    async heartbeat(jobId, runnerId) {
-      const current = now();
-      const timestamp = formatTimestamp(current);
-      const row = await db
-        .updateTable("jobs")
-        .set({
-          heartbeat_at: timestamp,
-          lease_expires_at: formatTimestamp(
-            new Date(current.getTime() + limits.leaseMs),
-          ),
-          updated_at: timestamp,
-        })
-        .where("id", "=", jobId)
-        .where("status", "=", "running")
-        .where("runner_id", "=", runnerId)
-        .returningAll()
-        .executeTakeFirst();
-      return row === undefined
-        ? { status: "not_holder" }
-        : { status: "ok", job: toJob(row) };
+    heartbeat(jobId, leaseToken) {
+      return inTransaction<HeartbeatResult>(async (trx) => {
+        const current = now();
+        const timestamp = formatTimestamp(current);
+        // The hard limit does not depend on anyone else's claim: the holder that is past it learns
+        // so here, and the job fails.
+        await failTimedOut(trx, { claim: { jobId, leaseToken } }, current);
+        const row = await trx
+          .updateTable("jobs")
+          .set({
+            heartbeat_at: timestamp,
+            lease_expires_at: formatTimestamp(
+              new Date(current.getTime() + limits.leaseMs),
+            ),
+            updated_at: timestamp,
+          })
+          .where(runningWhere({ claim: { jobId, leaseToken } }))
+          .returningAll()
+          .executeTakeFirst();
+        return row === undefined
+          ? { status: "not_holder" }
+          : { status: "ok", job: toJob(row) };
+      });
     },
 
-    complete(jobId, runnerId, outcome) {
+    complete(jobId, leaseToken, outcome) {
       const target: JobStatus = outcome.ok ? "succeeded" : "failed";
       const errorCode = outcome.ok ? null : outcome.errorCode;
       const result = outcome.result ?? null;
@@ -400,21 +498,19 @@ export function createJobsRepository(
             finished_at: timestamp,
             updated_at: timestamp,
           })
-          .where("id", "=", jobId)
-          .where("runner_id", "=", runnerId)
-          .where("status", "=", "running")
+          .where(runningWhere({ claim: { jobId, leaseToken } }))
           .returningAll()
           .executeTakeFirst();
         if (finished !== undefined)
           return { status: "completed", job: toJob(finished) };
 
-        // Not running any more: either this runner already reported (same or other outcome), or it
-        // never held the job, or it lost it.
+        // Not running any more: either this claim already reported (same or other outcome), or it
+        // was lost, or it never existed.
         const row = await trx
           .selectFrom("jobs")
           .selectAll()
           .where("id", "=", jobId)
-          .where("runner_id", "=", runnerId)
+          .where("lease_token", "=", leaseToken)
           .executeTakeFirst();
         if (row === undefined) return { status: "not_holder" };
         const job = toJob(row);
@@ -427,6 +523,31 @@ export function createJobsRepository(
         return sameOutcome
           ? { status: "already_completed", job }
           : { status: "outcome_conflict", job };
+      });
+    },
+
+    release(jobId, leaseToken, reason, releaseOptions = {}) {
+      return inTransaction<ReleaseResult>(async (trx) => {
+        const timestamp = formatTimestamp(now());
+        const lost = await loseAttempt(
+          trx,
+          { claim: { jobId, leaseToken } },
+          reason,
+          timestamp,
+          releaseOptions.retryAt === undefined
+            ? undefined
+            : formatTimestamp(releaseOptions.retryAt),
+        );
+        if (lost.failed === 0 && lost.requeued === 0)
+          return { status: "not_holder" };
+        const row = await trx
+          .selectFrom("jobs")
+          .selectAll()
+          .where("id", "=", jobId)
+          .executeTakeFirstOrThrow();
+        return lost.failed > 0
+          ? { status: "failed", job: toJob(row) }
+          : { status: "requeued", job: toJob(row) };
       });
     },
 
@@ -463,7 +584,15 @@ export function createJobsRepository(
           "in",
           Array.isArray(filter.status) ? filter.status : [filter.status],
         );
-      const rows = await query.orderBy("created_at").orderBy("id").execute();
+      const limit = Math.min(
+        Math.max(1, Math.trunc(filter.limit ?? JOB_LIST_DEFAULT_LIMIT)),
+        JOB_LIST_MAX_LIMIT,
+      );
+      const rows = await query
+        .orderBy("created_at")
+        .orderBy("id")
+        .limit(limit)
+        .execute();
       return rows.map(toJob);
     },
   };

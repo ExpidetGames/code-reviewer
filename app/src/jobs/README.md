@@ -7,14 +7,14 @@ from it through the runner API (CR-28), webhooks and the UI put jobs in. Everyth
 (`src/db/repositories/jobs-repository.ts`, the only code that touches the table). The running server
 gets its queue from `getJobQueue()` (`shared.ts`).
 
-| File            | Role                                                                                                                                                                  |
-| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `job-queue.ts`  | `createJobQueue(db, options)`: `enqueue`, `claimNext`, `heartbeat`, `complete`, `cancelWaitingForRepository`, `discardWaitingForPr`, `expireStaleJobs`, `get`, `list` |
-| `job-status.ts` | The statuses and the table of allowed transitions; the repository builds its update conditions from it                                                                |
-| `job-input.ts`  | `validateEnqueueInput`: field level checks before anything is written                                                                                                 |
-| `job-types.ts`  | `Job`, the inputs and results, the trigger kinds and the error codes the queue itself writes                                                                          |
-| `job-limits.ts` | Lease, maximum runtime and maximum attempts, with their defaults                                                                                                      |
-| `errors.ts`     | `JobQueueError` with the stable codes `JOB_INPUT_INVALID` (with `fieldErrors`) and `JOB_REPOSITORY_UNKNOWN`                                                           |
+| File            | Role                                                                                                                                                                             |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `job-queue.ts`  | `createJobQueue(db, options)`: `enqueue`, `claimNext`, `heartbeat`, `complete`, `release`, `cancelWaitingForRepository`, `discardWaitingForPr`, `expireStaleJobs`, `get`, `list` |
+| `job-status.ts` | The statuses and the table of allowed transitions; the repository builds its update conditions from it                                                                           |
+| `job-input.ts`  | `validateEnqueueInput`: field level checks before anything is written                                                                                                            |
+| `job-types.ts`  | `Job`, the inputs and results, the trigger kinds and the error codes the queue itself writes                                                                                     |
+| `job-limits.ts` | Lease, maximum runtime and maximum attempts, with their defaults                                                                                                                 |
+| `errors.ts`     | `JobQueueError` with the stable codes `JOB_INPUT_INVALID` (with `fieldErrors`) and `JOB_REPOSITORY_UNKNOWN`                                                                      |
 
 Jobs refer to `repositories`, not to projects. Whether a repository has an active project is checked
 by the code that enqueues (the trigger policy, CR-31), not here.
@@ -23,9 +23,8 @@ by the code that enqueues (the trigger policy, CR-31), not here.
 
 ```
 queued --claim--> running --complete--> succeeded | failed
-queued --newer job--> superseded          running --lease lost--> queued (attempts + 1)
-queued --project off / PR closed--> cancelled      running --last lease lost or too long--> failed
-queued --failed before it started--> failed
+queued --newer automatic job--> superseded     running --lease lost or release--> queued (attempts + 1)
+queued --project off / PR closed--> cancelled  running --last attempt lost, or too long--> failed
 ```
 
 `succeeded`, `failed`, `superseded` and `cancelled` are final; nothing leads back from them. A
@@ -44,11 +43,13 @@ reported).
    job frees the slot, so a commit that comes back (a force push to an old state) is reviewed again.
 3. **Jobs a person started** (`comment`, `manual`): exempt from the head commit rule, but there is never a
    duplicate of a waiting or running job for the same pull request, command and arguments
-   (`already_active`): the existing job is returned. Different arguments are different jobs (two
-   questions to `/ask`).
-4. **Supersession.** A new automatic job replaces the waiting jobs of the same pull request, command
-   and arguments (status `superseded`, `superseded_by` set). A running job is never touched: the new
-   job waits behind it, because only one job per pull request runs at a time.
+   (`already_active`): the existing job is returned, and if it is waiting behind a `run_after` in the
+   future (a debounced automatic job) it is made due now, because a person does not wait for a
+   debounce. Different arguments are different jobs (two questions to `/ask`).
+4. **Supersession.** A new automatic job replaces the waiting _automatic_ jobs of the same pull request,
+   command and arguments (status `superseded`, `superseded_by` set). Waiting `comment` and `manual`
+   jobs are never replaced, and a running job is never touched: the new job waits behind it, because
+   only one job per pull request runs at a time.
 
 `run_after` is `now` unless the caller passes a later time (the debounce of `synchronize` is policy and
 belongs to the intake, CR-31). A manual job is due at once.
@@ -75,13 +76,31 @@ request.
 That statement is the only dialect specific code (`src/db/repositories/jobs-claim.ts`); a port to
 Postgres changes it (`FOR UPDATE SKIP LOCKED`) and nothing else.
 
-`heartbeat(jobId, runnerId)` sets `heartbeat_at` and extends the lease to now + 2 minutes (runners beat
-every 30 seconds). `complete(jobId, runnerId, outcome)` finishes the job as `succeeded` or `failed`
-with the result and error code. The runner holds a job as long as the row is `running` with its
-`runner_id`: a lease that has run out but whose job nobody has taken yet does not cost the runner its
-job (an expired lease is acted on when the next runner claims, not before). Both answer
-`not_holder` for anyone else. `complete` with the same outcome again answers `already_completed`; with
-another outcome `outcome_conflict` (also what a runner whose job was failed by the expiry gets).
+### The lease token
+
+Every claim gets a new random `lease_token`, returned by `claimNext` next to the job (it is not a field
+of `Job` and is never listed or logged). `heartbeat`, `complete` and `release` take that token, not the
+runner id, and answer `not_holder` for any other: a runner that stalled past its lease, was requeued
+and claimed the same job again under the _same_ runner id cannot be confused with its own stale
+execution. Requeueing clears the token; a finished job keeps it, so a repeated report is recognised.
+`runner_id` is bookkeeping only.
+
+`heartbeat(jobId, leaseToken)` sets `heartbeat_at` and extends the lease to now + 2 minutes (runners
+beat every 30 seconds). It also enforces the hard limit: a job claimed longer ago than `maxRuntimeMs`
+is failed with `timeout` by the heartbeat itself and the holder is told `not_holder`, so a runner busy
+on a hung job learns to stop without anybody else claiming.
+
+`complete(jobId, leaseToken, outcome)` finishes the job as `succeeded` or `failed` with the result and
+error code. The holder keeps a job as long as the row is `running` with its token: a lease that has
+run out but whose job nobody has taken yet does not cost it the job (an expired lease is acted on when
+the next runner claims, not before). `complete` with the same outcome again answers
+`already_completed`; with another outcome `outcome_conflict` (also what the holder of a job that the
+expiry failed gets).
+
+`release(jobId, leaseToken, reason, { retryAt? })` gives a claimed job back (runner shutdown, no token
+for the repository). It is a lost attempt with the same rule as a lapsed lease: the job waits again
+(from `retryAt`, default now), or, on the last allowed attempt, fails with `reason` as its error code.
+`attempts` therefore never grows past the maximum.
 
 ## Dropping waiting jobs
 
@@ -94,6 +113,24 @@ running jobs finish. Nothing is deleted.
 `job-status.test.ts` and `job-input.test.ts` are unit tests of the pure rules. The queue itself is
 tested against a real SQLite file in `job-queue.integration.test.ts` (time is moved by a hand-set
 clock) and `job-queue-concurrency.integration.test.ts` (callers that overlap are real child
-processes). `integration-tests/webhooks/review-trigger-jobs.integration.test.ts` runs a signed
+processes). `list` returns at most 100 jobs (500 at most) unless told otherwise. `integration-tests/webhooks/review-trigger-jobs.integration.test.ts` runs a signed
 delivery through the webhook route into the queue. That the claim is the only dialect specific code is
 checked in code review.
+
+## For the tickets that build on it
+
+- **CR-31 (triggers).** Compare the head commit of a `synchronize` with the pull request's current head
+  (`headShaOf`, or drop events older than the newest known job) _before_ enqueueing: events can arrive
+  out of order, and a late `synchronize` for an older commit would otherwise supersede the waiting job
+  for the newer one. Also check that the repository has an active project, skip drafts, debounce through
+  `runAfter`, and call `discardWaitingForPr` when a pull request closes.
+- **CR-24 (projects).** Call `cancelWaitingForRepository` when a project is deactivated.
+- **CR-28/CR-29 (runner).** Until CR-31 and CR-24 are in, the intake enqueues for every repository and
+  closed pull requests keep their waiting jobs. The runner API must not be enabled (or shipped) before
+  they are, or old jobs would run with paid model calls. Use `release` for "token creation failed" and
+  for the runner shutdown.
+- **CR-32 (comments).** The provider does not cut `args`; the queue refuses more than 10 000 characters
+  (the intake drops such a trigger with a log line instead of failing the delivery). Truncate to 2000
+  with a note before the intake. Comment jobs are exempt from the head commit rule, so a captured signed
+  comment body replayed under a new delivery id runs again once the previous job finished: record the
+  comment id and dedupe on it.

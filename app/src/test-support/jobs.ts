@@ -47,6 +47,8 @@ export type JobQueueFixture = {
   enqueue(
     overrides?: Partial<EnqueueJobInput>,
   ): ReturnType<JobQueue["enqueue"]>;
+  /** The lease token stored for a job right now (what its current holder presents). */
+  tokenOf(jobId: string): Promise<string>;
   /** Enqueues, expects a new job, and returns it. */
   enqueueNew(overrides?: Partial<EnqueueJobInput>): Promise<Job>;
 };
@@ -102,6 +104,16 @@ export async function createJobQueueFixture(
     repositoryId: first.id,
     otherRepositoryId: second.id,
     enqueue: (overrides = {}) => queue.enqueue(defaults(overrides)),
+    async tokenOf(jobId) {
+      const row = await db
+        .selectFrom("jobs")
+        .select("lease_token")
+        .where("id", "=", jobId)
+        .executeTakeFirstOrThrow();
+      if (row.lease_token === null)
+        throw new Error(`Job ${jobId} has no lease token.`);
+      return row.lease_token;
+    },
     async enqueueNew(overrides = {}) {
       const result = await queue.enqueue(defaults(overrides));
       if (result.status !== "created")
