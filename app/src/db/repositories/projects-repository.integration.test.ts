@@ -2,7 +2,8 @@
 // project, deactivating keeps the row and its settings, activating again reuses the row, a repository
 // the platform no longer lists cannot be activated but keeps its project row, and two simultaneous
 // activations end in exactly one project.
-import { describe, expect, it } from "vitest";
+import { sql } from "kysely";
+import { describe, expect, it, vi } from "vitest";
 import type { RepoRef } from "../../integrations/types.ts";
 import { createTestDatabase } from "../../test-support/test-database.ts";
 import { createIntegrationsRepository } from "./integrations-repository.ts";
@@ -41,6 +42,8 @@ async function setup() {
     first,
     second,
     projects: createProjectsRepository(db, now),
+    projectsWithWarning: (warn: (message: string) => void) =>
+      createProjectsRepository(db, now, undefined, warn),
     rows: () => db.selectFrom("projects").selectAll().execute(),
   };
 }
@@ -424,5 +427,115 @@ describe("listing the repositories with their projects", () => {
     expect(afterRemoval.map((entry) => entry.repository.fullName)).toEqual([
       "acme/repo-1",
     ]);
+  });
+});
+
+describe("updating the settings of a project", () => {
+  // CR-25-T11
+  it("replaces the stored settings, moves the update time and leaves everything else alone", async () => {
+    const { projects, first, rows } = await setup();
+    await projects.activate(first.id);
+    const before = (await rows())[0];
+
+    const updated = await projects.updateSettings(first.id, {
+      maxFindings: 2,
+      allowedCommands: ["review"],
+      fallbackModel: null,
+    });
+
+    expect(updated).toMatchObject({
+      repositoryId: first.id,
+      active: true,
+      settings: {
+        maxFindings: 2,
+        allowedCommands: ["review"],
+        fallbackModel: null,
+      },
+    });
+    expect(updated?.updatedAt).not.toBe(before?.updated_at);
+    expect(await projects.get(first.id)).toEqual(updated);
+    const replaced = await projects.updateSettings(first.id, {
+      maxFindings: 9,
+    });
+    expect(replaced?.settings).toEqual({ maxFindings: 9 });
+  });
+
+  it("reaches only the project of the repository it was asked for", async () => {
+    const { projects, first, second } = await setup();
+    await projects.activate(first.id);
+    await projects.activate(second.id);
+
+    await projects.updateSettings(first.id, { maxFindings: 2 });
+
+    expect((await projects.get(second.id))?.settings).toEqual({});
+  });
+
+  it("returns undefined and writes nothing for a repository without a project", async () => {
+    const { projects, first, rows } = await setup();
+
+    expect(
+      await projects.updateSettings(first.id, { maxFindings: 2 }),
+    ).toBeUndefined();
+    expect(
+      await projects.updateSettings("no-such-repository", {}),
+    ).toBeUndefined();
+    expect(await rows()).toEqual([]);
+  });
+
+  it("keeps the settings through a deactivation and a new activation", async () => {
+    const { projects, first } = await setup();
+    await projects.activate(first.id);
+    await projects.updateSettings(first.id, { maxFindings: 2 });
+
+    await projects.deactivate(first.id);
+    const off = await projects.updateSettings(first.id, { maxFindings: 3 });
+    await projects.activate(first.id);
+
+    expect(off).toMatchObject({ active: false, settings: { maxFindings: 3 } });
+    expect((await projects.get(first.id))?.settings).toEqual({
+      maxFindings: 3,
+    });
+  });
+});
+
+describe("settings that are not valid JSON", () => {
+  // CR-25-T11 (a damaged row must not take the project list or the claim down)
+  it("read as no settings everywhere a project is read, with a warning that names the project and not the text", async () => {
+    const { projectsWithWarning, first, db } = await setup();
+    const warn = vi.fn();
+    const projects = projectsWithWarning(warn);
+    await projects.activate(first.id);
+    await sql`update projects set settings = '{damaged secret-looking-text'`.execute(
+      db,
+    );
+
+    const got = await projects.get(first.id);
+    const active = await projects.findActiveForRepository(first.id);
+    const listed = (await projects.list()).find(
+      (entry) => entry.repository.id === first.id,
+    );
+
+    expect(got).toMatchObject({ active: true, settings: {} });
+    expect(active?.settings).toEqual({});
+    expect(listed?.project?.settings).toEqual({});
+    expect(listed?.status).toBe("active");
+    expect(warn).toHaveBeenCalled();
+    for (const call of warn.mock.calls) {
+      const line = String(call[0]);
+      expect(line).toContain("PROJECT_SETTINGS_UNREADABLE");
+      expect(line).toContain(got?.id);
+      expect(line).not.toContain("secret-looking-text");
+    }
+  });
+
+  it("are replaced by the next save of settings", async () => {
+    const { projectsWithWarning, first, db } = await setup();
+    const projects = projectsWithWarning(() => undefined);
+    await projects.activate(first.id);
+    await sql`update projects set settings = 'nope'`.execute(db);
+
+    const saved = await projects.updateSettings(first.id, { maxFindings: 2 });
+
+    expect(saved?.settings).toEqual({ maxFindings: 2 });
   });
 });

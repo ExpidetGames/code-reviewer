@@ -12,7 +12,7 @@ import type {
 } from "../../integrations/types.ts";
 import {
   decodeBoolean,
-  decodeJson,
+  tryDecodeJson,
   encodeBoolean,
   encodeJson,
   formatTimestamp,
@@ -26,7 +26,7 @@ export type StoredProject = {
   id: string;
   repositoryId: string;
   active: boolean;
-  /** The project's setting overrides; empty until the settings ticket saves some. */
+  /** The project's setting overrides (src/review-settings); empty until some are saved. */
   settings: ProjectSettings;
   createdAt: string;
   updatedAt: string;
@@ -122,18 +122,48 @@ export type ProjectsRepository = {
     afterDeactivate?: AfterDeactivate,
   ): Promise<DeactivateResult>;
   /**
+   * Replaces the settings (the overrides of the review settings) of the project of a repository and
+   * moves `updatedAt`. Works for a project that is switched off too. Returns the project after the
+   * change, or undefined when the repository has no project (nothing is written then).
+   */
+  updateSettings(
+    repositoryId: string,
+    settings: ProjectSettings,
+  ): Promise<StoredProject | undefined>;
+  /**
    * Every repository the platform lists, plus the ones that disappeared but have a project, joined
    * with their integration and project, ordered by name.
    */
   list(): Promise<ProjectListEntry[]>;
 };
 
-function toStored(row: ProjectsTable): StoredProject {
+/**
+ * The settings of a project as an object. Damaged text (not JSON) must not take the project list, the
+ * claim and every review down: it reads as no settings, and a warning names the project (never the
+ * text). Saving settings again replaces it.
+ */
+function readSettings(
+  text: string,
+  projectId: string,
+  warn: (message: string) => void,
+): ProjectSettings {
+  const decoded = tryDecodeJson<ProjectSettings>(text);
+  if (decoded.ok) return decoded.value;
+  warn(
+    `[db] PROJECT_SETTINGS_UNREADABLE: the stored settings of project ${projectId} are not valid JSON and are ignored.`,
+  );
+  return {};
+}
+
+function toStoredProject(
+  row: ProjectsTable,
+  warn: (message: string) => void,
+): StoredProject {
   return {
     id: row.id,
     repositoryId: row.repository_id,
     active: decodeBoolean(row.active),
-    settings: decodeJson<ProjectSettings>(row.settings),
+    settings: readSettings(row.settings, row.id, warn),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -143,7 +173,11 @@ export function createProjectsRepository(
   db: Kysely<Database>,
   now: () => Date = () => new Date(),
   newId: () => string = () => crypto.randomUUID(),
+  warn: (message: string) => void = console.warn,
 ): ProjectsRepository {
+  const toStored = (row: ProjectsTable): StoredProject =>
+    toStoredProject(row, warn);
+
   // A transaction cannot start another one; inside one, just use it.
   function inTransaction<T>(
     run: (executor: Kysely<Database>) => Promise<T>,
@@ -317,6 +351,19 @@ export function createProjectsRepository(
       });
     },
 
+    async updateSettings(repositoryId, settings) {
+      const row = await db
+        .updateTable("projects")
+        .set({
+          settings: encodeJson(settings),
+          updated_at: formatTimestamp(now()),
+        })
+        .where("repository_id", "=", repositoryId)
+        .returningAll()
+        .executeTakeFirst();
+      return row === undefined ? undefined : toStored(row);
+    },
+
     async list() {
       const rows = await db
         .selectFrom("repositories")
@@ -368,7 +415,11 @@ export function createProjectsRepository(
                 id: row.project_id,
                 repositoryId: row.repository_id,
                 active: decodeBoolean(row.project_active),
-                settings: decodeJson<ProjectSettings>(row.project_settings),
+                settings: readSettings(
+                  row.project_settings,
+                  row.project_id,
+                  warn,
+                ),
                 createdAt: row.project_created_at,
                 updatedAt: row.project_updated_at,
               };

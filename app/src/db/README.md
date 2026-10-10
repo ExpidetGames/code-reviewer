@@ -137,6 +137,10 @@ first activation, switched off with `active = 0`, never deleted; see `src/projec
 `webhook-deliveries-repository.ts`) holds the delivery ids the webhook route has accepted, so a
 redelivery produces no second trigger; rows are pruned after 7 days; see `src/webhooks/README.md`.
 
+`app_settings` (migration `20261010201500_create_app_settings`, repository `app-settings-repository.ts`) holds
+settings of the whole instance, one row per setting with a JSON value; the first is `review_defaults`, the
+global default values of the review settings (`src/review-settings/README.md`).
+
 `app_meta` (a key/value table for facts about the installation) exists to prove the setup. Product
 tables come with the tickets that need them: add the migration, the row type in `schema.ts` and the
 repository in the same change.

@@ -122,6 +122,18 @@ export interface ProjectsTable {
   updated_at: string;
 }
 
+/** One setting of the whole instance (src/db/repositories/app-settings-repository.ts). */
+export interface AppSettingsTable {
+  /** The name of the setting, for example "review_defaults". */
+  key: string;
+  /** JSON text. */
+  value: string;
+  /** ISO 8601 text in UTC. */
+  updated_at: string;
+  /** The GitHub login of the person who saved it last, or null. */
+  updated_by: string | null;
+}
+
 export interface WebhookDeliveriesTable {
   /** The platform's delivery id (GitHub: `X-GitHub-Delivery`). */
   delivery_id: string;
@@ -146,4 +158,5 @@ export interface Database {
   repositories: RepositoriesTable;
   projects: ProjectsTable;
   webhook_deliveries: WebhookDeliveriesTable;
+  app_settings: AppSettingsTable;
 }
