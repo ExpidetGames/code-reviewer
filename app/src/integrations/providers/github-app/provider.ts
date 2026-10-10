@@ -229,10 +229,16 @@ export function createGithubAppProvider(
     },
 
     async listOpenPullRequests(integration, repo) {
-      return getClient().listOpenPullRequests(
-        integration.externalId,
-        repo.fullName,
-      );
+      // Failures leave as provider neutral codes (the installation is gone, access is refused, GitHub
+      // is down), so the page that lists the pull requests never has to know GitHub's error codes.
+      try {
+        return await getClient().listOpenPullRequests(
+          integration.externalId,
+          repo.fullName,
+        );
+      } catch (error) {
+        throw toJobAccessError(error);
+      }
     },
   };
 }

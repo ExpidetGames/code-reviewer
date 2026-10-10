@@ -25,7 +25,7 @@ import type {
   RepoRef,
   ReviewTrigger,
 } from "../../types.ts";
-import { GithubAppConfigError } from "./errors.ts";
+import { GithubAppConfigError, GithubAppError } from "./errors.ts";
 import { createGithubAppProvider } from "./provider.ts";
 
 const testGithubAppConfig = (
@@ -622,6 +622,56 @@ describe("pull requests", () => {
     expect(await provider.listOpenPullRequests(integration, widgets)).toEqual([
       FAKE_PULL_REQUEST,
     ]);
+  });
+});
+
+describe("listing the open pull requests when GitHub refuses", () => {
+  it.each([
+    [
+      new GithubAppError("GITHUB_APP_NOT_FOUND", "gone", { status: 404 }),
+      "INTEGRATION_ACCESS_CONNECTION_GONE",
+      false,
+    ],
+    [
+      new GithubAppError("GITHUB_APP_FORBIDDEN", "refused", { status: 403 }),
+      "INTEGRATION_ACCESS_CONNECTION_SUSPENDED",
+      false,
+    ],
+    [
+      new GithubAppError("GITHUB_APP_AUTH_FAILED", "no", { status: 401 }),
+      "INTEGRATION_ACCESS_APP_AUTH_FAILED",
+      false,
+    ],
+    [
+      new GithubAppError("GITHUB_APP_UNAVAILABLE", "down", { status: 500 }),
+      "INTEGRATION_ACCESS_UNAVAILABLE",
+      true,
+    ],
+  ] as const)(
+    "reports %s as the provider neutral code %s",
+    async (failure, code, retryable) => {
+      const { provider } = setup({ listPullRequestsFailure: failure });
+
+      await expect(
+        provider.listOpenPullRequests(integration, widgets),
+      ).rejects.toMatchObject({ name: "IntegrationError", code, retryable });
+    },
+  );
+
+  it("does not put anything but the client's own message into the failure", async () => {
+    const { provider } = setup({
+      listPullRequestsFailure: new Error("response body with ghs_secret"),
+    });
+
+    const error = await provider
+      .listOpenPullRequests(integration, widgets)
+      .then(
+        () => undefined,
+        (reason: unknown) => reason,
+      );
+
+    expect(error).toMatchObject({ code: "INTEGRATION_ACCESS_FAILED" });
+    expect((error as Error).message).not.toContain("ghs_secret");
   });
 });
 

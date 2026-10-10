@@ -19,6 +19,8 @@ export type FakeGithubAppClientData = {
   token?: { token: string; expiresAt: string };
   /** Makes `mintInstallationToken` reject with this error. */
   mintFailure?: Error;
+  /** Makes `listOpenPullRequests` reject with this error. */
+  listPullRequestsFailure?: Error;
 };
 
 export type FakeGithubAppClient = GithubAppClient & {
@@ -85,6 +87,7 @@ export function fakeGithubAppClient(
     },
     async listOpenPullRequests(installationId, repoFullName) {
       record("listOpenPullRequests", installationId, repoFullName);
+      if (data.listPullRequestsFailure) throw data.listPullRequestsFailure;
       return (pullRequests[repoFullName] ?? []).filter(
         (pr) => pr.state === "open",
       );
