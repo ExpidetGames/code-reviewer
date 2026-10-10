@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Smoke test of the runner image. Usage: docker/smoke/runner.sh <image>   (default: code-reviewer-runner:local)
 #
-# The runner has no job loop yet (CR-29). The test proves that the image starts, runs unprivileged,
-# can write to its temporary directory and holds nothing that must stay out of an image, and that
-# the pinned PR-Agent is installed and works offline: the version equals the pin, its tiktoken
-# encodings are baked in, and a job run through the real PR-Agent (no network at all) ends in a
-# well formed failure result without a secret in it.
+# The entry point of the image is the job loop (CR-29), which needs a running app, so this test does
+# not start it for real; it proves that it refuses to start without its configuration. The test
+# proves that the image starts, runs unprivileged, can write to its temporary directory and holds
+# nothing that must stay out of an image, and that the pinned PR-Agent is installed and works
+# offline: the version equals the pin, its tiktoken encodings are baked in, and a job run through
+# the real PR-Agent (no network at all) ends in a well formed failure result without a secret in it.
 set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -26,6 +27,15 @@ output=$(docker run --rm "$image" --version)
 [ "$output" = "code-reviewer-runner $expected" ] ||
   fail "expected 'code-reviewer-runner $expected', got '$output'"
 printf '    %s\n' "$output"
+
+# CR-29: the entry point is the job loop; without its configuration it says so and stops.
+step "the job loop refuses to start without its configuration and does not leak the token"
+loop_token="smoke-runner-token-0123456789-abcdef-0123456789"
+loop_errors=$(docker run --rm -e RUNNER_TOKEN="$loop_token" -e RUNNER_CONCURRENCY=many "$image" 2>&1) && status=0 || status=$?
+[ "$status" = "2" ] || fail "the job loop without a URL must exit with 2, got $status"
+grep -q "RUNNER_API_URL is required" <<<"$loop_errors" || fail "expected a message about RUNNER_API_URL, got: $loop_errors"
+if grep -qF "$loop_token" <<<"$loop_errors"; then fail "the runner token is in the output of the job loop"; fi
+printf '    %s\n' "$loop_errors"
 
 # CR-17-T06
 step "the installed PR-Agent is the pinned version"

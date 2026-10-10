@@ -9,11 +9,13 @@
 | `RUNNER_POLL_INTERVAL_SECONDS`  | Wait between two claims when nothing is waiting | 5 |
 | `RUNNER_JOB_TIMEOUT_SECONDS`    | Hard timeout of one job                         | 1200 |
 | `RUNNER_SHUTDOWN_GRACE_SECONDS` | How long running jobs may finish after SIGTERM  | 60 |
+| `PR_AGENT_COMMAND`              | Command that runs one job (test stacks only)    | run-job |
 
 A refusal names the variable and never the value: the token is one of them.
 """
 
 import re
+import shlex
 import socket
 import sys
 from collections.abc import Mapping
@@ -98,6 +100,18 @@ def _runner_id(environment: Mapping[str, str]) -> str:
     return f"runner-{host}"[:64]
 
 
+def _job_command(environment: Mapping[str, str]) -> tuple[str, ...]:
+    """`PR_AGENT_COMMAND` replaces the job entry point, for test stacks with a fake PR-Agent."""
+    raw = environment.get("PR_AGENT_COMMAND", "").strip()
+    if not raw:
+        return _default_job_command()
+    try:
+        parts = shlex.split(raw)
+    except ValueError:
+        raise SettingsError("PR_AGENT_COMMAND is not a valid command line") from None
+    return tuple(parts)
+
+
 def settings_from_environment(environment: Mapping[str, str]) -> LoopSettings:
     api_url = environment.get("RUNNER_API_URL", "").strip()
     if not api_url:
@@ -113,6 +127,7 @@ def settings_from_environment(environment: Mapping[str, str]) -> LoopSettings:
     if concurrency != int(concurrency):
         raise SettingsError("RUNNER_CONCURRENCY must be a whole number")
     return LoopSettings(
+        job_command=_job_command(environment),
         api_url=_api_url(api_url),
         token=token,
         runner_id=_runner_id(environment),

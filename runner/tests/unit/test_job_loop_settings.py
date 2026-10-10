@@ -69,3 +69,18 @@ def test_an_unusable_value_is_refused_naming_the_variable_and_never_the_value(
 
 def test_the_token_does_not_show_up_in_the_text_form_of_the_settings() -> None:
     assert TOKEN not in repr(settings_from_environment(BASE))
+
+
+def test_the_job_command_is_the_job_entry_point_unless_a_test_stack_replaces_it() -> None:
+    default = settings_from_environment(BASE).job_command
+    replaced = settings_from_environment(
+        {**BASE, "PR_AGENT_COMMAND": "python /fakes/fake_pr_agent.py --mode 'succeed fast'"}
+    ).job_command
+
+    assert default[1:] == ("-m", "code_reviewer_runner.runner")
+    assert replaced == ("python", "/fakes/fake_pr_agent.py", "--mode", "succeed fast")
+
+
+def test_a_job_command_with_an_open_quote_is_refused() -> None:
+    with pytest.raises(SettingsError, match="PR_AGENT_COMMAND"):
+        settings_from_environment({**BASE, "PR_AGENT_COMMAND": "python 'unfinished"})
