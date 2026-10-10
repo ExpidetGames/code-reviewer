@@ -12,7 +12,8 @@
 //                an id another request is handling right now                        409
 //   6. identify  `identifyWebhook` names the installation; the integration is loaded
 //   7. translate `parseEvent`: a review trigger, an installation change or "ignored"
-//   8. act       trigger -> `canTrigger`, then the intake; change -> the shared sync  202
+//   8. act       trigger -> the repository must have an active project, then `canTrigger`,
+//                then the intake; change -> the shared sync                          202
 //
 // Only a delivery that succeeded (a trigger handed over, an installation synchronized) stays a
 // duplicate; one that was turned away or failed can be redelivered with the same id. A failure after
@@ -37,6 +38,7 @@ import {
 } from "./errors.ts";
 import { readLimitedBody } from "./limited-body.ts";
 import { consoleWebhookLogger, type WebhookLogger } from "./logger.ts";
+import type { ProjectService } from "../projects/service.ts";
 import type { ReviewTriggerIntake } from "./review-trigger-intake.ts";
 
 /** 1 MiB. GitHub's own limit is 25 MB, but the payloads this app reads are a few kilobytes. */
@@ -58,12 +60,19 @@ const INSTALLATION_EVENTS: ReadonlySet<string> = new Set([
 const EVENT_NAME = /^[a-z][a-z0-9_]{0,63}$/;
 const DELIVERY_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
+/**
+ * Which repositories are reviewed at all: the project service. Review triggers for a repository
+ * without an active project are answered `project_not_active`.
+ */
+export type ProjectGate = Pick<ProjectService, "hasActiveProject">;
+
 export type GithubAppWebhookDeps = {
   registry: IntegrationRegistry;
   integrations: Pick<IntegrationsRepository, "findByExternalId">;
   deliveries: WebhookDeliveriesRepository;
   /** The process-wide sync service (`getIntegrationSync()`), never one created for the route. */
   sync: Pick<IntegrationSyncService, "handleInstallationChange">;
+  projects: ProjectGate;
   intake: ReviewTriggerIntake;
   logger?: WebhookLogger;
   maxBodyBytes?: number;
@@ -119,7 +128,7 @@ function loggedUnverifiableFor(): WeakSet<WebhookLogger> {
 export function createGithubAppWebhookHandler(
   deps: GithubAppWebhookDeps,
 ): WebhookHandler {
-  const { registry, integrations, deliveries, sync, intake } = deps;
+  const { registry, integrations, deliveries, sync, projects, intake } = deps;
   const logger = deps.logger ?? consoleWebhookLogger;
   const maxBodyBytes = deps.maxBodyBytes ?? WEBHOOK_MAX_BODY_BYTES;
 
@@ -180,6 +189,16 @@ export function createGithubAppWebhookHandler(
     // A review trigger. Only an installation event reaches here without a row, and it never yields a
     // trigger; the check keeps that true even if a provider changes.
     if (integration === undefined) return "unknown_installation";
+    // Only repositories with an active project are reviewed. Asked before `canTrigger` (one more
+    // GitHub call for a command); `parseEvent` has already read the payload, and for a comment it
+    // may have asked GitHub, because only it knows which repository the delivery is about.
+    if (
+      !(await projects.hasActiveProject(
+        integration.id,
+        event.trigger.repo.externalId,
+      ))
+    )
+      return "project_not_active";
     if (!(await provider.canTrigger(integration, event.trigger)))
       return "trigger_not_allowed";
     await intake.enqueueReviewTrigger(event.trigger, integration, {

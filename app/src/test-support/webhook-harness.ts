@@ -8,9 +8,11 @@ import {
   webhookFixture,
   type WebhookDeliveryOptions,
 } from "../../../fakes/github/webhooks.ts";
+import { createProjectsRepository } from "../db/repositories/projects-repository.ts";
 import { createWebhookDeliveriesRepository } from "../db/repositories/webhook-deliveries-repository.ts";
 import type { IntegrationProvider } from "../integrations/provider.ts";
 import { createIntegrationRegistry } from "../integrations/registry.ts";
+import { createProjectService } from "../projects/service.ts";
 import { createGithubAppWebhookHandler } from "../webhooks/github-app-handler.ts";
 import type { WebhookLogger } from "../webhooks/logger.ts";
 import { TEST_WEBHOOK_SECRET } from "./github-app.ts";
@@ -36,6 +38,9 @@ export async function startWebhookHarness(
   const registry = createIntegrationRegistry({ github_app: provider });
 
   const deliveries = createWebhookDeliveriesRepository(base.db);
+  const projects = createProjectService({
+    projects: createProjectsRepository(base.db),
+  });
   const intake = createRecordingReviewTriggerIntake();
   const infoLines: string[] = [];
   const errorLines: string[] = [];
@@ -48,6 +53,7 @@ export async function startWebhookHarness(
     integrations: base.integrations,
     deliveries,
     sync: base.sync,
+    projects,
     intake,
     logger,
     ...(options.maxBodyBytes === undefined
@@ -55,8 +61,12 @@ export async function startWebhookHarness(
       : { maxBodyBytes: options.maxBodyBytes }),
   });
 
-  /** The installation 4242 of "acme" with one repository, stored as an active integration. */
-  async function seedInstallation() {
+  /**
+   * The installation 4242 of "acme" with one repository (7001, "acme/widgets"), stored as an active
+   * integration. The repository is activated as a project unless `activateProject` is false, because
+   * a review trigger for a repository without an active project is not handed to the intake.
+   */
+  async function seedInstallation(options: { activateProject?: boolean } = {}) {
     base.fake.addInstallation({
       id: 4242,
       account: { login: "acme", id: 5001, type: "Organization" },
@@ -68,6 +78,13 @@ export async function startWebhookHarness(
       "4242",
     );
     if (integration === undefined) throw new Error("seeding failed");
+    if (options.activateProject !== false) {
+      const [repository] = await base.repositories.list({
+        integrationId: integration.id,
+      });
+      if (repository === undefined) throw new Error("seeding failed");
+      await projects.activateProject(repository.id);
+    }
     return integration;
   }
 
@@ -128,6 +145,7 @@ export async function startWebhookHarness(
         .selectFrom("repositories")
         .selectAll()
         .execute(),
+      projects: await base.db.selectFrom("projects").selectAll().execute(),
       deliveries: await base.db
         .selectFrom("webhook_deliveries")
         .selectAll()
@@ -141,6 +159,7 @@ export async function startWebhookHarness(
     verifyWebhook,
     parseEvent,
     deliveries,
+    projects,
     intake,
     handler,
     infoLines,
