@@ -15,6 +15,13 @@ const MESSAGES: Readonly<Record<string, string>> = {
   unable_to_get_user_info:
     "Could not read your GitHub profile. Please try again.",
   email_not_found: "Could not read your GitHub profile. Please try again.",
+  // The allow list (CR-19). Deliberately says nothing about who is allowed.
+  not_allowed:
+    "Your GitHub account is not allowed to use this Code Reviewer instance.",
+  check_failed:
+    "We could not check whether your GitHub account is allowed to use this Code Reviewer instance. Please try again later.",
+  sign_in_again:
+    "Your GitHub authorization is no longer valid. Please sign in again.",
   account_not_linked:
     "This GitHub account could not be matched to an existing user. Ask an administrator for help.",
 };

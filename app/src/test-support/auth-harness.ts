@@ -7,8 +7,11 @@ import {
   type FakeGithub,
   type FakeGithubUser,
 } from "../../../fakes/github/server.ts";
+import { createRuntimeAccessPolicy } from "../auth/access-runtime.ts";
 import { createAuth } from "../auth/auth.ts";
 import { loadAuthConfig } from "../auth/config.ts";
+import type { Kysely } from "kysely";
+import type { Database } from "../db/schema.ts";
 import { cleanUpAfterTest, createTestDatabase } from "./test-database.ts";
 
 export const TEST_BASE_URL = "http://localhost:3000";
@@ -25,13 +28,20 @@ export const OCTOCAT: FakeGithubUser = {
 
 export type CookieJar = Map<string, string>;
 
-export async function createAuthHarness(
-  options: {
-    secureCookies?: boolean;
-    githubRequestTimeoutMs?: number;
-    users?: FakeGithubUser[];
-  } = {},
-) {
+export type AuthHarnessOptions = {
+  secureCookies?: boolean;
+  githubRequestTimeoutMs?: number;
+  users?: FakeGithubUser[];
+  /**
+   * `ALLOWED_GITHUB_LOGINS`. Default: the logins of `users`, so a test that does not care about
+   * the allow list can sign in. Pass `[]` for an empty list.
+   */
+  allowedLogins?: string[];
+  /** `ALLOWED_GITHUB_ORG`. When set, the default for `allowedLogins` is an empty list. */
+  allowedOrg?: string;
+};
+
+export async function createAuthHarness(options: AuthHarnessOptions = {}) {
   const { db } = await createTestDatabase();
   const github: FakeGithub = await startGithubFake({
     clientId: TEST_CLIENT_ID,
@@ -39,6 +49,23 @@ export async function createAuthHarness(
   });
   cleanUpAfterTest(() => github.close());
   for (const user of options.users ?? [OCTOCAT]) github.addUser(user);
+  return assembleHarness(db, github, options);
+}
+
+export type AuthHarness = Awaited<ReturnType<typeof createAuthHarness>>;
+
+// Everything that depends on the settings: the Better Auth instance, the access policy and the
+// request helpers. `restart` builds it again over the same database and the same fake GitHub with
+// other settings, like a server that was restarted with a changed allow list.
+function assembleHarness(
+  db: Kysely<Database>,
+  github: FakeGithub,
+  options: AuthHarnessOptions,
+) {
+  const users = options.users ?? [OCTOCAT];
+  const allowedLogins =
+    options.allowedLogins ??
+    (options.allowedOrg === undefined ? users.map((user) => user.login) : []);
 
   // The settings come through the same loader as in the app, including the flag that allows the
   // fake GitHub's address. `secureCookies` is what an https BETTER_AUTH_URL yields; the harness
@@ -51,6 +78,8 @@ export async function createAuthHarness(
     GITHUB_OAUTH_BASE_URL: github.baseUrl,
     GITHUB_API_BASE: github.baseUrl,
     ALLOW_TEST_GITHUB_ENDPOINTS: "true",
+    ALLOWED_GITHUB_LOGINS: allowedLogins.join(","),
+    ALLOWED_GITHUB_ORG: options.allowedOrg,
   });
   const config = {
     ...loaded,
@@ -61,6 +90,9 @@ export async function createAuthHarness(
     config,
     githubRequestTimeoutMs: options.githubRequestTimeoutMs,
   });
+
+  // The same access rule the server uses, on the same database and the same fake GitHub.
+  const policy = createRuntimeAccessPolicy({ auth, config });
 
   /** Sends a request to the auth handler the way the route handler does. */
   function request(
@@ -122,7 +154,20 @@ export async function createAuthHarness(
     return { response, cookies };
   }
 
-  return { db, github, auth, config, request, startSignIn, callback, signIn };
+  return {
+    db,
+    github,
+    auth,
+    config,
+    policy,
+    request,
+    startSignIn,
+    callback,
+    signIn,
+    /** The same database and fake GitHub, started again with other settings. */
+    restart: (changes: AuthHarnessOptions) =>
+      assembleHarness(db, github, { ...options, ...changes }),
+  };
 }
 
 export function remember(cookies: CookieJar, response: Response): void {

@@ -9,9 +9,14 @@ import type { Kysely } from "kysely";
 import { getDatabase } from "../db/startup.ts";
 import type { Database } from "../db/schema.ts";
 import { loadAuthConfig, type AuthConfig } from "./config.ts";
+import { checkOrgMembership } from "./github-org.ts";
 import { githubProviderConfig } from "./github-provider.ts";
+import { decideSignIn, readSignInAccess } from "./sign-in-access.ts";
 
 export const SESSION_LIFETIME_SECONDS = 60 * 60 * 24 * 30;
+
+/** How long the organization check may take while a person waits for the sign in to complete. */
+const ORG_CHECK_TIMEOUT_MS = 5_000;
 
 export type CreateAuthOptions = {
   db: Kysely<Database>;
@@ -25,6 +30,8 @@ export function createAuth({
   config,
   githubRequestTimeoutMs,
 }: CreateAuthOptions) {
+  const org = config.access.org;
+
   return betterAuth({
     appName: "Code Reviewer",
     baseURL: config.baseUrl,
@@ -45,6 +52,23 @@ export function createAuth({
           required: true,
           fieldName: "github_login",
         },
+        // When the membership in the allowed organization was last confirmed (ISO 8601). Written
+        // at sign in and by the 24 hour re-check (access-runtime.ts); read by the access policy.
+        orgCheckedAt: {
+          type: "string",
+          required: false,
+          fieldName: "org_checked_at",
+        },
+      },
+      // The gate for who may use this instance, run by Better Auth just before it creates a user
+      // or lets an existing one sign in, so a refused person leaves no user, account or session
+      // behind. The decision was made by the GitHub provider from the profile and the token. It
+      // fails closed: anything that is not a clear yes is a no. The `error` becomes the login
+      // page's `?error=` code (see login-errors.ts).
+      validateUserInfo: ({ source }) => {
+        const access = readSignInAccess(source.oauth?.profile);
+        if (access.allowed && source.oauth?.providerId === "github") return;
+        return { error: access.allowed ? "not_allowed" : access.reason };
       },
     },
     session: {
@@ -82,8 +106,8 @@ export function createAuth({
       // GitHub account that reports the same verified email (the first one gave it up) would be
       // linked to the first account's user and inherit its access.
       accountLinking: { enabled: false },
-      // The GitHub token is kept (the access check by organization needs it later), encrypted
-      // with the secret.
+      // The GitHub token is kept (the 24 hour organization re-check needs it), encrypted with the
+      // secret.
       encryptOAuthTokens: true,
     },
     verification: {
@@ -104,6 +128,22 @@ export function createAuth({
             oauthBaseUrl: config.github.oauthBaseUrl,
             apiBaseUrl: config.github.apiBaseUrl,
             requestTimeoutMs: githubRequestTimeoutMs,
+            requestOrgScope: org !== null,
+            decideAccess: ({ login, accessToken }) =>
+              decideSignIn({
+                config: config.access,
+                login,
+                checkMembership: () =>
+                  org === null
+                    ? Promise.resolve("unavailable")
+                    : checkOrgMembership({
+                        apiBaseUrl: config.github.apiBaseUrl,
+                        org,
+                        accessToken,
+                        timeoutMs:
+                          githubRequestTimeoutMs ?? ORG_CHECK_TIMEOUT_MS,
+                      }),
+              }),
           }),
         ],
       }),

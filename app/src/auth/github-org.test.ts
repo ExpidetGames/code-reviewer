@@ -82,7 +82,7 @@ describe("checking the membership of the signed in account", () => {
   });
 
   // CR-19-T11
-  it.each([403, 429, 500, 502, 503, 302, 204])(
+  it.each([403, 429, 500, 502, 503, 302, 201])(
     "cannot tell on status %i",
     async (status) => {
       const answer = new Response("{}", { status });

@@ -4,18 +4,23 @@
 // once. Anything that goes wrong while checking denies the request.
 import { NextResponse, type NextRequest } from "next/server";
 import { decideAccess, isPublicPath } from "./access.ts";
-import { accessPolicy, type AccessPolicy } from "./access-policy.ts";
+import type { AccessPolicy } from "./access-policy.ts";
 import type { Auth } from "./auth.ts";
-import { getSessionUser } from "./session-user.ts";
+import {
+  lookupSession,
+  loginPath,
+  type SessionLookup,
+} from "./session-user.ts";
 
 export type AccessProxyDependencies = {
   getAuth: () => Pick<Auth, "api">;
-  policy?: AccessPolicy;
+  /** Called per request, so the policy is created on first use (not when the module is loaded). */
+  getPolicy: () => AccessPolicy;
 };
 
 export function createAccessProxy({
   getAuth,
-  policy = accessPolicy,
+  getPolicy,
 }: AccessProxyDependencies) {
   return async function accessProxy(
     request: NextRequest,
@@ -25,10 +30,9 @@ export function createAccessProxy({
     // A public path needs no lookup.
     if (isPublicPath(pathname)) return NextResponse.next();
 
-    let authenticated: boolean;
+    let lookup: SessionLookup;
     try {
-      authenticated =
-        (await getSessionUser(getAuth(), request.headers, policy)) !== null;
+      lookup = await lookupSession(getAuth(), request.headers, getPolicy());
     } catch (error) {
       // The database or the sign in configuration is broken: refuse instead of letting it through.
       console.error(
@@ -40,18 +44,27 @@ export function createAccessProxy({
       });
     }
 
-    const decision = decideAccess({ pathname, authenticated });
+    const decision = decideAccess({
+      pathname,
+      authenticated: lookup.kind === "user",
+    });
     switch (decision.kind) {
       case "allow":
         return NextResponse.next();
       case "unauthorized":
+        // A user the policy turned away is known, so the answer is "forbidden", with the reason.
+        if (lookup.kind === "denied")
+          return NextResponse.json(
+            { error: "ACCESS_DENIED", reason: lookup.reason },
+            { status: 403, headers: { "cache-control": "no-store" } },
+          );
         return NextResponse.json(
           { error: "UNAUTHENTICATED" },
           { status: 401, headers: { "cache-control": "no-store" } },
         );
       case "redirect-to-login":
         // Built from the request's own address, so it is the address the person used.
-        return NextResponse.redirect(new URL("/login", request.url), {
+        return NextResponse.redirect(new URL(loginPath(lookup), request.url), {
           headers: { "cache-control": "no-store" },
         });
     }

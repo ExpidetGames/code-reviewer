@@ -1,5 +1,6 @@
-// A fake GitHub for the sign in: the OAuth authorize and token endpoints plus the two profile
-// endpoints Code Reviewer reads (`/user`, `/user/emails`). It is a real HTTP server speaking
+// A fake GitHub for the sign in: the OAuth authorize and token endpoints, the two profile
+// endpoints Code Reviewer reads (`/user`, `/user/emails`) and the organization membership check
+// (`/user/memberships/orgs/:org`). It is a real HTTP server speaking
 // GitHub's protocol, so the production code runs unchanged against it; only the base URL differs.
 // State lives in memory. Dummy values only: the tokens and codes it hands out are random strings
 // without meaning outside this process.
@@ -42,6 +43,15 @@ export type TokenEndpointFailure =
   | { kind: "delay"; delayMs: number }
   | null;
 
+/** How the organization membership endpoint misbehaves; `null` is normal behavior. */
+export type MembershipEndpointFailure =
+  | { kind: "status"; status: number }
+  | { kind: "delay"; delayMs: number }
+  | null;
+
+/** A membership as GitHub reports it: `pending` is an invitation that was not accepted yet. */
+export type FakeMembershipState = "active" | "pending";
+
 export type FakeGithubRequest = { method: string; path: string };
 
 export type FakeGithub = {
@@ -53,6 +63,16 @@ export type FakeGithub = {
   /** Removes all users, codes, tokens and recorded requests; keeps the failure mode. */
   reset(): void;
   failTokenEndpoint(failure: TokenEndpointFailure): void;
+  /**
+   * Makes `login` a member of the organization `org` (created on the way). The membership belongs
+   * to the account id, so it survives a rename. Default state is `active`.
+   */
+  addOrgMember(org: string, login: string, state?: FakeMembershipState): void;
+  removeOrgMember(org: string, login: string): void;
+  /** Makes `GET /user/memberships/orgs/:org` answer an error, or answer slowly. */
+  failMembershipEndpoint(failure: MembershipEndpointFailure): void;
+  /** Revokes an access token, like the person removing the app at github.com. */
+  revokeToken(accessToken: string): void;
   /** Every request received, in order (no headers, no bodies, no tokens). */
   requests(): FakeGithubRequest[];
   /** Every access token issued so far; lets a test search outputs for them. */
@@ -96,6 +116,9 @@ export async function startGithubFake(
   const issued: string[] = [];
   let requests: FakeGithubRequest[] = [];
   let failure: TokenEndpointFailure = null;
+  let membershipFailure: MembershipEndpointFailure = null;
+  // org (lower case) -> account id -> state
+  const orgs = new Map<string, Map<number, FakeMembershipState>>();
   const timers = new Set<NodeJS.Timeout>();
 
   const server = createServer((request, response) => {
@@ -121,6 +144,15 @@ export async function startGithubFake(
       addUser(await readJson<FakeGithubUser>(request));
       return sendJson(response, 201, { ok: true });
     }
+    if (method === "POST" && url.pathname === "/__fake/org-members") {
+      const body = await readJson<{
+        org: string;
+        login: string;
+        state?: FakeMembershipState;
+      }>(request);
+      addOrgMember(body.org, body.login, body.state);
+      return sendJson(response, 201, { ok: true });
+    }
     if (method === "POST" && url.pathname === "/__fake/reset") {
       reset();
       return sendJson(response, 200, { ok: true });
@@ -135,6 +167,15 @@ export async function startGithubFake(
       return sendProfile(request, response);
     if (method === "GET" && url.pathname === "/user/emails")
       return sendEmails(request, response);
+    const membershipPath = /^\/user\/memberships\/orgs\/([^/]+)$/.exec(
+      url.pathname,
+    );
+    if (method === "GET" && membershipPath)
+      return sendMembership(
+        request,
+        response,
+        decodeURIComponent(membershipPath[1] ?? ""),
+      );
 
     sendJson(response, 404, { message: "Not Found" });
   }
@@ -344,6 +385,56 @@ export async function startGithubFake(
     );
   }
 
+  // Like GitHub: your own membership in one organization. Needs the read:org scope (or a larger
+  // one); without it GitHub answers 403. Not a member (or no such organization): 404.
+  async function sendMembership(
+    request: IncomingMessage,
+    response: ServerResponse,
+    org: string,
+  ) {
+    const current = membershipFailure;
+    if (current?.kind === "status")
+      return sendJson(response, current.status, { message: "Server Error" });
+    if (current?.kind === "delay")
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => {
+          timers.delete(timer);
+          resolve();
+        }, current.delayMs);
+        timers.add(timer);
+      });
+    if (response.destroyed) return;
+
+    const auth = authenticate(request, response);
+    if (!auth) return;
+    if (!/(^|[ ,])(read:org|write:org|admin:org)([ ,]|$)/.test(auth.scope))
+      return sendJson(response, 403, {
+        message: "Resource not accessible by personal access token",
+      });
+    const state = orgs.get(org.toLowerCase())?.get(auth.user.id);
+    if (!state) return sendJson(response, 404, { message: "Not Found" });
+    sendJson(response, 200, {
+      url: `https://api.invalid/orgs/${org}/memberships/${auth.user.login}`,
+      state,
+      role: "member",
+      organization: { login: org },
+      user: { login: auth.user.login, id: auth.user.id },
+    });
+  }
+
+  function addOrgMember(
+    org: string,
+    login: string,
+    state: FakeMembershipState = "active",
+  ) {
+    const user = [...users.values()].find((u) => u.login === login);
+    if (!user) throw new Error(`No fake GitHub user with login ${login}`);
+    const key = org.toLowerCase();
+    const members = orgs.get(key) ?? new Map<number, FakeMembershipState>();
+    members.set(user.id, state);
+    orgs.set(key, members);
+  }
+
   function addUser(user: FakeGithubUser) {
     users.set(user.id, { ...user });
   }
@@ -352,6 +443,7 @@ export async function startGithubFake(
     users.clear();
     codes.clear();
     tokens.clear();
+    orgs.clear();
     issued.length = 0;
     requests = [];
   }
@@ -398,6 +490,17 @@ export async function startGithubFake(
     reset,
     failTokenEndpoint(next) {
       failure = next;
+    },
+    addOrgMember,
+    removeOrgMember(org, login) {
+      const user = [...users.values()].find((u) => u.login === login);
+      if (user) orgs.get(org.toLowerCase())?.delete(user.id);
+    },
+    failMembershipEndpoint(next) {
+      membershipFailure = next;
+    },
+    revokeToken(accessToken) {
+      tokens.delete(accessToken);
     },
     requests: () => [...requests],
     issuedAccessTokens: () => [...issued],

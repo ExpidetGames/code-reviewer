@@ -19,6 +19,8 @@ export interface UsersTable {
   image: string | null;
   /** The current GitHub login, refreshed on every sign in. */
   github_login: string;
+  /** When the membership in the allowed GitHub organization was last confirmed (ISO 8601, UTC), or null. */
+  org_checked_at: string | null;
   created_at: string;
   updated_at: string;
 }
