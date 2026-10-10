@@ -3,17 +3,17 @@
 Kysely on SQLite (better-sqlite3). The whole layer lives in this folder; nothing else in the app
 opens a database or writes SQL.
 
-| File                        | Role                                                                                                                                                           |
-| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `config.ts`                 | Reads `DATABASE_PATH` and `DATABASE_BUSY_TIMEOUT_MS` from the environment                                                                                      |
-| `connection.ts`             | `openDatabase(config)`: checks the directory, opens the file, sets the pragmas                                                                                 |
-| `dialect.ts`                | Kysely's SQLite dialect with `begin immediate` transactions and transactional DDL                                                                              |
-| `migrate.ts`, `migrations/` | `migrateToLatest(db)` and the ordered list of migrations                                                                                                       |
-| `startup.ts`                | What the server does on start; `getDatabase()` hands the connection out                                                                                        |
-| `schema.ts`                 | Row types of every table (`Database`)                                                                                                                          |
-| `codecs.ts`                 | The only code that knows how JSON, booleans and timestamps are stored                                                                                          |
-| `repositories/`             | One small module per table (or aggregate); the only code that queries it                                                                                       |
-| `errors.ts`                 | `DatabaseError` with stable codes (`DATABASE_CONFIG_INVALID`, `DATABASE_DIRECTORY_UNAVAILABLE`, `DATABASE_OPEN_FAILED`, `DATABASE_LOCKED`, `MIGRATION_FAILED`) |
+| File                        | Role                                                                                                                                                                         |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `config.ts`                 | Reads `DATABASE_PATH` and `DATABASE_BUSY_TIMEOUT_MS` from the environment                                                                                                    |
+| `connection.ts`             | `openDatabase(config)`: checks the directory, opens the file, sets the pragmas                                                                                               |
+| `dialect.ts`                | Kysely's SQLite dialect with `begin immediate` transactions and transactional DDL                                                                                            |
+| `migrate.ts`, `migrations/` | `migrateToLatest(db)` and the ordered list of migrations                                                                                                                     |
+| `startup.ts`                | What the server does on start; `getDatabase()` hands the connection out                                                                                                      |
+| `schema.ts`                 | Row types of every table (`Database`)                                                                                                                                        |
+| `codecs.ts`                 | The only code that knows how JSON, booleans and timestamps are stored                                                                                                        |
+| `repositories/`             | One small module per table (or aggregate); the only code that queries it. Exception: `users`, `sessions`, `accounts` and `verifications` belong to Better Auth (`src/auth/`) |
+| `errors.ts`                 | `DatabaseError` with stable codes (`DATABASE_CONFIG_INVALID`, `DATABASE_DIRECTORY_UNAVAILABLE`, `DATABASE_OPEN_FAILED`, `DATABASE_LOCKED`, `MIGRATION_FAILED`)               |
 
 ## Why better-sqlite3
 
@@ -54,13 +54,12 @@ never hold one open across an `await` on something slow (network, model, subproc
 ## Migrations
 
 - Written in TypeScript with Kysely's schema builder, one file per migration in `migrations/`,
-  named `YYYYMMDDHHMMSS_what_it_does.ts` (the UTC time you create it, for example
-  `20261010120000_create_integrations.ts`) and registered in `migrations/index.ts`. Kysely runs them in
-  the alphabetical order of the keys there. `0001_create_app_meta` is the only exception and sorts
-  first. A timestamp instead of a running number keeps two branches from picking the same number;
-  `migrate.integration.test.ts` checks the name pattern. When an epic merges after another epic added
-  migrations, check the order: a migration must never sort before one that is already merged to
-  `development`, because Kysely refuses to run migrations out of order.
+  named `YYYYMMDDHHMMSS_what_it_does.ts` (the UTC time the migration was written; the first one,
+  `0001_create_app_meta`, is the only exception and sorts before all of them) and registered in
+  `migrations/index.ts`. Kysely runs them in the alphabetical order of the keys there. Timestamps
+  keep parallel branches from picking the same number. When a branch merges after another one added
+  migrations, check the order: a migration must never sort before one that is already merged, because
+  Kysely refuses to run it. A database that applied a migration under an old name must be recreated.
 - They run automatically when the server starts: `src/instrumentation.ts` (`register`, which Next.js
   calls once before the server accepts requests) calls `initializeDatabaseOnStart`. It is not run by
   `next build`.
@@ -121,7 +120,7 @@ string or a timestamp string format. Route handlers and server code get the conn
 `getDatabase()` (`startup.ts`) and pass it in; tests pass in a database from
 `src/test-support/test-database.ts`.
 
-`integrations` (migration `20261010120000_create_integrations`, repository `integrations-repository.ts`) holds the connections to
+`integrations` (migration `20261010134000_create_integrations`, repository `integrations-repository.ts`) holds the connections to
 git platforms; see `src/integrations/README.md`. It keeps no secret of a GitHub App, and the
 repository refuses secret-looking keys in `config`.
 

@@ -35,11 +35,17 @@ $leftovers"
 
 # CR-17-T08: a fresh named volume inherits the owner of /data from the image, so the unprivileged
 # user can create the database without any chown or root step.
+# The sign in settings are required (the server refuses to start without them); these are dummies
+# that point nowhere. Nothing in this script signs in.
 step "starting the container with a fresh volume on /data"
 docker volume create "$volume" >/dev/null
 docker run --detach --name "$container" \
   --publish 127.0.0.1::3000 \
   --volume "$volume:/data" \
+  --env BETTER_AUTH_SECRET=smoke-test-secret-0123456789-0123456789-abcdef \
+  --env BETTER_AUTH_URL=http://localhost:3000 \
+  --env GITHUB_OAUTH_CLIENT_ID=smoke-client-id \
+  --env GITHUB_OAUTH_CLIENT_SECRET=smoke-client-secret \
   --health-interval 2s \
   "$image" >/dev/null
 port=$(docker port "$container" 3000/tcp | head -n 1 | sed 's/.*://')
@@ -61,6 +67,16 @@ until body=$(curl --silent --fail --location --max-time 3 "http://127.0.0.1:$por
   sleep 1
 done
 grep -qi '<html' <<<"$body" || fail "the start page did not return HTML"
+
+# CR-18: the access guard runs in the built standalone server too, not only in the tests. Without a
+# session the start page redirects to the login page, which answers; the health route is public
+# and reads the database.
+step "the start page is guarded and the health route answers"
+start_status=$(curl --silent --output /dev/null --max-time 5 --write-out '%{http_code} %{redirect_url}' "http://127.0.0.1:$port/")
+[[ "$start_status" == "307 "*"/login" ]] || fail "the start page did not redirect to /login (got: $start_status)"
+health=$(curl --silent --fail --max-time 5 "http://127.0.0.1:$port/api/health") ||
+  fail "GET /api/health failed"
+[ "$health" = '{"status":"ok"}' ] || fail "unexpected health answer: $health"
 
 step "waiting for the container to report healthy"
 until [ "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$container")" = "healthy" ]; do

@@ -1,27 +1,26 @@
-// A fake GitHub App API on a loopback port together with the environment that points at it, for
-// tests of the GitHub client, the provider and the sync. The fake is closed after the test.
-import { afterEach } from "vitest";
-import {
-  startGithubAppFake,
-  type FakeGithubApp,
-} from "../../../fakes/github/app-api.ts";
-import { TEST_APP_ID, testAppKeys, testGithubAppEnv } from "./github-app.ts";
-
-const open: FakeGithubApp[] = [];
-
-afterEach(async () => {
-  await Promise.all(open.splice(0).map((fake) => fake.close()));
-});
+// The fake GitHub (src/test-support/github-fake.ts) together with the GitHub App environment that
+// points at it, for tests of the GitHub client, the provider and the sync.
+import type { FakeGithub } from "../../../fakes/github/server.ts";
+import { testGithubAppEnv } from "./github-app.ts";
+import { startTestGithub } from "./github-fake.ts";
 
 export type GithubAppHarness = {
-  fake: FakeGithubApp;
+  fake: FakeGithub;
   /** The GitHub App variables, with the API base URL set to the fake. */
   env: Record<string, string | undefined>;
   /** One clock for the fake and the code under test; move it with `advance`. */
   clock: { now(): number; advance(ms: number): void };
 };
 
-export async function startGithubAppHarness(): Promise<GithubAppHarness> {
+export async function startGithubAppHarness(
+  options: {
+    /**
+     * The fake GitHub to use. Default: a new one (`startTestGithub`) that runs on this harness's
+     * clock; a fake passed in keeps its own clock, so `clock.advance` does not move it.
+     */
+    fake?: FakeGithub;
+  } = {},
+): Promise<GithubAppHarness> {
   let nowMs = Date.UTC(2026, 9, 10, 12, 0, 0);
   const clock = {
     now: () => nowMs,
@@ -29,12 +28,7 @@ export async function startGithubAppHarness(): Promise<GithubAppHarness> {
       nowMs += ms;
     },
   };
-  const fake = await startGithubAppFake({
-    appId: TEST_APP_ID,
-    publicKeyPem: testAppKeys().publicKey,
-    now: clock.now,
-  });
-  open.push(fake);
+  const fake = options.fake ?? (await startTestGithub({ now: clock.now }));
   return {
     fake,
     clock,
