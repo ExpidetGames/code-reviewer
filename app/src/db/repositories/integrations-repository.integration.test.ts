@@ -120,6 +120,51 @@ describe("the integrations repository", () => {
     ).rejects.toMatchObject({ code: "INTEGRATION_NOT_FOUND" });
   });
 
+  it("refuses an integration without the platform's id and stores nothing", async () => {
+    const { db } = await createTestDatabase();
+    const repository = createIntegrationsRepository(db);
+
+    for (const externalId of [undefined, "", null]) {
+      await expect(
+        repository.create({ ...gitHubApp, externalId: externalId as never }),
+      ).rejects.toMatchObject({ code: "INTEGRATION_EXTERNAL_ID_REQUIRED" });
+    }
+
+    expect(await repository.list()).toEqual([]);
+  });
+
+  it("refuses a status it does not know, on create and on update", async () => {
+    const { db } = await createTestDatabase();
+    const repository = createIntegrationsRepository(db);
+    const saved = await repository.create(gitHubApp);
+
+    await expect(
+      repository.create({
+        ...gitHubApp,
+        externalId: "2",
+        status: "paused" as never,
+      }),
+    ).rejects.toMatchObject({ code: "INTEGRATION_STATUS_INVALID" });
+    await expect(
+      repository.setStatus(saved.id, "paused" as never),
+    ).rejects.toMatchObject({ code: "INTEGRATION_STATUS_INVALID" });
+
+    expect(await repository.get(saved.id)).toMatchObject({ status: "active" });
+  });
+
+  it("fails with a stable code when a stored row has a status this version does not know", async () => {
+    const { db } = await createTestDatabase();
+    await sql`insert into integrations
+      (id, type, display_name, external_id, config, status, created_at, updated_at)
+      values ('x', 'github_app', 'Old', '1', '{}', 'paused', 'now', 'now')`.execute(
+      db,
+    );
+
+    await expect(
+      createIntegrationsRepository(db).get("x"),
+    ).rejects.toMatchObject({ code: "INTEGRATION_STATUS_INVALID" });
+  });
+
   it("refuses a type it does not know with a stable code", async () => {
     const { db } = await createTestDatabase();
 

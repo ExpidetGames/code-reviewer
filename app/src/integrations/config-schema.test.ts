@@ -73,6 +73,70 @@ describe("validating an integration config", () => {
   });
 
   // CR-20-T04
+  it("reports names from the prototype chain as unknown fields instead of dropping them", () => {
+    for (const field of ["constructor", "toString", "hasOwnProperty"]) {
+      const result = validateConfigAgainstSchema(schema, {
+        accountLogin: "acme",
+        accountId: 5,
+        [field]: "x",
+      });
+
+      expect(result).toEqual({
+        ok: false,
+        errors: [{ field, code: "unknown_field" }],
+      });
+    }
+  });
+
+  // CR-20-T04
+  it("reports a __proto__ key from parsed JSON as an unknown field", () => {
+    const parsed = JSON.parse(
+      '{"accountLogin":"acme","accountId":5,"__proto__":{"x":1}}',
+    );
+
+    expect(validateConfigAgainstSchema(schema, parsed)).toEqual({
+      ok: false,
+      errors: [{ field: "__proto__", code: "unknown_field" }],
+    });
+  });
+
+  // CR-20-T04
+  it("rejects numbers that do not survive JSON", () => {
+    for (const accountId of [NaN, Infinity, -Infinity]) {
+      expect(
+        validateConfigAgainstSchema(schema, {
+          accountLogin: "acme",
+          accountId,
+        }),
+      ).toEqual({
+        ok: false,
+        errors: [{ field: "accountId", code: "invalid_type" }],
+      });
+    }
+  });
+
+  // CR-20-T04
+  it("treats an explicit null as not given: required fails, optional is left out", () => {
+    expect(
+      validateConfigAgainstSchema(schema, {
+        accountLogin: null,
+        accountId: 5,
+        note: null,
+      }),
+    ).toEqual({
+      ok: false,
+      errors: [{ field: "accountLogin", code: "required" }],
+    });
+    expect(
+      validateConfigAgainstSchema(schema, {
+        accountLogin: "acme",
+        accountId: 5,
+        note: null,
+      }),
+    ).toEqual({ ok: true, config: { accountLogin: "acme", accountId: 5 } });
+  });
+
+  // CR-20-T04
   it("rejects a config that is not an object", () => {
     for (const input of [null, undefined, "text", 3, ["a"]]) {
       expect(validateConfigAgainstSchema(schema, input)).toEqual({
@@ -92,6 +156,40 @@ describe("finding keys that look like secrets", () => {
         PrivateKey: "z",
       }),
     ).toEqual(["auth.apiToken", "auth.list.0.webhook_secret", "PrivateKey"]);
+  });
+
+  it("finds the usual spellings of keys, tokens, passwords and certificates", () => {
+    const keys = [
+      "apiKey",
+      "api_key",
+      "accessKey",
+      "client_secret",
+      "clientSecret",
+      "authorization",
+      "jwt",
+      "pem",
+      "keyPem",
+      "private_pem",
+      "password",
+      "bearerToken",
+    ];
+
+    expect(
+      findSecretLikeKeys(Object.fromEntries(keys.map((k) => [k, "x"]))),
+    ).toEqual(keys);
+  });
+
+  it("does not flag keys that only mention a secret word, such as urls and counts", () => {
+    expect(
+      findSecretLikeKeys({
+        access_tokens_url:
+          "https://api.example.test/app/installations/1/access_tokens",
+        tokenCount: 3,
+        token_id: 9,
+        development: "x",
+        company: "x",
+      }),
+    ).toEqual([]);
   });
 
   it("finds nothing in a plain config", () => {

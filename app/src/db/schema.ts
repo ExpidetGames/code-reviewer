@@ -14,7 +14,7 @@ export interface IntegrationsTable {
   type: string;
   display_name: string;
   /** The platform's id for the connection, for example a GitHub installation id. */
-  external_id: string | null;
+  external_id: string;
   /** JSON text: settings only, never a secret. */
   config: string;
   /** JSON text, reserved for token integrations. Null for a GitHub App. */

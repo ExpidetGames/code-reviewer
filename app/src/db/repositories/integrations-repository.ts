@@ -19,7 +19,8 @@ import type { Database, IntegrationsTable } from "../schema.ts";
 export type NewIntegration = {
   type: IntegrationType;
   displayName: string;
-  externalId?: string | null;
+  /** The platform's id for the connection (GitHub App: the installation id). Required. */
+  externalId: string;
   config: { [key: string]: JsonValue };
   /** Only for types that keep credentials in the table (none yet). */
   credentials?: JsonValue | null;
@@ -48,8 +49,9 @@ function toIntegration(row: IntegrationsTable): Integration {
     );
   const status = INTEGRATION_STATUSES.find((value) => value === row.status);
   if (status === undefined)
-    throw new Error(
-      `Stored integration ${row.id} has the status "${row.status}".`,
+    throw new IntegrationError(
+      "INTEGRATION_STATUS_INVALID",
+      `Stored integration ${row.id} has the unknown status "${row.status}".`,
     );
 
   return {
@@ -67,12 +69,26 @@ function toIntegration(row: IntegrationsTable): Integration {
   };
 }
 
-function assertSecretRules(input: NewIntegration): void {
+function assertStatus(status: unknown): asserts status is IntegrationStatus {
+  if (!INTEGRATION_STATUSES.some((value) => value === status))
+    throw new IntegrationError(
+      "INTEGRATION_STATUS_INVALID",
+      `Unknown integration status "${String(status)}".`,
+    );
+}
+
+function assertValidInput(input: NewIntegration): void {
   if (!isIntegrationType(input.type))
     throw new IntegrationError(
       "INTEGRATION_TYPE_UNKNOWN",
       `Unknown integration type "${String(input.type)}".`,
     );
+  if (typeof input.externalId !== "string" || input.externalId === "")
+    throw new IntegrationError(
+      "INTEGRATION_EXTERNAL_ID_REQUIRED",
+      "An integration needs the platform's id for the connection.",
+    );
+  assertStatus(input.status ?? "active");
 
   const storage = INTEGRATION_SECRET_STORAGE[input.type];
   if (input.credentials != null && !storage.credentials)
@@ -111,14 +127,14 @@ export function createIntegrationsRepository(
 
   return {
     async create(input) {
-      assertSecretRules(input);
+      assertValidInput(input);
 
       const timestamp = formatTimestamp(now());
       const row: IntegrationsTable = {
         id: newId(),
         type: input.type,
         display_name: input.displayName,
-        external_id: input.externalId ?? null,
+        external_id: input.externalId,
         config: encodeJson(input.config),
         credentials:
           input.credentials == null ? null : encodeJson(input.credentials),
@@ -165,6 +181,7 @@ export function createIntegrationsRepository(
     },
 
     async setStatus(id, status) {
+      assertStatus(status);
       const result = await db
         .updateTable("integrations")
         .set({ status, updated_at: formatTimestamp(now()) })

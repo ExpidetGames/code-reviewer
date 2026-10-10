@@ -4,7 +4,9 @@ import type { ConfigValidationResult } from "./config-schema.ts";
 import type {
   GitAccess,
   Integration,
+  IntegrationEvent,
   IntegrationType,
+  PullRequestRef,
   RepoRef,
   ReviewTrigger,
 } from "./types.ts";
@@ -31,18 +33,30 @@ export interface IntegrationProvider {
 
   /**
    * Checks the signature of a delivery. `integration` is null for platforms with one shared
-   * webhook (GitHub App). Reads a clone of the request; the caller can still read the body.
+   * webhook (GitHub App), where the connection is only known after `identifyWebhook`. Reads a clone
+   * of the request: the caller can still read the body afterwards.
    */
   verifyWebhook(
     integration: Integration | null,
     request: Request,
   ): Promise<boolean>;
 
-  /** Translates a verified delivery into a trigger, or null if it is not relevant for reviews. */
+  /**
+   * For a shared webhook: which connection does this delivery belong to? The route calls it after
+   * `verifyWebhook(null, request)` and looks the row up by `(type, externalId)`. Returns null where
+   * the URL already names the connection or the delivery carries no connection id. Reads a clone,
+   * has no side effects.
+   */
+  identifyWebhook(request: Request): Promise<{ externalId: string } | null>;
+
+  /**
+   * Translates a verified delivery into what it means for the app: a review trigger, a change of
+   * the connection (installed, removed, repositories changed) or nothing of interest. Reads a clone.
+   */
   parseEvent(
     integration: Integration,
     request: Request,
-  ): Promise<ReviewTrigger | null>;
+  ): Promise<IntegrationEvent>;
 
   /**
    * May this trigger start a job? About the trigger only (for example: has the comment author write
@@ -55,4 +69,17 @@ export interface IntegrationProvider {
 
   /** Credentials for one job on one repository; short-lived where the platform allows it. */
   jobAccess(integration: Integration, repo: RepoRef): Promise<GitAccess>;
+
+  /** One pull request of a repository, for example to start a review by hand. */
+  getPullRequest(
+    integration: Integration,
+    repo: RepoRef,
+    prNumber: number,
+  ): Promise<PullRequestRef>;
+
+  /** The open pull requests of a repository (drafts included, marked as such). */
+  listOpenPullRequests(
+    integration: Integration,
+    repo: RepoRef,
+  ): Promise<PullRequestRef[]>;
 }

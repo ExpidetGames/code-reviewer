@@ -42,12 +42,18 @@ export function validateConfigAgainstSchema(
   const config: { [key: string]: JsonValue } = {};
 
   for (const [field, spec] of Object.entries(schema)) {
-    const value = values[field];
+    const value = Object.hasOwn(values, field) ? values[field] : undefined;
+    // An explicit null counts as "not given": it fails a required field and is left out of an
+    // optional one, so a stored config never holds a null.
     if (value === undefined || value === null) {
       if (spec.required ?? true) errors.push({ field, code: "required" });
       continue;
     }
-    if (typeof value !== spec.type) {
+    // NaN and Infinity are numbers to typeof but turn into null in JSON, so they are not valid.
+    const typeMatches =
+      typeof value === spec.type &&
+      (typeof value !== "number" || Number.isFinite(value));
+    if (!typeMatches) {
       errors.push({ field, code: "invalid_type" });
       continue;
     }
@@ -55,13 +61,29 @@ export function validateConfigAgainstSchema(
   }
 
   for (const field of Object.keys(values)) {
-    if (!(field in schema)) errors.push({ field, code: "unknown_field" });
+    if (!Object.hasOwn(schema, field))
+      errors.push({ field, code: "unknown_field" });
   }
 
   return errors.length === 0 ? { ok: true, config } : { ok: false, errors };
 }
 
-const SECRET_KEY_PATTERN = /private[_-]?key|secret|token|password|credential/i;
+// Best effort, a second line of defence: the per-type schema (known fields only) is the real
+// protection. Matches key names such as privateKey, api_key, accessKey, client_secret, token,
+// password, credential, authorization, jwt and pem; the SAFE pattern excludes names that merely
+// mention one (access_tokens_url, tokenCount, token_id).
+const SECRET_KEY_PATTERN =
+  /private[_-]?key|secret|token|password|credential|api[_-]?key|access[_-]?key|authorization|jwt/i;
+// Case sensitive, so that "development" is not mistaken for a PEM: pem, PEM, keyPem, private_pem.
+const PEM_KEY_PATTERN = /(?:^|[_-])(?:pem|PEM)(?:$|[_-])|[a-z]Pem(?:[A-Z_-]|$)/;
+const SAFE_KEY_SUFFIX_PATTERN = /(?:_url|Url|URL|_count|Count|_id|Id)$/;
+
+function isSecretLikeKey(key: string): boolean {
+  return (
+    (SECRET_KEY_PATTERN.test(key) || PEM_KEY_PATTERN.test(key)) &&
+    !SAFE_KEY_SUFFIX_PATTERN.test(key)
+  );
+}
 
 /**
  * Paths of keys in `value` whose name suggests a secret. A config holds settings only: keys and
@@ -75,8 +97,7 @@ export function findSecretLikeKeys(value: unknown, path = ""): string[] {
     : Object.entries(value);
   for (const [key, child] of entries) {
     const childPath = path === "" ? key : `${path}.${key}`;
-    if (!Array.isArray(value) && SECRET_KEY_PATTERN.test(key))
-      found.push(childPath);
+    if (!Array.isArray(value) && isSecretLikeKey(key)) found.push(childPath);
     found.push(...findSecretLikeKeys(child, childPath));
   }
   return found;

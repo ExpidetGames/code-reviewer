@@ -1,8 +1,21 @@
 // Pins down the runtime guards for the normalized types. They are what keeps a raw platform payload
 // from travelling through the app disguised as a RepoRef, ReviewTrigger or GitAccess.
 import { describe, expect, it } from "vitest";
-import { isGitAccess, isRepoRef, isReviewTrigger } from "./normalized.ts";
-import type { GitAccess, RepoRef, ReviewTrigger } from "./types.ts";
+import {
+  createGitAccess,
+  isGitAccess,
+  isIntegrationEvent,
+  isPullRequestRef,
+  isRepoRef,
+  isReviewTrigger,
+  revealGitAccess,
+} from "./normalized.ts";
+import type {
+  GitAccess,
+  PullRequestRef,
+  RepoRef,
+  ReviewTrigger,
+} from "./types.ts";
 
 const repo: RepoRef = {
   integrationId: "int-1",
@@ -15,19 +28,34 @@ const opened: ReviewTrigger = {
   kind: "opened",
   repo,
   prNumber: 7,
+  prUrl: "https://example.test/acme/widgets/pull/7",
   headSha: "abc123",
   command: null,
   args: null,
   actor: { login: "alice", externalId: "1" },
 };
 
-const access: GitAccess = {
+const accessFields: GitAccess = {
   provider: "github",
   baseUrl: "https://api.example.test",
   token: "dummy-token",
   authType: "token",
   botLogin: "reviewer[bot]",
   expiresAt: "2026-10-10T13:00:00.000Z",
+};
+const makeAccess = (overrides: Partial<GitAccess> = {}) =>
+  createGitAccess({ ...accessFields, ...overrides });
+
+const pullRequest: PullRequestRef = {
+  number: 7,
+  title: "Add widgets",
+  url: "https://example.test/acme/widgets/pull/7",
+  headSha: "abc123",
+  baseRef: "main",
+  headRef: "feature",
+  draft: false,
+  state: "open",
+  author: { login: "alice", externalId: "1" },
 };
 
 describe("the normalized type guards", () => {
@@ -82,17 +110,96 @@ describe("the normalized type guards", () => {
     );
   });
 
+  it("rejects a trigger without a pull request url", () => {
+    expect(isReviewTrigger({ ...opened, prUrl: "" })).toBe(false);
+  });
+
   it("accepts git access with and without a bot login or an expiry", () => {
-    expect(isGitAccess(access)).toBe(true);
-    expect(isGitAccess({ ...access, botLogin: null, expiresAt: null })).toBe(
+    expect(isGitAccess(makeAccess())).toBe(true);
+    expect(isGitAccess(makeAccess({ botLogin: null, expiresAt: null }))).toBe(
       true,
     );
   });
 
   it("rejects git access with an unknown platform or auth type, an empty token or an extra field", () => {
-    expect(isGitAccess({ ...access, provider: "svn" })).toBe(false);
-    expect(isGitAccess({ ...access, authType: "basic" })).toBe(false);
-    expect(isGitAccess({ ...access, token: "" })).toBe(false);
-    expect(isGitAccess({ ...access, installationId: 9 })).toBe(false);
+    expect(isGitAccess(makeAccess({ provider: "svn" as never }))).toBe(false);
+    expect(isGitAccess(makeAccess({ authType: "basic" as never }))).toBe(false);
+    expect(isGitAccess(makeAccess({ token: "" }))).toBe(false);
+    expect(
+      isGitAccess(Object.assign(makeAccess(), { installationId: 9 })),
+    ).toBe(false);
+  });
+
+  it("rejects git access whose token is a plain visible field", () => {
+    expect(isGitAccess({ ...accessFields })).toBe(false);
+  });
+
+  it("accepts a pull request reference and rejects an incomplete or unknown-state one", () => {
+    expect(isPullRequestRef(pullRequest)).toBe(true);
+    expect(isPullRequestRef({ ...pullRequest, state: "merged" })).toBe(true);
+    expect(isPullRequestRef({ ...pullRequest, state: "locked" })).toBe(false);
+    expect(isPullRequestRef({ ...pullRequest, draft: "no" })).toBe(false);
+    expect(isPullRequestRef({ ...pullRequest, number: 0 })).toBe(false);
+    expect(isPullRequestRef({ ...pullRequest, base: { ref: "main" } })).toBe(
+      false,
+    );
+  });
+
+  it("accepts the three kinds of integration event and rejects a malformed one", () => {
+    expect(
+      isIntegrationEvent({ kind: "review_trigger", trigger: opened }),
+    ).toBe(true);
+    expect(
+      isIntegrationEvent({
+        kind: "installation_changed",
+        externalId: "9",
+        action: "deleted",
+      }),
+    ).toBe(true);
+    expect(isIntegrationEvent({ kind: "ignored", reason: "closed" })).toBe(
+      true,
+    );
+
+    expect(isIntegrationEvent(opened)).toBe(false);
+    expect(isIntegrationEvent({ kind: "review_trigger", trigger: {} })).toBe(
+      false,
+    );
+    expect(
+      isIntegrationEvent({
+        kind: "installation_changed",
+        externalId: "9",
+        action: "renamed",
+      }),
+    ).toBe(false);
+    expect(isIntegrationEvent({ kind: "ignored" })).toBe(false);
+  });
+});
+
+describe("git access and its token", () => {
+  it("leaves the token out of JSON, spreads, entries and console output", async () => {
+    const { inspect } = await import("node:util");
+    const access = makeAccess({ token: "ghs_dummy_token_value" });
+
+    expect(JSON.stringify(access)).not.toContain("ghs_dummy_token_value");
+    expect(JSON.stringify({ ...access })).not.toContain(
+      "ghs_dummy_token_value",
+    );
+    expect(Object.entries(access).flat()).not.toContain(
+      "ghs_dummy_token_value",
+    );
+    expect(inspect(access)).not.toContain("ghs_dummy_token_value");
+  });
+
+  it("still lets the code read the token", () => {
+    expect(makeAccess({ token: "abc" }).token).toBe("abc");
+  });
+
+  it("hands the token out only through the explicit reveal for the runner API", () => {
+    const revealed = revealGitAccess(makeAccess({ token: "abc" }));
+
+    expect(JSON.parse(JSON.stringify(revealed))).toEqual({
+      ...accessFields,
+      token: "abc",
+    });
   });
 });

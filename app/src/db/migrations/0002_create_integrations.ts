@@ -1,6 +1,7 @@
 // Connections to git platforms (see src/integrations/README.md). `config` and `credentials` are JSON
 // text; `credentials` and `webhook_secret` stay empty for a GitHub App and are reserved for token
-// integrations (encrypted before they are used). A platform connection exists once per type.
+// integrations (encrypted before they are used). `external_id` is the platform's id for the
+// connection and is required, so the unique index means: one integration per (type, external id).
 import type { Migration } from "kysely/migration";
 
 export const migration: Migration = {
@@ -10,7 +11,7 @@ export const migration: Migration = {
       .addColumn("id", "text", (column) => column.primaryKey())
       .addColumn("type", "text", (column) => column.notNull())
       .addColumn("display_name", "text", (column) => column.notNull())
-      .addColumn("external_id", "text")
+      .addColumn("external_id", "text", (column) => column.notNull())
       .addColumn("config", "text", (column) => column.notNull())
       .addColumn("credentials", "text")
       .addColumn("webhook_secret", "text")

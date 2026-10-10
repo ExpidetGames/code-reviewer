@@ -53,8 +53,8 @@ export type Integration = {
   id: string;
   type: IntegrationType;
   displayName: string;
-  /** The platform's id for this connection (GitHub App: the installation id). */
-  externalId: string | null;
+  /** The platform's id for this connection (GitHub App: the installation id). Never empty. */
+  externalId: string;
   /** Non-secret settings of the connection. Never holds a key or a token. */
   config: { [key: string]: JsonValue };
   /** Reserved for token integrations; encrypted later. `null` for a GitHub App. */
@@ -101,6 +101,8 @@ export type TriggerActor = {
 type ReviewTriggerBase = {
   repo: RepoRef;
   prNumber: number;
+  /** Web URL of the pull request; building it is platform specific, so the provider does it. */
+  prUrl: string;
   headSha: string;
   actor: TriggerActor;
 };
@@ -125,7 +127,11 @@ export type GitPlatform = (typeof GIT_PLATFORMS)[number];
 export const GIT_AUTH_TYPES = ["token", "bearer"] as const;
 export type GitAuthType = (typeof GIT_AUTH_TYPES)[number];
 
-/** Short-lived credentials for one job on one repository. Never stored, never logged. */
+/**
+ * Short-lived credentials for one job on one repository. Never stored, never logged. Build it with
+ * `createGitAccess` (normalized.ts): `token` is then not enumerable, so JSON.stringify, spreading and
+ * console output leave it out. Only `revealGitAccess` hands the token out, for the runner API.
+ */
 export type GitAccess = {
   provider: GitPlatform;
   /** API base URL of the platform. */
@@ -137,3 +143,42 @@ export type GitAccess = {
   /** ISO 8601 text in UTC; `null` when the token does not expire. */
   expiresAt: string | null;
 };
+
+export const PULL_REQUEST_STATES = ["open", "closed", "merged"] as const;
+export type PullRequestState = (typeof PULL_REQUEST_STATES)[number];
+
+/** A pull request as the app needs to know it, for example to start a review by hand. */
+export type PullRequestRef = {
+  number: number;
+  title: string;
+  url: string;
+  headSha: string;
+  /** Name of the branch the pull request merges into. */
+  baseRef: string;
+  /** Name of the branch the changes come from. */
+  headRef: string;
+  draft: boolean;
+  state: PullRequestState;
+  author: TriggerActor;
+};
+
+export const INSTALLATION_ACTIONS = [
+  "created",
+  "deleted",
+  "suspended",
+  "unsuspended",
+  "repositories_changed",
+] as const;
+export type InstallationAction = (typeof INSTALLATION_ACTIONS)[number];
+
+/** What a verified delivery means for the app, whatever the platform called it. */
+export type IntegrationEvent =
+  | { kind: "review_trigger"; trigger: ReviewTrigger }
+  /** The connection itself changed (installed, removed, repositories added or removed). */
+  | {
+      kind: "installation_changed";
+      externalId: string;
+      action: InstallationAction;
+    }
+  /** Genuine but of no interest for reviews; `reason` is for logs, never for branching. */
+  | { kind: "ignored"; reason: string };
