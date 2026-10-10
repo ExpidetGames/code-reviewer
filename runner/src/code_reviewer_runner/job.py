@@ -31,6 +31,7 @@ from enum import StrEnum
 from typing import Any, NoReturn
 from urllib.parse import SplitResult, urlsplit
 
+from code_reviewer_runner.platforms import PLATFORMS
 from code_reviewer_runner.question_images import remove_image_links
 from code_reviewer_runner.result import ErrorCode
 
@@ -101,6 +102,7 @@ class GitAccess:
     base_url: str
     token: str
     bot_login: str
+    provider: str = "github"
 
 
 @dataclass(frozen=True)
@@ -188,8 +190,9 @@ def _checked_url(value: str, field_name: str) -> SplitResult:
 def _git_access(data: dict[str, Any]) -> GitAccess:
     git = _section(data, "git")
     _check_fields(git, _GIT_FIELDS, "git.")
-    if _string(git, "provider", "git.") != "github":
-        raise _invalid("git.provider must be 'github'")
+    provider = _string(git, "provider", "git.")
+    if provider not in PLATFORMS:
+        raise _invalid(f"git.provider must be one of: {', '.join(sorted(PLATFORMS))}")
     base_url = _string(git, "baseUrl", "git.").rstrip("/")
     _checked_url(base_url, "git.baseUrl")
     token = _secret(git, "token", "git.")
@@ -197,6 +200,7 @@ def _git_access(data: dict[str, Any]) -> GitAccess:
     if not _BOT_LOGIN.fullmatch(bot_login):
         raise _invalid("git.botLogin must be an app slug, optionally with the [bot] suffix")
     return GitAccess(
+        provider=provider,
         base_url=base_url,
         token=token,
         bot_login=bot_login if bot_login.endswith("[bot]") else f"{bot_login}[bot]",
