@@ -7,6 +7,14 @@ import type { IntegrationProvider } from "./provider.ts";
 import { loadGithubAppConfig } from "./providers/github-app/config.ts";
 import { createGithubAppProvider } from "./providers/github-app/provider.ts";
 import type { GithubAppClientOptions } from "./providers/github-app/client.ts";
+
+// What the UI may know about the GitHub App settings: the rest of the app reaches the provider
+// folder through this file only.
+export {
+  describeGithubAppSetup,
+  githubAppInstallUrl,
+  type GithubAppSetup,
+} from "./providers/github-app/setup-status.ts";
 import {
   INTEGRATION_TYPES,
   isIntegrationType,

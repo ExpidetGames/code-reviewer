@@ -2,7 +2,6 @@
 // The routes answer with stable codes; this is where a code becomes a sentence (the UI translates
 // codes, never the other way round). A code written out in a sentence is a bug, so an unknown code
 // gets a generic one.
-import type { GithubAppErrorCode } from "../../integrations/providers/github-app/errors.ts";
 import type { SyncErrorCode } from "../../integrations/sync/errors.ts";
 import type { TransportErrorCode } from "../../ui/json-request.ts";
 import type { ProjectErrorCode } from "../errors.ts";
@@ -47,7 +46,12 @@ export function describeFailure(code: string): string {
   return hasCopy(code) ? FAILURE_COPY[code] : GENERIC_FAILURE;
 }
 
-const SYNC_PROBLEM_COPY: Record<GithubAppErrorCode, string> = {
+const GENERIC_SYNC_PROBLEM = "GitHub could not be read.";
+
+// The codes of the GitHub App provider's errors (the sync reports the code of the error it met). They
+// are spelled out here because the UI may not import a provider (src/integrations/README.md, "The
+// boundary"); a code that is not listed gets the generic sentence.
+const SYNC_PROBLEM_COPY: Record<string, string> = {
   GITHUB_APP_CONFIG_INVALID:
     "The GitHub App settings are incomplete or not valid, so GitHub could not be asked.",
   GITHUB_APP_AUTH_FAILED:
@@ -65,6 +69,6 @@ const SYNC_PROBLEM_COPY: Record<GithubAppErrorCode, string> = {
 /** The sentence for the stable code of one problem the sync reported; nothing is lost, only translated. */
 export function describeSyncProblem(code: string): string {
   return Object.hasOwn(SYNC_PROBLEM_COPY, code)
-    ? SYNC_PROBLEM_COPY[code as GithubAppErrorCode]
-    : "GitHub could not be read.";
+    ? (SYNC_PROBLEM_COPY[code] ?? GENERIC_SYNC_PROBLEM)
+    : GENERIC_SYNC_PROBLEM;
 }

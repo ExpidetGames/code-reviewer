@@ -147,9 +147,17 @@ test.describe("the project list and the settings pages", () => {
     await signInThroughTheForm(page, account);
 
     await page.getByRole("link", { name: "Settings" }).click();
+    // The page left behind stays in the document, hidden, with its own copy of the hint.
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Settings" }),
+    ).toBeVisible();
 
-    await expect(page.getByText("LLM key missing")).toBeVisible();
-    await expect(page.getByText(/Set LLM_API_KEY on the server/)).toBeVisible();
+    await expect(
+      page.getByText("LLM key missing").filter({ visible: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByText(/Set LLM_API_KEY on the server/).filter({ visible: true }),
+    ).toBeVisible();
   });
 
   test.describe("on a narrow window", () => {

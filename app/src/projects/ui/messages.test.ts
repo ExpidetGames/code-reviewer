@@ -2,7 +2,6 @@
 // that an unknown code still gets a sentence instead of the raw code.
 import { describe, expect, it } from "vitest";
 import { SYNC_ERROR_CODES } from "../../integrations/sync/errors.ts";
-import { GITHUB_APP_ERROR_CODES } from "../../integrations/providers/github-app/errors.ts";
 import { TRANSPORT_ERROR_CODES } from "../../ui/json-request.ts";
 import { PROJECT_ERROR_CODES } from "../errors.ts";
 import { describeFailure, describeSyncProblem } from "./messages.ts";
@@ -34,7 +33,16 @@ describe("the copy for a failed project action", () => {
 });
 
 describe("the copy for a problem the sync met at GitHub", () => {
-  it.each(GITHUB_APP_ERROR_CODES)("has a sentence for %s", (code) => {
+  // The provider's own list cannot be imported here (the boundary); these are its codes.
+  it.each([
+    "GITHUB_APP_CONFIG_INVALID",
+    "GITHUB_APP_AUTH_FAILED",
+    "GITHUB_APP_FORBIDDEN",
+    "GITHUB_APP_NOT_FOUND",
+    "GITHUB_APP_RATE_LIMITED",
+    "GITHUB_APP_UNAVAILABLE",
+    "GITHUB_APP_REQUEST_FAILED",
+  ])("has a sentence for %s", (code) => {
     const text = describeSyncProblem(code);
 
     expect(text).not.toBe("");
