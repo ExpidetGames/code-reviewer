@@ -12,9 +12,9 @@ import { closeDatabase, getDatabase } from "../../src/db/startup.ts";
 import { initializeDatabaseOnStart } from "../../src/db/startup.ts";
 import { TEST_WEBHOOK_SECRET } from "../../src/test-support/github-app.ts";
 import {
-  startGithubAppFake,
-  type FakeGithubApp,
-} from "../../../fakes/github/app-api.ts";
+  startGithubFake,
+  type FakeGithub,
+} from "../../../fakes/github/server.ts";
 import {
   TEST_APP_ID,
   testAppKeys,
@@ -24,16 +24,16 @@ import { createTestDirectory } from "../../src/test-support/test-database.ts";
 
 type Route = typeof import("../../src/app/api/webhooks/github-app/route.ts");
 
-const fakes: FakeGithubApp[] = [];
+const fakes: FakeGithub[] = [];
 
 async function startRoute(
   overrides: Record<string, string | undefined> = {},
 ): Promise<{
   route: Route;
-  github: { fake: FakeGithubApp };
+  github: { fake: FakeGithub };
 }> {
   // The production code reads the real clock, so the fake does too.
-  const fake = await startGithubAppFake({
+  const fake = await startGithubFake({
     appId: TEST_APP_ID,
     publicKeyPem: testAppKeys().publicKey,
   });

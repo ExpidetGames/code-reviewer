@@ -125,7 +125,7 @@ Or per part:
 | Integration | `pnpm test:int` | `uv run pytest -m "integration or contract"` |
 
 End-to-end tests run against a production build on port 3417 (`E2E_PORT`), next to a fake GitHub on
-a fake GitHub on a random port (`fakes/github`):
+a random port (`fakes/github`):
 
 ```sh
 make test-e2e                              # needs a Playwright browser:

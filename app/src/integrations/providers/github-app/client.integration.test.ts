@@ -1,7 +1,7 @@
 // Pins down the GitHub client against the fake GitHub API over real HTTP: what it reads, how it
 // pages, which token it uses, and that every failure becomes a stable code without a secret in it.
 import { describe, expect, it } from "vitest";
-import type { FakeGithubApp } from "../../../../../fakes/github/app-api.ts";
+import type { FakeGithub } from "../../../../../fakes/github/server.ts";
 import { startGithubAppHarness } from "../../../test-support/github-app-harness.ts";
 import { createGithubAppClient, type GithubAppClient } from "./client.ts";
 import { loadGithubAppConfig } from "./config.ts";
@@ -348,7 +348,7 @@ describe("requests that would point somewhere else", () => {
 describe("pull requests", () => {
   async function withPullRequests(): Promise<{
     client: GithubAppClient;
-    fake: FakeGithubApp;
+    fake: FakeGithub;
   }> {
     const { fake, client } = await setup();
     fake.addPullRequest("acme/widgets", {

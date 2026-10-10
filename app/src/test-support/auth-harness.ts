@@ -2,10 +2,9 @@
 // instance of the app, and the fake GitHub on a loopback port. The tests call `auth.handler`
 // with real `Request` objects, the same entry point the route handler uses, and walk the OAuth
 // flow the way a browser does (sign in request, authorize at the fake, callback), keeping cookies.
-import {
-  startGithubFake,
-  type FakeGithub,
-  type FakeGithubUser,
+import type {
+  FakeGithub,
+  FakeGithubUser,
 } from "../../../fakes/github/server.ts";
 import { createRuntimeAccessPolicy } from "../auth/access-runtime.ts";
 import { createAuth } from "../auth/auth.ts";
@@ -13,11 +12,15 @@ import { loadAuthConfig } from "../auth/config.ts";
 import { syncLoginPinsOnStart } from "../auth/startup.ts";
 import type { Kysely } from "kysely";
 import type { Database } from "../db/schema.ts";
-import { cleanUpAfterTest, createTestDatabase } from "./test-database.ts";
+import {
+  startTestGithub,
+  TEST_CLIENT_ID,
+  TEST_CLIENT_SECRET,
+} from "./github-fake.ts";
+import { createTestDatabase } from "./test-database.ts";
 
+export { TEST_CLIENT_ID, TEST_CLIENT_SECRET };
 export const TEST_BASE_URL = "http://localhost:3000";
-export const TEST_CLIENT_ID = "test-client-id";
-export const TEST_CLIENT_SECRET = "test-client-secret-value";
 export const TEST_AUTH_SECRET = "test-auth-secret-0123456789-0123456789-abc";
 
 export const OCTOCAT: FakeGithubUser = {
@@ -30,6 +33,11 @@ export const OCTOCAT: FakeGithubUser = {
 export type CookieJar = Map<string, string>;
 
 export type AuthHarnessOptions = {
+  /**
+   * The fake GitHub to sign in at. Default: a new one (`startTestGithub`). Pass the instance a
+   * GitHub integration test uses to run both against one fake.
+   */
+  github?: FakeGithub;
   secureCookies?: boolean;
   githubRequestTimeoutMs?: number;
   users?: FakeGithubUser[];
@@ -44,11 +52,7 @@ export type AuthHarnessOptions = {
 
 export async function createAuthHarness(options: AuthHarnessOptions = {}) {
   const { db } = await createTestDatabase();
-  const github: FakeGithub = await startGithubFake({
-    clientId: TEST_CLIENT_ID,
-    clientSecret: TEST_CLIENT_SECRET,
-  });
-  cleanUpAfterTest(() => github.close());
+  const github = options.github ?? (await startTestGithub());
   for (const user of options.users ?? [OCTOCAT]) github.addUser(user);
   return assembleHarness(db, github, options);
 }
@@ -77,7 +81,7 @@ function assembleHarness(
     GITHUB_OAUTH_CLIENT_ID: TEST_CLIENT_ID,
     GITHUB_OAUTH_CLIENT_SECRET: TEST_CLIENT_SECRET,
     GITHUB_OAUTH_BASE_URL: github.baseUrl,
-    GITHUB_API_BASE: github.baseUrl,
+    GITHUB_API_BASE_URL: github.baseUrl,
     ALLOW_TEST_GITHUB_ENDPOINTS: "true",
     ALLOWED_GITHUB_LOGINS: allowedLogins.join(","),
     ALLOWED_GITHUB_ORG: options.allowedOrg,

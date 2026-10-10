@@ -81,7 +81,7 @@ export function loadAuthConfig(env: Env): AuthConfig {
   );
   const apiBaseUrl = optionalBaseUrl(
     env,
-    "GITHUB_API_BASE",
+    "GITHUB_API_BASE_URL",
     DEFAULT_GITHUB_API_BASE_URL,
     allowTestEndpoints,
     problems,
@@ -154,9 +154,11 @@ function isLoopbackHost(hostname: string): boolean {
 }
 
 // The GitHub endpoints default to the real GitHub. The token exchange sends the client secret and
-// the authorization code to whatever they name, so an override is only accepted together with
+// the authorization code to whatever they name, so any other address is only accepted together with
 // ALLOW_TEST_GITHUB_ENDPOINTS=true, which only the test stack sets (it points the sign in at
-// fakes/github).
+// fakes/github). Naming the real GitHub explicitly is fine without the flag. `GITHUB_API_BASE_URL` is
+// also read by the GitHub App settings (src/integrations/providers/github-app/config.ts) with the
+// same rule.
 function optionalBaseUrl(
   env: Env,
   name: string,
@@ -166,16 +168,18 @@ function optionalBaseUrl(
 ): string {
   const value = env[name]?.trim();
   if (!value) return fallback;
+  const url = parseHttpUrl(value);
+  if (!url) {
+    problems.push(`${name} must be an http or https URL`);
+    return fallback;
+  }
+  const normalized = url.origin + url.pathname.replace(/\/+$/, "");
+  if (normalized === fallback) return fallback;
   if (!allowed) {
     problems.push(
       `${name} may only be set together with ALLOW_TEST_GITHUB_ENDPOINTS=true (test stack only); unset it to use the real GitHub`,
     );
     return fallback;
   }
-  const url = parseHttpUrl(value);
-  if (!url) {
-    problems.push(`${name} must be an http or https URL`);
-    return fallback;
-  }
-  return url.origin + url.pathname.replace(/\/+$/, "");
+  return normalized;
 }
