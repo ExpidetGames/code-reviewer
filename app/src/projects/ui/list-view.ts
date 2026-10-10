@@ -30,7 +30,8 @@ export type LastRun = {
 
 /**
  * The last run of each repository, by repository id; a repository without a run is not in the map.
- * The jobs module provides the real source; until it is on this branch the list says "No run yet".
+ * The running server uses the jobs table (`getLastRunSource()` in src/runs/shared.ts); without a
+ * source the list says "No run yet".
  */
 export type LastRunSource = (
   repositoryIds: readonly string[],

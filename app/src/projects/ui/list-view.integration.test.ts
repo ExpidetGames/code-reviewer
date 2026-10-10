@@ -4,6 +4,9 @@
 import { describe, expect, it } from "vitest";
 import type { SessionUser } from "../../auth/access-policy.ts";
 import { createProjectsRepository } from "../../db/repositories/projects-repository.ts";
+import { createRunsRepository } from "../../db/repositories/runs-repository.ts";
+import { createJobQueue } from "../../jobs/job-queue.ts";
+import { createLastRunSource } from "../../runs/runs-service.ts";
 import { startSyncHarness } from "../../test-support/integration-sync-harness.ts";
 import { createProjectRouteHandler } from "../http.ts";
 import { createProjectService } from "../service.ts";
@@ -89,6 +92,50 @@ describe("the project list", () => {
       ["acme/widgets", "succeeded"],
       ["octocat/hello", null],
     ]);
+  });
+
+  // CR-34-T01
+  it("takes the last run from the jobs table: running while a runner works, then how it ended", async () => {
+    const app = await startList();
+    const widgets = await app.idOf("acme/widgets");
+    const gadgets = await app.idOf("acme/gadgets");
+    await app.projects.activateProject(widgets);
+    await app.projects.activateProject(gadgets);
+    const queue = createJobQueue(app.db);
+    const lastRuns = createLastRunSource({
+      runs: createRunsRepository(app.db),
+    });
+    const prUrl = "https://github.com/acme/widgets/pull/1";
+    const created = await queue.enqueue({
+      repositoryId: widgets,
+      prNumber: 1,
+      prUrl,
+      headSha: "a".repeat(40),
+      command: "review",
+      triggerKind: "webhook",
+      actorLogin: "octocat",
+    });
+    const lastRunOf = async (repositoryId: string) =>
+      (await loadProjectList({ projects: app.projects, lastRuns })).rows.find(
+        (row) => row.repositoryId === repositoryId,
+      )?.lastRun ?? null;
+
+    expect(await lastRunOf(widgets)).toMatchObject({ status: "queued" });
+    expect(await lastRunOf(gadgets)).toBeNull();
+
+    const claim = await queue.claimNext("runner-1");
+    expect(await lastRunOf(widgets)).toMatchObject({ status: "running" });
+
+    if (created.status !== "created" || claim === null)
+      throw new Error("the job was not handed out");
+    await queue.complete(created.job.id, claim.leaseToken, {
+      ok: false,
+      errorCode: "timeout",
+    });
+    const finished = await lastRunOf(widgets);
+    expect(finished).toMatchObject({ status: "failed" });
+    expect(finished?.at).toBe((await queue.get(created.job.id))?.finishedAt);
+    expect(await lastRunOf(gadgets)).toBeNull();
   });
 
   // CR-34-T03

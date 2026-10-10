@@ -30,14 +30,23 @@ const STATE_COPY: Record<ProjectRowView["status"], string> = {
   unavailable: "Unavailable",
 };
 
-function LastRunStatus({ run }: { run: LastRun | null }) {
+function LastRunStatus({
+  run,
+  repositoryId,
+}: {
+  run: LastRun | null;
+  repositoryId: string;
+}) {
   if (run === null) return <span className="muted">No run yet</span>;
   return (
     <span>
       {RUN_COPY[run.status]}{" "}
       <time dateTime={run.at} className="muted">
         {formatUtc(run.at)}
-      </time>
+      </time>{" "}
+      <Link href={`/runs?repository=${encodeURIComponent(repositoryId)}`}>
+        All runs
+      </Link>
     </span>
   );
 }
@@ -102,7 +111,11 @@ export function ProjectList({
               {STATE_COPY[row.status]}
             </span>
             <span className="small">
-              Last run: <LastRunStatus run={row.lastRun} />
+              Last run:{" "}
+              <LastRunStatus
+                run={row.lastRun}
+                repositoryId={row.repositoryId}
+              />
             </span>
             {row.status === "unavailable" && row.switchedOn ? (
               <span className="muted small">

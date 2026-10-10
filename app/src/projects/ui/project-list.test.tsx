@@ -105,6 +105,22 @@ describe("the project list with repositories", () => {
     ).toBe("true");
   });
 
+  it("links the last run to the runs of that project", () => {
+    renderList([
+      row({
+        repositoryId: "repo with space",
+        hasProject: true,
+        switchedOn: true,
+        status: "active",
+        lastRun: { status: "failed", at: "2026-10-10T12:34:56Z" },
+      }),
+    ]);
+
+    expect(
+      screen.getByRole("link", { name: "All runs" }).getAttribute("href"),
+    ).toBe("/runs?repository=repo%20with%20space");
+  });
+
   // CR-34-T01
   it("lists every repository, with the switch off for the inactive ones", () => {
     renderList([
