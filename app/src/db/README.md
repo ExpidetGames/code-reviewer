@@ -130,6 +130,10 @@ holds the repositories each integration can see. A repository the platform stops
 inactive (`active = 0`), never deleted; `reconcile` makes the rows of one integration match a
 complete list in one transaction.
 
+`webhook_deliveries` (migration `20261010170000_create_webhook_deliveries`, repository
+`webhook-deliveries-repository.ts`) holds the delivery ids the webhook route has accepted, so a
+redelivery produces no second trigger; rows are pruned after 7 days; see `src/webhooks/README.md`.
+
 `app_meta` (a key/value table for facts about the installation) exists to prove the setup. Product
 tables come with the tickets that need them: add the migration, the row type in `schema.ts` and the
 repository in the same change.
