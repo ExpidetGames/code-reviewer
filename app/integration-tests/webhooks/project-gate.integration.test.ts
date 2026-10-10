@@ -10,6 +10,7 @@ import {
   type WebhookDeliveryOptions,
 } from "../../../fakes/github/webhooks.ts";
 import {
+  fixturePullRequest,
   startWebhookHarness,
   type WebhookHarness,
 } from "../../src/test-support/webhook-harness.ts";
@@ -238,6 +239,7 @@ describe("two repositories in one installation", () => {
   it("hands over the delivery of the activated repository and not the other one's", async () => {
     const h = await startWithTwoRepositories();
     await h.projects.activateProject(await repositoryIdOf(h, "acme/gadgets"));
+    h.fake.addPullRequest("acme/gadgets", fixturePullRequest());
 
     const widgets = await h.deliver(
       "pull_request.opened",

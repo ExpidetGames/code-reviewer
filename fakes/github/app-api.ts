@@ -87,7 +87,14 @@ export type FakeGithubAppControls = {
   addRawInstallationRecord(record: Record<string, unknown>): void;
   addRepository(installationId: number, repository: FakeRepository): void;
   removeRepository(installationId: number, repositoryId: number): void;
+  /** Adds a pull request; one with the same number in the same repository is replaced. */
   addPullRequest(repoFullName: string, pullRequest: FakePullRequest): void;
+  /** Changes fields of an added pull request, like a push (`headSha`) or a close (`state`). */
+  updatePullRequest(
+    repoFullName: string,
+    number: number,
+    changes: Partial<Omit<FakePullRequest, "number">>,
+  ): void;
   setCollaboratorPermission(
     repoFullName: string,
     login: string,
@@ -546,9 +553,22 @@ export function createAppPart(options: FakeAppOptions): AppPart {
     },
     addPullRequest(repoFullName, pullRequest) {
       pullRequests.set(repoFullName, [
-        ...(pullRequests.get(repoFullName) ?? []),
+        ...(pullRequests.get(repoFullName) ?? []).filter(
+          (existing) => existing.number !== pullRequest.number,
+        ),
         pullRequest,
       ]);
+    },
+    updatePullRequest(repoFullName, number, changes) {
+      const existing = pullRequests.get(repoFullName) ?? [];
+      if (!existing.some((pr) => pr.number === number))
+        throw new Error(`no pull request ${number} in ${repoFullName}`);
+      pullRequests.set(
+        repoFullName,
+        existing.map((pr) =>
+          pr.number === number ? { ...pr, ...changes } : pr,
+        ),
+      );
     },
     setCollaboratorPermission(repoFullName, login, permission) {
       permissions.set(`${repoFullName}#${login.toLowerCase()}`, permission);

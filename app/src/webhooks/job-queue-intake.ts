@@ -1,20 +1,28 @@
 // The review trigger intake of the running app: it turns a trigger into a job in the queue. This is
 // a thin mapping and nothing else. Deciding whether a trigger deserves a job (the repository has an
-// active project, drafts wait, `synchronize` is debounced) is trigger policy, which the automatic
-// triggers ticket adds around this function, not inside the queue.
+// active project, drafts wait, `synchronize` is debounced) is trigger policy, which the webhook
+// handler applies before it calls the intake (automatic-review-policy.ts), not inside the queue.
 import type { RepositoriesRepository } from "../db/repositories/repositories-repository.ts";
-import type { Integration, ReviewTrigger } from "../integrations/types.ts";
+import type {
+  Integration,
+  RepoRef,
+  ReviewTrigger,
+} from "../integrations/types.ts";
 import { JobQueueError } from "../jobs/errors.ts";
 import type { JobQueue } from "../jobs/job-queue.ts";
 import type { EnqueueJobInput } from "../jobs/job-types.ts";
 import type { WebhookLogger } from "./logger.ts";
 import type {
+  EnqueueOptions,
   ReviewTriggerIntake,
   ReviewTriggerSource,
 } from "./review-trigger-intake.ts";
 
 export type JobQueueIntakeDeps = {
-  queue: Pick<JobQueue, "enqueue">;
+  queue: Pick<
+    JobQueue,
+    "enqueue" | "discardWaitingForPr" | "discardWaitingAutomaticForPr"
+  >;
   repositories: Pick<RepositoriesRepository, "findByExternalId">;
   logger: WebhookLogger;
 };
@@ -27,6 +35,7 @@ export function jobInputForTrigger(
   trigger: ReviewTrigger,
   repositoryId: string,
   source: ReviewTriggerSource,
+  options: EnqueueOptions = {},
 ): EnqueueJobInput {
   const common = {
     repositoryId,
@@ -35,6 +44,7 @@ export function jobInputForTrigger(
     headSha: trigger.headSha,
     actorLogin: trigger.actor.login,
     deliveryId: source.deliveryId,
+    ...(options.runAfter === undefined ? {} : { runAfter: options.runAfter }),
   };
   if (trigger.kind === "command")
     return {
@@ -50,8 +60,38 @@ export function jobInputForTrigger(
 export function createJobQueueReviewTriggerIntake(
   deps: JobQueueIntakeDeps,
 ): ReviewTriggerIntake {
+  async function discard(
+    repo: RepoRef,
+    integration: Integration,
+    prNumber: number,
+    scope: "all" | "automatic",
+  ): Promise<number> {
+    const repository = await deps.repositories.findByExternalId(
+      integration.id,
+      repo.externalId,
+    );
+    // No row, no jobs: nothing can wait for a repository the app has never heard of.
+    if (repository === undefined) return 0;
+    const discarded =
+      scope === "all"
+        ? await deps.queue.discardWaitingForPr(repository.id, prNumber)
+        : await deps.queue.discardWaitingAutomaticForPr(
+            repository.id,
+            prNumber,
+          );
+    deps.logger.info(
+      `[webhook] waiting jobs discarded scope=${scope} count=${discarded} repo=${repo.fullName} pr=${prNumber}`,
+    );
+    return discarded;
+  }
+
   return {
-    async enqueueReviewTrigger(trigger, integration: Integration, source) {
+    async enqueueReviewTrigger(
+      trigger,
+      integration: Integration,
+      source,
+      options,
+    ) {
       const repository = await deps.repositories.findByExternalId(
         integration.id,
         trigger.repo.externalId,
@@ -67,7 +107,7 @@ export function createJobQueueReviewTriggerIntake(
       let result;
       try {
         result = await deps.queue.enqueue(
-          jobInputForTrigger(trigger, repository.id, source),
+          jobInputForTrigger(trigger, repository.id, source, options),
         );
       } catch (error) {
         // Input the queue refuses will be refused every time: rejecting would make the route answer
@@ -91,6 +131,12 @@ export function createJobQueueReviewTriggerIntake(
       deps.logger.info(
         `[webhook] job ${result.status} job=${result.job.id}${why} repo=${trigger.repo.fullName} pr=${trigger.prNumber} command=${result.job.command} delivery=${source.deliveryId}`,
       );
+    },
+    async discardWaitingJobs(repo, integration, prNumber) {
+      return discard(repo, integration, prNumber, "all");
+    },
+    async discardWaitingAutomaticJobs(repo, integration, prNumber) {
+      return discard(repo, integration, prNumber, "automatic");
     },
   };
 }

@@ -235,12 +235,26 @@ export function fakeIntegrationProvider(
       if (event.action === "opened")
         return {
           kind: "review_trigger",
-          trigger: { ...base, kind: "opened", command: null, args: null },
+          trigger: {
+            ...base,
+            kind: "opened",
+            command: null,
+            args: null,
+            draft: false,
+            state: "open",
+          },
         };
       if (event.action === "synchronize")
         return {
           kind: "review_trigger",
-          trigger: { ...base, kind: "updated", command: null, args: null },
+          trigger: {
+            ...base,
+            kind: "updated",
+            command: null,
+            args: null,
+            draft: false,
+            state: "open",
+          },
         };
       if (event.action === "comment") {
         const match = COMMAND_PATTERN.exec(event.comment?.body ?? "");
