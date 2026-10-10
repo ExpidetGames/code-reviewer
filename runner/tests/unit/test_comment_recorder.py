@@ -274,3 +274,58 @@ def test_no_failure_comment_in_a_healthy_run(recorder: CommentRecorder) -> None:
     record(recorder, "created", "https://x/review", f"{REVIEW_MARKER}\nbody")
 
     assert recorder.failure_comment_posted() is False
+
+
+# CR-49-T02 (a comment longer than GitHub takes is cut by the provider when it is written)
+def test_a_comment_longer_than_the_provider_limit_is_recorded_as_cut(
+    recorder: CommentRecorder,
+) -> None:
+    provider = provider_with_pull()
+
+    provider.publish_comment(f"{REVIEW_MARKER}\n" + "x" * 70_000)
+
+    assert recorder.cut_comment_posted() is True
+
+
+def test_a_comment_that_fits_the_provider_limit_is_not_recorded_as_cut(
+    recorder: CommentRecorder,
+) -> None:
+    provider = provider_with_pull()
+
+    provider.publish_comment(f"{REVIEW_MARKER}\n" + "x" * 64_000)
+
+    assert recorder.cut_comment_posted() is False
+
+
+def test_an_edit_beyond_the_provider_limit_is_recorded_as_cut(recorder: CommentRecorder) -> None:
+    class Editable(StubComment):
+        def edit(self, body: str) -> None:
+            self.body = body
+
+    provider = provider_with_pull()
+
+    provider.edit_comment(
+        Editable(html_url="https://x/review"), f"{REVIEW_MARKER}\n" + "x" * 66_000
+    )
+
+    assert recorder.cut_comment_posted() is True
+
+
+def test_a_failure_comment_beyond_the_limit_is_not_a_cut_review(recorder: CommentRecorder) -> None:
+    provider = provider_with_pull()
+
+    provider.publish_comment("Failed to review PR: " + "x" * 70_000)
+
+    assert recorder.cut_comment_posted() is False
+
+
+def test_a_standalone_review_is_detected(recorder: CommentRecorder) -> None:
+    record(recorder, "created", "https://x/standalone", "## Standalone PR Review\n\n_text_")
+
+    assert recorder.standalone_review_posted() is True
+
+
+def test_a_canonical_review_is_not_a_standalone_review(recorder: CommentRecorder) -> None:
+    record(recorder, "created", "https://x/review", f"## PR Reviewer Guide 🔍\n\n{REVIEW_MARKER}\n")
+
+    assert recorder.standalone_review_posted() is False

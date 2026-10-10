@@ -18,6 +18,7 @@ from litellm.exceptions import AuthenticationError, InternalServerError, RateLim
 from loguru import logger
 from pr_agent.agent.pr_agent import PRAgent
 from pr_agent.git_providers.github_provider import GithubProvider
+from support import pr_agent_module
 
 from code_reviewer_runner import runner
 from code_reviewer_runner.identity_patch import PATCHED_FOR_VERSION
@@ -1054,3 +1055,212 @@ def test_the_watchdog_fallback_result_is_marked_as_truncated(
     timer.join(timeout=5)
 
     assert json.loads(out.getvalue())["logTruncated"] is True
+
+
+def small_state() -> dict[str, Any]:
+    finding = {"finding_id": "a", "state": "ACTIVE", "path": "greeting.py", "body": "x" * 500}
+    return {
+        "schema_version": 1,
+        "findings": [finding],
+        "last_run": {"complete": True, "excluded_files": [], "head_sha": "a", "run_id": ""},
+    }
+
+
+def review_tool_cannot_fit_the_state() -> None:
+    """What the review tool does when the record no longer fits: it asks for a comment that is too
+    small for the record, catches the error and goes on (as PR-Agent 0.47.0 does)."""
+    pr_reviewer = pr_agent_module("pr_agent.tools.pr_reviewer")
+
+    try:
+        pr_reviewer.append_review_state("review", small_state(), 100)
+    except ValueError:
+        return
+    raise AssertionError("the state was expected not to fit")
+
+
+def review_tool_cuts_the_review_text() -> None:
+    pr_reviewer = pr_agent_module("pr_agent.tools.pr_reviewer")
+
+    pr_reviewer.append_review_state("review text " * 300, small_state(), 1500)
+
+
+# CR-49-T01
+def test_a_review_state_that_did_not_fit_is_reported_with_the_comment_that_was_posted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def double() -> bool:
+        review_tool_cannot_fit_the_state()
+        provider_with_pull().publish_comment(f"## PR Reviewer Guide\n\n{REVIEW_MARKER}\n\nbody")
+        return True
+
+    use_double(monkeypatch, double)
+
+    result, _ = run()
+
+    assert result.ok is False
+    assert result.exit_code == 1
+    assert result.error_code is ErrorCode.REVIEW_STATE_TRUNCATED
+    assert result.comment_url == "https://github.com/octo/repo/pull/7#c1"
+
+
+# CR-49-T01
+def test_a_standalone_review_after_a_state_that_did_not_fit_is_reported_as_truncated_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def double() -> bool:
+        review_tool_cannot_fit_the_state()
+        provider_with_pull().publish_comment("## Standalone PR Review\n\n_text_\n\nbody")
+        return True
+
+    use_double(monkeypatch, double)
+
+    result, _ = run()
+
+    assert result.ok is False
+    assert result.error_code is ErrorCode.REVIEW_STATE_TRUNCATED
+    assert result.comment_url is None
+
+
+# CR-49-T02
+def test_a_visible_review_that_was_cut_is_reported_with_the_comment_that_was_posted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def double() -> bool:
+        review_tool_cuts_the_review_text()
+        provider_with_pull().publish_comment(f"## PR Reviewer Guide\n\n{REVIEW_MARKER}\n\nbody")
+        return True
+
+    use_double(monkeypatch, double)
+
+    result, _ = run()
+
+    assert result.ok is False
+    assert result.exit_code == 1
+    assert result.error_code is ErrorCode.REVIEW_TEXT_TRUNCATED
+    assert result.comment_url == "https://github.com/octo/repo/pull/7#c1"
+
+
+# CR-49-T02
+def test_a_review_comment_that_the_provider_had_to_cut_is_reported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def double() -> bool:
+        provider_with_pull().publish_comment(
+            f"## PR Reviewer Guide\n\n{REVIEW_MARKER}\n" + "x" * 70_000
+        )
+        return True
+
+    use_double(monkeypatch, double)
+
+    result, _ = run()
+
+    assert result.ok is False
+    assert result.error_code is ErrorCode.REVIEW_TEXT_TRUNCATED
+    assert result.comment_url == "https://github.com/octo/repo/pull/7#c1"
+
+
+def test_a_lost_record_is_reported_before_a_cut_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def double() -> bool:
+        review_tool_cuts_the_review_text()
+        review_tool_cannot_fit_the_state()
+        provider_with_pull().publish_comment(f"## PR Reviewer Guide\n\n{REVIEW_MARKER}\n\nbody")
+        return True
+
+    use_double(monkeypatch, double)
+
+    result, _ = run()
+
+    assert result.error_code is ErrorCode.REVIEW_STATE_TRUNCATED
+
+
+# CR-49-T03
+def test_a_review_with_a_state_that_fits_stays_ok(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def double() -> bool:
+        pr_reviewer = pr_agent_module("pr_agent.tools.pr_reviewer")
+
+        pr_reviewer.append_review_state("short review", small_state(), 65_000)
+        provider_with_pull().publish_comment(f"## PR Reviewer Guide\n\n{REVIEW_MARKER}\n\nbody")
+        return True
+
+    use_double(monkeypatch, double)
+
+    result, _ = run()
+
+    assert result.ok is True
+    assert result.error_code is None
+    assert result.comment_url == "https://github.com/octo/repo/pull/7#c1"
+
+
+def test_a_standalone_review_without_a_lost_record_is_still_not_published(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def double() -> bool:
+        provider_with_pull().publish_comment("## Standalone PR Review\n\n_text_\n\nbody")
+        return True
+
+    use_double(monkeypatch, double)
+
+    result, _ = run()
+
+    assert result.error_code is ErrorCode.REVIEW_NOT_PUBLISHED
+
+
+def test_a_failure_comment_wins_over_a_lost_record(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def double() -> bool:
+        review_tool_cannot_fit_the_state()
+        provider_with_pull().publish_comment("Failed to review PR: boom")
+        return True
+
+    use_double(monkeypatch, double)
+
+    result, _ = run()
+
+    assert result.ok is False
+    assert result.error_code is ErrorCode.COMMAND_FAILED
+
+
+def test_a_long_comment_of_another_command_is_not_a_cut_review(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def double() -> bool:
+        provider_with_pull().publish_comment("### **Ask** ❓\n\n" + "x" * 70_000)
+        return True
+
+    use_double(monkeypatch, double)
+
+    result, _ = run(make_job(command="ask", args=["Why?"]))
+
+    assert result.ok is True
+    assert result.error_code is None
+
+
+def test_the_review_state_watch_is_removed_after_the_job(monkeypatch: pytest.MonkeyPatch) -> None:
+    pr_reviewer = pr_agent_module("pr_agent.tools.pr_reviewer")
+
+    async def double() -> bool:
+        return True
+
+    use_double(monkeypatch, double)
+    before = pr_reviewer.append_review_state
+
+    run()
+
+    assert pr_reviewer.append_review_state is before
+
+
+def test_a_review_tool_the_watch_cannot_observe_stops_the_job_before_handle_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pr_reviewer = pr_agent_module("pr_agent.tools.pr_reviewer")
+
+    async def double() -> bool:
+        return True
+
+    calls = use_double(monkeypatch, double)
+    monkeypatch.delattr(pr_reviewer, "append_review_state")
+
+    result, _ = run()
+
+    assert result.ok is False
+    assert result.error_code is ErrorCode.RUNNER_ERROR
+    assert calls == []

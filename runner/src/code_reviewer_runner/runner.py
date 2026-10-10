@@ -47,6 +47,11 @@ from code_reviewer_runner.pr_agent_runtime import JobTimeout, execute
 from code_reviewer_runner.redaction import REDACTED, RedactingStream, Redactor
 from code_reviewer_runner.repo_settings_guard import install_repo_settings_guard
 from code_reviewer_runner.result import ErrorCode, JobResult
+from code_reviewer_runner.review_state_watch import (
+    ReviewStateWatch,
+    WatchError,
+    install_review_state_watch,
+)
 
 PROGRAM_NAME = "code-reviewer-run-job"
 _ERROR_LEVEL = 40
@@ -91,6 +96,13 @@ def run_job(
         capture.add(_ERROR_LEVEL, "ERROR", "cannot load PR-Agent", error)
         return _failure(ErrorCode.RUNNER_ERROR, "cannot load PR-Agent", started, capture)
 
+    try:
+        watch, undo_watch = install_review_state_watch()
+    except WatchError as error:
+        undo_patch()
+        capture.add(_ERROR_LEVEL, "ERROR", "cannot watch the review state", error)
+        return _failure(ErrorCode.RUNNER_ERROR, "cannot watch the review state", started, capture)
+
     recorder: CommentRecorder
     recorder, undo_recorder = install_comment_recorder()
     guard, undo_guard = install_repo_settings_guard()
@@ -118,13 +130,20 @@ def run_job(
     finally:
         undo_guard()
         undo_recorder()
+        undo_watch()
         undo_patch()
 
     failure_comment = recorder.failure_comment_posted()
     comment_url = None if failure_comment else recorder.comment_url(job.command)
     ok = handled and not failed_flag and not failure_comment
     error_code: ErrorCode | None = None
-    if ok and job.command is Command.REVIEW and comment_url is None:
+    truncation = _truncation(job.command, watch, recorder) if ok else None
+    if truncation is not None:
+        # PR-Agent shortened the review to fit GitHub's limit and went on as if nothing happened:
+        # findings are lost, which the caller must see. The comment, if one was found, stays.
+        ok = False
+        error_code = truncation
+    elif ok and job.command is Command.REVIEW and comment_url is None:
         # handle_request returned normally but nothing was posted: a failure the caller must see.
         ok = False
         error_code = ErrorCode.REVIEW_NOT_PUBLISHED
@@ -144,6 +163,23 @@ def run_job(
         log_truncated=log_truncated,
         usage=usage,
     )
+
+
+def _truncation(
+    command: Command, watch: ReviewStateWatch, recorder: CommentRecorder
+) -> ErrorCode | None:
+    """The code for a review that was shortened to fit the comment limit, or None.
+
+    A lost record is the worse loss (findings are forgotten from now on), so it is named first. A
+    review comment the provider had to cut by itself is a cut review too, however it got there.
+    """
+    if command is not Command.REVIEW:
+        return None
+    if watch.state_did_not_fit:
+        return ErrorCode.REVIEW_STATE_TRUNCATED
+    if watch.text_cut or recorder.cut_comment_posted():
+        return ErrorCode.REVIEW_TEXT_TRUNCATED
+    return None
 
 
 def _ensure_clean(result: JobResult, secrets: Sequence[str]) -> JobResult:
