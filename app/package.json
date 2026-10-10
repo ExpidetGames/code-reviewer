@@ -10,16 +10,19 @@
     "typecheck": "next typegen && tsc --noEmit --pretty false",
     "test": "vitest run --project unit",
     "test:watch": "vitest --project unit",
-    "test:int": "vitest run --project integration --passWithNoTests",
+    "test:int": "vitest run --project integration",
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "kysely": "^0.29.6",
     "next": "16.4.0",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.0",
+    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^24.19.2",
     "@types/react": "^19",
     "@types/react-dom": "^19",

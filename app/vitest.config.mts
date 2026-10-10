@@ -36,6 +36,7 @@ export default defineConfig({
             "integration-tests/**/*.integration.test.{ts,tsx}",
           ],
           setupFiles,
+          globalSetup: ["./src/test-support/db-template.global-setup.ts"],
           pool: "forks",
           clearMocks: true,
           restoreMocks: true,
