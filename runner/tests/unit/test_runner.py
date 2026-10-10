@@ -13,6 +13,7 @@ from typing import Any
 
 import pytest
 from github import GithubException
+from github.Requester import Requester
 from litellm.exceptions import AuthenticationError, InternalServerError, RateLimitError, Timeout
 from loguru import logger
 from pr_agent.agent.pr_agent import PRAgent
@@ -669,7 +670,7 @@ def test_the_watchdog_still_prints_a_timeout_result_when_the_log_tail_cannot_be_
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class BrokenCapture(LogCapture):
-        def tail(self) -> str:
+        def snapshot(self) -> tuple[str, bool]:
             raise RuntimeError("cannot build the tail")
 
     exits: list[int] = []
@@ -847,16 +848,17 @@ def test_without_a_recorded_comment_the_url_is_null_and_no_extra_github_call_is_
 ) -> None:
     requests: list[str] = []
 
+    def record_request(self: Any, verb: str, url: str, *args: Any, **kwargs: Any) -> Any:
+        requests.append(f"{verb} {url}")
+        raise AssertionError("the runner must not call GitHub itself")
+
     async def double() -> bool:
         return True
 
     use_double(monkeypatch, double)
-    monkeypatch.setattr(
-        GithubProvider,
-        "get_issue_comments",
-        lambda self: requests.append("listing") or [],  # pyright: ignore
-        raising=False,
-    )
+    # Any request through PyGithub's requester (a comment listing included) would be recorded.
+    monkeypatch.setattr(Requester, "requestJsonAndCheck", record_request)
+    monkeypatch.setattr(Requester, "requestJson", record_request)
 
     result, _ = run(make_job(command="improve"))
 
@@ -917,8 +919,10 @@ def test_untrusted_log_text_cannot_break_or_overwrite_the_result(
 
     line = result.to_line()
     assert "\n" not in line
-    assert "\x1b" not in line
     printed = json.loads(line)
+    # to_line escapes non-ASCII, so only the decoded tail proves that the cleaning happened
+    assert "\x1b" not in printed["logTail"]
+    assert "red" in printed["logTail"]
     assert printed["ok"] is False
     assert printed["errorCode"] in {code.value for code in ErrorCode}
     assert isinstance(printed["logTail"], str)
@@ -931,3 +935,75 @@ def test_untrusted_log_text_cannot_break_or_overwrite_the_result(
         "logTruncated",
         "usage",
     }
+
+
+# CR-12 review: PR-Agent's "Standalone PR Review" is not the result of a review
+def test_a_standalone_review_comment_is_not_published_as_the_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pr_agent.tools.pr_reviewer import PRReviewer
+
+    canonical = f"## PR Reviewer Guide 🔍\n\n{REVIEW_MARKER}\n\nHere are some key observations"
+    standalone = PRReviewer._as_non_authoritative_review(canonical)  # pyright: ignore
+
+    async def double() -> bool:
+        provider_with_pull().publish_comment(standalone)
+        return True
+
+    use_double(monkeypatch, double)
+
+    result, _ = run()
+
+    assert result.ok is False
+    assert result.error_code is ErrorCode.REVIEW_NOT_PUBLISHED
+    assert result.comment_url is None
+
+
+def test_a_failed_result_keeps_its_code_and_detail_when_the_log_fills_the_limit() -> None:
+    capture = LogCapture(Redactor([]))
+    for number in range(500):
+        capture.add(20, "INFO", f"line {number:04d} " + "x" * 80)
+
+    result = runner._failure(  # pyright: ignore[reportPrivateUsage]
+        ErrorCode.TIMEOUT, "the command did not finish in time", 0.0, capture
+    )
+
+    assert result.log_tail.startswith("timeout: the command did not finish in time")
+    assert len(result.log_tail.encode("utf-8")) <= 4096
+    assert result.log_truncated is True
+
+
+def test_a_blanked_log_tail_is_marked_as_truncated() -> None:
+    result = JobResult(
+        ok=True,
+        duration_ms=1,
+        comment_url=None,
+        error_code=None,
+        log_tail=f"leaked {TOKEN}",
+    )
+
+    cleaned = runner._ensure_clean(result, [TOKEN])  # pyright: ignore[reportPrivateUsage]
+
+    assert cleaned.log_tail == "[REDACTED]"
+    assert cleaned.log_truncated is True
+
+
+def test_the_watchdog_fallback_result_is_marked_as_truncated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class BrokenCapture(LogCapture):
+        def snapshot(self) -> tuple[str, bool]:
+            raise RuntimeError("cannot build the tail")
+
+    exits: list[int] = []
+    monkeypatch.setattr(runner.os, "_exit", exits.append)
+    monkeypatch.setattr(runner, "HARD_TIMEOUT_GRACE_SECONDS", 0.0)
+    out = io.StringIO()
+    channel = runner._ResultChannel(out)  # pyright: ignore[reportPrivateUsage]
+
+    timer = runner._start_watchdog(  # pyright: ignore[reportPrivateUsage]
+        0.01, channel, time.monotonic(), BrokenCapture(Redactor([])), []
+    )
+    timer.join(timeout=5)
+
+    assert json.loads(out.getvalue())["logTruncated"] is True

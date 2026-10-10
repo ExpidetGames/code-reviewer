@@ -10,7 +10,7 @@ Date: 2026-10-10. PR-Agent: `pr-agent==0.47.0`. Runner: `code-reviewer-run-job`
 
 | Field | Source |
 |---|---|
-| `commentUrl` | Recorder around `GithubProvider.publish_comment` / `edit_comment`; the review (or improve, or answer) comment is chosen by its hidden marker. An edit counts, which is what every second review does. |
+| `commentUrl` | Recorder around `GithubProvider.publish_comment` / `edit_comment`; the review (or improve summary, or answer) comment is chosen by its hidden marker only: an exact line within the first five lines (or the link-reference form). The visible heading is no identity. An edit counts, which is what every second review does. |
 | `ok` | `handle_request` returned `True` **and** the tool did not mark the command as failed **and** no "Failed to ..." comment was posted. A `review` that posted no review comment is also not ok (`review_not_published`). |
 | `errorCode` | The exception PR-Agent logged (the runner's loguru sink reads it off the log record) classified by type and cause chain; free text never becomes a code. |
 | `durationMs` | Monotonic clock of the runner process, from start until the result is built. |
@@ -66,7 +66,7 @@ reviewer guide marker: the same URL. Both paths agree here.
 | T06 10 MB of log | New: unit (`LogCapture`, 50,000 lines of 200 bytes) and a real process (`flood` scenario: 10 MB through loguru plus 10 MB on stdout and stderr): tail at most 4096 bytes, `logTruncated: true`, stdout stays one short line. Behavior change: new field `logTruncated`. |
 | T07 comment link by API | Not applicable by the decision above (recorder). Test that no listing call is made and that `commentUrl` is `null` with `ok: true` for commands other than `review`. |
 | T08 secrets in git URL / URL-encoded | New (`x-access-token:TOKEN@` URL, quoted token, Authorization header, key; unit and a real process). The redactor already handled these forms. |
-| T09 hostile log text | New (quotes, newlines, escape sequences, embedded `{"ok": true}`; unit and a real process). Behavior change: escape sequences and control characters are now removed from the tail, so a log viewer cannot be driven by them. |
+| T09 hostile log text | New (quotes, newlines, escape sequences, embedded `{"ok": true}`; unit and a real process). Behavior change: escape sequences are removed and control characters turned into spaces before redaction, so a log viewer cannot be driven by them and a secret split by an escape sequence is still found. The tests assert on the decoded `logTail`. |
 | T10 shared schema in `contracts/` | Not applicable yet: `contracts/` comes with CR-28. The result shape is the one in `runner/README.md`, `ErrorCode` is the single enumeration, and a test pins README and enum together. |
 | T11 decision and real example | This document. |
 
@@ -74,14 +74,24 @@ reviewer guide marker: the same URL. Both paths agree here.
 
 | Command | No comment link |
 |---|---|
-| `review` | `ok: false`, `review_not_published` (a review that posted nothing is a failure the caller must see). This replaces the earlier idea "ok stays true"; it matches the CR-41 decision. |
+| `review` | `ok: false`, `review_not_published` (a review that posted nothing, or only PR-Agent's non-authoritative "Standalone PR Review" comment, is a failure the caller must see). This supersedes the earlier lead decision "ok stays true" for `review`; it matches the later CR-41 decision. |
 | `improve` | `ok: true`, `commentUrl: null` (no suggestions is a valid outcome). |
 | `ask` | `ok: true`, `commentUrl: null` if no answer comment was recorded. |
 | `describe` | Always `null`: it edits the pull request itself. |
+
+## Standalone comments (found in the review of this PR)
+
+Without a verified identity PR-Agent 0.47.0 posts the review as a separate comment headed "Standalone PR
+Review" (`PRReviewer._as_non_authoritative_review`). It drops the hidden marker but keeps the visible
+heading "PR Reviewer Guide". The first version of the recorder also accepted the heading, so such a run
+ended `ok: true` with the URL of a comment that "will not replace the canonical review" (this is what the
+CR-11 control run did). Now only the marker counts, so the same run ends `ok: false` with
+`review_not_published`. Tests: the heading alone is no result, the real standalone body built with PR-Agent's
+own function is no result, the canonical body is, the link-reference form of the marker is accepted.
 
 ## Follow-ups
 
 - When `contracts/` exists (CR-28): add `logTruncated` to the result schema and validate the results of
   the tests above against it on both sides (CR-12-T10).
-- A standalone fallback comment ("Standalone PR Review", seen without the identity patch in CR-11) still
-  contains the reviewer guide marker and would be picked as the result. Worth an engine test.
+- Engine suite (CR-41): the "Standalone PR Review" case against a fake GitHub (unit tests cover it with
+  the body PR-Agent 0.47.0 builds).

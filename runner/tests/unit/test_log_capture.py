@@ -226,3 +226,34 @@ def test_terminal_escape_sequences_and_control_characters_are_removed_from_the_t
     assert "\x1b" not in tail
     assert all(ord(character) >= 32 or character == "\n" for character in tail)
     assert "red text" in tail
+
+
+# CR-12 review: clean first, then redact
+def test_a_secret_split_by_an_escape_sequence_is_still_redacted(capture: LogCapture) -> None:
+    attach(capture)
+
+    logger.info(f"token {TOKEN[:12]}\x1b[0m{TOKEN[12:]} end")
+
+    tail = capture.tail()
+    assert TOKEN[:12] not in tail
+    assert TOKEN[12:] not in tail
+    assert REDACTED in tail
+
+
+def test_carriage_returns_and_other_white_space_controls_become_spaces(capture: LogCapture) -> None:
+    attach(capture)
+
+    logger.info("step 1\rstep 2\x0bstep 3\x0cstep 4\x85step 5")
+
+    assert "INFO step 1 step 2 step 3 step 4 step 5" in capture.tail()
+
+
+def test_the_tail_and_the_truncation_flag_come_from_one_snapshot(capture: LogCapture) -> None:
+    attach(capture)
+    for number in range(500):
+        logger.info(f"line {number:04d} " + "x" * 60)
+
+    tail, truncated = capture.snapshot()
+
+    assert tail == capture.tail()
+    assert truncated is True
