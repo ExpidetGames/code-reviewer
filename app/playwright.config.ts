@@ -20,6 +20,13 @@ const githubAppPublicKey = createPublicKey(githubAppPrivateKey)
   .export({ type: "spki", format: "pem" })
   .toString();
 
+// Locally an installed Chrome can be used instead of a downloaded Chromium:
+// PLAYWRIGHT_CHANNEL=chrome pnpm test:e2e
+const browser = {
+  ...devices["Desktop Chrome"],
+  channel: process.env.PLAYWRIGHT_CHANNEL || undefined,
+};
+
 export default defineConfig({
   testDir: "e2e",
   testMatch: /.*\.e2e\.ts$/,
@@ -34,15 +41,22 @@ export default defineConfig({
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
+  // The journeys share one app and one database file. The ones that put runs into the queue or claim
+  // them (the Runs pages and the manual start) must not overlap: the Runs journey expects an empty
+  // queue when it starts and `claimNextRun` takes the oldest job of the whole queue. So they are
+  // projects of their own, and the manual start waits for the Runs journeys to finish.
   projects: [
     {
       name: "chromium",
-      use: {
-        ...devices["Desktop Chrome"],
-        // Locally an installed Chrome can be used instead of a downloaded Chromium:
-        // PLAYWRIGHT_CHANNEL=chrome pnpm test:e2e
-        channel: process.env.PLAYWRIGHT_CHANNEL || undefined,
-      },
+      use: browser,
+      testIgnore: [/e2e\/runs\//, /e2e\/reviews\//],
+    },
+    { name: "runs", use: browser, testMatch: /e2e\/runs\/.*\.e2e\.ts$/ },
+    {
+      name: "reviews",
+      use: browser,
+      testMatch: /e2e\/reviews\/.*\.e2e\.ts$/,
+      dependencies: ["runs"],
     },
   ],
   // Two servers. The fake GitHub stands in for github.com (sign in) and api.github.com; the app

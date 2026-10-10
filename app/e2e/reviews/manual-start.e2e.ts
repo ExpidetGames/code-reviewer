@@ -13,7 +13,7 @@ import {
   signInThroughTheForm,
   type GithubAccount,
 } from "../helpers/github-fake";
-import { claimNextRun, completeRun } from "../helpers/job-queue";
+import { claimRun, completeRun } from "../helpers/job-queue";
 
 const account: GithubAccount = {
   id: 7400001,
@@ -104,6 +104,7 @@ test.describe("starting a review by hand", () => {
         name: `${WIDGETS.fullName} #12`,
       }),
     ).toBeVisible();
+    const runId = new URL(page.url()).pathname.split("/").at(-1) ?? "";
     await expect(page.getByText("Started by manual-journey")).toBeVisible();
 
     await page.getByRole("link", { name: "Runs", exact: true }).click();
@@ -113,7 +114,7 @@ test.describe("starting a review by hand", () => {
     await expect(run.locator(".badge-run")).toContainText("Waiting", POLL_WAIT);
     await expect(run).toContainText("Started by manual-journey");
 
-    const claim = await claimNextRun();
+    const claim = await claimRun(runId);
     await completeRun(claim, {
       ok: true,
       result: {
