@@ -23,6 +23,7 @@ import {
 } from "../../jobs/job-status.ts";
 import {
   JOB_TRIGGER_KINDS,
+  type CancelClaimedResult,
   type ClaimResult,
   type CompleteResult,
   type EnqueueResult,
@@ -97,6 +98,16 @@ export type JobsRepository = {
   ): Promise<ReleaseResult>;
   /** Deals with leases and runtimes that ran out. `claimNext` does this first on every call. */
   expireStaleJobs(): Promise<ExpiryReport>;
+  /**
+   * Cancels one claimed job with `errorCode`, in one statement keyed on the job id and the lease token
+   * of the claim (running -> cancelled). The attempt count is not touched and the job is never queued
+   * in between. `not_holder` when the caller does not hold the job (any more).
+   */
+  cancelClaimed(
+    jobId: string,
+    leaseToken: string,
+    errorCode: JobErrorCode,
+  ): Promise<CancelClaimedResult>;
   /** Cancels every waiting job of a repository (its project was deactivated); returns how many. */
   cancelWaitingForRepository(repositoryId: string): Promise<number>;
   /** Cancels the waiting jobs of one pull request (it was closed); returns how many. */
@@ -553,6 +564,28 @@ export function createJobsRepository(
 
     expireStaleJobs() {
       return inTransaction((trx) => expire(trx, now()));
+    },
+
+    async cancelClaimed(jobId, leaseToken, errorCode) {
+      const timestamp = formatTimestamp(now());
+      // Not a transition of the shared table (`canTransition`): `cancelWaiting` derives its statuses
+      // from that table and a deactivation must never cancel running jobs. This one statement is the
+      // only way a running job becomes cancelled, and only for the holder of the claim.
+      const row = await db
+        .updateTable("jobs")
+        .set({
+          status: "cancelled",
+          error_code: errorCode,
+          lease_expires_at: null,
+          finished_at: timestamp,
+          updated_at: timestamp,
+        })
+        .where(runningWhere({ claim: { jobId, leaseToken } }))
+        .returningAll()
+        .executeTakeFirst();
+      return row === undefined
+        ? { status: "not_holder" }
+        : { status: "cancelled", job: toJob(row) };
     },
 
     cancelWaitingForRepository(repositoryId) {

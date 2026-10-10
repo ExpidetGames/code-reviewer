@@ -3,11 +3,12 @@
 // job that was queued while the project was on and is claimed after it was switched off (and for a
 // deactivation that raced with the claim). Asking the project service at claim time, not at enqueue
 // time, is what makes the answer current.
+import type { JobErrorCode } from "../jobs/job-types.ts";
 import type { ProjectService } from "../projects/service.ts";
 import type { ClaimGuard } from "./claim-guard.ts";
 
-/** The error code of a job that is dropped because its project is off (`JOB_ERROR_CODES`). */
-export const PROJECT_DEACTIVATED = "project_deactivated" as const;
+/** The error code of a job that is dropped because its project is off. */
+export const PROJECT_DEACTIVATED = "project_deactivated" satisfies JobErrorCode;
 
 export function createProjectClaimGuard(deps: {
   projects: Pick<ProjectService, "getActiveProjectForRepository">;

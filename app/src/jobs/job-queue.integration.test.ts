@@ -905,6 +905,75 @@ describe("dropping waiting jobs", () => {
     ).toMatchObject({ status: "completed" });
   });
 
+  // CR-46-T01
+  it("cancels a claimed job in one step for the holder of the claim, on any attempt, without queuing it again", async () => {
+    const fixture = await createJobQueueFixture();
+    const job = await fixture.enqueueNew();
+    await fixture.db
+      .updateTable("jobs")
+      .set({ attempts: 2 })
+      .where("id", "=", job.id)
+      .execute();
+    const claimed = await fixture.queue.claimNext("runner-a");
+    fixture.clock.advance(SECOND);
+
+    const result = await fixture.queue.cancelClaimed(
+      job.id,
+      claimed!.leaseToken,
+      "project_deactivated",
+    );
+
+    expect(result).toMatchObject({
+      status: "cancelled",
+      job: {
+        status: "cancelled",
+        errorCode: "project_deactivated",
+        attempts: 2,
+        leaseExpiresAt: null,
+        finishedAt: fixture.clock.now().toISOString(),
+      },
+    });
+    // It frees the slot of the head commit, like any cancelled job.
+    expect((await fixture.enqueue({ headSha: job.headSha })).status).toBe(
+      "created",
+    );
+  });
+
+  // CR-46-T01
+  it("refuses to cancel a job for a caller that does not hold it, and a job that is not running", async () => {
+    const fixture = await createJobQueueFixture();
+    const job = await fixture.enqueueNew();
+
+    expect(
+      await fixture.queue.cancelClaimed(
+        job.id,
+        "no-such-token",
+        "project_deactivated",
+      ),
+    ).toStrictEqual({ status: "not_holder" });
+    const claimed = await fixture.queue.claimNext("runner-a");
+    expect(
+      await fixture.queue.cancelClaimed(
+        job.id,
+        "stale-token",
+        "project_deactivated",
+      ),
+    ).toStrictEqual({ status: "not_holder" });
+    expect((await fixture.queue.get(job.id))?.status).toBe("running");
+    await fixture.queue.complete(job.id, claimed!.leaseToken, {
+      ok: true,
+      result: {},
+    });
+    expect(
+      await fixture.queue.cancelClaimed(
+        job.id,
+        claimed!.leaseToken,
+        "project_deactivated",
+      ),
+    ).toStrictEqual({ status: "not_holder" });
+    expect((await fixture.queue.get(job.id))?.status).toBe("succeeded");
+  });
+
   it("does nothing when nothing waits", async () => {
     const fixture = await createJobQueueFixture();
 

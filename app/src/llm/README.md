@@ -49,7 +49,9 @@ ignored, the default is used, and it is reported as a _warning_ (`LLM_MODEL_INVA
   with the key that was handed out with the claim of that job _and_ the current one.
 - **Model and token budget per project** are review settings (`src/review-settings`); they replace the
   model and the context window of the access when a job is built. The provider and the key always
-  come from here.
+  come from here. Because the review settings always supply a token budget for a project,
+  `LLM_MAX_TOKENS` (the context window of a model PR-Agent does not know) only reaches a job as a
+  fallback, when no review setting names a budget.
 
 ## Testing
 

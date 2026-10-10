@@ -120,6 +120,9 @@ export type CompleteResult =
   | { status: "outcome_conflict"; job: Job }
   | { status: "not_holder" };
 
+export type CancelClaimedResult =
+  { status: "cancelled"; job: Job } | { status: "not_holder" };
+
 export type ReleaseResult =
   /** The job is waiting again with one more lost attempt. */
   | { status: "requeued"; job: Job }

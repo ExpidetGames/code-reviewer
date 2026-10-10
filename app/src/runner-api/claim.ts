@@ -29,7 +29,7 @@ import type {
   RepoRef,
 } from "../integrations/types.ts";
 import type { JobQueue } from "../jobs/job-queue.ts";
-import type { ClaimResult, Job } from "../jobs/job-types.ts";
+import type { ClaimResult, Job, JobErrorCode } from "../jobs/job-types.ts";
 import { revealLlmAccess, type LlmAccessResult } from "../llm/access.ts";
 import {
   MAX_LLM_CONTEXT_TOKENS,
@@ -77,18 +77,13 @@ export const CLAIM_RELEASE_REASONS = [
 /** When the platform does not say how long to wait. */
 export const DEFAULT_RETRY_AFTER_SECONDS = 30;
 const MAX_RETRY_AFTER_SECONDS = 900;
-/** How long a claim that is being cancelled waits in the queue before it could be taken again. */
-const CANCEL_PARKING_MS = 60 * 60 * 1000;
 /** How many jobs one claim request may end at claim time before it answers 204 and lets the runner ask again. */
 const MAX_REFUSED_PER_REQUEST = 25;
 /** The question of an `ask` job: the runner refuses more (and none). */
 const MAX_QUESTION_CHARS = 4000;
 
 export type ClaimDeps = {
-  queue: Pick<
-    JobQueue,
-    "claimNext" | "complete" | "release" | "cancelWaitingForRepository"
-  >;
+  queue: Pick<JobQueue, "claimNext" | "complete" | "release" | "cancelClaimed">;
   repositories: Pick<RepositoriesRepository, "get">;
   integrations: Pick<IntegrationsRepository, "get">;
   registry: IntegrationRegistry;
@@ -104,11 +99,14 @@ export type ClaimDeps = {
 
 type Prepared =
   | { kind: "ready"; response: ClaimResponse }
-  | { kind: "refused"; errorCode: string; cancel: boolean }
+  | { kind: "refused"; errorCode: string; detail?: string }
+  | { kind: "cancelled"; errorCode: JobErrorCode }
   | { kind: "retry"; reason: string; retryAfterSeconds: number };
 
-function refuse(errorCode: string, cancel = false): Prepared {
-  return { kind: "refused", errorCode, cancel };
+function refuse(errorCode: string, detail?: string): Prepared {
+  return detail === undefined
+    ? { kind: "refused", errorCode }
+    : { kind: "refused", errorCode, detail };
 }
 
 function retryAfterOf(error: unknown): number {
@@ -181,10 +179,17 @@ async function prepare(
 
   const decision = await deps.guard.check(job);
   if (!decision.allow)
-    return refuse(decision.errorCode, decision.outcome === "cancel");
+    return decision.outcome === "cancel"
+      ? { kind: "cancelled", errorCode: decision.errorCode }
+      : refuse(decision.errorCode);
 
   const llm = deps.loadLlm();
-  if (!llm.ok) return refuse(llm.errorCode);
+  // The log names which variable is wrong and why (names and codes, never a value).
+  if (!llm.ok)
+    return refuse(
+      llm.errorCode,
+      llm.issues.map((issue) => `${issue.variable}: ${issue.code}`).join(", "),
+    );
 
   const args = argsOf(job);
   if (args === null) return refuse("job_args_invalid");
@@ -310,6 +315,7 @@ async function endJob(
   claimed: NonNullable<ClaimResult>,
   runnerId: string,
   errorCode: string,
+  detail?: string,
 ): Promise<void> {
   const result = await deps.queue.complete(claimed.job.id, claimed.leaseToken, {
     ok: false,
@@ -323,40 +329,36 @@ async function endJob(
     return;
   }
   deps.logger.info(
-    `[runner-api] claim runner=${runnerId} job=${claimed.job.id} ended at claim: ${errorCode}`,
+    `[runner-api] claim runner=${runnerId} job=${claimed.job.id} ended at claim: ${errorCode}${detail === undefined || detail === "" ? "" : ` (${detail})`}`,
   );
 }
 
 /**
- * Ends a claimed job as cancelled, the way a deactivation ends a waiting one. A running job cannot
- * become `cancelled`, so the claim is given back first (a lost attempt, due in an hour so that no
- * other runner takes it in between), then every waiting job of the repository is cancelled with the
- * code. On the last allowed attempt `release` fails the job with the code instead. Throws if the
+ * Ends a claimed job as cancelled, the way a deactivation ends a waiting one: one statement fenced by
+ * the lease token (`cancelClaimed`), no attempt counted, never queued in between. Only this job is
+ * touched; the other waiting jobs of the repository were cancelled by the deactivation. Throws if the
  * queue fails; the caller gives the job back.
  */
 async function cancelJob(
   deps: ClaimDeps,
   claimed: NonNullable<ClaimResult>,
   runnerId: string,
-  errorCode: string,
+  errorCode: JobErrorCode,
 ): Promise<void> {
-  const released = await deps.queue.release(
+  const result = await deps.queue.cancelClaimed(
     claimed.job.id,
     claimed.leaseToken,
     errorCode,
-    { retryAt: new Date(deps.now().getTime() + CANCEL_PARKING_MS) },
   );
-  if (released.status === "not_holder") {
+  if (result.status === "not_holder") {
+    // Not ours any more (the lease ran out in the meantime); whoever holds the job now decides.
     deps.logger.error(
       `[runner-api] claim runner=${runnerId} job=${claimed.job.id} could not be cancelled at claim: not_holder`,
     );
     return;
   }
-  const cancelled = await deps.queue.cancelWaitingForRepository(
-    claimed.job.repositoryId,
-  );
   deps.logger.info(
-    `[runner-api] claim runner=${runnerId} job=${claimed.job.id} cancelled at claim: ${errorCode} (${cancelled} waiting job(s) of the repository cancelled, job ${released.status})`,
+    `[runner-api] claim runner=${runnerId} job=${claimed.job.id} cancelled at claim: ${errorCode}`,
   );
 }
 
@@ -395,9 +397,18 @@ export async function handleClaim(
       const prepared = await prepare(deps, claimed);
 
       if (prepared.kind === "refused") {
-        if (prepared.cancel)
-          await cancelJob(deps, claimed, runnerId, prepared.errorCode);
-        else await endJob(deps, claimed, runnerId, prepared.errorCode);
+        await endJob(
+          deps,
+          claimed,
+          runnerId,
+          prepared.errorCode,
+          prepared.detail,
+        );
+        continue;
+      }
+
+      if (prepared.kind === "cancelled") {
+        await cancelJob(deps, claimed, runnerId, prepared.errorCode);
         continue;
       }
 

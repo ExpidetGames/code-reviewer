@@ -133,10 +133,11 @@ The body is `{ leaseToken, result }`. `result` is what `code-reviewer-run-job` p
   `{ allow: false, errorCode, outcome? }`. The running server uses `createProjectClaimGuard`
   (`project-claim-guard.ts`): a job whose repository has no active project (the project was switched
   off after the job was queued, or the deactivation raced with the claim) is not handed out. Its
-  outcome is `cancel`: the claim is given back (`release`, a lost attempt, due in an hour so no other
-  runner takes it) and `cancelWaitingForRepository` cancels every waiting job of the repository, so the
-  job ends as `cancelled` with `project_deactivated`, exactly like a job that was waiting when the
-  project was switched off (on the last allowed attempt `release` fails it with the same code). The
+  outcome is `cancel`: `cancelClaimed` ends exactly this job as `cancelled` with `project_deactivated`
+  in one statement fenced by the lease token (running to cancelled, no attempt counted, never queued
+  in between, so also on the last allowed attempt, and the slot of its head commit is free again), like
+  a job that was waiting when the project was switched off. The other waiting jobs of the repository
+  were cancelled by the deactivation, and a job enqueued after a reactivation is not touched. The
   default outcome `fail` ends the job as `failed` with the guard's code. No credentials are created
   for a refused job. The other half of the rule is `createJobProjectHooks` (`src/jobs/project-hooks.ts`),
   wired in `src/projects/shared.ts`: deactivating a project cancels its waiting jobs in the same

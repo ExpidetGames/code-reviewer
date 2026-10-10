@@ -14,12 +14,14 @@ import { errorCode } from "../db/errors.ts";
 import { JobQueueError } from "./errors.ts";
 import { validateEnqueueInput } from "./job-input.ts";
 import type {
+  CancelClaimedResult,
   ClaimResult,
   CompleteResult,
   EnqueueJobInput,
   EnqueueResult,
   HeartbeatResult,
   Job,
+  JobErrorCode,
   JobOutcome,
   ReleaseResult,
 } from "./job-types.ts";
@@ -72,6 +74,16 @@ export type JobQueue = {
     reason: string,
     options?: { retryAt?: Date },
   ): Promise<ReleaseResult>;
+  /**
+   * Cancels a claimed job (the project of its repository is off): running -> cancelled with
+   * `errorCode`, in one statement fenced by the lease token. No attempt is counted, so the job ends
+   * `cancelled` also on its last allowed attempt, and it is never queued again in between.
+   */
+  cancelClaimed(
+    jobId: string,
+    leaseToken: string,
+    errorCode: JobErrorCode,
+  ): Promise<CancelClaimedResult>;
   /** The expiry step of `claimNext` on its own. */
   expireStaleJobs(): Promise<ExpiryReport>;
   /** Cancels all waiting jobs of a repository (project deactivated); running jobs finish. */
@@ -127,6 +139,8 @@ export function createJobQueue(
       return jobs.release(jobId, leaseToken, reason, releaseOptions);
     },
     expireStaleJobs: () => jobs.expireStaleJobs(),
+    cancelClaimed: (jobId, leaseToken, errorCode) =>
+      jobs.cancelClaimed(jobId, leaseToken, errorCode),
     cancelWaitingForRepository: (repositoryId) =>
       jobs.cancelWaitingForRepository(repositoryId),
     discardWaitingForPr: (repositoryId, prNumber) =>

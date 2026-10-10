@@ -69,6 +69,19 @@ describe("the PR-Agent variable names", () => {
     },
   );
 
+  // CR-46-T06
+  it("never include an option the runner reserves for itself", () => {
+    // The runner pins these (CR-45, `RESERVED_OPTIONS`) and refuses a job that sets them.
+    const reserved = [
+      "PR_REVIEWER__FINAL_UPDATE_MESSAGE",
+      "PR_REVIEWER__ENABLE_REVIEW_LABELS_SECURITY",
+      "PR_REVIEWER__ENABLE_REVIEW_LABELS_EFFORT",
+    ];
+    const names = RUNNER_ENV_VARIABLES.map(({ name }) => name);
+
+    for (const name of reserved) expect(names).not.toContain(name);
+  });
+
   it("are accepted by the runner's allowlist of job variables", () => {
     for (const { name } of RUNNER_ENV_VARIABLES)
       expect(name).toMatch(RUNNER_ENV_KEY_PATTERN);

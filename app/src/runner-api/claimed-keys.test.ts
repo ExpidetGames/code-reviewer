@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { createClaimedKeys } from "./claimed-keys.ts";
 
 describe("the keys handed out with a claim", () => {
+  // CR-46-T07
   it("knows the key of a job and nothing for another job", () => {
     const keys = createClaimedKeys();
     keys.remember("job-1", "key-one");

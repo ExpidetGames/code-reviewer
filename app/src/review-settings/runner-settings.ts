@@ -17,8 +17,10 @@ export type RunnerSettings = {
   /** `env` of the job: only the options of the four tools, as strings. */
   env: Record<string, string>;
   /**
-   * The fallback models, in order (none or one today). The job has no field for them yet: the runner
-   * pins an empty list. Do not put this into the job until the runner accepts it.
+   * The fallback models, in order (none or one today). The contract has the field
+   * (`llm.fallbackModels`), but the app does not send it in the MVP: no fallback chain is decided, and
+   * `llm.maxTokens` would have to fit the smallest window of the chain. Do not put this into the job
+   * until a chain is decided.
    */
   fallbackModels: string[];
 };

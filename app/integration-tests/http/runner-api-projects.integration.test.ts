@@ -11,6 +11,7 @@ import {
   startRunnerApiHarness,
   TEST_LLM_API_KEY,
   TEST_LLM_MODEL,
+  TEST_RUNNER_TOKEN,
 } from "../../src/test-support/runner-api-harness.ts";
 import {
   createContractValidator,
@@ -72,6 +73,96 @@ describe("a job of a repository without an active project", () => {
       status: "cancelled",
       errorCode: "project_deactivated",
     });
+  });
+});
+
+describe("cancelling a claimed job of an inactive project", () => {
+  // CR-46-T01
+  it("ends the job cancelled, not failed, also on its last allowed attempt, so re-pushing the same commit reviews it", async () => {
+    const h = await startRunnerApiHarness({ projects: true });
+    const job = await h.enqueueNew();
+    await h.db
+      .updateTable("jobs")
+      .set({ attempts: 2 })
+      .where("id", "=", job.id)
+      .execute();
+
+    const response = await h.claim();
+
+    expect(response.status).toBe(204);
+    expect(await h.queue.get(job.id)).toMatchObject({
+      status: "cancelled",
+      errorCode: "project_deactivated",
+      attempts: 2,
+    });
+    // The cancelled job does not hold the slot of its head commit: the same push enqueues again.
+    await h.projectService.activateProject(h.repositoryId);
+    expect((await h.enqueue({ headSha: job.headSha })).status).toBe("created");
+  });
+
+  // CR-46-T01
+  it("never parks the job in the queue: it goes from running to cancelled without a release", async () => {
+    const released: string[] = [];
+    const h = await startRunnerApiHarness({
+      projects: true,
+      wrapQueue: (queue) => ({
+        ...queue,
+        release: async (...args) => {
+          released.push(args[0]);
+          return queue.release(...args);
+        },
+      }),
+    });
+    const job = await h.enqueueNew();
+
+    await h.claim();
+
+    expect(released).toStrictEqual([]);
+    expect(await h.queue.get(job.id)).toMatchObject({
+      status: "cancelled",
+      attempts: 0,
+      runAfter: job.runAfter,
+    });
+  });
+
+  // CR-46-T01
+  it("does not cancel a job that was enqueued after the project was switched on again", async () => {
+    const h = await startRunnerApiHarness({ projects: true });
+    const stale = await h.enqueueNew({ prNumber: 7 });
+    await h.claim();
+    expect((await h.queue.get(stale.id))?.status).toBe("cancelled");
+    await h.projectService.activateProject(h.repositoryId);
+    h.clock.advance(1000);
+    const fresh = await h.enqueueNew({ prNumber: 8, headSha: "b".repeat(40) });
+
+    const body = await h.claimed();
+
+    expect(body.job.id).toBe(fresh.id);
+    expect(await h.queue.get(fresh.id)).toMatchObject({ status: "running" });
+  });
+
+  // CR-46-T01
+  it("gives the job back at once, not parked, when the cancel itself fails", async () => {
+    const h = await startRunnerApiHarness({
+      projects: true,
+      wrapQueue: (queue) => ({
+        ...queue,
+        cancelClaimed: async () => {
+          throw new Error("database is locked");
+        },
+      }),
+    });
+    const job = await h.enqueueNew();
+
+    const response = await h.claim();
+
+    expect(response.status).toBe(500);
+    expect(await h.queue.get(job.id)).toMatchObject({
+      status: "queued",
+      attempts: 1,
+      runAfter: job.runAfter,
+    });
+    expect(h.logLines().join("\n")).not.toContain("database is locked");
   });
 });
 
@@ -240,6 +331,30 @@ describe("the LLM access of a claimed job", () => {
     expect(h.logLines().join("\n")).not.toContain(TEST_LLM_API_KEY);
   });
 
+  // CR-46-T05
+  it("is not configured when the provider is missing although the key is set, and no log line holds the key", async () => {
+    const h = await startWiredHarness({
+      env: { LLM_PROVIDER: undefined },
+    });
+    const job = await h.enqueueNew();
+
+    const response = await h.claim();
+
+    expect(response.status).toBe(204);
+    expect(await h.queue.get(job.id)).toMatchObject({
+      status: "failed",
+      errorCode: "llm_not_configured",
+    });
+    expect(h.issuedJobTokens()).toStrictEqual([]);
+    const log = h.logLines().join("\n");
+    // The operator sees which variable is wrong, and never a value.
+    expect(log).toContain(
+      "llm_not_configured (LLM_PROVIDER: LLM_PROVIDER_MISSING)",
+    );
+    expect(log).not.toContain(TEST_LLM_API_KEY);
+    expect(log).not.toContain(TEST_RUNNER_TOKEN);
+  });
+
   it("is not configured with a provider the runner does not know", async () => {
     const h = await startWiredHarness({
       env: { LLM_PROVIDER: "someone-else" },
@@ -332,6 +447,7 @@ describe("the LLM access of a claimed job", () => {
 });
 
 describe("the contract file and the options the app sends", () => {
+  // CR-46-T06
   it("accepts every environment variable the review settings can produce", () => {
     const env = toRunnerSettings({
       model: "vendor/m",
@@ -354,6 +470,7 @@ describe("the contract file and the options the app sends", () => {
     expect(goodResult().ok).toBe(true);
   });
 
+  // CR-46-T06
   it.each([
     "PR_REVIEWER__A__B",
     "PR_REVIEWER__A_",
@@ -375,6 +492,7 @@ describe("the contract file and the options the app sends", () => {
     expect(contract.check("JobEnv", { [key]: "x" }).valid).toBe(true);
   });
 
+  // CR-46-T06
   it("describes the optional llm fields the runner accepts", () => {
     const input = readContract().$defs.RunnerJobInput as unknown as {
       properties: { llm: { properties: Record<string, unknown> } };

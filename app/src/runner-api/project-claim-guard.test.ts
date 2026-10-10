@@ -6,6 +6,7 @@ import { createProjectClaimGuard } from "./project-claim-guard.ts";
 const job = { id: "job-1", repositoryId: "repo-1" } as Job;
 
 describe("the project claim guard", () => {
+  // CR-46-T01
   it("allows a job whose repository has an active project", async () => {
     const asked: string[] = [];
     const guard = createProjectClaimGuard({
@@ -21,6 +22,7 @@ describe("the project claim guard", () => {
     expect(asked).toStrictEqual(["repo-1"]);
   });
 
+  // CR-46-T01
   it("cancels a job whose repository has no active project", async () => {
     const guard = createProjectClaimGuard({
       projects: { getActiveProjectForRepository: async () => undefined },
