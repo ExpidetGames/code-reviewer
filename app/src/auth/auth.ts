@@ -8,6 +8,7 @@ import { genericOAuth } from "better-auth/plugins/generic-oauth";
 import type { Kysely } from "kysely";
 import { getDatabase } from "../db/startup.ts";
 import type { Database } from "../db/schema.ts";
+import { createAllowedLoginPinsRepository } from "../db/repositories/allowed-login-pins-repository.ts";
 import { loadAuthConfig, type AuthConfig } from "./config.ts";
 import { membershipChecker } from "./github-org.ts";
 import { githubProviderConfig } from "./github-provider.ts";
@@ -28,6 +29,7 @@ export function createAuth({
   githubRequestTimeoutMs,
 }: CreateAuthOptions) {
   const org = config.access.org;
+  const loginPins = createAllowedLoginPinsRepository(db);
   const checkMembership =
     org === null
       ? undefined
@@ -140,10 +142,12 @@ export function createAuth({
             apiBaseUrl: config.github.apiBaseUrl,
             requestTimeoutMs: githubRequestTimeoutMs,
             requestOrgScope: org !== null,
-            signInAccess: ({ login, accessToken }) =>
+            signInAccess: ({ login, githubId, accessToken }) =>
               decideSignIn({
                 config: config.access,
                 login,
+                githubId,
+                pins: loginPins,
                 checkMembership: () =>
                   checkMembership === undefined
                     ? Promise.resolve("unavailable")

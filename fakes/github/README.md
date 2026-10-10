@@ -37,6 +37,8 @@ github.failTokenEndpoint({ kind: "status", status: 500 }); // or { kind: "delay"
 github.addOrgMember("my-org", "octocat"); // or (…, "pending"); removeOrgMember undoes it
 github.failMembershipEndpoint({ kind: "status", status: 503 }); // or a delay; null is normal again
 github.revokeToken(github.issuedAccessTokens()[0]); // the token stops working (401)
+github.authorize(authorizeUrl, 2002); // a number is the account id: two accounts can share a login
+github.holdTokenRequests(2); // the next two token exchanges are answered together (concurrent sign ins)
 await github.close();
 ```
 

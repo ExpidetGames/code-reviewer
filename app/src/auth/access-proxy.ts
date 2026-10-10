@@ -13,7 +13,7 @@ import {
 } from "./session-user.ts";
 
 export type AccessProxyDependencies = {
-  getAuth: () => Pick<Auth, "api">;
+  getAuth: () => Pick<Auth, "api" | "$context">;
   /** Called per request, so the policy is created on first use (not when the module is loaded). */
   getPolicy: () => AccessPolicy;
 };

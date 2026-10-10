@@ -7,6 +7,7 @@ import type {
   SessionUser,
 } from "./access-policy.ts";
 import type { Auth } from "./auth.ts";
+import { GITHUB_PROVIDER_ID } from "./github-provider.ts";
 
 /**
  * - `user`: a valid session of a user who may use the app.
@@ -20,16 +21,22 @@ export type SessionLookup =
   | { kind: "denied"; reason: AccessDenialReason };
 
 export async function lookupSession(
-  auth: Pick<Auth, "api">,
+  auth: Pick<Auth, "api" | "$context">,
   requestHeaders: Headers,
   policy: AccessPolicy,
 ): Promise<SessionLookup> {
   const session = await auth.api.getSession({ headers: requestHeaders });
   if (!session) return { kind: "none" };
+  // The stable identity of the account: the id GitHub gave it, kept in `accounts.account_id`. The
+  // login can change; this cannot. A user without a GitHub account cannot exist (GitHub is the only
+  // way in), so such a session is treated as no session at all.
+  const githubId = await findGithubId(auth, session.user.id);
+  if (githubId === null) return { kind: "none" };
   const user: SessionUser = {
     id: session.user.id,
     name: session.user.name,
     githubLogin: session.user.githubLogin,
+    githubId,
     orgCheckedAt: session.user.orgCheckedAt ?? null,
     orgCheckedFor: session.user.orgCheckedFor ?? null,
   };
@@ -37,6 +44,18 @@ export async function lookupSession(
   return decision.allowed
     ? { kind: "user", user }
     : { kind: "denied", reason: decision.reason };
+}
+
+async function findGithubId(
+  auth: Pick<Auth, "$context">,
+  userId: string,
+): Promise<string | null> {
+  const context = await auth.$context;
+  const accounts = await context.internalAdapter.findAccounts(userId);
+  const account = accounts.find(
+    (candidate) => candidate.providerId === GITHUB_PROVIDER_ID,
+  );
+  return account?.accountId ? account.accountId : null;
 }
 
 /** The login page address for a request that has no usable session. */

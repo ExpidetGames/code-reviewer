@@ -9,6 +9,7 @@ import {
   type AccessDenied,
 } from "./access-decision.ts";
 import type { OrgMembership } from "./github-org.ts";
+import { checkLoginPin, type LoginPins } from "./login-pins.ts";
 
 /** A confirmed membership, to be stored on the user. */
 export type OrgCheckRecord = {
@@ -29,6 +30,10 @@ export type SignInAccess =
 export type DecideSignInOptions = {
   config: AccessConfig;
   login: string;
+  /** The numeric GitHub id of the account, as text. */
+  githubId: string;
+  /** Where the logins of the list are bound to a GitHub id. Used only for a listed login. */
+  pins: LoginPins;
   /** Asks GitHub whether the person is in the organization. Called only in organization mode. */
   checkMembership: () => Promise<OrgMembership>;
   now?: () => Date;
@@ -37,10 +42,22 @@ export type DecideSignInOptions = {
 export async function decideSignIn({
   config,
   login,
+  githubId,
+  pins,
   checkMembership,
   now = () => new Date(),
 }: DecideSignInOptions): Promise<SignInAccess> {
-  if (isLoginListed(config, login)) return { allowed: true, orgCheck: null };
+  if (isLoginListed(config, login)) {
+    // Admitted through the list only as the account the login is bound to: the first account to
+    // use a listed login binds it, a later account with the same login (a renamed account's old
+    // name, taken by somebody else) is turned away. Nothing is written for a login that is not
+    // listed. With an organization configured, membership alone can still admit the account.
+    const pin = await checkLoginPin(pins, login, githubId);
+    if (pin === "match") return { allowed: true, orgCheck: null };
+    // The binding could not be read: no answer is a no, also when an organization is set.
+    if (pin === "unavailable") return deny("check_failed");
+    if (config.org === null) return deny("not_allowed");
+  }
   if (config.org === null) return deny("not_allowed");
 
   let membership: OrgMembership;
