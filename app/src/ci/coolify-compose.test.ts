@@ -26,6 +26,7 @@ type Service = {
   depends_on?: Record<string, { condition?: string }>;
   healthcheck?: Record<string, unknown>;
   entrypoint?: string[];
+  mem_limit?: string;
 };
 type Compose = {
   services: Record<string, Service>;
@@ -136,6 +137,13 @@ describe("compose.coolify.yml services", () => {
     expect(runner.environment?.APP_URL).toBe("http://app:3000");
   });
 
+  // CR-39-T12
+  it("limits the memory of the runner to the 2 GiB its number of parallel reviews is calculated for, as compose.yml does", () => {
+    expect(service(coolify, "runner").mem_limit).toBe("2g");
+    expect(service(plain, "runner").mem_limit).toBe("2g");
+    expect(service(coolify, "app")).not.toHaveProperty("mem_limit");
+  });
+
   it("carries the same runner entry point as compose.yml, so the job loop ticket removes both", () => {
     expect(service(coolify, "runner").entrypoint).toEqual(
       service(plain, "runner").entrypoint,
@@ -194,9 +202,7 @@ describe("compose.coolify.yml settings", () => {
       ].sort(),
     );
     for (const key of required)
-      expect(service(coolify, "app").environment?.[key]).toBe(
-        `\${${key}:?}`,
-      );
+      expect(service(coolify, "app").environment?.[key]).toBe(`\${${key}:?}`);
     expect(service(coolify, "runner").environment?.RUNNER_TOKEN).toBe(
       "${RUNNER_TOKEN:?}",
     );

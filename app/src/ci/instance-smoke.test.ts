@@ -3,13 +3,9 @@
 // child process, against a small HTTP server in this test that answers what a healthy or a broken
 // instance would. Whether a real deployment passes it is checked by running the script against the
 // Docker Compose stack (docker/smoke/compose.sh) and, by hand, against the Coolify instance.
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { statSync } from "node:fs";
-import {
-  createServer,
-  type IncomingHttpHeaders,
-  type Server,
-} from "node:http";
+import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
@@ -67,14 +63,15 @@ function run(
   args: string[],
 ): Promise<{ code: number | null; out: string; err: string }> {
   return new Promise((resolve, reject) => {
-    const child = spawn("bash", [script, ...args], {
+    const child: ChildProcess = spawn("bash", [script, ...args], {
       // Nothing of the developer's environment is needed; a proxy setting would even get in the way.
-      env: { PATH: process.env.PATH ?? "" },
+      env: { PATH: process.env.PATH ?? "", NODE_ENV: "test" },
+      stdio: ["ignore", "pipe", "pipe"],
     });
     let out = "";
     let err = "";
-    child.stdout.on("data", (chunk: Buffer) => (out += chunk.toString()));
-    child.stderr.on("data", (chunk: Buffer) => (err += chunk.toString()));
+    child.stdout?.on("data", (chunk: Buffer) => (out += chunk.toString()));
+    child.stderr?.on("data", (chunk: Buffer) => (err += chunk.toString()));
     child.on("error", reject);
     child.on("close", (code) => resolve({ code, out, err }));
   });
@@ -82,7 +79,6 @@ function run(
 
 describe("the instance smoke test", () => {
   it("is an executable script", () => {
-    // eslint-disable-next-line no-bitwise -- reading the permission bits of the file
     expect(statSync(script).mode & 0o111).not.toBe(0);
   });
 
@@ -101,12 +97,7 @@ describe("the instance smoke test", () => {
   it.each([
     ["the health endpoint is down", "GET /api/health", 503, "/api/health"],
     ["the login page fails", "GET /login", 500, "/login"],
-    [
-      "the login page only redirects",
-      "GET /login",
-      302,
-      "/login",
-    ],
+    ["the login page only redirects", "GET /login", 302, "/login"],
     [
       "the webhook accepts a wrongly signed delivery",
       "POST /api/webhooks/github-app",
@@ -222,7 +213,9 @@ describe("the instance smoke test", () => {
 
     await run([url]);
 
-    const webhook = seen.find((entry) => entry.path.startsWith("/api/webhooks"));
+    const webhook = seen.find((entry) =>
+      entry.path.startsWith("/api/webhooks"),
+    );
     const claim = seen.find((entry) => entry.path.startsWith("/api/runners"));
     expect(webhook?.method).toBe("POST");
     expect(webhook?.headers["x-github-event"]).toBe("ping");
