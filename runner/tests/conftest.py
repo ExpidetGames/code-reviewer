@@ -5,9 +5,15 @@ tests/engine), so the marker can never drift from where the file lives. A test o
 directories is a collection error: it would otherwise run unmarked and escape every level.
 """
 
+import os
 from pathlib import Path
 
 import pytest
+
+# LiteLLM fetches its price list from GitHub when it is imported, unless told to use the bundled
+# one. Tests import PR-Agent (and with it LiteLLM) while the collection of tests is still running,
+# so this must be set here, before any test module is imported.
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
 _LEVELS = ("unit", "integration", "contract", "engine")
 _TESTS_ROOT = Path(__file__).parent

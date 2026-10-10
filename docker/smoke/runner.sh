@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Smoke test of the runner image. Usage: docker/smoke/runner.sh <image>   (default: code-reviewer-runner:local)
 #
-# The runner has no job loop yet (CR-29); today its entry point answers --version. The test proves
-# that the image starts, runs unprivileged, can write to its temporary directory and holds nothing
-# that must stay out of an image. PR-Agent checks (installed version, a job through the fake
-# PR-Agent) arrive with CR-10 and CR-29.
+# The entry point of the image is the job loop (CR-29), which needs a running app, so this test does
+# not start it for real; it proves that it refuses to start without its configuration. The test
+# proves that the image starts, runs unprivileged, can write to its temporary directory and holds
+# nothing that must stay out of an image, and that the pinned PR-Agent is installed and works
+# offline: the version equals the pin, its tiktoken encodings are baked in, and a job run through
+# the real PR-Agent (no network at all) ends in a well formed failure result without a secret in it.
 set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -15,6 +17,9 @@ source "$here/lib.sh"
 image=${1:-code-reviewer-runner:local}
 require_image "$image"
 
+# Number of lines in a string (wc pads its output on macOS, hence tr).
+line_count() { printf '%s\n' "$1" | wc -l | tr -d ' '; }
+
 step "the entry point answers --version with the project version"
 expected=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$repo_root/runner/pyproject.toml" | head -n 1)
 [ -n "$expected" ] || fail "cannot read the version from runner/pyproject.toml"
@@ -22,6 +27,80 @@ output=$(docker run --rm "$image" --version)
 [ "$output" = "code-reviewer-runner $expected" ] ||
   fail "expected 'code-reviewer-runner $expected', got '$output'"
 printf '    %s\n' "$output"
+
+# CR-29: a process that kills its jobs' process groups needs an init process that reaps the orphans.
+step "the entry point starts with tini, so killed helpers do not stay as zombies"
+entrypoint=$(docker inspect --format '{{json .Config.Entrypoint}}' "$image")
+[[ "$entrypoint" == '["/usr/bin/tini","--","code-reviewer-runner"]' ]] ||
+  fail "expected tini in front of the job loop, got $entrypoint"
+# A job's helpers are killed with their process group and re-parented to PID 1; none may stay a zombie.
+zombie_check='
+import os, signal, subprocess, time
+job = subprocess.Popen(["sh", "-c", "sleep 30 & sleep 30 & wait"], start_new_session=True)
+time.sleep(0.5)
+os.killpg(job.pid, signal.SIGKILL)
+job.wait()
+time.sleep(1)
+zombies = [d for d in os.listdir("/proc") if d.isdigit()
+           and open(f"/proc/{d}/stat").read().rsplit(")", 1)[1].split()[0] == "Z"]
+print(len(zombies))
+'
+zombies=$(docker run --rm --entrypoint /usr/bin/tini "$image" -- python -c "$zombie_check")
+[ "$zombies" = "0" ] || fail "$zombies zombie process(es) after ending a process group under tini"
+
+# CR-29: the entry point is the job loop; without its configuration it says so and stops.
+step "the job loop refuses to start without its configuration and does not leak the token"
+loop_token="smoke-runner-token-0123456789-abcdef-0123456789"
+loop_errors=$(docker run --rm -e RUNNER_TOKEN="$loop_token" -e RUNNER_CONCURRENCY=many "$image" 2>&1) && status=0 || status=$?
+[ "$status" = "2" ] || fail "the job loop without a URL must exit with 2, got $status"
+grep -q "RUNNER_API_URL is required" <<<"$loop_errors" || fail "expected a message about RUNNER_API_URL, got: $loop_errors"
+if grep -qF "$loop_token" <<<"$loop_errors"; then fail "the runner token is in the output of the job loop"; fi
+printf '    %s\n' "$loop_errors"
+
+# CR-17-T06
+step "the installed PR-Agent is the pinned version"
+pinned=$(sed -n 's/^ *"pr-agent==\(.*\)",$/\1/p' "$repo_root/runner/pyproject.toml" | head -n 1)
+[ -n "$pinned" ] || fail "cannot read the pr-agent pin from runner/pyproject.toml"
+installed=$(in_image "$image" python -c "from importlib.metadata import version; print(version('pr-agent'))")
+[ "$installed" = "$pinned" ] || fail "pr-agent $installed is installed, runner/pyproject.toml pins $pinned"
+printf '    pr-agent %s\n' "$installed"
+
+# CR-10-T03: the identity patch needs this private method; the runner refuses to start without it.
+step "PR-Agent imports and still has the method the identity patch replaces"
+in_image "$image" python -c "
+from pr_agent.git_providers.github_provider import GithubProvider
+assert callable(GithubProvider._resolve_user_login)" ||
+  fail "PR-Agent does not import or has no GithubProvider._resolve_user_login"
+
+step "the tiktoken encodings are baked into the image (no network needed)"
+docker run --rm --network none --entrypoint python "$image" -c \
+  "import tiktoken; tiktoken.get_encoding('o200k_base'); tiktoken.get_encoding('cl100k_base')" ||
+  fail "tiktoken needs the network: the encodings are not cached in the image"
+
+# CR-10-T04
+step "the job entry point refuses an invalid job with one line of JSON"
+refused=$(echo '{}' | docker run --rm -i --entrypoint code-reviewer-run-job "$image") && status=0 || status=$?
+[ "$status" = "1" ] || fail "an invalid job must exit with 1, got $status"
+[ "$(line_count "$refused")" = "1" ] || fail "an invalid job must give one line of output, got: $refused"
+grep -q '"errorCode":"invalid_job"' <<<"$refused" || fail "expected invalid_job, got: $refused"
+
+# CR-10-T07: real PR-Agent, no network. The pull request lives on an address nothing listens on, so
+# the job fails while PR-Agent creates its GitHub client; the result must say so and carry no secret.
+step "a job through the real PR-Agent without network fails cleanly and leaks nothing"
+smoke_token="smoke-installation-token-0123456789"
+smoke_key="smoke-openrouter-key-0123456789"
+job='{"prUrl":"http://127.0.0.1:9/octo/repo/pull/7","command":"review","git":{"provider":"github","baseUrl":"http://127.0.0.1:9/api/v3","token":"'$smoke_token'","botLogin":"code-reviewer"},"llm":{"provider":"openrouter","model":"deepseek/deepseek-chat","apiKey":"'$smoke_key'","baseUrl":"http://127.0.0.1:9/api/v1","maxTokens":32000}}'
+errors=$(mktemp)
+result=$(docker run --rm -i --network none --entrypoint code-reviewer-run-job "$image" <<<"$job" 2>"$errors") && status=0 || status=$?
+[ "$status" = "1" ] || fail "a job without network must exit with 1, got $status: $result"
+[ "$(line_count "$result")" = "1" ] || fail "a job must give one line of output, got: $result"
+grep -q '"ok":false' <<<"$result" && grep -q '"errorCode":"git_unavailable"' <<<"$result" ||
+  fail "unexpected result for a job without network: $result"
+if grep -qF -e "$smoke_token" -e "$smoke_key" <<<"$result" || grep -qF -e "$smoke_token" -e "$smoke_key" "$errors"; then
+  fail "a secret of the job is in the output of the runner"
+fi
+rm -f "$errors"
+printf '    %s\n' "$result"
 
 # CR-17-T07
 step "the image sets a numeric non-root user"
