@@ -219,3 +219,22 @@ describe("the stored rows", () => {
     expect(row.updated_at > row.created_at).toBe(true);
   });
 });
+
+describe("finding a repository by the platform's id", () => {
+  it("finds the row of that integration and nothing for another integration or an unknown id", async () => {
+    const { first, second, repositories } = await setup();
+    await repositories.reconcile(first.id, [repo(first.id, 1)]);
+    await repositories.reconcile(second.id, [
+      repo(second.id, 1, "octocat/hello"),
+    ]);
+
+    expect(await repositories.findByExternalId(first.id, "1")).toMatchObject({
+      integrationId: first.id,
+      fullName: "acme/repo-1",
+    });
+    expect(await repositories.findByExternalId(second.id, "1")).toMatchObject({
+      fullName: "octocat/hello",
+    });
+    expect(await repositories.findByExternalId(first.id, "99")).toBeUndefined();
+  });
+});

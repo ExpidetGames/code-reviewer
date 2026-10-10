@@ -52,6 +52,10 @@ export const WEBHOOK_DELIVERY_OUTCOMES = [
   "project_not_active",
   /** A review trigger was handed to the intake. */
   "trigger_enqueued",
+  /** A pull request event that starts no review (a draft, a closed pull request, a setting, a stale commit). */
+  "trigger_skipped",
+  /** A pull request was closed and the jobs waiting for it were dropped. */
+  "waiting_jobs_discarded",
   /** The installation or its repositories were synchronized. */
   "installation_changed",
 ] as const;

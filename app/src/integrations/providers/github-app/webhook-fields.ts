@@ -38,6 +38,10 @@ export const WEBHOOK_READ_FIELDS = {
     { path: "number", type: "number" },
     { path: "pull_request.html_url", type: "string" },
     { path: "pull_request.head.sha", type: "string" },
+    // Whether the pull request is still work in progress, still open, and (for a closed one) merged.
+    { path: "pull_request.draft", type: "boolean" },
+    { path: "pull_request.state", type: "string" },
+    { path: "pull_request.merged", type: "boolean" },
     { path: "installation.id", type: "number" },
     ...REPOSITORY,
     ...SENDER,

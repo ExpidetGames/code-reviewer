@@ -128,12 +128,16 @@ assert_key_scan_works() {
 assert_image_has_no_secrets() {
   local image=$1 content_paths=$2
   # The operating system's CA bundles (public root certificates, also certifi's cacert.pem) are
-  # expected; anything else with a key or certificate extension is not. find must exit 0.
+  # expected, and so are two public files that third-party packages of the runner ship (a public
+  # key of LiteLLM and the root certificates of gRPC); anything else with a key or certificate
+  # extension is not. find must exit 0.
   scan_in_image "$image" "0" find / -xdev \
     \( -path /etc/ssl -o -path /usr/lib/ssl -o -path /usr/share/ca-certificates \) -prune -o \
     \( -name '.env' -o -name '.env.*' -o -name '.git' -o -name '*.pem' -o -name '*.p12' \
     -o -name '*.pfx' -o -name '*.key' -o -name '*.db' -o -name '*.sqlite' -o -name '*.sqlite3' \
-    -o -name 'id_rsa*' -o -name 'id_ed25519*' \) ! -name cacert.pem -print
+    -o -name 'id_rsa*' -o -name 'id_ed25519*' \) ! -name cacert.pem \
+    ! -path '*/site-packages/litellm/proxy/auth/public_key.pem' \
+    ! -path '*/site-packages/grpc/_cython/_credentials/roots.pem' -print
   [ -z "$SCAN_OUTPUT" ] || fail "$image contains files that must not be in an image:
 $SCAN_OUTPUT"
 
