@@ -44,3 +44,18 @@ def test_the_identity_patch_and_the_installed_package_name_the_same_version() ->
 
     assert pinned == PATCHED_FOR_VERSION
     assert version("pr-agent") == pinned
+
+
+# CR-45: the protection against evaluated settings values (`@format`, `@jinja`) was written and
+# proven against this Dynaconf version. A different version comes with a PR-Agent upgrade; the tests
+# in test_settings_evaluation.py and test_repo_settings_guard.py must be read again before this
+# constant is changed.
+VERIFIED_DYNACONF_VERSION = "3.3.5"
+
+
+def test_the_installed_dynaconf_is_the_version_the_evaluation_protection_was_proven_with() -> None:
+    lock = tomllib.loads((RUNNER_ROOT / "uv.lock").read_text())
+    locked = [package["version"] for package in lock["package"] if package["name"] == "dynaconf"]
+
+    assert locked == [VERIFIED_DYNACONF_VERSION]
+    assert version("dynaconf") == VERIFIED_DYNACONF_VERSION

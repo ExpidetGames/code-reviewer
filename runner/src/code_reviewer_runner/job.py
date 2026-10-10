@@ -10,13 +10,15 @@ Shape (basis of the runner contract v1, see the lead decisions for CR-10):
               "token": "<installation token>", "botLogin": "<app slug>[bot]"},
       "llm": {"provider": "openrouter", "model": "<vendor>/<model>", "apiKey": "<key>",
               "baseUrl": "http://127.0.0.1:<port>/api/v1",     // optional, loopback only (fakes)
-              "maxTokens": 163840},                            // optional, context window
+              "maxTokens": 163840,                             // optional, context window
+              "fallbackModels": ["<vendor>/<model>"]},         // optional, at most five
       "env": {"PR_REVIEWER__EXTRA_INSTRUCTIONS": "<string>"}   // optional, tool settings only
     }
 
 Everything that decides where a credential or a request goes (GitHub and LLM endpoints, tokens, the
 model, output switches) has its own validated field above or is pinned by the runner; `env` can only
-carry the settings of the four tools.
+carry the settings of the four tools. Values of `env` are text: PR-Agent never evaluates them (see
+`pr_agent_config.build_option_settings`).
 
 Validation never echoes a value from the job into its error detail: the job holds secrets, and the
 detail ends up in the result JSON and in logs. Details name fields, never contents.
@@ -37,18 +39,44 @@ MAX_SECRET_CHARS = 4096
 
 _TOP_LEVEL_FIELDS = {"prUrl", "command", "args", "git", "llm", "env"}
 _GIT_FIELDS = {"provider", "baseUrl", "token", "botLogin"}
-_LLM_FIELDS = {"provider", "model", "apiKey", "baseUrl", "maxTokens"}
+_LLM_FIELDS = {"provider", "model", "apiKey", "baseUrl", "maxTokens", "fallbackModels"}
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 MIN_CONTEXT_TOKENS = 1000
 MAX_CONTEXT_TOKENS = 10_000_000
+# A fallback chain longer than this only multiplies the cost and the time of a failing review.
+MAX_FALLBACK_MODELS = 5
 _FIELD_NAME = re.compile(r"[A-Za-z0-9_.-]{1,40}")
 _PR_PATH = re.compile(r"/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/pull/([1-9][0-9]{0,8})")
 _BOT_LOGIN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}(\[bot\])?")
 _MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,199}")
 # `env` may only set the options of the four tools. An allowlist instead of a list of forbidden
 # keys: PR-Agent has many sections (litellm, openai, azure, push_outputs, ...) that route requests
-# or credentials, and a new PR-Agent version can add more.
-_ENV_KEY = re.compile(r"(PR_REVIEWER|PR_DESCRIPTION|PR_CODE_SUGGESTIONS|PR_QUESTIONS)__[A-Z0-9_]+")
+# or credentials, and a new PR-Agent version can add more. One option name per key: a second `__`
+# would address a nested value.
+_ENV_KEY = re.compile(
+    r"(PR_REVIEWER|PR_DESCRIPTION|PR_CODE_SUGGESTIONS|PR_QUESTIONS)__[A-Z0-9]+(_[A-Z0-9]+)*"
+)
+# The names of the options the runner sets itself (switches that decide what is published). A job
+# may not set them: the runner's value must win, and a repository file may not change them either
+# (see `repo_settings_guard.PROTECTED_SETTINGS`, which a test compares with this list).
+RESERVED_OPTIONS = frozenset(
+    {
+        "PR_REVIEWER__FINAL_UPDATE_MESSAGE",
+        "PR_REVIEWER__ENABLE_REVIEW_LABELS_SECURITY",
+        "PR_REVIEWER__ENABLE_REVIEW_LABELS_EFFORT",
+    }
+)
+OPENROUTER_PREFIX = "openrouter/"
+
+
+def with_openrouter_prefix(model: str) -> str:
+    """The model name as PR-Agent needs it to route through OpenRouter."""
+    return model if model.startswith(OPENROUTER_PREFIX) else f"{OPENROUTER_PREFIX}{model}"
+
+
+def without_openrouter_prefix(model: str) -> str:
+    """The model name without the routing prefix, to compare two names."""
+    return model.removeprefix(OPENROUTER_PREFIX)
 
 
 class Command(StrEnum):
@@ -80,6 +108,7 @@ class LlmAccess:
     api_key: str
     base_url: str | None = None
     max_tokens: int | None = None
+    fallback_models: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -186,6 +215,7 @@ def _llm_access(data: dict[str, Any]) -> LlmAccess:
         api_key=_secret(llm, "apiKey", "llm."),
         base_url=_llm_base_url(llm),
         max_tokens=_max_tokens(llm),
+        fallback_models=_fallback_models(llm, model),
     )
 
 
@@ -209,6 +239,25 @@ def _max_tokens(llm: dict[str, Any]) -> int | None:
     if not MIN_CONTEXT_TOKENS <= value <= MAX_CONTEXT_TOKENS:
         raise _invalid("llm.maxTokens is out of range")
     return value
+
+
+def _fallback_models(llm: dict[str, Any], primary: str) -> tuple[str, ...]:
+    if "fallbackModels" not in llm:
+        return ()
+    value: Any = llm["fallbackModels"]
+    if not isinstance(value, list):
+        raise _invalid("llm.fallbackModels must be a list of model names")
+    models: list[Any] = value  # pyright: ignore[reportUnknownVariableType]
+    if len(models) > MAX_FALLBACK_MODELS:
+        raise _invalid(f"llm.fallbackModels may hold at most {MAX_FALLBACK_MODELS} models")
+    seen = {without_openrouter_prefix(primary)}
+    for model in models:
+        if not isinstance(model, str) or not _MODEL.fullmatch(model):
+            raise _invalid("llm.fallbackModels must hold valid model names")
+        if without_openrouter_prefix(model) in seen:
+            raise _invalid("llm.fallbackModels must not repeat a model or the primary model")
+        seen.add(without_openrouter_prefix(model))
+    return tuple(models)
 
 
 def _web_host(api_base_url: str) -> str:
@@ -271,6 +320,8 @@ def _env(data: dict[str, Any]) -> dict[str, str]:
             raise _invalid(
                 "env may only set options of the review, describe, improve and ask tools"
             )
+        if key in RESERVED_OPTIONS:
+            raise _invalid(f"env option {key} is set by the runner and cannot be set by a job")
         if not isinstance(value, str):
             raise _invalid("env values must be strings")
         env[key] = value
