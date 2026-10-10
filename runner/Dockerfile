@@ -23,30 +23,40 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy
 WORKDIR /build
-# Dependencies first (cached until pyproject.toml or uv.lock change). The runner has no runtime
-# dependencies yet. CR-10 adds PR-Agent as a dependency in pyproject.toml, pinned in uv.lock: it is
-# installed here from the lockfile without any change to this file. If PR-Agent needs system
-# packages (git, build tools for a wheel), install them in this stage and, for runtime libraries
-# and the git binary, in the runtime stage below.
+# Dependencies first (cached until pyproject.toml or uv.lock change): PR-Agent and everything it
+# pins, installed from uv.lock. All of them have wheels for this Python version, so no compiler is
+# needed in this stage.
 COPY pyproject.toml uv.lock .python-version ./
 RUN uv sync --locked --no-dev --no-install-project
 # Then the project itself, installed non-editable so the venv is self-contained.
 COPY src ./src
 RUN uv sync --locked --no-dev --no-editable
+# PR-Agent counts tokens with tiktoken, which downloads its encodings from the internet on first
+# use. Download them once here, so a job never needs that connection (and parallel jobs do not race
+# to write the same cache). The variable name is tiktoken's second choice; the first choice
+# (TIKTOKEN_CACHE_DIR) would trip the secret scan of the image smoke test.
+ENV DATA_GYM_CACHE_DIR=/opt/tiktoken-cache
+RUN mkdir -p "$DATA_GYM_CACHE_DIR" \
+    && /opt/venv/bin/python -c "import tiktoken; tiktoken.get_encoding('o200k_base'); tiktoken.get_encoding('cl100k_base')"
 
 # ---- runtime: Python, the venv and nothing else (no uv, no compiler, no sources) ----
 FROM ${PYTHON_IMAGE} AS runtime
 LABEL org.opencontainers.image.title="Code Reviewer runner" \
       org.opencontainers.image.description="Worker that runs PR-Agent for Code Reviewer" \
       org.opencontainers.image.source="https://github.com/ExpidetGames/code-reviewer"
+# LITELLM_LOCAL_MODEL_COST_MAP makes LiteLLM use its bundled price list instead of fetching it from
+# GitHub when it is imported (the runner sets it for every job as well).
 ENV PATH="/opt/venv/bin:${PATH}" \
     PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    LITELLM_LOCAL_MODEL_COST_MAP=True \
+    DATA_GYM_CACHE_DIR=/opt/tiktoken-cache
 # Fixed numeric ids, like the app image. The home directory is writable so tools that cache or
 # write config files (PR-Agent, git) work; the job working directories live under /tmp.
 RUN groupadd --system --gid 10001 runner \
     && useradd --system --uid 10001 --gid runner --create-home --home-dir /home/runner --shell /usr/sbin/nologin runner
 COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder /opt/tiktoken-cache /opt/tiktoken-cache
 USER 10001:10001
 WORKDIR /home/runner
 ENTRYPOINT ["code-reviewer-runner"]

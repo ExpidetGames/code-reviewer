@@ -23,8 +23,8 @@ from code_reviewer_runner.log_capture import LogCapture
 from code_reviewer_runner.redaction import Redactor
 from code_reviewer_runner.result import ErrorCode, JobResult
 
-TOKEN = "ghs_dummyInstallationToken0123456789"
-API_KEY = "sk-or-v1-dummyOpenRouterKey0123456789"
+TOKEN = "dummy-installation-token-0123456789"
+API_KEY = "dummy-openrouter-key-0123456789"
 PR_URL = "https://github.com/octo/repo/pull/7"
 REVIEW_MARKER = "<!-- pr-agent:review:full -->"
 
@@ -34,8 +34,7 @@ Double = Callable[..., Awaitable[bool]]
 def current_settings() -> Any:  # Any: PR-Agent ships no type information
     from pr_agent.config_loader import get_settings
 
-    settings: Any = get_settings()
-    return settings
+    return get_settings()  # pyright: ignore[reportUnknownVariableType]
 
 
 def job_json(**overrides: Any) -> dict[str, Any]:

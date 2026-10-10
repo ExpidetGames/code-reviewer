@@ -12,8 +12,8 @@ from typing import Any
 
 import pytest
 
-TOKEN = "ghs_dummyInstallationToken0123456789"
-API_KEY = "sk-or-v1-dummyOpenRouterKey0123456789"
+TOKEN = "dummy-installation-token-0123456789"
+API_KEY = "dummy-openrouter-key-0123456789"
 DOUBLE = Path(__file__).parent / "pr_agent_double.py"
 PR_URL = "https://github.com/octo/repo/pull/7"
 

@@ -14,8 +14,8 @@ from code_reviewer_runner.pr_agent_config import (
     build_typed_settings,
 )
 
-TOKEN = "ghs_dummyInstallationToken0123456789"
-API_KEY = "sk-or-v1-dummyOpenRouterKey0123456789"
+TOKEN = "dummy-installation-token-0123456789"
+API_KEY = "dummy-openrouter-key-0123456789"
 
 
 def make_job(command: str = "review", **extra: object) -> Job:

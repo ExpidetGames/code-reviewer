@@ -9,7 +9,7 @@ from loguru import logger
 from code_reviewer_runner.log_capture import LogCapture, StdlibLogHandler
 from code_reviewer_runner.redaction import REDACTED, Redactor
 
-TOKEN = "ghs_dummyInstallationToken0123456789"
+TOKEN = "dummy-installation-token-0123456789"
 
 
 @pytest.fixture

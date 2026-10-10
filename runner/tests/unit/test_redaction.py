@@ -8,8 +8,8 @@ from urllib.parse import quote
 
 from code_reviewer_runner.redaction import REDACTED, RedactingStream, Redactor
 
-TOKEN = "ghs_dummyInstallationToken0123456789"
-API_KEY = "sk-or-v1-dummyOpenRouterKey0123456789"
+TOKEN = "dummy-installation-token-0123456789"
+API_KEY = "dummy-openrouter-key-0123456789"
 
 
 # CR-10-T07
@@ -90,7 +90,7 @@ def test_the_stream_holds_back_an_unfinished_line_until_it_ends_or_closes() -> N
     assert target.getvalue() == ""
 
     stream.close()
-    assert target.getvalue() == "partial ghs_dumm"
+    assert target.getvalue() == "partial " + TOKEN[:8]
 
 
 def test_a_secret_that_straddles_the_release_of_a_very_long_line_is_still_redacted() -> None:

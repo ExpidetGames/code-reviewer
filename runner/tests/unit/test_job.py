@@ -10,8 +10,8 @@ import pytest
 from code_reviewer_runner.job import Command, JobError, parse_job
 from code_reviewer_runner.result import ErrorCode
 
-TOKEN = "ghs_dummyInstallationToken0123456789"
-API_KEY = "sk-or-v1-dummyOpenRouterKey0123456789"
+TOKEN = "dummy-installation-token-0123456789"
+API_KEY = "dummy-openrouter-key-0123456789"
 
 
 def valid_job(**overrides: Any) -> dict[str, Any]:
