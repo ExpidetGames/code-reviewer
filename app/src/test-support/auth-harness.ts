@@ -10,6 +10,7 @@ import {
 import { createRuntimeAccessPolicy } from "../auth/access-runtime.ts";
 import { createAuth } from "../auth/auth.ts";
 import { loadAuthConfig } from "../auth/config.ts";
+import { syncLoginPinsOnStart } from "../auth/startup.ts";
 import type { Kysely } from "kysely";
 import type { Database } from "../db/schema.ts";
 import { cleanUpAfterTest, createTestDatabase } from "./test-database.ts";
@@ -93,6 +94,7 @@ function assembleHarness(
 
   // The same access rule the server uses, on the same database and the same fake GitHub.
   const policy = createRuntimeAccessPolicy({
+    db,
     auth,
     config,
     orgCheckTimeoutMs: options.githubRequestTimeoutMs,
@@ -149,13 +151,22 @@ function assembleHarness(
   }
 
   /** A whole sign in as `login`: start, authorize at the fake, callback. */
-  async function signIn(login = OCTOCAT.login) {
+  async function signIn(who: string | number = OCTOCAT.login) {
+    const { callbackUrl, cookies } = await authorizeSignIn(who);
+    const response = await callback(callbackUrl, cookies);
+    return { response, cookies };
+  }
+
+  /**
+   * A sign in up to the callback: start, authorize at the fake. `who` is a login, or an account id
+   * when two accounts have the same login. The test completes it with `callback`.
+   */
+  async function authorizeSignIn(who: string | number) {
     const { authorizeUrl, cookies } = await startSignIn();
     if (!authorizeUrl)
       throw new Error("The sign in did not return a GitHub URL");
-    const callbackUrl = await github.authorize(authorizeUrl, login);
-    const response = await callback(callbackUrl, cookies);
-    return { response, cookies };
+    const callbackUrl = await github.authorize(authorizeUrl, who);
+    return { callbackUrl, cookies };
   }
 
   return {
@@ -168,6 +179,21 @@ function assembleHarness(
     startSignIn,
     callback,
     signIn,
+    authorizeSignIn,
+    /**
+     * What the server does when it starts, after the migrations: applies the pins of the
+     * allow list (deletes the pins of logins that left it, sets pre-set ids). `info` receives the
+     * line it would log.
+     */
+    start: (info: (message: string) => void = () => undefined) =>
+      syncLoginPinsOnStart({
+        db,
+        config: config.access,
+        info,
+        exit: (code) => {
+          throw new Error(`The server would exit with code ${String(code)}`);
+        },
+      }),
     /** The same database and fake GitHub, started again with other settings. */
     restart: (changes: AuthHarnessOptions) =>
       assembleHarness(db, github, { ...options, ...changes }),

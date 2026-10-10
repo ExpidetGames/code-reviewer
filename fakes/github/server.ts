@@ -78,10 +78,17 @@ export type FakeGithub = {
   /** Every access token issued so far; lets a test search outputs for them. */
   issuedAccessTokens(): string[];
   /**
-   * Confirms an authorize page as `login` (what the "Authorize" button does) and resolves to the
-   * URL the person is sent back to: the app's callback with `code` and `state`.
+   * Makes the next `count` requests to the token endpoint wait until `count` of them have arrived,
+   * then answers them all together. Lets a test complete several sign ins at the same moment.
    */
-  authorize(authorizeUrl: string, login: string): Promise<URL>;
+  holdTokenRequests(count: number): void;
+  /**
+   * Confirms an authorize page as an account (what the "Authorize" button does) and resolves to the
+   * URL the person is sent back to: the app's callback with `code` and `state`. A string is the
+   * login; a number is the account id, for the case that two accounts have the same login (one of
+   * them has just been renamed and GitHub has not caught up, or a test wants both at once).
+   */
+  authorize(authorizeUrl: string, who: string | number): Promise<URL>;
   /** What the "Cancel" button does: resolves to the callback URL with `error=access_denied`. */
   deny(authorizeUrl: string): Promise<URL>;
   close(): Promise<void>;
@@ -120,6 +127,8 @@ export async function startGithubFake(
   // org (lower case) -> account id -> state
   const orgs = new Map<string, Map<number, FakeMembershipState>>();
   const timers = new Set<NodeJS.Timeout>();
+  // Token requests that wait for the others, see `holdTokenRequests`.
+  let hold: { count: number; waiting: Array<() => void> } | null = null;
 
   const server = createServer((request, response) => {
     handle(request, response).catch((error: unknown) => {
@@ -206,6 +215,7 @@ export async function startGithubFake(
         (user) =>
           `<form method="post" action="/login/oauth/authorize/confirm">${hidden}` +
           `<input type="hidden" name="login" value="${escapeHtml(user.login)}">` +
+          `<input type="hidden" name="account_id" value="${String(user.id)}">` +
           `<button type="submit" name="decision" value="allow">Authorize ${escapeHtml(user.login)}</button></form>`,
       )
       .join("");
@@ -240,7 +250,11 @@ export async function startGithubFake(
       return redirect(response, callback);
     }
 
-    const user = [...users.values()].find((u) => u.login === form.get("login"));
+    const accountId = form.get("account_id");
+    const user =
+      accountId === null
+        ? [...users.values()].find((u) => u.login === form.get("login"))
+        : users.get(Number(accountId));
     if (!user) return sendHtml(response, 400, "<h1>Unknown account</h1>");
 
     const code = randomToken("code");
@@ -263,6 +277,7 @@ export async function startGithubFake(
     response: ServerResponse,
   ) {
     const form = await readTokenRequest(request);
+    await waitForHeldRequests();
     const current = failure;
     if (current?.kind === "status")
       return sendJson(response, current.status, { message: "Server Error" });
@@ -333,6 +348,17 @@ export async function startGithubFake(
       access_token: accessToken,
       scope: grant.scope.split(/[ ,]+/).filter(Boolean).join(","),
       token_type: "bearer",
+    });
+  }
+
+  function waitForHeldRequests(): Promise<void> {
+    const current = hold;
+    if (!current) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      current.waiting.push(resolve);
+      if (current.waiting.length < current.count) return;
+      hold = null;
+      for (const release of current.waiting) release();
     });
   }
 
@@ -516,10 +542,19 @@ export async function startGithubFake(
     },
     requests: () => [...requests],
     issuedAccessTokens: () => [...issued],
-    authorize: (authorizeUrl, login) =>
-      followConfirm(authorizeUrl, { login, decision: "allow" }),
+    holdTokenRequests(count) {
+      hold = { count, waiting: [] };
+    },
+    authorize: (authorizeUrl, who) =>
+      followConfirm(
+        authorizeUrl,
+        typeof who === "number"
+          ? { account_id: String(who), decision: "allow" }
+          : { login: who, decision: "allow" },
+      ),
     deny: (authorizeUrl) => followConfirm(authorizeUrl, { decision: "deny" }),
     async close() {
+      hold = null;
       for (const timer of timers) clearTimeout(timer);
       timers.clear();
       await closeServer(server);
