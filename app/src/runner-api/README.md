@@ -69,7 +69,7 @@ Every answer, including `204`, carries `Cache-Control: no-store`.
 for that job, in this order:
 
 1. **The claim guard** may refuse it (below).
-2. **LLM access** must be configured (`src/llm/config.ts`: `LLM_PROVIDER` default `openrouter`,
+2. **LLM access** must be configured (`src/runner-api/temporary-llm-access.ts`: `LLM_PROVIDER` default `openrouter`,
    `LLM_MODEL` default `anthropic/claude-haiku-5.5`, `LLM_API_KEY`). Otherwise the job ends as `failed`
    with `llm_not_configured`. **Operations:** this fails every job a runner claims, up to 25 per request,
    for good; fixing the setting later does not revive them (they have to be queued again, for example by
@@ -142,7 +142,7 @@ The body is `{ leaseToken, result }`. `result` is what `code-reviewer-run-job` p
   key pattern is `RUNNER_ENV_KEY_PATTERN` in `contract.ts`; CR-25 defines the same constant under the
   same name next to `toRunnerSettings`, so when the two branches are merged one of them imports the
   other.
-- **`src/llm/config.ts`** is the minimum the claim needs; CR-26 owns the module and extends it.
+- **`src/runner-api/temporary-llm-access.ts`** is the minimum the claim needs. It lives apart from the LLM configuration of CR-26 (`src/llm/`) until the integration ticket CR-46 replaces it.
 
 ## Before this is used in production
 
@@ -156,5 +156,5 @@ gate (CR-24, CR-5) are on the same branch, or old jobs would run with paid model
   `-route-files`: the real handlers with a real SQLite file and the fake GitHub; the route files with
   the wiring of the running server and a delivery that goes through the webhook route first.
 - `integration-tests/compatibility/runner-api-contract.integration.test.ts`: the contract.
-- `token-auth.test.ts`, `requests.test.ts`, `redact.test.ts`, `src/llm/config.test.ts`: unit tests.
+- `token-auth.test.ts`, `requests.test.ts`, `redact.test.ts`, `temporary-llm-access.test.ts`: unit tests.
 - The harness is `src/test-support/runner-api-harness.ts`.

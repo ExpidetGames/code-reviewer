@@ -7,7 +7,7 @@ import { createRepositoriesRepository } from "../db/repositories/repositories-re
 import { getDatabase } from "../db/startup.ts";
 import { integrationRegistry } from "../integrations/registry.ts";
 import { getJobQueue } from "../jobs/shared.ts";
-import { loadLlmAccess } from "../llm/config.ts";
+import { loadLlmAccess } from "./temporary-llm-access.ts";
 import { createRunnerApi, type RunnerApi } from "./api.ts";
 import { allowAllClaimGuard } from "./claim-guard.ts";
 import { HEARTBEAT_INTERVAL_SECONDS } from "./contract.ts";
