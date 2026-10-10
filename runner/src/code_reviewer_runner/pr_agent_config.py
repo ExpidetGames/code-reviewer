@@ -25,7 +25,7 @@ process (other secrets, stray CONFIG or GITHUB variables) reaches PR-Agent.
 import re
 from collections.abc import Callable, Mapping
 
-from code_reviewer_runner.job import OPENROUTER_PREFIX, Command, Job
+from code_reviewer_runner.job import RESERVED_OPTIONS, Command, Job, with_openrouter_prefix
 
 OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
 # The Dynaconf setting that decides whether `@format`, `@jinja`, ... are evaluated at all.
@@ -55,14 +55,10 @@ _PASSTHROUGH = (
 )
 
 
-def _with_prefix(model: str) -> str:
-    return model if model.startswith(OPENROUTER_PREFIX) else f"{OPENROUTER_PREFIX}{model}"
-
-
 def build_environment(job: Job, parent: Mapping[str, str]) -> dict[str, str]:
     """The complete process environment for PR-Agent: no secret and no value from the job."""
     env = {name: parent[name] for name in _PASSTHROUGH if name in parent}
-    pinned_model = _with_prefix(job.llm.model)
+    pinned_model = with_openrouter_prefix(job.llm.model)
     env.update(
         {
             # Read by Dynaconf when its settings are created, i.e. before the first variable is
@@ -108,11 +104,16 @@ def build_typed_settings(job: Job) -> dict[str, bool | int | str | list[str]]:
         "config.use_global_settings_file": False,
         "config.output_run_cost": True,
         # The job's list, or none: the default fallback model belongs to another vendor.
-        "config.fallback_models": [_with_prefix(model) for model in job.llm.fallback_models],
+        "config.fallback_models": [
+            with_openrouter_prefix(model) for model in job.llm.fallback_models
+        ],
         # A repository file must not move the place its own settings are read from (the default
         # branch) and must not add settings files of directories.
         "config.config_branch": "",
         "config.enable_per_directory_settings": False,
+        # Context files such as AGENTS.md come from the default branch, never from the branch a
+        # pull request targets (a repository file could otherwise switch this).
+        "config.repo_context_from_default_branch": True,
         # A re-run edits the review in place; no second "updated to latest commit" comment.
         "pr_reviewer.final_update_message": False,
         # Review labels need write scope and surprise users.
@@ -142,7 +143,7 @@ def option_setting_name(key: str) -> str:
     return f"{section}.{option}"
 
 
-def _typed_option(key: str, text: str, default: object) -> bool | int | float | str:
+def _typed_option(key: str, text: str, default: object) -> bool | int | str:
     if isinstance(default, bool):
         lowered = text.strip().lower()
         if lowered not in ("true", "false"):
@@ -152,17 +153,12 @@ def _typed_option(key: str, text: str, default: object) -> bool | int | float | 
         if not _INTEGER.fullmatch(text.strip()):
             raise InvalidOption(key)
         return int(text)
-    if isinstance(default, float):
-        try:
-            return float(text)
-        except ValueError:
-            raise InvalidOption(key) from None
     return text
 
 
 def build_option_settings(
     options: Mapping[str, str], default_of: Callable[[str], object]
-) -> dict[str, bool | int | float | str]:
+) -> dict[str, bool | int | str]:
     """The options of the job as typed settings.
 
     Dynaconf would turn an environment string into whatever TOML reads (`true`, `123`, `[1]`, a
@@ -171,8 +167,11 @@ def build_option_settings(
     all, stays the text that was sent. A value that does not fit raises `InvalidOption`.
     `default_of` answers with PR-Agent's default for a dotted setting name (None if unknown).
     """
-    settings: dict[str, bool | int | float | str] = {}
+    settings: dict[str, bool | int | str] = {}
     for key, text in options.items():
+        if key in RESERVED_OPTIONS:
+            # parse_job refuses these names; the runner's own value must win in any case.
+            raise InvalidOption(key)
         name = option_setting_name(key)
         settings[name] = _typed_option(key, text, default_of(name))
     return settings

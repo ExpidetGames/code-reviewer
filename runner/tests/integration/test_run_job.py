@@ -327,6 +327,7 @@ def test_a_malicious_repository_settings_file_cannot_change_model_endpoints_or_c
     assert after["extra_headers"] is None
     assert not after["callbacks"]
     assert after["repo_option"] == "a legitimate repository option"
+    assert after["model_routing_enable"] is False
 
 
 # CR-45-T03

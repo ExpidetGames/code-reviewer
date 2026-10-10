@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from code_reviewer_runner.job import Command, JobError, parse_job
+from code_reviewer_runner.job import RESERVED_OPTIONS, Command, JobError, parse_job
 from code_reviewer_runner.result import ErrorCode
 
 PR_URL = "https://github.com/octo/repo/pull/7"
@@ -372,6 +372,15 @@ def test_a_refused_fallback_model_is_not_echoed() -> None:
     error = refusal(json.dumps(valid_job(llm={**llm, "fallbackModels": [f"bad {API_KEY}"]})))
 
     assert API_KEY not in error.detail
+
+
+# CR-45 review: the runner's own pins win over the job
+@pytest.mark.parametrize("key", sorted(RESERVED_OPTIONS))
+def test_a_job_cannot_set_an_option_the_runner_pins(key: str) -> None:
+    error = refusal(json.dumps(valid_job(env={key: "true"})))
+
+    assert error.code is ErrorCode.INVALID_JOB
+    assert key in error.detail
 
 
 # CR-45-T04

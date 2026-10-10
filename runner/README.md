@@ -107,8 +107,16 @@ How a job becomes PR-Agent configuration (`pr_agent_config.py`, `pr_agent_runtim
   the job. The guard puts the options of the job back after each repository file, so the project
   settings of the app win over the repository file; a repository can only set what the app does not
   manage. The settings that route a request or a credential, select the model, bound the cost or
-  switch publishing and callbacks (`PROTECTED_SETTINGS`) cannot be set by a repository at all. A
-  unit test feeds a malicious file through PR-Agent's own merge function.
+  switch publishing and callbacks cannot be set by a repository at all: the key list
+  `PROTECTED_SETTINGS` (model roles, fallbacks, token and reasoning budgets, endpoints, tokens,
+  publishing switches) and the sections in `PROTECTED_SECTIONS`, which are pinned as a whole so a
+  key PR-Agent does not declare cannot be added either (`model_routing`, which can swap the model per
+  pull request size, `openrouter` provider routing and limits, `litellm`, `openai`, `azure_ad`,
+  `aws`, `vertexai` and every provider section PR-Agent reads a key or endpoint from). A unit test
+  feeds a malicious file with all of these through PR-Agent's own merge function; another compares
+  the provider sections with PR-Agent's own list, so a new provider after an upgrade is noticed.
+  A job cannot set the options the runner pins itself (`PR_REVIEWER__FINAL_UPDATE_MESSAGE`,
+  `PR_REVIEWER__ENABLE_REVIEW_LABELS_SECURITY` and `_EFFORT`): `invalid_job`.
 - **Where `.pr_agent.toml` comes from.** PR-Agent 0.47.0 reads it from the **default branch** of the
   repository (contents API without a ref), not from the head of the pull request and not from the
   base branch of a pull request into another branch. The author of a pull request therefore cannot
@@ -119,8 +127,10 @@ How a job becomes PR-Agent configuration (`pr_agent_config.py`, `pr_agent_runtim
   (`config.enable_per_directory_settings`) are pinned, so a repository file cannot redirect the
   lookup. The organization-wide settings repository (`<owner>/pr-agent-settings`) is not read
   (`config.use_global_settings_file` is off). The agent rules file `AGENTS.md`
-  (`config.repo_context_files`) is read from the base branch of the pull request. Repository
-  settings files stay enabled (single tenant, trusted repositories).
+  (`config.repo_context_files`) is read from the default branch as well
+  (`config.repo_context_from_default_branch`, pinned to `true`: a repository file could otherwise
+  switch it to the branch a pull request targets). Repository settings files stay enabled (single
+  tenant, trusted repositories).
 - `config.repo_context_files` stays at PR-Agent's default `["AGENTS.md"]` on purpose: the rules a
   project writes down for agents help the review. It costs a few tokens and one extra GitHub call
   per run, and it puts repository text into the prompt, which the repositories of a single tenant

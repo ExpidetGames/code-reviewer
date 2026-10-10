@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 from pr_agent.algo.utils import decode_user_text_args
 
-from code_reviewer_runner.job import Job, parse_job
+from code_reviewer_runner.job import RESERVED_OPTIONS, Job, parse_job
 from code_reviewer_runner.pr_agent_config import (
     InvalidOption,
     build_environment,
@@ -19,6 +19,7 @@ from code_reviewer_runner.pr_agent_config import (
     build_secret_settings,
     build_typed_settings,
 )
+from code_reviewer_runner.repo_settings_guard import PROTECTED_SETTINGS
 
 TOKEN = "dummy-installation-token-0123456789"
 API_KEY = "dummy-openrouter-key-0123456789"
@@ -266,6 +267,32 @@ def test_a_repository_cannot_move_its_settings_to_another_branch_or_directory() 
 
     assert settings["config.config_branch"] == ""
     assert settings["config.enable_per_directory_settings"] is False
+
+
+# CR-45 review
+def test_the_options_the_runner_pins_are_exactly_the_reserved_options_of_the_job() -> None:
+    pinned = {
+        key
+        for key in {**build_typed_settings(make_job()), **{p: 0 for p in PROTECTED_SETTINGS}}
+        if key.split(".")[0]
+        in ("pr_reviewer", "pr_description", "pr_code_suggestions", "pr_questions")
+    }
+
+    assert {key.replace(".", "__").upper() for key in pinned} == RESERVED_OPTIONS
+
+
+# CR-45 review
+@pytest.mark.parametrize("key", sorted(RESERVED_OPTIONS))
+def test_a_reserved_option_is_refused_even_when_it_bypasses_the_job_validation(key: str) -> None:
+    with pytest.raises(InvalidOption) as caught:
+        build_option_settings({key: "true"}, defaults({}))
+
+    assert caught.value.key == key
+
+
+# CR-45 review
+def test_the_context_files_are_pinned_to_the_default_branch() -> None:
+    assert build_typed_settings(make_job())["config.repo_context_from_default_branch"] is True
 
 
 # CR-45-T04

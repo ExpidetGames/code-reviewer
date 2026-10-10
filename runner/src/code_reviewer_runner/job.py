@@ -56,7 +56,27 @@ _MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,199}")
 _ENV_KEY = re.compile(
     r"(PR_REVIEWER|PR_DESCRIPTION|PR_CODE_SUGGESTIONS|PR_QUESTIONS)__[A-Z0-9]+(_[A-Z0-9]+)*"
 )
+# The names of the options the runner sets itself (switches that decide what is published). A job
+# may not set them: the runner's value must win, and a repository file may not change them either
+# (see `repo_settings_guard.PROTECTED_SETTINGS`, which a test compares with this list).
+RESERVED_OPTIONS = frozenset(
+    {
+        "PR_REVIEWER__FINAL_UPDATE_MESSAGE",
+        "PR_REVIEWER__ENABLE_REVIEW_LABELS_SECURITY",
+        "PR_REVIEWER__ENABLE_REVIEW_LABELS_EFFORT",
+    }
+)
 OPENROUTER_PREFIX = "openrouter/"
+
+
+def with_openrouter_prefix(model: str) -> str:
+    """The model name as PR-Agent needs it to route through OpenRouter."""
+    return model if model.startswith(OPENROUTER_PREFIX) else f"{OPENROUTER_PREFIX}{model}"
+
+
+def without_openrouter_prefix(model: str) -> str:
+    """The model name without the routing prefix, to compare two names."""
+    return model.removeprefix(OPENROUTER_PREFIX)
 
 
 class Command(StrEnum):
@@ -221,10 +241,6 @@ def _max_tokens(llm: dict[str, Any]) -> int | None:
     return value
 
 
-def _without_prefix(model: str) -> str:
-    return model.removeprefix(OPENROUTER_PREFIX)
-
-
 def _fallback_models(llm: dict[str, Any], primary: str) -> tuple[str, ...]:
     if "fallbackModels" not in llm:
         return ()
@@ -234,13 +250,13 @@ def _fallback_models(llm: dict[str, Any], primary: str) -> tuple[str, ...]:
     models: list[Any] = value  # pyright: ignore[reportUnknownVariableType]
     if len(models) > MAX_FALLBACK_MODELS:
         raise _invalid(f"llm.fallbackModels may hold at most {MAX_FALLBACK_MODELS} models")
-    seen = {_without_prefix(primary)}
+    seen = {without_openrouter_prefix(primary)}
     for model in models:
         if not isinstance(model, str) or not _MODEL.fullmatch(model):
             raise _invalid("llm.fallbackModels must hold valid model names")
-        if _without_prefix(model) in seen:
+        if without_openrouter_prefix(model) in seen:
             raise _invalid("llm.fallbackModels must not repeat a model or the primary model")
-        seen.add(_without_prefix(model))
+        seen.add(without_openrouter_prefix(model))
     return tuple(models)
 
 
@@ -304,6 +320,8 @@ def _env(data: dict[str, Any]) -> dict[str, str]:
             raise _invalid(
                 "env may only set options of the review, describe, improve and ask tools"
             )
+        if key in RESERVED_OPTIONS:
+            raise _invalid(f"env option {key} is set by the runner and cannot be set by a job")
         if not isinstance(value, str):
             raise _invalid("env values must be strings")
         env[key] = value
