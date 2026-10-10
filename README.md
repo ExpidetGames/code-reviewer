@@ -12,6 +12,7 @@ Code Reviewer wraps PR-Agent: it runs PR-Agent against pull requests and adds a 
 |---|---|
 | `app/` | Web app and API: Next.js 16, TypeScript, pnpm |
 | `runner/` | Worker that runs PR-Agent: Python, uv |
+| `compose.yml` | The whole stack on one machine (app and runner), see "Run with Docker Compose" |
 | `fakes/` | Fake servers and fixtures used by the tests |
 | `TESTING.md` | Testing strategy |
 | `AGENTS.md` | Rules for agents and contributors |
@@ -102,6 +103,61 @@ CI builds and smoke tests both images on pull requests. A push to `development` 
 (`.github/workflows/publish-images.yml`) pushes them to GHCR with the tags `sha-<short commit>` and
 `development` or `latest`. The packages must be public (set once in the GitHub package settings,
 see the pull request of the image ticket); pulling needs no login then.
+
+## Run with Docker Compose
+
+`compose.yml` runs the whole system on one machine: the `app` (port 3000, SQLite database in the named
+volume `data` at `/data`) and the `runner` (no published port, talks to `http://app:3000`). The runner
+starts only after the app reports healthy; both restart unless stopped on purpose.
+
+```sh
+cp .env.example .env      # then fill in the values, see the comments in the file
+docker compose up -d --wait
+docker compose ps         # app: healthy, runner: running
+```
+
+Open `http://localhost:3000`: it shows the login page. Which values you need and where to get them:
+
+| Setting | Where it comes from |
+|---|---|
+| `BETTER_AUTH_SECRET`, `RUNNER_TOKEN` | Random, at least 32 characters: `openssl rand -base64 32` (one each) |
+| `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET` | A GitHub OAuth app of your own; callback URL `<BETTER_AUTH_URL>/api/auth/callback/github` (see "Sign in") |
+| `ALLOWED_GITHUB_LOGINS` and/or `ALLOWED_GITHUB_ORG` | Who may sign in; with neither set nobody can |
+| `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_WEBHOOK_SECRET`, `GITHUB_APP_PRIVATE_KEY` | The GitHub App that reads pull requests and posts reviews (its settings page) |
+| `LLM_API_KEY` (and `LLM_PROVIDER`) | The LLM access shared by the team. Optional for starting the stack; without it review jobs fail |
+
+A required setting that is empty stops `docker compose up` with a message naming the variable, before
+any container is created. The production app also refuses to start without them (one line in the log
+naming the variables, never their values): the sign in settings, `RUNNER_TOKEN` (at least 32
+characters) and the GitHub App credentials. The development server (`pnpm dev`) does not require the
+last two, so the sign in can be tried without a GitHub App.
+
+**Images.** By default compose pulls `ghcr.io/expidetgames/code-reviewer-app:development` and
+`...-runner:development` (change them with `APP_IMAGE` and `RUNNER_IMAGE`, for example to a
+`sha-<short commit>` tag). The packages are private, so run `docker login ghcr.io` first with a token
+that may read packages. To build from this checkout instead:
+
+```sh
+docker compose -f compose.yml -f compose.build.yml up -d --build --wait
+```
+
+**Data.** The database survives `docker compose down` and image updates (`docker compose pull && docker
+compose up -d`). Only `docker compose down -v` deletes it. Back it up by copying `/data/app.db` out of
+the volume while the app is stopped, until the backup ticket lands. The app is published on
+`127.0.0.1` only; set `APP_BIND_ADDRESS=0.0.0.0` (and `APP_PORT`, `BETTER_AUTH_URL`) to reach it from
+elsewhere, preferably behind a reverse proxy with https.
+
+**Restarts.** `restart: unless-stopped` brings a crashed container back. A container you stop yourself
+(`docker stop`, `docker kill`, `docker compose stop`) stays stopped until the next `up`: that is what
+the policy means.
+
+**Runner.** The job loop does not exist yet (CR-29). Until then the runner container runs a clearly
+marked placeholder that keeps it up and logs `connected to http://app:3000` (and `cannot reach ...` if
+the app is down); `docker compose logs runner` shows it.
+
+`make test-compose` builds both images and runs `docker/smoke/compose.sh` against them with dummy
+settings: validation of the settings, no runner before a healthy app, the stack comes up, the data
+survives `down` and `up`, a killed app container restarts. CI runs the same script for pull requests.
 
 ## Lint, typecheck, test
 
