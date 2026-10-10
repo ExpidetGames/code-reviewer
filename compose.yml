@@ -24,6 +24,10 @@ services:
       # The SQLite database (/data/app.db) lives in a named volume: it survives `docker compose down`
       # and image updates, and is only removed by `docker compose down -v`.
       - data:/data
+      # The daily backups (BACKUP_DIR=/backups, fixed by the image) go to a volume of their own, never
+      # next to the data. Survives `docker compose down` like the data; to get them off this machine
+      # replace the named volume by a path on the host (see app/src/backup/README.md).
+      - backups:/backups
     environment:
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required, see .env.example}
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:${APP_PORT:-3000}}
@@ -44,6 +48,8 @@ services:
       LLM_MODEL: ${LLM_MODEL:-}
       LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-}
       DATABASE_BUSY_TIMEOUT_MS: ${DATABASE_BUSY_TIMEOUT_MS:-}
+      # When the app backs up the database every day (HH:MM, UTC), or "off". Empty: the default.
+      BACKUP_TIME: ${BACKUP_TIME:-}
     healthcheck:
       # Node is in the image, curl is not. /api/health is public and reads the database. Declared
       # here so the timings are visible and tunable; keep the command in sync with the HEALTHCHECK
@@ -95,3 +101,4 @@ services:
 
 volumes:
   data:
+  backups:

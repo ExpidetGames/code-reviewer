@@ -27,6 +27,9 @@ vi.mock("./db/startup.ts", () => ({
 vi.mock("./integrations/sync/startup.ts", () => ({
   runStartupSync: async () => void calls.push("sync"),
 }));
+vi.mock("./backup/startup.ts", () => ({
+  startBackupSchedulerOnStart: () => void calls.push("backup"),
+}));
 
 import { register } from "./instrumentation.ts";
 
@@ -50,7 +53,7 @@ describe("starting the server", () => {
 
     expect(warn).toHaveBeenCalledTimes(1);
     expect(String(warn.mock.calls[0]?.[0])).toContain("LLM_API_KEY_MISSING");
-    expect(calls).toEqual(["auth-check", "database", "pins", "sync"]);
+    expect(calls).toEqual(["auth-check", "database", "pins", "sync", "backup"]);
   });
 
   it("says nothing about the LLM when its configuration is complete", async () => {
@@ -79,6 +82,18 @@ describe("starting the server", () => {
       "database",
       "pins",
       "sync",
+      "backup",
     ]);
+  });
+
+  // CR-40-T14
+  it("starts the daily backup timer once the database is ready", async () => {
+    vi.stubEnv("LLM_PROVIDER", "openrouter");
+    vi.stubEnv("LLM_API_KEY", "dummy-llm-key-0123456789");
+
+    await register();
+
+    expect(calls).toContain("backup");
+    expect(calls.indexOf("backup")).toBeGreaterThan(calls.indexOf("database"));
   });
 });
