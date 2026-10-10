@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# Smoke test of the runner image. Usage: docker/smoke/runner.sh <image>   (default: code-reviewer-runner:local)
+#
+# The runner has no job loop yet (CR-29); today its entry point answers --version. The test proves
+# that the image starts, runs unprivileged, can write to its temporary directory and holds nothing
+# that must stay out of an image. PR-Agent checks (installed version, a job through the fake
+# PR-Agent) arrive with CR-10 and CR-29.
+set -euo pipefail
+
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+repo_root=$(cd "$here/../.." && pwd)
+# shellcheck source=docker/smoke/lib.sh
+source "$here/lib.sh"
+
+image=${1:-code-reviewer-runner:local}
+require_image "$image"
+
+step "the entry point answers --version with the project version"
+expected=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$repo_root/runner/pyproject.toml" | head -n 1)
+[ -n "$expected" ] || fail "cannot read the version from runner/pyproject.toml"
+output=$(docker run --rm "$image" --version)
+[ "$output" = "code-reviewer-runner $expected" ] ||
+  fail "expected 'code-reviewer-runner $expected', got '$output'"
+printf '    %s\n' "$output"
+
+# CR-17-T07
+step "the image sets a numeric non-root user"
+assert_image_user_is_numeric_non_root "$image"
+
+step "the process of the entry point runs as a non-root user"
+# The entry point exits at once, so the same image user is asked from inside a container.
+uid=$(in_image "$image" id -u)
+[[ "$uid" =~ ^[0-9]+$ ]] && [ "$uid" != "0" ] || fail "a process in the image runs with uid '$uid'"
+printf '    process uid: %s\n' "$uid"
+
+# CR-17-T05 (partly): jobs work in the temporary directory and the home directory.
+step "the unprivileged user can write to the temporary and home directories"
+# shellcheck disable=SC2016 # $HOME must expand inside the container, not here
+in_image "$image" sh -c 'touch /tmp/smoke-write && touch "$HOME/smoke-write"' ||
+  fail "the unprivileged user cannot write to /tmp or its home directory"
+
+# CR-17-T09
+step "the image holds no environment files, git data, keys or secrets"
+assert_image_has_no_secrets "$image" "/opt/venv/lib/python*/site-packages/code_reviewer_runner /home /root /tmp"
+# Only our own package is checked for tests: third-party packages may ship a tests directory.
+scan_in_image "$image" "0" sh -c \
+  "find /opt/venv/lib/python*/site-packages/code_reviewer_runner /home -name tests -o -name 'test_*.py' -o -name '*_test.py' -o -name conftest.py"
+[ -z "$SCAN_OUTPUT" ] || fail "tests are inside the image:
+$SCAN_OUTPUT"
+# shellcheck disable=SC2016 # $dir must expand inside the container, not here
+scan_in_image "$image" "0" sh -c 'for dir in /build /src /tests; do [ ! -e "$dir" ] || echo "$dir"; done'
+[ -z "$SCAN_OUTPUT" ] || fail "build directories are inside the image:
+$SCAN_OUTPUT"
+
+step "runner image smoke test passed"
