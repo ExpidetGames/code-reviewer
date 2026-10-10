@@ -280,7 +280,7 @@ describe("starting a command over HTTP", () => {
     expect(await queue.list()).toEqual([]);
   });
 
-  it.each([
+  it.each<Record<string, string>>([
     { "sec-fetch-site": "cross-site" },
     { "sec-fetch-site": "same-site" },
     { origin: "https://evil.test" },

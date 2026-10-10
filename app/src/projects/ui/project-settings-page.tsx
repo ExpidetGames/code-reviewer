@@ -8,6 +8,8 @@ import type { ConfigStatus } from "../../config-status/status.ts";
 import { EmptyState } from "../../ui/empty-state.tsx";
 import { PageHeader } from "../../ui/page-header.tsx";
 import { ReviewSettingsError } from "../../review-settings/errors.ts";
+import type { ManualReviewApi } from "../../manual-reviews/ui/api.ts";
+import { StartReviewPanel } from "../../manual-reviews/ui/start-review-panel.tsx";
 import type { ReviewSettingsService } from "../../review-settings/service.ts";
 import type { SettingsApi } from "../../review-settings/ui/api.ts";
 import {
@@ -66,10 +68,13 @@ const STATE_TEXT: Record<ProjectRowView["status"], string> = {
 export function ProjectSettingsPageContent({
   data,
   api,
+  manualReviewApi,
 }: {
   data: Exclude<ProjectSettingsPageData, { kind: "not_found" }>;
   /** Only tests pass this: a server component cannot hand functions to the client form. */
   api?: SettingsApi;
+  /** Same, for the "Review now" panel. */
+  manualReviewApi?: ManualReviewApi;
 }) {
   const { row } = data;
   return (
@@ -92,6 +97,21 @@ export function ProjectSettingsPageContent({
       ) : (
         <>
           <p className="muted">{STATE_TEXT[row.status]}</p>
+          {/* Keyed on the repository: a panel that Cache Components kept mounted for another project
+              must not show its pull requests. Only an active project can be started by hand. */}
+          {row.status === "active" ? (
+            <StartReviewPanel
+              key={row.repositoryId}
+              repositoryId={row.repositoryId}
+              {...(manualReviewApi === undefined
+                ? {}
+                : { api: manualReviewApi })}
+            />
+          ) : (
+            <p className="muted small">
+              Reviews can be started by hand only while the project is active.
+            </p>
+          )}
           {/* Keyed on the server data: with Cache Components a page that was left stays mounted, and
               when it is shown again with fresh data the form must start from that data. */}
           <SettingsForm
