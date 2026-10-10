@@ -41,7 +41,9 @@ async function setup(
   const put = (
     repositoryId: string,
     body: unknown,
-    headers: Record<string, string> = { "content-type": "application/json" },
+    headers: Record<string, string> = {
+      "content-type": "application/json",
+    },
   ) =>
     handler(
       new Request(`https://app.test/api/repositories/${repositoryId}/project`, {
@@ -184,7 +186,7 @@ describe("a request that is not usable", () => {
     for (const headers of [
       { "content-type": "text/plain" },
       { "content-type": "application/x-www-form-urlencoded" },
-      {},
+      {} as Record<string, string>,
     ]) {
       const response = await put(repository.id, '{"active":true}', headers);
 

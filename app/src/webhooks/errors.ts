@@ -29,6 +29,8 @@ export const WEBHOOK_ACCEPTED_OUTCOMES = [
   "unknown_installation",
   "integration_disabled",
   "trigger_not_allowed",
+  /** The repository has no active project (never activated, deactivated, or gone from the installation). */
+  "project_not_active",
   "trigger_enqueued",
   "installation_changed",
 ] as const;
