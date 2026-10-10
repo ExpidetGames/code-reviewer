@@ -97,4 +97,8 @@ if [ "$failures" -gt 0 ]; then
   printf 'SMOKE TEST FAILED: %s check(s) failed against %s\n' "$failures" "$base" >&2
   exit 1
 fi
-printf 'smoke test passed\n'
+if [ "$skip_runner" = 1 ]; then
+  printf 'smoke test passed (runner API check skipped)\n'
+else
+  printf 'smoke test passed\n'
+fi

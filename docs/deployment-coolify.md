@@ -103,7 +103,9 @@ The apps need the domain and the deployment needs their values, so do it in this
    `https://<domain>/api/auth/callback/github` (the same address as `BETTER_AUTH_URL`, plus that path).
    Generate its client secret.
 5. Create Code Reviewer's GitHub App (steps 1 and 2 of [`github-app.md`](github-app.md)): webhook URL
-   `https://<domain>/api/webhooks/github-app`, permissions, events, private key.
+   `https://<domain>/api/webhooks/github-app`, permissions, events, private key. GitHub sends a first
+   `ping` delivery right away, before anything runs on the domain: it shows as failed. That is expected;
+   redeliver it after the first deploy (*Advanced > Recent Deliveries*), or ignore it.
 6. Enter all values in Coolify ([section 6](#6-environment-variables)) and deploy
    ([section 7](#7-deploy-and-check-the-instance)).
 7. Install the GitHub App on the repositories (step 5 of [`github-app.md`](github-app.md)).
@@ -169,7 +171,11 @@ The file [`.env.example`](../.env.example) explains each setting in detail and i
 table is checked against it and against the Compose file by a test.
 
 Generate random values on any machine with `openssl rand -base64 32`. Never reuse a value between
-environments. Put every secret into the team's password manager first.
+environments. Put every secret into the team's password manager first. Coolify expands `$` references in
+values unless the variable's *Interpolation* is set to **Literal (keep $ characters as-is)**
+([Coolify: multiline and literal values](https://coolify.io/docs/applications/configuration/environment-variables#multiline-and-literal-values)).
+The values from `openssl rand -base64 32` contain no `$`; for any secret that does (a password manager
+value), set Literal.
 
 | Variable | Required | Where the value comes from | Notes |
 |---|---|---|---|
@@ -177,8 +183,8 @@ environments. Put every secret into the team's password manager first.
 | `BETTER_AUTH_SECRET` | yes | `openssl rand -base64 32` | At least 32 characters. Signs the session cookie and encrypts stored GitHub tokens. Changing it signs everybody out. |
 | `GITHUB_OAUTH_CLIENT_ID` | yes | The OAuth app's settings page | The OAuth app is not the GitHub App. |
 | `GITHUB_OAUTH_CLIENT_SECRET` | yes | Generated on the OAuth app's settings page | Secret. |
-| `ALLOWED_GITHUB_LOGINS` | one of two | Comma separated GitHub logins of the team | At least one of this and `ALLOWED_GITHUB_ORG` must be set, otherwise nobody can sign in (the app still starts and logs one warning). Details, including binding a login to its numeric id (`octocat:583231`): [`app/src/auth/README.md`](../app/src/auth/README.md). |
-| `ALLOWED_GITHUB_ORG` | one of two | The name of a GitHub organization (`github.com/<name>`) | Its members may sign in. If both are set, either is enough. |
+| `ALLOWED_GITHUB_LOGINS` | one of two | Comma separated GitHub logins of the team | **Set this or `ALLOWED_GITHUB_ORG` (or both).** Coolify does not block the deployment when both are empty, the app is healthy and the smoke test passes, but nobody can sign in (the app logs one warning). Details, including binding a login to its numeric id (`octocat:583231`): [`app/src/auth/README.md`](../app/src/auth/README.md). |
+| `ALLOWED_GITHUB_ORG` | one of two | The name of a GitHub organization (`github.com/<name>`) | **Set this or `ALLOWED_GITHUB_LOGINS` (or both).** Its members may sign in. If both are set, either is enough. |
 | `GITHUB_APP_ID` | yes | The App ID on the GitHub App's settings page | [`github-app.md`](github-app.md), step 2. |
 | `GITHUB_APP_SLUG` | yes | The last part of `github.com/apps/<slug>` | |
 | `GITHUB_APP_WEBHOOK_SECRET` | yes | The secret entered in the GitHub App's webhook settings | Secret. Byte for byte: no trailing space or line break. |
@@ -230,7 +236,15 @@ After changing a variable, save and **Restart** (only runtime values changed) or
    It checks that `/api/health` and `/login` answer 2xx, that a webhook delivery with a wrong signature
    gets 401, and that the runner API refuses a request without a token with 401. Any deviation makes
    the exit code non-zero and names the check.
-5. Compare the variables in Coolify with the table in [section 6](#6-environment-variables). Where the app
+
+   **Until the runner API is part of the release** (it is not yet on every branch, see
+   [What is verified](#what-is-verified)) the last check fails with 404. Only then, run
+   `docker/smoke/instance.sh --skip-runner-endpoint https://<domain>`; the script prints that it skipped
+   the check and ends with "smoke test passed (runner API check skipped)". Do not use the option once the
+   runner API is in: it would hide an open runner API.
+5. Compare the variables in Coolify with the table in [section 6](#6-environment-variables), and check that
+   **at least one of `ALLOWED_GITHUB_LOGINS` and `ALLOWED_GITHUB_ORG` is set**: neither Coolify nor the health
+   check notices when both are empty. Where the app
    shows configuration hints (the setup status of the project pages), they are empty once everything is set.
 6. From outside the server, only 80 and 443 answer (for example `nmap -p 1-10000 <server-ip>` from another
    machine; your hosting provider's firewall helps), and the runner has no domain.
@@ -257,7 +271,8 @@ in [`app/src/backup/README.md`](../app/src/backup/README.md); read it once befor
 
 **A Coolify scheduled task instead of (or in addition to) the built-in timer.** If you prefer Coolify to
 run and record it: *Scheduled Tasks*, *+ Add*, command `node /srv/app/backup/cli.ts backup`, container
-`app`, a frequency such as `30 2 * * *`, then *Execute now* once and read the execution under *Recent
+`app` (if the field wants the name Coolify generated for the container, use the one `docker ps` shows on the
+server; to be confirmed at the first deployment), a frequency such as `30 2 * * *`, then *Execute now* once and read the execution under *Recent
 executions* ([Coolify: scheduled tasks](https://coolify.io/docs/core/automation/scheduled-tasks/create-a-task)).
 Set `BACKUP_TIME=off` so the two do not both run. Coolify evaluates the schedule in the server's time
 zone; `BACKUP_TIME` is always UTC. The same command, run once before every update, gives you a
@@ -278,9 +293,10 @@ deleted row, not against losing the server or its disk. Copy it elsewhere:
    volume: an archive of a live database file can be inconsistent, which the same page warns about. Whether
    your Coolify version offers it for a volume that a Compose file declares is not verified; if it does not,
    use option 1.
-3. **A host directory instead of a volume.** Replace `backups:/backups` in `compose.coolify.yml` by
-   `/var/backups/code-reviewer:/backups` (create the directory beforehand, owned by uid and gid 10001,
-   mode 700), commit it, and the backups appear in a directory you can copy with any tool.
+
+Do not edit `compose.coolify.yml` on the tracked branch to bind a host directory: the tests pin the two named
+volumes, and every later update of the file would conflict with your change. Option 1 reaches the same
+directory without touching the file.
 
 Keep at least one copy that is not on the Coolify server, and **test a restore** with a copy that came back
 from there ([`app/src/backup/README.md`](../app/src/backup/README.md), "Restore trials").
@@ -367,7 +383,8 @@ App ([`github-app.md`](github-app.md), webhook secret rotation).
 
 1. Make a restore point: run the backup command by hand
    (`node /srv/app/backup/cli.ts backup`, as a scheduled task with *Execute now*, or in the application's
-   *Terminal* for the container `app`).
+   *Terminal* for the container `app`; if Coolify asks for the generated container name, take the one
+   `docker ps` shows).
 2. Get the new version into the branch Coolify tracks (a release pull request into `main`). With *Deploy on
    push* Coolify deploys it at once; otherwise press **Redeploy** in Coolify.
 3. Follow *Deployment Logs*; the log shows the commit that is deployed. Wait for `app` to be **healthy**.
@@ -395,15 +412,17 @@ written since that backup is lost.
 
 Do this once with the whole team in the room; it is the acceptance test of the deployment.
 
-- [ ] `docker/smoke/instance.sh https://<domain>` passes.
+- [ ] `docker/smoke/instance.sh https://<domain>` passes (with `--skip-runner-endpoint` only until the runner
+      API is part of the release, [section 7](#7-deploy-and-check-the-instance), step 4).
 - [ ] **Sign in.** A team member opens `https://<domain>` and signs in with GitHub. A GitHub account that is
       not on the list is turned away ("Your GitHub account is not allowed to use this Code Reviewer
       instance.") and sees no project or run data.
 - [ ] **Install the GitHub App** on a team repository ([`github-app.md`](github-app.md), step 5). The
       `installation` delivery shows 202 under *Recent Deliveries*, and the repository appears in the app.
-- [ ] **Activate the repository as a project.** Repositories are inactive until someone activates them. Use
-      the project list in the UI where it exists; until then use the API call in [`github-app.md`](github-app.md)
-      (`PUT /api/repositories/:repositoryId/project`, see [`app/src/projects/README.md`](../app/src/projects/README.md)).
+- [ ] **Activate the repository as a project.** Repositories are inactive until someone activates them. Open
+      the Projects page of the app, find the repository and activate it. (The Projects page comes with the UI
+      epic; on a build without it the project lead does this with you through the API call described in
+      [`app/src/projects/README.md`](../app/src/projects/README.md), which needs a signed-in session.)
 - [ ] **Open a test pull request** (not a draft) in that repository. The delivery shows 2xx, the run appears
       in the app and goes from waiting to running to succeeded, and the review comment of the app appears
       on the pull request. The run's detail page shows no error code.
@@ -448,4 +467,5 @@ Do this once with the whole team in the room; it is the acceptance test of the d
   from a run.
 - Until the runner's job loop and runner API (CR-28, CR-29) are part of the release, the runner container runs
   a placeholder that only logs whether it can reach the app, reviews cannot run, and the runner check of the smoke
-  script fails with 404 (the compose smoke test in CI passes the option that leaves it out).
+  script fails with 404. Until then run the script with `--skip-runner-endpoint`, which is also what the
+  compose smoke test in CI does; the option goes away from CI once the runner API is on the branch.

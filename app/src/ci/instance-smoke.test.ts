@@ -239,6 +239,9 @@ describe("the instance smoke test", () => {
 
     expect(skipped.code).toBe(0);
     expect(skipped.out).toContain("skipped POST /api/runners/v1/claim");
+    expect(skipped.out).toContain(
+      "smoke test passed (runner API check skipped)",
+    );
     expect(seen.map((entry) => entry.path)).not.toContain(
       "/api/runners/v1/claim",
     );

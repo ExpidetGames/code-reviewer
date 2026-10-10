@@ -119,14 +119,15 @@ services=$(dc config --services | sort | tr '\n' ' ')
 # nothing is built or started from it here.
 step "compose.coolify.yml validates with a complete configuration and names a missing public address"
 coolify_file="$repo_root/compose.coolify.yml"
+# --env-file /dev/null: a developer's own .env in the repository root must not leak into these checks.
 BETTER_AUTH_URL=https://reviews.example.com docker compose --project-name "$project" \
-  --project-directory "$repo_root" --file "$coolify_file" config --quiet ||
+  --project-directory "$repo_root" --env-file /dev/null --file "$coolify_file" config --quiet ||
   fail "docker compose config failed on compose.coolify.yml with a complete configuration"
 coolify_services=$(BETTER_AUTH_URL=https://reviews.example.com docker compose --project-name "$project" \
-  --project-directory "$repo_root" --file "$coolify_file" config --services | sort | tr '\n' ' ')
+  --project-directory "$repo_root" --env-file /dev/null --file "$coolify_file" config --services | sort | tr '\n' ' ')
 [ "$coolify_services" = "app runner " ] || fail "compose.coolify.yml defines '$coolify_services', expected 'app runner'"
 if message=$(env -u BETTER_AUTH_URL docker compose --project-name "$project" \
-  --project-directory "$repo_root" --file "$coolify_file" config --quiet 2>&1); then
+  --project-directory "$repo_root" --env-file /dev/null --file "$coolify_file" config --quiet 2>&1); then
   fail "compose.coolify.yml is valid without BETTER_AUTH_URL"
 fi
 grep -q 'BETTER_AUTH_URL' <<<"$message" || fail "the message does not name BETTER_AUTH_URL: $message"

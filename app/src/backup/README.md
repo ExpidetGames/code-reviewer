@@ -78,14 +78,13 @@ volume `data`. That is separate from the app container: a redeploy, an image upd
 To get the backups off the machine, mount `/backups` from a directory of the host and copy that
 directory somewhere else:
 
-1. Mount a directory of the host instead of the volume: replace `backups:/backups` by
-   `/var/backups/code-reviewer:/backups` in the Compose file (`compose.coolify.yml` for Coolify,
-   `compose.yml` otherwise). Create the host directory beforehand and give it to the app user:
-   `chown 10001:10001 /var/backups/code-reviewer` and `chmod 700`. (For a Coolify _Docker Compose_
-   application the Compose file is the source of truth for mounts, so the mount is not added under
-   Persistent Storage there; see `docs/deployment-coolify.md`, section 8. Without changing the file, the
-   named volume's directory on the host, `/var/lib/docker/volumes/<name>_backups/_data`, can be copied
-   the same way.)
+1. With Docker Compose (`compose.yml`): mount a directory of the host instead of the volume by replacing
+   `backups:/backups` by `/var/backups/code-reviewer:/backups`. Create the host directory beforehand and
+   give it to the app user: `chown 10001:10001 /var/backups/code-reviewer` and `chmod 700`. On Coolify the
+   Compose file is the source of truth for the mounts of a _Docker Compose_ application (nothing is added
+   under Persistent Storage there), and `compose.coolify.yml` should not be edited for this; copy the
+   named volume's directory on the host instead, `/var/lib/docker/volumes/<name>_backups/_data` (see
+   `docs/deployment-coolify.md`, section 8).
 2. Copy that directory off the server with a tool of your choice, run on the host (for example a
    cron job with `rsync`, `rclone` or `restic` to another server or an object storage). As far as we
    know, Coolify's own S3 backups cover the databases that Coolify manages, not a SQLite file in an

@@ -186,6 +186,37 @@ describe("the Coolify guide and the environment variables", () => {
   });
 });
 
+describe("the Coolify guide and the smoke test", () => {
+  // CR-39-T01
+  it("names the option that leaves the runner check out, and says when it is only needed", () => {
+    const step = section("7. Deploy and check the instance");
+
+    expect(step).toContain("--skip-runner-endpoint");
+    expect(step).toContain("Until the runner API is part of the release");
+    expect(guide).toMatch(/What is verified[\s\S]*`--skip-runner-endpoint`/);
+  });
+
+  // CR-39-T03
+  it("makes it prominent that one of the two allow list settings must be set", () => {
+    const rows = variableRows(section("6. Environment variables")).filter(
+      (row) => row.required === "one of two",
+    );
+
+    expect(rows).toHaveLength(2);
+    for (const row of rows)
+      expect(row.cells.join("|")).toContain("**Set this or");
+    expect(section("7. Deploy and check the instance")).toContain(
+      "**at least one of `ALLOWED_GITHUB_LOGINS` and `ALLOWED_GITHUB_ORG` is set**",
+    );
+  });
+
+  it("does not tell people to edit the tracked Compose file to move the backups", () => {
+    expect(section("8. Storage and backups")).toContain(
+      "Do not edit `compose.coolify.yml` on the tracked branch",
+    );
+  });
+});
+
 describe("the Coolify guide and the Compose file", () => {
   // CR-39-T02
   it("tells where the file is and how the domain is routed to the app", () => {
