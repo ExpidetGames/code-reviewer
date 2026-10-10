@@ -1320,6 +1320,178 @@ describe("listing jobs with a limit", () => {
   });
 });
 
+describe("a job that comes from a comment", () => {
+  async function recordedComments(
+    fixture: Awaited<ReturnType<typeof createJobQueueFixture>>,
+  ) {
+    return fixture.db
+      .selectFrom("job_comments")
+      .select(["repository_id", "comment_id", "job_id"])
+      .orderBy("comment_id")
+      .execute();
+  }
+
+  // CR-32-T12
+  it("records the comment it came from", async () => {
+    const fixture = await createJobQueueFixture();
+
+    const job = await fixture.enqueueNew({
+      triggerKind: "comment",
+      commentId: "99001",
+    });
+    await fixture.enqueueNew({ headSha: sha("b") });
+
+    expect(await recordedComments(fixture)).toEqual([
+      {
+        repository_id: fixture.repositoryId,
+        comment_id: "99001",
+        job_id: job.id,
+      },
+    ]);
+  });
+
+  // CR-32-T12
+  it("is not created twice for the same comment, whatever delivery brings it", async () => {
+    const fixture = await createJobQueueFixture();
+    const first = await fixture.enqueueNew({
+      triggerKind: "comment",
+      commentId: "99001",
+      deliveryId: "delivery-1",
+    });
+
+    const replay = await fixture.enqueue({
+      triggerKind: "comment",
+      commentId: "99001",
+      deliveryId: "delivery-2",
+    });
+
+    expect(replay).toMatchObject({
+      status: "existing",
+      reason: "same_comment",
+      job: { id: first.id },
+    });
+    expect(await fixture.queue.list()).toHaveLength(1);
+  });
+
+  // CR-32-T12
+  it("is not created again for a comment whose job has finished", async () => {
+    const fixture = await createJobQueueFixture();
+    const first = await fixture.enqueueNew({
+      triggerKind: "comment",
+      commentId: "99001",
+      deliveryId: "delivery-1",
+    });
+    const claimed = await fixture.queue.claimNext("runner-a");
+    await fixture.queue.complete(first.id, claimed?.leaseToken ?? "", {
+      ok: true,
+      result: {},
+    });
+
+    const replay = await fixture.enqueue({
+      triggerKind: "comment",
+      commentId: "99001",
+      deliveryId: "delivery-2",
+    });
+
+    expect(replay).toMatchObject({
+      status: "existing",
+      reason: "same_comment",
+      job: { id: first.id, status: "succeeded" },
+    });
+  });
+
+  // CR-32-T12
+  it("is recorded too when a second comment finds the same command still waiting, so its replay creates nothing later", async () => {
+    const fixture = await createJobQueueFixture();
+    const first = await fixture.enqueueNew({
+      triggerKind: "comment",
+      commentId: "99001",
+    });
+
+    const second = await fixture.enqueue({
+      triggerKind: "comment",
+      commentId: "99002",
+    });
+    const claimed = await fixture.queue.claimNext("runner-a");
+    await fixture.queue.complete(first.id, claimed?.leaseToken ?? "", {
+      ok: true,
+      result: {},
+    });
+    const replayOfSecond = await fixture.enqueue({
+      triggerKind: "comment",
+      commentId: "99002",
+    });
+
+    expect(second).toMatchObject({
+      status: "existing",
+      reason: "already_active",
+      job: { id: first.id },
+    });
+    expect(replayOfSecond).toMatchObject({
+      status: "existing",
+      reason: "same_comment",
+      job: { id: first.id },
+    });
+    expect(
+      (await recordedComments(fixture)).map((row) => row.comment_id),
+    ).toEqual(["99001", "99002"]);
+    expect(await fixture.queue.list()).toHaveLength(1);
+  });
+
+  // CR-32-T12
+  it("is created for another comment asking for the same thing, once the first job has finished", async () => {
+    const fixture = await createJobQueueFixture();
+    const first = await fixture.enqueueNew({
+      triggerKind: "comment",
+      commentId: "99001",
+    });
+    const claimed = await fixture.queue.claimNext("runner-a");
+    await fixture.queue.complete(first.id, claimed?.leaseToken ?? "", {
+      ok: true,
+      result: {},
+    });
+
+    const second = await fixture.enqueue({
+      triggerKind: "comment",
+      commentId: "99002",
+    });
+
+    expect(second.status).toBe("created");
+  });
+
+  it("is a different job for the same comment id in another repository", async () => {
+    const fixture = await createJobQueueFixture();
+    await fixture.enqueueNew({ triggerKind: "comment", commentId: "99001" });
+
+    const other = await fixture.enqueue({
+      triggerKind: "comment",
+      commentId: "99001",
+      repositoryId: fixture.otherRepositoryId,
+    });
+
+    expect(other.status).toBe("created");
+  });
+
+  it("is refused by the database too when a comment is recorded twice", async () => {
+    const fixture = await createJobQueueFixture();
+    const first = await fixture.enqueueNew({
+      triggerKind: "comment",
+      commentId: "99001",
+    });
+
+    await expect(
+      fixture.db
+        .insertInto("job_comments")
+        .values({
+          repository_id: fixture.repositoryId,
+          comment_id: "99001",
+          job_id: first.id,
+        })
+        .execute(),
+    ).rejects.toThrow(/UNIQUE/);
+  });
+});
+
 describe("the automatic slot index", () => {
   it("spells out the same statuses as the slot-holding statuses of the code", async () => {
     const fixture = await createJobQueueFixture();

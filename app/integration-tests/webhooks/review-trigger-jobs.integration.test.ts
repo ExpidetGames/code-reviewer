@@ -244,6 +244,7 @@ describe("a comment delivery with the job queue behind the route", () => {
         prNumber: 7,
         prUrl: "https://github.test/acme/widgets/pull/7",
         headSha: OPENED_HEAD,
+        commentId: "99001",
         actor: { login: "bob", externalId: "1002" },
       },
       integration,

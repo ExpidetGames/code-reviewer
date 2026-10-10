@@ -33,6 +33,8 @@ export const WEBHOOK_ACCEPTED_OUTCOMES = [
   "trigger_not_allowed",
   /** The repository has no active project (never activated, deactivated, or gone from the installation). */
   "project_not_active",
+  /** A comment command the project's settings do not allow; nothing was handed to the intake. */
+  "command_not_allowed",
   "trigger_enqueued",
   /**
    * A pull request event that deliberately starts no review: a draft, a closed pull request, a

@@ -26,14 +26,16 @@ import re
 from collections.abc import Callable, Mapping
 
 from code_reviewer_runner.job import RESERVED_OPTIONS, Command, Job, with_openrouter_prefix
+from code_reviewer_runner.platforms import Platform, platform_for
 
 OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
 # The Dynaconf setting that decides whether `@format`, `@jinja`, ... are evaluated at all.
 AUTO_CAST_SETTING = "AUTO_CAST_FOR_DYNACONF"
 _INTEGER = re.compile(r"[+-]?[0-9]{1,18}")
 
-# Plain runtime variables the process needs. Everything else of the parent is dropped.
-_PASSTHROUGH = (
+# Plain runtime variables the process needs. Everything else of the parent is dropped. The job
+# loop uses the same list for the environment of a job process.
+PASSTHROUGH_VARIABLES = (
     "PATH",
     "HOME",
     "LANG",
@@ -55,18 +57,27 @@ _PASSTHROUGH = (
 )
 
 
+def _platform_of(job: Job) -> Platform:
+    platform = platform_for(job.git.provider)
+    if platform is None:
+        # parse_job refuses an unknown provider; this only guards a Job built by hand.
+        raise ValueError("unsupported git provider")
+    return platform
+
+
 def build_environment(job: Job, parent: Mapping[str, str]) -> dict[str, str]:
     """The complete process environment for PR-Agent: no secret and no value from the job."""
-    env = {name: parent[name] for name in _PASSTHROUGH if name in parent}
+    platform = _platform_of(job)
+    env = {name: parent[name] for name in PASSTHROUGH_VARIABLES if name in parent}
     pinned_model = with_openrouter_prefix(job.llm.model)
     env.update(
         {
             # Read by Dynaconf when its settings are created, i.e. before the first variable is
             # parsed. PR-Agent sets the same variable itself, but only after that point.
             AUTO_CAST_SETTING: "false",
-            "CONFIG__GIT_PROVIDER": "github",
-            "GITHUB__DEPLOYMENT_TYPE": "user",
-            "GITHUB__BASE_URL": job.git.base_url,
+            "CONFIG__GIT_PROVIDER": platform.git_provider,
+            platform.deployment_type_variable: platform.deployment_type,
+            platform.base_url_variable: job.git.base_url,
             # All three model roles are the job's model: PR-Agent uses the weak model for `ask`
             # and `describe` and the reasoning model for self-reflection, and would otherwise
             # fall back to vendor defaults (and send the LLM key to an unintended model).
@@ -84,7 +95,7 @@ def build_environment(job: Job, parent: Mapping[str, str]) -> dict[str, str]:
 def build_secret_settings(job: Job) -> dict[str, str]:
     """The credentials of the job as typed settings. Never log or print this mapping."""
     return {
-        "github.user_token": job.git.token,
+        _platform_of(job).token_setting: job.git.token,
         "openrouter.key": job.llm.api_key,
     }
 
