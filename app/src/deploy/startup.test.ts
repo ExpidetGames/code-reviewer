@@ -142,6 +142,8 @@ describe("checking the deployment settings when the server starts", () => {
       `${"x".repeat(32)}\n`,
       `${"x".repeat(31)}\n`,
       `  ${"x".repeat(32)}  `,
+      `${"x".repeat(20)} ${"x".repeat(20)}`,
+      `${"x".repeat(40)}\u0007`,
       "   ",
       "",
     ];

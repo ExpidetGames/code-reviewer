@@ -5,10 +5,7 @@
 // the provider uses (src/integrations/providers/github-app/config.ts, reached through the registry),
 // so the two cannot disagree. A problem is reported with variable names only, never with a value (they are secrets).
 
-import {
-  MIN_RUNNER_TOKEN_LENGTH,
-  configuredRunnerToken,
-} from "../runner-api/token-auth.ts";
+import { runnerTokenProblem } from "../runner-api/token-auth.ts";
 
 export const DEPLOY_ERROR_CODES = ["DEPLOY_CONFIG_INVALID"] as const;
 export type DeployErrorCode = (typeof DEPLOY_ERROR_CODES)[number];
@@ -27,13 +24,9 @@ export async function findDeploymentConfigProblems(
 ): Promise<string[]> {
   const problems: string[] = [];
 
-  // The token is judged by the runner API's own rules (same trimming, same minimum length).
-  const runnerToken = configuredRunnerToken(env);
-  if (runnerToken === undefined) problems.push("RUNNER_TOKEN is not set");
-  else if (runnerToken.length < MIN_RUNNER_TOKEN_LENGTH)
-    problems.push(
-      `RUNNER_TOKEN must be at least ${String(MIN_RUNNER_TOKEN_LENGTH)} characters long`,
-    );
+  // The token is judged by the runner API's own rule, the one that also logs the start-up warning.
+  const tokenProblem = runnerTokenProblem(env);
+  if (tokenProblem !== null) problems.push(`RUNNER_TOKEN ${tokenProblem}`);
 
   // The GitHub App settings have exactly one reader, the provider's loader; this check only asks it
   // whether the settings are usable (it names variables, never values).
