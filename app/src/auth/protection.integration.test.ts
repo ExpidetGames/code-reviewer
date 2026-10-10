@@ -21,6 +21,10 @@ const PUBLIC_ROUTES = [
   "/api/auth/[...all]",
   // GitHub signs its deliveries; the route checks the signature itself (src/webhooks/README.md).
   "/api/webhooks/github-app",
+  // The runner sends its own shared token (src/runner-api/README.md).
+  "/api/runners/v1/claim",
+  "/api/runners/v1/jobs/[id]/heartbeat",
+  "/api/runners/v1/jobs/[id]/complete",
 ] as const;
 const PROTECTED_ROUTES = ["/"] as const;
 // Files the proxy matcher leaves out on purpose (src/proxy.ts), so no session rule applies to them.

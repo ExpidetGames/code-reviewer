@@ -39,8 +39,8 @@ it. Do not document planned things as if they existed in READMEs or PR descripti
 | Level | Tool | Runs on | What belongs here | Status |
 |---|---|---|---|---|
 | App unit | Vitest, project `unit` | host | Pure logic: signature verification, event filtering, job state machine, backoff, comment formatting, input validation, React components. Collaborators are fakes. No database, no network. | exists |
-| App integration | Vitest, project `integration` | host or Docker stack | Real SQLite file plus real Kysely repositories; route handlers driven through the real handler (webhook, runner API, auth) including refusals; GitHub client code against the GitHub fake. | exists (database layer, sign in and access guard against the fake GitHub login, GitHub App client and sync against the GitHub fake, the GitHub App webhook route; runner API handlers planned) |
-| Contract | Vitest in `app/integration-tests/compatibility/`, pytest in `runner/tests/contract/` | host | Pins the runner HTTP API and the GitHub webhook payload subset. One machine-readable source in `contracts/` is validated by both sides. | planned |
+| App integration | Vitest, project `integration` | host or Docker stack | Real SQLite file plus real Kysely repositories; route handlers driven through the real handler (webhook, runner API, auth) including refusals; GitHub client code against the GitHub fake. | exists (database layer, sign in and access guard against the fake GitHub login, GitHub App client and sync against the GitHub fake, the GitHub App webhook route, the runner API routes claim, heartbeat and complete) |
+| Contract | Vitest in `app/integration-tests/compatibility/`, pytest in `runner/tests/contract/` | host | Pins the runner HTTP API and the GitHub webhook payload subset. One machine-readable source in `contracts/` is validated by both sides. | exists (runner API v1: the app checks its real answers and requests against `contracts/runner-api.v1.json`, the runner checks the examples and rules; webhook payload subset is covered by its own contract test in the GitHub App provider) |
 | Runner unit | pytest, marker `unit` | host | Job loop with a fake clock, heartbeat, lease loss, backoff, shutdown, PR-Agent command and env construction, output parsing, log truncation, secret redaction. Subprocess boundary replaced by a fake. | exists |
 | Runner integration | pytest, marker `integration` | host or Docker stack | Real processes and real loopback sockets: the real loop against the app or a fake runner API, with the fake PR-Agent executable as a real subprocess (exit codes, timeouts, kill). | exists (entry point only) |
 | Engine smoke | pytest, marker `engine` | Docker stack, nightly and release PRs | The real, pinned PR-Agent against the GitHub fake and the LLM fake. Asserts the shape of what was posted, never review quality. Deselected by default. | marker exists, no tests yet |
@@ -89,11 +89,11 @@ runner/                            Python project (uv)
   src/code_reviewer_runner/        code
   tests/unit/test_<module>.py
   tests/integration/test_<behavior_area>.py
-  tests/contract/test_<contract>.py      (planned)
+  tests/contract/test_<contract>.py
   tests/engine/test_<engine_area>.py     (planned)
 fakes/                             shared fake servers and fixtures (see fakes/README.md)
 docker/smoke/                      image smoke tests (bash) and their shared helpers
-contracts/                         runner API and webhook schemas (planned)
+contracts/                         runner API schema (runner-api.v1.json) and one valid example per body (examples/)
 ```
 
 - App: unit `*.test.ts(x)`, integration `*.integration.test.ts(x)`, e2e `*.e2e.ts`. E2E files never
@@ -181,7 +181,7 @@ PR-Agent ticket: installed version equals the pinned one, a job through the fake
 
 Planned: `verify:structure` (placement and naming rules, test files must be discovered by a runner,
 no process identifiers in titles), `verify:server-only-canary`, the Docker test stack
-(`docker/compose.test.yml`), `contracts/`.
+(`docker/compose.test.yml`).
 
 ## 7. Commands
 

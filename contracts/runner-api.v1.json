@@ -1,0 +1,315 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ExpidetGames/code-reviewer/contracts/runner-api.v1.json",
+  "title": "Code Reviewer runner API, version 1",
+  "description": "The wire format between the app and the runner. The app serves POST /api/runners/v1/claim, POST /api/runners/v1/jobs/{id}/heartbeat and POST /api/runners/v1/jobs/{id}/complete. Every request carries 'Authorization: Bearer <RUNNER_TOKEN>' and may carry 'X-Runner-Id' (a free-form id for bookkeeping, not a security boundary). A reader ignores fields it does not know, except where a definition says 'additionalProperties: false' (RunnerJobInput mirrors the closed job format of the runner). This file is the only source of the format: the app (app/integration-tests/compatibility) and the runner (runner/tests/contract) both validate against it, and contracts/examples holds one valid example per definition.",
+  "version": 1,
+  "$defs": {
+    "Timestamp": {
+      "description": "ISO 8601, UTC.",
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?Z$"
+    },
+    "JobId": {
+      "description": "The id of a job (a UUID).",
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "LeaseToken": {
+      "description": "Proof that the caller holds the job. New for every claim; required by heartbeat and complete. Secret: never log it.",
+      "type": "string",
+      "minLength": 8,
+      "maxLength": 256
+    },
+    "Command": {
+      "type": "string",
+      "enum": ["review", "improve", "describe", "ask"]
+    },
+    "KnownRunnerErrorCode": {
+      "description": "The error codes the runner reports in a result (ErrorCode in the runner, plus runner_shutdown from the job loop). A caller branches on the code, never on a message. The app accepts any code of the form below and stores an unknown one as 'unknown' (the original stays in the stored result), so a newer runner never loses a result.",
+      "type": "string",
+      "enum": [
+        "invalid_job",
+        "invalid_command",
+        "pr_agent_version_mismatch",
+        "identity_patch_failed",
+        "runner_error",
+        "command_failed",
+        "review_not_published",
+        "pr_not_found",
+        "git_auth",
+        "git_forbidden",
+        "git_rate_limit",
+        "git_unavailable",
+        "git_unprocessable",
+        "git_provider_init",
+        "llm_auth",
+        "llm_quota",
+        "llm_rate_limit",
+        "llm_timeout",
+        "llm_unavailable",
+        "llm_bad_request",
+        "llm_output_invalid",
+        "model_unknown",
+        "timeout",
+        "runner_shutdown",
+        "unknown"
+      ]
+    },
+    "JobEnv": {
+      "description": "Extra options of the four PR-Agent tools, as strings. Nothing else is allowed here (credentials, endpoints and the model have their own fields).",
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^(PR_REVIEWER|PR_DESCRIPTION|PR_CODE_SUGGESTIONS|PR_QUESTIONS)__[A-Z0-9_]+$"
+      },
+      "additionalProperties": { "type": "string", "maxLength": 4096 },
+      "maxProperties": 64
+    },
+    "RunnerJobInput": {
+      "description": "Exactly the job the runner reads on stdin (see runner/src/code_reviewer_runner/job.py). Closed: the runner refuses unknown fields. Contains secrets (git.token, llm.apiKey): only the claim response carries it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["prUrl", "command", "git", "llm", "env"],
+      "properties": {
+        "prUrl": { "type": "string", "minLength": 1, "maxLength": 2048 },
+        "command": { "$ref": "#/$defs/Command" },
+        "args": {
+          "description": "Only for the ask command: exactly one string, the question.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 4000 },
+          "minItems": 1,
+          "maxItems": 1
+        },
+        "git": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["provider", "baseUrl", "token", "botLogin"],
+          "properties": {
+            "provider": { "type": "string", "enum": ["github"] },
+            "baseUrl": { "type": "string", "minLength": 1, "maxLength": 2048 },
+            "token": { "type": "string", "minLength": 1, "maxLength": 4096 },
+            "botLogin": { "type": "string", "minLength": 1, "maxLength": 128 }
+          }
+        },
+        "llm": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["provider", "model", "apiKey"],
+          "properties": {
+            "provider": { "type": "string", "enum": ["openrouter"] },
+            "model": { "type": "string", "minLength": 1, "maxLength": 200 },
+            "apiKey": { "type": "string", "minLength": 1, "maxLength": 4096 },
+            "baseUrl": { "type": "string", "minLength": 1, "maxLength": 2048 },
+            "maxTokens": {
+              "type": "integer",
+              "minimum": 1000,
+              "maximum": 10000000
+            }
+          }
+        },
+        "env": { "$ref": "#/$defs/JobEnv" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "command": { "const": "ask" } },
+            "required": ["command"]
+          },
+          "then": { "required": ["args"] },
+          "else": { "not": { "required": ["args"] } }
+        }
+      ]
+    },
+    "ClaimResponse": {
+      "description": "200 from POST /api/runners/v1/claim. 204 without a body means there is nothing to do. Cache-Control is always no-store.",
+      "type": "object",
+      "required": ["version", "job"],
+      "properties": {
+        "version": { "const": 1 },
+        "job": {
+          "type": "object",
+          "required": [
+            "id",
+            "leaseToken",
+            "leaseExpiresAt",
+            "heartbeatIntervalSeconds",
+            "tokenExpiresAt",
+            "input"
+          ],
+          "properties": {
+            "id": { "$ref": "#/$defs/JobId" },
+            "leaseToken": { "$ref": "#/$defs/LeaseToken" },
+            "leaseExpiresAt": { "$ref": "#/$defs/Timestamp" },
+            "heartbeatIntervalSeconds": {
+              "description": "How often to send a heartbeat; the lease is several times longer.",
+              "type": "integer",
+              "minimum": 1
+            },
+            "tokenExpiresAt": {
+              "description": "When the git token stops working; null if it does not expire.",
+              "oneOf": [{ "$ref": "#/$defs/Timestamp" }, { "type": "null" }]
+            },
+            "input": { "$ref": "#/$defs/RunnerJobInput" }
+          }
+        }
+      }
+    },
+    "HeartbeatRequest": {
+      "type": "object",
+      "required": ["leaseToken"],
+      "properties": { "leaseToken": { "$ref": "#/$defs/LeaseToken" } }
+    },
+    "HeartbeatResponse": {
+      "type": "object",
+      "required": ["version", "job"],
+      "properties": {
+        "version": { "const": 1 },
+        "job": {
+          "type": "object",
+          "required": ["id", "heartbeatAt", "leaseExpiresAt"],
+          "properties": {
+            "id": { "$ref": "#/$defs/JobId" },
+            "heartbeatAt": { "$ref": "#/$defs/Timestamp" },
+            "leaseExpiresAt": { "$ref": "#/$defs/Timestamp" }
+          }
+        }
+      }
+    },
+    "RunnerUsage": {
+      "type": "object",
+      "required": [
+        "model",
+        "promptTokens",
+        "completionTokens",
+        "totalTokens",
+        "aiCalls",
+        "fallbackUsed",
+        "costUsd"
+      ],
+      "properties": {
+        "model": { "type": ["string", "null"], "maxLength": 200 },
+        "promptTokens": { "type": "integer", "minimum": 0 },
+        "completionTokens": { "type": "integer", "minimum": 0 },
+        "totalTokens": { "type": "integer", "minimum": 0 },
+        "aiCalls": { "type": "integer", "minimum": 0 },
+        "fallbackUsed": { "type": "boolean" },
+        "costUsd": { "type": ["number", "null"], "minimum": 0 }
+      }
+    },
+    "RunnerResult": {
+      "description": "What the runner prints when a job ends (the output of code-reviewer-run-job), plus an optional errorMessage. The runner has redacted secrets from logTail; the app removes anything that still looks like one before it stores the result.",
+      "type": "object",
+      "required": ["ok", "durationMs", "errorCode", "logTail"],
+      "properties": {
+        "ok": { "type": "boolean" },
+        "durationMs": { "type": "integer", "minimum": 0, "maximum": 604800000 },
+        "commentUrl": {
+          "description": "Link to the comment PR-Agent wrote; null when it could not be found (the run is still ok).",
+          "type": ["string", "null"],
+          "maxLength": 2048,
+          "pattern": "^https?://"
+        },
+        "errorCode": {
+          "description": "null if and only if ok is true. See KnownRunnerErrorCode.",
+          "type": ["string", "null"],
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        },
+        "errorMessage": {
+          "description": "Optional human readable detail for a failure; never contains secrets.",
+          "type": ["string", "null"],
+          "maxLength": 2000
+        },
+        "logTail": { "type": "string", "maxLength": 8192 },
+        "logTruncated": { "type": "boolean" },
+        "usage": {
+          "oneOf": [{ "$ref": "#/$defs/RunnerUsage" }, { "type": "null" }]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "ok": { "const": true } },
+            "required": ["ok"]
+          },
+          "then": { "properties": { "errorCode": { "type": "null" } } },
+          "else": { "properties": { "errorCode": { "type": "string" } } }
+        }
+      ]
+    },
+    "CompleteRequest": {
+      "description": "The whole request body must not exceed 65536 bytes (413 otherwise).",
+      "type": "object",
+      "required": ["leaseToken", "result"],
+      "properties": {
+        "leaseToken": { "$ref": "#/$defs/LeaseToken" },
+        "result": { "$ref": "#/$defs/RunnerResult" }
+      }
+    },
+    "CompleteResponse": {
+      "description": "200 for a completion and for the repetition of the same completion (alreadyCompleted: true); a different result for a completed job is 409. A result with errorCode runner_shutdown is not stored: the job is given back (status queued) and a repetition is 409, because the runner no longer holds the job.",
+      "type": "object",
+      "required": ["version", "job", "alreadyCompleted"],
+      "properties": {
+        "version": { "const": 1 },
+        "job": {
+          "type": "object",
+          "required": ["id", "status"],
+          "properties": {
+            "id": { "$ref": "#/$defs/JobId" },
+            "status": {
+              "description": "succeeded or failed: the job is finished. queued: the runner reported runner_shutdown, the job was given back and waits for another runner (it fails instead if that was the last allowed attempt).",
+              "type": "string",
+              "enum": ["succeeded", "failed", "queued"]
+            }
+          }
+        },
+        "alreadyCompleted": { "type": "boolean" }
+      }
+    },
+    "ApiErrorCode": {
+      "description": "Every error of the API has one of these codes. 401 RUNNER_UNAUTHORIZED, 400 RUNNER_ID_INVALID / RUNNER_REQUEST_INVALID, 404 RUNNER_JOB_NOT_FOUND, 409 RUNNER_LEASE_LOST / RUNNER_RESULT_CONFLICT, 413 RUNNER_BODY_TOO_LARGE, 503 RUNNER_GIT_ACCESS_UNAVAILABLE (with Retry-After), 500 RUNNER_INTERNAL_ERROR.",
+      "type": "string",
+      "enum": [
+        "RUNNER_UNAUTHORIZED",
+        "RUNNER_ID_INVALID",
+        "RUNNER_REQUEST_INVALID",
+        "RUNNER_JOB_NOT_FOUND",
+        "RUNNER_LEASE_LOST",
+        "RUNNER_RESULT_CONFLICT",
+        "RUNNER_BODY_TOO_LARGE",
+        "RUNNER_GIT_ACCESS_UNAVAILABLE",
+        "RUNNER_INTERNAL_ERROR"
+      ]
+    },
+    "ErrorResponse": {
+      "type": "object",
+      "required": ["error"],
+      "properties": {
+        "error": {
+          "type": "object",
+          "required": ["code", "message"],
+          "properties": {
+            "code": { "$ref": "#/$defs/ApiErrorCode" },
+            "message": { "type": "string", "minLength": 1, "maxLength": 500 },
+            "fields": {
+              "description": "For RUNNER_REQUEST_INVALID: which fields were refused and why (never their values).",
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["field", "code"],
+                "properties": {
+                  "field": { "type": "string", "maxLength": 100 },
+                  "code": {
+                    "type": "string",
+                    "enum": ["required", "invalid", "too_long"]
+                  }
+                }
+              }
+            },
+            "retryAfterSeconds": { "type": "integer", "minimum": 1 }
+          }
+        }
+      }
+    }
+  }
+}

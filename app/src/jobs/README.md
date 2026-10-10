@@ -125,10 +125,13 @@ checked in code review.
   for the newer one. Also check that the repository has an active project, skip drafts, debounce through
   `runAfter`, and call `discardWaitingForPr` when a pull request closes.
 - **CR-24 (projects).** Call `cancelWaitingForRepository` when a project is deactivated.
-- **CR-28/CR-29 (runner).** Until CR-31 and CR-24 are in, the intake enqueues for every repository and
+- **CR-28/CR-29 (runner).** The runner API exists (`src/runner-api/README.md`); it uses `release` for
+  "token creation failed". Until CR-31 and CR-24 are in, the intake enqueues for every repository and
   closed pull requests keep their waiting jobs. The runner API must not be enabled (or shipped) before
-  they are, or old jobs would run with paid model calls. Use `release` for "token creation failed" and
-  for the runner shutdown.
+  they are, or old jobs would run with paid model calls; its claim guard is the hook that skips jobs of
+  repositories without an active project once the projects are there. The runner (CR-29) reports its
+  shutdown through `complete` with the error code `runner_shutdown`; the runner API turns that into
+  `release`, so the job is requeued with the attempt cap (the runner never calls `release` itself).
 - **CR-32 (comments).** The provider does not cut `args`; the queue refuses more than 10 000 characters
   (the intake drops such a trigger with a log line instead of failing the delivery). Truncate to 2000
   with a note before the intake. Comment jobs are exempt from the head commit rule, so a captured signed
