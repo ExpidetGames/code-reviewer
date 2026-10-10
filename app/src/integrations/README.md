@@ -51,7 +51,7 @@ interface IntegrationProvider {
 
 ### Receiving a webhook
 
-The route never looks into a platform payload. For a shared webhook (GitHub App) it does:
+The route (`POST /api/webhooks/github-app`, see `src/webhooks/README.md`) never looks into a platform payload. For a shared webhook (GitHub App) it does:
 
 1. `verifyWebhook(null, request)`: is the delivery genuine? (HMAC of the body with the shared secret.)
 2. `identifyWebhook(request)`: which connection is it? Returns `{ externalId }` (the GitHub

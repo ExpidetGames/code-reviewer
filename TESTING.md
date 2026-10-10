@@ -39,7 +39,7 @@ it. Do not document planned things as if they existed in READMEs or PR descripti
 | Level | Tool | Runs on | What belongs here | Status |
 |---|---|---|---|---|
 | App unit | Vitest, project `unit` | host | Pure logic: signature verification, event filtering, job state machine, backoff, comment formatting, input validation, React components. Collaborators are fakes. No database, no network. | exists |
-| App integration | Vitest, project `integration` | host or Docker stack | Real SQLite file plus real Kysely repositories; route handlers driven through the real handler (webhook, runner API, auth) including refusals; GitHub client code against the GitHub fake. | exists (database layer, GitHub App client and sync against the GitHub fake; route handlers planned) |
+| App integration | Vitest, project `integration` | host or Docker stack | Real SQLite file plus real Kysely repositories; route handlers driven through the real handler (webhook, runner API, auth) including refusals; GitHub client code against the GitHub fake. | exists (database layer, GitHub App client and sync against the GitHub fake, the GitHub App webhook route; runner API and auth routes planned) |
 | Contract | Vitest in `app/integration-tests/compatibility/`, pytest in `runner/tests/contract/` | host | Pins the runner HTTP API and the GitHub webhook payload subset. One machine-readable source in `contracts/` is validated by both sides. | planned |
 | Runner unit | pytest, marker `unit` | host | Job loop with a fake clock, heartbeat, lease loss, backoff, shutdown, PR-Agent command and env construction, output parsing, log truncation, secret redaction. Subprocess boundary replaced by a fake. | exists |
 | Runner integration | pytest, marker `integration` | host or Docker stack | Real processes and real loopback sockets: the real loop against the app or a fake runner API, with the fake PR-Agent executable as a real subprocess (exit codes, timeouts, kill). | exists (entry point only) |
@@ -81,7 +81,7 @@ app/                               Next.js project (pnpm)
   src/<owner>/foo.integration.test.ts   single-owner integration test beside the code
   src/test-support/                shared test setup (network guard, SQLite template and child process helpers); not product code
   src/ci/                          structure tests of the CI and publish workflows and of the Dockerfiles
-  integration-tests/               cross-owner integration tests (planned)
+  integration-tests/               cross-owner integration tests (exists: webhooks/)
     http/ webhooks/ workflows/ compatibility/ support/   closed list; support/ holds no tests
   e2e/<area>/<journey>.e2e.ts      Playwright; areas: app/, auth/, reviews/, jobs/, settings/
 runner/                            Python project (uv)
