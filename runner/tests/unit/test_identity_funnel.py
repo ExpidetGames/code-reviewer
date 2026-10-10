@@ -6,32 +6,51 @@ only then update the fingerprints and `PATCHED_FOR_VERSION` together with the pi
 
 import ast
 import inspect
+import sys
 from typing import Any
 
 import pytest
 from pr_agent.agent import pr_agent as pr_agent_module
+from pr_agent.algo import comment_identity
+from pr_agent.algo.comment_identity import PRReviewIdentity
 from pr_agent.git_providers.git_provider import GitProvider
 from pr_agent.git_providers.github_provider import GithubProvider
-from pr_agent.tools import pr_reviewer as pr_reviewer_module
+from pr_agent.tools.pr_reviewer import PRReviewer
 
 from code_reviewer_runner.identity_funnel import (
     FUNNEL,
     FunnelError,
     fingerprint,
+    function_tree,
     self_calls,
     verify_identity_funnel,
 )
-from code_reviewer_runner.identity_patch import PATCHED_FOR_VERSION
+from code_reviewer_runner.identity_patch import (
+    PATCHED_FOR_VERSION,
+    IdentityPatchError,
+    apply_identity_patch,
+)
 from code_reviewer_runner.result import ErrorCode
 
+# The fingerprints are hashes of the syntax tree, which differs between Python minor versions.
+FINGERPRINT_PYTHON = (3, 13)
+
 # Fingerprints of the code the patch relies on, taken from PR-Agent PATCHED_FOR_VERSION (a hash of
-# the syntax tree, so comments, formatting and docstrings do not change it).
+# the syntax tree, so comments, formatting and docstrings do not change it). The first group is the
+# login chain; the second decides which deployment type, which comments and which review branch
+# PR-Agent uses, where a change would bypass the patch or post duplicates.
 FINGERPRINTS_FOR_0_47_0 = {
     "GithubProvider._resolve_user_login": "55901c51d57450e3",
     "GithubProvider._agent_login": "9e1cca1165e9fced",
     "GithubProvider.is_comment_authored_by_pr_agent": "ae0e1e11fab2156d",
     "GithubProvider.supports_review_finding_state": "72a280fa559c9136",
     "GitProvider._iter_persistent_comments": "83b8ed0cbf692ecb",
+    "GithubProvider._deployment_type": "7c9296ae5c0b70a7",
+    "comment_identity.comment_matches_identity": "a1d3ee0b4b63cbc9",
+    "comment_identity.comment_carries_other_identity": "68fb6f4e578d134d",
+    "comment_identity.hidden_marker_forms": "84a40a8e0b1093a6",
+    "PRReviewer._review_comment_authorship_available": "b30659553deca3a0",
+    "PRReviewer._review_finding_state_in_play": "ee6991ca5ecc7abf",
 }
 
 HOW_TO_FIX = (
@@ -43,8 +62,14 @@ HOW_TO_FIX = (
 
 
 def _target(name: str) -> Any:  # Any: PR-Agent ships no type information
+    owners: dict[str, Any] = {
+        "GithubProvider": GithubProvider,
+        "GitProvider": GitProvider,
+        "PRReviewer": PRReviewer,
+        "comment_identity": comment_identity,
+    }
     owner, method = name.split(".")
-    return getattr(GithubProvider if owner == "GithubProvider" else GitProvider, method)
+    return getattr(owners[owner], method)
 
 
 def test_the_fingerprints_in_this_file_belong_to_the_version_the_patch_was_written_for() -> None:
@@ -77,6 +102,13 @@ def test_the_authorship_check_compares_the_comment_author_with_the_agent_login()
 # CR-30-T04
 @pytest.mark.parametrize("name", sorted(FINGERPRINTS_FOR_0_47_0))
 def test_the_code_the_patch_relies_on_is_unchanged_since_the_patch_was_written(name: str) -> None:
+    assert sys.version_info[:2] == FINGERPRINT_PYTHON, (
+        "the fingerprints were recorded on Python "
+        f"{FINGERPRINT_PYTHON[0]}.{FINGERPRINT_PYTHON[1]}; this interpreter is "
+        f"{sys.version_info[0]}.{sys.version_info[1]}. Run the tests on the recorded version, "
+        "or re-record the fingerprints on the new one."
+    )
+
     assert fingerprint(_target(name)) == FINGERPRINTS_FOR_0_47_0[name], f"{name}: {HOW_TO_FIX}"
 
 
@@ -87,20 +119,35 @@ def test_the_persistent_comment_lookup_still_asks_for_authorship() -> None:
     assert "require_agent_authorship" in inspect.signature(lookup).parameters
 
 
-def test_the_review_tool_still_asks_for_authorship_when_it_reads_and_writes_its_comment() -> None:
-    tree = ast.parse(inspect.getsource(pr_reviewer_module))
-    requests = [
-        node
-        for node in ast.walk(tree)
+def _authorship_requests(function: Any) -> int:
+    """How often a function asks for authorship: a keyword argument or a key of a dict."""
+    return sum(
+        1
+        for node in ast.walk(function_tree(function))
         if (isinstance(node, ast.keyword) and node.arg == "require_agent_authorship")
         or (isinstance(node, ast.Constant) and node.value == "require_agent_authorship")
-    ]
-
-    assert len(requests) == 4, HOW_TO_FIX
+    )
 
 
-def test_the_agent_facade_still_asks_the_provider_whether_a_comment_is_its_own() -> None:
-    assert "is_comment_authored_by_pr_agent" in inspect.getsource(pr_agent_module)
+def test_the_review_tool_still_asks_for_authorship_where_it_reads_and_writes_its_comment() -> None:
+    requests = {
+        "PRReviewer.run": _authorship_requests(PRReviewer.run),
+        "PRReviewer._load_review_finding_state": _authorship_requests(
+            PRReviewer._load_review_finding_state  # pyright: ignore[reportPrivateUsage]
+        ),
+    }
+
+    assert requests == {"PRReviewer.run": 3, "PRReviewer._load_review_finding_state": 1}, (
+        f"{requests}: {HOW_TO_FIX}"
+    )
+
+
+def test_the_incomplete_files_notice_still_asks_the_provider_whether_a_comment_is_its_own() -> None:
+    notice = pr_agent_module._publish_incomplete_files_comment  # pyright: ignore[reportPrivateUsage]
+
+    assert "is_comment_authored_by_pr_agent" in {
+        node.attr for node in ast.walk(function_tree(notice)) if isinstance(node, ast.Attribute)
+    }, HOW_TO_FIX
 
 
 def test_the_real_github_provider_passes_the_runtime_check_of_the_chain() -> None:
@@ -178,3 +225,82 @@ def test_a_fingerprint_ignores_comments_and_docstrings_but_not_behaviour() -> No
 
     assert fingerprint(base) == fingerprint(reworded)
     assert fingerprint(base) != fingerprint(changed)
+
+
+# CR-30-T03
+def test_a_method_whose_source_cannot_be_parsed_fails_the_chain_check_not_the_runner() -> None:
+    # A multi-line string whose continuation starts at column 0 makes textwrap.dedent leave an
+    # indented first line behind, which ast.parse refuses with an IndentationError.
+    namespace: dict[str, Any] = {}
+    exec(
+        "class Odd:\n"
+        "    def _agent_login(self):\n"
+        "        return self._resolve_user_login('a\\\nb')\n",
+        namespace,
+    )
+
+    with pytest.raises(FunnelError) as caught:
+        verify_identity_funnel(namespace["Odd"])
+
+    assert caught.value.code is ErrorCode.IDENTITY_PATCH_FAILED
+
+
+@pytest.mark.parametrize("builtin", [len, "text".upper])
+def test_a_method_without_readable_python_source_fails_the_chain_check(builtin: Any) -> None:
+    with pytest.raises(FunnelError) as caught:
+        self_calls(builtin)
+
+    assert caught.value.code is ErrorCode.IDENTITY_PATCH_FAILED
+    assert "cannot be read" in caught.value.detail
+
+
+def test_the_patch_turns_an_unreadable_source_into_a_refusal_with_the_patch_code() -> None:
+    class Opaque:
+        def _resolve_user_login(self) -> str:
+            return ""
+
+        _agent_login = len
+        is_comment_authored_by_pr_agent = len
+        supports_review_finding_state = len
+
+    with pytest.raises(IdentityPatchError) as caught:
+        apply_identity_patch("code-reviewer[bot]", provider_class=Opaque)
+
+    assert caught.value.code is ErrorCode.IDENTITY_PATCH_FAILED
+
+
+# CR-30-T02
+def test_with_the_patch_only_the_comment_of_the_app_is_found_as_the_agents_own_review() -> None:
+    """The whole chain on the real provider, through the helpers no fingerprint watches: the
+    persistent-comment lookup, the identity markers and the deployment type. Without the patch a
+    bare provider cannot tell whose comment is whose."""
+
+    def comment(author: str, body: str) -> Any:
+        user = type("User", (), {"login": author})()
+        return type("Comment", (), {"user": user, "body": body})()
+
+    review = f"{PRReviewIdentity.REGULAR.value}\n\n## PR Reviewer Guide\n\nfindings"
+    ours = comment("code-reviewer[bot]", review)
+    foreign = comment("somebody-else", review)
+    provider: Any = object.__new__(GithubProvider)
+    provider.deployment_type = "user"
+    provider.get_issue_comments_newest_first = lambda: [foreign, ours]  # type: ignore[method-assign]
+
+    undo = apply_identity_patch("code-reviewer[bot]")
+    try:
+        lookup = _target("GitProvider._iter_persistent_comments")
+        found: list[Any] = [
+            found_comment
+            for found_comment, _ in lookup(
+                provider,
+                [PRReviewIdentity.REGULAR.value],
+                identity_marker=PRReviewIdentity.REGULAR.value,
+                require_agent_authorship=True,
+            )
+        ]
+        supported = provider.supports_review_finding_state()
+    finally:
+        undo()
+
+    assert found == [ours]
+    assert supported is True

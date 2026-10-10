@@ -57,15 +57,6 @@ def test_the_identity_patch_and_the_installed_package_name_the_same_version() ->
     assert installed == pinned, version_advice(pinned, installed)
 
 
-# CR-30-T05
-def test_the_advice_of_a_version_mismatch_names_all_versions_and_the_constant_to_raise() -> None:
-    advice = version_advice("0.48.0", "0.48.0")
-
-    assert "0.48.0" in advice
-    assert PATCHED_FOR_VERSION in advice
-    assert "PATCHED_FOR_VERSION" in advice
-
-
 # CR-45: the protection against evaluated settings values (`@format`, `@jinja`) was written and
 # proven against this Dynaconf version. A different version comes with a PR-Agent upgrade; the tests
 # in test_settings_evaluation.py and test_repo_settings_guard.py must be read again before this

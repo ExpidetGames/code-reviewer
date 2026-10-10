@@ -17,6 +17,7 @@ from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
 from code_reviewer_runner.identity_funnel import FunnelError, verify_identity_funnel
+from code_reviewer_runner.job import _BOT_LOGIN  # pyright: ignore[reportPrivateUsage]
 from code_reviewer_runner.result import ErrorCode
 
 PATCHED_FOR_VERSION = "0.47.0"
@@ -72,10 +73,13 @@ def apply_identity_patch(
     exists and takes only `self`, the chain that asks it for the login is intact, and there is a
     login to return. Applying the patch twice does not wrap it twice.
     """
-    if not bot_login.strip().removesuffix("[bot]").strip():
+    if not isinstance(bot_login, str):  # pyright: ignore[reportUnnecessaryIsInstance]
+        raise TypeError("the bot login must be a string")
+    if not _BOT_LOGIN.fullmatch(bot_login):
         # No fallback to another identity: PR-Agent would post under a login it cannot recognise.
+        # parse_job guarantees this already; the patch does not rely on its caller.
         raise IdentityPatchError(
-            ErrorCode.IDENTITY_PATCH_FAILED, "the bot login of the job is empty"
+            ErrorCode.IDENTITY_PATCH_FAILED, "the bot login of the job is empty or not an app login"
         )
     if provider_class is None:
         from pr_agent.git_providers.github_provider import GithubProvider

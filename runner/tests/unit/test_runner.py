@@ -20,6 +20,7 @@ from pr_agent.agent.pr_agent import PRAgent
 from pr_agent.git_providers.github_provider import GithubProvider
 
 from code_reviewer_runner import runner
+from code_reviewer_runner.identity_patch import PATCHED_FOR_VERSION
 from code_reviewer_runner.job import Job, parse_job
 from code_reviewer_runner.log_capture import LogCapture
 from code_reviewer_runner.redaction import Redactor
@@ -382,7 +383,7 @@ def test_a_moved_login_chain_stops_the_job_before_handle_request_and_names_the_s
     assert result.ok is False
     assert result.error_code is ErrorCode.IDENTITY_PATCH_FAILED
     assert "GithubProvider._agent_login" in result.log_tail
-    assert "pr-agent 0.47.0" in result.log_tail
+    assert f"pr-agent {PATCHED_FOR_VERSION}" in result.log_tail
     assert calls == []
 
 

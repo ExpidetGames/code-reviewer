@@ -187,7 +187,10 @@ protect it:
   gone or changed, or when the fingerprint of one of them (a hash of its syntax tree) differs from
   the one recorded for 0.47.0. A PR that bumps `pr-agent` therefore turns the check
   `All checks passed?` red until someone has read the release diff and updated the recorded
-  fingerprints and `PATCHED_FOR_VERSION` together with the pin.
+  fingerprints and `PATCHED_FOR_VERSION` together with the pin. The fingerprints are hashes of
+  the syntax tree and were recorded on Python 3.13 (the version of `.python-version` and the
+  image); on another minor version they differ, so the fingerprint tests first assert the
+  interpreter and say so instead of reporting a PR-Agent change that does not exist.
 
 ## Measuring memory and duration
 

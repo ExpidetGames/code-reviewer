@@ -243,20 +243,21 @@ def test_applying_the_patch_again_with_another_login_replaces_the_login_instead_
     original = GithubProvider._resolve_user_login  # pyright: ignore[reportPrivateUsage]
     instance: Any = object.__new__(GithubProvider)
 
-    undo_first = apply_identity_patch("first-app[bot]")
+    apply_identity_patch("first-app[bot]")
     undo_second = apply_identity_patch("second-app[bot]")
     try:
         login = instance._resolve_user_login()  # pyright: ignore[reportPrivateUsage]
     finally:
+        # One undo is enough only if the second patch was built on the real method. Built on the
+        # first patch, it would restore that one and leave the provider patched.
         undo_second()
-        undo_first()
 
     assert login == "second-app[bot]"
     assert GithubProvider._resolve_user_login is original  # pyright: ignore[reportPrivateUsage]
 
 
 # CR-30-T07
-@pytest.mark.parametrize("login", ["", "   ", "[bot]", " [bot]"])
+@pytest.mark.parametrize("login", ["", "   ", "[bot]", " [bot]", "two words[bot]", "-dash[bot]"])
 def test_the_patch_refuses_an_empty_login_instead_of_falling_back_to_another_identity(
     login: str,
 ) -> None:
@@ -289,3 +290,12 @@ def test_the_patch_refuses_to_apply_when_the_login_chain_of_pr_agent_has_moved()
 
     assert caught.value.code is ErrorCode.IDENTITY_PATCH_FAILED
     assert "_agent_login" in caught.value.detail
+
+
+def test_the_patch_refuses_a_login_that_is_not_a_string() -> None:
+    original = GithubProvider._resolve_user_login  # pyright: ignore[reportPrivateUsage]
+
+    with pytest.raises(TypeError):
+        apply_identity_patch(42)  # type: ignore[arg-type]
+
+    assert GithubProvider._resolve_user_login is original  # pyright: ignore[reportPrivateUsage]

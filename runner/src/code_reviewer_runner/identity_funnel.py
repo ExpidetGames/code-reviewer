@@ -35,13 +35,21 @@ class FunnelError(Exception):
         self.detail = detail
 
 
-def function_tree(function: Callable[..., Any]) -> ast.FunctionDef:
+def function_tree(function: Callable[..., Any]) -> ast.FunctionDef | ast.AsyncFunctionDef:
     """The parsed definition of a function, read from the installed source."""
-    source = textwrap.dedent(inspect.getsource(function))
-    module = ast.parse(source)
-    definition = module.body[0]
-    if not isinstance(definition, ast.FunctionDef):
-        raise FunnelError(f"{function.__qualname__} is not a plain function definition")
+    name = getattr(function, "__qualname__", repr(function))
+    try:
+        source = textwrap.dedent(inspect.getsource(function))
+        module = ast.parse(source)
+    except (OSError, TypeError, SyntaxError) as error:  # IndentationError is a SyntaxError
+        # An unreadable or unparsable source is as much a change as a moved method: fail closed
+        # with the code of the patch, not as an unexpected runner error.
+        raise FunnelError(
+            f"the source of {name} cannot be read ({type(error).__name__})"
+        ) from error
+    definition = module.body[0] if module.body else None
+    if not isinstance(definition, ast.FunctionDef | ast.AsyncFunctionDef):
+        raise FunnelError(f"{name} is not a plain function definition")
     return definition
 
 
