@@ -3,7 +3,9 @@ name = "code-reviewer-runner"
 version = "0.1.0"
 description = "Worker that picks up review jobs from the Code Reviewer app and runs PR-Agent."
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "pr-agent==0.47.0",
+]
 
 [project.scripts]
 code-reviewer-runner = "code_reviewer_runner.cli:main"
