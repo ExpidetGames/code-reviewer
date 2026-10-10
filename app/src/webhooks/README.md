@@ -8,13 +8,14 @@ function of its collaborators in this folder, so tests wire fakes in.
 The route is **public**: it needs no session, and the auth guard must keep letting `/api/webhooks/**`
 through. The signature of the delivery is its authentication.
 
-| File                       | Role                                                                                                                                               |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `github-app-handler.ts`    | `createGithubAppWebhookHandler(deps)`: the steps below                                                                                             |
-| `limited-body.ts`          | `readLimitedBody`: reads the body as text and stops at the limit, whatever `Content-Length` claims                                                 |
-| `review-trigger-intake.ts` | `ReviewTriggerIntake`: where a review trigger goes (`enqueueReviewTrigger(trigger, integration, source)`), and the logging intake used until CR-27 |
-| `shared.ts`                | The wiring of the running server: database, registry, the process-wide sync service, the intake. The only file the jobs tickets change             |
-| `errors.ts`, `logger.ts`   | The stable error codes of the answers, and the two-level logger                                                                                    |
+| File                       | Role                                                                                                                                 |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `github-app-handler.ts`    | `createGithubAppWebhookHandler(deps)`: the steps below                                                                               |
+| `limited-body.ts`          | `readLimitedBody`: reads the body as text and stops at the limit, whatever `Content-Length` claims                                   |
+| `review-trigger-intake.ts` | `ReviewTriggerIntake`: where a review trigger goes (`enqueueReviewTrigger(trigger, integration, source)`)                            |
+| `job-queue-intake.ts`      | `createJobQueueReviewTriggerIntake`: the intake of the running app, a thin mapping from a trigger to a job in the queue (`src/jobs`) |
+| `shared.ts`                | The wiring of the running server: database, registry, the process-wide sync service, the intake (`getJobQueueReviewTriggerIntake`)   |
+| `errors.ts`, `logger.ts`   | The stable error codes of the answers, and the two-level logger                                                                      |
 
 ## What happens to a delivery
 
@@ -80,7 +81,7 @@ The answer is sent when the work is done, not before: the work is a handful of c
 failure has to reach GitHub as a status code, which work scheduled with `after()` could not do.
 GitHub gives up on a delivery after 10 seconds; the GitHub client times out after 15, so a slow GitHub
 can make GitHub record a failed delivery even though the work finishes. A redelivery is then a
-duplicate or repeats an idempotent sync. Revisit it when jobs are enqueued by the real queue.
+duplicate or repeats an idempotent sync. The enqueue is one short local transaction, so the work itself stays well inside that.
 
 ### Deduplication and replay
 
@@ -92,21 +93,35 @@ proceeds. Rows older than 7 days are deleted, at most every 10 minutes per proce
 
 **The delivery id is not covered by the signature** (GitHub signs the body only). Replaying a captured
 signed body with a fresh id passes the signature check and the delivery dedupe. Replay protection is
-therefore the queue's: it must deduplicate on (pull request, head commit, command), as
-`ReviewTriggerIntake` says (CR-27). The same event can also legitimately arrive under different ids
+therefore the queue's: it deduplicates on (pull request, head commit, command), as
+`ReviewTriggerIntake` says. The same event can also legitimately arrive under different ids
 (two identical comments).
 
 ## The review trigger intake
 
 The route hands a `ReviewTrigger` to `ReviewTriggerIntake.enqueueReviewTrigger(trigger, integration, source)`
-and knows nothing about jobs. Until CR-27 creates the jobs table the app uses
-`createLoggingReviewTriggerIntake`, which logs kind, command (not its arguments), repository, pull
-request number, the first 12 characters of the head commit and the delivery id. CR-27 and CR-31 replace
-`getReviewTriggerIntake` in `shared.ts`; the route and its tests stay as they are. The intake also
-receives the delivery id and event name (`ReviewTriggerSource`), so the real queue can make the enqueue
-idempotent per delivery and trace a job back to its delivery. The contract of the
-intake (what rejecting means, what it may assume) is documented on the type. Whether a repository has
-an active project is decided there as well (CR-24), as is skipping drafts (CR-31).
+and knows nothing about jobs. The intake of the running app is `createJobQueueReviewTriggerIntake`
+(`job-queue-intake.ts`, wired in `shared.ts` by `getJobQueueReviewTriggerIntake`): it looks up the
+`repositories` row of the trigger's repository and enqueues a job with the delivery id.
+
+- `opened` and `updated` become an automatic `webhook` job for the command `review`; a `command`
+  trigger becomes a `comment` job with its command and arguments.
+- It is a thin mapping on purpose. It adds **no trigger policy**: whether the repository has an active
+  project (CR-24), whether a draft waits, the debounce of `synchronize` (CR-31) are decided around
+  it, not in the queue.
+- What the queue does with a job (the same delivery gives the same job; one automatic job per pull
+  request, head commit and command; a newer commit replaces the waiting job) is described in
+  `src/jobs/README.md`. That is the replay protection the signature cannot give: a captured signed body
+  replayed under a new delivery id finds the job of the head commit and creates nothing.
+- A trigger the queue can never accept (today only: a command whose arguments are over 10 000
+  characters) is dropped with an error log line naming the field and code, not the value, and the
+  intake resolves. Rejecting would make the route answer `500` and release the delivery, and every
+  redelivery would fail the same way. Truncating the arguments is the comment commands ticket (CR-32).
+- A trigger for a repository the app has no row for (the delivery outran the synchronization) makes
+  the intake reject with `JOB_REPOSITORY_UNKNOWN`; the route answers `500` and releases the delivery,
+  so "Redeliver" works after the sync.
+- The log line names the job, the outcome (`created` or `existing` with the reason), repository, pull
+  request, command and delivery id, never the arguments.
 
 ## Testing
 
@@ -116,4 +131,5 @@ GitHub API, the real GitHub App provider, a `RecordingReviewTriggerIntake`
 signed requests built by `fakes/github/webhooks.ts` from the recorded payloads in
 `fakes/fixtures/github-webhooks/`. `integration-tests/webhooks/github-app-route.integration.test.ts`
 covers every behavior above; `github-app-route-file.integration.test.ts` calls the real `route.ts`
-with the production wiring.
+with the production wiring; `review-trigger-jobs.integration.test.ts` runs the handler with the real
+job queue intake.

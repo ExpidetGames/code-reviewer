@@ -122,6 +122,46 @@ export interface WebhookDeliveriesTable {
   received_at: string;
 }
 
+export interface JobsTable {
+  id: string;
+  repository_id: string;
+  pr_number: number;
+  pr_url: string;
+  /** 40 hexadecimal characters, lower case. */
+  head_sha: string;
+  /** A ReviewCommand (src/integrations/types.ts). */
+  command: string;
+  /** Text after the command, an empty string when there is none. Untrusted. */
+  args: string;
+  /** A JobTriggerKind (src/jobs/job-types.ts). */
+  trigger_kind: string;
+  actor_login: string;
+  /** The webhook delivery that created the job, or null. Unique where not null. */
+  delivery_id: string | null;
+  /** A JobStatus (src/jobs/job-status.ts). */
+  status: string;
+  /** ISO 8601 text in UTC: the job is not handed out before this moment. */
+  run_after: string;
+  /** How many attempts were lost (a lease ran out, a claim was given back). */
+  attempts: number;
+  runner_id: string | null;
+  /**
+   * Random value of the current claim; required to heartbeat, complete or release the job. Cleared
+   * when the job is requeued, kept on a finished job so that a repeated report is recognised.
+   */
+  lease_token: string | null;
+  claimed_at: string | null;
+  heartbeat_at: string | null;
+  lease_expires_at: string | null;
+  /** JSON text, or null. */
+  result: string | null;
+  error_code: string | null;
+  superseded_by: string | null;
+  created_at: string;
+  updated_at: string;
+  finished_at: string | null;
+}
+
 export interface Database {
   app_meta: AppMetaTable;
   users: UsersTable;
@@ -132,4 +172,5 @@ export interface Database {
   integrations: IntegrationsTable;
   repositories: RepositoriesTable;
   webhook_deliveries: WebhookDeliveriesTable;
+  jobs: JobsTable;
 }
