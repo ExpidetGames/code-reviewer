@@ -100,6 +100,8 @@ export const JOB_ERROR_CODES = [
   "project_deactivated",
   /** Cancelled because the pull request was closed. */
   "pull_request_closed",
+  /** Cancelled because the pull request was turned into a draft (automatic jobs only). */
+  "pull_request_draft",
 ] as const;
 export type JobErrorCode = (typeof JOB_ERROR_CODES)[number];
 

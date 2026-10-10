@@ -113,6 +113,15 @@ describe("the webhook route file", () => {
         secret: TEST_WEBHOOK_SECRET,
       }),
     );
+    github.fake.addPullRequest("acme/widgets", {
+      number: 7,
+      title: "Add widget caching",
+      state: "open",
+      headSha: "1f3a5c7e9b2d4f60a8c1e3b5d7f90a2c4e6b8d01",
+      headRef: "feature/caching",
+      baseRef: "main",
+      author: { login: "alice", id: 1001 },
+    });
     // The repository must be a project before its pull requests are reviewed.
     const [repository] =
       await createRepositoriesRepository(getDatabase()).list();

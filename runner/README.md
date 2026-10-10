@@ -232,6 +232,27 @@ a second review of the same pull request would fail instead of editing its comme
 `GithubProvider._resolve_user_login` is replaced to return `<slug>[bot]`. The patch is tied to the
 exact PR-Agent version (`identity_patch.PATCHED_FOR_VERSION`) and refused for any other.
 
+The patch reaches into a private method, so a PR-Agent upgrade must not slip through. Two layers
+protect it:
+
+- At the start of every job the runner checks the installed version, that `_resolve_user_login`
+  exists and takes only `self`, and that the chain that asks it for the login is intact
+  (`is_comment_authored_by_pr_agent` calls `_agent_login`, which calls `_resolve_user_login`; see
+  `identity_funnel.py`). If anything differs, the job is refused before PR-Agent runs, with the
+  result code `pr_agent_version_mismatch` or `identity_patch_failed`. The detail names the method,
+  the installed version and, for a signature change, the expected and the found signature. The
+  runner never falls back to another identity and never posts a duplicate comment instead.
+- `tests/unit/test_dependency_pin.py` and `tests/unit/test_identity_funnel.py` run in the runner CI
+  job against the real, pinned PR-Agent (no network). They fail when the pin, the lock file, the
+  installed package and `PATCHED_FOR_VERSION` disagree, when the methods the patch relies on are
+  gone or changed, or when the fingerprint of one of them (a hash of its syntax tree) differs from
+  the one recorded for 0.47.0. A PR that bumps `pr-agent` therefore turns the check
+  `All checks passed?` red until someone has read the release diff and updated the recorded
+  fingerprints and `PATCHED_FOR_VERSION` together with the pin. The fingerprints are hashes of
+  the syntax tree and were recorded on Python 3.13 (the version of `.python-version` and the
+  image); on another minor version they differ, so the fingerprint tests first assert the
+  interpreter and say so instead of reporting a PR-Agent change that does not exist.
+
 ## Measuring memory and duration
 
 `scripts/measure_runs.py` starts one or several runner processes against the sandbox pull requests

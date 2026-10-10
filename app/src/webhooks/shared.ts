@@ -13,13 +13,16 @@ import {
   type WebhookHandler,
 } from "./github-app-handler.ts";
 import { getProjectService } from "../projects/shared.ts";
+import { getReviewSettingsService } from "../review-settings/shared.ts";
+import { createAutomaticReviewSettingsSource } from "./automatic-review-settings.ts";
+import { configuredDebounceMs } from "./debounce-config.ts";
 import { consoleWebhookLogger } from "./logger.ts";
 import { createJobQueueReviewTriggerIntake } from "./job-queue-intake.ts";
 import type { ReviewTriggerIntake } from "./review-trigger-intake.ts";
 
 /**
  * Where review triggers go: into the job queue, as a thin mapping. The trigger policy (active
- * project, drafts, debounce) is added around this by the automatic triggers ticket (CR-31).
+ * project, drafts, settings, debounce) is applied by the handler before it calls the intake.
  */
 export function getJobQueueReviewTriggerIntake(): ReviewTriggerIntake {
   return createJobQueueReviewTriggerIntake({
@@ -38,6 +41,14 @@ export function getGithubAppWebhookHandler(): WebhookHandler {
     deliveries: createWebhookDeliveriesRepository(db),
     sync: getIntegrationSync(),
     projects: getProjectService(),
+    automatic: {
+      settingsFor: createAutomaticReviewSettingsSource({
+        repositories: createRepositoriesRepository(db),
+        settings: getReviewSettingsService(),
+      }),
+      debounceMs: configuredDebounceMs(process.env),
+      now: () => new Date(),
+    },
     intake: getJobQueueReviewTriggerIntake(),
     logger: consoleWebhookLogger,
   });
