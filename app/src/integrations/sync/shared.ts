@@ -7,6 +7,7 @@ import type { Kysely } from "kysely";
 import type { Database } from "../../db/schema.ts";
 import { getDatabase } from "../../db/startup.ts";
 import { integrationRegistry } from "../registry.ts";
+import { coalesceSyncAll } from "./coalesce.ts";
 import {
   createIntegrationSync,
   type IntegrationSyncService,
@@ -24,7 +25,10 @@ export function getIntegrationSync(): IntegrationSyncService {
   if (holder[SHARED_SERVICE]?.db !== db)
     holder[SHARED_SERVICE] = {
       db,
-      service: createIntegrationSync({ db, registry: integrationRegistry }),
+      // Overlapping full syncs (the button in two tabs, the start-up sync) share one run.
+      service: coalesceSyncAll(
+        createIntegrationSync({ db, registry: integrationRegistry }),
+      ),
     };
   return holder[SHARED_SERVICE].service;
 }

@@ -46,13 +46,16 @@ export class GithubAppError extends Error implements SafeMessageError {
 /** The configuration is missing or invalid. `variables` are the names involved, never their values. */
 export class GithubAppConfigError extends GithubAppError {
   readonly variables: readonly string[];
+  /** `missing`: the variables are not set. `invalid`: they are set but not usable. */
+  readonly problem: "missing" | "invalid";
 
-  constructor(variables: readonly string[], problem: string) {
+  constructor(variables: readonly string[], problem: "missing" | "invalid") {
     super(
       "GITHUB_APP_CONFIG_INVALID",
       `GitHub App configuration is invalid (${problem}): ${variables.join(", ")}.`,
     );
     this.name = "GithubAppConfigError";
     this.variables = variables;
+    this.problem = problem;
   }
 }

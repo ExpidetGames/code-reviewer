@@ -1,4 +1,4 @@
-import { generateKeyPairSync } from "node:crypto";
+import { createPublicKey, generateKeyPairSync } from "node:crypto";
 import { defineConfig, devices } from "@playwright/test";
 import { e2eEnv } from "./e2e/helpers/e2e-env";
 
@@ -14,6 +14,11 @@ const githubAppPrivateKey = generateKeyPairSync("rsa", {
   privateKeyEncoding: { type: "pkcs1", format: "pem" },
   publicKeyEncoding: { type: "spki", format: "pem" },
 }).privateKey;
+
+// The fake GitHub checks the App JWTs of the app under test with the public half of that key.
+const githubAppPublicKey = createPublicKey(githubAppPrivateKey)
+  .export({ type: "spki", format: "pem" })
+  .toString();
 
 export default defineConfig({
   testDir: "e2e",
@@ -51,6 +56,8 @@ export default defineConfig({
         GITHUB_FAKE_PORT: String(e2eEnv.githubPort),
         GITHUB_FAKE_CLIENT_ID: e2eEnv.githubClientId,
         GITHUB_FAKE_CLIENT_SECRET: e2eEnv.githubClientSecret,
+        GITHUB_FAKE_APP_ID: e2eEnv.githubAppId,
+        GITHUB_FAKE_APP_PUBLIC_KEY: githubAppPublicKey,
       },
       url: `${e2eEnv.githubUrl}/__fake/health`,
       reuseExistingServer: false,
