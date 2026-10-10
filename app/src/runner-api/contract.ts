@@ -16,13 +16,13 @@ export const RUNNER_MAX_BODY_BYTES = 64 * 1024;
 export const HEARTBEAT_INTERVAL_SECONDS = 30;
 
 /**
- * The environment variables a job may carry: the options of the four PR-Agent tools. The same
- * pattern as `propertyNames` of `JobEnv` in the contract (a test compares them), and as the runner's
- * `_ENV_KEY`. The review settings (CR-25) define the same constant under this name next to
- * `toRunnerSettings`; when both branches are merged, one of the two imports the other.
+ * The environment variables a job may carry: the options of the four PR-Agent tools, one option
+ * name per key (a second `__` would address a nested value). The same pattern as `propertyNames` of
+ * `JobEnv` in the contract and as the runner's `_ENV_KEY` (a test compares it with the contract). The
+ * only definition in the app: the review settings (`toRunnerSettings`) import it from here.
  */
 export const RUNNER_ENV_KEY_PATTERN =
-  /^(PR_REVIEWER|PR_DESCRIPTION|PR_CODE_SUGGESTIONS|PR_QUESTIONS)__[A-Z0-9_]+$/;
+  /^(PR_REVIEWER|PR_DESCRIPTION|PR_CODE_SUGGESTIONS|PR_QUESTIONS)__[A-Z0-9]+(_[A-Z0-9]+)*$/;
 
 /** Error codes the runner reports in a result (`KnownRunnerErrorCode` in the contract). */
 export const RUNNER_ERROR_CODES = [
@@ -96,6 +96,10 @@ export type RunnerJobInput = {
     provider: "openrouter";
     model: string;
     apiKey: string;
+    /** The token budget of the review; left out when neither the settings nor the instance set one. */
+    maxTokens?: number;
+    /** Not sent by the app in the MVP (no fallback chain). The runner accepts it. */
+    fallbackModels?: string[];
   };
   env: Record<string, string>;
 };

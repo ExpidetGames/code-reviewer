@@ -9,11 +9,11 @@ import {
   INLINE_KEY_ISSUES_VARIABLE,
   LARGE_PR_CHUNKING_VARIABLE,
   MAX_FINDINGS_VARIABLE,
-  RUNNER_ENV_KEY_PATTERN,
   RUNNER_ENV_VARIABLES,
   protectFromSettingsParser,
   toRunnerSettings,
 } from "./runner-settings.ts";
+import { RUNNER_ENV_KEY_PATTERN } from "../runner-api/contract.ts";
 import { builtInReviewSettings, type ReviewSettings } from "./settings.ts";
 
 const base = builtInReviewSettings("deepseek/deepseek-v3.2");

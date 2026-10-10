@@ -11,10 +11,6 @@
 // by `runner-settings.test.ts` against `fixtures/pr-agent-0.47.0-configuration.excerpt.toml`.
 import type { ReviewSettings } from "./settings.ts";
 
-/** The prefixes the runner lets through (`_ENV_KEY` in runner/src/code_reviewer_runner/job.py). */
-export const RUNNER_ENV_KEY_PATTERN =
-  /^(PR_REVIEWER|PR_DESCRIPTION|PR_CODE_SUGGESTIONS|PR_QUESTIONS)__[A-Z0-9_]+$/;
-
 export type RunnerSettings = {
   /** `llm.model` and `llm.maxTokens` of the job. The provider and the key come from the LLM configuration. */
   llm: { model: string; maxTokens: number };

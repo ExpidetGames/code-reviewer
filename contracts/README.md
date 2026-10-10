@@ -35,6 +35,17 @@ other way round, so a change to the format has to change the file and both sides
 The meaning of the calls (status codes, the lease, what happens on failure) is in
 `app/src/runner-api/README.md`.
 
+## The job options
+
+- `env` (`JobEnv`) holds options of the four PR-Agent tools, one option name per key: the key pattern is
+  `PR_<TOOL>__<NAME>` with `NAME` made of upper case letters and digits in groups separated by one `_`
+  (never a second `__`, never a trailing `_`). It is the runner's `_ENV_KEY`, and the app's
+  `RUNNER_ENV_KEY_PATTERN` (a test compares the app's pattern with this file). Values are text of the
+  type of the PR-Agent option (`"5"`, `"true"`); the runner refuses a value that does not fit.
+- `llm.maxTokens` is the token budget of a review. `llm.fallbackModels` (at most five names) is accepted
+  by the runner; the app does not send it until a chain is decided, and then `maxTokens` must fit the
+  smallest window of the chain.
+
 ## Size of a result
 
 A `complete` request must stay under 64 KiB serialized, or the app answers `413` and the job can never
