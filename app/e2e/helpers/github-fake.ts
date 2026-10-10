@@ -48,3 +48,25 @@ export async function signOutThroughTheMenu(
   await userMenuButton(page, account).click();
   await page.getByRole("button", { name: "Sign out" }).click();
 }
+
+export type GithubInstallation = {
+  id: number;
+  account: { login: string; id: number; type: "User" | "Organization" };
+};
+
+/**
+ * Installs the GitHub App for an account at the fake, with these repositories (replacing the ones
+ * of an installation that exists). Each spec file owns its installations, like its accounts. The app
+ * learns about them at its next sync (the "Sync from GitHub" button).
+ */
+export async function addGithubInstallation(
+  request: APIRequestContext,
+  installation: GithubInstallation,
+  repositories: Array<{ id: number; fullName: string }>,
+): Promise<void> {
+  const response = await request.post(
+    `${e2eEnv.githubUrl}/__fake/installations`,
+    { data: { installation, repositories } },
+  );
+  expect(response.status()).toBe(201);
+}

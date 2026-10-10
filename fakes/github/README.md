@@ -46,6 +46,7 @@ that may need it.
 | `GET /installation/repositories`                          | Installation token. `{ total_count, repositories }`, paged; only the repositories the token is narrowed to.                                                                                                                                                                                                                                                                                                                      |
 | `GET /repos/:owner/:repo/pulls`, `.../pulls/:n`           | Installation token with pull requests read. Open pull requests (`state` supported), one pull request or 404 (also for a repository the token is not narrowed to); 403 without the permission.                                                                                                                                                                                                                                    |
 | `GET /repos/:owner/:repo/collaborators/:login/permission` | Installation token with metadata read. `{ permission }`, `none` for a user without an entry.                                                                                                                                                                                                                                                                                                                                     |
+| `POST /__fake/installations`                              | Control endpoint for the fake as its own process: body `{ installation, repositories }` installs the app for the account (or replaces the repositories of an installation that exists). Needs the GitHub App part (`GITHUB_FAKE_APP_ID`, `GITHUB_FAKE_APP_PUBLIC_KEY`).                                                                                                                                                          |
 
 ## In a Vitest test (same process)
 
@@ -123,10 +124,12 @@ reads, with dummy data, named `<event>.<action>[.<variant>].json`.
 GITHUB_FAKE_CLIENT_ID=id GITHUB_FAKE_CLIENT_SECRET=secret GITHUB_FAKE_PORT=4010 node fakes/github/main.ts
 ```
 
-`app/playwright.config.ts` starts it next to the app with fixed dummy credentials. Each journey adds
-the accounts it needs (`app/e2e/helpers/github-fake.ts`) and never resets the fake, because other
-spec files run at the same time. The process serves the sign in; the GitHub App API has no control
-endpoints yet, so a journey that needs installations seeds them when that is added.
+`app/playwright.config.ts` starts it next to the app with fixed dummy credentials, including the
+public half of the throwaway GitHub App key it gives the app (`GITHUB_FAKE_APP_ID`,
+`GITHUB_FAKE_APP_PUBLIC_KEY`), so the process serves the sign in and the GitHub App API. Each journey
+adds the accounts and installations it needs (`app/e2e/helpers/github-fake.ts`: `POST /__fake/users`,
+`POST /__fake/installations` with `{ installation, repositories }`) and never resets the fake, because
+other spec files run at the same time.
 
 ## Not covered yet
 
