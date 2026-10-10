@@ -4,7 +4,12 @@
 import { sql, type Kysely } from "kysely";
 import { describe, expect, it } from "vitest";
 import { createTestDatabase } from "../test-support/test-database.ts";
-import { decodeBoolean, decodeJson, encodeBoolean, encodeJson } from "./codecs.ts";
+import {
+  decodeBoolean,
+  decodeJson,
+  encodeBoolean,
+  encodeJson,
+} from "./codecs.ts";
 import type { Database } from "./schema.ts";
 
 type ProbeRow = { id: string; payload: string; enabled: number };
@@ -25,12 +30,23 @@ async function createProbeRepository() {
     async save(id: string, payload: unknown, enabled: boolean) {
       await db
         .insertInto("probe")
-        .values({ id, payload: encodeJson(payload), enabled: encodeBoolean(enabled) })
+        .values({
+          id,
+          payload: encodeJson(payload),
+          enabled: encodeBoolean(enabled),
+        })
         .execute();
     },
     async load(id: string) {
-      const row = await db.selectFrom("probe").selectAll().where("id", "=", id).executeTakeFirstOrThrow();
-      return { payload: decodeJson(row.payload), enabled: decodeBoolean(row.enabled) };
+      const row = await db
+        .selectFrom("probe")
+        .selectAll()
+        .where("id", "=", id)
+        .executeTakeFirstOrThrow();
+      return {
+        payload: decodeJson(row.payload),
+        enabled: decodeBoolean(row.enabled),
+      };
     },
   };
 }
@@ -39,12 +55,18 @@ describe("a repository using the column conventions", () => {
   // CR-15-T04
   it("reads a nested object back equal to what was saved, stored as text", async () => {
     const repository = await createProbeRepository();
-    const payload = { name: "review", tags: ["a", "b"], nested: { count: 3, empty: null } };
+    const payload = {
+      name: "review",
+      tags: ["a", "b"],
+      nested: { count: 3, empty: null },
+    };
 
     await repository.save("one", payload, true);
 
     expect((await repository.load("one")).payload).toEqual(payload);
-    const { rows } = await sql<{ type: string }>`select typeof(payload) as type from probe`.execute(repository.db);
+    const { rows } = await sql<{
+      type: string;
+    }>`select typeof(payload) as type from probe`.execute(repository.db);
     expect(rows[0]?.type).toBe("text");
   });
 
@@ -56,7 +78,9 @@ describe("a repository using the column conventions", () => {
     await repository.save("off", {}, false);
 
     const { rows } = await sql<{ id: string; enabled: number; type: string }>`
-      select id, enabled, typeof(enabled) as type from probe order by id`.execute(repository.db);
+      select id, enabled, typeof(enabled) as type from probe order by id`.execute(
+      repository.db,
+    );
     expect(rows).toEqual([
       { id: "off", enabled: 0, type: "integer" },
       { id: "on", enabled: 1, type: "integer" },

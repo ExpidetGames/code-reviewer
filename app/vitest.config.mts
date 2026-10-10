@@ -9,7 +9,9 @@ import { defineConfig } from "vitest/config";
 // code. Tests are server code, so it resolves to nothing there.
 const alias = {
   "@": fileURLToPath(new URL("./src", import.meta.url)),
-  "server-only": fileURLToPath(new URL("./src/test-support/empty.ts", import.meta.url)),
+  "server-only": fileURLToPath(
+    new URL("./src/test-support/empty.ts", import.meta.url),
+  ),
 };
 const setupFiles = ["./src/test-support/network-guard.setup.ts"];
 const maxWorkers = Number(process.env.TEST_MAX_WORKERS) || 4;

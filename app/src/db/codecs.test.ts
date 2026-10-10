@@ -19,9 +19,12 @@ describe("JSON columns", () => {
     expect(decodeJson(stored)).toEqual(value);
   });
 
-  it.each([undefined, () => 1, Symbol("x")])("refuses a value JSON cannot represent (%s)", (value) => {
-    expect(() => encodeJson(value)).toThrow(/cannot be stored as JSON/);
-  });
+  it.each([undefined, () => 1, Symbol("x")])(
+    "refuses a value JSON cannot represent (%s)",
+    (value) => {
+      expect(() => encodeJson(value)).toThrow(/cannot be stored as JSON/);
+    },
+  );
 
   it("stores null as the text null", () => {
     expect(encodeJson(null)).toBe("null");

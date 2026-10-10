@@ -29,7 +29,9 @@ export function createAppMetaRepository(
       await db
         .insertInto("app_meta")
         .values({ key, value, updated_at })
-        .onConflict((conflict) => conflict.column("key").doUpdateSet({ value, updated_at }))
+        .onConflict((conflict) =>
+          conflict.column("key").doUpdateSet({ value, updated_at }),
+        )
         .execute();
     },
   };

@@ -29,12 +29,17 @@ export async function startDatabase(
 // One connection per server process. The global survives module reloads in `next dev` and is
 // shared between the instrumentation bundle and the route bundles, which do not share modules.
 const globalKey = Symbol.for("code-reviewer.database");
-type GlobalWithDatabase = typeof globalThis & { [globalKey]?: Kysely<Database> };
+type GlobalWithDatabase = typeof globalThis & {
+  [globalKey]?: Kysely<Database>;
+};
 
 /** The connection opened at startup. Fails loudly when the server did not start the database. */
 export function getDatabase(): Kysely<Database> {
   const db = (globalThis as GlobalWithDatabase)[globalKey];
-  if (!db) throw new Error("The database is not initialized: it is opened when the server starts.");
+  if (!db)
+    throw new Error(
+      "The database is not initialized: it is opened when the server starts.",
+    );
   return db;
 }
 
@@ -66,12 +71,17 @@ export async function initializeDatabaseOnStart({
   exit = (code) => process.exit(code),
 }: StartOptions = {}): Promise<void> {
   try {
-    const { db, migrationsApplied } = await startDatabase(loadDatabaseConfig(env), migrations);
+    const { db, migrationsApplied } = await startDatabase(
+      loadDatabaseConfig(env),
+      migrations,
+    );
     // A second start in the same process (a reloaded module in `next dev`) must not leak the first.
     await closeDatabase();
     (globalThis as GlobalWithDatabase)[globalKey] = db;
     if (migrationsApplied.length > 0) {
-      console.info(`[database] applied migrations: ${migrationsApplied.join(", ")}`);
+      console.info(
+        `[database] applied migrations: ${migrationsApplied.join(", ")}`,
+      );
     }
   } catch (error) {
     if (!(error instanceof DatabaseError)) throw error;

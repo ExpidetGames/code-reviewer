@@ -29,16 +29,23 @@ export function openDatabase(config: DatabaseConfig): Kysely<Database> {
     );
   }
 
-  return new Kysely<Database>({ dialect: new AppSqliteDialect({ database: sqlite }) });
+  return new Kysely<Database>({
+    dialect: new AppSqliteDialect({ database: sqlite }),
+  });
 }
 
 // SQLite answers `pragma journal_mode = WAL` with the mode it ended up in. An in-memory database or
 // a file system without shared memory silently stays in another mode; the busy timeout reasoning
 // and the README assume WAL, so that is a failure to open, not something to run with.
 function enableWal(sqlite: BetterSqlite3.Database): void {
-  const result = sqlite.pragma("journal_mode = WAL") as Array<{ journal_mode?: string }>;
+  const result = sqlite.pragma("journal_mode = WAL") as Array<{
+    journal_mode?: string;
+  }>;
   const mode = result[0]?.journal_mode;
-  if (mode !== "wal") throw new Error(`WAL mode could not be enabled (journal mode is "${mode}")`);
+  if (mode !== "wal")
+    throw new Error(
+      `WAL mode could not be enabled (journal mode is "${mode}")`,
+    );
 }
 
 // The file itself is created on first open, the directory is not: a wrong DATABASE_PATH (or a volume
@@ -81,7 +88,8 @@ function retryWhileBusy(timeoutMs: number, action: () => void): void {
     try {
       return action();
     } catch (error) {
-      if (errorCode(error) !== "SQLITE_BUSY" || Date.now() >= deadline) throw error;
+      if (errorCode(error) !== "SQLITE_BUSY" || Date.now() >= deadline)
+        throw error;
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
     }
   }

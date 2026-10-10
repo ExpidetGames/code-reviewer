@@ -3,17 +3,17 @@
 Kysely on SQLite (better-sqlite3). The whole layer lives in this folder; nothing else in the app
 opens a database or writes SQL.
 
-| File | Role |
-|---|---|
-| `config.ts` | Reads `DATABASE_PATH` and `DATABASE_BUSY_TIMEOUT_MS` from the environment |
-| `connection.ts` | `openDatabase(config)`: checks the directory, opens the file, sets the pragmas |
-| `dialect.ts` | Kysely's SQLite dialect with `begin immediate` transactions and transactional DDL |
-| `migrate.ts`, `migrations/` | `migrateToLatest(db)` and the ordered list of migrations |
-| `startup.ts` | What the server does on start; `getDatabase()` hands the connection out |
-| `schema.ts` | Row types of every table (`Database`) |
-| `codecs.ts` | The only code that knows how JSON, booleans and timestamps are stored |
-| `repositories/` | One small module per table (or aggregate); the only code that queries it |
-| `errors.ts` | `DatabaseError` with stable codes (`DATABASE_CONFIG_INVALID`, `DATABASE_DIRECTORY_UNAVAILABLE`, `DATABASE_OPEN_FAILED`, `DATABASE_LOCKED`, `MIGRATION_FAILED`) |
+| File                        | Role                                                                                                                                                           |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `config.ts`                 | Reads `DATABASE_PATH` and `DATABASE_BUSY_TIMEOUT_MS` from the environment                                                                                      |
+| `connection.ts`             | `openDatabase(config)`: checks the directory, opens the file, sets the pragmas                                                                                 |
+| `dialect.ts`                | Kysely's SQLite dialect with `begin immediate` transactions and transactional DDL                                                                              |
+| `migrate.ts`, `migrations/` | `migrateToLatest(db)` and the ordered list of migrations                                                                                                       |
+| `startup.ts`                | What the server does on start; `getDatabase()` hands the connection out                                                                                        |
+| `schema.ts`                 | Row types of every table (`Database`)                                                                                                                          |
+| `codecs.ts`                 | The only code that knows how JSON, booleans and timestamps are stored                                                                                          |
+| `repositories/`             | One small module per table (or aggregate); the only code that queries it                                                                                       |
+| `errors.ts`                 | `DatabaseError` with stable codes (`DATABASE_CONFIG_INVALID`, `DATABASE_DIRECTORY_UNAVAILABLE`, `DATABASE_OPEN_FAILED`, `DATABASE_LOCKED`, `MIGRATION_FAILED`) |
 
 ## Why better-sqlite3
 
@@ -82,13 +82,13 @@ The MVP runs on SQLite only, but the schema stays portable so that Postgres rema
 Every table follows these rules; `migrate.integration.test.ts` checks the ones it can on the real
 schema.
 
-| Kind | Column type | Stored as |
-|---|---|---|
-| Identifier | `text` | An application generated id (for example a UUID). Never `autoincrement` or a database sequence |
-| Timestamp | `text`, named `*_at` | ISO 8601 in UTC with milliseconds, e.g. `2026-10-10T12:30:15.042Z` (`formatTimestamp`). Time is injected into repositories (`now: () => Date`) |
-| JSON | `text` | `JSON.stringify` output (`encodeJson` / `decodeJson`); `undefined` is refused, use `null` for "no value" |
-| Boolean | `integer` | `1` or `0` (`encodeBoolean` / `decodeBoolean`) |
-| Everything else | `text` or `integer` | Numbers that are not booleans are `integer`; no floating point, no `blob`, no dates or booleans as native types |
+| Kind            | Column type          | Stored as                                                                                                                                      |
+| --------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Identifier      | `text`               | An application generated id (for example a UUID). Never `autoincrement` or a database sequence                                                 |
+| Timestamp       | `text`, named `*_at` | ISO 8601 in UTC with milliseconds, e.g. `2026-10-10T12:30:15.042Z` (`formatTimestamp`). Time is injected into repositories (`now: () => Date`) |
+| JSON            | `text`               | `JSON.stringify` output (`encodeJson` / `decodeJson`); `undefined` is refused, use `null` for "no value"                                       |
+| Boolean         | `integer`            | `1` or `0` (`encodeBoolean` / `decodeBoolean`)                                                                                                 |
+| Everything else | `text` or `integer`  | Numbers that are not booleans are `integer`; no floating point, no `blob`, no dates or booleans as native types                                |
 
 More rules: foreign keys are declared and enforced; use only schema builder features that exist on
 both SQLite and Postgres (no `STRICT`, no SQLite-only pragmas in migrations); keep SQL out of

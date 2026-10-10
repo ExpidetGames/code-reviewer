@@ -14,8 +14,12 @@ describe("createTestDatabase", () => {
     await createAppMetaRepository(first.db).set("only-in-first", "yes");
 
     expect(first.config.path).not.toBe(second.config.path);
-    expect(await createAppMetaRepository(first.db).get("only-in-first")).toBe("yes");
-    expect(await createAppMetaRepository(second.db).get("only-in-first")).toBeUndefined();
+    expect(await createAppMetaRepository(first.db).get("only-in-first")).toBe(
+      "yes",
+    );
+    expect(
+      await createAppMetaRepository(second.db).get("only-in-first"),
+    ).toBeUndefined();
   });
 
   // CR-15-T13

@@ -15,7 +15,10 @@ export function loadDatabaseConfig(
   env: Readonly<Record<string, string | undefined>>,
 ): DatabaseConfig {
   const path = env.DATABASE_PATH?.trim() || DEFAULT_DATABASE_PATH;
-  return { path, busyTimeoutMs: parseBusyTimeout(env.DATABASE_BUSY_TIMEOUT_MS) };
+  return {
+    path,
+    busyTimeoutMs: parseBusyTimeout(env.DATABASE_BUSY_TIMEOUT_MS),
+  };
 }
 
 // SQLite stores the timeout as a 32 bit integer; a larger value would be rejected later, at open.
@@ -26,7 +29,8 @@ function parseBusyTimeout(raw: string | undefined): number {
   const text = raw.trim();
   const value = Number(text);
   // Plain digits only: Number() would also accept "1e3", "0x10" and "+5".
-  if (/^\d+$/.test(text) && value > 0 && value <= MAX_BUSY_TIMEOUT_MS) return value;
+  if (/^\d+$/.test(text) && value > 0 && value <= MAX_BUSY_TIMEOUT_MS)
+    return value;
   throw new DatabaseError(
     "DATABASE_CONFIG_INVALID",
     `DATABASE_BUSY_TIMEOUT_MS must be a whole number of milliseconds between 1 and ${MAX_BUSY_TIMEOUT_MS}, got "${raw}".`,

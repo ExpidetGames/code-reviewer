@@ -6,7 +6,11 @@ import { join } from "node:path";
 import { sql } from "kysely";
 import { describe, expect, it } from "vitest";
 import { startDbProcess } from "../test-support/db-process.ts";
-import { createTestDatabase, createTestDirectory, track } from "../test-support/test-database.ts";
+import {
+  createTestDatabase,
+  createTestDirectory,
+  track,
+} from "../test-support/test-database.ts";
 import { openDatabase } from "./connection.ts";
 import { migrationProvider } from "./migrations/index.ts";
 import { createAppMetaRepository } from "./repositories/app-meta-repository.ts";
@@ -35,7 +39,10 @@ describe("writing while another connection holds the write lock", () => {
 
     const write = createAppMetaRepository(db).set("k", "v");
 
-    await expect(write).rejects.toMatchObject({ code: "SQLITE_BUSY", message: /database is locked/ });
+    await expect(write).rejects.toMatchObject({
+      code: "SQLITE_BUSY",
+      message: /database is locked/,
+    });
     const waited = Date.now() - started;
     expect(waited).toBeGreaterThanOrEqual(150);
     expect(waited).toBeLessThan(3000);
@@ -71,20 +78,38 @@ describe("two app instances starting on the same empty file", () => {
     const startAt = Date.now() + 300;
     first.send(`go ${startAt}`);
     second.send(`go ${startAt}`);
-    const results = [JSON.parse(await first.nextLine()), JSON.parse(await second.nextLine())] as Array<{
+    const results = [
+      JSON.parse(await first.nextLine()),
+      JSON.parse(await second.nextLine()),
+    ] as Array<{
       applied?: string[];
       error?: string;
     }>;
 
-    expect(results.map((result) => result.error)).toEqual([undefined, undefined]);
+    expect(results.map((result) => result.error)).toEqual([
+      undefined,
+      undefined,
+    ]);
     expect(await first.exited).toBe(0);
     expect(await second.exited).toBe(0);
-    const expected = Object.keys(await migrationProvider.getMigrations()).sort();
+    const expected = Object.keys(
+      await migrationProvider.getMigrations(),
+    ).sort();
     // Each migration ran in exactly one of the two processes.
-    expect(results.flatMap((result) => result.applied ?? []).sort()).toEqual(expected);
+    expect(results.flatMap((result) => result.applied ?? []).sort()).toEqual(
+      expected,
+    );
     const db = track(openDatabase({ path, busyTimeoutMs: 1000 }));
-    const { rows } = await sql<{ name: string }>`select name from kysely_migration order by name`.execute(db);
+    const { rows } = await sql<{
+      name: string;
+    }>`select name from kysely_migration order by name`.execute(db);
     expect(rows.map((row) => row.name)).toEqual(expected);
-    expect((await sql`select name from sqlite_master where name = 'app_meta'`.execute(db)).rows).toHaveLength(1);
+    expect(
+      (
+        await sql`select name from sqlite_master where name = 'app_meta'`.execute(
+          db,
+        )
+      ).rows,
+    ).toHaveLength(1);
   });
 });

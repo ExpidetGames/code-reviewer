@@ -6,7 +6,8 @@ export function encodeJson(value: unknown): string {
   const text = JSON.stringify(value);
   // JSON.stringify returns undefined (not a string) for undefined, functions and symbols. Storing
   // that would silently drop the column from an insert, so refuse it here. Use null for "no value".
-  if (text === undefined) throw new Error("Value cannot be stored as JSON (use null for no value).");
+  if (text === undefined)
+    throw new Error("Value cannot be stored as JSON (use null for no value).");
   return text;
 }
 

@@ -17,7 +17,10 @@ export async function migrateToLatest(
   db: Kysely<any>,
   provider: MigrationProvider = migrationProvider,
 ): Promise<MigrationOutcome> {
-  const { error, results = [] } = await new Migrator({ db, provider }).migrateToLatest();
+  const { error, results = [] } = await new Migrator({
+    db,
+    provider,
+  }).migrateToLatest();
 
   if (error) {
     const failed = results.find((result) => result.status === "Error");
@@ -32,7 +35,9 @@ export async function migrateToLatest(
         { cause: error },
       );
     }
-    const which = failed ? `Migration "${failed.migrationName}"` : "Running the migrations";
+    const which = failed
+      ? `Migration "${failed.migrationName}"`
+      : "Running the migrations";
     throw new DatabaseError(
       "MIGRATION_FAILED",
       `${which} failed and was rolled back: ${describeError(error)}`,
@@ -41,6 +46,8 @@ export async function migrateToLatest(
   }
 
   return {
-    executed: results.filter((r) => r.status === "Success").map((r) => r.migrationName),
+    executed: results
+      .filter((r) => r.status === "Success")
+      .map((r) => r.migrationName),
   };
 }

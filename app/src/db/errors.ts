@@ -12,7 +12,11 @@ export type DatabaseErrorCode = (typeof DATABASE_ERROR_CODES)[number];
 export class DatabaseError extends Error {
   readonly code: DatabaseErrorCode;
 
-  constructor(code: DatabaseErrorCode, message: string, options?: { cause?: unknown }) {
+  constructor(
+    code: DatabaseErrorCode,
+    message: string,
+    options?: { cause?: unknown },
+  ) {
     super(message, options);
     this.name = "DatabaseError";
     this.code = code;
@@ -25,6 +29,7 @@ export function describeError(error: unknown): string {
 
 /** The `code` of a Node or SQLite error such as "ENOENT" or "SQLITE_BUSY", if it has one. */
 export function errorCode(error: unknown): string | undefined {
-  if (typeof error !== "object" || error === null || !("code" in error)) return undefined;
+  if (typeof error !== "object" || error === null || !("code" in error))
+    return undefined;
   return typeof error.code === "string" ? error.code : undefined;
 }

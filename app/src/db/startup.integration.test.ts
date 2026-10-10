@@ -6,7 +6,11 @@ import { sql } from "kysely";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTestDirectory } from "../test-support/test-database.ts";
 import { createAppMetaRepository } from "./repositories/app-meta-repository.ts";
-import { closeDatabase, getDatabase, initializeDatabaseOnStart } from "./startup.ts";
+import {
+  closeDatabase,
+  getDatabase,
+  initializeDatabaseOnStart,
+} from "./startup.ts";
 
 afterEach(closeDatabase);
 
@@ -16,7 +20,10 @@ describe("initializeDatabaseOnStart", () => {
     const directory = await createTestDirectory();
     const exit = vi.fn();
 
-    await initializeDatabaseOnStart({ env: { DATABASE_PATH: join(directory, "app.db") }, exit });
+    await initializeDatabaseOnStart({
+      env: { DATABASE_PATH: join(directory, "app.db") },
+      exit,
+    });
 
     const repository = createAppMetaRepository(getDatabase());
     await repository.set("started", "yes");
@@ -31,7 +38,11 @@ describe("initializeDatabaseOnStart", () => {
     const log = vi.fn();
     const exit = vi.fn();
 
-    await initializeDatabaseOnStart({ env: { DATABASE_PATH: join(missing, "app.db") }, log, exit });
+    await initializeDatabaseOnStart({
+      env: { DATABASE_PATH: join(missing, "app.db") },
+      log,
+      exit,
+    });
 
     expect(exit).toHaveBeenCalledExactlyOnceWith(1);
     expect(log).toHaveBeenCalledOnce();
@@ -49,7 +60,9 @@ describe("initializeDatabaseOnStart", () => {
         await sql`this is not valid sql`.execute(db);
       },
     };
-    const migrations: MigrationProvider = { getMigrations: async () => ({ "0001_broken": broken }) };
+    const migrations: MigrationProvider = {
+      getMigrations: async () => ({ "0001_broken": broken }),
+    };
     const log = vi.fn();
     const exit = vi.fn();
 

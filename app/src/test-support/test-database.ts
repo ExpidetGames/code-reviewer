@@ -48,6 +48,9 @@ export async function createTestDatabase(
   const path = join(directory, "app.db");
   await copyFile(inject("dbTemplatePath"), path);
 
-  const config = { path, busyTimeoutMs: options.busyTimeoutMs ?? DEFAULT_BUSY_TIMEOUT_MS };
+  const config = {
+    path,
+    busyTimeoutMs: options.busyTimeoutMs ?? DEFAULT_BUSY_TIMEOUT_MS,
+  };
   return { db: track(openDatabase(config)), config, directory };
 }

@@ -18,7 +18,9 @@ import {
 } from "kysely";
 
 class ImmediateTransactionDriver extends SqliteDriver {
-  override async beginTransaction(connection: DatabaseConnection): Promise<void> {
+  override async beginTransaction(
+    connection: DatabaseConnection,
+  ): Promise<void> {
     await connection.executeQuery(CompiledQuery.raw("begin immediate"));
   }
 }

@@ -1,12 +1,19 @@
 // Pins down how the database settings are read from the environment: defaults, overrides and the
 // refusal of a busy timeout that cannot be used.
 import { describe, expect, it } from "vitest";
-import { DEFAULT_BUSY_TIMEOUT_MS, DEFAULT_DATABASE_PATH, loadDatabaseConfig } from "./config.ts";
+import {
+  DEFAULT_BUSY_TIMEOUT_MS,
+  DEFAULT_DATABASE_PATH,
+  loadDatabaseConfig,
+} from "./config.ts";
 import { DatabaseError } from "./errors.ts";
 
 describe("loadDatabaseConfig", () => {
   it("uses /data/app.db and a 5000 ms busy timeout when nothing is configured", () => {
-    expect(loadDatabaseConfig({})).toEqual({ path: "/data/app.db", busyTimeoutMs: 5000 });
+    expect(loadDatabaseConfig({})).toEqual({
+      path: "/data/app.db",
+      busyTimeoutMs: 5000,
+    });
     expect(DEFAULT_DATABASE_PATH).toBe("/data/app.db");
     expect(DEFAULT_BUSY_TIMEOUT_MS).toBe(5000);
   });
@@ -21,14 +28,22 @@ describe("loadDatabaseConfig", () => {
   });
 
   it("treats an empty database path as not configured", () => {
-    expect(loadDatabaseConfig({ DATABASE_PATH: "  " }).path).toBe("/data/app.db");
+    expect(loadDatabaseConfig({ DATABASE_PATH: "  " }).path).toBe(
+      "/data/app.db",
+    );
   });
 
-  it.each(["abc", "-1", "1.5", "0", "1e3", "0x10", "+5", "99999999999"])("rejects the busy timeout %j with a stable error code", (value) => {
-    const load = () => loadDatabaseConfig({ DATABASE_BUSY_TIMEOUT_MS: value });
+  it.each(["abc", "-1", "1.5", "0", "1e3", "0x10", "+5", "99999999999"])(
+    "rejects the busy timeout %j with a stable error code",
+    (value) => {
+      const load = () =>
+        loadDatabaseConfig({ DATABASE_BUSY_TIMEOUT_MS: value });
 
-    expect(load).toThrow(DatabaseError);
-    expect(load).toThrow(expect.objectContaining({ code: "DATABASE_CONFIG_INVALID" }));
-    expect(load).toThrow(/DATABASE_BUSY_TIMEOUT_MS/);
-  });
+      expect(load).toThrow(DatabaseError);
+      expect(load).toThrow(
+        expect.objectContaining({ code: "DATABASE_CONFIG_INVALID" }),
+      );
+      expect(load).toThrow(/DATABASE_BUSY_TIMEOUT_MS/);
+    },
+  );
 });

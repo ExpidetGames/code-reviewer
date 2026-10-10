@@ -15,7 +15,8 @@ import { DatabaseError } from "../db/errors.ts";
 import { startDatabase } from "../db/startup.ts";
 
 const [command, databasePath, argument] = process.argv.slice(2);
-if (!databasePath) throw new Error("Usage: db-child.ts <hold-lock|migrate> <database> [ms]");
+if (!databasePath)
+  throw new Error("Usage: db-child.ts <hold-lock|migrate> <database> [ms]");
 
 if (command === "hold-lock") {
   const sqlite = new BetterSqlite3(databasePath, { timeout: 5000 });
@@ -37,7 +38,10 @@ if (command === "hold-lock") {
     const startAt = Number(line.split(" ")[1]);
     while (Date.now() < startAt);
     try {
-      const { db, migrationsApplied } = await startDatabase({ path: databasePath, busyTimeoutMs: 5000 });
+      const { db, migrationsApplied } = await startDatabase({
+        path: databasePath,
+        busyTimeoutMs: 5000,
+      });
       await db.destroy();
       console.log(JSON.stringify({ applied: migrationsApplied }));
       process.exit(0);

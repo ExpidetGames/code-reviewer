@@ -22,12 +22,19 @@ export type DbProcess = {
 };
 
 export function startDbProcess(args: string[]): DbProcess {
-  const child = spawn(process.execPath, ["--no-warnings", "--conditions=react-server", childScript, ...args], {
-    stdio: ["pipe", "pipe", "pipe"],
-  });
+  const child = spawn(
+    process.execPath,
+    ["--no-warnings", "--conditions=react-server", childScript, ...args],
+    {
+      stdio: ["pipe", "pipe", "pipe"],
+    },
+  );
   running.add(child);
 
-  const pending: Array<{ resolve: (line: string) => void; reject: (error: Error) => void }> = [];
+  const pending: Array<{
+    resolve: (line: string) => void;
+    reject: (error: Error) => void;
+  }> = [];
   const buffered: string[] = [];
   let stderr = "";
   child.stderr.on("data", (chunk) => (stderr += String(chunk)));
@@ -40,7 +47,9 @@ export function startDbProcess(args: string[]): DbProcess {
   const exited = new Promise<number | null>((resolve) => {
     child.once("exit", (code) => {
       for (const waiting of pending.splice(0)) {
-        waiting.reject(new Error(`db-child exited with ${code} before printing: ${stderr}`));
+        waiting.reject(
+          new Error(`db-child exited with ${code} before printing: ${stderr}`),
+        );
       }
       resolve(code);
     });
@@ -50,7 +59,9 @@ export function startDbProcess(args: string[]): DbProcess {
     nextLine() {
       const line = buffered.shift();
       if (line !== undefined) return Promise.resolve(line);
-      return new Promise((resolve, reject) => pending.push({ resolve, reject }));
+      return new Promise((resolve, reject) =>
+        pending.push({ resolve, reject }),
+      );
     },
     send: (line) => void child.stdin.write(`${line}\n`),
     closeInput: () => void child.stdin.end(),

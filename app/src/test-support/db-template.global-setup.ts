@@ -14,7 +14,9 @@ declare module "vitest" {
   }
 }
 
-export default async function setup(project: TestProject): Promise<() => Promise<void>> {
+export default async function setup(
+  project: TestProject,
+): Promise<() => Promise<void>> {
   const directory = await mkdtemp(join(tmpdir(), "cr-db-template-"));
   const templatePath = join(directory, "template.db");
 

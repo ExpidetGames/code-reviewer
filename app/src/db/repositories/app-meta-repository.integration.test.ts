@@ -22,7 +22,10 @@ describe("the app meta repository", () => {
     await repository.set("greeting", "hi");
 
     expect(await repository.get("greeting")).toBe("hi");
-    const { rows } = await sql`select key, value, updated_at from app_meta`.execute(db);
-    expect(rows).toEqual([{ key: "greeting", value: "hi", updated_at: "2026-10-10T09:00:00.000Z" }]);
+    const { rows } =
+      await sql`select key, value, updated_at from app_meta`.execute(db);
+    expect(rows).toEqual([
+      { key: "greeting", value: "hi", updated_at: "2026-10-10T09:00:00.000Z" },
+    ]);
   });
 });
