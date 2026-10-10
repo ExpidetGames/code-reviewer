@@ -35,7 +35,7 @@ describe("the sign in decision", () => {
       "OctoCat",
     );
 
-    expect(await result).toEqual({ allowed: true, orgCheckedAt: null });
+    expect(await result).toEqual({ allowed: true, orgCheck: null });
     expect(checkMembership).not.toHaveBeenCalled();
   });
 
@@ -67,7 +67,7 @@ describe("the sign in decision", () => {
 
     expect(await result).toEqual({
       allowed: true,
-      orgCheckedAt: NOW.toISOString(),
+      orgCheck: { at: NOW.toISOString(), org: "my-org" },
     });
     expect(checkMembership).toHaveBeenCalledTimes(1);
   });
@@ -102,9 +102,15 @@ describe("reading the decision back from the profile", () => {
   it("returns a decision that was attached by the provider", () => {
     expect(
       readSignInAccess({
-        codeReviewerAccess: { allowed: true, orgCheckedAt: "2026-10-10" },
+        codeReviewerAccess: {
+          allowed: true,
+          orgCheck: { at: "2026-10-10", org: "my-org" },
+        },
       }),
-    ).toEqual({ allowed: true, orgCheckedAt: "2026-10-10" });
+    ).toEqual({
+      allowed: true,
+      orgCheck: { at: "2026-10-10", org: "my-org" },
+    });
     expect(
       readSignInAccess({
         codeReviewerAccess: { allowed: false, reason: "check_failed" },

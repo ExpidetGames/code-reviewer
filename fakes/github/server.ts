@@ -407,19 +407,31 @@ export async function startGithubFake(
 
     const auth = authenticate(request, response);
     if (!auth) return;
+    // Like GitHub, every answer to an OAuth token names the scopes of the token.
+    const scopes = auth.scope.split(/[ ,]+/).filter(Boolean).join(", ");
+    const headers = { "x-oauth-scopes": scopes };
     if (!/(^|[ ,])(read:org|write:org|admin:org)([ ,]|$)/.test(auth.scope))
-      return sendJson(response, 403, {
-        message: "Resource not accessible by personal access token",
-      });
+      return sendJson(
+        response,
+        403,
+        { message: "Resource not accessible by personal access token" },
+        headers,
+      );
     const state = orgs.get(org.toLowerCase())?.get(auth.user.id);
-    if (!state) return sendJson(response, 404, { message: "Not Found" });
-    sendJson(response, 200, {
-      url: `https://api.invalid/orgs/${org}/memberships/${auth.user.login}`,
-      state,
-      role: "member",
-      organization: { login: org },
-      user: { login: auth.user.login, id: auth.user.id },
-    });
+    if (!state)
+      return sendJson(response, 404, { message: "Not Found" }, headers);
+    sendJson(
+      response,
+      200,
+      {
+        url: `https://api.invalid/orgs/${org}/memberships/${auth.user.login}`,
+        state,
+        role: "member",
+        organization: { login: org },
+        user: { login: auth.user.login, id: auth.user.id },
+      },
+      headers,
+    );
   }
 
   function addOrgMember(
@@ -541,13 +553,19 @@ function send(
   status: number,
   contentType: string,
   body: string,
+  headers: Record<string, string> = {},
 ) {
-  response.writeHead(status, { "content-type": contentType });
+  response.writeHead(status, { "content-type": contentType, ...headers });
   response.end(body);
 }
 
-function sendJson(response: ServerResponse, status: number, body: unknown) {
-  send(response, status, "application/json", JSON.stringify(body));
+function sendJson(
+  response: ServerResponse,
+  status: number,
+  body: unknown,
+  headers?: Record<string, string>,
+) {
+  send(response, status, "application/json", JSON.stringify(body), headers);
 }
 
 function sendHtml(response: ServerResponse, status: number, body: string) {

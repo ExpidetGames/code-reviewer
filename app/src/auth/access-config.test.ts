@@ -113,12 +113,38 @@ describe("ALLOWED_GITHUB_ORG", () => {
     "org?x=1",
     "a".repeat(40),
     "org,other",
+    "double--hyphen",
+    "trailing-",
   ])("is refused as a configuration problem when it is %j", (org) => {
     const { problems } = parse({ ALLOWED_GITHUB_ORG: org });
 
     expect(problems).toHaveLength(1);
     expect(problems[0]).toContain("ALLOWED_GITHUB_ORG");
     expect(problems[0]).not.toContain(org);
+  });
+});
+
+describe("entries of ALLOWED_GITHUB_LOGINS that cannot be logins", () => {
+  it("are reported, still match nothing, and do not touch the valid entries", () => {
+    const { config } = parse({
+      ALLOWED_GITHUB_LOGINS: "octocat, @hubot ,octo/cat,two words,ok-name",
+    });
+
+    expect(config.invalidLoginEntries).toEqual([
+      "@hubot",
+      "octo/cat",
+      "two words",
+    ]);
+    expect(isLoginListed(config, "octocat")).toBe(true);
+    expect(isLoginListed(config, "ok-name")).toBe(true);
+    expect(isLoginListed(config, "hubot")).toBe(false);
+  });
+
+  it("are not reported for a clean list", () => {
+    expect(
+      parse({ ALLOWED_GITHUB_LOGINS: "octocat,Hubot-2,a--b" }).config
+        .invalidLoginEntries,
+    ).toEqual([]);
   });
 });
 

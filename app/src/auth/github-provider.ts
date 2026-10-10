@@ -37,7 +37,7 @@ export type GithubProviderOptions = {
    * is attached to the profile; `user.validateUserInfo` in auth.ts refuses the sign in before
    * anything is written.
    */
-  decideAccess: (input: {
+  signInAccess: (input: {
     login: string;
     accessToken: string;
   }) => Promise<SignInAccess>;
@@ -75,8 +75,10 @@ export function githubProviderConfig(
     getUserInfo: (tokens) => readProfile(options, timeoutMs, tokens),
     mapProfileToUser: (profile) => ({
       githubLogin: typeof profile.login === "string" ? profile.login : "",
-      // When the organization membership was confirmed during this sign in; null if it was not.
-      orgCheckedAt: readOrgCheckedAt(profile),
+      // When, and for which organization, the membership was confirmed during this sign in; null
+      // if it was not.
+      orgCheckedAt: readOrgCheck(profile)?.at ?? null,
+      orgCheckedFor: readOrgCheck(profile)?.org ?? null,
     }),
   };
 }
@@ -147,7 +149,7 @@ async function readProfile(
   );
   if (!profile || typeof profile.id !== "number" || !profile.login) return null;
 
-  const access = await options.decideAccess({
+  const access = await options.signInAccess({
     login: profile.login,
     accessToken: tokens.accessToken,
   });
@@ -163,9 +165,9 @@ async function readProfile(
   };
 }
 
-function readOrgCheckedAt(profile: Record<string, unknown>): string | null {
+function readOrgCheck(profile: Record<string, unknown>) {
   const access = readSignInAccess(profile);
-  return access.allowed ? access.orgCheckedAt : null;
+  return access.allowed ? access.orgCheck : null;
 }
 
 /**

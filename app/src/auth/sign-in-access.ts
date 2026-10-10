@@ -3,15 +3,28 @@
 // nothing behind. The decision travels from the GitHub provider (which has the token) to Better
 // Auth's `validateUserInfo` gate (which can refuse) inside the profile, see `github-provider.ts`.
 import { isLoginListed, type AccessConfig } from "./access-config.ts";
+import {
+  deny,
+  isAccessDenialReason,
+  type AccessDenied,
+} from "./access-decision.ts";
 import type { OrgMembership } from "./github-org.ts";
+
+/** A confirmed membership, to be stored on the user. */
+export type OrgCheckRecord = {
+  /** ISO 8601 time of the check. */
+  at: string;
+  /** The organization it was made for. */
+  org: string;
+};
 
 export type SignInAccess =
   | {
       allowed: true;
-      /** When the organization membership was confirmed, or null if the login list sufficed. */
-      orgCheckedAt: string | null;
+      /** Set when the organization membership was confirmed; null if the login list sufficed. */
+      orgCheck: OrgCheckRecord | null;
     }
-  | { allowed: false; reason: "not_allowed" | "check_failed" };
+  | AccessDenied;
 
 export type DecideSignInOptions = {
   config: AccessConfig;
@@ -27,24 +40,26 @@ export async function decideSignIn({
   checkMembership,
   now = () => new Date(),
 }: DecideSignInOptions): Promise<SignInAccess> {
-  if (isLoginListed(config, login))
-    return { allowed: true, orgCheckedAt: null };
-  if (config.org === null) return { allowed: false, reason: "not_allowed" };
+  if (isLoginListed(config, login)) return { allowed: true, orgCheck: null };
+  if (config.org === null) return deny("not_allowed");
 
   let membership: OrgMembership;
   try {
     membership = await checkMembership();
   } catch {
-    return { allowed: false, reason: "check_failed" };
+    return deny("check_failed");
   }
   switch (membership) {
     case "member":
-      return { allowed: true, orgCheckedAt: now().toISOString() };
+      return {
+        allowed: true,
+        orgCheck: { at: now().toISOString(), org: config.org },
+      };
     case "not_member":
-      return { allowed: false, reason: "not_allowed" };
+      return deny("not_allowed");
     case "token_invalid":
     case "unavailable":
-      return { allowed: false, reason: "check_failed" };
+      return deny("check_failed");
   }
 }
 
@@ -56,16 +71,15 @@ export function readSignInAccess(
   profile: Record<string, unknown> | undefined,
 ): SignInAccess {
   const access = profile?.codeReviewerAccess;
-  if (typeof access !== "object" || access === null)
-    return { allowed: false, reason: "not_allowed" };
-  const { allowed, orgCheckedAt, reason } = access as Record<string, unknown>;
+  if (typeof access !== "object" || access === null) return deny("not_allowed");
+  const { allowed, orgCheck, reason } = access as Record<string, unknown>;
   if (allowed === true)
-    return {
-      allowed: true,
-      orgCheckedAt: typeof orgCheckedAt === "string" ? orgCheckedAt : null,
-    };
-  return {
-    allowed: false,
-    reason: reason === "check_failed" ? "check_failed" : "not_allowed",
-  };
+    return { allowed: true, orgCheck: readOrgCheck(orgCheck) };
+  return deny(isAccessDenialReason(reason) ? reason : "not_allowed");
+}
+
+function readOrgCheck(value: unknown): OrgCheckRecord | null {
+  if (typeof value !== "object" || value === null) return null;
+  const { at, org } = value as Record<string, unknown>;
+  return typeof at === "string" && typeof org === "string" ? { at, org } : null;
 }

@@ -9,14 +9,11 @@ import type { Kysely } from "kysely";
 import { getDatabase } from "../db/startup.ts";
 import type { Database } from "../db/schema.ts";
 import { loadAuthConfig, type AuthConfig } from "./config.ts";
-import { checkOrgMembership } from "./github-org.ts";
+import { membershipChecker } from "./github-org.ts";
 import { githubProviderConfig } from "./github-provider.ts";
 import { decideSignIn, readSignInAccess } from "./sign-in-access.ts";
 
 export const SESSION_LIFETIME_SECONDS = 60 * 60 * 24 * 30;
-
-/** How long the organization check may take while a person waits for the sign in to complete. */
-const ORG_CHECK_TIMEOUT_MS = 5_000;
 
 export type CreateAuthOptions = {
   db: Kysely<Database>;
@@ -31,6 +28,14 @@ export function createAuth({
   githubRequestTimeoutMs,
 }: CreateAuthOptions) {
   const org = config.access.org;
+  const checkMembership =
+    org === null
+      ? undefined
+      : membershipChecker({
+          apiBaseUrl: config.github.apiBaseUrl,
+          org,
+          timeoutMs: githubRequestTimeoutMs,
+        });
 
   return betterAuth({
     appName: "Code Reviewer",
@@ -58,6 +63,12 @@ export function createAuth({
           type: "string",
           required: false,
           fieldName: "org_checked_at",
+        },
+        // The organization that check was made for, so a check is never reused for another one.
+        orgCheckedFor: {
+          type: "string",
+          required: false,
+          fieldName: "org_checked_for",
         },
       },
       // The gate for who may use this instance, run by Better Auth just before it creates a user
@@ -129,20 +140,14 @@ export function createAuth({
             apiBaseUrl: config.github.apiBaseUrl,
             requestTimeoutMs: githubRequestTimeoutMs,
             requestOrgScope: org !== null,
-            decideAccess: ({ login, accessToken }) =>
+            signInAccess: ({ login, accessToken }) =>
               decideSignIn({
                 config: config.access,
                 login,
                 checkMembership: () =>
-                  org === null
+                  checkMembership === undefined
                     ? Promise.resolve("unavailable")
-                    : checkOrgMembership({
-                        apiBaseUrl: config.github.apiBaseUrl,
-                        org,
-                        accessToken,
-                        timeoutMs:
-                          githubRequestTimeoutMs ?? ORG_CHECK_TIMEOUT_MS,
-                      }),
+                    : checkMembership(accessToken),
               }),
           }),
         ],

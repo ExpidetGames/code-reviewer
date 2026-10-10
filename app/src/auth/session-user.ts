@@ -31,6 +31,7 @@ export async function lookupSession(
     name: session.user.name,
     githubLogin: session.user.githubLogin,
     orgCheckedAt: session.user.orgCheckedAt ?? null,
+    orgCheckedFor: session.user.orgCheckedFor ?? null,
   };
   const decision = await policy(user);
   return decision.allowed

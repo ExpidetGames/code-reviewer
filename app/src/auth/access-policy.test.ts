@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { parseAccessConfig } from "./access-config.ts";
 import {
   ORG_RECHECK_INTERVAL_MS,
+  ORG_UNAVAILABLE_BACKOFF_MS,
   createAccessPolicy,
   type OrgAccessDependencies,
   type SessionUser,
@@ -19,6 +20,7 @@ function user(overrides: Partial<SessionUser> = {}): SessionUser {
     name: "The Octocat",
     githubLogin: "octocat",
     orgCheckedAt: null,
+    orgCheckedFor: null,
     ...overrides,
   };
 }
@@ -47,8 +49,15 @@ function setup(
       Promise.resolve(),
     ),
   };
-  const policy = createAccessPolicy({ config, org, now: () => NOW });
-  return { policy, org };
+  const clock = { now: NOW };
+  const logError = vi.fn<(message: string) => void>();
+  const policy = createAccessPolicy({
+    config,
+    org,
+    now: () => clock.now,
+    logError,
+  });
+  return { policy, org, clock, logError };
 }
 
 describe("the logins list as the access rule of a request", () => {
@@ -118,7 +127,10 @@ describe("the organization as the access rule of a request", () => {
     const { policy, org } = setup(env);
 
     const decision = await policy(
-      user({ orgCheckedAt: ago(ORG_RECHECK_INTERVAL_MS - 1) }),
+      user({
+        orgCheckedAt: ago(ORG_RECHECK_INTERVAL_MS - 1),
+        orgCheckedFor: "my-org",
+      }),
     );
 
     expect(decision).toEqual({ allowed: true });
@@ -134,7 +146,7 @@ describe("the organization as the access rule of a request", () => {
 
     expect(decision).toEqual({ allowed: true });
     expect(org.checkMembership).toHaveBeenCalledTimes(1);
-    expect(org.recordCheck).toHaveBeenCalledWith("user-1", NOW);
+    expect(org.recordCheck).toHaveBeenCalledWith("user-1", NOW, "my-org");
   });
 
   it.each([
@@ -191,14 +203,101 @@ describe("the organization as the access rule of a request", () => {
     });
   });
 
-  it("does not lengthen the 24 hours by a check that failed earlier", async () => {
-    const { policy, org } = setup(env, "unavailable");
+  it("does not reuse a confirmation that was made for another organization", async () => {
+    const { policy, org } = setup(env, "not_member");
 
-    await policy(user({ orgCheckedAt: ago(ORG_RECHECK_INTERVAL_MS + 1) }));
-    await policy(user({ orgCheckedAt: ago(ORG_RECHECK_INTERVAL_MS + 1) }));
+    const decision = await policy(
+      user({ orgCheckedAt: ago(1000), orgCheckedFor: "old-org" }),
+    );
 
+    expect(decision).toEqual({ allowed: false, reason: "not_allowed" });
+    expect(org.checkMembership).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not reuse a confirmation without an organization", async () => {
+    const { policy, org } = setup(env, "member");
+
+    await policy(user({ orgCheckedAt: ago(1000), orgCheckedFor: null }));
+
+    expect(org.checkMembership).toHaveBeenCalledTimes(1);
+  });
+
+  it("compares the organization names without regard to case", async () => {
+    const { policy, org } = setup({ ALLOWED_GITHUB_ORG: "My-Org" });
+
+    const decision = await policy(
+      user({ orgCheckedAt: ago(1000), orgCheckedFor: "my-org" }),
+    );
+
+    expect(decision).toEqual({ allowed: true });
+    expect(org.checkMembership).not.toHaveBeenCalled();
+  });
+
+  it("does not call GitHub again for 20 seconds after a check that could not be made", async () => {
+    const { policy, org, clock } = setup(env, "unavailable");
+
+    await policy(user());
+    clock.now = new Date(NOW.getTime() + ORG_UNAVAILABLE_BACKOFF_MS - 1);
+    const during = await policy(user());
+
+    expect(during).toEqual({ allowed: false, reason: "check_failed" });
+    expect(org.checkMembership).toHaveBeenCalledTimes(1);
+
+    clock.now = new Date(NOW.getTime() + ORG_UNAVAILABLE_BACKOFF_MS);
+    await policy(user());
     expect(org.checkMembership).toHaveBeenCalledTimes(2);
   });
+
+  it("keeps the back-off per user and only for checks that could not be made", async () => {
+    const { policy, org } = setup(env, "unavailable");
+
+    await policy(user({ id: "user-1" }));
+    await policy(user({ id: "user-2" }));
+    expect(org.checkMembership).toHaveBeenCalledTimes(2);
+
+    const answered = setup(env, "not_member");
+    await answered.policy(user());
+    await answered.policy(user());
+    expect(answered.org.checkMembership).toHaveBeenCalledTimes(2);
+  });
+
+  it("lets a person back in at once after the back-off when GitHub answers again", async () => {
+    let membership: OrgMembership = "unavailable";
+    const { policy, clock } = setup(env, () => Promise.resolve(membership));
+    await policy(user());
+
+    membership = "member";
+    clock.now = new Date(NOW.getTime() + ORG_UNAVAILABLE_BACKOFF_MS);
+
+    expect(await policy(user())).toEqual({ allowed: true });
+  });
+
+  it("denies with check-failed instead of failing when the check cannot be stored", async () => {
+    const { policy, org, logError } = setup(env, "member");
+    org.recordCheck.mockRejectedValue(new Error("database is locked"));
+
+    expect(await policy(user())).toEqual({
+      allowed: false,
+      reason: "check_failed",
+    });
+    expect(logError).toHaveBeenCalledTimes(1);
+    expect(String(logError.mock.calls[0]?.[0])).not.toContain("locked");
+  });
+
+  it.each([
+    ["not_member", "not_allowed"],
+    ["token_invalid", "sign_in_again"],
+  ] as const)(
+    "still denies with %s after trying to end the sessions when that fails",
+    async (membership, reason) => {
+      const { policy, org, logError } = setup(env, membership);
+      org.revokeSessions.mockRejectedValue(new Error("database is locked"));
+
+      expect(await policy(user())).toEqual({ allowed: false, reason });
+      expect(org.revokeSessions).toHaveBeenCalledWith("user-1");
+      expect(logError).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it("makes one call to GitHub for requests of the same user that arrive together", async () => {
     let answer: (membership: OrgMembership) => void = () => undefined;

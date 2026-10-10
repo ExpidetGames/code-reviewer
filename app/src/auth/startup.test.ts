@@ -80,4 +80,24 @@ describe("checking the sign in configuration when the server starts", () => {
       expect(warn).not.toHaveBeenCalled();
     }
   });
+
+  it("warns once about allow-list entries that cannot be logins, without echoing long values", () => {
+    const warn = vi.fn();
+    const long = `@${"x".repeat(60)}`;
+
+    checkAuthConfigOnStart({
+      env: { ...validEnv, ALLOWED_GITHUB_LOGINS: `octocat,@hubot,${long}` },
+      log: vi.fn(),
+      warn,
+      exit: vi.fn(),
+    });
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    const line = String(warn.mock.calls[0]?.[0]);
+    expect(line).toContain("ACCESS_LIST_ENTRY_INVALID");
+    expect(line).toContain("ALLOWED_GITHUB_LOGINS");
+    expect(line).toContain("@hubot");
+    expect(line).not.toContain(long);
+    expect(line).not.toContain("\n");
+  });
 });

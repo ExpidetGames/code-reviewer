@@ -6,11 +6,13 @@ import type { Migration, MigrationProvider } from "kysely/migration";
 import { migration as createAppMeta } from "./0001_create_app_meta.ts";
 import { migration as createAuthTables } from "./20261010123800_create_auth_tables.ts";
 import { migration as addUserOrgCheckedAt } from "./20261010125500_add_user_org_checked_at.ts";
+import { migration as addUserOrgCheckedFor } from "./20261010131500_add_user_org_checked_for.ts";
 
 const migrations: Record<string, Migration> = {
   "0001_create_app_meta": createAppMeta,
   "20261010123800_create_auth_tables": createAuthTables,
   "20261010125500_add_user_org_checked_at": addUserOrgCheckedAt,
+  "20261010131500_add_user_org_checked_for": addUserOrgCheckedFor,
 };
 
 export const migrationProvider: MigrationProvider = {

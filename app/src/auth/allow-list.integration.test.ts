@@ -224,6 +224,7 @@ describe("signing in when access is given by organization", () => {
     expect(Date.now() - Date.parse(user.org_checked_at ?? "")).toBeLessThan(
       60_000,
     );
+    expect(user.org_checked_for).toBe("my-org");
     expect(
       await harness.db.selectFrom("sessions").selectAll().execute(),
     ).toHaveLength(1);

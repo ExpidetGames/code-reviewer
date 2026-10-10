@@ -6,8 +6,13 @@ import { checkOrgMembership } from "./github-org.ts";
 
 type FetchImpl = typeof fetch;
 
-function check(fetchImpl: FetchImpl, org = "my-org") {
+function check(
+  fetchImpl: FetchImpl,
+  org = "my-org",
+  log: (message: string) => void = () => undefined,
+) {
   return checkOrgMembership({
+    log,
     apiBaseUrl: "https://api.example.test",
     org,
     accessToken: "token-value",
@@ -43,7 +48,7 @@ describe("checking the membership of the signed in account", () => {
     );
     const headers = new Headers(init?.headers);
     expect(headers.get("authorization")).toBe("Bearer token-value");
-    expect(init?.redirect).toBe("error");
+    expect(init?.redirect).toBe("manual");
   });
 
   // CR-19-T09
@@ -82,7 +87,7 @@ describe("checking the membership of the signed in account", () => {
   });
 
   // CR-19-T11
-  it.each([403, 429, 500, 502, 503, 302, 201])(
+  it.each([403, 429, 500, 502, 503, 201])(
     "cannot tell on status %i",
     async (status) => {
       const answer = new Response("{}", { status });
@@ -125,5 +130,74 @@ describe("checking the membership of the signed in account", () => {
     expect(String(fetchImpl.mock.calls[0]?.[0])).toBe(
       "https://api.example.test/user/memberships/orgs/a%2F..%2Fb",
     );
+  });
+
+  // CR-19-T11
+  it.each([301, 302, 307, 308])(
+    "cannot tell on a redirect (%i), never follows it, and says once what to fix",
+    async (status) => {
+      const org = `renamed-org-${String(status)}`;
+      const log = vi.fn<(message: string) => void>();
+      const fetchImpl = vi.fn<FetchImpl>(() =>
+        Promise.resolve(
+          new Response(null, {
+            status,
+            headers: { location: "https://elsewhere.example/steal" },
+          }),
+        ),
+      );
+
+      expect(await check(fetchImpl, org, log)).toBe("unavailable");
+      expect(await check(fetchImpl, org, log)).toBe("unavailable");
+
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      expect(log).toHaveBeenCalledTimes(1);
+      const line = String(log.mock.calls[0]?.[0]);
+      expect(line).toContain("ORG_CHECK_REDIRECTED");
+      expect(line).toContain("ALLOWED_GITHUB_ORG");
+      expect(line).not.toContain("token-value");
+      expect(line).not.toContain("elsewhere");
+    },
+  );
+
+  describe("when GitHub names the scopes of the token", () => {
+    function withScopes(status: number, scopes: string): Response {
+      return new Response("{}", {
+        status,
+        headers: { "x-oauth-scopes": scopes },
+      });
+    }
+
+    it.each([403, 404])(
+      "reports a token without read:org as invalid on %i, not as an answer about the membership",
+      async (status) => {
+        const answer = withScopes(status, "read:user");
+
+        expect(await check(() => Promise.resolve(answer))).toBe(
+          "token_invalid",
+        );
+      },
+    );
+
+    it("reports an empty scope list the same way", async () => {
+      expect(await check(() => Promise.resolve(withScopes(404, "")))).toBe(
+        "token_invalid",
+      );
+    });
+
+    it.each(["read:user, read:org", "admin:org", "write:org,read:user"])(
+      "reads a 404 as not a member when the scopes are %j",
+      async (scopes) => {
+        expect(
+          await check(() => Promise.resolve(withScopes(404, scopes))),
+        ).toBe("not_member");
+      },
+    );
+
+    it("reads a 403 with the scope as unavailable (rate limit, organization policy)", async () => {
+      expect(
+        await check(() => Promise.resolve(withScopes(403, "read:org"))),
+      ).toBe("unavailable");
+    });
   });
 });

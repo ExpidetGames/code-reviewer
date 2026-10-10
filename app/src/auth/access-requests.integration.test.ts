@@ -181,20 +181,56 @@ describe("a member of the allowed organization", () => {
     expect(await sessionCount(harness)).toBe(0);
   });
 
-  it("is turned away while GitHub cannot answer, keeps the session, and is let back in when it can", async () => {
+  it("is turned away while GitHub cannot answer, without asking again for 20 seconds, keeps the session, and is let back in when it can", async () => {
     const { harness, cookies, visit } = await signedInMember();
     harness.github.failMembershipEndpoint({ kind: "status", status: 503 });
 
     vi.setSystemTime(Date.now() + 25 * HOUR);
+    const asked = await membershipRequests(harness);
     const failed = await visit("/", cookies);
     const failedData = await visit("/api/jobs", cookies);
 
     expect(loginRedirect(failed)).toBe("/login?error=check_failed");
     expect(failedData.status).toBe(403);
     expect(await sessionCount(harness)).toBe(1);
+    expect(await membershipRequests(harness)).toBe(asked + 1);
 
     harness.github.failMembershipEndpoint(null);
+    vi.setSystemTime(Date.now() + 10_000);
+    expect(loginRedirect(await visit("/", cookies))).toBe(
+      "/login?error=check_failed",
+    );
+    expect(await membershipRequests(harness)).toBe(asked + 1);
+
+    vi.setSystemTime(Date.now() + 11_000);
     expect(passesThrough(await visit("/", cookies))).toBe(true);
+    expect(await membershipRequests(harness)).toBe(asked + 2);
+  });
+
+  it("is asked about again at once when ALLOWED_GITHUB_ORG names another organization", async () => {
+    const { harness, cookies } = await signedInMember();
+    const other = harness.restart({ allowedOrg: "other-org" });
+    const asked = await membershipRequests(harness);
+
+    const page = await visitor(other)("/", cookies);
+
+    expect(loginRedirect(page)).toBe("/login?error=not_allowed");
+    expect(await membershipRequests(harness)).toBe(asked + 1);
+    expect(await sessionCount(harness)).toBe(0);
+  });
+
+  it("is let through for the other organization when they are a member there, and notes it", async () => {
+    const { harness, cookies } = await signedInMember();
+    harness.github.addOrgMember("other-org", "octocat");
+    const other = harness.restart({ allowedOrg: "other-org" });
+
+    expect(passesThrough(await visitor(other)("/", cookies))).toBe(true);
+
+    const user = await harness.db
+      .selectFrom("users")
+      .selectAll()
+      .executeTakeFirstOrThrow();
+    expect(user.org_checked_for).toBe("other-org");
   });
 
   it("is turned away when GitHub does not answer in time", async () => {
@@ -238,6 +274,25 @@ describe("a member of the allowed organization", () => {
     const page = await visitor(withoutOrg)("/", cookies);
 
     expect(loginRedirect(page)).toBe("/login?error=not_allowed");
+  });
+});
+
+describe("a person who signed in before the organization was configured", () => {
+  it("is asked to sign in again because the token has no organization scope, and the new sign in works", async () => {
+    const before = await createAuthHarness({ allowedLogins: ["octocat"] });
+    const { cookies } = await before.signIn("octocat");
+    before.github.addOrgMember("my-org", "octocat");
+    const orgMode = before.restart({ allowedLogins: [], allowedOrg: "my-org" });
+
+    const page = await visitor(orgMode)("/", cookies);
+
+    expect(loginRedirect(page)).toBe("/login?error=sign_in_again");
+    expect(await sessionCount(orgMode)).toBe(0);
+    const again = await orgMode.signIn("octocat");
+    expect(again.response.headers.get("location")).toBe("/");
+    expect(passesThrough(await visitor(orgMode)("/", again.cookies))).toBe(
+      true,
+    );
   });
 });
 

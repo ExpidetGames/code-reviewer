@@ -2,8 +2,9 @@
 
 GitHub is the only way in. [Better Auth](https://www.better-auth.com) runs the OAuth flow and keeps
 sessions in the SQLite database (tables `users`, `sessions`, `accounts`, `verifications`, created by
-migration `20261010123800_create_auth_tables`, plus `users.org_checked_at` from
-`20261010125500_add_user_org_checked_at`, see `src/db/README.md`).
+migration `20261010123800_create_auth_tables`, plus `users.org_checked_at` and `users.org_checked_for`
+from `20261010125500_add_user_org_checked_at` and `20261010131500_add_user_org_checked_for`, see
+`src/db/README.md`).
 
 | File                             | Role                                                                                                                                                                                                                                                                                  |
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -12,6 +13,7 @@ migration `20261010123800_create_auth_tables`, plus `users.org_checked_at` from
 | `auth.ts`                        | `createAuth` builds the Better Auth instance (30 day sessions, snake_case column mapping, tokens encrypted at rest, secure cookies when `BETTER_AUTH_URL` is https). `getAuth()` is the lazy per-process instance.                                                                    |
 | `github-provider.ts`             | The GitHub OAuth app as a Better Auth provider (token exchange, `/user`, timeouts). Better Auth's built-in GitHub provider hard-codes the GitHub URLs, so the fake GitHub could not be used with it.                                                                                  |
 | `access.ts`                      | The pure rule: `PUBLIC_PATHS` and `decideAccess`. Default deny.                                                                                                                                                                                                                       |
+| `access-decision.ts`             | The refusal reasons and the decision shapes shared by the sign in and the request check.                                                                                                                                                                                              |
 | `access-config.ts`               | Reads `ALLOWED_GITHUB_LOGINS` and `ALLOWED_GITHUB_ORG` (part of `config.ts`) and matches a login against the list: case-insensitive, whole logins only.                                                                                                                               |
 | `access-policy.ts`               | The rule applied on every authenticated request (`createAccessPolicy`): listed login, or organization member checked at most every 24 hours, otherwise no. Returns a decision with a reason.                                                                                          |
 | `access-runtime.ts`              | Wires the policy for the running server: the stored (decrypted) GitHub token, the membership call, `orgCheckedAt`, ending sessions. `getAccessPolicy()` is the per-process instance.                                                                                                  |
@@ -29,9 +31,11 @@ Signing in with GitHub is not enough; the account must be allowed. Two settings,
 at least one needed (`app/.env.example`):
 
 - `ALLOWED_GITHUB_LOGINS`: comma separated logins. Not case sensitive, spaces and empty entries
-  are ignored, only whole logins match (`octocat` does not admit `octocat-evil`).
+  are ignored, only whole logins match (`octocat` does not admit `octocat-evil`). An entry that
+  cannot be a login (`@octocat`, a space inside) matches nobody, and startup logs one
+  `ACCESS_LIST_ENTRY_INVALID` warning.
 - `ALLOWED_GITHUB_ORG`: members of this GitHub organization (an active membership, an invitation
-  does not count). The sign in then also requests the `read:org` scope; without this setting it
+  does not count). The name follows GitHub's rule (letters and digits, single hyphens between). The sign in then also requests the `read:org` scope; without this setting it
   asks for `read:user` only.
 
 If both are set, either one is enough. If neither is set, nobody is allowed (fail closed): the
@@ -59,14 +63,28 @@ The copy never names who is allowed.
   Removing a login from `ALLOWED_GITHUB_LOGINS` and restarting the server therefore takes effect on
   the next request of every signed in person: pages redirect to `/login?error=not_allowed`, data
   routes answer 403 `{"error":"ACCESS_DENIED","reason":"not_allowed"}`.
+- Logins mode never ends a session: the rows stay, and the list is applied on every request, so
+  a removed login is refused immediately and a login put back works again with its old session
+  (intended; the sessions expire after 30 days anyway).
 - Otherwise, in organization mode, a membership confirmed less than 24 hours ago
-  (`users.org_checked_at`, written at sign in and by the re-check) counts. After that the next
+  (`users.org_checked_at` for `users.org_checked_for`, written at sign in and by the re-check) counts,
+  but only for the organization that is configured now: a check made for another organization is
+  ignored and asked again at once. After that the next
   request asks GitHub again with the person's stored (decrypted) token; requests of the same person
   that arrive together share one call. Member: the time is updated. Not a member: all their sessions
   are ended and they are turned away (`not_allowed`). Token rejected (401): sessions ended,
-  `sign_in_again`. GitHub cannot be asked (403, 5xx, timeout, odd answer): this request is turned
-  away (`check_failed`), the sessions stay and the next request tries again. Nothing is let through
-  on a doubt.
+  `sign_in_again`. A token without the `read:org` scope (a person who signed in before the
+  organization was configured) is the same case: GitHub names the scopes of a token in the
+  `X-OAuth-Scopes` header of its answer, and a 403 or 404 for a token without `read:org` is read as
+  `token_invalid`, not as an answer about the membership. (The scope stored on the account is not
+  used: Better Auth writes it once, when the account is created.) GitHub cannot be asked (403, 5xx,
+  timeout, odd answer): this request is turned away (`check_failed`), the sessions stay, and that
+  person is not asked about again for 20 seconds (so an outage or a rate limit is not hammered), then
+  the next request tries again. If the sessions or the check cannot be written, the answer is still
+  a refusal, never a 500. Nothing is let through on a doubt.
+- GitHub answering the membership check with a redirect (the organization was renamed or moved)
+  is never followed; it is treated like an outage and logged once as `ORG_CHECK_REDIRECTED`, which
+  tells you to correct `ALLOWED_GITHUB_ORG`.
 - With neither setting, nobody passes.
 
 Things to know: the allow list is by login, which is a name and not an identity. If a listed person

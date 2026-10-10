@@ -1,14 +1,22 @@
 // "Who may use this instance", decided on every authenticated request. Both places that grant access
 // go through it: the proxy (every request) and `requireUser` (every page or action that needs the
-// user), via `getSessionUser`.
+// user), via `lookupSession`.
 //
 // The rule (config in `access-config.ts`): a login on `ALLOWED_GITHUB_LOGINS` is allowed, checked on
 // every request, so removing a login takes effect at once. Otherwise, with `ALLOWED_GITHUB_ORG` set,
 // the person must be a member of that organization; that costs a call to GitHub, so a yes is
-// remembered on the user (`orgCheckedAt`) and asked again every 24 hours. With neither set nobody is
-// allowed. Anything that cannot be decided is a no.
+// remembered on the user (`orgCheckedAt` for `orgCheckedFor`) and asked again every 24 hours, or at
+// once when the configured organization is another one than the one that was checked. With neither
+// set nobody is allowed. Anything that cannot be decided is a no.
 import { isLoginListed, type AccessConfig } from "./access-config.ts";
+import { deny, type AccessDecision } from "./access-decision.ts";
 import type { OrgMembership } from "./github-org.ts";
+
+export type {
+  AccessDecision,
+  AccessDenialReason,
+  AccessDenied,
+} from "./access-decision.ts";
 
 /** The part of the signed in user that an access rule may look at. */
 export type SessionUser = {
@@ -18,23 +26,9 @@ export type SessionUser = {
   githubLogin: string;
   /** ISO 8601 time of the last successful organization check, or null when there was none. */
   orgCheckedAt: string | null;
+  /** The organization that check was made for, or null. */
+  orgCheckedFor: string | null;
 };
-
-/**
- * Why a request was turned away. The login page translates the code to copy.
- * - `not_allowed`: the account is not on the list and not in the organization.
- * - `check_failed`: the organization check could not be made (GitHub unreachable, missing scope).
- * - `sign_in_again`: the stored GitHub token no longer works; a new sign in replaces it.
- */
-export const ACCESS_DENIAL_REASONS = [
-  "not_allowed",
-  "check_failed",
-  "sign_in_again",
-] as const;
-export type AccessDenialReason = (typeof ACCESS_DENIAL_REASONS)[number];
-
-export type AccessDecision =
-  { allowed: true } | { allowed: false; reason: AccessDenialReason };
 
 /**
  * Decides whether a signed in user may use the app. It runs on every authenticated request. A
@@ -44,13 +38,15 @@ export type AccessPolicy = (user: SessionUser) => Promise<AccessDecision>;
 
 /** How long a successful organization check is trusted. */
 export const ORG_RECHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+/** How long a user is turned away without asking GitHub again after a check that could not be made. */
+export const ORG_UNAVAILABLE_BACKOFF_MS = 20 * 1000;
 
 /** What the organization rule needs from the outside world. */
 export type OrgAccessDependencies = {
   /** Asks GitHub with the user's stored token. */
   checkMembership: (user: SessionUser) => Promise<OrgMembership>;
-  /** Stores the time of a successful check on the user. */
-  recordCheck: (userId: string, at: Date) => Promise<void>;
+  /** Stores the time of a successful check, and the organization it was made for, on the user. */
+  recordCheck: (userId: string, at: Date, org: string) => Promise<void>;
   /** Ends every session of the user (they have lost access, or must sign in again). */
   revokeSessions: (userId: string) => Promise<void>;
 };
@@ -60,57 +56,88 @@ export type CreateAccessPolicyOptions = {
   /** Needed when `config.org` is set. Never called otherwise. */
   org?: OrgAccessDependencies;
   now?: () => Date;
+  /** Where a failed write is reported (no user data, no token). */
+  logError?: (message: string) => void;
 };
 
 const ALLOWED: AccessDecision = { allowed: true };
-const deny = (reason: AccessDenialReason): AccessDecision => ({
-  allowed: false,
-  reason,
-});
 
 export function createAccessPolicy({
   config,
   org,
   now = () => new Date(),
+  logError = console.error,
 }: CreateAccessPolicyOptions): AccessPolicy {
   // Requests of one user that arrive together share one call to GitHub.
   const inFlight = new Map<string, Promise<AccessDecision>>();
+  // Users whose last check could not be made, and until when they are turned away without a call:
+  // during an outage or a rate limit every page load would otherwise hit GitHub again.
+  const backoffUntil = new Map<string, number>();
+
+  async function revoke(userId: string): Promise<void> {
+    try {
+      await org?.revokeSessions(userId);
+    } catch {
+      // The person is turned away either way; the sessions are refused on every request anyway.
+      logError(
+        "[auth] ORG_ACCESS_REVOKE_FAILED: could not end the sessions of a user",
+      );
+    }
+  }
 
   async function decideByOrganization(
     user: SessionUser,
+    orgName: string,
     deps: OrgAccessDependencies,
   ): Promise<AccessDecision> {
     const current = now();
-    if (isFresh(user.orgCheckedAt, current)) return ALLOWED;
+    if (isFresh(user, orgName, current)) return ALLOWED;
+
+    const blockedUntil = backoffUntil.get(user.id);
+    if (blockedUntil !== undefined) {
+      if (current.getTime() < blockedUntil) return deny("check_failed");
+      backoffUntil.delete(user.id);
+    }
 
     let membership: OrgMembership;
     try {
       membership = await deps.checkMembership(user);
     } catch {
-      return deny("check_failed");
+      membership = "unavailable";
     }
     switch (membership) {
       case "member":
-        await deps.recordCheck(user.id, current);
+        try {
+          await deps.recordCheck(user.id, current, orgName);
+        } catch {
+          logError(
+            "[auth] ORG_ACCESS_RECORD_FAILED: could not store an organization check",
+          );
+          return deny("check_failed");
+        }
         return ALLOWED;
       case "not_member":
-        await deps.revokeSessions(user.id);
+        await revoke(user.id);
         return deny("not_allowed");
       case "token_invalid":
-        await deps.revokeSessions(user.id);
+        await revoke(user.id);
         return deny("sign_in_again");
       case "unavailable":
+        backoffUntil.set(
+          user.id,
+          current.getTime() + ORG_UNAVAILABLE_BACKOFF_MS,
+        );
         return deny("check_failed");
     }
   }
 
-  return async function accessPolicy(user) {
+  return async function accessPolicy(user): Promise<AccessDecision> {
     if (isLoginListed(config, user.githubLogin)) return ALLOWED;
     if (config.org === null || org === undefined) return deny("not_allowed");
 
     const running = inFlight.get(user.id);
     if (running) return running;
-    const decision = decideByOrganization(user, org).finally(() => {
+    const decision = decideByOrganization(user, config.org, org).finally(() => {
       inFlight.delete(user.id);
     });
     inFlight.set(user.id, decision);
@@ -118,9 +145,11 @@ export function createAccessPolicy({
   };
 }
 
-function isFresh(checkedAt: string | null, current: Date): boolean {
-  if (checkedAt === null) return false;
-  const checked = Date.parse(checkedAt);
+function isFresh(user: SessionUser, orgName: string, current: Date): boolean {
+  // A check made for another organization says nothing about this one.
+  if (user.orgCheckedFor?.toLowerCase() !== orgName.toLowerCase()) return false;
+  if (user.orgCheckedAt === null) return false;
+  const checked = Date.parse(user.orgCheckedAt);
   if (Number.isNaN(checked)) return false;
   const age = current.getTime() - checked;
   // A time in the future is not trusted (a clock that went back, or a tampered row).

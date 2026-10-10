@@ -11,12 +11,9 @@ import {
 } from "./access-policy.ts";
 import { getAuth, type Auth } from "./auth.ts";
 import type { AuthConfig } from "./config.ts";
-import { checkOrgMembership } from "./github-org.ts";
+import { membershipChecker } from "./github-org.ts";
 import { GITHUB_PROVIDER_ID } from "./github-provider.ts";
 import { loadAuthConfig } from "./config.ts";
-
-/** A page waits for this check, so it is shorter than the one while signing in. */
-const ORG_CHECK_TIMEOUT_MS = 5_000;
 
 export type AccessRuntimeOptions = {
   auth: Pick<Auth, "$context">;
@@ -33,9 +30,18 @@ export function createRuntimeAccessPolicy({
   config,
   fetchImpl,
   now,
-  orgCheckTimeoutMs = ORG_CHECK_TIMEOUT_MS,
+  orgCheckTimeoutMs,
 }: AccessRuntimeOptions): AccessPolicy {
   const org = config.access.org;
+  const checkWithToken =
+    org === null
+      ? undefined
+      : membershipChecker({
+          apiBaseUrl: config.github.apiBaseUrl,
+          org,
+          timeoutMs: orgCheckTimeoutMs,
+          fetchImpl,
+        });
   const orgDependencies: OrgAccessDependencies | undefined =
     org === null
       ? undefined
@@ -62,18 +68,15 @@ export function createRuntimeAccessPolicy({
             } catch {
               return "token_invalid";
             }
-            return checkOrgMembership({
-              apiBaseUrl: config.github.apiBaseUrl,
-              org,
-              accessToken,
-              timeoutMs: orgCheckTimeoutMs,
-              fetchImpl,
-            });
+            return checkWithToken === undefined
+              ? "unavailable"
+              : checkWithToken(accessToken);
           },
-          async recordCheck(userId, at) {
+          async recordCheck(userId, at, orgName) {
             const context = await auth.$context;
             await context.internalAdapter.updateUser(userId, {
               orgCheckedAt: at.toISOString(),
+              orgCheckedFor: orgName,
             });
           },
           async revokeSessions(userId) {
