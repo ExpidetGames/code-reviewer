@@ -41,7 +41,8 @@ The outcomes of step 6 to 8 are `trigger_enqueued`, `trigger_skipped` (a pull re
 turned down, with the reason in the log), `waiting_jobs_discarded` (a pull request was closed or turned into a draft),
 `installation_changed`, `ignored` (a genuine event that starts nothing, such as a `labeled` pull
 request, or a command from a user without write access),
-`trigger_not_allowed` (`canTrigger` said no), `project_not_active` (the repository has no active project: never
+`trigger_not_allowed` (`canTrigger` said no), `command_not_allowed` (the project does not allow that
+comment command; like `trigger_not_allowed` the delivery id can be claimed again), `project_not_active` (the repository has no active project: never
 activated, deactivated, or gone from the installation; nothing is handed to the intake and, like
 `trigger_not_allowed`, the delivery id can be claimed again, so redelivering it after the project was
 activated works), `integration_disabled` (the installation is suspended or
@@ -81,7 +82,7 @@ wants:
   (`202 duplicate`, nothing done) for 7 days. A `400` is never kept: an unusable payload releases the
   claim.
 - A delivery that was turned away for a reason that can change (`unknown_installation`,
-  `integration_disabled`, `trigger_not_allowed`, `project_not_active`, `trigger_skipped`, `waiting_jobs_discarded`, `ignored`, for example a pull request delivery that
+  `integration_disabled`, `trigger_not_allowed`, `command_not_allowed`, `project_not_active`, `trigger_skipped`, `waiting_jobs_discarded`, `ignored`, for example a pull request delivery that
   raced the `installation.created` sync, or a command from a user who gets write access later) is
   recorded with that outcome for diagnostics, but the id can be claimed again: redelivering it
   handles it anew.
@@ -154,7 +155,46 @@ automatic ones and the ones a person started with a comment or the start button 
 takes no commands); a running job finishes. A pull request that is turned into a draft
 (`pull_request_drafted`) cancels only its waiting _automatic_ jobs (error code `pull_request_draft`):
 a draft is not reviewed automatically, but a review someone asked for stays. Pull requests from forks and pull requests opened by bots are reviewed like any other. A
-comment command is not subject to this policy (CR-32 decides about commands).
+comment command is not subject to this policy; it has its own rules, below.
+
+## Comment commands
+
+A comment on a pull request is a command when it starts with `/review`, `/improve`, `/describe` or
+`/ask <question>` (`src/integrations/comment-command.ts`, see `src/integrations/README.md`). The
+rules, in the order they are applied:
+
+| Rule                                                                                                                                                                                                           | Where    | Result                |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | --------------------- |
+| Only `created` comments count; `edited` and `deleted` do not (an edited comment must not start a second job)                                                                                                   | provider | `ignored`             |
+| The comment is on a pull request (the payload has `issue.pull_request`), and the pull request is open (closed and merged ones take no commands)                                                                | provider | `ignored`             |
+| The author is not a bot (this includes the app's own comments, so a review that quotes `/review` cannot loop)                                                                                                  | provider | `ignored`             |
+| The author can have write access (`author_association` is `OWNER`, `MEMBER` or `COLLABORATOR`) and really has it (collaborator permission `admin` or `write`). Anyone else gets no reply; the reason is logged | provider | `ignored`             |
+| The text starts with a command (`/ask` needs a question; an unknown command is nothing)                                                                                                                        | provider | `ignored`             |
+| The repository has an active project                                                                                                                                                                           | handler  | `project_not_active`  |
+| The project allows the command (setting `allowedCommands`, "Comment commands people may use")                                                                                                                  | handler  | `command_not_allowed` |
+| `canTrigger` (the permission, asked again)                                                                                                                                                                     | handler  | `trigger_not_allowed` |
+| Otherwise a `comment` job with the command, the question (for `/ask`) and the author                                                                                                                           | intake   | `trigger_enqueued`    |
+
+The text of a comment is read only after the bot check and the `author_association` check, and only
+its first 8000 UTF-16 units are looked at; every pattern that reads it is bounded (a comment of 65 536
+characters made of `![` once kept the parser busy for seconds). Tests pin a time limit for hostile
+shapes on both sides.
+
+Replays: the same delivery id is a `duplicate` (the route). The same comment under another delivery id
+(the signature does not cover the delivery id) finds the job of the comment, whatever became of it:
+the queue records the comment id with the job that answers it and refuses a second job for it (`same_comment`, see `src/jobs/README.md`).
+A second comment with the same command is a new job unless an equal one is still waiting or running.
+
+The question is untrusted input. Markdown images and links to images are replaced by
+`[image link removed]` first: PR-Agent's `/ask` downloads the first one it finds from the runner (a
+HEAD request with redirects, and a failure is posted back with the address), which would let a user
+make the runner request an address of their choice. The runner removes them again from the question it
+receives (`runner/src/code_reviewer_runner/question_images.py`); both sides must give the results in
+`fakes/fixtures/ask-question-images.json`. The question is then cut to 2000 UTF-16 units, never inside
+a surrogate pair (the job ends with a note when that happened), travels as the job's `args`, is handed to the runner as exactly one argument of an `ask`
+job (the runner API refuses an `ask` job without one and sends no arguments for any other command),
+and is never put into settings or environment variables. It is never logged. No reply is posted for
+a refused command: the app only reacts through the review it posts when the job has run.
 
 ## The review trigger intake
 
@@ -179,7 +219,7 @@ and knows nothing about jobs. The intake of the running app is `createJobQueueRe
 - A trigger the queue can never accept (today only: a command whose arguments are over 10 000
   characters) is dropped with an error log line naming the field and code, not the value, and the
   intake resolves. Rejecting would make the route answer `500` and release the delivery, and every
-  redelivery would fail the same way. Truncating the arguments is the comment commands ticket (CR-32).
+  redelivery would fail the same way. The provider cuts a question to 2000 characters long before, so this is a safety net.
 - A trigger for a repository the app has no row for (the delivery outran the synchronization) makes
   the intake reject with `JOB_REPOSITORY_UNKNOWN`; the route answers `500` and releases the delivery,
   so "Redeliver" works after the sync.
@@ -188,7 +228,8 @@ and knows nothing about jobs. The intake of the running app is `createJobQueueRe
 
 ## Testing
 
-`integration-tests/webhooks/automatic-reviews.integration.test.ts` runs signed deliveries through the
+`integration-tests/webhooks/comment-commands.integration.test.ts` runs signed comment deliveries
+through the same wiring (the CR-32 behaviors above). `integration-tests/webhooks/automatic-reviews.integration.test.ts` runs signed deliveries through the
 handler into the real queue with a hand-set clock (the CR-31 behaviors above). `src/test-support/webhook-harness.ts` starts everything the route needs: a real SQLite file, the fake
 GitHub API, the real GitHub App provider, a `RecordingReviewTriggerIntake`
 (`recording-review-trigger-intake.ts`, which can fail or take its time), the project service and the

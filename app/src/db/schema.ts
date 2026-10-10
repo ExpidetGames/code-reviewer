@@ -187,6 +187,15 @@ export interface JobsTable {
   finished_at: string | null;
 }
 
+/** A comment that was answered with a job (src/jobs/README.md). One row per comment. */
+export interface JobCommentsTable {
+  repository_id: string;
+  /** The platform's id of the comment, as text. */
+  comment_id: string;
+  /** The job that answers the comment; possibly one that was already waiting or running. */
+  job_id: string;
+}
+
 export interface Database {
   app_meta: AppMetaTable;
   users: UsersTable;
@@ -199,5 +208,6 @@ export interface Database {
   projects: ProjectsTable;
   webhook_deliveries: WebhookDeliveriesTable;
   jobs: JobsTable;
+  job_comments: JobCommentsTable;
   app_settings: AppSettingsTable;
 }

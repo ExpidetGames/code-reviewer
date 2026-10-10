@@ -39,11 +39,22 @@ def test_the_locked_version_equals_the_pinned_version() -> None:
     assert locked_version() == pinned
 
 
+def version_advice(pinned: str, installed: str) -> str:
+    return (
+        f"pr-agent is pinned to {pinned} and installed as {installed}, but the identity patch was "
+        f"checked for {PATCHED_FOR_VERSION}. Check the identity patch against the new release "
+        "(tests/unit/test_identity_funnel.py explains how), then raise PATCHED_FOR_VERSION in "
+        "identity_patch.py to the pinned version."
+    )
+
+
+# CR-30-T05
 def test_the_identity_patch_and_the_installed_package_name_the_same_version() -> None:
     pinned = declared_requirement().removeprefix("pr-agent==")
+    installed = version("pr-agent")
 
-    assert pinned == PATCHED_FOR_VERSION
-    assert version("pr-agent") == pinned
+    assert pinned == PATCHED_FOR_VERSION, version_advice(pinned, installed)
+    assert installed == pinned, version_advice(pinned, installed)
 
 
 # CR-45: the protection against evaluated settings values (`@format`, `@jinja`) was written and
