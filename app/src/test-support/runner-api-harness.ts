@@ -6,6 +6,7 @@ import { createIntegrationsRepository } from "../db/repositories/integrations-re
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
 import { createDefaultIntegrationRegistry } from "../integrations/registry.ts";
 import type { JobQueueLimits } from "../jobs/job-limits.ts";
+import type { JobQueue } from "../jobs/job-queue.ts";
 import { loadLlmAccess } from "../llm/config.ts";
 import { createRunnerApi } from "../runner-api/api.ts";
 import {
@@ -13,12 +14,17 @@ import {
   type ClaimGuard,
 } from "../runner-api/claim-guard.ts";
 import type { ClaimResponse, RunnerResult } from "../runner-api/contract.ts";
-import { emptyJobEnvSource, type JobEnvSource } from "../runner-api/job-env.ts";
+import {
+  emptyJobOptionsSource,
+  type JobOptionsSource,
+} from "../runner-api/job-options.ts";
+import { knownSecretsFromEnv } from "../runner-api/redact.ts";
+import { configuredRunnerToken } from "../runner-api/token-auth.ts";
 import type { RunnerApiLogger } from "../runner-api/logger.ts";
 import { startGithubAppHarness } from "./github-app-harness.ts";
 import { createJobQueueFixture, sha } from "./jobs.ts";
 
-export const TEST_RUNNER_TOKEN = "test-runner-token-4f9c2a7e1b";
+export const TEST_RUNNER_TOKEN = "test-runner-token-4f9c2a7e1b-0d58a3c6e9f2";
 export const TEST_LLM_API_KEY = "test-llm-api-key-8d3b6e0a5c";
 export const TEST_LLM_MODEL = "vendor/test-model";
 
@@ -34,7 +40,9 @@ export type RequestOptions = {
 export async function startRunnerApiHarness(
   options: {
     guard?: ClaimGuard;
-    jobEnv?: JobEnvSource;
+    jobOptions?: JobOptionsSource;
+    /** Wraps the job queue the API uses, for example to make one call fail. */
+    wrapQueue?: (queue: JobQueue) => JobQueue;
     limits?: Partial<JobQueueLimits>;
     /** Replaces or (with undefined) removes variables of the app's environment. */
     env?: Record<string, string | undefined>;
@@ -102,21 +110,18 @@ export async function startRunnerApiHarness(
     error: (line) => errorLines.push(line),
   };
   const api = createRunnerApi({
-    queue: fixture.queue,
+    queue: options.wrapQueue?.(fixture.queue) ?? fixture.queue,
     repositories: createRepositoriesRepository(fixture.db, fixture.clock.now),
     integrations: createIntegrationsRepository(fixture.db, fixture.clock.now),
     registry,
     guard: options.guard ?? allowAllClaimGuard,
-    jobEnv: options.jobEnv ?? emptyJobEnvSource,
+    jobOptions: options.jobOptions ?? emptyJobOptionsSource,
     loadLlm: () => loadLlmAccess(env),
     now: fixture.clock.now,
     logger,
     heartbeatIntervalSeconds: 30,
-    runnerToken: () => env.RUNNER_TOKEN,
-    knownSecrets: () =>
-      [env.LLM_API_KEY, env.RUNNER_TOKEN].filter(
-        (value): value is string => value !== undefined,
-      ),
+    runnerToken: () => configuredRunnerToken(env),
+    knownSecrets: () => knownSecretsFromEnv(env),
   });
 
   function headers(

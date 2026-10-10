@@ -190,3 +190,12 @@ def test_the_error_codes_the_runner_reports_are_listed_once() -> None:
 
     assert len(codes) == len(set(codes))
     assert {"timeout", "llm_auth", "git_rate_limit", "runner_shutdown", "unknown"} <= set(codes)
+
+
+def test_a_complete_response_may_say_the_job_was_given_back_after_a_shutdown() -> None:
+    response = _example("CompleteResponse")
+    response["job"]["status"] = "queued"
+    assert _accepts("CompleteResponse", response)
+
+    response["job"]["status"] = "cancelled"
+    assert not _accepts("CompleteResponse", response)

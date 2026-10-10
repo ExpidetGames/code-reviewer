@@ -15,6 +15,15 @@ export const RUNNER_MAX_BODY_BYTES = 64 * 1024;
 /** How often a runner should send a heartbeat (the lease is four times as long). */
 export const HEARTBEAT_INTERVAL_SECONDS = 30;
 
+/**
+ * The environment variables a job may carry: the options of the four PR-Agent tools. The same
+ * pattern as `propertyNames` of `JobEnv` in the contract (a test compares them), and as the runner's
+ * `_ENV_KEY`. The review settings (CR-25) define the same constant under this name next to
+ * `toRunnerSettings`; when both branches are merged, one of the two imports the other.
+ */
+export const RUNNER_ENV_KEY_PATTERN =
+  /^(PR_REVIEWER|PR_DESCRIPTION|PR_CODE_SUGGESTIONS|PR_QUESTIONS)__[A-Z0-9_]+$/;
+
 /** Error codes the runner reports in a result (`KnownRunnerErrorCode` in the contract). */
 export const RUNNER_ERROR_CODES = [
   "invalid_job",
@@ -137,6 +146,10 @@ export type CompleteRequest = { leaseToken: string; result: RunnerResult };
 
 export type CompleteResponse = {
   version: typeof RUNNER_API_VERSION;
-  job: { id: string; status: "succeeded" | "failed" };
+  /**
+   * `queued`: the runner reported `runner_shutdown`, the job was given back and waits again (it fails
+   * instead when that was the last allowed attempt).
+   */
+  job: { id: string; status: "succeeded" | "failed" | "queued" };
   alreadyCompleted: boolean;
 };

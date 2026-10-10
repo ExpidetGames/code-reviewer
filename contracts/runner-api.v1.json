@@ -246,7 +246,7 @@
       }
     },
     "CompleteResponse": {
-      "description": "200 for a completion and for the repetition of the same completion (alreadyCompleted: true); a different result for a completed job is 409.",
+      "description": "200 for a completion and for the repetition of the same completion (alreadyCompleted: true); a different result for a completed job is 409. A result with errorCode runner_shutdown is not stored: the job is given back (status queued) and a repetition is 409, because the runner no longer holds the job.",
       "type": "object",
       "required": ["version", "job", "alreadyCompleted"],
       "properties": {
@@ -256,7 +256,11 @@
           "required": ["id", "status"],
           "properties": {
             "id": { "$ref": "#/$defs/JobId" },
-            "status": { "type": "string", "enum": ["succeeded", "failed"] }
+            "status": {
+              "description": "succeeded or failed: the job is finished. queued: the runner reported runner_shutdown, the job was given back and waits for another runner (it fails instead if that was the last allowed attempt).",
+              "type": "string",
+              "enum": ["succeeded", "failed", "queued"]
+            }
           }
         },
         "alreadyCompleted": { "type": "boolean" }

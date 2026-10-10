@@ -209,6 +209,69 @@ describe("completing a job", () => {
     });
   });
 
+  it("gives the job back when the runner reports its shutdown, so the job waits for another runner", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await claimedJob(h, "runner-a");
+
+    const response = await h.complete(job.id, job.leaseToken, {
+      ok: false,
+      errorCode: "runner_shutdown",
+      logTail: "stopped by SIGTERM",
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toStrictEqual({
+      version: 1,
+      job: { id: job.id, status: "queued" },
+      alreadyCompleted: false,
+    });
+    expect(await h.queue.get(job.id)).toMatchObject({
+      status: "queued",
+      attempts: 1,
+      runnerId: null,
+      leaseExpiresAt: null,
+      result: null,
+      errorCode: null,
+    });
+    const again = await h.claimed({ runnerId: "runner-b" });
+    expect(again.job.id).toBe(job.id);
+  });
+
+  it("fails the job with runner_shutdown when the shutdown used up the last allowed attempt", async () => {
+    const h = await startRunnerApiHarness({ limits: { maxAttempts: 1 } });
+    const job = await claimedJob(h);
+
+    const response = await h.complete(job.id, job.leaseToken, {
+      ok: false,
+      errorCode: "runner_shutdown",
+    });
+
+    expect((await response.json()).job.status).toBe("failed");
+    expect(await h.queue.get(job.id)).toMatchObject({
+      status: "failed",
+      errorCode: "runner_shutdown",
+    });
+  });
+
+  it("refuses a shutdown report from a runner that no longer holds the job", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await claimedJob(h);
+    await h.complete(job.id, job.leaseToken, {
+      ok: false,
+      errorCode: "runner_shutdown",
+    });
+    const before = await h.snapshotJobs();
+
+    const repeated = await h.complete(job.id, job.leaseToken, {
+      ok: false,
+      errorCode: "runner_shutdown",
+    });
+
+    expect(repeated.status).toBe(409);
+    expect((await errorOf(repeated)).code).toBe("RUNNER_LEASE_LOST");
+    expect(await h.snapshotJobs()).toStrictEqual(before);
+  });
+
   // CR-28-T16
   it("is refused with 409 for another runner that does not hold the job, and changes nothing", async () => {
     const h = await startRunnerApiHarness();

@@ -1,7 +1,7 @@
 // Pins down how the LLM access for a job is read from the environment: what counts as configured,
 // that a missing key is reported with a stable code, and that the key stays out of logs.
 import { describe, expect, it } from "vitest";
-import { loadLlmAccess, revealLlmAccess } from "./config.ts";
+import { DEFAULT_LLM_MODEL, loadLlmAccess, revealLlmAccess } from "./config.ts";
 
 const ENV = {
   LLM_PROVIDER: "openrouter",
@@ -32,19 +32,38 @@ describe("reading the LLM access from the environment", () => {
     ["no key", { LLM_API_KEY: undefined }],
     ["an empty key", { LLM_API_KEY: "" }],
     ["a blank key", { LLM_API_KEY: "   " }],
-    ["no model", { LLM_MODEL: undefined }],
-    ["a blank model", { LLM_MODEL: " " }],
   ])("is not configured with %s", (_name, override) => {
     expect(loadLlmAccess({ ...ENV, ...override })).toStrictEqual({
       ok: false,
-      code: "llm_not_configured",
+      errorCode: "llm_not_configured",
+    });
+  });
+
+  it("uses the default model when none is set or the setting is blank", () => {
+    for (const LLM_MODEL of [undefined, "", "  "]) {
+      const result = loadLlmAccess({ ...ENV, LLM_MODEL });
+      expect(result.ok && result.access.model).toBe(DEFAULT_LLM_MODEL);
+    }
+    expect(DEFAULT_LLM_MODEL).toBe("anthropic/claude-haiku-5.5");
+  });
+
+  it("trims the key and the model", () => {
+    const result = loadLlmAccess({
+      ...ENV,
+      LLM_API_KEY: " dummy-llm-key-value\n",
+      LLM_MODEL: " vendor/model-name ",
+    });
+
+    expect(result.ok && revealLlmAccess(result.access)).toMatchObject({
+      apiKey: "dummy-llm-key-value",
+      model: "vendor/model-name",
     });
   });
 
   it("is not configured for a provider the runner does not support", () => {
     expect(loadLlmAccess({ ...ENV, LLM_PROVIDER: "other" })).toStrictEqual({
       ok: false,
-      code: "llm_not_configured",
+      errorCode: "llm_not_configured",
     });
   });
 

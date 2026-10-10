@@ -18,12 +18,31 @@ const SECRET_SHAPES: readonly RegExp[] = [
   /\bBearer\s+[A-Za-z0-9._~+/=-]{16,}/g,
 ];
 
-/** `secrets` are the exact values the app knows (the LLM key, the runner token). */
+/**
+ * The secrets the app itself holds, as they are used: surrounding white space is not part of a
+ * setting (the LLM key is trimmed before it is handed to a runner, the runner token before it is
+ * compared), so it is trimmed here as well. Empty settings are left out.
+ */
+export function knownSecretsFromEnv(
+  env: Readonly<Record<string, string | undefined>>,
+): string[] {
+  return [env.LLM_API_KEY, env.RUNNER_TOKEN]
+    .map((value) => value?.trim())
+    .filter((value): value is string => value !== undefined && value !== "");
+}
+
+/**
+ * `secrets` are the exact values the app knows (see `knownSecretsFromEnv`). Each is removed as it is
+ * and in its URL-encoded form, which is how it appears in a request line or an error text.
+ */
 export function redactText(text: string, secrets: readonly string[]): string {
   let cleaned = text;
-  for (const secret of secrets) {
+  for (const raw of secrets) {
+    const secret = raw.trim();
     if (secret.length < MIN_SECRET_LENGTH) continue;
     cleaned = cleaned.split(secret).join(REDACTED);
+    const encoded = encodeURIComponent(secret);
+    if (encoded !== secret) cleaned = cleaned.split(encoded).join(REDACTED);
   }
   for (const shape of SECRET_SHAPES) cleaned = cleaned.replace(shape, REDACTED);
   return cleaned;
@@ -45,5 +64,9 @@ export function redactResult(
       result.commentUrl === null
         ? null
         : redactText(result.commentUrl, secrets),
+    usage:
+      result.usage === null || result.usage.model === null
+        ? result.usage
+        : { ...result.usage, model: redactText(result.usage.model, secrets) },
   };
 }

@@ -129,8 +129,9 @@ checked in code review.
   "token creation failed". Until CR-31 and CR-24 are in, the intake enqueues for every repository and
   closed pull requests keep their waiting jobs. The runner API must not be enabled (or shipped) before
   they are, or old jobs would run with paid model calls; its claim guard is the hook that skips jobs of
-  repositories without an active project once the projects are there. The runner (CR-29) uses `release`
-  for the runner shutdown.
+  repositories without an active project once the projects are there. The runner (CR-29) reports its
+  shutdown through `complete` with the error code `runner_shutdown`; the runner API turns that into
+  `release`, so the job is requeued with the attempt cap (the runner never calls `release` itself).
 - **CR-32 (comments).** The provider does not cut `args`; the queue refuses more than 10 000 characters
   (the intake drops such a trigger with a log line instead of failing the delivery). Truncate to 2000
   with a note before the intake. Comment jobs are exempt from the head commit rule, so a captured signed

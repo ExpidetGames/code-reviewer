@@ -11,15 +11,11 @@ import { loadLlmAccess } from "../llm/config.ts";
 import { createRunnerApi, type RunnerApi } from "./api.ts";
 import { allowAllClaimGuard } from "./claim-guard.ts";
 import { HEARTBEAT_INTERVAL_SECONDS } from "./contract.ts";
-import { emptyJobEnvSource } from "./job-env.ts";
-import { consoleRunnerApiLogger } from "./logger.ts";
-
-/** The exact secrets the app holds, which a stored result must never contain. */
-function knownSecrets(): string[] {
-  return [process.env.LLM_API_KEY, process.env.RUNNER_TOKEN].filter(
-    (value): value is string => value !== undefined,
-  );
-}
+import { emptyJobOptionsSource } from "./job-options.ts";
+import { consoleRunnerApiLogger, describeError } from "./logger.ts";
+import { knownSecretsFromEnv } from "./redact.ts";
+import { errorResponse } from "./responses.ts";
+import { configuredRunnerToken } from "./token-auth.ts";
 
 /** The runner API of the running server. */
 export function getRunnerApi(): RunnerApi {
@@ -31,13 +27,31 @@ export function getRunnerApi(): RunnerApi {
     registry: integrationRegistry,
     // Until the projects exist on this branch, every job may run; see claim-guard.ts.
     guard: allowAllClaimGuard,
-    // Until the project settings exist on this branch, a job has no extra options; see job-env.ts.
-    jobEnv: emptyJobEnvSource,
+    // Until the project settings exist on this branch, a job has no extra options; see job-options.ts.
+    jobOptions: emptyJobOptionsSource,
     loadLlm: () => loadLlmAccess(process.env),
     now: () => new Date(),
     logger: consoleRunnerApiLogger,
     heartbeatIntervalSeconds: HEARTBEAT_INTERVAL_SECONDS,
-    runnerToken: () => process.env.RUNNER_TOKEN,
-    knownSecrets,
+    runnerToken: () => configuredRunnerToken(process.env),
+    knownSecrets: () => knownSecretsFromEnv(process.env),
   });
+}
+
+/**
+ * What the route files call: builds the API and runs one call. If building it fails (the database
+ * was not opened, say), the caller gets the same kind of answer as for any other unplanned failure,
+ * with `no-store` and an error body, and the log gets the cause.
+ */
+export async function withRunnerApi(
+  call: (api: RunnerApi) => Promise<Response>,
+): Promise<Response> {
+  try {
+    return await call(getRunnerApi());
+  } catch (error) {
+    consoleRunnerApiLogger.error(
+      `[runner-api] the API could not be set up: ${describeError(error)}`,
+    );
+    return errorResponse(500, "RUNNER_INTERNAL_ERROR");
+  }
 }

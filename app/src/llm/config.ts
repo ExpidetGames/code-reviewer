@@ -7,6 +7,13 @@ import "server-only";
 export const LLM_PROVIDERS = ["openrouter"] as const;
 export type LlmProvider = (typeof LLM_PROVIDERS)[number];
 
+/**
+ * The model used when `LLM_MODEL` is not set: the default after the model comparison (CR-44, lead
+ * decision). A project may choose another one (CR-25); this module is replaced by the LLM
+ * configuration of CR-26.
+ */
+export const DEFAULT_LLM_MODEL = "anthropic/claude-haiku-5.5";
+
 /** The stable code of a job that cannot start because the app has no usable LLM access. */
 export const LLM_NOT_CONFIGURED = "llm_not_configured" as const;
 
@@ -22,7 +29,7 @@ export type LlmAccess = {
 
 export type LlmAccessResult =
   | { ok: true; access: LlmAccess }
-  | { ok: false; code: typeof LLM_NOT_CONFIGURED };
+  | { ok: false; errorCode: typeof LLM_NOT_CONFIGURED };
 
 function isLlmProvider(value: string): value is LlmProvider {
   return LLM_PROVIDERS.some((provider) => provider === value);
@@ -33,18 +40,18 @@ function present(value: string | undefined): string | undefined {
 }
 
 /**
- * Reads `LLM_PROVIDER` (default `openrouter`), `LLM_MODEL` and `LLM_API_KEY`. Anything missing or
- * not supported is "not configured": the answer never says which setting is wrong, because it ends
+ * Reads `LLM_PROVIDER` (default `openrouter`), `LLM_MODEL` (default `DEFAULT_LLM_MODEL`) and
+ * `LLM_API_KEY`. A missing key or a provider the runner does not support is "not configured": the answer never says which setting is wrong, because it ends
  * up in a job's error code, not in a log of settings.
  */
 export function loadLlmAccess(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): LlmAccessResult {
   const provider = present(env.LLM_PROVIDER) ?? "openrouter";
-  const model = present(env.LLM_MODEL);
+  const model = present(env.LLM_MODEL) ?? DEFAULT_LLM_MODEL;
   const apiKey = present(env.LLM_API_KEY);
-  if (!isLlmProvider(provider) || model === undefined || apiKey === undefined)
-    return { ok: false, code: LLM_NOT_CONFIGURED };
+  if (!isLlmProvider(provider) || apiKey === undefined)
+    return { ok: false, errorCode: LLM_NOT_CONFIGURED };
 
   const access = { provider, model } as LlmAccess;
   Object.defineProperty(access, "apiKey", {

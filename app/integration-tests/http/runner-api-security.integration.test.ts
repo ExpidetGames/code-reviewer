@@ -137,12 +137,14 @@ describe("a runner token that is not configured", () => {
     ["not set", undefined],
     ["empty", ""],
     ["blank", "   "],
+    ["shorter than 32 characters", "short-but-matching-token"],
   ])("never lets anybody in when RUNNER_TOKEN is %s", async (_name, value) => {
     const h = await startRunnerApiHarness();
     const job = await withJobs(h);
     h.env.RUNNER_TOKEN = value;
     const before = await h.snapshotJobs();
     const attempts: RequestOptions[] = [
+      ...(value === undefined ? [] : [{ token: value.trim() }]),
       { authorization: "Bearer" },
       { authorization: "Bearer " },
       { authorization: "Bearer anything" },
@@ -156,6 +158,16 @@ describe("a runner token that is not configured", () => {
         expect((await endpoint.call(h, job, request)).status).toBe(401);
 
     expect(await h.snapshotJobs()).toStrictEqual(before);
+  });
+});
+
+describe("a runner token with white space around it", () => {
+  it("is used without the white space, as it is when the setting ends in a newline", async () => {
+    const h = await startRunnerApiHarness({
+      env: { RUNNER_TOKEN: `${TEST_RUNNER_TOKEN}\n` },
+    });
+
+    expect((await h.claim()).status).toBe(204);
   });
 });
 
@@ -261,6 +273,24 @@ describe("where the git token and the LLM key appear", () => {
       if (answers[index] === second) return;
       for (const secret of secrets) expect(text).not.toContain(secret);
     });
+  });
+
+  it("removes the LLM key from a result even when it has white space in the setting or comes back URL-encoded", async () => {
+    const key = "key/with+special=chars-1234";
+    const h = await startRunnerApiHarness({ env: { LLM_API_KEY: `${key}\n` } });
+    await h.enqueueNew();
+    const claim = await h.claimed();
+    expect(claim.job.input.llm.apiKey).toBe(key);
+
+    await h.complete(claim.job.id, claim.job.leaseToken, {
+      ok: false,
+      errorCode: "llm_auth",
+      logTail: `GET /v1?key=${encodeURIComponent(key)} refused; key ${key}`,
+    });
+
+    const dump = await dumpDatabase(h);
+    expect(dump).not.toContain(key);
+    expect(dump).not.toContain(encodeURIComponent(key));
   });
 
   it("keeps the git token and the LLM key out of what is stored when a job is released after a failure", async () => {

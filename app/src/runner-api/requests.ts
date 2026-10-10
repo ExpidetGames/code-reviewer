@@ -125,31 +125,46 @@ export function parseHeartbeatRequest(body: unknown): Parsed<HeartbeatRequest> {
   return { ok: true, value: { leaseToken } };
 }
 
-function parseUsage(value: unknown): RunnerUsage | null | undefined {
+function parseUsage(
+  check: Checker,
+  value: unknown,
+): RunnerUsage | null | undefined {
   if (value === undefined || value === null) return null;
-  if (!isRecord(value)) return undefined;
-  const check = new Checker();
+  if (!isRecord(value)) return check.fail("result.usage", "invalid");
+  const before = check.fields.length;
+  const prefix = "result.usage.";
   const model =
     value.model === null
       ? null
-      : check.string(value, "model", "model", { max: MAX_MODEL_CHARS });
-  const promptTokens = check.integer(value, "promptTokens", "promptTokens");
+      : check.string(value, "model", `${prefix}model`, {
+          max: MAX_MODEL_CHARS,
+        });
+  const promptTokens = check.integer(
+    value,
+    "promptTokens",
+    `${prefix}promptTokens`,
+  );
   const completionTokens = check.integer(
     value,
     "completionTokens",
-    "completionTokens",
+    `${prefix}completionTokens`,
   );
-  const totalTokens = check.integer(value, "totalTokens", "totalTokens");
-  const aiCalls = check.integer(value, "aiCalls", "aiCalls");
+  const totalTokens = check.integer(
+    value,
+    "totalTokens",
+    `${prefix}totalTokens`,
+  );
+  const aiCalls = check.integer(value, "aiCalls", `${prefix}aiCalls`);
   const fallbackUsed = value.fallbackUsed;
-  if (typeof fallbackUsed !== "boolean") check.fail("fallbackUsed", "invalid");
+  if (typeof fallbackUsed !== "boolean")
+    check.fail(`${prefix}fallbackUsed`, "invalid");
   const costUsd = value.costUsd;
   const costOk =
     costUsd === null ||
     (typeof costUsd === "number" && costUsd >= 0 && Number.isFinite(costUsd));
-  if (!costOk) check.fail("costUsd", "invalid");
+  if (!costOk) check.fail(`${prefix}costUsd`, "invalid");
   if (
-    check.fields.length > 0 ||
+    check.fields.length > before ||
     model === undefined ||
     promptTokens === undefined ||
     completionTokens === undefined ||
@@ -218,8 +233,7 @@ function parseResult(check: Checker, value: unknown): RunnerResult | undefined {
   const logTruncated = value.logTruncated;
   if (logTruncated !== undefined && typeof logTruncated !== "boolean")
     check.fail("result.logTruncated", "invalid");
-  const usage = parseUsage(value.usage);
-  if (usage === undefined) check.fail("result.usage", "invalid");
+  const usage = parseUsage(check, value.usage);
 
   if (
     check.fields.length > before ||

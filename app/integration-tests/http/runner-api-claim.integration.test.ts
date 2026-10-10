@@ -128,8 +128,10 @@ describe("claiming a job", () => {
 
   it("hands the options of the source for job options to the runner", async () => {
     const h = await startRunnerApiHarness({
-      jobEnv: {
-        envFor: async () => ({ PR_REVIEWER__EXTRA_INSTRUCTIONS: "Be kind." }),
+      jobOptions: {
+        optionsFor: async () => ({
+          env: { PR_REVIEWER__EXTRA_INSTRUCTIONS: "Be kind." },
+        }),
       },
     });
     await h.enqueueNew();
@@ -139,6 +141,69 @@ describe("claiming a job", () => {
     expect(body.job.input.env).toStrictEqual({
       PR_REVIEWER__EXTRA_INSTRUCTIONS: "Be kind.",
     });
+  });
+
+  it("asks the source for the options of each job, so the model and the context size can differ per repository", async () => {
+    const h = await startRunnerApiHarness({
+      jobOptions: {
+        optionsFor: async (job) =>
+          job.prNumber === 7
+            ? {
+                env: {},
+                llm: {
+                  model: "vendor/model-one",
+                  maxTokens: 64000,
+                  fallbackModels: ["vendor/fallback"],
+                },
+              }
+            : { env: {}, llm: { model: "vendor/model-two", maxTokens: null } },
+      },
+    });
+    await h.enqueueNew({ prNumber: 7 });
+    h.clock.advance(1000);
+    await h.enqueueNew({ prNumber: 8, headSha: "b".repeat(40) });
+
+    const first = await h.claimed();
+    const second = await h.claimed();
+
+    expect(first.job.input.llm).toStrictEqual({
+      provider: "openrouter",
+      model: "vendor/model-one",
+      apiKey: TEST_LLM_API_KEY,
+      maxTokens: 64000,
+    });
+    // A null is left out: the runner refuses a maxTokens that is not a whole number.
+    expect(second.job.input.llm).toStrictEqual({
+      provider: "openrouter",
+      model: "vendor/model-two",
+      apiKey: TEST_LLM_API_KEY,
+    });
+  });
+
+  it("keeps the model of the LLM access when the options name none", async () => {
+    const h = await startRunnerApiHarness({
+      jobOptions: {
+        optionsFor: async () => ({ env: {}, llm: { model: null } }),
+      },
+    });
+    await h.enqueueNew();
+
+    const body = await h.claimed();
+
+    expect(body.job.input.llm).toStrictEqual({
+      provider: "openrouter",
+      model: TEST_LLM_MODEL,
+      apiKey: TEST_LLM_API_KEY,
+    });
+  });
+
+  it("uses the default model when LLM_MODEL is not set", async () => {
+    const h = await startRunnerApiHarness({ env: { LLM_MODEL: undefined } });
+    await h.enqueueNew();
+
+    const body = await h.claimed();
+
+    expect(body.job.input.llm.model).toBe("anthropic/claude-haiku-5.5");
   });
 
   it("hands each job to one runner only", async () => {
@@ -403,9 +468,67 @@ describe("a job that cannot be handed out", () => {
     });
   });
 
+  it.each([
+    ["a context size that is not a whole number", { maxTokens: 1.5 }],
+    ["a context size below the minimum", { maxTokens: 10 }],
+    ["a model name the runner refuses", { model: "bad model name" }],
+  ])(
+    "fails a job whose options hold %s, without creating job credentials",
+    async (_name, llm) => {
+      const h = await startRunnerApiHarness({
+        jobOptions: { optionsFor: async () => ({ env: {}, llm }) },
+      });
+      const job = await h.enqueueNew();
+
+      await h.claim();
+
+      expect(await h.queue.get(job.id)).toMatchObject({
+        status: "failed",
+        errorCode: "job_llm_options_invalid",
+      });
+      expect(h.issuedJobTokens()).toStrictEqual([]);
+    },
+  );
+
+  it("gives the job back and answers 500 when it cannot be ended after the guard refused it", async () => {
+    const h = await startRunnerApiHarness({
+      guard: {
+        check: async () => ({ allow: false, errorCode: "project_deactivated" }),
+      },
+      wrapQueue: (queue) => ({
+        ...queue,
+        complete: async () => {
+          throw new Error("database is locked");
+        },
+      }),
+    });
+    const job = await h.enqueueNew();
+
+    const response = await h.claim();
+
+    expect(response.status).toBe(500);
+    expect(await h.queue.get(job.id)).toMatchObject({
+      status: "queued",
+      attempts: 1,
+      runnerId: null,
+    });
+    expect(h.logLines().join("\n")).not.toContain("database is locked");
+  });
+
+  it("trims a key with white space around it before it is handed out", async () => {
+    const h = await startRunnerApiHarness({
+      env: { LLM_API_KEY: ` ${TEST_LLM_API_KEY}\n` },
+    });
+    await h.enqueueNew();
+
+    const body = await h.claimed();
+
+    expect(body.job.input.llm.apiKey).toBe(TEST_LLM_API_KEY);
+  });
+
   it("fails a job whose options are not options of the four tools", async () => {
     const h = await startRunnerApiHarness({
-      jobEnv: { envFor: async () => ({ OPENAI__KEY: "x" }) },
+      jobOptions: { optionsFor: async () => ({ env: { OPENAI__KEY: "x" } }) },
     });
     const job = await h.enqueueNew();
 

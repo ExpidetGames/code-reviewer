@@ -1,8 +1,9 @@
 // The runner API as three functions of their collaborators (`createRunnerApi`). The route files
-// only call `getRunnerApi()` (shared.ts); tests build the API with fakes and a real database.
+// only call `withRunnerApi` (shared.ts); tests build the API with fakes and a real database.
 //
-// The order is the contract; each step ends the request on failure, and nothing before the token
-// check touches the database or GitHub:
+// The order is the contract; each step ends the request on failure, and nothing in a handler before
+// the token check touches the database or GitHub (building the collaborators in shared.ts only
+// opens nothing; if that fails, the route answers 500 in the same form):
 //
 //   1. token     `Authorization: Bearer <RUNNER_TOKEN>`, constant time compare       401
 //   2. runner id `X-Runner-Id`, optional, for bookkeeping only                       400

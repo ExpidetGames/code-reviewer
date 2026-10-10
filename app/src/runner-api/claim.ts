@@ -22,17 +22,23 @@ import type { RepositoriesRepository } from "../db/repositories/repositories-rep
 import { IntegrationError } from "../integrations/errors.ts";
 import { revealGitAccess } from "../integrations/normalized.ts";
 import type { IntegrationRegistry } from "../integrations/registry.ts";
-import type { GitAccess, RepoRef } from "../integrations/types.ts";
+import type {
+  GitAccess,
+  GitPlatform,
+  IntegrationType,
+  RepoRef,
+} from "../integrations/types.ts";
 import type { JobQueue } from "../jobs/job-queue.ts";
 import type { ClaimResult, Job } from "../jobs/job-types.ts";
 import { revealLlmAccess, type LlmAccessResult } from "../llm/config.ts";
 import type { ClaimGuard } from "./claim-guard.ts";
 import {
   RUNNER_API_VERSION,
+  RUNNER_ENV_KEY_PATTERN,
   type ClaimResponse,
   type RunnerJobInput,
 } from "./contract.ts";
-import type { JobEnvSource } from "./job-env.ts";
+import type { JobOptions, JobOptionsSource } from "./job-options.ts";
 import { describeError, type RunnerApiLogger } from "./logger.ts";
 import { errorResponse, jsonResponse, noContent } from "./responses.ts";
 
@@ -52,6 +58,7 @@ export const CLAIM_FAILURE_CODES = [
   "pull_request_closed",
   "job_args_invalid",
   "job_env_invalid",
+  "job_llm_options_invalid",
 ] as const;
 
 /** Why a job is given back (the code becomes the job's error code if it was the last attempt). */
@@ -68,8 +75,10 @@ const MAX_RETRY_AFTER_SECONDS = 900;
 const MAX_REFUSED_PER_REQUEST = 25;
 /** The question of an `ask` job: the runner refuses more (and none). */
 const MAX_QUESTION_CHARS = 4000;
-const ENV_KEY =
-  /^(PR_REVIEWER|PR_DESCRIPTION|PR_CODE_SUGGESTIONS|PR_QUESTIONS)__[A-Z0-9_]+$/;
+/** What the runner accepts as `llm.model` and `llm.maxTokens` (runner job.py). */
+const MODEL = /^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,199}$/;
+const MIN_CONTEXT_TOKENS = 1000;
+const MAX_CONTEXT_TOKENS = 10_000_000;
 
 export type ClaimDeps = {
   queue: Pick<JobQueue, "claimNext" | "complete" | "release">;
@@ -77,7 +86,7 @@ export type ClaimDeps = {
   integrations: Pick<IntegrationsRepository, "get">;
   registry: IntegrationRegistry;
   guard: ClaimGuard;
-  jobEnv: JobEnvSource;
+  jobOptions: JobOptionsSource;
   loadLlm: () => LlmAccessResult;
   now: () => Date;
   logger: RunnerApiLogger;
@@ -117,6 +126,36 @@ function accessFailureCode(error: IntegrationError): string {
   }
 }
 
+/** The platform each integration type talks to; the runner knows GitHub only. */
+const PLATFORM_OF: Record<IntegrationType, GitPlatform> = {
+  github_app: "github",
+};
+
+/**
+ * The model and context size a project chose, as the job takes them: a null is left out (the runner
+ * refuses a `maxTokens` that is not a whole number). Null when a value is one the runner would refuse.
+ */
+function llmOptionsOf(
+  options: JobOptions,
+): { model?: string; maxTokens?: number } | null {
+  const { model, maxTokens } = options.llm ?? {};
+  const chosen: { model?: string; maxTokens?: number } = {};
+  if (model !== undefined && model !== null) {
+    if (!MODEL.test(model)) return null;
+    chosen.model = model;
+  }
+  if (maxTokens !== undefined && maxTokens !== null) {
+    if (
+      !Number.isInteger(maxTokens) ||
+      maxTokens < MIN_CONTEXT_TOKENS ||
+      maxTokens > MAX_CONTEXT_TOKENS
+    )
+      return null;
+    chosen.maxTokens = maxTokens;
+  }
+  return chosen;
+}
+
 /** The question of an `ask` job; other commands take no arguments. Null when it cannot be sent. */
 function argsOf(job: Job): { args?: [string] } | null {
   if (job.command !== "ask") return {};
@@ -135,13 +174,17 @@ async function prepare(
   if (!decision.allow) return refuse(decision.errorCode);
 
   const llm = deps.loadLlm();
-  if (!llm.ok) return refuse(llm.code);
+  if (!llm.ok) return refuse(llm.errorCode);
 
   const args = argsOf(job);
   if (args === null) return refuse("job_args_invalid");
-  const env = await deps.jobEnv.envFor(job);
-  if (Object.keys(env).some((key) => !ENV_KEY.test(key)))
+  const options = await deps.jobOptions.optionsFor(job);
+  if (Object.keys(options.env).some((key) => !RUNNER_ENV_KEY_PATTERN.test(key)))
     return refuse("job_env_invalid");
+  const llmOptions = llmOptionsOf(options);
+  if (llmOptions === null) return refuse("job_llm_options_invalid");
+  if (job.leaseExpiresAt === null)
+    throw new Error(`Claimed job ${job.id} has no lease expiry.`);
 
   const repository = await deps.repositories.get(job.repositoryId);
   const integration =
@@ -154,6 +197,9 @@ async function prepare(
     integration.status !== "active"
   )
     return refuse("git_connection_disabled");
+  // The runner speaks GitHub only: refuse before anything is created if this connection is not.
+  if (PLATFORM_OF[integration.type] !== "github")
+    return refuse("git_access_failed");
   const provider = deps.registry.resolve(integration.type);
   const repo: RepoRef = {
     integrationId: repository.integrationId,
@@ -206,7 +252,7 @@ async function prepare(
       };
     return refuse(accessFailureCode(error));
   }
-  // The runner knows GitHub only, and needs the login the bot acts as.
+  // The runner needs the login the bot acts as; only the access itself can say.
   if (git.provider !== "github" || git.botLogin === null)
     return refuse("git_access_failed");
 
@@ -220,11 +266,15 @@ async function prepare(
       token: git.token,
       botLogin: git.botLogin,
     },
-    llm: revealLlmAccess(llm.access),
-    env,
+    llm: {
+      ...revealLlmAccess(llm.access),
+      ...(llmOptions.model === undefined ? {} : { model: llmOptions.model }),
+      ...(llmOptions.maxTokens === undefined
+        ? {}
+        : { maxTokens: llmOptions.maxTokens }),
+    },
+    env: options.env,
   };
-  if (job.leaseExpiresAt === null)
-    throw new Error(`Claimed job ${job.id} has no lease expiry.`);
   return {
     kind: "ready",
     response: {
@@ -241,17 +291,24 @@ async function prepare(
   };
 }
 
-/** Ends a claimed job as failed with a code; the runner is not told. */
+/** Ends a claimed job as failed with a code; the runner is not told. Throws if the queue fails. */
 async function endJob(
   deps: ClaimDeps,
   claimed: NonNullable<ClaimResult>,
   runnerId: string,
   errorCode: string,
 ): Promise<void> {
-  await deps.queue.complete(claimed.job.id, claimed.leaseToken, {
+  const result = await deps.queue.complete(claimed.job.id, claimed.leaseToken, {
     ok: false,
     errorCode,
   });
+  if (result.status !== "completed") {
+    // Not ours any more (the lease ran out in the meantime); whoever holds the job now decides.
+    deps.logger.error(
+      `[runner-api] claim runner=${runnerId} job=${claimed.job.id} could not be ended at claim: ${result.status}`,
+    );
+    return;
+  }
   deps.logger.info(
     `[runner-api] claim runner=${runnerId} job=${claimed.job.id} ended at claim: ${errorCode}`,
   );
@@ -286,9 +343,35 @@ export async function handleClaim(
     const claimed = await deps.queue.claimNext(runnerId);
     if (claimed === null) return noContent();
 
-    let prepared: Prepared;
+    // Whatever goes wrong from here on, the job is given back instead of staying under a lease that
+    // nobody uses (it would only run out after two minutes).
     try {
-      prepared = await prepare(deps, claimed);
+      const prepared = await prepare(deps, claimed);
+
+      if (prepared.kind === "refused") {
+        await endJob(deps, claimed, runnerId, prepared.errorCode);
+        continue;
+      }
+
+      if (prepared.kind === "retry") {
+        await giveBack(
+          deps,
+          claimed,
+          prepared.reason,
+          new Date(deps.now().getTime() + prepared.retryAfterSeconds * 1000),
+        );
+        deps.logger.info(
+          `[runner-api] claim runner=${runnerId} job=${claimed.job.id} given back: ${prepared.reason}`,
+        );
+        return errorResponse(503, "RUNNER_GIT_ACCESS_UNAVAILABLE", {
+          retryAfterSeconds: prepared.retryAfterSeconds,
+        });
+      }
+
+      deps.logger.info(
+        `[runner-api] claim runner=${runnerId} job=${claimed.job.id} command=${claimed.job.command}`,
+      );
+      return jsonResponse(200, prepared.response);
     } catch (error) {
       deps.logger.error(
         `[runner-api] claim runner=${runnerId} job=${claimed.job.id} failed: ${describeError(error)}`,
@@ -296,31 +379,6 @@ export async function handleClaim(
       await giveBack(deps, claimed, "claim_failed");
       return errorResponse(500, "RUNNER_INTERNAL_ERROR");
     }
-
-    if (prepared.kind === "refused") {
-      await endJob(deps, claimed, runnerId, prepared.errorCode);
-      continue;
-    }
-
-    if (prepared.kind === "retry") {
-      await giveBack(
-        deps,
-        claimed,
-        prepared.reason,
-        new Date(deps.now().getTime() + prepared.retryAfterSeconds * 1000),
-      );
-      deps.logger.info(
-        `[runner-api] claim runner=${runnerId} job=${claimed.job.id} given back: ${prepared.reason}`,
-      );
-      return errorResponse(503, "RUNNER_GIT_ACCESS_UNAVAILABLE", {
-        retryAfterSeconds: prepared.retryAfterSeconds,
-      });
-    }
-
-    deps.logger.info(
-      `[runner-api] claim runner=${runnerId} job=${claimed.job.id} command=${claimed.job.command}`,
-    );
-    return jsonResponse(200, prepared.response);
   }
   // Many jobs in a row ended at claim time; let the runner ask again instead of holding the request.
   return noContent();

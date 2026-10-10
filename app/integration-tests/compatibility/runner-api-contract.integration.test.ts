@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { REVIEW_COMMANDS } from "../../src/integrations/types.ts";
 import {
   RUNNER_API_ERROR_CODES,
+  RUNNER_ENV_KEY_PATTERN,
   RUNNER_API_VERSION,
   RUNNER_ERROR_CODES,
 } from "../../src/runner-api/contract.ts";
@@ -58,6 +59,14 @@ describe("the contract file", () => {
     expect([...REVIEW_COMMANDS].sort()).toStrictEqual(
       [...(listed ?? [])].sort(),
     );
+  });
+
+  it("allows the same environment variables as the app's pattern", () => {
+    const schema = readContract().$defs.JobEnv as unknown as {
+      propertyNames: { pattern: string };
+    };
+
+    expect(schema.propertyNames.pattern).toBe(RUNNER_ENV_KEY_PATTERN.source);
   });
 
   it.each(readExamples())(
@@ -130,6 +139,22 @@ describe("what the app answers", () => {
     const repeated = await h.complete(job.id, job.leaseToken);
     expectValid("CompleteResponse", await first.json());
     expectValid("CompleteResponse", await repeated.json());
+  });
+
+  // CR-28-T03
+  it("answers a shutdown report with the job back in the queue, valid against the contract", async () => {
+    const h = await startRunnerApiHarness();
+    await h.enqueueNew();
+    const { job } = await h.claimed();
+
+    const response = await h.complete(job.id, job.leaseToken, {
+      ok: false,
+      errorCode: "runner_shutdown",
+    });
+
+    const body = await response.json();
+    expectValid("CompleteResponse", body);
+    expect(body.job.status).toBe("queued");
   });
 
   // CR-28-T03

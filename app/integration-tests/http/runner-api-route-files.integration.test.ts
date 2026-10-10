@@ -23,7 +23,7 @@ import {
 } from "../../src/test-support/github-app.ts";
 import { createTestDirectory } from "../../src/test-support/test-database.ts";
 
-const RUNNER_TOKEN = "route-file-runner-token-91ac";
+const RUNNER_TOKEN = "route-file-runner-token-91ac-5d2e8b7f0c14";
 const LLM_KEY = "route-file-llm-key-77de";
 const HEAD = "1f3a5c7e9b2d4f60a8c1e3b5d7f90a2c4e6b8d01";
 
@@ -99,6 +99,18 @@ afterEach(async () => {
 });
 
 describe("the runner API route files", () => {
+  it("answers 500 in the usual form, not cacheable, when the server was not set up", async () => {
+    const routes = await startRoutes();
+    await closeDatabase();
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const response = await routes.claim.POST(runnerRequest("claim", undefined));
+
+    expect(response.status).toBe(500);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect((await response.json()).error.code).toBe("RUNNER_INTERNAL_ERROR");
+  });
+
   it("takes a job that came in through the webhook route from claim to complete", async () => {
     const routes = await startRoutes();
     routes.fake.addInstallation({

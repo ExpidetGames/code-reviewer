@@ -34,3 +34,18 @@ other way round, so a change to the format has to change the file and both sides
 
 The meaning of the calls (status codes, the lease, what happens on failure) is in
 `app/src/runner-api/README.md`.
+
+## Size of a result
+
+A `complete` request must stay under 64 KiB serialized, or the app answers `413` and the job can never
+finish (the lease runs out and it is tried again). The largest document the schema allows can exceed
+that, because `logTail` (8192 characters) and `errorMessage` (2000) may hold characters that take
+several bytes in JSON; with `ensure_ascii` (the runner's output mode) a non-ASCII character takes 6 to 12
+bytes. The runner keeps `logTail` at 4 KB today. A runner (CR-29) must cap the result **before**
+serializing, well under the limit, or send UTF-8.
+
+## A shutdown is not a result
+
+A runner that is shut down while it holds a job reports `ok: false, errorCode: "runner_shutdown"` with
+`complete`. The app gives the job back to the queue instead of finishing it (the answer's `job.status`
+is `queued`, or `failed` when that was the last allowed attempt).

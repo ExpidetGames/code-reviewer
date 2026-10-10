@@ -1,41 +1,69 @@
 // Pins down the shared secret check of the runner API: only the exact token passes, whatever the
 // lengths and characters of the two sides, and the comparison never throws.
 import { describe, expect, it } from "vitest";
-import { bearerTokenOf, tokensMatch } from "./token-auth.ts";
+import {
+  bearerTokenOf,
+  configuredRunnerToken,
+  tokensMatch,
+} from "./token-auth.ts";
 
 describe("comparing the runner token", () => {
   // CR-28-T11
   it("accepts only exactly the same token", () => {
-    expect(tokensMatch("correct-horse-battery", "correct-horse-battery")).toBe(
-      true,
-    );
+    expect(
+      tokensMatch(
+        "correct-horse-battery-staple-xyz0",
+        "correct-horse-battery-staple-xyz0",
+      ),
+    ).toBe(true);
   });
 
   // CR-28-T11
   it("refuses a token of the same length that differs in one character", () => {
-    expect(tokensMatch("correct-horse-battery", "correct-horse-batterz")).toBe(
-      false,
-    );
+    expect(
+      tokensMatch(
+        "correct-horse-battery-staple-xyz0",
+        "correct-horse-battery-staple-xyz1",
+      ),
+    ).toBe(false);
   });
 
   // CR-28-T11
   it("refuses shorter and longer tokens, including a prefix and an extension of the real one", () => {
-    expect(tokensMatch("correct-horse-battery", "correct-horse")).toBe(false);
-    expect(tokensMatch("correct-horse-battery", "correct-horse-battery!")).toBe(
-      false,
-    );
-    expect(tokensMatch("correct-horse-battery", "")).toBe(false);
+    expect(
+      tokensMatch(
+        "correct-horse-battery-staple-xyz0",
+        "correct-horse-battery-staple",
+      ),
+    ).toBe(false);
+    expect(
+      tokensMatch(
+        "correct-horse-battery-staple-xyz0",
+        "correct-horse-battery-staple-xyz0!",
+      ),
+    ).toBe(false);
+    expect(tokensMatch("correct-horse-battery-staple-xyz0", "")).toBe(false);
   });
 
   // CR-28-T11
   it("compares non-ASCII tokens and refuses lookalikes without throwing", () => {
-    expect(tokensMatch("sécret-tökén-✓", "sécret-tökén-✓")).toBe(true);
-    expect(tokensMatch("sécret-tökén-✓", "secret-token-v")).toBe(false);
+    expect(
+      tokensMatch(
+        "sécret-tökén-✓-with-enough-length-1234",
+        "sécret-tökén-✓-with-enough-length-1234",
+      ),
+    ).toBe(true);
+    expect(
+      tokensMatch(
+        "sécret-tökén-✓-with-enough-length-1234",
+        "secret-token-v-with-enough-length-12345",
+      ),
+    ).toBe(false);
     // Same number of UTF-16 units, different bytes.
-    expect(tokensMatch("aé", "ae")).toBe(false);
+    expect(tokensMatch("é".repeat(40), "e".repeat(40))).toBe(false);
     // A lone surrogate is not valid text and must not make the comparison throw.
-    expect(() => tokensMatch("secret", "\ud800")).not.toThrow();
-    expect(tokensMatch("secret", "\ud800")).toBe(false);
+    expect(() => tokensMatch("s".repeat(40), "\ud800")).not.toThrow();
+    expect(tokensMatch("s".repeat(40), "\ud800")).toBe(false);
   });
 
   // CR-28-T12
@@ -44,6 +72,25 @@ describe("comparing the runner token", () => {
     expect(tokensMatch(undefined, "")).toBe(false);
     expect(tokensMatch("", "")).toBe(false);
     expect(tokensMatch("   ", "   ")).toBe(false);
+  });
+});
+
+describe("a configured token that is too weak", () => {
+  // CR-28-T12
+  it("never matches when it is shorter than 32 characters, even for the same text", () => {
+    const short = "a".repeat(31);
+
+    expect(tokensMatch(short, short)).toBe(false);
+    expect(tokensMatch("a".repeat(32), "a".repeat(32))).toBe(true);
+  });
+
+  it("ignores white space around the configured token, such as a trailing newline", () => {
+    const token = "b".repeat(40);
+
+    expect(tokensMatch(`${token}\n`, token)).toBe(true);
+    expect(configuredRunnerToken({ RUNNER_TOKEN: ` ${token}\n` })).toBe(token);
+    expect(configuredRunnerToken({ RUNNER_TOKEN: "  " })).toBeUndefined();
+    expect(configuredRunnerToken({})).toBeUndefined();
   });
 });
 

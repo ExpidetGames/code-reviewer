@@ -23,11 +23,17 @@ import {
 import { errorResponse, jsonResponse } from "./responses.ts";
 
 export type ReportDeps = {
-  queue: Pick<JobQueue, "get" | "heartbeat" | "complete">;
+  queue: Pick<JobQueue, "get" | "heartbeat" | "complete" | "release">;
   logger: RunnerApiLogger;
   /** Exact values (the LLM key, the runner token) that must never end up in a stored result. */
   knownSecrets: () => readonly string[];
 };
+
+/**
+ * The code a runner reports when it is shut down while it holds a job (CR-29). The job did not fail
+ * for its own reasons, so it is given back to the queue instead of being finished.
+ */
+export const RUNNER_SHUTDOWN_CODE = "runner_shutdown";
 
 /** The code a failed job is stored with: a code the runner is known to use, or `unknown`. */
 export function mapRunnerErrorCode(code: string): string {
@@ -95,6 +101,33 @@ export async function handleComplete(
           errorCode: mapRunnerErrorCode(stored.errorCode),
           result: stored,
         };
+
+  // A runner that is shut down gives the job back: it waits again (one attempt counted, the same cap
+  // as a lapsed lease) instead of failing for good with every redeploy. The result is not stored.
+  if (stored.errorCode === RUNNER_SHUTDOWN_CODE) {
+    const released = await deps.queue.release(
+      jobId,
+      parsed.value.leaseToken,
+      RUNNER_SHUTDOWN_CODE,
+    );
+    if (released.status === "not_holder") {
+      deps.logger.info(
+        `[runner-api] complete runner=${runnerId} job=${jobId} refused: lease lost`,
+      );
+      return errorResponse(409, "RUNNER_LEASE_LOST");
+    }
+    deps.logger.info(
+      `[runner-api] complete runner=${runnerId} job=${jobId} given back: runner_shutdown (${released.status})`,
+    );
+    return jsonResponse(200, {
+      version: RUNNER_API_VERSION,
+      job: {
+        id: released.job.id,
+        status: released.status === "requeued" ? "queued" : "failed",
+      },
+      alreadyCompleted: false,
+    } satisfies CompleteResponse);
+  }
 
   const result = await deps.queue.complete(
     jobId,

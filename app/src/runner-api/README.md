@@ -10,30 +10,33 @@ The runner (Python, `runner/`) asks the app for work over HTTP: it **claims** a 
 | `POST /api/runners/v1/jobs/:id/heartbeat` | `200`                          | Extends the lease (2 minutes; runners beat every 30 seconds)      |
 | `POST /api/runners/v1/jobs/:id/complete`  | `200`                          | Stores the result and finishes the job                            |
 
-| File                           | Role                                                                                                                                    |
-| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `api.ts`                       | `createRunnerApi(deps)`: the order of the checks and the three entry points                                                             |
-| `claim.ts`                     | The claim: guard, settings, pull request, credentials, the response                                                                     |
-| `report.ts`                    | Heartbeat and complete                                                                                                                  |
-| `requests.ts`                  | The checks on job id, `X-Runner-Id` and the two request bodies (hand written, kept in line with the contract by the compatibility test) |
-| `token-auth.ts`                | The `RUNNER_TOKEN` check (constant time)                                                                                                |
-| `redact.ts`                    | Removes anything that looks like a credential from a result before it is stored                                                         |
-| `responses.ts`                 | Every answer: `Cache-Control: no-store`, the error form `{ error: { code, message } }`                                                  |
-| `claim-guard.ts`, `job-env.ts` | The two hooks (below)                                                                                                                   |
-| `contract.ts`                  | The TypeScript types and code lists of the contract                                                                                     |
-| `shared.ts`                    | The wiring of the running server (`getRunnerApi()`); the route files under `src/app/api/runners/v1/` only call it                       |
+| File                               | Role                                                                                                                                                                                                            |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `api.ts`                           | `createRunnerApi(deps)`: the order of the checks and the three entry points                                                                                                                                     |
+| `claim.ts`                         | The claim: guard, settings, pull request, credentials, the response                                                                                                                                             |
+| `report.ts`                        | Heartbeat and complete                                                                                                                                                                                          |
+| `requests.ts`                      | The checks on job id, `X-Runner-Id` and the two request bodies (hand written, kept in line with the contract by the compatibility test)                                                                         |
+| `token-auth.ts`, `startup.ts`      | The `RUNNER_TOKEN` check (constant time, at least 32 characters) and the hint at server start                                                                                                                   |
+| `redact.ts`                        | Removes anything that looks like a credential from a result before it is stored                                                                                                                                 |
+| `responses.ts`                     | Every answer: `Cache-Control: no-store`, the error form `{ error: { code, message } }`                                                                                                                          |
+| `claim-guard.ts`, `job-options.ts` | The two hooks (below)                                                                                                                                                                                           |
+| `contract.ts`                      | The TypeScript types and code lists of the contract                                                                                                                                                             |
+| `shared.ts`                        | The wiring of the running server (`getRunnerApi()`, `withRunnerApi`); the route files under `src/app/api/runners/v1/` only call `withRunnerApi`, which answers a failure while setting up in the usual 500 form |
 
 ## Authentication
 
 `Authorization: Bearer <RUNNER_TOKEN>` on every call. One shared token in the MVP, read from the
-environment on every request. A missing, wrong, empty or differently schemed token, and a server
-without `RUNNER_TOKEN` (or with a blank one), all get the same `401 RUNNER_UNAUTHORIZED` answer,
+environment on every request, without surrounding white space. A missing, wrong, empty or
+differently schemed token, and a server without `RUNNER_TOKEN` (or with a blank or **too short** one:
+under 32 characters never matches, so a weak token fails closed), all get the same
+`401 RUNNER_UNAUTHORIZED` answer,
 before anything else is looked at. The comparison hashes both sides and compares in constant time, so
 lengths and characters do not matter and it never throws. The session guard lets `/api/runners/**`
 through (`src/auth/access.ts`): this token is the authentication.
 
 `X-Runner-Id` is a free-form name (letters, digits and `._:@-`, up to 64 characters) that ends up in
-`jobs.runner_id` and in the logs. It is bookkeeping, not a security boundary: what proves that a runner
+`jobs.runner_id` and in the logs. There is no rate limit on failed attempts: that is why the token must
+be long and random (`openssl rand -hex 32`); the server logs one warning at start if it is missing or short. It is bookkeeping, not a security boundary: what proves that a runner
 holds a job is the **lease token**.
 
 ## The lease token
@@ -67,7 +70,12 @@ for that job, in this order:
 
 1. **The claim guard** may refuse it (below).
 2. **LLM access** must be configured (`src/llm/config.ts`: `LLM_PROVIDER` default `openrouter`,
-   `LLM_MODEL`, `LLM_API_KEY`). Otherwise the job ends as `failed` with `llm_not_configured`.
+   `LLM_MODEL` default `anthropic/claude-haiku-5.5`, `LLM_API_KEY`). Otherwise the job ends as `failed`
+   with `llm_not_configured`. **Operations:** this fails every job a runner claims, up to 25 per request,
+   for good; fixing the setting later does not revive them (they have to be queued again, for example by
+   a new commit or a comment). Set `LLM_API_KEY` before the first runner connects.
+   **Options** of the job come next (`JobOptionsSource`, below): the model and context size of a
+   project replace the defaults, and the options go into `env`.
 3. **The pull request** is read through the provider's `getPullRequest`. A pull request that does not
    exist ends the job with `pr_not_found`, one that is closed or merged with `pull_request_closed`;
    `prUrl` in the response is the URL the provider reports.
@@ -79,7 +87,8 @@ for that job, in this order:
 A job that cannot run for a reason that will not go away (guard, LLM not configured, pull request
 gone, connection removed or suspended, repository not part of the installation, permissions missing)
 ends as `failed` with a stable code (`CLAIM_FAILURE_CODES` in `claim.ts`), the runner is not told, and
-the next job is tried (up to 25 per request, then `204`). A reason that may pass (GitHub rate limiting
+the next job is tried (up to 25 per request, then `204`). If ending the job itself fails (a database
+error), the job is given back like after any other unexpected error. A reason that may pass (GitHub rate limiting
 or down, the pull request could not be read) gives the job back with `release`: it counts as a lost
 attempt like a lapsed lease (3 attempts, then it fails with the reason as its code), waits until the
 `Retry-After` time and the runner gets `503`. `Retry-After` is what the platform said (a rate limit),
@@ -102,6 +111,11 @@ The body is `{ leaseToken, result }`. `result` is what `code-reviewer-run-job` p
   anything that looks like a credential (GitHub tokens, provider keys, bearer credentials) and the exact
   LLM key and runner token from `logTail`, `errorMessage` and `commentUrl` before they are stored. The
   git token is not known to the app after the claim, so it can only be recognised by its shape.
+- **A runner that is shut down** reports `ok: false, errorCode: "runner_shutdown"`. That is not a result:
+  the job is given back with `release` (it waits again, one attempt counted, the same cap as a lapsed
+  lease; on the last allowed attempt it fails with `runner_shutdown`) and the answer says
+  `status: "queued"` (or `failed`). Nothing is stored. Reporting it again, or after the lease was lost,
+  is `409`.
 - Repeating the same completion answers `200` with `alreadyCompleted: true`; another result for a
   completed job is `409`. "Same" is compared on the stored form, so leaving out an optional field is
   not a different result.
@@ -116,10 +130,18 @@ The body is `{ leaseToken, result }`. `result` is what `code-reviewer-run-job` p
   returns `project_deactivated`. A refused job ends as `failed` with that code. (The queue has no
   operation that cancels a claimed job; if `cancelled` is wanted for this case, that is a small addition
   to `src/jobs` at that time.)
-- **`JobEnvSource`** (`job-env.ts`): `envFor(job)` returns the extra options of the four PR-Agent tools
-  (`PR_REVIEWER__*`, `PR_DESCRIPTION__*`, `PR_CODE_SUGGESTIONS__*`, `PR_QUESTIONS__*`) that become the
-  job's `env`. The default is empty. CR-25 (settings) fills it from the project settings. A key outside
-  those four families ends the job as `job_env_invalid`, because the runner would refuse it.
+- **`JobOptionsSource`** (`job-options.ts`): `optionsFor(job)` returns the options of one job, so they
+  can differ per repository: `env` (the extra options of the four PR-Agent tools, `PR_REVIEWER__*`,
+  `PR_DESCRIPTION__*`, `PR_CODE_SUGGESTIONS__*`, `PR_QUESTIONS__*`) and optionally
+  `llm: { model, maxTokens, fallbackModels }`. A `model` replaces the model of the LLM access, a
+  `maxTokens` (a whole number from 1000 to 10 000 000) becomes `llm.maxTokens`; a null or missing value
+  is left out of the job (the runner refuses a `maxTokens` that is not a whole number).
+  `fallbackModels` is accepted and not handed on, because the job has no field for it yet. The default
+  source is empty. CR-25 plugs its `toRunnerSettings` in here. A key outside the four families ends the
+  job as `job_env_invalid`, a model or size the runner would refuse as `job_llm_options_invalid`. The
+  key pattern is `RUNNER_ENV_KEY_PATTERN` in `contract.ts`; CR-25 defines the same constant under the
+  same name next to `toRunnerSettings`, so when the two branches are merged one of them imports the
+  other.
 - **`src/llm/config.ts`** is the minimum the claim needs; CR-26 owns the module and extends it.
 
 ## Before this is used in production

@@ -1,7 +1,12 @@
 // Pins down the last line of defense against a secret in a stored result. The runner redacts its
 // own output; this removes what still looks like a credential, and the secrets the app itself knows.
 import { describe, expect, it } from "vitest";
-import { REDACTED, redactResult, redactText } from "./redact.ts";
+import {
+  REDACTED,
+  knownSecretsFromEnv,
+  redactResult,
+  redactText,
+} from "./redact.ts";
 import type { RunnerResult } from "./contract.ts";
 
 describe("removing secrets from text", () => {
@@ -28,6 +33,22 @@ describe("removing secrets from text", () => {
     expect(redactText(text, ["hunter2-secret-value"])).toBe(
       `the value ${REDACTED} appears twice: ${REDACTED}.`,
     );
+  });
+
+  it("removes a secret that was given with white space around it", () => {
+    expect(redactText("key=my-llm-secret-key.", ["my-llm-secret-key\n"])).toBe(
+      `key=${REDACTED}.`,
+    );
+  });
+
+  it("removes the URL-encoded form of a secret too", () => {
+    const secret = "key/with+special chars=1";
+
+    expect(
+      redactText(`GET /v1?k=${encodeURIComponent(secret)} and ${secret}`, [
+        secret,
+      ]),
+    ).toBe(`GET /v1?k=${REDACTED} and ${REDACTED}`);
   });
 
   it("ignores given secrets that are too short to be real, so ordinary words survive", () => {
@@ -71,5 +92,17 @@ describe("removing secrets from a result", () => {
     const once = redactResult(result, ["my-llm-secret-key"]);
 
     expect(redactResult(once, ["my-llm-secret-key"])).toStrictEqual(once);
+  });
+});
+
+describe("the secrets the app knows", () => {
+  it("are the LLM key and the runner token, trimmed, without the empty ones", () => {
+    expect(
+      knownSecretsFromEnv({
+        LLM_API_KEY: "llm-key-value\n",
+        RUNNER_TOKEN: "  ",
+        OTHER: "x",
+      }),
+    ).toStrictEqual(["llm-key-value"]);
   });
 });

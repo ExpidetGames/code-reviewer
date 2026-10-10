@@ -205,7 +205,14 @@ describe("the complete body", () => {
       code: "invalid",
     });
     expect(fields).toContainEqual({ field: "result.logTail", code: "invalid" });
-    expect(fields).toContainEqual({ field: "result.usage", code: "invalid" });
+    expect(fields).toContainEqual({
+      field: "result.usage.model",
+      code: "invalid",
+    });
+    expect(fields).toContainEqual({
+      field: "result.usage.promptTokens",
+      code: "required",
+    });
     expect(JSON.stringify(fields)).not.toContain("yes");
   });
 
