@@ -1,0 +1,95 @@
+# Code Reviewer: the app and the runner on one machine. See "Run with Docker Compose" in README.md.
+#
+#   cp .env.example .env     # then fill in the values; a missing required value stops `up` with a
+#                            # message naming the variable, before any container is created
+#   docker compose up -d --wait
+#
+# Images come from GHCR by default (the packages are private: `docker login ghcr.io` first). To build
+# them from this checkout instead, add the override file:
+#   docker compose -f compose.yml -f compose.build.yml up -d --build --wait
+#
+# Every setting is read from the environment of this command or from `.env` (see .env.example for
+# what each one means). No secret is written in this file.
+name: code-reviewer
+
+services:
+  app:
+    image: ${APP_IMAGE:-ghcr.io/expidetgames/code-reviewer-app:development}
+    restart: unless-stopped
+    ports:
+      # Loopback only by default; set APP_BIND_ADDRESS=0.0.0.0 to reach the app from other machines
+      # without a reverse proxy. The container always listens on 3000.
+      - "${APP_BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-3000}:3000"
+    volumes:
+      # The SQLite database (/data/app.db) lives in a named volume: it survives `docker compose down`
+      # and image updates, and is only removed by `docker compose down -v`.
+      - data:/data
+    environment:
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required, see .env.example}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:${APP_PORT:-3000}}
+      GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:?GITHUB_OAUTH_CLIENT_ID is required, see .env.example}
+      GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET:?GITHUB_OAUTH_CLIENT_SECRET is required, see .env.example}
+      ALLOWED_GITHUB_LOGINS: ${ALLOWED_GITHUB_LOGINS:-}
+      ALLOWED_GITHUB_ORG: ${ALLOWED_GITHUB_ORG:-}
+      GITHUB_APP_ID: ${GITHUB_APP_ID:?GITHUB_APP_ID is required, see .env.example}
+      GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:?GITHUB_APP_SLUG is required, see .env.example}
+      GITHUB_APP_WEBHOOK_SECRET: ${GITHUB_APP_WEBHOOK_SECRET:?GITHUB_APP_WEBHOOK_SECRET is required, see .env.example}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:?GITHUB_APP_PRIVATE_KEY is required, see .env.example}
+      # The runner presents the same token; both services read the one variable.
+      RUNNER_TOKEN: ${RUNNER_TOKEN:?RUNNER_TOKEN is required, see .env.example}
+      # One shared LLM access for the team. Not needed for the stack to start: without a key the app
+      # runs and shows a configuration error, and review jobs fail with a stable error code.
+      LLM_PROVIDER: ${LLM_PROVIDER:-openrouter}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      DATABASE_BUSY_TIMEOUT_MS: ${DATABASE_BUSY_TIMEOUT_MS:-}
+    healthcheck:
+      # Node is in the image, curl is not. /api/health is public and reads the database. Declared
+      # here so the timings are visible and tunable; keep the command in sync with the HEALTHCHECK
+      # in app/Dockerfile.
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  runner:
+    image: ${RUNNER_IMAGE:-ghcr.io/expidetgames/code-reviewer-runner:development}
+    restart: unless-stopped
+    # No published port: the runner only talks to the app, over the compose network.
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      APP_URL: http://app:3000
+      RUNNER_TOKEN: ${RUNNER_TOKEN:?RUNNER_TOKEN is required, see .env.example}
+    # PLACEHOLDER until the job loop exists (CR-29). The image entry point does nothing yet except
+    # answer --version, and would exit at once; this keeps the container up and logs whether the app
+    # answers on APP_URL (once on every change). CR-29 deletes `entrypoint` so that the image's own
+    # entry point, the real loop, runs.
+    entrypoint:
+      - python
+      - -u
+      - -c
+      - |
+        import os, signal, sys, time, urllib.request
+        signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+        base = os.environ["APP_URL"].rstrip("/")
+        print(f"runner placeholder (no job loop yet): watching {base}")
+        connected = None
+        while True:
+            try:
+                with urllib.request.urlopen(base + "/api/health", timeout=5) as answer:
+                    now = answer.status == 200
+            except Exception:
+                now = False
+            if now != connected:
+                connected = now
+                print(f"connected to {base}" if now else f"cannot reach {base}, retrying")
+            time.sleep(5)
+
+volumes:
+  data:

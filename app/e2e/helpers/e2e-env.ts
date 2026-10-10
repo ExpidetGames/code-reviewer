@@ -22,4 +22,7 @@ export const e2eEnv = {
   // listed are refused (see e2e/auth/allow-list.e2e.ts).
   allowedLogins: ["login-journey"].join(","),
   authSecret: "e2e-auth-secret-0123456789-0123456789-abcdef",
+  // The production server refuses to start without the runner token and GitHub App credentials.
+  // Dummies: nothing in the journeys talks to the GitHub App or the runner API.
+  runnerToken: "e2e-runner-token-0123456789-0123456789-abcdef",
 };
