@@ -17,7 +17,7 @@ platform; the MVP has exactly one kind, the GitHub App (`github_app`, `providers
 | `providers/<type>/`       | One folder per implementation: `providers/github-app/` (see "The GitHub App provider")                                                                                          |
 | `sync/`                   | `createIntegrationSync`: keeps the `integrations` and `repositories` tables in line with the platform (see "Synchronization")                                                   |
 
-The tables are `integrations` (`src/db/migrations/20261010120000_create_integrations.ts`) and
+The tables are `integrations` (`src/db/migrations/20261010134000_create_integrations.ts`) and
 `repositories` (`src/db/migrations/20261010143000_create_repositories.ts`); the only code that touches
 them is `src/db/repositories/integrations-repository.ts` and `repositories-repository.ts`.
 

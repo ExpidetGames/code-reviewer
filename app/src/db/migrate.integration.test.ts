@@ -63,11 +63,16 @@ describe("starting the database", () => {
       await names(db, "select name from kysely_migration order by name"),
     ).toEqual(expectedMigrations);
     expect(await userTables(db)).toEqual([
+      "accounts",
+      "allowed_login_pins",
       "app_meta",
       "integrations",
       "kysely_migration",
       "kysely_migration_lock",
       "repositories",
+      "sessions",
+      "users",
+      "verifications",
       "webhook_deliveries",
     ]);
     const { rows } = await sql<{
