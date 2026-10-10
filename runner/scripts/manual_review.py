@@ -125,7 +125,7 @@ CONTROL_SNIPPET = (
 def runner_command(*, identity_patch: bool) -> list[str]:
     if identity_patch:
         return [str(Path(sys.executable).parent / "code-reviewer-run-job")]
-    return [sys.executable, "-c", CONTROL_SNIPPET]
+    return [sys.executable, "-I", "-c", CONTROL_SNIPPET]
 
 
 def start_runner(

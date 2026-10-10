@@ -59,14 +59,36 @@ After the second review (commit `75bdbd8`):
   PR-Agent counts as a new finding. The review therefore shows the crash as new and, in the
   "Resolved findings" section, as resolved at the same time.
 
+Excerpts of the state block, as of these runs (the links in this report point to a comment that later runs,
+for example CR-13, overwrote, so the quoted ids can no longer be read there). First review, commit `ac848ef`:
+
+```
+{"findings":[
+  {"finding_id":"b50ba875c307","state":"ACTIVE","body":"**Off-by-one error** ... `slice(0, count - 1)` ..."},
+  {"finding_id":"bcdf826a1dac","state":"ACTIVE","body":"**Potential crash on empty order** ... `order.items[0].name` ..."}],
+ "last_run":{"head_sha":"ac848ef...","kind":"full","complete":true}}
+```
+
+After the second review (run 2, commit `75bdbd8`):
+
+```
+{"findings":[
+  {"finding_id":"7ba9a9302ffb","state":"ACTIVE",  "body":"**Performance Concern** ... sorts the entire array ..."},
+  {"finding_id":"8e4a7bbf4b9d","state":"ACTIVE",  "body":"**Edge Case Bug** ... `summarizeOrder` will crash if `order.items` is empty ..."},
+  {"finding_id":"b50ba875c307","state":"RESOLVED","resolved_head_sha":"75bdbd8..."},
+  {"finding_id":"bcdf826a1dac","state":"RESOLVED","resolved_head_sha":"75bdbd8..."}],
+ "last_run":{"head_sha":"75bdbd8...","kind":"full","complete":true}}
+```
+
 Why: `finding_id` is the SHA-256 of the file path and the whitespace-normalized, lower-cased text of the
 finding (`algo/review_finding_state.py`, `key_issue_fingerprint`). The previous findings are **not** given to the model, so the
 model has no reason to repeat its wording. A finding is recognized only if the model produces exactly the
 same sentence again; a finding that is not reproduced exactly is marked resolved when the head commit
 changed, and added as new otherwise.
 
-Evidence over five reviews that all reported the same problem (`summarizeOrder` on an empty order), none of them
-produced an identical text:
+Evidence over five reviews that all reported the same problem (`summarizeOrder` on an empty order): four of
+them wrote a state block, so four ids can be compared, and no two are equal; the fifth (the control run) has a
+fifth wording in a comment without state:
 
 | Review | finding id | start of the text |
 |---|---|---|
@@ -74,7 +96,7 @@ produced an identical text:
 | 2 | `8e4a7bbf4b9d` | "Edge Case Bug" |
 | 3b | `e5b40be2c435` | "Possible Issue" |
 | 4 (one of two concurrent runs) | `87f0e4f81d92` | "Possible Issue" |
-| 2 control (standalone comment, no state) | n/a | "Possible Issue", yet another wording |
+| 2 control (standalone comment) | none: a standalone comment carries no state block | "Possible Issue", yet another wording |
 
 Consequences:
 
@@ -103,9 +125,10 @@ Yes. Without the identity patch (the installation token cannot call `GET /user`)
   review as a new comment headed "Standalone PR Review" instead.
 - The runner returned `ok: true` and pointed `commentUrl` at that standalone comment, not at the
   canonical one. With the patch in place this cannot happen, and `pr_agent_version_mismatch` /
-  `identity_patch_failed` stop a runner whose patch no longer applies. Follow-up for the
-  engine suite: a standalone comment ("Standalone PR Review" header) should not count as the
-  result of a review (at least not as `ok` with a `commentUrl`).
+  `identity_patch_failed` stop a runner whose patch no longer applies. That the runner took the
+  standalone comment for the result was a bug of the recorder at the time of this run (it accepted
+  the visible heading as an identity); it is fixed in CR-12 (PR #22): only the hidden marker counts,
+  so such a run ends `ok: false` with `review_not_published`.
 
 With the patch: the canonical comment is found, edited in place, and the finding state is read and
 written (run 2 and later).
@@ -127,7 +150,7 @@ written (run 2 and later).
 | CR-11-T01 | Passed manually (runs 2, 3b, 4): one reviewer guide comment, edited in place, content for the new commit, "Review updated until commit". |
 | CR-11-T02 | Engine suite (CR-41) will automate this; the real GitHub behavior is shown by run 2. |
 | CR-11-T03 | Not passed. The unfixed finding was not recognized as known, it came back with new wording (see above). |
-| CR-11-T04 | Passed, with the caveat that any finding the model words differently is also shown as resolved. |
+| CR-11-T04 | Partly. The fixed finding was shown as resolved, but so was the finding that is still in the code, because the model worded it differently (see above). |
 | CR-11-T05 | Done. Recognition depends on the author login (control run), and the patch fixes it. |
 | CR-11-T06 | Partly manual (runs 3 and 4 on an existing comment): one comment, no run broke because of the concurrency; the state of one run is lost (last write wins). The race on first creation is for the engine suite. |
 | CR-11-T07 | Not run: it needs a deleted comment, and deleting comments was not part of this spike. Engine suite (CR-41). With no existing comment PR-Agent takes the same path as in the first review (run 1 of CR-10). |

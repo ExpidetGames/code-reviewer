@@ -3,6 +3,8 @@ it on the sandbox repository, and that it never prints the installation token or
 even when the runner's output contains them."""
 
 import importlib.util
+import io
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -162,39 +164,54 @@ def test_the_normal_runner_command_is_the_console_script() -> None:
     assert len(command) == 1
 
 
-def test_the_control_command_starts_the_runner_with_the_identity_patch_switched_off(
+def test_the_control_command_runs_python_in_isolated_mode() -> None:
+    command = load_script().runner_command(identity_patch=False)
+
+    # -I: neither the current directory nor user site packages are put on sys.path
+    assert command[:3] == [sys.executable, "-I", "-c"]
+
+
+# CR-11-T05 (helper): the real job runs, and the identity patch is not applied
+def test_the_control_command_runs_the_real_job_without_the_identity_patch(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    command = load_script().runner_command(identity_patch=False)
+    from pr_agent.agent.pr_agent import PRAgent
+    from pr_agent.git_providers.github_provider import GithubProvider
 
-    assert command[:2] == [sys.executable, "-c"]
     from code_reviewer_runner import runner
 
-    seen: list[object] = []
+    script = load_script()
+    original = GithubProvider._resolve_user_login  # pyright: ignore[reportPrivateUsage]
+    seen: list[bool] = []
+
+    async def handle_request(
+        self: Any, pr_url: str, request: Any, notify: Any = None, propagate_tool_errors: Any = None
+    ) -> bool:
+        seen.append(
+            GithubProvider._resolve_user_login is original  # pyright: ignore[reportPrivateUsage]
+        )
+        return True
+
+    monkeypatch.setattr(PRAgent, "handle_request", handle_request)
     # The snippet assigns the module attribute; let monkeypatch put the original back afterwards.
     monkeypatch.setattr(runner, "apply_identity_patch", runner.apply_identity_patch)
-
-    def fake_main(argv: list[str]) -> int:
-        seen.append(runner.apply_identity_patch("x"))
-        return 0
-
-    monkeypatch.setattr(runner, "main", fake_main)
-    with pytest.raises(SystemExit):
-        exec(command[2], {})  # the snippet is our own constant
-    (undo,) = seen
-    assert callable(undo)
-    undo()  # must be a harmless no-op, the real patch would have replaced a method
-
-
-def test_the_control_command_still_refuses_an_invalid_job_like_the_real_entry_point() -> None:
-    command = load_script().runner_command(identity_patch=False)
-
-    process = subprocess.run(
-        command, input="not json", capture_output=True, text=True, timeout=60, check=False
+    job = json.dumps(
+        script.build_job(script.DEFAULT_PR_URL, "review", TOKEN, "bot", API_KEY, "v/m", 1000)
     )
 
-    assert process.returncode == 1
-    assert '"errorCode":"invalid_job"' in process.stdout
+    def run(code: str | None) -> None:
+        monkeypatch.setattr(sys, "stdin", io.StringIO(job))
+        monkeypatch.setattr(sys, "stdout", io.StringIO())
+        if code is None:
+            runner.main([])
+            return
+        with pytest.raises(SystemExit):
+            exec(code, {})  # the snippet is our own constant
+
+    run(None)  # the normal entry point: the patch is in place while the command runs
+    run(script.CONTROL_SNIPPET)  # the control: the stock method
+
+    assert seen == [False, True]
 
 
 def test_the_flag_for_the_control_run_reaches_the_runner_start(
