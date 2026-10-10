@@ -11,6 +11,12 @@ GITHUB_APP_ID, GITHUB_APP_SLUG, GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_K
 OPENROUTER_API_KEY.
 
     uv run python scripts/manual_review.py [--pr-url URL] [--command review] [--model MODEL]
+        [--record-dir DIR --label NAME]
+
+With `--record-dir`, the run also leaves `DIR/NAME.json` (the result JSON of the runner plus model,
+pull request and wall time) and `DIR/NAME.comment.md` (the text of the review comment as it is right
+after the run, because the next run edits it in place). Nothing is written if a secret shows up in
+either. This is how model comparisons (CR-44) keep every run.
 
 It only talks to the sandbox repository below, on purpose: it posts a real comment and costs real
 money. Nothing runs without `--yes`. The installation token is limited to that one repository and to
@@ -91,6 +97,72 @@ def check_repository(pr_url: str) -> None:
         raise SystemExit(f"refusing to run: only pull requests of {ALLOWED_REPOSITORY} are allowed")
 
 
+def comment_id_from_url(comment_url: str | None) -> int | None:
+    """The id in `<sandbox pull request link>#issuecomment-<id>`; None for any other link."""
+    if comment_url is None:
+        return None
+    pattern = rf"https://github\.com/{re.escape(ALLOWED_REPOSITORY)}/pull/[1-9][0-9]*#issuecomment-([0-9]+)"
+    match = re.fullmatch(pattern, comment_url)
+    return int(match.group(1)) if match else None
+
+
+def fetch_comment_body(token: str, comment_url: str | None) -> str | None:
+    """Text of the review comment, read with the installation token (None without a usable link)."""
+    comment_id = comment_id_from_url(comment_url)
+    if comment_id is None:
+        return None
+    request = urllib.request.Request(
+        f"{GITHUB_API}/repos/{ALLOWED_REPOSITORY}/issues/comments/{comment_id}",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "code-reviewer-manual-review",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:
+        payload: dict[str, Any] = json.load(response)
+    return str(payload["body"])
+
+
+def write_record(
+    directory: Path,
+    *,
+    label: str,
+    pr_url: str,
+    model: str,
+    result: Mapping[str, Any],
+    wall_seconds: float,
+    comment_body: str | None,
+) -> Path:
+    """Write `<label>.json` (and `<label>.comment.md` if there is a comment text)."""
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", label):
+        raise SystemExit("--label must be a plain file name (letters, digits, . _ -)")
+    directory.mkdir(parents=True, exist_ok=True)
+    record = {
+        "label": label,
+        "prUrl": pr_url,
+        "model": model,
+        "wallSeconds": round(wall_seconds, 1),
+        "result": dict(result),
+    }
+    if comment_body is not None:
+        (directory / f"{label}.comment.md").write_text(comment_body)
+    path = directory / f"{label}.json"
+    path.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
+    return path
+
+
+def parse_result(stdout: str) -> dict[str, Any]:
+    """The runner prints the result as the last line of stdout."""
+    lines = [line for line in stdout.splitlines() if line.strip()]
+    try:
+        parsed = json.loads(lines[-1])
+    except (IndexError, json.JSONDecodeError):
+        return {"ok": False, "errorCode": "unreadable_result"}
+    return parsed if isinstance(parsed, dict) else {"ok": False, "errorCode": "unreadable_result"}
+
+
 def build_job(
     pr_url: str, command: str, token: str, bot_login: str, api_key: str, model: str, max_tokens: int
 ) -> dict[str, Any]:
@@ -132,12 +204,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--command", default="review")
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--max-tokens", type=int, default=DEFAULT_MAX_TOKENS)
+    parser.add_argument("--record-dir", type=Path, help="keep result JSON and comment text here")
+    parser.add_argument("--label", help="file name stem of the record (needed with --record-dir)")
     parser.add_argument(
         "--yes", action="store_true", help="really run (posts a comment, costs money)"
     )
     args = parser.parse_args(argv)
 
     check_repository(args.pr_url)
+    if args.record_dir is not None and not args.label:
+        raise SystemExit("--record-dir needs --label")
     if not args.yes:
         print(f"Would run `{args.command}` on {args.pr_url} with {args.model}.")
         print("That posts a real comment and costs real money (a few cents); add --yes to run.")
@@ -174,6 +250,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     if leaked:
         print(f"SECRET SCAN FAILED: {', '.join(sorted(set(leaked)))} found in the runner output")
         return 2
+    result = parse_result(process.stdout)
+    if args.record_dir is not None:
+        body = fetch_comment_body(token, result.get("commentUrl"))
+        if any(secret in (body or "") for secret in (token, api_key)):
+            print("SECRET SCAN FAILED: a secret found in the review comment, nothing recorded")
+            return 2
+        write_record(
+            args.record_dir,
+            label=args.label,
+            pr_url=args.pr_url,
+            model=args.model,
+            result=result,
+            wall_seconds=wall_seconds,
+            comment_body=body,
+        )
     print(process.stdout.strip())
     if process.stderr.strip():
         print("--- stderr ---")
