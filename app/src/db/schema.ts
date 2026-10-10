@@ -163,6 +163,11 @@ export interface JobsTable {
   actor_login: string;
   /** The webhook delivery that created the job, or null. Unique where not null. */
   delivery_id: string | null;
+  /**
+   * The platform's id of the comment a comment command came from, or null. Unique per repository
+   * where not null: one job per comment.
+   */
+  comment_id: string | null;
   /** A JobStatus (src/jobs/job-status.ts). */
   status: string;
   /** ISO 8601 text in UTC: the job is not handed out before this moment. */

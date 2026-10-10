@@ -148,6 +148,7 @@ function toJob(row: JobsTable): Job {
     triggerKind,
     actorLogin: row.actor_login,
     deliveryId: row.delivery_id,
+    commentId: row.comment_id,
     status: row.status,
     runAfter: row.run_after,
     attempts: row.attempts,
@@ -348,6 +349,23 @@ export function createJobsRepository(
             };
         }
 
+        // 1b. The same comment again, under another delivery id (a replayed signed body, or two
+        // deliveries of one comment): one job per comment, whatever became of it.
+        if (input.commentId !== null) {
+          const sameComment = await trx
+            .selectFrom("jobs")
+            .selectAll()
+            .where("repository_id", "=", input.repositoryId)
+            .where("comment_id", "=", input.commentId)
+            .executeTakeFirst();
+          if (sameComment !== undefined)
+            return {
+              status: "existing",
+              job: toJob(sameComment),
+              reason: "same_comment",
+            };
+        }
+
         const samePullRequest = () =>
           trx
             .selectFrom("jobs")
@@ -414,6 +432,7 @@ export function createJobsRepository(
             trigger_kind: input.triggerKind,
             actor_login: input.actorLogin,
             delivery_id: input.deliveryId,
+            comment_id: input.commentId,
             status: "queued",
             run_after: formatTimestamp(input.runAfter ?? current),
             attempts: 0,

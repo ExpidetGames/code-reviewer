@@ -39,6 +39,7 @@ describe("enqueueing a job", () => {
       triggerKind: "webhook",
       actorLogin: "octocat",
       deliveryId: "delivery-1",
+      commentId: null,
       status: "queued",
       runAfter: T0.toISOString(),
       attempts: 0,
@@ -1317,6 +1318,128 @@ describe("listing jobs with a limit", () => {
     expect(limited.map((job) => job.id)).toEqual([jobs[0]?.id, jobs[1]?.id]);
     expect(await fixture.queue.list()).toHaveLength(5);
     expect(await fixture.queue.list({ limit: 0 })).toHaveLength(1);
+  });
+});
+
+describe("a job that comes from a comment", () => {
+  // CR-32-T12
+  it("stores the comment it came from", async () => {
+    const fixture = await createJobQueueFixture();
+
+    const job = await fixture.enqueueNew({
+      triggerKind: "comment",
+      commentId: "99001",
+    });
+
+    expect(job.commentId).toBe("99001");
+    expect((await fixture.queue.get(job.id))?.commentId).toBe("99001");
+    expect((await fixture.enqueueNew({ headSha: sha("b") })).commentId).toBe(
+      null,
+    );
+  });
+
+  // CR-32-T12
+  it("is not created twice for the same comment, whatever delivery brings it", async () => {
+    const fixture = await createJobQueueFixture();
+    const first = await fixture.enqueueNew({
+      triggerKind: "comment",
+      commentId: "99001",
+      deliveryId: "delivery-1",
+    });
+
+    const replay = await fixture.enqueue({
+      triggerKind: "comment",
+      commentId: "99001",
+      deliveryId: "delivery-2",
+    });
+
+    expect(replay).toMatchObject({
+      status: "existing",
+      reason: "same_comment",
+      job: { id: first.id },
+    });
+    expect(await fixture.queue.list()).toHaveLength(1);
+  });
+
+  // CR-32-T12
+  it("is not created again for a comment whose job has finished", async () => {
+    const fixture = await createJobQueueFixture();
+    const first = await fixture.enqueueNew({
+      triggerKind: "comment",
+      commentId: "99001",
+      deliveryId: "delivery-1",
+    });
+    const claimed = await fixture.queue.claimNext("runner-a");
+    await fixture.queue.complete(first.id, claimed?.leaseToken ?? "", {
+      ok: true,
+      result: {},
+    });
+
+    const replay = await fixture.enqueue({
+      triggerKind: "comment",
+      commentId: "99001",
+      deliveryId: "delivery-2",
+    });
+
+    expect(replay).toMatchObject({
+      status: "existing",
+      reason: "same_comment",
+      job: { id: first.id, status: "succeeded" },
+    });
+  });
+
+  // CR-32-T12
+  it("is created for another comment asking for the same thing, once the first job has finished", async () => {
+    const fixture = await createJobQueueFixture();
+    const first = await fixture.enqueueNew({
+      triggerKind: "comment",
+      commentId: "99001",
+    });
+    const claimed = await fixture.queue.claimNext("runner-a");
+    await fixture.queue.complete(first.id, claimed?.leaseToken ?? "", {
+      ok: true,
+      result: {},
+    });
+
+    const second = await fixture.enqueue({
+      triggerKind: "comment",
+      commentId: "99002",
+    });
+
+    expect(second.status).toBe("created");
+  });
+
+  it("is a different job for the same comment id in another repository", async () => {
+    const fixture = await createJobQueueFixture();
+    await fixture.enqueueNew({ triggerKind: "comment", commentId: "99001" });
+
+    const other = await fixture.enqueue({
+      triggerKind: "comment",
+      commentId: "99001",
+      repositoryId: fixture.otherRepositoryId,
+    });
+
+    expect(other.status).toBe("created");
+  });
+
+  it("is refused by the database too when the same comment gets a second job", async () => {
+    const fixture = await createJobQueueFixture();
+    const first = await fixture.enqueueNew({
+      triggerKind: "comment",
+      commentId: "99001",
+    });
+    const stored = await fixture.db
+      .selectFrom("jobs")
+      .selectAll()
+      .where("id", "=", first.id)
+      .executeTakeFirstOrThrow();
+
+    await expect(
+      fixture.db
+        .insertInto("jobs")
+        .values({ ...stored, id: "another-id", delivery_id: "other" })
+        .execute(),
+    ).rejects.toThrow(/UNIQUE/);
   });
 });
 

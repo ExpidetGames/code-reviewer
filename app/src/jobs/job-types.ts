@@ -28,6 +28,8 @@ export type Job = {
   actorLogin: string;
   /** The webhook delivery that created the job; null for a manual job. */
   deliveryId: string | null;
+  /** The comment a comment command came from (the platform's id); null for every other job. */
+  commentId: string | null;
   status: JobStatus;
   /** The job is not handed out before this moment. */
   runAfter: string;
@@ -61,6 +63,12 @@ export type EnqueueJobInput = {
   actorLogin: string;
   /** The webhook delivery the job comes from; makes the enqueue idempotent per delivery. */
   deliveryId?: string | null;
+  /**
+   * The comment the command was written in, for a `comment` job. At most one job is ever created
+   * per comment of a repository (`same_comment`), however often and under whatever delivery id the
+   * comment arrives.
+   */
+  commentId?: string | null;
   /** Defaults to now. A debounce is a later `runAfter`. */
   runAfter?: Date;
 };
@@ -69,6 +77,8 @@ export type EnqueueJobInput = {
 export const ENQUEUE_EXISTING_REASONS = [
   /** The same delivery was enqueued before (a redelivery or a second request). */
   "same_delivery",
+  /** A job for this comment was created before (a replayed delivery under another delivery id). */
+  "same_comment",
   /** An automatic job for this head commit and command already exists. */
   "same_head",
   /** A waiting or running job for this pull request and command already exists. */

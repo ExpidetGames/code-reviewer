@@ -51,6 +51,7 @@ export function jobInputForTrigger(
       ...common,
       command: trigger.command,
       args: trigger.args,
+      commentId: trigger.commentId,
       triggerKind: "comment",
     };
   return { ...common, command: "review", triggerKind: "webhook" };
