@@ -35,6 +35,7 @@ describe("validating a job to enqueue", () => {
         triggerKind: "webhook",
         actorLogin: "octocat",
         deliveryId: null,
+        commentId: null,
         runAfter: null,
       },
     });
@@ -141,6 +142,24 @@ describe("validating a job to enqueue", () => {
     });
     expect(validateEnqueueInput(input({ deliveryId: null }))).toMatchObject({
       ok: true,
+    });
+  });
+
+  it("refuses an empty comment id but accepts none", () => {
+    expect(validateEnqueueInput(input({ commentId: "" }))).toEqual({
+      ok: false,
+      fieldErrors: [{ field: "commentId", code: "invalid" }],
+    });
+    expect(validateEnqueueInput(input({ commentId: 99001 }))).toEqual({
+      ok: false,
+      fieldErrors: [{ field: "commentId", code: "invalid" }],
+    });
+    expect(validateEnqueueInput(input({ commentId: null }))).toMatchObject({
+      ok: true,
+    });
+    expect(validateEnqueueInput(input({ commentId: "99001" }))).toMatchObject({
+      ok: true,
+      value: { commentId: "99001" },
     });
   });
 

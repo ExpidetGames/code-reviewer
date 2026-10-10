@@ -1,0 +1,121 @@
+{
+  "placeholder": "[image link removed]",
+  "comment": "Questions for /ask and what the app and the runner both make of them. PR-Agent fetches the first markdown image or the first image-looking link of a question from the runner, so both sides remove them with the same result. Dummy hosts only.",
+  "cases": [
+    {
+      "name": "a markdown image",
+      "input": "see ![image](https://evil.test/a.png) why",
+      "expected": "see [image link removed] why"
+    },
+    {
+      "name": "a markdown image without alt text",
+      "input": "![](http://169.254.169.254/latest/meta-data/)",
+      "expected": "[image link removed]"
+    },
+    {
+      "name": "a markdown image with a long alt text and a link without an extension",
+      "input": "![a screenshot of the page](https://internal.test/render?id=7) is it right?",
+      "expected": "[image link removed] is it right?"
+    },
+    {
+      "name": "a markdown image whose bracket is not closed",
+      "input": "![image](https://evil.test/a.png",
+      "expected": "[image link removed]"
+    },
+    {
+      "name": "the bare marker PR-Agent looks for",
+      "input": "![image] http://10.0.0.5/x",
+      "expected": "[image link removed] http://10.0.0.5/x"
+    },
+    {
+      "name": "a reference style image",
+      "input": "![image][ref]\n\n[ref]: https://evil.test/a.png",
+      "expected": "[image link removed]\n\n[ref]: [image link removed]"
+    },
+    {
+      "name": "a bare image link",
+      "input": "what is https://internal.test/a.png ?",
+      "expected": "what is [image link removed] ?"
+    },
+    {
+      "name": "upper case extensions and schemes",
+      "input": "https://x.test/A.PNG and HTTPS://X.TEST/b.JpG",
+      "expected": "[image link removed] and [image link removed]"
+    },
+    {
+      "name": "every extension PR-Agent knows and some more",
+      "input": "https://x.test/a.png https://x.test/a.jpg https://x.test/a.jpeg https://x.test/a.gif https://x.test/a.webp https://x.test/a.svg",
+      "expected": "[image link removed] [image link removed] [image link removed] [image link removed] [image link removed] [image link removed]"
+    },
+    {
+      "name": "an image link with a query string",
+      "input": "https://x.test/a.png?token=1&b=2",
+      "expected": "[image link removed]"
+    },
+    {
+      "name": "an image link with a fragment",
+      "input": "look: https://x.test/a.gif#top",
+      "expected": "look: [image link removed]"
+    },
+    {
+      "name": "a link that redirects style to an image",
+      "input": "https://x.test/redirect?to=https://169.254.169.254/x.png",
+      "expected": "[image link removed]"
+    },
+    {
+      "name": "an image link with an extension in a later parameter",
+      "input": "https://x.test/view?file=a.png&size=2",
+      "expected": "[image link removed]"
+    },
+    {
+      "name": "an image link over plain http",
+      "input": "http://10.0.0.1/a.jpeg",
+      "expected": "[image link removed]"
+    },
+    {
+      "name": "an image link in brackets and followed by a full stop",
+      "input": "(https://x.test/a.webp).",
+      "expected": "([image link removed])."
+    },
+    {
+      "name": "an image link in an html tag",
+      "input": "<img src=\"https://x.test/a.svg\">",
+      "expected": "<img src=\"[image link removed]\">"
+    },
+    {
+      "name": "an exclamation mark in front of a bare link",
+      "input": "!https://x.test/a.png",
+      "expected": "[image link removed]"
+    },
+    {
+      "name": "several lines keep their line breaks",
+      "input": "line one\n![x](https://a.test/b.png)\nline three",
+      "expected": "line one\n[image link removed]\nline three"
+    },
+    {
+      "name": "a link that is not an image stays",
+      "input": "see https://example.com/docs/page and https://example.com/report.pdf",
+      "expected": "see https://example.com/docs/page and https://example.com/report.pdf"
+    },
+    {
+      "name": "a question without links stays",
+      "input": "Why was the cache removed?",
+      "expected": "Why was the cache removed?"
+    },
+    {
+      "name": "an alt text over the bound still loses its image link",
+      "input": "![aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa](https://evil.test/x.png)",
+      "expected": "![aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]([image link removed])"
+    },
+    {
+      "name": "an alt text with a line break still loses its image link",
+      "input": "![a\nb](https://evil.test/x.png)",
+      "expected": "![a\nb]([image link removed])"
+    },
+    {
+      "name": "an alt text of exactly the bound is one image",
+      "input": "![aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa](https://evil.test/x)",
+      "expected": "[image link removed]"
+    }
+  ]
+}
