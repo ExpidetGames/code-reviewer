@@ -464,6 +464,7 @@ describe("a delivery about installations", () => {
     seedTwoInstallations(h);
     await h.sync.syncAll();
 
+    h.fake.suspendInstallation(4242, true);
     expect(await h.deliver("installation.suspend")).toMatchObject({
       outcome: "disabled",
     });
@@ -471,6 +472,7 @@ describe("a delivery about installations", () => {
       (await h.integrations.findByExternalId("github_app", "4242"))?.status,
     ).toBe("disabled");
 
+    h.fake.suspendInstallation(4242, false);
     h.fake.addRepository(4242, { id: 7003, fullName: "acme/gizmos" });
     expect(await h.deliver("installation.unsuspend")).toMatchObject({
       outcome: "synced",
@@ -481,10 +483,39 @@ describe("a delivery about installations", () => {
     expect(await h.repositories.list({ active: true })).toHaveLength(4);
   });
 
+  it("does not suspend an installation because of a late suspend delivery when GitHub says it is active", async () => {
+    const h = await startSyncHarness();
+    seedTwoInstallations(h);
+    await h.sync.syncAll();
+
+    const result = await h.deliver("installation.suspend");
+
+    expect(result).toMatchObject({ outcome: "synced" });
+    expect(
+      (await h.integrations.findByExternalId("github_app", "4242"))?.status,
+    ).toBe("active");
+  });
+
+  it("does not resume an installation because of a late unsuspend delivery when GitHub says it is suspended", async () => {
+    const h = await startSyncHarness();
+    seedTwoInstallations(h);
+    await h.sync.syncAll();
+    h.fake.suspendInstallation(4242, true);
+    await h.deliver("installation.suspend");
+
+    const result = await h.deliver("installation.unsuspend");
+
+    expect(result).toMatchObject({ outcome: "skipped_disabled" });
+    expect(
+      (await h.integrations.findByExternalId("github_app", "4242"))?.status,
+    ).toBe("disabled");
+  });
+
   it("does not read the repositories of a suspended installation", async () => {
     const h = await startSyncHarness();
     seedTwoInstallations(h);
     await h.sync.syncAll();
+    h.fake.suspendInstallation(4242, true);
     await h.deliver("installation.suspend");
     const callsBefore = h.fake.requests().length;
 

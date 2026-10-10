@@ -1,12 +1,7 @@
 // Turns GitHub's pull request JSON into the app's PullRequestRef. Returns null when a field the app
 // needs is missing, so the caller can report an unexpected answer instead of passing on garbage.
+import { isRecord } from "./guards.ts";
 import type { PullRequestRef, PullRequestState } from "../../types.ts";
-
-type Record_ = Record<string, unknown>;
-
-function isRecord(value: unknown): value is Record_ {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 export function toPullRequestRef(json: unknown): PullRequestRef | null {
   if (!isRecord(json) || !isRecord(json.head) || !isRecord(json.base))

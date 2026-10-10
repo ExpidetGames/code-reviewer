@@ -30,6 +30,9 @@ const PULL_REQUEST_TRIGGER_MAP = {
   synchronize: "updated",
 } as const;
 
+/** Only these can have write access to a repository; every other commenter is ignored at once. */
+const WRITE_CAPABLE_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+
 // A command counts only if the comment starts with it (leading whitespace allowed), in any case.
 const COMMAND_PATTERN =
   /^\s*\/(review|improve|describe|ask)(?=\s|$)\s*([\s\S]*)$/i;
@@ -39,6 +42,8 @@ export type ParseContext = {
   /** The event name from the `X-GitHub-Event` header. */
   eventName: string;
   payload: unknown;
+  /** Does this user have write access to the repository? Asked before anything else is read. */
+  hasWriteAccess(repoFullName: string, login: string): Promise<boolean>;
   /** The current head commit of a pull request; a comment delivery does not carry it. */
   headShaOf(repoFullName: string, prNumber: number): Promise<string>;
 };
@@ -133,7 +138,21 @@ export async function parseGithubEvent(
   const match = COMMAND_PATTERN.exec(field<string>(payload, "comment.body"));
   if (match === null) return ignored("the comment is not a command");
 
+  // Cheapest checks first, so a commenter without write access costs as few GitHub calls as
+  // possible: the association from the payload (no call), then the permission (one call), and only
+  // then the head commit of the pull request.
+  if (
+    !WRITE_CAPABLE_ASSOCIATIONS.has(
+      field<string>(payload, "comment.author_association"),
+    )
+  )
+    return ignored("the commenter cannot have write access");
+
   const repo = repoOf(context);
+  const actor = actorOf(payload);
+  if (!(await context.hasWriteAccess(repo.fullName, actor.login)))
+    return ignored("the commenter has no write access");
+
   const prNumber = field<number>(payload, "issue.number");
   return {
     kind: "review_trigger",
@@ -145,7 +164,7 @@ export async function parseGithubEvent(
       headSha: await context.headShaOf(repo.fullName, prNumber),
       command: (match[1] as string).toLowerCase() as ReviewCommand,
       args: (match[2] ?? "").trim(),
-      actor: actorOf(payload),
+      actor,
     },
   };
 }

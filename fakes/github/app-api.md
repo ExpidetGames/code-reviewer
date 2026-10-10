@@ -19,6 +19,8 @@ const fake = await startGithubAppFake({ appId, publicKeyPem, now: clock.now });
 fake.addInstallation({ id: 4242, account: { login: "acme", id: 5001, type: "Organization" } });
 fake.setRepositories(4242, [{ id: 7001, fullName: "acme/widgets" }]);
 fake.fail({ pathIncludes: "/installation/repositories", status: 503, times: 1 }); // or delayMs, headers
+fake.fail({ pathIncludes: "/app/installations", responseDelayMs: 300, times: 1 }); // a slow answer that reflects the state when the request arrived
+fake.omitFromListings(4242, [7002]); // a page boundary that skipped a repository (total_count still counts it)
 fake.rejectAppJwts(true); // every JWT answered with 401
 fake.requests(); // method and path of every request, no credentials
 fake.seenCredentials(); // every JWT or token received, to search outputs for leaks

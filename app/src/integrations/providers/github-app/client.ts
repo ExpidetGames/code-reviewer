@@ -6,6 +6,7 @@
 // status only: never the JWT, a token, a key or a response body.
 import type { GithubAppConfig } from "./config.ts";
 import { GithubAppError } from "./errors.ts";
+import { isRecord } from "./guards.ts";
 import { createAppJwt } from "./jwt.ts";
 import { toPullRequestRef } from "./mappers.ts";
 import type { PullRequestRef } from "../../types.ts";
@@ -77,20 +78,18 @@ export type GithubAppClientOptions = {
   now?: () => number;
   /** How long one request may take before it counts as unavailable. Default 15 seconds. */
   requestTimeoutMs?: number;
+  /** Receives a warning about a record that is skipped. Default: console.warn. */
+  warn?: (line: string) => void;
 };
 
 const PAGE_SIZE = 100;
 /** A hard stop so a misbehaving server cannot loop us forever; reaching it is an error, not a cut. */
 const MAX_PAGES = 100;
 const TOKEN_EXPIRY_BUFFER_MS = 60_000;
+/** A JWT lives about 9 minutes (see jwt.ts); reuse it for 5 so it never expires mid-call. */
+const JWT_REUSE_MS = 5 * 60_000;
 const DEFAULT_TIMEOUT_MS = 15_000;
 const GITHUB_API_VERSION = "2022-11-28";
-
-type Record_ = Record<string, unknown>;
-
-function isRecord(value: unknown): value is Record_ {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function shapeError(call: string): GithubAppError {
   return new GithubAppError(
@@ -99,16 +98,24 @@ function shapeError(call: string): GithubAppError {
   );
 }
 
-function toInstallation(value: unknown, call: string): RemoteInstallation {
-  if (!isRecord(value) || !isRecord(value.account)) throw shapeError(call);
+/**
+ * One installation record. Returns `skip` for a record whose account has no login or type (for
+ * example some enterprise accounts), so one odd record cannot block the whole listing; throws for a
+ * record that is not even an installation.
+ */
+function toInstallation(
+  value: unknown,
+  call: string,
+): RemoteInstallation | { skip: string } {
+  if (!isRecord(value) || typeof value.id !== "number") throw shapeError(call);
   const { id, account } = value;
   if (
-    typeof id !== "number" ||
+    !isRecord(account) ||
     typeof account.login !== "string" ||
     typeof account.id !== "number" ||
     typeof account.type !== "string"
   )
-    throw shapeError(call);
+    return { skip: `installation ${id}: its account has no login, id or type` };
   return {
     id: String(id),
     accountLogin: account.login,
@@ -141,14 +148,34 @@ function checkInstallationId(installationId: string): void {
     );
 }
 
+/** A path segment must be a real name: `.` and `..` would make the URL point somewhere else. */
+function isPlainSegment(segment: string): boolean {
+  return segment !== "" && segment !== "." && segment !== "..";
+}
+
 function repoPath(repoFullName: string): string {
   const match = /^([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+)$/.exec(repoFullName);
-  if (!match)
+  const owner = match?.[1];
+  const name = match?.[2];
+  if (
+    owner === undefined ||
+    name === undefined ||
+    !isPlainSegment(owner) ||
+    !isPlainSegment(name)
+  )
     throw new GithubAppError(
       "GITHUB_APP_REQUEST_FAILED",
       "The repository name is not in the form owner/name.",
     );
-  return `/repos/${encodeURIComponent(match[1] as string)}/${encodeURIComponent(match[2] as string)}`;
+  return `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
+}
+
+function checkPullRequestNumber(prNumber: number): void {
+  if (!Number.isSafeInteger(prNumber) || prNumber < 1)
+    throw new GithubAppError(
+      "GITHUB_APP_REQUEST_FAILED",
+      "The pull request number is not a positive whole number.",
+    );
 }
 
 export function createGithubAppClient(
@@ -157,16 +184,23 @@ export function createGithubAppClient(
   const { config } = options;
   const now = options.now ?? Date.now;
   const timeoutMs = options.requestTimeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const warn = options.warn ?? ((line: string) => console.warn(line));
   const doFetch: typeof fetch = (input, init) =>
     (options.fetch ?? globalThis.fetch)(input, init);
   const tokenCache = new Map<string, { token: string; expiresAtMs: number }>();
 
+  // One JWT serves many calls (a listing needs one per page): keep it until shortly before it ends.
+  let cachedJwt: { jwt: string; reuseUntilMs: number } | undefined;
   function appJwt(): string {
-    return createAppJwt({
+    const nowMs = now();
+    if (cachedJwt && nowMs < cachedJwt.reuseUntilMs) return cachedJwt.jwt;
+    const jwt = createAppJwt({
       appId: config.appId,
       privateKey: config.privateKey,
-      nowMs: now(),
+      nowMs,
     });
+    cachedJwt = { jwt, reuseUntilMs: nowMs + JWT_REUSE_MS };
+    return jwt;
   }
 
   function retryAfter(headers: Headers): number | null {
@@ -343,6 +377,12 @@ export function createGithubAppClient(
           return json;
         },
         (item) => toInstallation(item, "GET /app/installations"),
+      ).then((items) =>
+        items.flatMap((item) => {
+          if (!("skip" in item)) return [item];
+          warn(`[github-app] skipped ${item.skip}.`);
+          return [];
+        }),
       );
     },
 
@@ -354,7 +394,14 @@ export function createGithubAppClient(
           "GET",
           `/app/installations/${installationId}`,
         );
-        return toInstallation(json, "GET /app/installations/{id}");
+        const installation = toInstallation(
+          json,
+          "GET /app/installations/{id}",
+        );
+        // Unlike a listing, a single lookup cannot skip: the caller asked for exactly this one.
+        if ("skip" in installation)
+          throw shapeError("GET /app/installations/{id}");
+        return installation;
       } catch (error) {
         if (
           error instanceof GithubAppError &&
@@ -367,23 +414,37 @@ export function createGithubAppClient(
 
     async listInstallationRepositories(installationId) {
       checkInstallationId(installationId);
-      return withInstallationToken(installationId, (token) =>
-        allPages(
+      return withInstallationToken(installationId, async (token) => {
+        let total: number | undefined;
+        const repositories = await allPages(
           token,
           "/installation/repositories",
           (json) => {
             if (!isRecord(json) || !Array.isArray(json.repositories))
               throw shapeError("GET /installation/repositories");
+            total =
+              typeof json.total_count === "number" ? json.total_count : total;
             return json.repositories;
           },
           (item) => toRepository(item, "GET /installation/repositories"),
-        ),
-      );
+        );
+        // Pages are read one after the other while repositories may be added or removed, which can
+        // make a page boundary skip one. A list shorter than GitHub's own count is incomplete, and
+        // an incomplete list must never be taken for "the others are gone".
+        const distinct = new Set(repositories.map((repo) => repo.externalId));
+        if (total !== undefined && distinct.size < total)
+          throw new GithubAppError(
+            "GITHUB_APP_UNAVAILABLE",
+            `GitHub listed ${distinct.size} of ${total} repositories; try again.`,
+          );
+        return repositories;
+      });
     },
 
     async getPullRequest(installationId, repoFullName, prNumber) {
       checkInstallationId(installationId);
-      const path = `${repoPath(repoFullName)}/pulls/${Number(prNumber)}`;
+      checkPullRequestNumber(prNumber);
+      const path = `${repoPath(repoFullName)}/pulls/${prNumber}`;
       return withInstallationToken(installationId, async (token) => {
         const json = await request(await token(), "GET", path);
         const pr = toPullRequestRef(json);
@@ -416,6 +477,11 @@ export function createGithubAppClient(
 
     async getCollaboratorPermission(installationId, repoFullName, login) {
       checkInstallationId(installationId);
+      if (!isPlainSegment(login))
+        throw new GithubAppError(
+          "GITHUB_APP_REQUEST_FAILED",
+          "The login is not a usable user name.",
+        );
       const path = `${repoPath(repoFullName)}/collaborators/${encodeURIComponent(login)}/permission`;
       return withInstallationToken(installationId, async (token) => {
         try {

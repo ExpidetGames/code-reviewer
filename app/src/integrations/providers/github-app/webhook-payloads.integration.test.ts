@@ -103,6 +103,7 @@ describe("the recorded GitHub webhook payloads", () => {
       integrationId: "integration-1",
       eventName: "pull_request",
       payload: webhookFixture("pull_request.opened"),
+      hasWriteAccess: async () => false,
       headShaOf: async () => "unused",
     });
 

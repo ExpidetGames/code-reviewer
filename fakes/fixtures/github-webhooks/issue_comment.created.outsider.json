@@ -1,0 +1,50 @@
+{
+  "action": "created",
+  "issue": {
+    "number": 7,
+    "title": "Add widget caching",
+    "state": "open",
+    "html_url": "https://github.com/acme/widgets/pull/7",
+    "pull_request": {
+      "url": "https://api.github.com/repos/acme/widgets/pulls/7",
+      "html_url": "https://github.com/acme/widgets/pull/7"
+    },
+    "user": {
+      "login": "alice",
+      "id": 1001,
+      "type": "User"
+    }
+  },
+  "comment": {
+    "id": 99001,
+    "body": "/review",
+    "user": {
+      "login": "mallory",
+      "id": 1099,
+      "type": "User"
+    },
+    "author_association": "NONE"
+  },
+  "repository": {
+    "id": 7001,
+    "name": "widgets",
+    "full_name": "acme/widgets",
+    "private": true,
+    "html_url": "https://github.com/acme/widgets",
+    "owner": {
+      "login": "acme",
+      "id": 5001,
+      "type": "Organization"
+    },
+    "default_branch": "main"
+  },
+  "installation": {
+    "id": 4242,
+    "node_id": "MDIzOkludGVncmF0aW9uSW5zdGFsbGF0aW9uNDI0Mg=="
+  },
+  "sender": {
+    "login": "mallory",
+    "id": 1099,
+    "type": "User"
+  }
+}

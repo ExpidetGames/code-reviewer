@@ -84,6 +84,19 @@ export function createGithubAppProvider(
     return resolvedClient;
   }
 
+  async function hasWriteAccess(
+    installationId: string,
+    repoFullName: string,
+    login: string,
+  ): Promise<boolean> {
+    const permission = await getClient().getCollaboratorPermission(
+      installationId,
+      repoFullName,
+      login,
+    );
+    return permission === "admin" || permission === "write";
+  }
+
   return {
     type: "github_app",
     connect: { kind: "install_redirect" },
@@ -137,6 +150,8 @@ export function createGithubAppProvider(
         integrationId: integration.id,
         eventName: request.headers.get("x-github-event") ?? "",
         payload,
+        hasWriteAccess: (repoFullName, login) =>
+          hasWriteAccess(integration.externalId, repoFullName, login),
         async headShaOf(repoFullName, prNumber) {
           const pr = await getClient().getPullRequest(
             integration.externalId,
@@ -151,12 +166,11 @@ export function createGithubAppProvider(
     async canTrigger(integration, trigger) {
       // Pull request events start a review whoever caused them (forks included).
       if (trigger.kind !== "command") return true;
-      const permission = await getClient().getCollaboratorPermission(
+      return hasWriteAccess(
         integration.externalId,
         trigger.repo.fullName,
         trigger.actor.login,
       );
-      return permission === "admin" || permission === "write";
     },
 
     async jobAccess(integration, repo) {

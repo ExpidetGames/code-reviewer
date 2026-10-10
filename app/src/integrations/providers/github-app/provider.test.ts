@@ -50,7 +50,11 @@ const widgets: RepoRef = {
 };
 
 function setup(data: FakeGithubAppClientData = {}) {
-  const client = fakeGithubAppClient(data);
+  const client = fakeGithubAppClient({
+    // The commenter of the fixtures has write access unless a test says otherwise.
+    permissions: { "acme/widgets#bob": "write" },
+    ...data,
+  });
   const provider = createGithubAppProvider({
     config: testGithubAppConfig(),
     client,
@@ -137,6 +141,35 @@ describe("verifying a delivery", () => {
 
     expect(
       await provider.verifyWebhook(null, delivery("installation.created")),
+    ).toBe(true);
+  });
+
+  // CR-21-T14
+  it("refuses a delivery whose body was changed after it was signed", async () => {
+    const { provider } = setup();
+    const original = JSON.stringify(webhookFixture("pull_request.opened"));
+    const signature = delivery("pull_request.opened").headers.get(
+      "x-hub-signature-256",
+    );
+
+    const tampered = webhookDelivery({
+      event: "pull_request",
+      body: original.replace('"number":7', '"number":8'),
+      secret: TEST_WEBHOOK_SECRET,
+      signature,
+    });
+
+    expect(await provider.verifyWebhook(null, tampered)).toBe(false);
+    expect(
+      await provider.verifyWebhook(
+        null,
+        webhookDelivery({
+          event: "pull_request",
+          body: original,
+          secret: TEST_WEBHOOK_SECRET,
+          signature,
+        }),
+      ),
     ).toBe(true);
   });
 
@@ -275,6 +308,10 @@ describe("translating comment deliveries", () => {
       actor: { login: "bob", externalId: "1002" },
     });
     expect(client.calls).toEqual([
+      {
+        method: "getCollaboratorPermission",
+        args: ["4242", "acme/widgets", "bob"],
+      },
       { method: "getPullRequest", args: ["4242", "acme/widgets", 7] },
     ]);
   });
@@ -305,6 +342,34 @@ describe("translating comment deliveries", () => {
     expect(await eventOf("issue_comment.created.bot")).toMatchObject({
       kind: "ignored",
     });
+  });
+
+  it("asks GitHub nothing for a commenter who cannot have write access", async () => {
+    const { client, provider } = setup();
+
+    const event = await provider.parseEvent(
+      integration,
+      delivery("issue_comment.created.outsider"),
+    );
+
+    expect(event).toMatchObject({ kind: "ignored" });
+    expect(client.calls).toEqual([]);
+  });
+
+  it("does not read the pull request for a member who has no write access", async () => {
+    const { client, provider } = setup({
+      permissions: { "acme/widgets#bob": "read" },
+    });
+
+    const event = await provider.parseEvent(
+      integration,
+      delivery("issue_comment.created.review"),
+    );
+
+    expect(event).toMatchObject({ kind: "ignored" });
+    expect(client.calls.map((call) => call.method)).toEqual([
+      "getCollaboratorPermission",
+    ]);
   });
 
   it("does not ask GitHub anything for a comment that is no command", async () => {

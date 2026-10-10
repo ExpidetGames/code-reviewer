@@ -35,18 +35,23 @@ describe("the sync at server start", () => {
     h.fake.setRepositories(4242, [{ id: 7001, fullName: "acme/widgets" }]);
     await h.sync.syncAll();
     h.fake.fail({ status: 500 });
-    const lines: string[] = [];
+    const lines: Array<[string, string]> = [];
 
     const summary = await runStartupSync({
       getDb: () => h.db,
       registry: h.registry,
-      log: (line) => lines.push(line),
+      log: (line, level) => lines.push([level, line]),
     });
 
     expect(summary?.errors.map((error) => error.code)).toEqual([
       "GITHUB_APP_UNAVAILABLE",
     ]);
-    expect(lines.join("\n")).toContain("GITHUB_APP_UNAVAILABLE");
+    expect(lines.length).toBeGreaterThan(0);
+    // Failures are logged as errors, not as information.
+    expect(lines.every(([level]) => level === "error")).toBe(true);
+    expect(lines.map(([, line]) => line).join("\n")).toContain(
+      "GITHUB_APP_UNAVAILABLE",
+    );
     expect(await h.repositories.list({ active: true })).toHaveLength(1);
   });
 

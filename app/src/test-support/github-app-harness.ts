@@ -38,6 +38,9 @@ export async function startGithubAppHarness(): Promise<GithubAppHarness> {
   return {
     fake,
     clock,
-    env: testGithubAppEnv({ GITHUB_API_BASE_URL: fake.baseUrl }),
+    env: testGithubAppEnv({
+      GITHUB_API_BASE_URL: fake.baseUrl,
+      ALLOW_TEST_GITHUB_ENDPOINTS: "true",
+    }),
   };
 }

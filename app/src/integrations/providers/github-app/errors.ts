@@ -1,3 +1,5 @@
+import type { SafeMessageError } from "../../errors.ts";
+
 // Stable error codes of the GitHub App provider. Callers branch on `code`, never on the message. A
 // message names the call and the status, never a key, a JWT, a token or a response body.
 export const GITHUB_APP_ERROR_CODES = [
@@ -17,7 +19,9 @@ export const GITHUB_APP_ERROR_CODES = [
 
 export type GithubAppErrorCode = (typeof GITHUB_APP_ERROR_CODES)[number];
 
-export class GithubAppError extends Error {
+export class GithubAppError extends Error implements SafeMessageError {
+  /** The messages of this provider name calls and statuses only; see `hasSafeMessage`. */
+  readonly safeMessage = true as const;
   readonly code: GithubAppErrorCode;
   /** HTTP status of the answer; null for a network failure, a timeout or a configuration error. */
   readonly status: number | null;

@@ -13,7 +13,22 @@ export const INTEGRATION_ERROR_CODES = [
 
 export type IntegrationErrorCode = (typeof INTEGRATION_ERROR_CODES)[number];
 
-export class IntegrationError extends Error {
+/**
+ * Marks an error whose message is known to be free of secrets (it names calls, statuses and
+ * variable names, never a key, token or response body), so it may be logged and shown as it is. Any
+ * error without the marker is reduced to a generic line wherever it is reported.
+ */
+export type SafeMessageError = Error & { readonly safeMessage: true };
+
+export function hasSafeMessage(error: unknown): error is SafeMessageError {
+  return (
+    error instanceof Error &&
+    (error as { safeMessage?: unknown }).safeMessage === true
+  );
+}
+
+export class IntegrationError extends Error implements SafeMessageError {
+  readonly safeMessage = true as const;
   readonly code: IntegrationErrorCode;
 
   constructor(

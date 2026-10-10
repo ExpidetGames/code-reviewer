@@ -74,15 +74,26 @@ function readKey(
     : { invalid: "GITHUB_APP_PRIVATE_KEY_PATH" };
 }
 
-function parseBaseUrl(raw: string | undefined): string | undefined {
+/**
+ * The App JWT and installation tokens are sent to this address, so it is the public GitHub API unless
+ * the operator explicitly allows a test endpoint (the fake GitHub of the tests). Returns undefined
+ * when the value is unusable or not allowed.
+ */
+function parseBaseUrl(
+  raw: string | undefined,
+  testEndpointsAllowed: boolean,
+): string | undefined {
   if (raw === undefined) return DEFAULT_GITHUB_API_BASE_URL;
+  let normalized: string;
   try {
     const url = new URL(raw);
     if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
-    return raw.replace(/\/+$/, "");
+    normalized = raw.replace(/\/+$/, "");
   } catch {
     return undefined;
   }
+  if (normalized === DEFAULT_GITHUB_API_BASE_URL) return normalized;
+  return testEndpointsAllowed ? normalized : undefined;
 }
 
 /**
@@ -102,7 +113,10 @@ export function loadGithubAppConfig(env: Env): GithubAppConfig {
   else if (!/^[A-Za-z0-9][A-Za-z0-9-]*$/.test(slug))
     invalid.push("GITHUB_APP_SLUG");
 
-  const webhookSecret = value(env, "GITHUB_APP_WEBHOOK_SECRET");
+  // Not trimmed: the secret is compared byte for byte with the one GitHub signs with.
+  const rawSecret = env.GITHUB_APP_WEBHOOK_SECRET;
+  const webhookSecret =
+    rawSecret === undefined || rawSecret.trim() === "" ? undefined : rawSecret;
   if (webhookSecret === undefined) missing.push("GITHUB_APP_WEBHOOK_SECRET");
 
   const key = readKey(env);
@@ -110,8 +124,13 @@ export function loadGithubAppConfig(env: Env): GithubAppConfig {
     missing.push("GITHUB_APP_PRIVATE_KEY (or GITHUB_APP_PRIVATE_KEY_PATH)");
   else if ("invalid" in key) invalid.push(key.invalid);
 
-  const apiBaseUrl = parseBaseUrl(value(env, "GITHUB_API_BASE_URL"));
-  if (apiBaseUrl === undefined) invalid.push("GITHUB_API_BASE_URL");
+  const apiBaseUrl = parseBaseUrl(
+    value(env, "GITHUB_API_BASE_URL"),
+    value(env, "ALLOW_TEST_GITHUB_ENDPOINTS") === "true",
+  );
+  // Both names: the fix is either to remove the override or to allow it on purpose.
+  if (apiBaseUrl === undefined)
+    invalid.push("GITHUB_API_BASE_URL", "ALLOW_TEST_GITHUB_ENDPOINTS");
 
   if (missing.length > 0) throw new GithubAppConfigError(missing, "missing");
   if (invalid.length > 0) throw new GithubAppConfigError(invalid, "invalid");

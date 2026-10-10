@@ -73,13 +73,47 @@ describe("loading the GitHub App configuration", () => {
     ).toBe(privateKey.trim());
   });
 
-  it("uses the API base URL from the environment without a trailing slash", () => {
+  it("uses a test API base URL without a trailing slash when test endpoints are allowed", () => {
     const config = loadGithubAppConfig({
       ...complete,
       GITHUB_API_BASE_URL: "http://127.0.0.1:4010/",
+      ALLOW_TEST_GITHUB_ENDPOINTS: "true",
     });
 
     expect(config.apiBaseUrl).toBe("http://127.0.0.1:4010");
+  });
+
+  it("refuses another API base URL unless test endpoints are allowed, naming both variables", () => {
+    for (const allow of [undefined, "false", "1", "TRUE"]) {
+      const error = failureOf({
+        ...complete,
+        GITHUB_API_BASE_URL: "http://127.0.0.1:4010",
+        ALLOW_TEST_GITHUB_ENDPOINTS: allow,
+      });
+
+      expect(error).toMatchObject({
+        code: "GITHUB_APP_CONFIG_INVALID",
+        variables: ["GITHUB_API_BASE_URL", "ALLOW_TEST_GITHUB_ENDPOINTS"],
+      });
+    }
+  });
+
+  it("accepts the public GitHub API address given explicitly without the flag", () => {
+    const config = loadGithubAppConfig({
+      ...complete,
+      GITHUB_API_BASE_URL: "https://api.github.com/",
+    });
+
+    expect(config.apiBaseUrl).toBe("https://api.github.com");
+  });
+
+  it("keeps whitespace of the webhook secret", () => {
+    const config = loadGithubAppConfig({
+      ...complete,
+      GITHUB_APP_WEBHOOK_SECRET: " secret with edges ",
+    });
+
+    expect(config.webhookSecret).toBe(" secret with edges ");
   });
 
   // CR-21-T10
@@ -145,9 +179,15 @@ describe("loading the GitHub App configuration", () => {
   });
 
   it("refuses an API base URL that is not an http(s) URL", () => {
-    const error = failureOf({ ...complete, GITHUB_API_BASE_URL: "ftp://x" });
+    const error = failureOf({
+      ...complete,
+      GITHUB_API_BASE_URL: "ftp://x",
+      ALLOW_TEST_GITHUB_ENDPOINTS: "true",
+    });
 
-    expect(error).toMatchObject({ variables: ["GITHUB_API_BASE_URL"] });
+    expect(error).toMatchObject({
+      variables: ["GITHUB_API_BASE_URL", "ALLOW_TEST_GITHUB_ENDPOINTS"],
+    });
   });
 
   it("keeps the key and the webhook secret out of JSON and enumeration", () => {

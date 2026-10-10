@@ -55,8 +55,13 @@ export type FakeFailure = {
   /** Answers with this status and an empty JSON error body. */
   status?: number;
   headers?: Record<string, string>;
-  /** Waits this long before answering (or before the status, if both are given). */
+  /** Waits this long before looking at the request (and before the status, if both are given). */
   delayMs?: number;
+  /**
+   * Looks at the request at once but sends the answer only after this long: the answer reflects the
+   * state of GitHub when the request arrived, and reaches the client later, like a slow response.
+   */
+  responseDelayMs?: number;
   /** How many requests it applies to; forever when omitted. */
   times?: number;
 };
@@ -82,6 +87,13 @@ export type FakeGithubApp = {
   removeInstallation(id: number): void;
   suspendInstallation(id: number, suspended: boolean): void;
   setRepositories(installationId: number, repositories: FakeRepository[]): void;
+  /**
+   * Leaves these repositories out of the pages of `/installation/repositories` while `total_count`
+   * still counts them, like a page boundary that skipped one while the list changed.
+   */
+  omitFromListings(installationId: number, repositoryIds: number[]): void;
+  /** Adds a raw record to `/app/installations`, for example one whose account has no login. */
+  addRawInstallationRecord(record: Record<string, unknown>): void;
   addRepository(installationId: number, repository: FakeRepository): void;
   removeRepository(installationId: number, repositoryId: number): void;
   addPullRequest(repoFullName: string, pullRequest: FakePullRequest): void;
@@ -201,6 +213,8 @@ export async function startGithubAppFake(
     installationId: number;
     repositories: string[] | null;
   }> = [];
+  const omitted = new Map<number, number[]>();
+  const rawInstallationRecords: Record<string, unknown>[] = [];
   const log: FakeGithubAppRequest[] = [];
   const credentials: string[] = [];
   let failures: Array<FakeFailure & { remaining: number }> = [];
@@ -281,6 +295,13 @@ export async function startGithubAppFake(
     if (bearer !== undefined) credentials.push(bearer);
 
     const failure = takeFailure(path, url.search);
+    const responseDelayMs = failure?.responseDelayMs;
+    // The answer is worked out now (when the request arrived) and sent later.
+    const send = async (status: number, body: unknown): Promise<void> => {
+      if (responseDelayMs !== undefined)
+        await new Promise((resolve) => setTimeout(resolve, responseDelayMs));
+      json(response, status, body);
+    };
     if (failure?.delayMs !== undefined)
       await new Promise((resolve) => setTimeout(resolve, failure.delayMs));
     if (failure?.status !== undefined) {
@@ -292,19 +313,22 @@ export async function startGithubAppFake(
       return;
     }
 
-    const unauthorized = () => json(response, 401, { message: "Bad credentials" });
-    const notFound = () => json(response, 404, { message: "Not Found" });
+    const unauthorized = () => send(401, { message: "Bad credentials" });
+    const notFound = () => send(404, { message: "Not Found" });
 
     // App JWT endpoints
     if (path === "/app/installations" && method === "GET") {
       if (bearer === undefined || !jwtIsValid(bearer)) return unauthorized();
-      const list = [...installations.values()].map((installation) => ({
-        id: installation.id,
-        account: accountJson(installation.account),
-        suspended_at: installation.suspended ? "2026-10-01T00:00:00Z" : null,
-        app_id: Number(options.appId),
-      }));
-      return json(response, 200, pageOf(list, url.searchParams));
+      const list: unknown[] = [...installations.values()].map(
+        (installation) => ({
+          id: installation.id,
+          account: accountJson(installation.account),
+          suspended_at: installation.suspended ? "2026-10-01T00:00:00Z" : null,
+          app_id: Number(options.appId),
+        }),
+      );
+      list.push(...rawInstallationRecords);
+      return send(200, pageOf(list, url.searchParams));
     }
 
     const installationMatch = /^\/app\/installations\/(\d+)$/.exec(path);
@@ -312,7 +336,7 @@ export async function startGithubAppFake(
       if (bearer === undefined || !jwtIsValid(bearer)) return unauthorized();
       const installation = installations.get(Number(installationMatch[1]));
       if (installation === undefined) return notFound();
-      return json(response, 200, {
+      return send(200, {
         id: installation.id,
         account: accountJson(installation.account),
         suspended_at: installation.suspended ? "2026-10-01T00:00:00Z" : null,
@@ -327,7 +351,7 @@ export async function startGithubAppFake(
       const installation = installations.get(installationId);
       if (installation === undefined) return notFound();
       if (installation.suspended)
-        return json(response, 403, { message: "This installation is suspended" });
+        return send(403, { message: "This installation is suspended" });
 
       const body = await readBody(request);
       let names: string[] | null = null;
@@ -341,7 +365,7 @@ export async function startGithubAppFake(
         (repo) => repo.fullName.split("/")[1] ?? "",
       );
       if (names !== null && names.some((name) => !known.includes(name)))
-        return json(response, 422, {
+        return send(422, {
           message: "There is at least one repository that does not exist or is not accessible",
         });
 
@@ -349,7 +373,7 @@ export async function startGithubAppFake(
       const expiresAtMs = now() + TOKEN_LIFETIME_MS;
       tokens.set(token, { installationId, repositoryNames: names, expiresAtMs });
       issuedTokens.push(token);
-      return json(response, 201, {
+      return send(201, {
         token,
         expires_at: new Date(expiresAtMs).toISOString(),
         repository_selection: names === null ? "all" : "selected",
@@ -362,9 +386,11 @@ export async function startGithubAppFake(
     if (path === "/installation/repositories" && method === "GET") {
       if (issued === undefined) return unauthorized();
       const all = reposVisibleTo(issued);
-      return json(response, 200, {
+      const hidden = omitted.get(issued.installationId) ?? [];
+      const listed = all.filter((repo) => !hidden.includes(repo.id));
+      return send(200, {
         total_count: all.length,
-        repositories: pageOf(all, url.searchParams).map(repositoryJson),
+        repositories: pageOf(listed, url.searchParams).map(repositoryJson),
       });
     }
 
@@ -396,14 +422,14 @@ export async function startGithubAppFake(
       if (pullMatch && method === "GET") {
         const pr = prs.find((item) => item.number === Number(pullMatch[1]));
         if (pr === undefined) return notFound();
-        return json(response, 200, pullRequestJson(repository, pr));
+        return send(200, pullRequestJson(repository, pr));
       }
       const permissionMatch = /^\/collaborators\/([^/]+)\/permission$/.exec(rest);
       if (permissionMatch && method === "GET") {
         const login = decodeURIComponent(permissionMatch[1] ?? "");
         const permission =
           permissions.get(`${fullName}#${login.toLowerCase()}`) ?? "none";
-        return json(response, 200, {
+        return send(200, {
           permission,
           user: { login },
         });
@@ -444,6 +470,12 @@ export async function startGithubAppFake(
     setRepositories(installationId, list) {
       repositories.set(installationId, [...list]);
     },
+    omitFromListings(installationId, repositoryIds) {
+      omitted.set(installationId, [...repositoryIds]);
+    },
+    addRawInstallationRecord(record) {
+      rawInstallationRecords.push(record);
+    },
     addRepository(installationId, repository) {
       const list = repositories.get(installationId) ?? [];
       repositories.set(installationId, [
@@ -482,6 +514,8 @@ export async function startGithubAppFake(
       repositories.clear();
       pullRequests.clear();
       permissions.clear();
+      omitted.clear();
+      rawInstallationRecords.length = 0;
       tokens.clear();
       issuedTokens.length = 0;
       tokenRequests.length = 0;

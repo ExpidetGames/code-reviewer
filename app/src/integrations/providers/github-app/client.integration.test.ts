@@ -9,7 +9,9 @@ import { GithubAppError } from "./errors.ts";
 
 const ACME = { login: "acme", id: 5001, type: "Organization" } as const;
 
-async function setup(options: { requestTimeoutMs?: number } = {}) {
+async function setup(
+  options: { requestTimeoutMs?: number; warn?: (line: string) => void } = {},
+) {
   const harness = await startGithubAppHarness();
   const { fake, clock, env } = harness;
   fake.addInstallation({ id: 4242, account: ACME });
@@ -88,6 +90,39 @@ describe("listing installations", () => {
   });
 });
 
+describe("installation records", () => {
+  it("skips an installation whose account has no login and warns, without blocking the others", async () => {
+    const warnings: string[] = [];
+    const { fake, client } = await setup({
+      warn: (line) => warnings.push(line),
+    });
+    fake.addRawInstallationRecord({
+      id: 4999,
+      account: { id: 1 },
+      suspended_at: null,
+    });
+
+    const installations = await client.listInstallations();
+
+    expect(installations.map((item) => item.id)).toEqual(["4242"]);
+    expect(warnings).toEqual([expect.stringContaining("installation 4999")]);
+  });
+});
+
+describe("the App JWT", () => {
+  it("is reused until shortly before it ends and then replaced", async () => {
+    const { fake, clock, client } = await setup();
+
+    await client.listInstallations();
+    await client.getInstallation("4242");
+    expect(new Set(fake.seenCredentials()).size).toBe(1);
+
+    clock.advance(6 * 60 * 1000);
+    await client.listInstallations();
+    expect(new Set(fake.seenCredentials()).size).toBe(2);
+  });
+});
+
 describe("listing the repositories of an installation", () => {
   it("returns the id, full name and web URL of each repository", async () => {
     const { client } = await setup();
@@ -151,6 +186,16 @@ describe("listing the repositories of an installation", () => {
 
     expect(repos).toHaveLength(2);
     expect(fake.issuedInstallationTokens()).toHaveLength(2);
+  });
+
+  it("fails instead of returning a list shorter than GitHub's own count", async () => {
+    const { fake, client } = await setup();
+    fake.omitFromListings(4242, [7002]);
+
+    const error = await failureOf(client.listInstallationRepositories("4242"));
+
+    expect(error).toMatchObject({ code: "GITHUB_APP_UNAVAILABLE" });
+    expect(error.message).toContain("1 of 2");
   });
 
   it("fails with a stable code instead of returning a partial list when a later page fails", async () => {
@@ -253,6 +298,24 @@ describe("failures", () => {
   });
 });
 
+describe("requests that would point somewhere else", () => {
+  it("refuses dot segments in a repository name, a login and a bad pull request number before any request", async () => {
+    const { fake, client } = await setup();
+
+    for (const run of [
+      client.getPullRequest("4242", "acme/..", 7),
+      client.getPullRequest("4242", "../widgets", 7),
+      client.getPullRequest("4242", "acme/widgets", Number.NaN),
+      client.getPullRequest("4242", "acme/widgets", 0),
+      client.getPullRequest("4242", "acme/widgets", 1.5),
+      client.listOpenPullRequests("4242", "./."),
+      client.getCollaboratorPermission("4242", "acme/widgets", ".."),
+    ])
+      expect((await failureOf(run)).code).toBe("GITHUB_APP_REQUEST_FAILED");
+    expect(fake.requests()).toEqual([]);
+  });
+});
+
 describe("pull requests", () => {
   async function withPullRequests(): Promise<{
     client: GithubAppClient;
@@ -351,14 +414,14 @@ describe("collaborator permissions", () => {
 
 describe("minting an installation token", () => {
   it("narrows the token to the named repositories", async () => {
-    const { fake, client } = await setup();
+    const { fake, clock, client } = await setup();
 
     const token = await client.mintInstallationToken("4242", {
       repositoryNames: ["widgets"],
     });
 
     expect(token.token).toMatch(/^ghs_/);
-    expect(Date.parse(token.expiresAt)).toBeGreaterThan(Date.now() - 1);
+    expect(Date.parse(token.expiresAt)).toBe(clock.now() + 60 * 60 * 1000);
     expect(fake.tokenRequests()).toEqual([
       { installationId: 4242, repositories: ["widgets"] },
     ]);

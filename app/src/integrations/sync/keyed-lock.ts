@@ -22,3 +22,16 @@ export function createKeyedLock(): KeyedLock {
     },
   };
 }
+
+// One lock for the whole process. Next.js may load `instrumentation.ts` and the route handlers as
+// separate module graphs, each with its own copy of this module, so the lock lives on `globalThis`
+// (like the database connection): the start-up sync, a webhook and the button all queue on it.
+const SHARED_LOCK = Symbol.for("code-reviewer.integration-sync-lock");
+
+export function sharedKeyedLock(): KeyedLock {
+  const holder = globalThis as typeof globalThis & {
+    [SHARED_LOCK]?: KeyedLock;
+  };
+  holder[SHARED_LOCK] ??= createKeyedLock();
+  return holder[SHARED_LOCK];
+}

@@ -17,7 +17,7 @@ import {
   type ReconcileResult,
 } from "../../db/repositories/repositories-repository.ts";
 import type { Database } from "../../db/schema.ts";
-import { IntegrationError } from "../errors.ts";
+import { hasSafeMessage, IntegrationError } from "../errors.ts";
 import type { IntegrationProvider } from "../provider.ts";
 import type { IntegrationRegistry } from "../registry.ts";
 import type {
@@ -26,7 +26,7 @@ import type {
   Integration,
   IntegrationType,
 } from "../types.ts";
-import { createKeyedLock } from "./keyed-lock.ts";
+import { sharedKeyedLock, type KeyedLock } from "./keyed-lock.ts";
 
 export type SyncError = {
   stage: "discover" | "connection" | "repositories";
@@ -98,6 +98,12 @@ export type IntegrationSyncOptions = {
   db: Kysely<Database>;
   registry: IntegrationRegistry;
   now?: () => Date;
+  /**
+   * Orders the work on the same installation. Default: the lock shared by the whole process, so that
+   * the start-up sync, a webhook and the button never overlap on one installation however many
+   * services were created. Pass another only to test the lock itself.
+   */
+  lock?: KeyedLock;
   /** Receives one line per failure. Default: console.error. */
   log?: (line: string) => void;
 };
@@ -138,7 +144,7 @@ export function createIntegrationSync(
   const log = options.log ?? ((line: string) => console.error(line));
   const integrations = createIntegrationsRepository(db, options.now);
   const repositories = createRepositoriesRepository(db, options.now);
-  const lock = createKeyedLock();
+  const lock = options.lock ?? sharedKeyedLock();
   const lockKey = (type: IntegrationType, externalId: string) =>
     `${type}:${externalId}`;
 
@@ -148,17 +154,14 @@ export function createIntegrationSync(
     integrationId: string | null,
     error: unknown,
   ): void {
-    // Only our own errors carry a message that is known to be free of secrets; anything else is
-    // reduced to a generic line. (Recognised by name: this folder may not import a provider.)
-    const known =
-      error instanceof Error &&
-      (error instanceof IntegrationError || error.name.startsWith("GithubApp"));
+    // Only an error that carries the safe-message marker has a message known to be free of
+    // secrets; anything else is reduced to a generic line.
     const code =
       typeof (error as { code?: unknown } | null)?.code === "string"
         ? (error as { code: string }).code
         : "INTEGRATION_SYNC_FAILED";
-    const message = known
-      ? (error as Error).message
+    const message = hasSafeMessage(error)
+      ? error.message
       : "The synchronization failed unexpectedly.";
     summary.errors.push({ stage, integrationId, code, message });
     log(
@@ -222,25 +225,43 @@ export function createIntegrationSync(
     }
   }
 
-  /** Brings an existing row in line with what the platform says about the connection. */
+  /**
+   * Brings an existing row in line with what the platform says about the connection. A change of
+   * status (suspended or not) is first confirmed with the platform unless `confirmed` says the
+   * connection was just read: the list it came from may be older than a delivery that already set
+   * the row right. Call inside the lock.
+   */
   async function applyConnection(
+    provider: IntegrationProvider,
     existing: Integration,
     connection: DiscoveredConnection,
     summary: SyncSummary,
+    confirmed: boolean,
   ): Promise<Integration> {
+    let effective = connection;
+    const statusWouldChange =
+      (connection.suspended && existing.status === "active") ||
+      (!connection.suspended && existing.status === "disabled");
+    if (statusWouldChange && !confirmed && provider.findConnection) {
+      const fresh = await provider.findConnection(existing.externalId);
+      // Gone since the list was read: the "not listed" handling will deal with it.
+      if (fresh === null) return existing;
+      effective = fresh;
+    }
+
     let current = existing;
-    if (!sameDetails(existing, connection)) {
+    if (!sameDetails(existing, effective)) {
       await integrations.updateDetails(existing.id, {
-        displayName: connection.displayName,
-        config: connection.config,
+        displayName: effective.displayName,
+        config: effective.config,
       });
       summary.integrations.updated += 1;
     }
-    if (connection.suspended && existing.status === "active") {
+    if (effective.suspended && existing.status === "active") {
       await integrations.setStatus(existing.id, "disabled");
       summary.integrations.disabled += 1;
       current = { ...current, status: "disabled" };
-    } else if (!connection.suspended && existing.status === "disabled") {
+    } else if (!effective.suspended && existing.status === "disabled") {
       await integrations.setStatus(existing.id, "active");
       summary.integrations.enabled += 1;
       current = { ...current, status: "active" };
@@ -293,34 +314,62 @@ export function createIntegrationSync(
       await lock.run(
         lockKey(provider.type, connection.externalId),
         async () => {
+          let integrationId: string | null = null;
           try {
             const existing = await integrations.findByExternalId(
               provider.type,
               connection.externalId,
             );
+            integrationId = existing?.id ?? null;
             if (existing === undefined)
               await createFromConnection(provider, connection, summary);
-            else await applyConnection(existing, connection, summary);
+            else
+              await applyConnection(
+                provider,
+                existing,
+                connection,
+                summary,
+                false,
+              );
           } catch (error) {
-            recordFailure(summary, "connection", null, error);
+            recordFailure(summary, "connection", integrationId, error);
           }
         },
       );
     }
 
+    // A row the list does not mention is not necessarily gone: it may have been created by a
+    // delivery after the list was read. Only the platform's own answer about that one connection,
+    // asked inside the lock, decides; without that answer the row is left alone.
     for (const known of await integrations.list()) {
       if (known.type !== provider.type || seen.has(known.externalId)) continue;
       await lock.run(lockKey(known.type, known.externalId), async () => {
-        const current = await integrations.get(known.id);
-        if (current !== undefined) await disableAndDeactivate(current, summary);
+        try {
+          const current = await integrations.get(known.id);
+          if (current === undefined || provider.findConnection === undefined)
+            return;
+          const confirmed = await provider.findConnection(current.externalId);
+          if (confirmed === null) await disableAndDeactivate(current, summary);
+          else
+            await applyConnection(provider, current, confirmed, summary, true);
+        } catch (error) {
+          recordFailure(summary, "connection", known.id, error);
+        }
       });
     }
 
     for (const integration of await integrations.list()) {
       if (integration.type !== provider.type || integration.status !== "active")
         continue;
-      await lock.run(lockKey(integration.type, integration.externalId), () =>
-        syncRepositories(provider, integration.id, summary),
+      await lock.run(
+        lockKey(integration.type, integration.externalId),
+        async () => {
+          try {
+            await syncRepositories(provider, integration.id, summary);
+          } catch (error) {
+            recordFailure(summary, "repositories", integration.id, error);
+          }
+        },
       );
     }
   }
@@ -394,23 +443,26 @@ export function createIntegrationSync(
                   : "synced";
             }
 
-            if (action === "suspended") {
-              if (integration.status === "active") {
-                await integrations.setStatus(integration.id, "disabled");
-                summary.integrations.disabled += 1;
-              }
-              return "disabled";
-            }
-
+            // These deliveries can be retried or arrive out of order, so what they say is checked
+            // against GitHub's current answer before the row is changed.
             if (
-              (action === "unsuspended" || action === "created") &&
-              integration.status === "disabled"
+              (action === "created" ||
+                action === "suspended" ||
+                action === "unsuspended") &&
+              provider.findConnection !== undefined
             ) {
-              await integrations.setStatus(integration.id, "active");
-              summary.integrations.enabled += 1;
-              integration = { ...integration, status: "active" };
+              const connection = await provider.findConnection(externalId);
+              if (connection === null) return "installation_not_found";
+              integration = await applyConnection(
+                provider,
+                integration,
+                connection,
+                summary,
+                true,
+              );
             }
-            if (integration.status !== "active") return "skipped_disabled";
+            if (integration.status !== "active")
+              return action === "suspended" ? "disabled" : "skipped_disabled";
 
             await syncRepositories(provider, integration.id, summary);
             return summary.errors.length > 0 ? "failed" : "synced";

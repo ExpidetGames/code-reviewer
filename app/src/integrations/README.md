@@ -127,7 +127,10 @@ Settings come from the environment (see `.env.example`). Missing or invalid valu
 `GITHUB_APP_CONFIG_INVALID` and an error that names the variables, never their values. The provider is
 created when the app loads but reads the settings on first use, so a missing variable breaks only the
 calls that need GitHub. The private key and the webhook secret are not enumerable properties of the
-configuration, like the token of a `GitAccess`.
+configuration, like the token of a `GitAccess`. The webhook secret is used exactly as given (not
+trimmed). `GITHUB_API_BASE_URL` other than `https://api.github.com` is refused unless
+`ALLOW_TEST_GITHUB_ENDPOINTS=true`, because the App JWT and the tokens are sent to that address; the
+tests set both to reach the fake GitHub.
 
 How the interface is met:
 
@@ -148,16 +151,29 @@ How the interface is met:
     with `/review`, `/improve`, `/describe` or `/ask` (leading whitespace and any case allowed); the
     head commit, which a comment delivery does not carry, is read from GitHub. Comments of bots, edited
     and deleted comments and comments on issues are ignored. The arguments are not truncated here.
+    To cost a commenter without write access as few calls as possible, the order is: the payload's
+    `author_association` (only `OWNER`, `MEMBER` and `COLLABORATOR` can have write access; others
+    are ignored with no call), then the permission (one call), and only then the pull request for its
+    head commit. A commenter without write access is ignored with a reason, so no trigger exists.
 - `canTrigger`: `opened` and `updated` triggers are always allowed; a command is allowed when the
   author's repository permission is `admin` or `write` (read with the installation token). The comment's
-  `author_association` is not used: it cannot tell a member with read access from one with write access,
-  and the trigger does not carry it.
+  `author_association` only serves as the free first filter above: it cannot tell a member with read
+  access from one with write access, and the trigger does not carry it.
 - `jobAccess` mints a fresh installation token narrowed to the repository (`client.mintInstallationToken`,
   the one place that mints a job token; never cached). The rules for permissions and expiry belong to
   the token ticket and finish this function.
 - Rate limits and failures become `GithubAppError`s with a code and, for a rate limit,
   `retryAfterSeconds`. There is no retry loop. Requests time out after 15 seconds. Messages name the
-  call and the status only, never a credential or a response body.
+  call and the status only, never a credential or a response body; `GithubAppError` and
+  `IntegrationError` carry `safeMessage: true` (`hasSafeMessage` in `errors.ts`), the marker that
+  allows a message to be logged as it is.
+- Names that go into a request path (repository owner and name, login, installation id) are checked
+  first: `.` and `..` segments and anything but a plain name are refused, as is a pull request number
+  that is not a positive whole number.
+- A listing of repositories is compared with GitHub's own `total_count`; a shorter list (a page
+  boundary skipped one while the list changed) fails with `GITHUB_APP_UNAVAILABLE` instead of being
+  taken for complete. One App JWT is reused for about five minutes. An installation record whose
+  account has no login is skipped with a warning, so one odd record cannot block the others.
 - Read calls use an installation token that is cached per client until a minute before it expires, and
   asked for again once if GitHub refuses the cached one.
 
@@ -169,18 +185,30 @@ nothing is deleted, so projects and past reviews keep their reference. A reposit
 gets its old row back. New repositories are active in this table; whether a project reviews them is
 decided when a project is activated for the repository, not here.
 
-| Entry point                          | When                                                       | What                                                                                                                                                                                                                                                                                |
-| ------------------------------------ | ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `runStartupSync` (`sync/startup.ts`) | When the server starts (`instrumentation.ts`), not awaited | `syncAll`; logs the result; never stops the start                                                                                                                                                                                                                                   |
-| `syncAll()`                          | Start, and later the button in the UI                      | Creates, updates and disables integrations from `discoverConnections`, then reads every active integration's repositories                                                                                                                                                           |
-| `handleInstallationChange(change)`   | The webhook route, for an `installation_changed` event     | `deleted`: disable and deactivate all repositories without a call to GitHub. `suspended`: disable. `unsuspended`/`created`/`repositories_changed`: read the repositories again. A connection without a row is first confirmed with `findConnection` (App JWT) and only then created |
-| `syncIntegration(id)`                | Single integration                                         | Reads its repositories                                                                                                                                                                                                                                                              |
+| Entry point                          | When                                                       | What                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| ------------------------------------ | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `runStartupSync` (`sync/startup.ts`) | When the server starts (`instrumentation.ts`), not awaited | `syncAll`; logs the result; never stops the start                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `syncAll()`                          | Start, and later the button in the UI                      | Creates, updates and disables integrations from `discoverConnections`, then reads every active integration's repositories                                                                                                                                                                                                                                                                                                                                          |
+| `handleInstallationChange(change)`   | The webhook route, for an `installation_changed` event     | `deleted`: disable and deactivate all repositories without a call to GitHub. `created`/`suspended`/`unsuspended`: the delivery may be a retry or arrive out of order, so `findConnection` is asked first and the row follows GitHub's answer (suspended or not); an active row has its repositories read again. `repositories_changed`: read the repositories again. A connection without a row is confirmed with `findConnection` (App JWT) and only then created |
+| `syncIntegration(id)`                | Single integration                                         | Reads its repositories                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
 All of them return a summary and never reject because of the platform (`errors` lists each failure by
 stage and stable code). The rule: the tables change to "gone" only after GitHub answered completely. A
 5xx, a timeout, a refused JWT, a failing later page or missing settings are reported and change
-nothing. Work on the same installation runs one after the other (`keyed-lock.ts`), and each run reads
+nothing. A failure for one installation (even an unexpected one, such as a database error) is
+reported with its integration id and does not stop the others.
+
+Overlapping triggers: work on the same installation runs one after the other, and each run reads
 GitHub's current state inside the lock, so repeating or overlapping triggers end in the same state.
+The lock (`keyed-lock.ts`, `sharedKeyedLock`) is one per process, kept on `globalThis` because Next.js
+may load `instrumentation.ts` and the route handlers as separate module graphs. The webhook route and
+the button use `getIntegrationSync()` (`sync/shared.ts`), the process-wide service, never their own
+`createIntegrationSync`. A full sync works from a list that can be older than a delivery, so it never
+decides from the list alone: before it disables a row the list does not mention, and before it
+suspends or resumes one, it asks GitHub about that one installation inside the lock.
+
+`disabled` always means "suspended or gone on GitHub": a full sync resumes any disabled row GitHub
+lists as active. There is no way to keep an integration disabled by hand.
 
 ## Types and reserved values
 

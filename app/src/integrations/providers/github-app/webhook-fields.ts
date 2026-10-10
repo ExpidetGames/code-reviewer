@@ -49,6 +49,8 @@ export const WEBHOOK_READ_FIELDS = {
     // Present only when the comment is on a pull request, not on a plain issue.
     { path: "issue.pull_request", type: "object", optional: true },
     { path: "comment.body", type: "string" },
+    // Who can write at all: only OWNER, MEMBER and COLLABORATOR can, so others cost no API call.
+    { path: "comment.author_association", type: "string" },
     { path: "installation.id", type: "number" },
     ...REPOSITORY,
     ...SENDER,
