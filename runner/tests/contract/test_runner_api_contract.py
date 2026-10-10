@@ -15,6 +15,8 @@ from typing import Any
 import pytest
 from jsonschema import Draft202012Validator
 
+from code_reviewer_runner import job as runner_job
+
 CONTRACTS = Path(__file__).resolve().parents[3] / "contracts"
 SCHEMA_PATH = CONTRACTS / "runner-api.v1.json"
 EXAMPLES = CONTRACTS / "examples"
@@ -199,3 +201,74 @@ def test_a_complete_response_may_say_the_job_was_given_back_after_a_shutdown() -
 
     response["job"]["status"] = "cancelled"
     assert not _accepts("CompleteResponse", response)
+
+
+# CR-29 alignment: the contract and the runner state the same rules twice, so both are read from
+# their sources and compared.
+def test_the_job_env_key_pattern_of_the_runner_equals_the_one_of_the_contract() -> None:
+    schema: Document = _load(SCHEMA_PATH)
+    contract_pattern: str = schema["$defs"]["JobEnv"]["propertyNames"]["pattern"]
+
+    # The contract anchors the pattern, the runner uses fullmatch: the same rule written twice.
+    assert contract_pattern == f"^{runner_job._ENV_KEY.pattern}$"  # pyright: ignore[reportPrivateUsage]
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "PR_REVIEWER__EXTRA_INSTRUCTIONS",
+        "PR_DESCRIPTION__ADD_ORIGINAL_USER_DESCRIPTION",
+        "PR_CODE_SUGGESTIONS__NUM_CODE_SUGGESTIONS",
+        "PR_QUESTIONS__ENABLE_HELP_TEXT",
+        "PR_REVIEWER__NUM_MAX_FINDINGS",
+        "GITHUB__USER_TOKEN",
+        "CONFIG__MODEL",
+        "PR_REVIEWER__",
+        "PR_REVIEWER__EXTRA__NESTED",
+        "PR_REVIEWER__EXTRA_",
+        "pr_reviewer__extra_instructions",
+        "PR_OTHER__EXTRA_INSTRUCTIONS",
+    ],
+)
+def test_the_runner_and_the_contract_give_the_same_verdict_on_a_job_env_key(key: str) -> None:
+    claim = _example("ClaimResponse")
+    claim["job"]["input"]["env"] = {key: "x"}
+    contract_accepts = _accepts("ClaimResponse", claim)
+
+    try:
+        runner_job.parse_job(json.dumps(claim["job"]["input"]))
+        runner_accepts = True
+    except runner_job.JobError:
+        runner_accepts = False
+
+    assert runner_accepts == contract_accepts
+
+
+def test_the_runner_accepts_the_fallback_models_the_way_the_contract_defines_them() -> None:
+    schema: Document = _load(SCHEMA_PATH)
+    definition = schema["$defs"]["RunnerJobInput"]["properties"]["llm"]["properties"]
+    max_items: int = definition["fallbackModels"]["maxItems"]
+    models = [f"vendor/fallback-{number}" for number in range(max_items)]
+    claim = _example("ClaimResponse")
+    claim["job"]["input"]["llm"]["fallbackModels"] = models
+    assert _accepts("ClaimResponse", claim)
+
+    parsed = runner_job.parse_job(json.dumps(claim["job"]["input"]))
+
+    assert parsed.llm.fallback_models == tuple(models)
+    assert max_items == runner_job.MAX_FALLBACK_MODELS
+
+
+def test_the_runner_and_the_contract_both_refuse_more_fallback_models_than_allowed() -> None:
+    schema: Document = _load(SCHEMA_PATH)
+    max_items: int = schema["$defs"]["RunnerJobInput"]["properties"]["llm"]["properties"][
+        "fallbackModels"
+    ]["maxItems"]
+    claim = _example("ClaimResponse")
+    claim["job"]["input"]["llm"]["fallbackModels"] = [
+        f"vendor/fallback-{number}" for number in range(max_items + 1)
+    ]
+
+    assert not _accepts("ClaimResponse", claim)
+    with pytest.raises(runner_job.JobError):
+        runner_job.parse_job(json.dumps(claim["job"]["input"]))
