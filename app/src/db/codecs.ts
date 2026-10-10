@@ -19,6 +19,20 @@ export function decodeJson<T = unknown>(text: string): T {
   }
 }
 
+/**
+ * Like `decodeJson`, but for stored text a reader can survive without: damaged text is reported as
+ * `{ ok: false }` instead of an exception, so a caller can fall back to a default.
+ */
+export function tryDecodeJson<T = unknown>(
+  text: string,
+): { ok: true; value: T } | { ok: false } {
+  try {
+    return { ok: true, value: JSON.parse(text) as T };
+  } catch {
+    return { ok: false };
+  }
+}
+
 /** Boolean columns are integers: 1 for true, 0 for false. */
 export function encodeBoolean(value: boolean): 0 | 1 {
   return value ? 1 : 0;
