@@ -1,0 +1,14 @@
+{
+  "zen": "Keep it logically awesome.",
+  "hook_id": 123,
+  "hook": {
+    "type": "App",
+    "id": 123,
+    "events": [
+      "pull_request",
+      "issue_comment",
+      "installation",
+      "installation_repositories"
+    ]
+  }
+}

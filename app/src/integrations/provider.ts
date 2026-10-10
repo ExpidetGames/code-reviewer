@@ -2,6 +2,7 @@
 // call these methods and see normalized types only. See README.md in this folder.
 import type { ConfigValidationResult } from "./config-schema.ts";
 import type {
+  DiscoveredConnection,
   GitAccess,
   Integration,
   IntegrationEvent,
@@ -26,6 +27,21 @@ export interface IntegrationProvider {
   /** Checks a config from the user or the platform. One error per offending field. */
   validateConfig(config: unknown): ConfigValidationResult;
 
+  /**
+   * Only where the platform can list the connections of this app (GitHub App: the installations).
+   * The sync creates, updates and disables `integrations` rows from it. Rejects when the platform
+   * cannot be asked, so a failure is never mistaken for "there are no connections".
+   */
+  discoverConnections?(): Promise<DiscoveredConnection[]>;
+
+  /**
+   * Only together with `discoverConnections`: asks the platform whether one connection exists, and
+   * returns its details or null when the platform does not know it. This is how a "connection
+   * created" delivery for a connection without a row is verified before a row is created.
+   */
+  findConnection?(externalId: string): Promise<DiscoveredConnection | null>;
+
+  /** Every repository of the connection the app may see. Rejects when it cannot list all of them. */
   listRepositories(integration: Integration): Promise<RepoRef[]>;
 
   /** Only where webhooks are per repository: creates the webhook if it is missing. */
