@@ -10,6 +10,7 @@ import {
 } from "../../../fakes/github/webhooks.ts";
 import { TEST_WEBHOOK_SECRET } from "../../src/test-support/github-app.ts";
 import {
+  fixturePullRequest,
   startWebhookHarness,
   type WebhookHarness,
 } from "../../src/test-support/webhook-harness.ts";
@@ -73,6 +74,7 @@ describe("a pull request delivery", () => {
     const h = await startWebhookHarness();
     await h.seedInstallation();
     await h.deliver("pull_request.opened");
+    h.fake.updatePullRequest("acme/widgets", 7, { headSha: NEW_HEAD });
 
     const response = await h.deliver("pull_request.synchronize", {
       payload: withHeadSha("pull_request.synchronize", NEW_HEAD),
@@ -88,6 +90,9 @@ describe("a pull request delivery", () => {
   it("reviews a pull request from a fork like any other", async () => {
     const h = await startWebhookHarness();
     await h.seedInstallation();
+    h.fake.updatePullRequest("acme/widgets", 7, {
+      headSha: "9e8d7c6b5a4938271605f4e3d2c1b0a998877665",
+    });
 
     const response = await h.deliver("pull_request.opened.fork");
 
@@ -102,7 +107,7 @@ describe("a pull request delivery", () => {
     const h = await startWebhookHarness();
     await h.seedInstallation();
 
-    const response = await h.deliver("pull_request.closed");
+    const response = await h.deliver("pull_request.edited");
 
     expect(response.status).toBe(202);
     expect(await json(response)).toMatchObject({ outcome: "ignored" });
@@ -614,6 +619,7 @@ describe("a delivery that was turned away for a reason that can change", () => {
     ).toEqual(["unknown_installation"]);
 
     await h.deliver("installation.created", { deliveryId: "delivery-2" });
+    h.fake.addPullRequest("acme/widgets", fixturePullRequest());
     const [repository] = await h.repositories.list();
     await h.projects.activateProject(repository!.id);
     const redelivered = await h.deliver("pull_request.opened", {

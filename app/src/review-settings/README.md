@@ -49,18 +49,18 @@ not blamed on an unrelated save; `cost.exceedsContext` lists it for the UI.
 
 `toRunnerSettings(settings)` (`runner-settings.ts`) returns `{ llm: { model, maxTokens }, env, fallbackModels }`:
 
-| Setting              | Runner job                                                                                                                                                                              |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `model`, `maxTokens` | `llm.model`, `llm.maxTokens` (the provider and the key come from the LLM configuration, `src/llm`)                                                                                      |
-| `extraInstructions`  | `PR_REVIEWER__EXTRA_INSTRUCTIONS`, `PR_DESCRIPTION__...`, `PR_CODE_SUGGESTIONS__...`, `PR_QUESTIONS__...` (left out when empty)                                                         |
-| `maxFindings`        | `PR_REVIEWER__NUM_MAX_FINDINGS`                                                                                                                                                         |
-| `largePrChunking`    | `PR_REVIEWER__ENABLE_LARGE_PR_CHUNKING=true` (left out when off: PR-Agent's own value is off)                                                                                           |
-| `inlineKeyIssues`    | `PR_REVIEWER__INLINE_KEY_ISSUES=true` (left out when off: PR-Agent's own value is off)                                                                                                  |
-| `fallbackModel`      | `fallbackModels` (**not part of the job yet**: the runner pins an empty fallback list; add a field to the contract first)                                                               |
-| triggers, commands   | nothing: the app is the only trigger. The webhook intake asks `isAutomaticReviewEnabled(settings, "opened" or "updated")` and the comment handler `isCommandAllowed(settings, command)` |
+| Setting              | Runner job                                                                                                                                                                                                        |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `model`, `maxTokens` | `llm.model`, `llm.maxTokens` (the provider and the key come from the LLM configuration, `src/llm`)                                                                                                                |
+| `extraInstructions`  | `PR_REVIEWER__EXTRA_INSTRUCTIONS`, `PR_DESCRIPTION__...`, `PR_CODE_SUGGESTIONS__...`, `PR_QUESTIONS__...` (left out when empty)                                                                                   |
+| `maxFindings`        | `PR_REVIEWER__NUM_MAX_FINDINGS`                                                                                                                                                                                   |
+| `largePrChunking`    | `PR_REVIEWER__ENABLE_LARGE_PR_CHUNKING=true` (left out when off: PR-Agent's own value is off)                                                                                                                     |
+| `inlineKeyIssues`    | `PR_REVIEWER__INLINE_KEY_ISSUES=true` (left out when off: PR-Agent's own value is off)                                                                                                                            |
+| `fallbackModel`      | `fallbackModels` (in the contract, but the app **does not send it** in the MVP: no fallback chain is decided)                                                                                                     |
+| triggers, commands   | nothing: the app is the only trigger. The webhook handler's trigger policy asks `isAutomaticReviewEnabled(settings, "opened" or "updated")` (CR-31) and the comment handler `isCommandAllowed(settings, command)` |
 
-The result holds only `PR_*` variables the runner lets through (`RUNNER_ENV_KEY_PATTERN` is the runner's
-own allowlist) and the two `llm` fields. It never receives the LLM key or a Git token, so it cannot
+The result holds only `PR_*` variables the runner lets through (`RUNNER_ENV_KEY_PATTERN`, defined in
+`src/runner-api/contract.ts`, is the runner's own allowlist and the one in the contract file) and the two `llm` fields. It never receives the LLM key or a Git token, so it cannot
 contain them. The names are PR-Agent 0.47.0's: `runner-settings.test.ts` reads
 `fixtures/pr-agent-0.47.0-configuration.excerpt.toml` (verbatim lines of that release's
 `configuration.toml`) and checks that every variable exists there with the kind of value we send, and
