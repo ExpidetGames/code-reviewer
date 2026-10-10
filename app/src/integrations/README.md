@@ -17,7 +17,7 @@ platform; the MVP has exactly one kind, the GitHub App (`github_app`, `providers
 | `providers/<type>/`       | One folder per implementation: `providers/github-app/` (see "The GitHub App provider")                                                                                          |
 | `sync/`                   | `createIntegrationSync`: keeps the `integrations` and `repositories` tables in line with the platform (see "Synchronization")                                                   |
 
-The tables are `integrations` (`src/db/migrations/20261010120000_create_integrations.ts`) and
+The tables are `integrations` (`src/db/migrations/20261010134000_create_integrations.ts`) and
 `repositories` (`src/db/migrations/20261010143000_create_repositories.ts`); the only code that touches
 them is `src/db/repositories/integrations-repository.ts` and `repositories-repository.ts`.
 
@@ -297,8 +297,9 @@ trigger, the access it hands out, the pull requests it knows, a failure for `job
 Use it in jobs, runner API and UI tests; pass it to `createIntegrationRegistry({ github_app: fake })`
 when the code under test resolves through a registry.
 
-The real GitHub App provider is tested against `fakes/github/app-api.ts`, a fake GitHub REST API over
-real HTTP (see `fakes/github/app-api.md`), and against recorded webhook payloads. For tests outside the
+The real GitHub App provider is tested against the fake GitHub (`fakes/github`, the same one the sign
+in tests use), a fake GitHub REST API over real HTTP (see `fakes/github/README.md`), and against
+recorded webhook payloads. For tests outside the
 provider folder, `createDefaultIntegrationRegistry({ env })` builds the real provider from an
 environment, and `src/test-support/integration-sync-harness.ts` gives a database, the fake GitHub, a
 sync service and `deliver(fixture)`, which does what the webhook route does with a delivery.

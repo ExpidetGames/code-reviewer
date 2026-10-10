@@ -10,15 +10,11 @@
 // `repository_ids` of the request) and only does what the permissions of the request allow. A token
 // request may not ask for more than the app itself is granted (`setAppPermissions`).
 //
-// The OAuth part (login) is a separate fake in the same folder.
+// It is one part of the single fake GitHub (`server.ts`), which owns the HTTP server, the request
+// log, the base URL and the failure injection; the sign in part (`oauth.ts`) sits next to it.
 import { createPublicKey, randomBytes, verify } from "node:crypto";
-import {
-  createServer,
-  type IncomingMessage,
-  type Server,
-  type ServerResponse,
-} from "node:http";
-import type { AddressInfo } from "node:net";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { readBody } from "./http.ts";
 
 export type FakeInstallation = {
   id: number;
@@ -59,38 +55,14 @@ export const DEFAULT_FAKE_APP_PERMISSIONS: FakePermissions = {
 
 export type FakeCollaboratorPermission = "admin" | "write" | "read" | "none";
 
-/** Makes matching requests fail before they are looked at. */
-export type FakeFailure = {
-  /** Applies to requests whose path (without query) contains this text; every request when omitted. */
-  pathIncludes?: string;
-  /** Applies to requests whose query string contains this text, for example "page=2". */
-  queryIncludes?: string;
-  /** Answers with this status and an empty JSON error body. */
-  status?: number;
-  headers?: Record<string, string>;
-  /** Waits this long before looking at the request (and before the status, if both are given). */
-  delayMs?: number;
-  /**
-   * Looks at the request at once but sends the answer only after this long: the answer reflects the
-   * state of GitHub when the request arrived, and reaches the client later, like a slow response.
-   */
-  responseDelayMs?: number;
-  /** How many requests it applies to; forever when omitted. */
-  times?: number;
-};
-
-export type FakeGithubAppOptions = {
+/** The GitHub App registered at the fake: what the App JWTs of the app under test are checked with. */
+export type FakeAppOptions = {
   appId: string;
   /** SPKI PEM of the app's key pair; JWTs are checked against it. */
   publicKeyPem: string;
-  host?: string;
-  /** Default 0: a free port. */
-  port?: number;
   /** The fake's clock in milliseconds since the epoch. Default Date.now. */
   now?: () => number;
 };
-
-export type FakeGithubAppRequest = { method: string; path: string };
 
 export type FakeTokenRequest = {
   installationId: number;
@@ -99,9 +71,8 @@ export type FakeTokenRequest = {
   permissions: Record<string, string> | null;
 };
 
-export type FakeGithubApp = {
-  /** For example http://127.0.0.1:41234 */
-  baseUrl: string;
+/** What the GitHub App part of the fake offers a test (see `FakeGithub` in `server.ts` for the whole). */
+export type FakeGithubAppControls = {
   addInstallation(installation: FakeInstallation): void;
   /** What uninstalling the app does: the installation and everything behind it disappears. */
   removeInstallation(id: number): void;
@@ -132,24 +103,33 @@ export type FakeGithubApp = {
   answerTokensWith(patch: Record<string, unknown> | null): void;
   /** Answers 401 to every App JWT, as when the key or app id of the app is wrong. */
   rejectAppJwts(reject: boolean): void;
-  fail(failure: FakeFailure): void;
-  clearFailures(): void;
-  /** Removes all state, recorded requests and failures. */
-  reset(): void;
-  /** Every request received, in order (method and path only: no headers, no bodies). */
-  requests(): FakeGithubAppRequest[];
   /**
    * The body of every access token request that was accepted for a look, in order: `repositories`
    * (names), `repository_ids` and `permissions`, each null when the request did not send it.
    */
   tokenRequests(): FakeTokenRequest[];
-  /** Every credential (JWT or token) any request carried; lets a test search outputs for them. */
-  seenCredentials(): string[];
   /** Every installation token issued so far. */
   issuedInstallationTokens(): string[];
   /** Every installation token switched off with `DELETE /installation/token`, in order. */
   revokedInstallationTokens(): string[];
-  close(): Promise<void>;
+};
+
+export type AppPart = {
+  controls: FakeGithubAppControls;
+  /**
+   * Answers the request when the path belongs to the GitHub App API; false when it does not.
+   * `bearer` is the credential the request carried, `reply` sends an answer (late, if the injected
+   * failure asks for that).
+   */
+  handle(context: {
+    request: IncomingMessage;
+    response: ServerResponse;
+    url: URL;
+    bearer: string | undefined;
+    reply: (status: number, body: unknown) => Promise<void>;
+  }): Promise<boolean>;
+  /** Removes all state of the App API. */
+  reset(): void;
 };
 
 type IssuedToken = {
@@ -166,24 +146,6 @@ const levelOf = (level: unknown): number =>
 
 const TOKEN_LIFETIME_MS = 60 * 60 * 1000;
 const MAX_PER_PAGE = 100;
-
-function json(response: ServerResponse, status: number, body: unknown): void {
-  const text = JSON.stringify(body);
-  response.writeHead(status, {
-    "content-type": "application/json; charset=utf-8",
-    "content-length": Buffer.byteLength(text),
-  });
-  response.end(text);
-}
-
-function readBody(request: IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    request.on("data", (chunk: Buffer) => chunks.push(chunk));
-    request.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-    request.on("error", reject);
-  });
-}
 
 function pageOf<T>(items: T[], query: URLSearchParams): T[] {
   const perPage = Math.min(
@@ -236,9 +198,7 @@ function base64urlDecode(text: string): Buffer {
   return Buffer.from(text, "base64url");
 }
 
-export async function startGithubAppFake(
-  options: FakeGithubAppOptions,
-): Promise<FakeGithubApp> {
+export function createAppPart(options: FakeAppOptions): AppPart {
   const now = options.now ?? Date.now;
   const publicKey = createPublicKey(options.publicKeyPem);
 
@@ -253,9 +213,6 @@ export async function startGithubAppFake(
   let appPermissions: FakePermissions = { ...DEFAULT_FAKE_APP_PERMISSIONS };
   const omitted = new Map<number, number[]>();
   const rawInstallationRecords: Record<string, unknown>[] = [];
-  const log: FakeGithubAppRequest[] = [];
-  const credentials: string[] = [];
-  let failures: Array<FakeFailure & { remaining: number }> = [];
   let jwtsRejected = false;
   let tokenAnswerPatch: Record<string, unknown> | null = null;
 
@@ -313,51 +270,24 @@ export async function startGithubAppFake(
     return levelOf(token.permissions[permission]) >= levelOf(level);
   }
 
-  function takeFailure(path: string, query: string): FakeFailure | undefined {
-    const failure = failures.find(
-      (candidate) =>
-        candidate.remaining > 0 &&
-        (candidate.pathIncludes === undefined ||
-          path.includes(candidate.pathIncludes)) &&
-        (candidate.queryIncludes === undefined ||
-          query.includes(candidate.queryIncludes)),
-    );
-    if (failure === undefined) return undefined;
-    failure.remaining -= 1;
-    return failure;
+  async function handle(
+    context: Parameters<AppPart["handle"]>[0],
+  ): Promise<boolean> {
+    let answered = false;
+    await route(context, async (status, body) => {
+      answered = true;
+      await context.reply(status, body);
+    });
+    return answered || context.response.writableEnded;
   }
 
-  async function handle(
-    request: IncomingMessage,
-    response: ServerResponse,
+  // Answers through `send`; a path that is not part of the GitHub App API is left unanswered.
+  async function route(
+    { request, url, bearer, response }: Parameters<AppPart["handle"]>[0],
+    send: (status: number, body: unknown) => Promise<void>,
   ): Promise<void> {
-    const url = new URL(request.url ?? "/", "http://fake.test");
     const path = url.pathname;
     const method = request.method ?? "GET";
-    log.push({ method, path });
-
-    const header = request.headers.authorization;
-    const bearer = header?.startsWith("Bearer ") ? header.slice(7) : undefined;
-    if (bearer !== undefined) credentials.push(bearer);
-
-    const failure = takeFailure(path, url.search);
-    const responseDelayMs = failure?.responseDelayMs;
-    // The answer is worked out now (when the request arrived) and sent later.
-    const send = async (status: number, body: unknown): Promise<void> => {
-      if (responseDelayMs !== undefined)
-        await new Promise((resolve) => setTimeout(resolve, responseDelayMs));
-      json(response, status, body);
-    };
-    if (failure?.delayMs !== undefined)
-      await new Promise((resolve) => setTimeout(resolve, failure.delayMs));
-    if (failure?.status !== undefined) {
-      response.writeHead(failure.status, {
-        "content-type": "application/json",
-        ...failure.headers,
-      });
-      response.end(JSON.stringify({ message: "Injected failure" }));
-      return;
-    }
 
     const unauthorized = () => send(401, { message: "Bad credentials" });
     const notFound = () => send(404, { message: "Not Found" });
@@ -574,26 +504,9 @@ export async function startGithubAppFake(
         });
       }
     }
-
-    return notFound();
   }
 
-  const server: Server = createServer((request, response) => {
-    handle(request, response).catch(() => {
-      if (!response.headersSent)
-        json(response, 500, { message: "Fake failed" });
-      else response.end();
-    });
-  });
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(options.port ?? 0, options.host ?? "127.0.0.1", resolve);
-  });
-  const address = server.address() as AddressInfo;
-  const host = options.host ?? "127.0.0.1";
-
-  return {
-    baseUrl: `http://${host}:${address.port}`,
+  const controls: FakeGithubAppControls = {
     addInstallation(installation) {
       installations.set(installation.id, installation);
       if (!repositories.has(installation.id))
@@ -649,12 +562,14 @@ export async function startGithubAppFake(
     rejectAppJwts(reject) {
       jwtsRejected = reject;
     },
-    fail(failure) {
-      failures.push({ ...failure, remaining: failure.times ?? Infinity });
-    },
-    clearFailures() {
-      failures = [];
-    },
+    tokenRequests: () => [...tokenRequests],
+    issuedInstallationTokens: () => [...issuedTokens],
+    revokedInstallationTokens: () => [...revoked],
+  };
+
+  return {
+    controls,
+    handle,
     reset() {
       installations.clear();
       repositories.clear();
@@ -666,23 +581,9 @@ export async function startGithubAppFake(
       issuedTokens.length = 0;
       revoked.length = 0;
       tokenRequests.length = 0;
-      log.length = 0;
-      credentials.length = 0;
-      failures = [];
       jwtsRejected = false;
       tokenAnswerPatch = null;
       appPermissions = { ...DEFAULT_FAKE_APP_PERMISSIONS };
-    },
-    requests: () => [...log],
-    tokenRequests: () => [...tokenRequests],
-    seenCredentials: () => [...credentials],
-    issuedInstallationTokens: () => [...issuedTokens],
-    revokedInstallationTokens: () => [...revoked],
-    close() {
-      return new Promise<void>((resolve) => {
-        server.closeAllConnections();
-        server.close(() => resolve());
-      });
     },
   };
 }
