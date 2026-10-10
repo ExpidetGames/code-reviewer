@@ -51,8 +51,9 @@ export function createRunsRouteHandlers({
         status: params.get("status") ?? undefined,
       });
       if (!filter.ok) return refusal("RUNS_FILTER_INVALID");
-      const { ok: _ok, ...criteria } = filter;
-      return Response.json(await service.list(criteria), { headers: NO_STORE });
+      return Response.json(await service.list(filter.filter), {
+        headers: NO_STORE,
+      });
     },
 
     async detail(_request, id) {

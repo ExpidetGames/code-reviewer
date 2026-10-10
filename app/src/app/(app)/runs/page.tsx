@@ -1,12 +1,17 @@
 import type { Metadata } from "next";
 import { requireUser } from "@/auth/session";
-import { EmptyState } from "@/ui/empty-state";
+import { getProjectService } from "@/projects/shared";
+import { loadRunsPage, RunsPageContent } from "@/runs/ui/runs-page";
+import { getRunsService } from "@/runs/shared";
 import { PageHeader } from "@/ui/page-header";
 
 export const metadata: Metadata = { title: "Runs" };
 
-// A placeholder: the list of review runs comes with the runs tickets.
-export default async function RunsPage() {
+// Every review Code Reviewer has started, newest first, filtered by project and status through the
+// address. The page asks for the user itself (the second guard behind the proxy). `searchParams` is
+// request data, so it is read inside the component that renders the list, behind the layout's
+// <Suspense>; the page itself stays static.
+export default async function RunsPage({ searchParams }: PageProps<"/runs">) {
   await requireUser();
   return (
     <>
@@ -14,9 +19,19 @@ export default async function RunsPage() {
         title="Runs"
         description="Every review Code Reviewer has started."
       />
-      <EmptyState title="No runs yet">
-        Reviews of your pull requests will appear here.
-      </EmptyState>
+      <RunsContent searchParams={searchParams} />
     </>
   );
+}
+
+async function RunsContent({
+  searchParams,
+}: {
+  searchParams: PageProps<"/runs">["searchParams"];
+}) {
+  const data = await loadRunsPage(await searchParams, {
+    runs: getRunsService(),
+    projects: getProjectService(),
+  });
+  return <RunsPageContent data={data} />;
 }

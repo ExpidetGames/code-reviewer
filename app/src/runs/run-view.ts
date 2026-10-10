@@ -55,6 +55,9 @@ export type RunDetailView = RunRowView & {
   supersededBy: string | null;
 };
 
+/** What the list can be narrowed by: one repository, one status. */
+export type RunsFilter = { repositoryId?: string; status?: JobStatus };
+
 export type RunsSnapshot = {
   /** When the answer was made; the duration of a running run is counted up to it. */
   generatedAt: string;
@@ -90,12 +93,9 @@ export function safeCommentUrl(url: unknown): string | null {
 
 // Escape sequences of a terminal: colors and cursor moves (CSI), and window titles or links (OSC).
 const ANSI_SEQUENCES =
-  // eslint-disable-next-line no-control-regex -- matching terminal escape sequences is the point
   /\u001b\[[0-9;?]*[ -/]*[@-~]|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)|\u001b[@-Z\\-_]/g;
 // Control characters other than tab and line feed, and the characters that reorder text on screen.
-const UNSAFE_CHARACTERS =
-  // eslint-disable-next-line no-control-regex -- removing control characters is the point
-  /[\u0000-\u0008\u000b-\u001f\u007f-\u009f‪-‮⁦-⁩]/g;
+const UNSAFE_CHARACTERS = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f‪-‮⁦-⁩]/g;
 
 /**
  * Makes a runner's log fit for showing: terminal escapes and control characters out, line breaks

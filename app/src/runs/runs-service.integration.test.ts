@@ -224,13 +224,17 @@ describe("what leaves the server", () => {
 
 describe("the filter of a request", () => {
   it("accepts a known status and a repository id, and treats empty values as no filter", () => {
-    expect(parseRunsFilter({})).toEqual({ ok: true });
+    expect(parseRunsFilter({})).toEqual({ ok: true, filter: {} });
     expect(parseRunsFilter({ repositoryId: "", status: "" })).toEqual({
       ok: true,
+      filter: {},
     });
     expect(
       parseRunsFilter({ repositoryId: "repo-1", status: "failed" }),
-    ).toEqual({ ok: true, repositoryId: "repo-1", status: "failed" });
+    ).toEqual({
+      ok: true,
+      filter: { repositoryId: "repo-1", status: "failed" },
+    });
   });
 
   it("refuses an unknown status and an unusable repository id", () => {

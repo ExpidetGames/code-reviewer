@@ -10,9 +10,9 @@ import {
   toRunDetailView,
   toRunRowView,
   type RunDetailSnapshot,
+  type RunsFilter,
   type RunsSnapshot,
 } from "./run-view.ts";
-import type { JobStatus } from "../jobs/job-status.ts";
 
 /** How many runs the list shows at most. */
 export const RUNS_LIST_LIMIT = 100;
@@ -23,8 +23,7 @@ export type RunsFilterInput = {
   status?: string | undefined;
 };
 
-export type ParsedRunsFilter =
-  { ok: true; repositoryId?: string; status?: JobStatus } | { ok: false };
+export type ParsedRunsFilter = { ok: true; filter: RunsFilter } | { ok: false };
 
 const MAX_ID_LENGTH = 128;
 const RUN_ID =
@@ -43,20 +42,19 @@ export function parseRunsFilter(input: RunsFilterInput): ParsedRunsFilter {
     return { ok: false };
   return {
     ok: true,
-    ...(repositoryId === undefined || repositoryId === ""
-      ? {}
-      : { repositoryId }),
-    ...(status === undefined || status === "" || !isRunStatus(status)
-      ? {}
-      : { status }),
+    filter: {
+      ...(repositoryId === undefined || repositoryId === ""
+        ? {}
+        : { repositoryId }),
+      ...(status === undefined || status === "" || !isRunStatus(status)
+        ? {}
+        : { status }),
+    },
   };
 }
 
 export type RunsService = {
-  list(filter: {
-    repositoryId?: string;
-    status?: JobStatus;
-  }): Promise<RunsSnapshot>;
+  list(filter: RunsFilter): Promise<RunsSnapshot>;
   /** undefined for an id that is not a run id or that nobody has. */
   get(id: string): Promise<RunDetailSnapshot | undefined>;
 };
