@@ -14,7 +14,8 @@ import type {
 export const GITHUB_PROVIDER_ID = "github";
 export const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 
-const SCOPES = ["read:user", "user:email"];
+// Only the public profile is read; no email scope (see noreplyEmail).
+const SCOPES = ["read:user"];
 
 export type GithubProviderOptions = {
   clientId: string;
@@ -34,8 +35,6 @@ type GithubProfile = {
   email?: string | null;
   avatar_url?: string | null;
 };
-
-type GithubEmail = { email: string; primary: boolean; verified: boolean };
 
 export function githubProviderConfig(
   options: GithubProviderOptions,
@@ -129,50 +128,22 @@ async function readProfile(
   );
   if (!profile || typeof profile.id !== "number" || !profile.login) return null;
 
-  // `/user` leaves `email` empty when the person keeps the address private; the list has it, and
-  // says which addresses are verified.
-  const emails = await getJson<GithubEmail[]>(
-    `${options.apiBaseUrl}/user/emails`,
-    tokens.accessToken,
-    timeoutMs,
-  );
-  const chosen = chooseEmail(profile, Array.isArray(emails) ? emails : []);
-
   return {
     id: String(profile.id),
     login: profile.login,
     name: profile.name || profile.login,
-    email: chosen.email,
-    emailVerified: chosen.verified,
+    email: noreplyEmail(profile.id),
+    emailVerified: false,
     image: profile.avatar_url ?? undefined,
   };
 }
 
 /**
- * The address stored on the user. Better Auth needs one, and a GitHub account may expose none (the
- * email is hidden and the token cannot read the list). The stand-in is GitHub's own noreply address
- * for that account id: it never changes when the login does, and it is marked unverified.
+ * The address stored on every user. Better Auth needs one, but the app never uses it and
+ * identifies a person by the GitHub id, so it does not read the real address (that would take an
+ * extra scope, an extra call that can fail, and a UNIQUE column that two accounts can collide on).
+ * This is GitHub's own noreply address for the account id: it never changes when the login does.
  */
-export function chooseEmail(
-  profile: Pick<GithubProfile, "id" | "email">,
-  emails: GithubEmail[],
-): { email: string; verified: boolean } {
-  const publicEmail = profile.email?.trim();
-  if (publicEmail) {
-    const listed = emails.find(
-      (entry) => entry.email.toLowerCase() === publicEmail.toLowerCase(),
-    );
-    return { email: publicEmail, verified: listed?.verified ?? false };
-  }
-  const best =
-    emails.find((entry) => entry.primary && entry.verified) ??
-    emails.find((entry) => entry.verified) ??
-    emails.find((entry) => entry.primary) ??
-    emails[0];
-  if (best) return { email: best.email, verified: best.verified };
-  return { email: noreplyEmail(profile.id), verified: false };
-}
-
 export function noreplyEmail(githubId: number): string {
   return `${String(githubId)}@users.noreply.github.com`;
 }

@@ -2,7 +2,13 @@
 // the fake GitHub) and the journeys. Nothing here is a secret: the values only have to match
 // between the two processes under test.
 const appPort = Number(process.env.E2E_PORT) || 3417;
-const githubPort = Number(process.env.E2E_GITHUB_PORT) || appPort + 1;
+// The fake GitHub gets a random port in a high range, so two checkouts never collide however their
+// E2E_PORT values are chosen. The choice is stored in the environment: Playwright loads this file
+// again in every worker process, which inherits the main process's environment.
+process.env.E2E_GITHUB_PORT ||= String(
+  20000 + Math.floor(Math.random() * 20000),
+);
+const githubPort = Number(process.env.E2E_GITHUB_PORT);
 
 export const e2eEnv = {
   appPort,

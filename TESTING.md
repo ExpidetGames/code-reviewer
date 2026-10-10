@@ -153,7 +153,7 @@ App (`app/`, Node version from `.nvmrc`, pnpm):
   one retry on CI (the accepted baseline, see section 1), trace and screenshot on failure. It builds the app and runs `next start` on
   `E2E_PORT` (default 3417, never 3000 or 3100) so it never touches another running server, with
   `DATABASE_PATH` pointing to a fresh file under `test-results/e2e-data/`. Without a
-  downloaded Chromium, run with an installed Chrome: `PLAYWRIGHT_CHANNEL=chrome`. It also starts the fake GitHub (`fakes/github/main.ts`) on the next port (`E2E_GITHUB_PORT`, default `E2E_PORT + 1`) and gives the app dummy sign in settings; ports and credentials are in `e2e/helpers/e2e-env.ts`.
+  downloaded Chromium, run with an installed Chrome: `PLAYWRIGHT_CHANNEL=chrome`. It also starts the fake GitHub (`fakes/github/main.ts`) on a random free-range port (`E2E_GITHUB_PORT` fixes it) and gives the app dummy sign in settings plus `ALLOW_TEST_GITHUB_ENDPOINTS=true`, which the app requires before it accepts another GitHub address; ports and credentials are in `e2e/helpers/e2e-env.ts`.
 - ESLint flat config (Next.js core-web-vitals and TypeScript rules, `no-explicit-any` as an error,
   Vitest and Playwright plugin rules against focused and skipped tests), Prettier with its defaults
   (`pnpm format` fixes, `pnpm format:check` verifies) and `tsc --noEmit` with `strict`.

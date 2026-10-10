@@ -2,7 +2,10 @@
 
 A fake GitHub for the sign in. One HTTP server speaks the parts of GitHub that Code Reviewer uses to
 log a person in; the app is pointed at it with `GITHUB_OAUTH_BASE_URL` and `GITHUB_API_BASE` (both
-set to the fake's address; they default to the real GitHub). State is in memory.
+set to the fake's address; they default to the real GitHub). The app refuses both unless
+`ALLOW_TEST_GITHUB_ENDPOINTS=true` is set as well, because the token exchange sends the client
+secret to that address. State is in memory. The app does not call `/user/emails` (it stores a noreply
+address); the endpoint is there for tickets that may need it.
 
 | Endpoint                                                         | Behavior                                                                                                                                                                                                                                      |
 | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

@@ -1,7 +1,7 @@
 // The hook for "who may use this instance". Today every GitHub account that signs in may. CR-19
 // (allow list by GitHub login or organization) replaces `accessPolicy` below with the real rule;
 // nothing else has to change, because both places that grant access go through it: the proxy
-// (every request) and `getCurrentUser` (every page that shows the user).
+// (every request) and `requireUser` (every page or action that needs the user).
 
 /** The part of the signed in user that an access rule may look at. */
 export type SessionUser = {

@@ -8,7 +8,7 @@ import {
   type FakeGithubUser,
 } from "../../../fakes/github/server.ts";
 import { createAuth } from "../auth/auth.ts";
-import type { AuthConfig } from "../auth/config.ts";
+import { loadAuthConfig } from "../auth/config.ts";
 import { cleanUpAfterTest, createTestDatabase } from "./test-database.ts";
 
 export const TEST_BASE_URL = "http://localhost:3000";
@@ -40,16 +40,21 @@ export async function createAuthHarness(
   cleanUpAfterTest(() => github.close());
   for (const user of options.users ?? [OCTOCAT]) github.addUser(user);
 
-  const config: AuthConfig = {
-    secret: TEST_AUTH_SECRET,
-    baseUrl: TEST_BASE_URL,
-    github: {
-      clientId: TEST_CLIENT_ID,
-      clientSecret: TEST_CLIENT_SECRET,
-      oauthBaseUrl: github.baseUrl,
-      apiBaseUrl: github.baseUrl,
-    },
-    secureCookies: options.secureCookies ?? false,
+  // The settings come through the same loader as in the app, including the flag that allows the
+  // fake GitHub's address. `secureCookies` is what an https BETTER_AUTH_URL yields; the harness
+  // keeps its address on http (nothing here listens on it) and forces the flag.
+  const loaded = loadAuthConfig({
+    BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
+    BETTER_AUTH_URL: TEST_BASE_URL,
+    GITHUB_OAUTH_CLIENT_ID: TEST_CLIENT_ID,
+    GITHUB_OAUTH_CLIENT_SECRET: TEST_CLIENT_SECRET,
+    GITHUB_OAUTH_BASE_URL: github.baseUrl,
+    GITHUB_API_BASE: github.baseUrl,
+    ALLOW_TEST_GITHUB_ENDPOINTS: "true",
+  });
+  const config = {
+    ...loaded,
+    secureCookies: options.secureCookies ?? loaded.secureCookies,
   };
   const auth = createAuth({
     db,

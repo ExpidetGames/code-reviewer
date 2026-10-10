@@ -26,6 +26,11 @@ describe("the message for a failed sign in", () => {
     },
   );
 
+  it("says that retrying will not help when the account cannot be matched to a user", () => {
+    expect(loginErrorMessage("account_not_linked")).toMatch(/administrator/i);
+    expect(loginErrorMessage("account_not_linked")).not.toMatch(/try again/i);
+  });
+
   it("uses a generic message for a code it does not know and never echoes it", () => {
     const message = loginErrorMessage("<script>alert(1)</script>");
 

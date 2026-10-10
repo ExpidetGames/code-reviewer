@@ -80,35 +80,95 @@ describe("loading the sign-in configuration", () => {
     expect(config.baseUrl).toBe("https://reviews.example.com");
   });
 
-  it("takes the GitHub endpoints from the environment when they are set, without a trailing slash", () => {
+  it("takes the GitHub endpoints from the environment only together with the test flag, without a trailing slash", () => {
     const config = loadAuthConfig({
       ...validEnv,
       GITHUB_OAUTH_BASE_URL: "http://127.0.0.1:4000/",
       GITHUB_API_BASE: "http://127.0.0.1:4000/",
+      ALLOW_TEST_GITHUB_ENDPOINTS: "true",
     });
 
     expect(config.github.oauthBaseUrl).toBe("http://127.0.0.1:4000");
     expect(config.github.apiBaseUrl).toBe("http://127.0.0.1:4000");
   });
 
-  it("rejects a GitHub endpoint override that is not a URL", () => {
+  it.each(["GITHUB_OAUTH_BASE_URL", "GITHUB_API_BASE"])(
+    "refuses %s without the test flag, because the client secret would be sent there",
+    (name) => {
+      const error = loadError({ ...validEnv, [name]: "http://127.0.0.1:4000" });
+
+      expect(error.message).toContain(name);
+      expect(error.message).toContain("ALLOW_TEST_GITHUB_ENDPOINTS");
+    },
+  );
+
+  it("refuses a GitHub endpoint override that is not a URL", () => {
     expect(
-      loadError({ ...validEnv, GITHUB_API_BASE: "api.github.com" }).message,
+      loadError({
+        ...validEnv,
+        ALLOW_TEST_GITHUB_ENDPOINTS: "true",
+        GITHUB_API_BASE: "api.github.com",
+      }).message,
     ).toContain("GITHUB_API_BASE");
   });
 
-  it("uses secure cookies in production and for an https address, plain cookies otherwise", () => {
-    expect(
-      loadAuthConfig({ ...validEnv, NODE_ENV: "production" }).secureCookies,
-    ).toBe(true);
+  it("ignores the test flag when no endpoint is overridden", () => {
+    const config = loadAuthConfig({
+      ...validEnv,
+      ALLOW_TEST_GITHUB_ENDPOINTS: "true",
+    });
+
+    expect(config.github.oauthBaseUrl).toBe("https://github.com");
+  });
+
+  // CR-18-T13
+  it("uses secure cookies exactly when the base URL is https", () => {
     expect(
       loadAuthConfig({
         ...validEnv,
         BETTER_AUTH_URL: "https://reviews.example.com",
       }).secureCookies,
     ).toBe(true);
+    expect(loadAuthConfig(validEnv).secureCookies).toBe(false);
     expect(
-      loadAuthConfig({ ...validEnv, NODE_ENV: "development" }).secureCookies,
+      loadAuthConfig({ ...validEnv, NODE_ENV: "production" }).secureCookies,
     ).toBe(false);
+  });
+
+  it.each([
+    "http://localhost:3000",
+    "http://127.0.0.1:3417",
+    "http://[::1]:3000",
+  ])(
+    "starts in production over plain http on the local machine (%s)",
+    (url) => {
+      expect(() =>
+        loadAuthConfig({
+          ...validEnv,
+          NODE_ENV: "production",
+          BETTER_AUTH_URL: url,
+        }),
+      ).not.toThrow();
+    },
+  );
+
+  it("refuses production over plain http on another host, where browsers would drop the secure cookies", () => {
+    const error = loadError({
+      ...validEnv,
+      NODE_ENV: "production",
+      BETTER_AUTH_URL: "http://reviews.example.com",
+    });
+
+    expect(error.message).toContain("BETTER_AUTH_URL");
+    expect(error.message).toMatch(/https/);
+  });
+
+  it("accepts plain http on another host outside production", () => {
+    expect(() =>
+      loadAuthConfig({
+        ...validEnv,
+        BETTER_AUTH_URL: "http://reviews.example.com",
+      }),
+    ).not.toThrow();
   });
 });

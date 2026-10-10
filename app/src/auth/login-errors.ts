@@ -15,6 +15,8 @@ const MESSAGES: Readonly<Record<string, string>> = {
   unable_to_get_user_info:
     "Could not read your GitHub profile. Please try again.",
   email_not_found: "Could not read your GitHub profile. Please try again.",
+  account_not_linked:
+    "This GitHub account could not be matched to an existing user. Ask an administrator for help.",
 };
 
 const GENERIC_MESSAGE = "Sign in failed. Please try again.";

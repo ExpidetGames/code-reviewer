@@ -54,8 +54,12 @@ never hold one open across an `await` on something slow (network, model, subproc
 ## Migrations
 
 - Written in TypeScript with Kysely's schema builder, one file per migration in `migrations/`,
-  named `NNNN_what_it_does.ts` and registered in `migrations/index.ts`. Kysely runs them in the
-  alphabetical order of the keys there.
+  named `YYYYMMDDHHMMSS_what_it_does.ts` (the UTC time the migration was written; the first one,
+  `0001_create_app_meta`, is the only exception and sorts before all of them) and registered in
+  `migrations/index.ts`. Kysely runs them in the alphabetical order of the keys there. Timestamps
+  keep parallel branches from picking the same number. When a branch merges after another one added
+  migrations, check the order: a migration must never sort before one that is already merged, because
+  Kysely refuses to run it. A database that applied a migration under an old name must be recreated.
 - They run automatically when the server starts: `src/instrumentation.ts` (`register`, which Next.js
   calls once before the server accepts requests) calls `initializeDatabaseOnStart`. It is not run by
   `next build`.

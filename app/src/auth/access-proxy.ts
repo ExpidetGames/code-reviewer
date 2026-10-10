@@ -3,7 +3,7 @@
 // looked up in the database on each request, so a signed out or expired session stops working at
 // once. Anything that goes wrong while checking denies the request.
 import { NextResponse, type NextRequest } from "next/server";
-import { decideAccess } from "./access.ts";
+import { decideAccess, isPublicPath } from "./access.ts";
 import { accessPolicy, type AccessPolicy } from "./access-policy.ts";
 import type { Auth } from "./auth.ts";
 import { getSessionUser } from "./session-user.ts";
@@ -23,8 +23,7 @@ export function createAccessProxy({
     const { pathname } = request.nextUrl;
 
     // A public path needs no lookup.
-    if (decideAccess({ pathname, authenticated: false }).kind === "allow")
-      return NextResponse.next();
+    if (isPublicPath(pathname)) return NextResponse.next();
 
     let authenticated: boolean;
     try {

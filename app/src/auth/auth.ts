@@ -1,5 +1,5 @@
 // The one Better Auth instance of the app: GitHub is the only way in, sessions live in our SQLite
-// database for 30 days, and the four tables are the ones created by migration 0002.
+// database for 30 days, and the four tables are the ones created by migration 20261010123800_create_auth_tables.
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { betterAuth } from "better-auth";

@@ -3,8 +3,6 @@
 // the person to the login page and a data route answers 401; a signed out, expired or forged
 // session counts as no session. The route list is read from the file system, so a route added
 // without deciding here whether it is public makes the test fail (default deny).
-import { readdirSync } from "node:fs";
-import { join, relative, sep } from "node:path";
 import { NextRequest } from "next/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -13,37 +11,14 @@ import {
   createAuthHarness,
   type CookieJar,
 } from "../test-support/auth-harness.ts";
+import { concretePath, discoverRoutes } from "../test-support/routes.ts";
 import { createAccessProxy } from "./access-proxy.ts";
-
-const APP_DIRECTORY = join(import.meta.dirname, "..", "app");
 
 // Every route of the app and whether it needs a session. A new route must be added here.
 const PUBLIC_ROUTES = ["/login", "/api/health", "/api/auth/[...all]"] as const;
 const PROTECTED_ROUTES = ["/"] as const;
-
-// Routes as the file system defines them: every page.tsx and route.ts below src/app.
-function discoverRoutes(): string[] {
-  const routes: string[] = [];
-  const walk = (directory: string) => {
-    for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      const path = join(directory, entry.name);
-      if (entry.isDirectory()) walk(path);
-      else if (/^(page|route)\.(ts|tsx)$/.test(entry.name)) {
-        const segments = relative(APP_DIRECTORY, directory)
-          .split(sep)
-          .filter((segment) => segment !== "" && !/^\(.*\)$/.test(segment));
-        routes.push(`/${segments.join("/")}`);
-      }
-    }
-  };
-  walk(APP_DIRECTORY);
-  return routes.sort();
-}
-
-/** A concrete URL path for a route pattern such as `/api/auth/[...all]` or `/p/[id]`. */
-function concretePath(route: string): string {
-  return route.replace(/\[\.\.\.[^\]]+\]/g, "x/y").replace(/\[[^\]]+\]/g, "x");
-}
+// Files the proxy matcher leaves out on purpose (src/proxy.ts), so no session rule applies to them.
+const OUTSIDE_THE_PROXY = ["/favicon.ico"] as const;
 
 async function createGuardedApp() {
   const harness = await createAuthHarness();
@@ -72,9 +47,13 @@ afterEach(() => {
 describe("a request without a session", () => {
   // CR-18-T07
   it("knows every route of the app as either public or protected", () => {
-    const known = [...PUBLIC_ROUTES, ...PROTECTED_ROUTES].sort();
+    const known = [
+      ...PUBLIC_ROUTES,
+      ...PROTECTED_ROUTES,
+      ...OUTSIDE_THE_PROXY,
+    ].sort();
 
-    expect(discoverRoutes()).toEqual(known);
+    expect(discoverRoutes().map(({ route }) => route)).toEqual(known);
   });
 
   // CR-18-T07

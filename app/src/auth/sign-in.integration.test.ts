@@ -19,7 +19,7 @@ describe("signing in with GitHub for the first time", () => {
     expect(users[0]).toMatchObject({
       name: "The Octocat",
       github_login: "octocat",
-      email: "octocat@example.test",
+      email: `${String(OCTOCAT.id)}@users.noreply.github.com`,
     });
     const accounts = await harness.db
       .selectFrom("accounts")
@@ -75,57 +75,55 @@ describe("signing in again", () => {
   });
 });
 
-describe("signing in with a GitHub account that hides its email address", () => {
+describe("the email address of a signed in user", () => {
   // CR-18-T06
-  it("takes the primary verified address from the email list", async () => {
-    const harness = await createAuthHarness({
-      users: [
-        {
-          ...OCTOCAT,
-          email: null,
-          emails: [
-            { email: "other@example.test", primary: false, verified: true },
-            { email: "private@example.test", primary: true, verified: true },
-          ],
-        },
-      ],
-    });
+  it.each([
+    ["has a public address", { email: "octocat@example.test" }],
+    ["hides the address", { email: null, emails: [] }],
+    [
+      "hides it but lists one",
+      {
+        email: null,
+        emails: [
+          { email: "private@example.test", primary: true, verified: true },
+        ],
+      },
+    ],
+  ])(
+    "is the GitHub noreply address of the account id when the account %s, and the sign in succeeds",
+    async (_case, overrides) => {
+      const harness = await createAuthHarness({
+        users: [{ ...OCTOCAT, ...overrides }],
+      });
 
-    const { response } = await harness.signIn();
+      const { response } = await harness.signIn();
 
-    expect(response.headers.get("location")).toBe("/");
-    const user = await harness.db
-      .selectFrom("users")
-      .selectAll()
-      .executeTakeFirstOrThrow();
-    expect(user).toMatchObject({
-      email: "private@example.test",
-      email_verified: 1,
-      github_login: "octocat",
-    });
-  });
+      expect(response.headers.get("location")).toBe("/");
+      const user = await harness.db
+        .selectFrom("users")
+        .selectAll()
+        .executeTakeFirstOrThrow();
+      expect(user.email).toBe(`${String(OCTOCAT.id)}@users.noreply.github.com`);
+      expect(user.email_verified).toBe(0);
+      expect(user.github_login).toBe("octocat");
+    },
+  );
 
   // CR-18-T06
-  it("uses the GitHub noreply address for the account id when no address can be read at all", async () => {
-    const harness = await createAuthHarness({
-      users: [{ ...OCTOCAT, email: null, emails: [] }],
-    });
+  it("is not read from GitHub at all", async () => {
+    const harness = await createAuthHarness();
 
-    const { response } = await harness.signIn();
+    await harness.signIn();
 
-    expect(response.headers.get("location")).toBe("/");
-    const user = await harness.db
-      .selectFrom("users")
-      .selectAll()
-      .executeTakeFirstOrThrow();
-    expect(user.email).toBe(`${String(OCTOCAT.id)}@users.noreply.github.com`);
-    expect(user.email_verified).toBe(0);
+    expect(
+      harness.github.requests().map((request) => request.path),
+    ).not.toContain("/user/emails");
   });
 });
 
-describe("signing in with a second GitHub account that has the same email address", () => {
-  // Extra case beyond the Jira table: the user follows the GitHub id, not the email address.
-  it("does not give it the user of the first account", async () => {
+describe("signing in with a second GitHub account that has the same public email address", () => {
+  // Extra case beyond the Jira table: the user follows the GitHub id, never the email address.
+  it("gives it a user of its own and leaves the first one alone", async () => {
     const harness = await createAuthHarness({
       users: [
         OCTOCAT,
@@ -141,12 +139,15 @@ describe("signing in with a second GitHub account that has the same email addres
 
     const { response } = await harness.signIn("other-account");
 
-    expect(response.headers.get("location")).toContain("/login?error=");
-    const users = await harness.db.selectFrom("users").selectAll().execute();
-    expect(users).toHaveLength(1);
-    expect(users[0]).toMatchObject({ github_login: "octocat" });
-    expect(
-      await harness.db.selectFrom("sessions").selectAll().execute(),
-    ).toHaveLength(1);
+    expect(response.headers.get("location")).toBe("/");
+    const users = await harness.db
+      .selectFrom("users")
+      .select(["github_login", "name"])
+      .orderBy("github_login")
+      .execute();
+    expect(users).toEqual([
+      { github_login: "octocat", name: "The Octocat" },
+      { github_login: "other-account", name: "Other Account" },
+    ]);
   });
 });
