@@ -2,7 +2,7 @@
 // saved, saving and replacing a value with the time and the person, JSON values of every shape, and
 // removing a setting.
 import { sql } from "kysely";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createTestDatabase } from "../../test-support/test-database.ts";
 import { createAppSettingsRepository } from "./app-settings-repository.ts";
 
@@ -81,5 +81,41 @@ describe("the app settings repository", () => {
     await expect(
       createAppSettingsRepository(db).set("x", undefined, null),
     ).rejects.toThrow(/JSON/);
+  });
+});
+
+describe("a stored value that is not valid JSON", () => {
+  it("reads as no value, with a warning that names the setting and not the text", async () => {
+    const { db } = await createTestDatabase();
+    const warn = vi.fn();
+    const repository = createAppSettingsRepository(db, undefined, warn);
+    await repository.set("review_defaults", { a: 1 }, "octocat");
+    await sql`update app_settings set value = '{damaged secret-looking-text'`.execute(
+      db,
+    );
+
+    const stored = await repository.get("review_defaults");
+
+    expect(stored).toMatchObject({ value: undefined, updatedBy: "octocat" });
+    expect(warn).toHaveBeenCalledTimes(1);
+    const line = String(warn.mock.calls[0]?.[0]);
+    expect(line).toContain("APP_SETTING_UNREADABLE");
+    expect(line).toContain("review_defaults");
+    expect(line).not.toContain("secret-looking-text");
+  });
+
+  it("is replaced by the next save", async () => {
+    const { db } = await createTestDatabase();
+    const repository = createAppSettingsRepository(
+      db,
+      undefined,
+      () => undefined,
+    );
+    await repository.set("review_defaults", {}, null);
+    await sql`update app_settings set value = 'nope'`.execute(db);
+
+    await repository.set("review_defaults", { a: 2 }, null);
+
+    expect((await repository.get("review_defaults"))?.value).toEqual({ a: 2 });
   });
 });

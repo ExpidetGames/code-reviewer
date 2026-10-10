@@ -18,23 +18,32 @@ A save **replaces the whole set** of its layer: a field left out is inherited ag
 allow list may change both layers (no admin role in the MVP); `app_settings.updated_by` records who saved
 the global defaults last.
 
-| Field               | Meaning                                                                      | Built-in value                             | Limits                                 |
-| ------------------- | ---------------------------------------------------------------------------- | ------------------------------------------ | -------------------------------------- |
-| `model`             | The model (as the provider spells it, no prefix)                             | `LLM_MODEL`, else `deepseek/deepseek-v3.2` | the pattern the runner accepts         |
-| `fallbackModel`     | Tried when the model fails; `null` = none                                    | none                                       | same pattern                           |
-| `extraInstructions` | Project rules for the model, free text                                       | none                                       | 4000 characters, no control characters |
-| `maxFindings`       | The most findings one review lists                                           | 5                                          | 1 to 30                                |
-| `maxTokens`         | Token budget of a review (`llm.maxTokens`)                                   | 100000 (PR-Agent's own: 32000)             | 8000 to 2000000                        |
-| `largePrChunking`   | Review a large pull request in chunks instead of leaving files out           | on                                         | boolean                                |
-| `inlineKeyIssues`   | Also post every finding as an inline comment                                 | off                                        | boolean                                |
-| `autoReviewOnOpen`  | Review when a pull request is opened, reopened or marked ready               | on                                         | boolean                                |
-| `autoReviewOnPush`  | Review again when commits are pushed                                         | on                                         | boolean                                |
-| `allowedCommands`   | The comment commands people may use (`review`, `improve`, `describe`, `ask`) | all four                                   | any subset, no duplicates              |
+| Field               | Meaning                                                                      | Built-in value                                 | Limits                                                           |
+| ------------------- | ---------------------------------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------- |
+| `model`             | The model (as the provider spells it, no prefix)                             | `LLM_MODEL`, else `anthropic/claude-haiku-5.5` | the pattern the runner accepts                                   |
+| `fallbackModel`     | Tried when the model fails; `null` = none                                    | none                                           | same pattern                                                     |
+| `extraInstructions` | Project rules for the model, free text                                       | none                                           | 4000 characters, no control characters                           |
+| `maxFindings`       | The most findings one review lists                                           | 5                                              | 1 to 30                                                          |
+| `maxTokens`         | Token budget of a review (`llm.maxTokens`)                                   | 100000 (PR-Agent's own: 32000)                 | 8000 to 2000000, not above the model's context window (if known) |
+| `largePrChunking`   | Review a large pull request in chunks instead of leaving files out           | on                                             | boolean                                                          |
+| `inlineKeyIssues`   | Also post every finding as an inline comment                                 | off                                            | boolean                                                          |
+| `autoReviewOnOpen`  | Review when a pull request is opened, reopened or marked ready               | on                                             | boolean                                                          |
+| `autoReviewOnPush`  | Review again when commits are pushed                                         | on                                             | boolean                                                          |
+| `allowedCommands`   | The comment commands people may use (`review`, `improve`, `describe`, `ask`) | all four                                       | any subset, no duplicates                                        |
 
 The limits are `REVIEW_SETTING_LIMITS`; `validate.ts` checks every field and reports each problem as
 `{ field, code }` with a stable code (`REVIEW_SETTING_ISSUE_CODES`), never with the value.
-`parseStoredOverrides` reads what is stored and drops any field this version would not accept, so old or
-hand-edited data cannot make a review fail.
+`parseStoredOverrides` reads what is stored and drops any field this version would not accept, and
+stored text that is not JSON at all reads as no settings (a `[db] APP_SETTING_UNREADABLE` or
+`PROJECT_SETTINGS_UNREADABLE` warning names the setting or the project, never the text), so old,
+damaged or hand-edited data cannot make a review fail, the project list or a page. The next save
+replaces it.
+
+The token budget must fit into the context window of the models the saved settings would use (model and
+fallback model, counted in the model's own tokens, only for models the price table knows):
+otherwise the save is refused with `EXCEEDS_MODEL_CONTEXT` on `maxTokens` (or on the model, when the
+request only changed the model). A combination that a later change of another layer made too large is
+not blamed on an unrelated save; `cost.exceedsContext` lists it for the UI.
 
 ## From settings to a runner job
 
@@ -55,9 +64,13 @@ own allowlist) and the two `llm` fields. It never receives the LLM key or a Git 
 contain them. The names are PR-Agent 0.47.0's: `runner-settings.test.ts` reads
 `fixtures/pr-agent-0.47.0-configuration.excerpt.toml` (verbatim lines of that release's
 `configuration.toml`) and checks that every variable exists there with the kind of value we send, and
-that the switches we leave out when off really are off by default. **When PR-Agent is upgraded**, copy
-the same lines from the new release's file into the fixture (the header of the file says which) and fix
-what the test reports.
+that the switches we leave out when off really are off by default.
+
+**Names, and when PR-Agent is upgraded:** copy the lines named in the header of the fixture from the
+`pr_agent/settings/configuration.toml` of the new release (PyPI package `pr-agent`, for example the
+installed one in `runner/.venv/lib/python3.13/site-packages/pr_agent/settings/`) into the fixture,
+change the version in its file name, and fix what the test reports. Check the new release's Dynaconf
+behaviour for free text again (next section): the table in `runner-settings.test.ts` is what 0.47.0 does.
 
 ### Things to know
 
@@ -66,9 +79,10 @@ what the test reports.
   `@format {env[OPENROUTER__KEY]}` or `@jinja ...` is **evaluated** against the process environment (the
   LLM key and the GitHub token are in it) and the result goes into the prompt; other `@` converters change
   the type or abort the run; a text that is only a number, a date, a quoted string, a list or `true`,
-  `false`, `inf`, `nan` becomes that value instead of text. `protectFromSettingsParser` puts one line
-  break in front of a text that starts with anything but a letter (or is only one of those words); any
-  other text is passed on exactly as it is. A runner test with the real PR-Agent should pin the same
+  `false`, `inf`, `nan` becomes that value instead of text (also when it is only the _first token_:
+  `true` followed by a line break and a line `foo = 1` is read as the boolean). `protectFromSettingsParser`
+  puts one line break in front of a text that starts with anything but a letter, or whose first token is
+  `true`, `false`, `inf` or `nan`; any other text is passed on exactly as it is. A runner test with the real PR-Agent should pin the same
   table (the engine suite).
 - **The environment wins over a repository's `.pr_agent.toml`.** The runner keeps the variables in the
   process environment, and PR-Agent re-applies the environment after merging a repository file. So the
@@ -82,19 +96,29 @@ what the test reports.
   `config.max_model_tokens`, which is 32000 unless set (`algo/token_budget.py`, `get_max_tokens`). The
   runner has to set `CONFIG__MAX_MODEL_TOKENS` from `llm.maxTokens` as well, otherwise a budget above
   32000 has no effect.
-- `LLM_MAX_TOKENS` (`src/llm`) is not used here: the budget is a review setting now.
+- `LLM_MAX_TOKENS` (`src/llm`) is not used here: the budget is a review setting now. It stays as the
+  instance's hint for the context window of a model PR-Agent does not know (`contextWindowTokens`), and
+  the budget of a review replaces it in a job.
 
 ## Cost guard
 
 `estimateReviewCost(settings)` (`cost.ts`) answers what a typical review is expected to cost with the
-model (and the fallback model), and sets `warn` when either is above **0.10 USD**, the customer's limit.
-It never blocks a setting; the UI shows the warning. The price per model is a small static table
-(`model-pricing.ts`, USD per million tokens from OpenRouter's model list, with the day it was read);
-the model comparison ticket keeps it up to date. A review is assumed to send 30000 tokens (never more
-than the budget) and get 3000 back, one call; that reproduces the cost measured in the model comparison
-for gemini-3.8-flash (0.034 estimated, 0.035 measured), and is conservative for deepseek-v3.2 (0.010,
-0.007 measured). A model that is not in the table is `unknown_model` and does not warn. Chunked reviews of
-very large pull requests (up to three calls) are not counted.
+model (and the fallback model) and lists the warnings: `above_limit` when the estimate is above **0.10 USD**,
+the customer's limit (exactly 0.10 does not warn), and `cost_unknown` for a model the price table does
+not know. `warn` is true when there is any. It never blocks a setting; the UI shows the warnings.
+
+The price per model is a small static table (`model-pricing.ts`, USD per million tokens from OpenRouter's
+model list, with the day it was read, the same prices the model comparison used); the model comparison
+ticket keeps it up to date. A review is assumed to send 30000 tokens (the size of a large pull request, never
+more than the budget) and get 3000 back, in one call. The prompt is multiplied by the model's
+`inputTokenFactor`: PR-Agent cuts the diff in its own tokens, and a Claude model counts the same diff as
+1.4 times as many (45k against 32k, measured in the model comparison). That puts the estimate for
+Claude Haiku 5.5 (the default model) at 0.006 USD (0.0051 measured for the large pull request), for Gemini 3.8
+Flash at 0.034 (0.035 measured on average) and for Claude Sonnet 5.5 at 0.114 USD, above the limit, like the
+one large review that was measured (0.1004 USD): Sonnet is the quality alternative for a single project and
+shows the warning. `upperUsd` of an estimate is the most a review can cost with the model: the whole
+budget as the prompt, and every call that chunking a large pull request allows (three); it is shown
+and never warns. `exceedsContext` lists the models whose context window is smaller than the budget.
 
 ## Routes
 

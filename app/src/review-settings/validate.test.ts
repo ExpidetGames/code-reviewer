@@ -251,3 +251,36 @@ describe("reading stored review settings", () => {
       expect(parseStoredOverrides(stored)).toEqual({});
   });
 });
+
+// The numbers the README, the Jira story and the UI promise, written out: the tests above are
+// relative to REVIEW_SETTING_LIMITS, so they would follow a changed constant. These would not.
+describe("the documented limits", () => {
+  // CR-25-T07, CR-25-T08
+  it.each([
+    [{ maxTokens: 7_999 }, "maxTokens", "TOO_SMALL"],
+    [{ maxTokens: 2_000_001 }, "maxTokens", "TOO_LARGE"],
+    [{ maxFindings: 0 }, "maxFindings", "TOO_SMALL"],
+    [{ maxFindings: 31 }, "maxFindings", "TOO_LARGE"],
+    [{ extraInstructions: "x".repeat(4_001) }, "extraInstructions", "TOO_LONG"],
+  ])("refuses %j", (settings, field, code) => {
+    expect(issuesOf(settings)).toEqual([{ field, code }]);
+  });
+
+  it.each([
+    { maxTokens: 8_000 },
+    { maxTokens: 2_000_000 },
+    { maxFindings: 1 },
+    { maxFindings: 30 },
+    { extraInstructions: "x".repeat(4_000) },
+  ])("accepts %j", (settings) => {
+    expect(validateReviewSettingsPatch(settings).ok).toBe(true);
+  });
+
+  it("pins the constants to the same numbers", () => {
+    expect(REVIEW_SETTING_LIMITS).toEqual({
+      extraInstructionsMaxChars: 4_000,
+      maxFindings: { min: 1, max: 30 },
+      maxTokens: { min: 8_000, max: 2_000_000 },
+    });
+  });
+});

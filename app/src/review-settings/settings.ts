@@ -5,8 +5,9 @@
 // and the overrides of one project (a sparse set in `projects.settings`). A layer only holds the
 // fields somebody changed; everything else is inherited, so a built-in value that changes later
 // (the model comparison may change the default model) reaches everybody who did not choose one.
-// A repository's own `.pr_agent.toml` comes on top for what PR-Agent lets it set (see README.md for
-// what that means for the values below).
+// A repository's own `.pr_agent.toml` can still set what the app does not send: the options sent in
+// `job.env` win over the repository file (README.md, "Things to know"), so the file only reaches keys
+// that are left out (empty project rules, switches that are off, everything else PR-Agent has).
 import { REVIEW_COMMANDS, type ReviewCommand } from "../integrations/types.ts";
 import { DEFAULT_LLM_MODEL } from "../llm/config.ts";
 

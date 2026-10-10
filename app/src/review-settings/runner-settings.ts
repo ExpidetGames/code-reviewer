@@ -57,18 +57,20 @@ export const RUNNER_ENV_VARIABLES = [
 //     whole process environment, which holds the LLM key and the GitHub token. The result goes into
 //     the prompt (and so to the model and, through a reply, to the pull request).
 //   - other "@..." converters (@merge, @json, @int, ...) change the type, "@get X" ends the run.
-//   - a text that is a number, a date, a quoted string, a list or a table ("123", "2026-10-10",
-//     "\"quoted\"", "[1, 2]", "{a = 1}") is parsed into that value; "true", "false", "inf" and "nan"
-//     (also followed by a "#" comment) become a boolean or a float.
+//   - the value is read as the right side of a TOML assignment, so a text that is a number, a date, a
+//     quoted string, a list or a table ("123", "2026-10-10", "\"quoted\"", "[1, 2]", "{a = 1}") is
+//     parsed into that value, and so is a text whose *first token* is "true", "false", "inf" or
+//     "nan", whatever follows it: a "#" comment, or a line break and more lines ("true\nfoo = 1").
 // All of that only happens when the text *starts* in a way that looks like such a value, and
 // Dynaconf's check does not skip a leading line break. A text that starts with anything but a letter,
-// or that is only one of those words, therefore gets one line break in front: the prompt reads the
-// same, and the text stays a plain string. Any other text is passed on exactly as it is.
-const BARE_LITERAL = /^(true|false|inf|nan|null|none)\s*(#[\s\S]*)?$/i;
+// or whose first token is one of those four words, therefore gets one line break in front: the prompt
+// reads the same, and the text stays a plain string. Any other text is passed on exactly as it is.
+const LITERAL_FIRST_TOKEN = /^(true|false|inf|nan)(?![\p{L}\p{N}_])/iu;
 
 export function protectFromSettingsParser(text: string): string {
   if (text === "") return text;
-  if (!/^\p{L}/u.test(text) || BARE_LITERAL.test(text)) return `\n${text}`;
+  if (!/^\p{L}/u.test(text) || LITERAL_FIRST_TOKEN.test(text))
+    return `\n${text}`;
   return text;
 }
 

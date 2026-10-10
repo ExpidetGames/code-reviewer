@@ -26,6 +26,11 @@ export const REVIEW_SETTING_ISSUE_CODES = [
   "DUPLICATE_ENTRY",
   /** Control characters (other than tab and line breaks) or an unpaired surrogate. */
   "FORBIDDEN_CHARACTERS",
+  /**
+   * The token budget is larger than the context window of the model (a model the price table knows).
+   * Reported on `maxTokens` when the request sets it, otherwise on the model that became too small.
+   */
+  "EXCEEDS_MODEL_CONTEXT",
 ] as const;
 export type ReviewSettingIssueCode =
   (typeof REVIEW_SETTING_ISSUE_CODES)[number];

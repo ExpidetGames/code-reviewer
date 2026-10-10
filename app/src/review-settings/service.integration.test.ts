@@ -3,7 +3,9 @@
 // defaults reaches every project that does not override the field, resetting an override brings the
 // project back to the global value, bad input is refused with the affected fields and stores nothing,
 // and stored data that is no longer valid cannot break a review.
+import { sql } from "kysely";
 import { describe, expect, it } from "vitest";
+
 import { ReviewSettingsError } from "./errors.ts";
 import {
   setupReviewSettings,
@@ -129,6 +131,95 @@ describe("the global defaults", () => {
       aboveLimit: true,
     });
     expect(view.effective.model).toBe("anthropic/claude-opus-5.5");
+  });
+});
+
+describe("the token budget against the context window of the model", () => {
+  // deepseek/deepseek-v3.2 has a context window of 163,840 tokens in the price table
+  it("refuses a global budget that does not fit into the model, blaming the budget", async () => {
+    const app = await setupReviewSettings();
+
+    const error = await refusal(
+      app.service.updateGlobalSettings({ maxTokens: 1_000_000 }, "octocat"),
+    );
+
+    expect(error.issues).toEqual([
+      { field: "maxTokens", code: "EXCEEDS_MODEL_CONTEXT" },
+    ]);
+    expect(await app.appSettingRows()).toEqual([]);
+  });
+
+  it("accepts the same budget together with a model that has the room", async () => {
+    const app = await setupReviewSettings();
+
+    const view = await app.service.updateGlobalSettings(
+      { maxTokens: 500_000, model: "anthropic/claude-haiku-5.5" },
+      "octocat",
+    );
+
+    expect(view.effective.maxTokens).toBe(500_000);
+    expect(view.cost.exceedsContext).toEqual([]);
+  });
+
+  it("refuses a model that is too small for the budget in effect and blames the model", async () => {
+    const app = await setupReviewSettings();
+    await app.service.updateGlobalSettings(
+      { maxTokens: 500_000, model: "anthropic/claude-haiku-5.5" },
+      "octocat",
+    );
+    await app.projects.activate(app.first.id);
+
+    const error = await refusal(
+      app.service.updateProjectSettings(app.first.id, {
+        model: "deepseek/deepseek-v3.2",
+      }),
+    );
+
+    expect(error.issues).toEqual([
+      { field: "model", code: "EXCEEDS_MODEL_CONTEXT" },
+    ]);
+  });
+
+  it("does not know a model the table does not know, so it cannot refuse the budget for it", async () => {
+    const app = await setupReviewSettings();
+
+    const view = await app.service.updateGlobalSettings(
+      { model: "some/new-model", maxTokens: 2_000_000 },
+      "octocat",
+    );
+
+    expect(view.effective.maxTokens).toBe(2_000_000);
+    expect(view.cost.warnings).toEqual([
+      { model: "primary", kind: "cost_unknown" },
+    ]);
+  });
+
+  it("shows a combination that a later change made too large without blaming an unrelated save", async () => {
+    const app = await setupReviewSettings();
+    await app.projects.activate(app.first.id);
+    await app.service.updateGlobalSettings(
+      { model: "anthropic/claude-haiku-5.5" },
+      "octocat",
+    );
+    await app.service.updateProjectSettings(app.first.id, {
+      maxTokens: 600_000,
+    });
+
+    await app.service.updateGlobalSettings(
+      { model: "deepseek/deepseek-v3.2" },
+      "octocat",
+    );
+    const view = await app.service.getProjectSettings(app.first.id);
+    const saved = await app.service
+      .updateProjectSettings(app.first.id, {
+        maxTokens: 600_000,
+        maxFindings: 3,
+      })
+      .catch((error: unknown) => error);
+
+    expect(view.cost.exceedsContext).toEqual(["primary"]);
+    // A save that sets the budget again is asked to fix it.
+    expect(saved).toBeInstanceOf(ReviewSettingsError);
   });
 });
 
@@ -278,6 +369,31 @@ describe("the settings of a project", () => {
       maxTokens: DEFAULT_MAX_TOKENS,
       inlineKeyIssues: true,
     });
+  });
+});
+
+describe("stored settings that are not valid JSON", () => {
+  it("fall back to the defaults when the global defaults or the settings of a project are damaged", async () => {
+    const app = await setupReviewSettings();
+    await app.projects.activate(app.first.id);
+    await app.service.updateGlobalSettings({ maxFindings: 8 }, "octocat");
+    await app.service.updateProjectSettings(app.first.id, { maxFindings: 2 });
+    await sql`update app_settings set value = '{damaged'`.execute(app.db);
+    await sql`update projects set settings = 'damaged}'`.execute(app.db);
+
+    const global = await app.service.getGlobalSettings();
+    const project = await app.service.getProjectSettings(app.first.id);
+    const resolved = await app.service.resolveForRepository(app.first.id);
+
+    expect(global.overrides).toEqual({});
+    expect(global.effective.maxFindings).toBe(5);
+    expect(project.overrides).toEqual({});
+    expect(project.effective.maxFindings).toBe(5);
+    expect(resolved?.settings.maxFindings).toBe(5);
+    const view = await app.service.updateProjectSettings(app.first.id, {
+      maxFindings: 3,
+    });
+    expect(view.effective.maxFindings).toBe(3);
   });
 });
 

@@ -3,7 +3,7 @@
 # environment variables or reasons about. Only these lines are kept; the section headers are the
 # original ones. runner-settings.test.ts reads this file to check every variable name and the
 # default each switch relies on. When PR-Agent is upgraded, replace the lines from the new
-# release's file (see README.md in this folder) and fix what the test then reports.
+# release's file (src/review-settings/README.md, "Names") and fix what the test then reports.
 
 [pr_reviewer]
 inline_key_issues=false # Publish each review finding as an inline comment where the provider can verify inline-comment publication (GitHub, Bitbucket Cloud, Azure DevOps, GitLab).

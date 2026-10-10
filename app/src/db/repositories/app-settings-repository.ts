@@ -2,10 +2,11 @@
 // whole instance, the value as JSON.
 import "server-only";
 import type { Kysely } from "kysely";
-import { decodeJson, encodeJson, formatTimestamp } from "../codecs.ts";
+import { encodeJson, formatTimestamp, tryDecodeJson } from "../codecs.ts";
 import type { Database } from "../schema.ts";
 
 export type StoredAppSetting = {
+  /** The stored value; `undefined` when the stored text is not valid JSON (a warning is logged). */
   value: unknown;
   /** ISO 8601 text in UTC. */
   updatedAt: string;
@@ -24,6 +25,7 @@ export type AppSettingsRepository = {
 export function createAppSettingsRepository(
   db: Kysely<Database>,
   now: () => Date = () => new Date(),
+  warn: (message: string) => void = console.warn,
 ): AppSettingsRepository {
   return {
     async get(key) {
@@ -33,8 +35,15 @@ export function createAppSettingsRepository(
         .where("key", "=", key)
         .executeTakeFirst();
       if (row === undefined) return undefined;
+      // Damaged text must not take every reader down: the caller falls back to its default. The
+      // warning names the setting, never the text.
+      const decoded = tryDecodeJson(row.value);
+      if (!decoded.ok)
+        warn(
+          `[db] APP_SETTING_UNREADABLE: the stored value of the setting "${row.key}" is not valid JSON and is ignored.`,
+        );
       return {
-        value: decodeJson(row.value),
+        value: decoded.ok ? decoded.value : undefined,
         updatedAt: row.updated_at,
         updatedBy: row.updated_by,
       };

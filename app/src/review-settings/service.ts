@@ -8,7 +8,11 @@ import type {
   ProjectsRepository,
   StoredProject,
 } from "../db/repositories/projects-repository.ts";
-import { estimateReviewCost, type ReviewCostGuard } from "./cost.ts";
+import {
+  estimateReviewCost,
+  modelsExceedingContext,
+  type ReviewCostGuard,
+} from "./cost.ts";
 import {
   resolveReviewSettings,
   type EffectiveReviewSettings,
@@ -23,6 +27,7 @@ import {
 import {
   parseStoredOverrides,
   validateReviewSettingsPatch,
+  type ReviewSettingIssue,
 } from "./validate.ts";
 
 /** The key of the global defaults in `app_settings`. */
@@ -105,6 +110,35 @@ function checked(input: unknown): ReviewSettingsOverrides {
   return result.value;
 }
 
+/**
+ * The token budget must fit into the context window of the models the settings would use. Only the
+ * fields the request sets are blamed: a combination that was there before (a project's budget that a
+ * later change of the global model made too large) is not this request's problem, the cost guard
+ * shows it (`exceedsContext`).
+ */
+function refuseBudgetAboveContext(
+  patch: ReviewSettingsOverrides,
+  effective: ReviewSettings,
+): void {
+  const issues: ReviewSettingIssue[] = [];
+  for (const field of modelsExceedingContext(effective)) {
+    const blamed: ReviewSettingField | undefined =
+      patch.maxTokens !== undefined
+        ? "maxTokens"
+        : patch[field] !== undefined
+          ? field
+          : undefined;
+    if (blamed !== undefined && !issues.some((i) => i.field === blamed))
+      issues.push({ field: blamed, code: "EXCEEDS_MODEL_CONTEXT" });
+  }
+  if (issues.length > 0)
+    throw new ReviewSettingsError(
+      "REVIEW_SETTINGS_INVALID",
+      "Some settings are not valid.",
+      issues,
+    );
+}
+
 export function createReviewSettingsService(deps: {
   appSettings: AppSettingsRepository;
   projects: ProjectsRepository;
@@ -180,6 +214,11 @@ export function createReviewSettingsService(deps: {
 
     async updateGlobalSettings(input, actor) {
       const overrides = checked(input);
+      refuseBudgetAboveContext(
+        overrides,
+        resolveReviewSettings({ builtIn: deps.builtIn(), global: overrides })
+          .settings,
+      );
       await appSettings.set(REVIEW_DEFAULTS_KEY, overrides, actor);
       return globalView();
     },
@@ -190,6 +229,14 @@ export function createReviewSettingsService(deps: {
 
     async updateProjectSettings(repositoryId, input) {
       const overrides = checked(input);
+      refuseBudgetAboveContext(
+        overrides,
+        resolveReviewSettings({
+          builtIn: deps.builtIn(),
+          global: (await readGlobal()).overrides,
+          project: overrides,
+        }).settings,
+      );
       const project = await projects.updateSettings(repositoryId, overrides);
       if (project === undefined) throw notFound();
       return projectView(project);
