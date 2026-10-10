@@ -160,7 +160,8 @@ Open `http://localhost:3000`: it shows the login page. Which values you need and
 
 | Setting | Where it comes from |
 |---|---|
-| `BETTER_AUTH_SECRET`, `RUNNER_TOKEN` | Random, at least 32 characters: `openssl rand -base64 32` (one each) |
+| `BETTER_AUTH_SECRET` | Random, at least 32 characters: `openssl rand -base64 32` |
+| `RUNNER_TOKEN` | Random, at least 32 characters: `openssl rand -hex 32` (the app and the runner share it) |
 | `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET` | A GitHub OAuth app of your own; callback URL `<BETTER_AUTH_URL>/api/auth/callback/github` (see "Sign in") |
 | `ALLOWED_GITHUB_LOGINS` and/or `ALLOWED_GITHUB_ORG` | Who may sign in; with neither set nobody can |
 | `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_WEBHOOK_SECRET`, `GITHUB_APP_PRIVATE_KEY` | The GitHub App that reads pull requests and posts reviews: create it once with [docs/github-app.md](docs/github-app.md) (permissions, events, webhook URL, key handling, installation) |
@@ -203,13 +204,20 @@ must be https, so put a reverse proxy with TLS in front. An IPv6 address needs b
 (`docker stop`, `docker kill`, `docker compose stop`) stays stopped until the next `up`: that is what
 the policy means.
 
-**Runner.** The job loop does not exist yet (CR-29). Until then the runner container runs a clearly
-marked placeholder that keeps it up and logs `connected to http://app:3000` (and `cannot reach ...` if
-the app is down); `docker compose logs runner` shows it.
+**Runner.** The runner container runs the job loop of the image (`runner/README.md`, "The job loop"): it
+asks the app for work, runs up to `RUNNER_CONCURRENCY` reviews at once (default 3, for the 2 GiB the
+container may use) and logs `runner ... started` at start; `docker compose logs runner` shows it, and a
+warning with `trying again` whenever the app cannot be reached or refuses its token. `RUNNER_CONCURRENCY`,
+`RUNNER_JOB_TIMEOUT_SECONDS`, `RUNNER_POLL_INTERVAL_SECONDS` and `RUNNER_ID` are optional settings in
+`.env`. `docker compose stop` (and an update) gives running reviews up to 60 seconds to finish and
+waits for the runner to report the rest (`stop_grace_period: 90s`), so do not stop it with `kill`.
+The runner needs to reach only `api.github.com`, `openrouter.ai` and the app; how to restrict it to
+those is in [docs/deployment-coolify.md](docs/deployment-coolify.md), section 9.
 
 `make test-compose` builds both images and runs `docker/smoke/compose.sh` against them with dummy
 settings: validation of the settings, no runner before a healthy app, the stack comes up, the data
-survives `down` and `up`, an app process that exits by itself is restarted. CI runs the same script for pull requests.
+survives `down` and `up`, an app process that exits by itself is restarted, a backup restores, and a
+`docker compose stop` while a (fake) review runs ends with the runner reporting that review. CI runs the same script for pull requests.
 
 ## Deploy on Coolify
 

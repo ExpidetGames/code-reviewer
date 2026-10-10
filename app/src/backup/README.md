@@ -86,9 +86,12 @@ directory somewhere else:
    named volume's directory on the host instead, `/var/lib/docker/volumes/<name>_backups/_data` (see
    `docs/deployment-coolify.md`, section 8).
 2. Copy that directory off the server with a tool of your choice, run on the host (for example a
-   cron job with `rsync`, `rclone` or `restic` to another server or an object storage). As far as we
-   know, Coolify's own S3 backups cover the databases that Coolify manages, not a SQLite file in an
-   application volume, so the copy off the server is not done by Coolify. Backup files contain
+   cron job with `rsync`, `rclone` or `restic` to another server or an object storage). Coolify
+   also documents scheduled backups of storage volumes to an S3 destination ([Coolify: backups of
+   storage mounts](https://coolify.io/docs/core/persistent-storage/storage-mounts/backups)); that
+   would suit the `backups` volume (finished files), never the `data` volume (a live database file).
+   Whether a Coolify version offers it for a volume that a Compose file declares is not verified,
+   which is why the copy from the host above is the way this documentation relies on. Backup files contain
    sessions and stored tokens: copy them only to places that are as protected as the server, and
    encrypt them if they go further (`restic` does).
 
@@ -141,6 +144,15 @@ replaces an earlier one (`app.db.before-restore-<time>`, with `-2`, `-3` added w
 4. Start the app. Check `/api/health`, sign in, look at the projects. Pending migrations of a newer
    image run at the start as usual.
 5. When the data is confirmed, delete the `app.db*.before-restore-*` files from the data volume.
+
+**A leftover `app.db-wal` next to a restored `app.db`.** The restore command moves the old database
+aside together with its `-wal` and `-shm` files, so none is left. If you put a backup in place by
+hand and an old `app.db-wal` stays next to it, SQLite does not ask: it takes the log over when it
+opens the database, replaying changes of the old database into the restored one (which then holds
+writes that are not in the backup), or it discards the log if it does not fit. Which of the two
+happens cannot be known beforehand, so never start the app with such a file there: stop the app, move
+`app.db`, `app.db-wal` and `app.db-shm` aside, and only then copy the backup in as `app.db`. A backup
+file itself never has a `-wal`.
 
 If the restore stops with `RESTORE_BACKUP_INVALID` the file is damaged (truncated copy, bad
 transfer): try the next older backup. The database is unchanged in that case.

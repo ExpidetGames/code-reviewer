@@ -74,8 +74,8 @@ function variableRows(text: string): Row[] {
 }
 
 // Settings the guide explains that no .env.example and no Compose file has yet; each one moves into
-// them with the ticket named here, and the test below then asks for this list to be emptied.
-const PLANNED = ["RUNNER_CONCURRENCY"];
+// them with the ticket that adds it, and the test below then asks for this list to be emptied.
+const PLANNED: string[] = [];
 
 const settings = variableRows(section("6. Environment variables"));
 const byRequirement = (kind: string): string[] =>
@@ -116,7 +116,10 @@ describe("the Coolify guide and the environment variables", () => {
 
   // CR-39-T03
   it("marks as optional exactly the settings the Compose file passes on with a default", () => {
-    const withDefault = Object.entries(appEnvironment)
+    const withDefault = [
+      ...Object.entries(appEnvironment),
+      ...Object.entries(coolify.services.runner?.environment ?? {}),
+    ]
       .filter(([, value]) => /^\$\{[A-Z0-9_]+:-/.test(String(value)))
       .map(([name]) => name)
       .filter(
@@ -187,13 +190,26 @@ describe("the Coolify guide and the environment variables", () => {
 });
 
 describe("the Coolify guide and the smoke test", () => {
-  // CR-39-T01
-  it("names the option that leaves the runner check out, and says when it is only needed", () => {
+  // CR-51-T01
+  it("describes the smoke script without any way to leave out the runner API check", () => {
     const step = section("7. Deploy and check the instance");
 
-    expect(step).toContain("--skip-runner-endpoint");
-    expect(step).toContain("Until the runner API is part of the release");
-    expect(guide).toMatch(/What is verified[\s\S]*`--skip-runner-endpoint`/);
+    expect(step).toContain("docker/smoke/instance.sh https://<domain>");
+    expect(step).toContain("the runner API refuses a request without a token");
+    expect(guide).not.toContain("--skip-runner-endpoint");
+    expect(guide).not.toContain("Until the runner API is part of the release");
+  });
+
+  // CR-51-T01
+  it("says what the job loop of the runner does now, and no longer calls it planned or a placeholder", () => {
+    expect(guide).not.toMatch(/placeholder/i);
+    expect(guide).not.toMatch(/\bplanned\b/i);
+    expect(guide).not.toContain("CR-29");
+    expect(readme).not.toMatch(/job loop does not exist/i);
+    expect(readme).not.toMatch(/placeholder/i);
+    expect(section("7. Deploy and check the instance")).toContain(
+      "started: 3 slots",
+    );
   });
 
   // CR-39-T03
@@ -259,6 +275,111 @@ describe("the Coolify guide and the Compose file", () => {
     );
     expect(decision).toMatch(/Why build from the repository/);
     expect(coolifySource).toContain("build:");
+  });
+});
+
+describe("the runner in the Coolify guide", () => {
+  const runnerSection = section("9. Runner sizing and `RUNNER_CONCURRENCY`");
+
+  // CR-51-T03
+  it("explains the settings of the job loop that the Compose file passes on, with the defaults of the code", () => {
+    const rows = variableRows(section("6. Environment variables"));
+    const row = (name: string) => rows.find((entry) => entry.names[0] === name);
+
+    for (const [name, standard] of [
+      ["RUNNER_CONCURRENCY", "3"],
+      ["RUNNER_JOB_TIMEOUT_SECONDS", "1200"],
+      ["RUNNER_POLL_INTERVAL_SECONDS", "5"],
+    ] as const) {
+      expect(row(name)?.required, name).toBe("optional");
+      expect(row(name)?.cells.join("|"), name).toContain(`Empty: ${standard}`);
+      expect(coolify.services.runner?.environment?.[name], name).toBe(
+        `\${${name}:-${standard}}`,
+      );
+    }
+  });
+
+  // CR-51-T03
+  it("names the runner settings the Compose file does not pass on, and why", () => {
+    const notUsed = byRequirement("not used");
+
+    expect(notUsed).toContain("RUNNER_SHUTDOWN_GRACE_SECONDS");
+    expect(notUsed).toContain("PR_AGENT_COMMAND");
+    expect(byRequirement("fixed")).toEqual(["RUNNER_API_URL"]);
+    expect(coolify.services.runner?.environment?.RUNNER_API_URL).toBe(
+      "http://app:3000",
+    );
+    expect(guide).toContain("`stop_grace_period: 90s`");
+  });
+
+  // CR-51-T04
+  it("explains that a stop gives running reviews time to finish and report", () => {
+    expect(guide).toContain("`runner_shutdown`");
+    expect(guide).toContain("90 seconds");
+  });
+
+  it("tells how to restrict what the runner can reach, naming the three places it needs", () => {
+    const hint = runnerSection.slice(
+      runnerSection.indexOf("### Restrict what the runner can reach"),
+    );
+
+    expect(hint).toContain("### Restrict what the runner can reach");
+    for (const place of ["api.github.com", "openrouter.ai", "`app`"])
+      expect(hint, place).toContain(place);
+    expect(hint).toContain("DOCKER-USER");
+  });
+
+  // CR-51-T03
+  it("gives one command for the runner token everywhere it is explained", () => {
+    // A table row is a unit of its own; everything else is a paragraph (a block of comment lines).
+    const units = (text: string): string[] =>
+      text
+        .split(/\n\s*\n/)
+        .flatMap((paragraph) =>
+          paragraph.split("\n").every((line) => line.startsWith("|"))
+            ? paragraph.split("\n")
+            : [paragraph],
+        );
+
+    for (const [file, text] of [
+      ["the guide", guide],
+      ["README.md", readme],
+      [".env.example", envExample],
+      ["app/.env.example", read("app/.env.example")],
+    ] as const) {
+      const about = units(text).filter(
+        (unit) =>
+          unit.includes("RUNNER_TOKEN") && unit.includes("openssl rand"),
+      );
+
+      expect(about.length, file).toBeGreaterThan(0);
+      for (const unit of about) {
+        expect(unit, file).toContain("openssl rand -hex 32");
+        expect(unit, file).not.toContain("openssl rand -base64");
+      }
+    }
+  });
+});
+
+describe("the backup README", () => {
+  const backupReadme = read("app/src/backup/README.md");
+
+  // CR-51 (CR-40 follow-up)
+  it("warns about a leftover -wal file next to a restored database and says what SQLite does with it", () => {
+    expect(backupReadme).toContain(
+      "A leftover `app.db-wal` next to a restored",
+    );
+    expect(backupReadme).toMatch(/takes the log over/);
+    expect(backupReadme).toMatch(/discards the log/);
+  });
+
+  // CR-51 (CR-40 follow-up)
+  it("does not claim that Coolify has no S3 backups for volumes, and says the use for a Compose volume is not verified", () => {
+    expect(backupReadme).not.toContain(
+      "cover the databases that Coolify manages",
+    );
+    expect(backupReadme).toContain("storage-mounts/backups");
+    expect(backupReadme).toMatch(/not verified/);
   });
 });
 
