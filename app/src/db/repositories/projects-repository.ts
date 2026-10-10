@@ -26,7 +26,7 @@ export type StoredProject = {
   id: string;
   repositoryId: string;
   active: boolean;
-  /** The project's setting overrides; empty until the settings ticket saves some. */
+  /** The project's setting overrides (src/review-settings); empty until some are saved. */
   settings: ProjectSettings;
   createdAt: string;
   updatedAt: string;
@@ -121,6 +121,15 @@ export type ProjectsRepository = {
     repositoryId: string,
     afterDeactivate?: AfterDeactivate,
   ): Promise<DeactivateResult>;
+  /**
+   * Replaces the settings (the overrides of the review settings) of the project of a repository and
+   * moves `updatedAt`. Works for a project that is switched off too. Returns the project after the
+   * change, or undefined when the repository has no project (nothing is written then).
+   */
+  updateSettings(
+    repositoryId: string,
+    settings: ProjectSettings,
+  ): Promise<StoredProject | undefined>;
   /**
    * Every repository the platform lists, plus the ones that disappeared but have a project, joined
    * with their integration and project, ordered by name.
@@ -315,6 +324,19 @@ export function createProjectsRepository(
         if (afterDeactivate !== undefined) await afterDeactivate(project, trx);
         return { kind: "deactivated", project, changed };
       });
+    },
+
+    async updateSettings(repositoryId, settings) {
+      const row = await db
+        .updateTable("projects")
+        .set({
+          settings: encodeJson(settings),
+          updated_at: formatTimestamp(now()),
+        })
+        .where("repository_id", "=", repositoryId)
+        .returningAll()
+        .executeTakeFirst();
+      return row === undefined ? undefined : toStored(row);
     },
 
     async list() {

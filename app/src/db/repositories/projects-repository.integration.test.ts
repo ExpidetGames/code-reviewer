@@ -426,3 +426,71 @@ describe("listing the repositories with their projects", () => {
     ]);
   });
 });
+
+describe("updating the settings of a project", () => {
+  // CR-25-T11
+  it("replaces the stored settings, moves the update time and leaves everything else alone", async () => {
+    const { projects, first, rows } = await setup();
+    await projects.activate(first.id);
+    const before = (await rows())[0];
+
+    const updated = await projects.updateSettings(first.id, {
+      maxFindings: 2,
+      allowedCommands: ["review"],
+      fallbackModel: null,
+    });
+
+    expect(updated).toMatchObject({
+      repositoryId: first.id,
+      active: true,
+      settings: {
+        maxFindings: 2,
+        allowedCommands: ["review"],
+        fallbackModel: null,
+      },
+    });
+    expect(updated?.updatedAt).not.toBe(before?.updated_at);
+    expect(await projects.get(first.id)).toEqual(updated);
+    const replaced = await projects.updateSettings(first.id, {
+      maxFindings: 9,
+    });
+    expect(replaced?.settings).toEqual({ maxFindings: 9 });
+  });
+
+  it("reaches only the project of the repository it was asked for", async () => {
+    const { projects, first, second } = await setup();
+    await projects.activate(first.id);
+    await projects.activate(second.id);
+
+    await projects.updateSettings(first.id, { maxFindings: 2 });
+
+    expect((await projects.get(second.id))?.settings).toEqual({});
+  });
+
+  it("returns undefined and writes nothing for a repository without a project", async () => {
+    const { projects, first, rows } = await setup();
+
+    expect(
+      await projects.updateSettings(first.id, { maxFindings: 2 }),
+    ).toBeUndefined();
+    expect(
+      await projects.updateSettings("no-such-repository", {}),
+    ).toBeUndefined();
+    expect(await rows()).toEqual([]);
+  });
+
+  it("keeps the settings through a deactivation and a new activation", async () => {
+    const { projects, first } = await setup();
+    await projects.activate(first.id);
+    await projects.updateSettings(first.id, { maxFindings: 2 });
+
+    await projects.deactivate(first.id);
+    const off = await projects.updateSettings(first.id, { maxFindings: 3 });
+    await projects.activate(first.id);
+
+    expect(off).toMatchObject({ active: false, settings: { maxFindings: 3 } });
+    expect((await projects.get(first.id))?.settings).toEqual({
+      maxFindings: 3,
+    });
+  });
+});
