@@ -76,11 +76,14 @@ export function isReviewTrigger(value: unknown): value is ReviewTrigger {
     "args",
     "actor",
   ];
-  // Only a pull request trigger knows whether the pull request is a draft and whether it is open.
+  // Only a pull request trigger knows whether the pull request is a draft and whether it is open;
+  // only a command trigger knows the comment it came from.
   if (
     !hasExactKeys(
       value,
-      value.kind === "command" ? keys : [...keys, "draft", "state"],
+      value.kind === "command"
+        ? [...keys, "commentId"]
+        : [...keys, "draft", "state"],
     )
   )
     return false;
@@ -93,7 +96,9 @@ export function isReviewTrigger(value: unknown): value is ReviewTrigger {
 
   if (value.kind === "command") {
     return (
-      isOneOf(REVIEW_COMMANDS, value.command) && typeof value.args === "string"
+      isOneOf(REVIEW_COMMANDS, value.command) &&
+      typeof value.args === "string" &&
+      isNonEmptyString(value.commentId)
     );
   }
   return (
