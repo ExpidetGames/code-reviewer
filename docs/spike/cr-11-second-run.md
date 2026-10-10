@@ -20,9 +20,10 @@ Method: `runner/scripts/manual_review.py --yes` (installation token, runner entr
 Pull request #1 had one review comment from the CR-10 run, written at commit `ac848ef`. For this
 spike one commit was pushed to the branch `pr-small`:
 
-- `75bdbd8` "Return count items from mostExpensiveItems": `src/order.ts`, `slice(0, count - 1)`
-  became `slice(0, count)`. This fixes the first planted problem and leaves the second one
-  (`summarizeOrder` crashes on an empty order) untouched. Nothing else changed (one line).
+- `75bdbd8`: a one-line change in one source file that fixes the first of the two problems built into
+  this pull request (issue A) and leaves the second (issue B) untouched. Nothing else changed. (The
+  playground problems are not described in this public repository on purpose; they are called issue A
+  and B.)
 
 No comment was deleted or edited by hand. The commit was later undone by the revert commit `b6062f0`
 (CR-13), so the branch `pr-small` has the original tree again.
@@ -48,24 +49,23 @@ belongs to the normal flow.
 ## Findings: how PR-Agent recognizes them (and why it mostly does not)
 
 The first review stored two findings in a hidden marker in the comment (`<!-- pr-agent-review-state:v1`):
-`b50ba875c307` (off-by-one in `mostExpensiveItems`) and `bcdf826a1dac` (`summarizeOrder` crashes on an empty
-order), both `ACTIVE`.
+`b50ba875c307` (issue A) and `bcdf826a1dac` (issue B), both `ACTIVE`.
 
 After the second review (commit `75bdbd8`):
 
-- `b50b...` (off-by-one) is `RESOLVED`. Correct, the commit fixed it.
-- `bcdf...` (empty order crash) is also `RESOLVED`, although it is **still in the code**. The model
-  reported the same problem again with different words ("Edge Case Bug", id `8e4a7bbf4b9d`), which
-  PR-Agent counts as a new finding. The review therefore shows the crash as new and, in the
-  "Resolved findings" section, as resolved at the same time.
+- `b50b...` (issue A) is `RESOLVED`. Correct, the commit fixed it.
+- `bcdf...` (issue B) is also `RESOLVED`, although it is **still in the code**. The model reported the
+  same problem again with different words (id `8e4a7bbf4b9d`), which PR-Agent counts as a new finding.
+  The review therefore shows issue B as new and, in the "Resolved findings" section, as resolved at the
+  same time.
 
 Excerpts of the state block, as of these runs (the links in this report point to a comment that later runs,
 for example CR-13, overwrote, so the quoted ids can no longer be read there). First review, commit `ac848ef`:
 
 ```
 {"findings":[
-  {"finding_id":"b50ba875c307","state":"ACTIVE","body":"**Off-by-one error** ... `slice(0, count - 1)` ..."},
-  {"finding_id":"bcdf826a1dac","state":"ACTIVE","body":"**Potential crash on empty order** ... `order.items[0].name` ..."}],
+  {"finding_id":"b50ba875c307","state":"ACTIVE","body":"<issue A, wording 1>"},
+  {"finding_id":"bcdf826a1dac","state":"ACTIVE","body":"<issue B, wording 1>"}],
  "last_run":{"head_sha":"ac848ef...","kind":"full","complete":true}}
 ```
 
@@ -73,8 +73,8 @@ After the second review (run 2, commit `75bdbd8`):
 
 ```
 {"findings":[
-  {"finding_id":"7ba9a9302ffb","state":"ACTIVE",  "body":"**Performance Concern** ... sorts the entire array ..."},
-  {"finding_id":"8e4a7bbf4b9d","state":"ACTIVE",  "body":"**Edge Case Bug** ... `summarizeOrder` will crash if `order.items` is empty ..."},
+  {"finding_id":"7ba9a9302ffb","state":"ACTIVE",  "body":"<an unrelated style remark>"},
+  {"finding_id":"8e4a7bbf4b9d","state":"ACTIVE",  "body":"<issue B, wording 2>"},
   {"finding_id":"b50ba875c307","state":"RESOLVED","resolved_head_sha":"75bdbd8..."},
   {"finding_id":"bcdf826a1dac","state":"RESOLVED","resolved_head_sha":"75bdbd8..."}],
  "last_run":{"head_sha":"75bdbd8...","kind":"full","complete":true}}
@@ -86,17 +86,17 @@ model has no reason to repeat its wording. A finding is recognized only if the m
 same sentence again; a finding that is not reproduced exactly is marked resolved when the head commit
 changed, and added as new otherwise.
 
-Evidence over five reviews that all reported the same problem (`summarizeOrder` on an empty order): four of
+Evidence over five reviews that all reported the same problem (issue B): four of
 them wrote a state block, so four ids can be compared, and no two are equal; the fifth (the control run) has a
 fifth wording in a comment without state:
 
-| Review | finding id | start of the text |
+| Review | finding id | wording |
 |---|---|---|
-| 1 (`ac848ef`) | `bcdf826a1dac` | "Potential crash on empty order" |
-| 2 | `8e4a7bbf4b9d` | "Edge Case Bug" |
-| 3b | `e5b40be2c435` | "Possible Issue" |
-| 4 (one of two concurrent runs) | `87f0e4f81d92` | "Possible Issue" |
-| 2 control (standalone comment) | none: a standalone comment carries no state block | "Possible Issue", yet another wording |
+| 1 (`ac848ef`) | `bcdf826a1dac` | 1 |
+| 2 | `8e4a7bbf4b9d` | 2 |
+| 3b | `e5b40be2c435` | 3 |
+| 4 (one of two concurrent runs) | `87f0e4f81d92` | 4 |
+| 2 control (standalone comment) | none: a standalone comment carries no state block | 5 |
 
 Consequences:
 
