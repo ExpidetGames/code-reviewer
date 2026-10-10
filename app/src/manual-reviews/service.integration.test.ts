@@ -4,70 +4,13 @@
 // command the project allows, an open pull request that GitHub itself confirms, one job at a time
 // for the same pull request and command, and no debounce.
 import { describe, expect, it } from "vitest";
-import type { FakePullRequest } from "../../../fakes/github/server.ts";
-import { createAppSettingsRepository } from "../db/repositories/app-settings-repository.ts";
-import { createProjectsRepository } from "../db/repositories/projects-repository.ts";
-import { createJobQueue } from "../jobs/job-queue.ts";
-import { createReviewSettingsService } from "../review-settings/service.ts";
-import { builtInReviewSettings } from "../review-settings/settings.ts";
-import { startWebhookHarness } from "../test-support/webhook-harness.ts";
-import { createManualReviewService } from "./service.ts";
+import {
+  HEAD_SHA as HEAD,
+  pullRequest,
+  startManualReviewHarness as start,
+} from "../test-support/manual-review-harness.ts";
 
 const USER = { githubLogin: "octocat" };
-const HEAD = "1f3a5c7e9b2d4f60a8c1e3b5d7f90a2c4e6b8d01";
-
-function pullRequest(
-  number: number,
-  overrides: Partial<FakePullRequest> = {},
-): FakePullRequest {
-  return {
-    number,
-    title: `Change number ${number}`,
-    state: "open",
-    headSha: HEAD,
-    headRef: `feature/${number}`,
-    baseRef: "main",
-    author: { login: "alice", id: 1001 },
-    ...overrides,
-  };
-}
-
-async function start(options: { requestTimeoutMs?: number } = {}) {
-  const h = await startWebhookHarness(options);
-  const integration = await h.seedInstallation();
-  const [repository] = await h.repositories.list({
-    integrationId: integration.id,
-  });
-  if (repository === undefined) throw new Error("seeding failed");
-  // seedInstallation adds pull request 7; these tests set up their own.
-  h.fake.reset();
-  h.fake.addInstallation({
-    id: 4242,
-    account: { login: "acme", id: 5001, type: "Organization" },
-  });
-  h.fake.setRepositories(4242, [{ id: 7001, fullName: "acme/widgets" }]);
-
-  const projects = createProjectsRepository(h.db);
-  const settings = createReviewSettingsService({
-    appSettings: createAppSettingsRepository(h.db),
-    projects,
-    builtIn: () => builtInReviewSettings("test/model"),
-  });
-  const queue = createJobQueue(h.db);
-  const lines: string[] = [];
-  const service = createManualReviewService({
-    repositories: h.repositories,
-    integrations: h.integrations,
-    projects: h.projects,
-    settings,
-    registry: h.registry,
-    queue,
-    log: (line) => lines.push(line),
-  });
-  // The reset cost the client its token; one call gets a new one, so no test starts with a refusal.
-  await service.listOpenPullRequests(repository.id);
-  return { h, repository, integration, service, queue, settings, lines };
-}
 
 async function failureOf(promise: Promise<unknown>): Promise<unknown> {
   return promise.then(
