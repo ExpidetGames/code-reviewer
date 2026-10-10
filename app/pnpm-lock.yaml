@@ -51,6 +51,9 @@ importers:
       vitest:
         specifier: ^5.0.3
         version: 5.0.3(@types/node@24.19.2)(vite@8.3.4(@types/node@24.19.2)(yaml@2.9.1))
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
 
 packages:
 
@@ -4426,8 +4429,7 @@ snapshots:
 
   yallist@3.1.1: {}
 
-  yaml@2.9.1:
-    optional: true
+  yaml@2.9.1: {}
 
   yocto-queue@0.1.0: {}
 
