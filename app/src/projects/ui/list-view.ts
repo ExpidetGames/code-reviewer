@@ -7,27 +7,19 @@ import type {
   ProjectStatus,
 } from "../../db/repositories/projects-repository.ts";
 import type { ProjectService } from "../service.ts";
-
-/** The status of a run, as the jobs module names it (src/jobs). */
-export const RUN_STATUSES = [
-  "queued",
-  "running",
-  "succeeded",
-  "failed",
-  "superseded",
-  "cancelled",
-] as const;
-export type RunStatus = (typeof RUN_STATUSES)[number];
+import type { JobStatus } from "../../jobs/job-status.ts";
+import { webAddress } from "../../ui/web-address.ts";
 
 export type LastRun = {
-  status: RunStatus;
+  status: JobStatus;
   /** ISO 8601 time the run last changed (finished, or started when it is still going). */
   at: string;
 };
 
 /**
  * The last run of each repository, by repository id; a repository without a run is not in the map.
- * The jobs module provides the real source; until it is on this branch the list says "No run yet".
+ * The running server uses the jobs table (`getLastRunSource()` in src/runs/shared.ts); without a
+ * source the list says "No run yet".
  */
 export type LastRunSource = (
   repositoryIds: readonly string[],
@@ -51,16 +43,6 @@ export type ProjectRowView = {
 };
 
 export type ProjectListView = { rows: ProjectRowView[] };
-
-/** The address when it is an http(s) web address, otherwise null (never a `javascript:` link). */
-export function webAddress(url: string): string | null {
-  try {
-    const protocol = new URL(url).protocol;
-    return protocol === "https:" || protocol === "http:" ? url : null;
-  } catch {
-    return null;
-  }
-}
 
 function toRowView(
   { repository, project, status }: ProjectListEntry,

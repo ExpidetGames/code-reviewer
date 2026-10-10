@@ -5,6 +5,7 @@ import {
   getGithubAppInstallUrl,
 } from "@/config-status/shared";
 import { getProjectService } from "@/projects/shared";
+import { getLastRunSource } from "@/runs/shared";
 import {
   loadProjectsPage,
   ProjectsPageContent,
@@ -33,6 +34,8 @@ export default async function ProjectsPage() {
 async function ProjectsContent() {
   const data = await loadProjectsPage({
     projects: getProjectService(),
+    // The status of each repository's newest run comes from the jobs table.
+    lastRuns: getLastRunSource(),
     config: getConfigStatus,
     installUrl: getGithubAppInstallUrl,
   });

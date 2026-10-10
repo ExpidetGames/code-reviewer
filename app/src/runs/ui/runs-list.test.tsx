@@ -1,0 +1,325 @@
+// @vitest-environment jsdom
+// Pins down the list of runs: what a row shows, the empty states, text from outside rendered as text,
+// and the polling (the status moves on without a reload; a failed update keeps the last data).
+import { act, cleanup, render, screen, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { RequestResult } from "../../ui/json-request.ts";
+import type { RunRowView, RunsSnapshot } from "../run-view.ts";
+import type { RunsApi } from "./api.ts";
+import { POLL_FAILED_TEXT } from "./poll-messages.ts";
+import { RunsList } from "./runs-list.tsx";
+
+beforeEach(() => {
+  vi.useFakeTimers();
+});
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
+
+function run(overrides: Partial<RunRowView> = {}): RunRowView {
+  return {
+    id: "6b1f0a52-5f43-4a53-9d0e-8d4a0f1c2e11",
+    repositoryId: "repo-1",
+    project: "acme/widgets",
+    prNumber: 7,
+    prUrl: "https://github.com/acme/widgets/pull/7",
+    command: "review",
+    triggerKind: "webhook",
+    trigger: "Automatic",
+    status: "succeeded",
+    createdAt: "2026-10-10T12:00:00.000Z",
+    startedAt: "2026-10-10T12:00:10.000Z",
+    finishedAt: "2026-10-10T12:01:00.000Z",
+    durationMs: 50_000,
+    problem: null,
+    ...overrides,
+  };
+}
+
+function snapshot(
+  runs: RunRowView[],
+  overrides: Partial<RunsSnapshot> = {},
+): RunsSnapshot {
+  return {
+    generatedAt: "2026-10-10T12:10:00.000Z",
+    runs,
+    limited: false,
+    ...overrides,
+  };
+}
+
+function apiAnswering(
+  answers: RequestResult<RunsSnapshot>[],
+): RunsApi & { list: ReturnType<typeof vi.fn> } {
+  return {
+    list: vi.fn(async () => answers.shift() ?? failure),
+    detail: vi.fn(),
+  } as RunsApi & { list: ReturnType<typeof vi.fn> };
+}
+
+const failure: RequestResult<RunsSnapshot> = {
+  ok: false,
+  status: 500,
+  code: "UNEXPECTED_RESPONSE",
+  issues: [],
+};
+const answer = (data: RunsSnapshot): RequestResult<RunsSnapshot> => ({
+  ok: true,
+  data,
+});
+
+describe("the rows of the list", () => {
+  // CR-35-T01
+  it("show project, pull request, command, status and start time, each run linking to its page", () => {
+    render(
+      <RunsList
+        initial={snapshot([
+          run(),
+          run({
+            id: "other-run",
+            project: "acme/gadgets",
+            prNumber: 9,
+            command: "improve",
+            status: "failed",
+            problem:
+              "The run took longer than the time limit, so it was stopped.",
+            triggerKind: "comment",
+            trigger: "Comment by alice",
+          }),
+        ])}
+        filter={{}}
+        api={apiAnswering([])}
+      />,
+    );
+
+    const rows = within(
+      screen.getByRole("list", { name: "Runs" }),
+    ).getAllByRole("listitem");
+    expect(rows).toHaveLength(2);
+    const [first, second] = rows;
+    expect(first?.textContent).toContain("acme/widgets #7");
+    expect(first?.textContent).toContain("/review");
+    expect(first?.textContent).toContain("Succeeded");
+    expect(first?.textContent).toContain("2026-10-10 12:00 UTC");
+    expect(second?.textContent).toContain("acme/gadgets #9");
+    expect(second?.textContent).toContain("/improve");
+    expect(second?.textContent).toContain("Comment by alice");
+    expect(second?.textContent).toContain("Failed");
+    expect(second?.textContent).toContain("time limit");
+    expect(
+      within(first as HTMLElement)
+        .getByRole("link")
+        .getAttribute("href"),
+    ).toBe("/runs/6b1f0a52-5f43-4a53-9d0e-8d4a0f1c2e11");
+  });
+
+  it("tell a waiting run from one that started, and show how long a run took", () => {
+    render(
+      <RunsList
+        initial={snapshot([
+          run({
+            id: "a",
+            status: "queued",
+            startedAt: null,
+            finishedAt: null,
+            durationMs: null,
+          }),
+          run({
+            id: "b",
+            status: "running",
+            finishedAt: null,
+            durationMs: 125_000,
+          }),
+          run({ id: "c", status: "succeeded", durationMs: 185_000 }),
+        ])}
+        filter={{}}
+        api={apiAnswering([])}
+      />,
+    );
+
+    const [waiting, going, done] = screen.getAllByRole("listitem");
+    expect(waiting?.textContent).toContain(
+      "Waiting since 2026-10-10 12:00 UTC",
+    );
+    expect(waiting?.textContent).not.toContain("Took");
+    expect(going?.textContent).toContain("Running for 2 min 05 s");
+    expect(done?.textContent).toContain("Took 3 min 05 s");
+  });
+
+  it("say when the list is cut off", () => {
+    render(
+      <RunsList
+        initial={snapshot([run()], { limited: true })}
+        filter={{}}
+        api={apiAnswering([])}
+      />,
+    );
+
+    expect(screen.getByText(/Only the newest 1 runs are shown/)).toBeTruthy();
+  });
+
+  // CR-35-T13
+  it("render a project name and a login with HTML as text and run no script", () => {
+    const { container } = render(
+      <RunsList
+        initial={snapshot([
+          run({
+            project: "<script>alert(1)</script>/<img src=x onerror=alert(1)>",
+            trigger: "Comment by <b>mallory</b>",
+          }),
+        ])}
+        filter={{}}
+        api={apiAnswering([])}
+      />,
+    );
+
+    expect(container.querySelector("script")).toBeNull();
+    expect(container.querySelector("img")).toBeNull();
+    expect(container.querySelector("b")).toBeNull();
+    expect(container.textContent).toContain("<script>alert(1)</script>");
+    expect(container.textContent).toContain("Comment by <b>mallory</b>");
+  });
+});
+
+describe("the empty list", () => {
+  // CR-35-T03
+  it("explains that there are no runs yet", () => {
+    render(
+      <RunsList initial={snapshot([])} filter={{}} api={apiAnswering([])} />,
+    );
+
+    expect(screen.getByRole("heading", { name: "No runs yet" })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Reset filter" })).toBeNull();
+  });
+
+  // CR-35-T03
+  it("explains that no run matches the filter and offers to reset it", () => {
+    render(
+      <RunsList
+        initial={snapshot([])}
+        filter={{ status: "failed" }}
+        api={apiAnswering([])}
+      />,
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "No runs for this filter" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("link", { name: "Reset filter" }).getAttribute("href"),
+    ).toBe("/runs");
+  });
+});
+
+describe("polling the list", () => {
+  async function pass(ms: number) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+  }
+
+  // CR-35-T11
+  it("moves a waiting run to running and succeeded without a reload", async () => {
+    const waiting = run({
+      status: "queued",
+      startedAt: null,
+      finishedAt: null,
+      durationMs: null,
+    });
+    const api = apiAnswering([
+      answer(
+        snapshot([
+          { ...waiting, status: "running", startedAt: waiting.createdAt },
+        ]),
+      ),
+      answer(snapshot([run({ id: waiting.id })])),
+    ]);
+    render(<RunsList initial={snapshot([waiting])} filter={{}} api={api} />);
+    expect(screen.getByText("Waiting")).toBeTruthy();
+
+    await pass(3000);
+    expect(screen.getByText("Running")).toBeTruthy();
+    expect(screen.queryByText("Waiting")).toBeNull();
+
+    await pass(3000);
+    expect(screen.getByText("Succeeded")).toBeTruthy();
+    expect(api.list).toHaveBeenCalledTimes(2);
+  });
+
+  // CR-35-T11
+  it("slows down once every run is settled instead of asking every few seconds", async () => {
+    const api = apiAnswering([answer(snapshot([run()]))]);
+    render(<RunsList initial={snapshot([run()])} filter={{}} api={api} />);
+
+    await pass(4000);
+    expect(api.list).not.toHaveBeenCalled();
+    await pass(1000);
+    expect(api.list).toHaveBeenCalledTimes(1);
+  });
+
+  // CR-35-T17
+  it("shows a run that appears after the page was opened", async () => {
+    const api = apiAnswering([
+      answer(
+        snapshot([
+          run({
+            id: "new",
+            status: "queued",
+            startedAt: null,
+            finishedAt: null,
+            durationMs: null,
+          }),
+        ]),
+      ),
+    ]);
+    render(<RunsList initial={snapshot([])} filter={{}} api={api} />);
+    expect(screen.getByText("No runs yet")).toBeTruthy();
+
+    await pass(5000);
+
+    expect(screen.queryByText("No runs yet")).toBeNull();
+    expect(screen.getByText("Waiting")).toBeTruthy();
+  });
+
+  // CR-35-T12
+  it("keeps the last data, says the update failed and goes on with the next try", async () => {
+    const waiting = run({
+      status: "queued",
+      startedAt: null,
+      finishedAt: null,
+      durationMs: null,
+    });
+    const api = apiAnswering([
+      failure,
+      answer(snapshot([run({ id: waiting.id })])),
+    ]);
+    render(<RunsList initial={snapshot([waiting])} filter={{}} api={api} />);
+
+    await pass(3000);
+    expect(screen.getByRole("status").textContent).toBe(POLL_FAILED_TEXT);
+    expect(screen.getByText("Waiting")).toBeTruthy();
+
+    await pass(3000);
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getByText("Succeeded")).toBeTruthy();
+  });
+
+  it("asks with the filter of its address", async () => {
+    const api = apiAnswering([answer(snapshot([]))]);
+    render(
+      <RunsList
+        initial={snapshot([])}
+        filter={{ repositoryId: "repo-1", status: "failed" }}
+        api={api}
+      />,
+    );
+
+    await pass(5000);
+
+    expect(api.list).toHaveBeenCalledWith({
+      repositoryId: "repo-1",
+      status: "failed",
+    });
+  });
+});

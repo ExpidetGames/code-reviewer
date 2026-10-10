@@ -68,7 +68,7 @@ export default defineConfig({
         "pnpm build && rm -rf test-results/e2e-data && mkdir -p test-results/e2e-data && " +
         `pnpm start --hostname 127.0.0.1 --port ${e2eEnv.appPort}`,
       env: {
-        DATABASE_PATH: "test-results/e2e-data/app.db",
+        DATABASE_PATH: e2eEnv.databasePath,
         BETTER_AUTH_SECRET: e2eEnv.authSecret,
         BETTER_AUTH_URL: e2eEnv.appUrl,
         GITHUB_OAUTH_CLIENT_ID: e2eEnv.githubClientId,

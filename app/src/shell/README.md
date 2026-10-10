@@ -14,9 +14,10 @@ other small building blocks are in `src/ui/` and `src/app/globals.css`; the colo
 | `user-display.ts` | Display name (the login when the profile has no name), initials, `safeAvatarUrl`.                                                                                                                                                                                                                          |
 
 The pages live in `src/app/(app)/` (route group, no effect on the URLs): `layout.tsx` wraps them in
-`AppShell`, `runs` is a placeholder with an empty state until its ticket fills it; `projects` (the list and, below
-it, `[repositoryId]` for the settings of one project) and `settings` are real pages, see
-`src/projects/README.md` and `src/review-settings/README.md`. `/` redirects to `/projects`. Without JavaScript the narrow Menu button does nothing (the navigation stays folded); the rest keeps working. The login page is outside the frame.
+`AppShell`, `projects` (the list and, below
+it, `[repositoryId]` for the settings of one project), `runs` (the list and, below it, `[id]` for one
+run) and `settings` are real pages, see `src/projects/README.md`, `src/runs/README.md` and
+`src/review-settings/README.md`. `/` redirects to `/projects`. Without JavaScript the narrow Menu button does nothing (the navigation stays folded); the rest keeps working. The login page is outside the frame.
 
 ## Rules
 
