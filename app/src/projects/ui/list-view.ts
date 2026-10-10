@@ -7,6 +7,9 @@ import type {
   ProjectStatus,
 } from "../../db/repositories/projects-repository.ts";
 import type { ProjectService } from "../service.ts";
+import { webAddress } from "../../ui/web-address.ts";
+
+export { webAddress };
 
 /** The status of a run, as the jobs module names it (src/jobs). */
 export const RUN_STATUSES = [
@@ -51,16 +54,6 @@ export type ProjectRowView = {
 };
 
 export type ProjectListView = { rows: ProjectRowView[] };
-
-/** The address when it is an http(s) web address, otherwise null (never a `javascript:` link). */
-export function webAddress(url: string): string | null {
-  try {
-    const protocol = new URL(url).protocol;
-    return protocol === "https:" || protocol === "http:" ? url : null;
-  } catch {
-    return null;
-  }
-}
 
 function toRowView(
   { repository, project, status }: ProjectListEntry,

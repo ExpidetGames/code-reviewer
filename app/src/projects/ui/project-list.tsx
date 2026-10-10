@@ -2,6 +2,7 @@
 // has a project), installation, state, the status of the last run and the switch. Everything that
 // comes from GitHub (names, addresses) is untrusted and rendered as text.
 import Link from "next/link";
+import { formatUtc } from "../../ui/format-time.ts";
 import { NoRepositories } from "./no-repositories.tsx";
 import { ProjectToggle } from "./project-toggle.tsx";
 import type { ProjectsApi } from "./api.ts";
@@ -11,6 +12,8 @@ import type {
   ProjectRowView,
   RunStatus,
 } from "./list-view.ts";
+
+export { formatUtc };
 
 const RUN_COPY: Record<RunStatus, string> = {
   queued: "Queued",
@@ -26,13 +29,6 @@ const STATE_COPY: Record<ProjectRowView["status"], string> = {
   inactive: "Inactive",
   unavailable: "Unavailable",
 };
-
-/** A time as UTC text the server and the browser render the same way. */
-export function formatUtc(iso: string): string {
-  const time = new Date(iso);
-  if (Number.isNaN(time.getTime())) return "unknown time";
-  return `${time.toISOString().slice(0, 16).replace("T", " ")} UTC`;
-}
 
 function LastRunStatus({ run }: { run: LastRun | null }) {
   if (run === null) return <span className="muted">No run yet</span>;
