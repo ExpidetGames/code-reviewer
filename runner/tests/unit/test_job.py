@@ -317,6 +317,71 @@ def test_the_context_window_of_an_unknown_model_is_an_explicit_bounded_number() 
         assert refusal(json.dumps(job)).code is ErrorCode.INVALID_JOB, value
 
 
+# CR-45-T06
+def test_fallback_models_are_an_optional_bounded_list_of_valid_model_ids() -> None:
+    llm = valid_job()["llm"]
+    fallbacks = [
+        "qwen/qwen3-coder",
+        "openrouter/google/gemini-2.5-flash",
+        "meta-llama/llama-3.3:free",
+    ]
+
+    parsed = parse(valid_job(llm={**llm, "fallbackModels": fallbacks}))
+
+    assert parsed.llm.fallback_models == tuple(fallbacks)
+    assert parse(valid_job(llm={**llm, "fallbackModels": []})).llm.fallback_models == ()
+    assert parse(valid_job()).llm.fallback_models == ()
+
+
+# CR-45-T06
+@pytest.mark.parametrize(
+    "value",
+    [
+        "qwen/qwen3-coder",  # not a list
+        None,
+        {"0": "qwen/qwen3-coder"},
+        [7],
+        [None],
+        [["a/b"]],
+        [""],
+        ["  "],
+        ["bad model"],
+        ["model;rm -rf"],
+        ["@format {env[X]}"],
+        ["a/b\n"],
+        ["a" * 201],
+        ["a/b", "a/b"],  # repeated
+        ["deepseek/deepseek-chat"],  # the primary model again
+        ["openrouter/deepseek/deepseek-chat"],  # the primary model again, with the prefix
+        [f"vendor/model-{n}" for n in range(6)],  # more than five
+    ],
+)
+def test_an_invalid_fallback_model_list_is_an_invalid_job(value: Any) -> None:
+    llm = valid_job()["llm"]
+
+    error = refusal(json.dumps(valid_job(llm={**llm, "fallbackModels": value})))
+
+    assert error.code is ErrorCode.INVALID_JOB
+    assert "llm.fallbackModels" in error.detail
+
+
+# CR-45-T06
+def test_a_refused_fallback_model_is_not_echoed() -> None:
+    llm = valid_job()["llm"]
+
+    error = refusal(json.dumps(valid_job(llm={**llm, "fallbackModels": [f"bad {API_KEY}"]})))
+
+    assert API_KEY not in error.detail
+
+
+# CR-45-T04
+@pytest.mark.parametrize(
+    "key", ["PR_REVIEWER__A__B", "PR_REVIEWER__", "PR_REVIEWER___X", "PR_REVIEWER__X_"]
+)
+def test_extra_environment_names_are_a_single_option_name_without_nesting(key: str) -> None:
+    assert refusal(json.dumps(valid_job(env={key: "x"}))).code is ErrorCode.INVALID_JOB
+
+
 @pytest.mark.parametrize("suffix", ["\n", "\r", "\t", " ", "\x00", "\u200b", "\x7f"])
 def test_a_pull_request_url_with_whitespace_or_control_characters_is_an_invalid_job(
     suffix: str,
