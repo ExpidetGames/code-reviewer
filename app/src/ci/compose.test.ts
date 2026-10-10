@@ -30,6 +30,9 @@ type Service = {
     start_period?: string;
   };
   entrypoint?: string[];
+  command?: string[] | string;
+  stop_grace_period?: string;
+  mem_limit?: string;
 };
 type Compose = {
   services: Record<string, Service>;
@@ -94,7 +97,8 @@ describe("compose services", () => {
     const runner = service("runner");
 
     expect(runner).not.toHaveProperty("ports");
-    expect(runner.environment?.APP_URL).toBe("http://app:3000");
+    expect(runner.environment?.RUNNER_API_URL).toBe("http://app:3000");
+    expect(runner.environment).not.toHaveProperty("APP_URL");
   });
 
   // CR-37-T03
@@ -138,10 +142,88 @@ describe("compose services", () => {
     expect(statSync(`${repoRoot}runner/Dockerfile`).isFile()).toBe(true);
   });
 
-  it("replaces the placeholder entry point of the runner only until the job loop exists", () => {
-    // CR-29 removes `entrypoint`; this reminder keeps the placeholder from becoming permanent.
-    expect(composeSource).toContain("PLACEHOLDER until the job loop exists");
-    expect(service("runner").entrypoint?.[0]).toBe("python");
+  // CR-51-T01
+  it("runs the job loop of the runner image: no entry point and no command of its own", () => {
+    const runner = service("runner");
+
+    expect(runner).not.toHaveProperty("entrypoint");
+    expect(runner).not.toHaveProperty("command");
+    expect(composeSource).not.toMatch(/placeholder/i);
+  });
+
+  // CR-51-T01
+  it("passes the settings of the job loop, with the defaults the loop itself has", () => {
+    const loop = readFileSync(
+      `${repoRoot}runner/src/code_reviewer_runner/job_loop/settings.py`,
+      "utf8",
+    );
+    const defaultOf = (name: string): number => {
+      const match = new RegExp(`^${name} = ([0-9. *]+)$`, "m").exec(loop);
+      if (!match) throw new Error(`no default ${name} in settings.py`);
+      return (match[1] as string)
+        .split("*")
+        .map((factor) => Number(factor.trim()))
+        .reduce((product, factor) => product * factor, 1);
+    };
+    const environment = service("runner").environment ?? {};
+
+    expect(environment.RUNNER_CONCURRENCY).toBe(
+      `\${RUNNER_CONCURRENCY:-${String(defaultOf("DEFAULT_CONCURRENCY"))}}`,
+    );
+    expect(environment.RUNNER_JOB_TIMEOUT_SECONDS).toBe(
+      `\${RUNNER_JOB_TIMEOUT_SECONDS:-${String(defaultOf("DEFAULT_JOB_TIMEOUT_SECONDS"))}}`,
+    );
+    expect(environment.RUNNER_POLL_INTERVAL_SECONDS).toBe(
+      `\${RUNNER_POLL_INTERVAL_SECONDS:-${String(defaultOf("DEFAULT_POLL_INTERVAL_SECONDS"))}}`,
+    );
+    expect(environment.RUNNER_ID).toBe("${RUNNER_ID:-}");
+  });
+
+  // CR-51-T04
+  it("leaves the runner 90 seconds to stop: its shutdown grace period of 60 s plus the report", () => {
+    expect(service("runner").stop_grace_period).toBe("90s");
+    expect(service("app")).not.toHaveProperty("stop_grace_period");
+  });
+
+  // CR-51-T04
+  it("does not pass the shutdown grace period on, so it cannot outgrow the 90 seconds", () => {
+    expect(service("runner").environment).not.toHaveProperty(
+      "RUNNER_SHUTDOWN_GRACE_SECONDS",
+    );
+  });
+});
+
+// The compose files an operator uses. The one smoke test file that sets PR_AGENT_COMMAND lives in
+// docker/smoke and is never part of a deployment.
+const SHIPPED_COMPOSE_FILES = readdirSync(repoRoot).filter((name) =>
+  /^compose(\..+)?\.ya?ml$/.test(name),
+);
+
+describe("compose files and the test command of the runner", () => {
+  it("finds the three compose files of the repository", () => {
+    expect(SHIPPED_COMPOSE_FILES.sort()).toEqual([
+      "compose.build.yml",
+      "compose.coolify.yml",
+      "compose.yml",
+    ]);
+  });
+
+  // CR-51-T05
+  it("sets PR_AGENT_COMMAND in no compose file that is shipped, not even in a comment", () => {
+    for (const file of SHIPPED_COMPOSE_FILES)
+      expect(read(file), file).not.toContain("PR_AGENT_COMMAND");
+  });
+
+  // CR-51-T05
+  it("sets it only in the override file of the compose smoke test, which stays under docker/smoke", () => {
+    const override = parse(
+      read("docker/smoke/compose.fake-job.yml"),
+    ) as Compose;
+
+    expect(
+      override.services.runner?.environment?.PR_AGENT_COMMAND,
+    ).toBeTruthy();
+    expect(SHIPPED_COMPOSE_FILES).not.toContain("compose.fake-job.yml");
   });
 });
 
@@ -227,10 +309,14 @@ function variablesRead(): Set<string> {
   }
   for (const file of sourceFiles(`${repoRoot}runner/src`)) {
     if (!file.endsWith(".py")) continue;
+    const source = readFileSync(file, "utf8");
     add(
-      readFileSync(file, "utf8"),
+      source,
       /(?:environ(?:\.get)?\s*[[(]|getenv\()\s*["']([A-Z][A-Z0-9_]+)["']/g,
     );
+    // The job loop (job_loop/settings.py) reads from a mapping it is given, called `environment`.
+    add(source, /\benvironment\.get\(\s*["']([A-Z][A-Z0-9_]+)["']/g);
+    add(source, /\(\s*environment,\s*["']([A-Z][A-Z0-9_]+)["']/g);
   }
   for (const name of PROVIDED_BY_RUNTIME) names.delete(name);
   return names;

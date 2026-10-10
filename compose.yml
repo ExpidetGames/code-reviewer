@@ -76,36 +76,26 @@ services:
     # (RUNNER_CONCURRENCY, about 1.5 per GiB) is calculated from, see docs/deployment-coolify.md. A
     # review needs about 320 MB; without a limit too many at once could take the whole server's memory.
     mem_limit: 2g
+    # `docker compose stop` and a redeploy send SIGTERM. The loop then stops claiming, gives running
+    # reviews 60 seconds to finish (RUNNER_SHUTDOWN_GRACE_SECONDS, not passed on here so that it cannot
+    # outgrow this value), reports what is left as runner_shutdown, and exits. Docker's default of 10
+    # seconds would kill it before the reports are sent; 90 = 60 + 5 between SIGTERM and SIGKILL of a
+    # stuck job + up to 10 to report + margin. The image's tini passes the signal on (no `init: true`).
+    stop_grace_period: 90s
     depends_on:
       app:
         condition: service_healthy
     environment:
-      APP_URL: http://app:3000
+      # The image's own entry point is the job loop (runner/README.md, "The job loop").
+      RUNNER_API_URL: http://app:3000
       RUNNER_TOKEN: ${RUNNER_TOKEN:?RUNNER_TOKEN is required, see .env.example}
-    # PLACEHOLDER until the job loop exists (CR-29). The image entry point does nothing yet except
-    # answer --version, and would exit at once; this keeps the container up and logs whether the app
-    # answers on APP_URL (once on every change). CR-29 deletes `entrypoint` so that the image's own
-    # entry point, the real loop, runs.
-    entrypoint:
-      - python
-      - -u
-      - -c
-      - |
-        import os, signal, sys, time, urllib.request
-        signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
-        base = os.environ["APP_URL"].rstrip("/")
-        print(f"runner placeholder (no job loop yet): watching {base}")
-        connected = None
-        while True:
-            try:
-                with urllib.request.urlopen(base + "/api/health", timeout=5) as answer:
-                    now = answer.status == 200
-            except Exception:
-                now = False
-            if now != connected:
-                connected = now
-                print(f"connected to {base}" if now else f"cannot reach {base}, retrying")
-            time.sleep(5)
+      # Reviews at the same time: about 1.5 per GiB of the memory limit above (docs/deployment-coolify.md,
+      # section 9). Hard timeout of one review in seconds. Wait between two claims in seconds.
+      RUNNER_CONCURRENCY: ${RUNNER_CONCURRENCY:-3}
+      RUNNER_JOB_TIMEOUT_SECONDS: ${RUNNER_JOB_TIMEOUT_SECONDS:-1200}
+      RUNNER_POLL_INTERVAL_SECONDS: ${RUNNER_POLL_INTERVAL_SECONDS:-5}
+      # A name for this runner in the app's logs. Empty: runner-<container host name>.
+      RUNNER_ID: ${RUNNER_ID:-}
 
 volumes:
   data:
