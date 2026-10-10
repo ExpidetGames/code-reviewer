@@ -74,6 +74,11 @@ describe("engine workflow", () => {
     expect(script).toContain("is not isolated");
   });
 
+  // CR-41 follow-up: the dropped root user must not be able to gain privileges again (setuid files).
+  it("drops privileges for good before the suite starts", () => {
+    expect(script).toMatch(/setpriv [^\n]*--no-new-privs/);
+  });
+
   // CR-41-T15
   it("caches the tiktoken encoding", () => {
     const cache = steps.find((step) => step.uses?.startsWith("actions/cache@"));

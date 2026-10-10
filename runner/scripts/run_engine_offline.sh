@@ -22,6 +22,6 @@ sudo --preserve-env env "PATH=$PATH" "HOME=$HOME" ENGINE_USER="$(id -u):$(id -g)
       echo "the network namespace is not isolated" >&2
       exit 1
     fi
-    exec setpriv --reuid="${ENGINE_USER%%:*}" --regid="${ENGINE_USER##*:}" --clear-groups \
+    exec setpriv --reuid="${ENGINE_USER%%:*}" --regid="${ENGINE_USER##*:}" --clear-groups --no-new-privs \
       uv run --no-sync --offline pytest -m engine "$@"
   ' engine-offline "$@"
