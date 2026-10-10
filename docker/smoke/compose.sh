@@ -105,8 +105,10 @@ runner_has_started() {
 }
 # The job loop logs nothing while it claims successfully and finds nothing to do, and a warning or
 # an error whenever the app cannot be reached or refuses it (a wrong token is a 401 there).
-runner_log_has_trouble() {
-  dc logs --no-color runner 2>&1 | grep -Eq 'trying again in|claim failed|unexpected runner error|Traceback'
+# Takes the log as its argument (capture it first: grep -q on a pipe can end it early, and with
+# `pipefail` a match would then look like a failure of the pipeline).
+log_has_trouble() {
+  grep -Eq 'trying again in|claim failed|unexpected runner error|Traceback' <<<"$1"
 }
 host_port() { dc port app 3000 | head -n 1 | sed 's/.*://'; }
 
@@ -204,7 +206,7 @@ step "the runner starts its job loop and polls the app without a failure"
 wait_until "the runner to log that it started" 30 runner_has_started
 sleep 12
 runner_log=$(dc logs --no-color runner 2>&1)
-if runner_log_has_trouble; then
+if log_has_trouble "$runner_log"; then
   printf '%s\n' "$runner_log" >&2
   fail "the runner log reports a failing connection to the app"
 fi
@@ -242,10 +244,10 @@ started=$(docker inspect --format '{{.State.StartedAt}}' "$(container_of app)")
 dc exec -T app sh -c 'kill -TERM 1' || fail_with_logs "could not signal the app process"
 wait_until "the app to restart and become healthy" "$WAIT_SECONDS" app_restarted_and_healthy "$started"
 [ "$(docker inspect --format '{{.RestartCount}}' "$(container_of app)")" -ge 1 ] || fail "the app was not restarted by the restart policy"
-runner_is_running || fail_with_logs "the runner is not running after the app restarted"
 sleep 12
 runner_is_running || fail_with_logs "the runner is not running after the app restarted"
-if dc logs --no-color runner 2>&1 | grep -Eq 'runner [^ ]+ stopped|Traceback'; then
+runner_log=$(dc logs --no-color runner 2>&1)
+if grep -Eq 'runner [^ ]+ stopped|Traceback' <<<"$runner_log"; then
   fail_with_logs "the job loop ended or crashed while the app restarted"
 fi
 [ "$(docker inspect --format '{{.RestartCount}}' "$(container_of runner)")" = "0" ] || fail "the runner had to be restarted"
