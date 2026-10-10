@@ -35,6 +35,7 @@ printf '    process uid: %s\n' "$uid"
 
 # CR-17-T05 (partly): jobs work in the temporary directory and the home directory.
 step "the unprivileged user can write to the temporary and home directories"
+# shellcheck disable=SC2016 # $HOME must expand inside the container, not here
 in_image "$image" sh -c 'touch /tmp/smoke-write && touch "$HOME/smoke-write"' ||
   fail "the unprivileged user cannot write to /tmp or its home directory"
 

@@ -62,6 +62,29 @@ cd runner
 uv run code-reviewer-runner --version
 ```
 
+## Container images
+
+Two images are built from the repository, each with its own Dockerfile and `.dockerignore`:
+
+| Image | Build | Notes |
+|---|---|---|
+| `ghcr.io/expidetgames/code-reviewer-app` | `docker build -t code-reviewer-app app` | Next.js standalone server on port 3000, runs as uid 10001. The database lives in the volume `/data` (`DATABASE_PATH=/data/app.db`); it is created and migrated on start. |
+| `ghcr.io/expidetgames/code-reviewer-runner` | `docker build -t code-reviewer-runner runner` | Python (version of `runner/.python-version`) with the runner installed by uv from `uv.lock`, runs as uid 10001. PR-Agent is added with its own ticket. |
+
+```sh
+docker run --rm -p 3000:3000 -v code-reviewer-data:/data code-reviewer-app
+docker run --rm code-reviewer-runner --version
+```
+
+A named volume is owned by the container user on first use. A bind mount (`-v ./data:/data`) must be
+writable for uid 10001. `make test-images` builds both images and runs their smoke tests
+(`docker/smoke/`).
+
+CI builds and smoke tests both images on pull requests. A push to `development` or `main`
+(`.github/workflows/publish-images.yml`) pushes them to GHCR with the tags `sha-<short commit>` and
+`development` or `latest`. The packages must be public (set once in the GitHub package settings,
+see the pull request of the image ticket); pulling needs no login then.
+
 ## Lint, typecheck, test
 
 One command per task from the repository root, covering both parts:

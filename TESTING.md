@@ -44,6 +44,7 @@ it. Do not document planned things as if they existed in READMEs or PR descripti
 | Runner unit | pytest, marker `unit` | host | Job loop with a fake clock, heartbeat, lease loss, backoff, shutdown, PR-Agent command and env construction, output parsing, log truncation, secret redaction. Subprocess boundary replaced by a fake. | exists |
 | Runner integration | pytest, marker `integration` | host or Docker stack | Real processes and real loopback sockets: the real loop against the app or a fake runner API, with the fake PR-Agent executable as a real subprocess (exit codes, timeouts, kill). | exists (entry point only) |
 | Engine smoke | pytest, marker `engine` | Docker stack, nightly and release PRs | The real, pinned PR-Agent against the GitHub fake and the LLM fake. Asserts the shape of what was posted, never review quality. Deselected by default. | marker exists, no tests yet |
+| Image smoke | Bash scripts `docker/smoke/app.sh` and `docker/smoke/runner.sh` | Docker daemon (host or CI) | The built container images: the app starts as a non-root user with a fresh volume, serves the start page, creates and migrates the database; the runner answers `--version`; neither image holds env files, git data, keys or secrets. Fails without Docker, never skips. | exists |
 | E2E | Playwright, chromium | production build (`next build` and `next start`), later the Docker stack | User-visible flows. At most about 8 `@smoke` journeys. | exists (start page) |
 | Manual | none | a developer machine | Real PR-Agent against a real model on a sandbox repository before a release. The result goes into the PR description. Never in CI. | n/a |
 
@@ -79,7 +80,7 @@ app/                               Next.js project (pnpm)
   src/<owner>/foo.test.ts          unit test beside the code
   src/<owner>/foo.integration.test.ts   single-owner integration test beside the code
   src/test-support/                shared test setup (network guard, SQLite template and child process helpers); not product code
-  src/ci/                          structure test of .github/workflows/ci.yml
+  src/ci/                          structure tests of the CI and publish workflows and of the Dockerfiles
   integration-tests/               cross-owner integration tests (planned)
     http/ webhooks/ workflows/ compatibility/ support/   closed list; support/ holds no tests
   e2e/<area>/<journey>.e2e.ts      Playwright; areas: app/, auth/, reviews/, jobs/, settings/
@@ -90,6 +91,7 @@ runner/                            Python project (uv)
   tests/contract/test_<contract>.py      (planned)
   tests/engine/test_<engine_area>.py     (planned)
 fakes/                             shared fake servers and fixtures (see fakes/README.md)
+docker/smoke/                      image smoke tests (bash) and their shared helpers
 contracts/                         runner API and webhook schemas (planned)
 ```
 
@@ -163,6 +165,18 @@ Runner (`runner/`, Python version pinned in `.python-version`, uv, `uv.lock` com
   180 s. `pytest-socket` as described above.
 - `ruff check` and `ruff format --check`, `pyright` in strict mode.
 
+Images (`docker/smoke/`, bash): `app.sh <image>` starts the app image with a fresh named volume on
+`/data`, polls `/` until it answers (at most `SMOKE_WAIT_SECONDS`, default 90) and waits for the
+container's own health check; it then checks the image user and the uid of PID 1, that the standalone
+server runs, that `/data/app.db` exists, belongs to the unprivileged user and holds a recorded
+migration, and that the log reports no database error. `runner.sh <image>` checks `--version` against
+`runner/pyproject.toml`, the user, a writable `/tmp` and home directory. Both run the secrets scan of
+`lib.sh` (no `.env*`, `.git`, key or database files, no private key material, no secret-looking
+variable in the image configuration or build history). Containers and volumes are removed on exit,
+also after a failure. What is not covered: the real push to GHCR and pulling from the deployment
+server (manual, see the PR of the image ticket), and PR-Agent in the runner image (planned with the
+PR-Agent ticket: installed version equals the pinned one, a job through the fake PR-Agent).
+
 Planned: `verify:structure` (placement and naming rules, test files must be discovered by a runner,
 no process identifiers in titles), `verify:server-only-canary`, the Docker test stack
 (`docker/compose.test.yml`), `contracts/`.
@@ -178,6 +192,7 @@ no process identifiers in titles), `verify:server-only-canary`, the Docker test 
 | Unit tests | `make test-unit` | `pnpm test`; `pytest -m unit` |
 | Integration tests (host) | `make test-integration` | `pnpm test:int`; `pytest -m "integration or contract"` |
 | E2E | `make test-e2e` | `pnpm test:e2e` (`ARGS="--grep @smoke"` filters) |
+| Image smoke tests | `make test-images` | builds both images with `docker build`, then runs `docker/smoke/app.sh` and `docker/smoke/runner.sh` (needs a Docker daemon; not part of `make verify`) |
 
 Inside `app/`: `pnpm dev | build | start | lint | typecheck | test | test:watch | test:int | test:e2e`.
 Inside `runner/`: `uv sync --locked`, `uv run ruff check .`, `uv run ruff format --check .`,
@@ -221,12 +236,23 @@ file is pinned by `app/src/ci/ci-workflow.test.ts`.
 | `app-fast` | app changed | `pnpm format:check`, `lint`, `typecheck`, `test` (unit), `test:int` (host), `build` with placeholder env. |
 | `runner-fast` | runner changed | `ruff check`, `ruff format --check`, `pyright`, `pytest -m unit`, `pytest -m "integration or contract"`. |
 | `e2e` ("E2E: browser journeys") | app changed | `playwright install --with-deps chromium`, then the journeys against the production build: `@smoke` only on pull requests into `development` and `CR-*`, all (without `@flaky`) on pull requests into `main` and on pushes. |
+| `image-app`, `image-runner` | pull requests: app (runner) changed, or any pull request into `main` | Builds the image with `docker/build-push-action` (`load`, no push, GHA layer cache), then runs its smoke test. No registry login, read-only token. Pushes do not run these jobs because the publish workflow builds the same images. |
 | `actionlint` | workflows changed | actionlint with `.github/actionlint.yaml`. |
 | `ci-passed` ("All checks passed?") | always | Fails on any failed or cancelled job, accepts skipped jobs. |
 
 Pushes and pull requests into `main` run every job. `ci-passed` is the only check that branch
 protection requires (on `development`, `main` and the `CR-*` pattern), so a job skipped by the path
 filter never blocks a merge. Branch protection is a GitHub setting and is not stored in the repository.
+
+`.github/workflows/publish-images.yml` (workflow "Publish images") runs on pushes to `development` and
+`main` only, never for pull requests, and only in the project repository. One job builds both images,
+smoke tests both, and only then logs in to GHCR with the run's `GITHUB_TOKEN` (the only secret it
+references) and pushes `ghcr.io/expidetgames/code-reviewer-app` and `-runner` with the tags
+`sha-<7 character commit hash>` and `development` (branch `development`) or `latest` (branch `main`).
+It is the only workflow with `packages: write`, granted to that job alone. A failing build or smoke
+test stops the job before the login, so no tag moves. The structure of both files is pinned by
+`app/src/ci/images-workflow.test.ts`; `app/src/ci/dockerfiles.test.ts` pins the runtime versions,
+digests, user and `.dockerignore` rules of the Dockerfiles.
 
 Planned, added with the suites they run: the Docker stack jobs (`integration`, `engine`), the
 `nightly.yml` workflow and `enforce-pr-source-branch.yml`. `main` accepts pull requests only from
