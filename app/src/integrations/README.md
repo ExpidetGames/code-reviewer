@@ -16,7 +16,7 @@ platform; the MVP has exactly one kind, the GitHub App (`github_app`), implement
 | `provider-import-rule.ts` | The import rule that keeps providers out of the rest of the app (see "The boundary")                                                                                            |
 | `providers/<type>/`       | One folder per implementation (none yet; the GitHub App arrives with the GitHub integration tickets)                                                                            |
 
-The table is `integrations` (`src/db/migrations/0002_create_integrations.ts`), the only code that
+The table is `integrations` (`src/db/migrations/20261010120000_create_integrations.ts`), the only code that
 touches it is `src/db/repositories/integrations-repository.ts`.
 
 ## The interface in short

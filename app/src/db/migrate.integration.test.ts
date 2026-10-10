@@ -32,6 +32,16 @@ async function userTables(db: Kysely<Database>): Promise<string[]> {
   );
 }
 
+describe("the list of migrations", () => {
+  it("names every migration after the first with a UTC timestamp prefix", async () => {
+    const keys = Object.keys(await migrationProvider.getMigrations()).sort();
+
+    expect(keys[0]).toBe("0001_create_app_meta");
+    for (const key of keys.slice(1))
+      expect(key, key).toMatch(/^\d{14}_[a-z0-9_]+$/);
+  });
+});
+
 describe("starting the database", () => {
   // CR-15-T01
   it("creates a missing file and applies every migration in order", async () => {
