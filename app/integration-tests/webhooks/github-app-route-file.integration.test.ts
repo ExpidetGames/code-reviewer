@@ -26,7 +26,9 @@ type Route = typeof import("../../src/app/api/webhooks/github-app/route.ts");
 
 const fakes: FakeGithubApp[] = [];
 
-async function startRoute(): Promise<{
+async function startRoute(
+  overrides: Record<string, string | undefined> = {},
+): Promise<{
   route: Route;
   github: { fake: FakeGithubApp };
 }> {
@@ -39,6 +41,7 @@ async function startRoute(): Promise<{
   const env = testGithubAppEnv({
     GITHUB_API_BASE_URL: fake.baseUrl,
     ALLOW_TEST_GITHUB_ENDPOINTS: "true",
+    ...overrides,
   });
   for (const [name, value] of Object.entries(env))
     if (value !== undefined) vi.stubEnv(name, value);
@@ -146,6 +149,34 @@ describe("the webhook route file", () => {
         .selectAll()
         .execute(),
     ).toEqual([]);
+  });
+
+  it("refuses deliveries like forged ones when the webhook secret is missing and logs the cause once per process, not once per request", async () => {
+    const { route } = await startRoute({
+      GITHUB_APP_WEBHOOK_SECRET: undefined,
+    });
+    const error = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const send = () =>
+      route.POST(
+        webhookDelivery({
+          event: "pull_request",
+          payload: webhookFixture("pull_request.opened"),
+          secret: TEST_WEBHOOK_SECRET,
+        }),
+      );
+
+    const first = await send();
+    const second = await send();
+
+    expect([first.status, second.status]).toEqual([401, 401]);
+    expect(await first.json()).toEqual({ error: "WEBHOOK_SIGNATURE_INVALID" });
+    const logged = error.mock.calls
+      .map((call) => String(call[0]))
+      .filter((line) => line.includes("deliveries cannot be verified"));
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toContain("GITHUB_APP_WEBHOOK_SECRET");
   });
 
   it("exports only the POST method", async () => {

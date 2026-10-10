@@ -102,6 +102,20 @@ function standIn(externalId: string): Integration {
   };
 }
 
+// Webhook secret problems are logged once per logger and process: an unauthenticated caller can
+// repeat the request as often as it likes, and the route makes a new handler for every request. The
+// record is kept on `globalThis` like the database connection and the sync service, because Next.js
+// may load route handlers as separate module graphs.
+const LOGGED_UNVERIFIABLE = Symbol.for("code-reviewer.webhook-unverifiable");
+type GlobalWithLoggedSet = typeof globalThis & {
+  [LOGGED_UNVERIFIABLE]?: WeakSet<WebhookLogger>;
+};
+
+function loggedUnverifiableFor(): WeakSet<WebhookLogger> {
+  const holder = globalThis as GlobalWithLoggedSet;
+  return (holder[LOGGED_UNVERIFIABLE] ??= new WeakSet());
+}
+
 export function createGithubAppWebhookHandler(
   deps: GithubAppWebhookDeps,
 ): WebhookHandler {
@@ -175,10 +189,6 @@ export function createGithubAppWebhookHandler(
     return "trigger_enqueued";
   }
 
-  // Webhook secret problems are logged once per logger: an unauthenticated caller can repeat the
-  // request as often as it likes.
-  const loggedUnverifiable = new WeakSet<WebhookLogger>();
-
   async function handleRequest(request: Request): Promise<Response> {
     // 1. size
     const body = await readLimitedBody(request, maxBodyBytes);
@@ -202,8 +212,9 @@ export function createGithubAppWebhookHandler(
     } catch (error) {
       // A delivery that cannot be verified is refused like a forged one; callers learn nothing about
       // the configuration. The operator reads the cause in the log.
-      if (!loggedUnverifiable.has(logger)) {
-        loggedUnverifiable.add(logger);
+      const logged = loggedUnverifiableFor();
+      if (!logged.has(logger)) {
+        logged.add(logger);
         logger.error(
           `[webhook] deliveries cannot be verified: ${describeError(error)}`,
         );
