@@ -33,6 +33,25 @@ const opened: ReviewTrigger = {
   command: null,
   args: null,
   actor: { login: "alice", externalId: "1" },
+  draft: false,
+  state: "open",
+};
+
+/** A command trigger: it knows nothing about drafts or the state of the pull request. */
+const openedFields = {
+  repo,
+  prNumber: 7,
+  prUrl: "https://example.test/acme/widgets/pull/7",
+  headSha: "abc123",
+  command: null,
+  args: null,
+  actor: { login: "alice", externalId: "1" },
+};
+const commandTrigger: ReviewTrigger = {
+  ...openedFields,
+  kind: "command",
+  command: "ask",
+  args: "why?",
 };
 
 const accessFields: GitAccess = {
@@ -73,28 +92,24 @@ describe("the normalized type guards", () => {
   it("accepts opened, updated and command triggers", () => {
     expect(isReviewTrigger(opened)).toBe(true);
     expect(isReviewTrigger({ ...opened, kind: "updated" })).toBe(true);
-    expect(
-      isReviewTrigger({
-        ...opened,
-        kind: "command",
-        command: "ask",
-        args: "why?",
-      }),
-    ).toBe(true);
+    expect(isReviewTrigger(commandTrigger)).toBe(true);
+  });
+
+  it("requires a pull request trigger to say whether the pull request is a draft and open", () => {
+    expect(isReviewTrigger({ ...opened, draft: undefined })).toBe(false);
+    expect(isReviewTrigger({ ...opened, draft: "no" })).toBe(false);
+    expect(isReviewTrigger({ ...opened, state: "merged" })).toBe(false);
+    expect(isReviewTrigger({ ...openedFields })).toBe(false);
+    expect(isReviewTrigger({ ...commandTrigger, draft: false })).toBe(false);
   });
 
   it("rejects a trigger whose kind and command do not fit together", () => {
     expect(isReviewTrigger({ ...opened, command: "review", args: "" })).toBe(
       false,
     );
-    expect(isReviewTrigger({ ...opened, kind: "command" })).toBe(false);
+    expect(isReviewTrigger({ ...openedFields, kind: "command" })).toBe(false);
     expect(
-      isReviewTrigger({
-        ...opened,
-        kind: "command",
-        command: "deploy",
-        args: "",
-      }),
+      isReviewTrigger({ ...commandTrigger, command: "deploy", args: "" }),
     ).toBe(false);
     expect(isReviewTrigger({ ...opened, kind: "labeled" })).toBe(false);
   });
@@ -159,7 +174,36 @@ describe("the normalized type guards", () => {
     expect(isIntegrationEvent({ kind: "ignored", reason: "closed" })).toBe(
       true,
     );
+    expect(
+      isIntegrationEvent({
+        kind: "pull_request_closed",
+        repo,
+        prNumber: 7,
+        merged: true,
+      }),
+    ).toBe(true);
+    expect(
+      isIntegrationEvent({ kind: "invalid_payload", reason: "no head" }),
+    ).toBe(true);
+    expect(
+      isIntegrationEvent({ kind: "pull_request_drafted", repo, prNumber: 7 }),
+    ).toBe(true);
+    expect(
+      isIntegrationEvent({ kind: "pull_request_drafted", repo, prNumber: 0 }),
+    ).toBe(false);
 
+    expect(
+      isIntegrationEvent({
+        kind: "pull_request_closed",
+        repo,
+        prNumber: 0,
+        merged: true,
+      }),
+    ).toBe(false);
+    expect(
+      isIntegrationEvent({ kind: "pull_request_closed", repo, prNumber: 7 }),
+    ).toBe(false);
+    expect(isIntegrationEvent({ kind: "invalid_payload" })).toBe(false);
     expect(isIntegrationEvent(opened)).toBe(false);
     expect(isIntegrationEvent({ kind: "review_trigger", trigger: {} })).toBe(
       false,

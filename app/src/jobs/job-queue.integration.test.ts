@@ -862,6 +862,39 @@ describe("dropping waiting jobs", () => {
     );
   });
 
+  it("cancels only the waiting automatic jobs of a pull request that became a draft", async () => {
+    const fixture = await createJobQueueFixture();
+    const automatic = await fixture.enqueueNew({
+      prNumber: 7,
+      headSha: sha("a"),
+    });
+    const asked = await fixture.enqueueNew({
+      prNumber: 7,
+      command: "ask",
+      args: "why?",
+      triggerKind: "comment",
+    });
+    const otherPullRequest = await fixture.enqueueNew({
+      prNumber: 8,
+      headSha: sha("b"),
+    });
+
+    const discarded = await fixture.queue.discardWaitingAutomaticForPr(
+      fixture.repositoryId,
+      7,
+    );
+
+    expect(discarded).toBe(1);
+    expect(await fixture.queue.get(automatic.id)).toMatchObject({
+      status: "cancelled",
+      errorCode: "pull_request_draft",
+    });
+    expect((await fixture.queue.get(asked.id))?.status).toBe("queued");
+    expect((await fixture.queue.get(otherPullRequest.id))?.status).toBe(
+      "queued",
+    );
+  });
+
   it("cancels the waiting jobs of one pull request and lets its running job finish", async () => {
     const fixture = await createJobQueueFixture();
     const running = await fixture.enqueueNew({

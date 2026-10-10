@@ -51,6 +51,7 @@ async function startHarness(
     deliveries: h.deliveries,
     sync: h.sync,
     projects: options.projects ?? h.projects,
+    automatic: h.automatic,
     intake,
     logger: {
       info: (line) => routeLog.push(line),
@@ -120,6 +121,7 @@ describe("a pull request delivery with the job queue behind the route", () => {
     const { h, queue, send } = await startHarness();
     await h.seedInstallation();
     await send("pull_request.opened", { deliveryId: "d-1" });
+    h.fake.updatePullRequest("acme/widgets", 7, { headSha: NEW_HEAD });
 
     await send("pull_request.synchronize", {
       deliveryId: "d-2",
@@ -165,6 +167,8 @@ describe("a pull request delivery with the job queue behind the route", () => {
       prUrl: "https://github.test/acme/widgets/pull/7",
       headSha: OPENED_HEAD,
       actor: { login: "alice", externalId: "1001" },
+      draft: false,
+      state: "open" as const,
     };
     const source = { deliveryId: "d-1", event: "pull_request" };
 

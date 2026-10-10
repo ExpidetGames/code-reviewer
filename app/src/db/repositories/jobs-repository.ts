@@ -112,6 +112,10 @@ export type JobsRepository = {
   cancelWaitingForRepository(repositoryId: string): Promise<number>;
   /** Cancels the waiting jobs of one pull request (it was closed); returns how many. */
   discardWaitingForPr(repositoryId: string, prNumber: number): Promise<number>;
+  discardWaitingAutomaticForPr(
+    repositoryId: string,
+    prNumber: number,
+  ): Promise<number>;
   get(id: string): Promise<Job | undefined>;
   list(filter?: JobListFilter): Promise<Job[]>;
 };
@@ -296,7 +300,12 @@ export function createJobsRepository(
   }
 
   async function cancelWaiting(
-    where: { repositoryId: string; prNumber?: number },
+    where: {
+      repositoryId: string;
+      prNumber?: number;
+      /** Only jobs a webhook created (`trigger_kind = webhook`), not the ones a person started. */
+      automaticOnly?: boolean;
+    },
     errorCode: JobErrorCode,
   ): Promise<number> {
     const timestamp = formatTimestamp(now());
@@ -312,6 +321,8 @@ export function createJobsRepository(
       .where("repository_id", "=", where.repositoryId);
     if (where.prNumber !== undefined)
       query = query.where("pr_number", "=", where.prNumber);
+    if (where.automaticOnly === true)
+      query = query.where("trigger_kind", "=", "webhook");
     const result = await query.executeTakeFirst();
     return Number(result.numUpdatedRows);
   }
@@ -594,6 +605,13 @@ export function createJobsRepository(
 
     discardWaitingForPr(repositoryId, prNumber) {
       return cancelWaiting({ repositoryId, prNumber }, "pull_request_closed");
+    },
+
+    discardWaitingAutomaticForPr(repositoryId, prNumber) {
+      return cancelWaiting(
+        { repositoryId, prNumber, automaticOnly: true },
+        "pull_request_draft",
+      );
     },
 
     async get(id) {

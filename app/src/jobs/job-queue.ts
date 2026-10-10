@@ -88,8 +88,19 @@ export type JobQueue = {
   expireStaleJobs(): Promise<ExpiryReport>;
   /** Cancels all waiting jobs of a repository (project deactivated); running jobs finish. */
   cancelWaitingForRepository(repositoryId: string): Promise<number>;
-  /** Cancels the waiting jobs of a pull request (it was closed); a running job finishes. */
+  /**
+   * Cancels every waiting job of a pull request (it was closed): the automatic ones and the ones a
+   * person started with a comment or the start button. A running job finishes.
+   */
   discardWaitingForPr(repositoryId: string, prNumber: number): Promise<number>;
+  /**
+   * Cancels the waiting automatic jobs of a pull request (it was turned into a draft). Jobs a person
+   * started stay: a draft can be reviewed on request. A running job finishes.
+   */
+  discardWaitingAutomaticForPr(
+    repositoryId: string,
+    prNumber: number,
+  ): Promise<number>;
   get(id: string): Promise<Job | undefined>;
   list(filter?: JobListFilter): Promise<Job[]>;
 };
@@ -145,6 +156,8 @@ export function createJobQueue(
       jobs.cancelWaitingForRepository(repositoryId),
     discardWaitingForPr: (repositoryId, prNumber) =>
       jobs.discardWaitingForPr(repositoryId, prNumber),
+    discardWaitingAutomaticForPr: (repositoryId, prNumber) =>
+      jobs.discardWaitingAutomaticForPr(repositoryId, prNumber),
     get: (id) => jobs.get(id),
     list: (filter) => jobs.list(filter),
   };

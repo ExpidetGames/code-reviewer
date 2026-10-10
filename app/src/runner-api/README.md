@@ -165,9 +165,10 @@ The body is `{ leaseToken, result }`. `result` is what `code-reviewer-run-job` p
 
 ## Before this is used in production
 
-The runner API must not process jobs in production before the trigger policy (CR-31) is on the same
-branch, or old jobs would run with paid model calls (`src/jobs/README.md`, "For the tickets that build
-on it"). The project gate (CR-24, CR-5) is wired in.
+The trigger policy (CR-31: drafts, the review settings, the debounce of a push, the check against
+the current head commit, dropping the waiting jobs of a closed pull request) and the project gate
+(CR-24, CR-5) are wired in the webhook handler (`src/webhooks/README.md`), so the runner API only sees
+jobs the policy let through.
 
 ## Tests
 
