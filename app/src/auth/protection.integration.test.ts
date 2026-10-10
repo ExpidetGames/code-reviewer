@@ -28,6 +28,7 @@ const PROTECTED_DATA_ROUTES = [
   "/api/repositories/[repositoryId]/project",
   "/api/repositories/[repositoryId]/project/settings",
   "/api/review-settings",
+  "/api/integrations/sync",
 ] as const;
 // Files the proxy matcher leaves out on purpose (src/proxy.ts), so no session rule applies to them.
 const OUTSIDE_THE_PROXY = ["/favicon.ico"] as const;
