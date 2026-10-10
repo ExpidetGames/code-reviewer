@@ -24,8 +24,8 @@ spike one commit was pushed to the branch `pr-small`:
   became `slice(0, count)`. This fixes the first planted problem and leaves the second one
   (`summarizeOrder` crashes on an empty order) untouched. Nothing else changed (one line).
 
-No comment was deleted or edited by hand. The commit stays on the branch (a later spike ticket may
-restore the original content with a revert commit).
+No comment was deleted or edited by hand. The commit was later undone by the revert commit `b6062f0`
+(CR-13), so the branch `pr-small` has the original tree again.
 
 ## Runs
 
