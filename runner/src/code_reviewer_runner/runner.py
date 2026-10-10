@@ -42,7 +42,7 @@ from code_reviewer_runner.log_capture import (
     StdlibLogHandler,
     fit_to_bytes,
 )
-from code_reviewer_runner.pr_agent_config import build_environment
+from code_reviewer_runner.pr_agent_config import InvalidOption, build_environment
 from code_reviewer_runner.pr_agent_runtime import JobTimeout, execute
 from code_reviewer_runner.redaction import REDACTED, RedactingStream, Redactor
 from code_reviewer_runner.repo_settings_guard import install_repo_settings_guard
@@ -100,6 +100,14 @@ def run_job(
         except JobTimeout:
             return _failure(
                 ErrorCode.TIMEOUT, "the command did not finish in time", started, capture
+            )
+        except InvalidOption as error:
+            # The key is an env name that parse_job validated; the value is never echoed.
+            return _failure(
+                ErrorCode.INVALID_JOB,
+                f"the value of env option {error.key} does not fit the type of the option",
+                started,
+                capture,
             )
         except KeyboardInterrupt:
             raise

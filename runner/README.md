@@ -13,8 +13,21 @@ The job is JSON on stdin (the shape is documented in `src/code_reviewer_runner/j
 | `prUrl`, `command` | `https://<host>/<owner>/<repo>/pull/<n>` on the host of `git.baseUrl`; one of `review`, `improve`, `describe`, `ask` |
 | `args` | `ask` only: exactly one string, the question |
 | `git` | `provider` (`github`), `baseUrl`, `token` (installation token), `botLogin` (`<app slug>[bot]`) |
-| `llm` | `provider` (`openrouter`), `model`, `apiKey`; optional `baseUrl` (loopback only, for test fakes) and `maxTokens` (context window of a model PR-Agent does not know) |
-| `env` | optional options of the four tools, `PR_REVIEWER__*`, `PR_DESCRIPTION__*`, `PR_CODE_SUGGESTIONS__*`, `PR_QUESTIONS__*`, as strings. Nothing else is accepted. |
+| `llm` | `provider` (`openrouter`), `model`, `apiKey`; optional `baseUrl` (loopback only, for test fakes), `maxTokens` and `fallbackModels` (see below) |
+| `env` | optional options of the four tools, `PR_REVIEWER__*`, `PR_DESCRIPTION__*`, `PR_CODE_SUGGESTIONS__*`, `PR_QUESTIONS__*`, as strings; one option per key (`PR_REVIEWER__NUM_MAX_FINDINGS`, never a second `__`). Nothing else is accepted. See "Settings policy" for how the values are read. |
+
+`llm.maxTokens` (integer, 1000 to 10,000,000) is the context window the runner gives PR-Agent. It
+sets `config.custom_model_max_tokens` (used for a model PR-Agent does not know) and
+`config.max_model_tokens` (the upper bound PR-Agent applies to every model, default 32,000), both
+to the same value; without `maxTokens` PR-Agent's own values stay. The value also applies to the
+fallback models PR-Agent does not know, so use the smallest window of the models in the chain.
+
+`llm.fallbackModels` (optional list of at most five model names, same characters as `model`, no
+repeats, none equal to `model`) is the chain PR-Agent tries, in order, when the model fails. Every
+entry gets the `openrouter/` prefix like `model`. Without the field there is no fallback: PR-Agent's
+own default fallback model belongs to another vendor and is never used. An entry that is not a valid
+model name, a list that is too long or one with a repeat is an `invalid_job`. A review that needed
+a fallback model reports `usage.fallbackUsed`.
 
 The result is exactly one line of JSON on stdout: `ok`, `durationMs`, `commentUrl` (or `null`),
 `errorCode` (or `null`), `logTail` (redacted, at most 4 KB), `logTruncated` (true if the runner's log sink, which sees PR-Agent's records at INFO and above,
@@ -84,23 +97,72 @@ and the enum agree. Callers branch on the code, never on the text.
 
 ## Settings policy
 
-- Secrets, URLs and model names reach PR-Agent through the process environment (the environment
-  wins over a repository's `.pr_agent.toml`). The runner builds a minimal environment from the job;
-  nothing of the parent process is passed on except plain runtime variables.
-- Booleans and lists are typed settings, set before the command starts.
-- PR-Agent 0.47.0 only protects some host-level keys from a repository's `.pr_agent.toml`. The
-  settings guard (`repo_settings_guard.py`) snapshots every key that routes a request or a
-  credential, selects the model, bounds the cost or switches publishing and callbacks, and puts them
-  back after each settings file PR-Agent merges. A unit test feeds a malicious file through PR-Agent's
-  own merge function. Options meant for repositories (instructions, thresholds) still apply.
-- `job.env` is limited to the options of the four tools; it cannot carry credentials, endpoints or
-  model settings. The only LLM endpoint override is `llm.baseUrl`, accepted for loopback addresses.
-- Repository settings files stay enabled (single tenant, trusted repositories); the global settings
-  file is off.
+How a job becomes PR-Agent configuration (`pr_agent_config.py`, `pr_agent_runtime.py`,
+`repo_settings_guard.py`):
+
+- **No secret in the process environment.** The installation token (`github.user_token`) and the
+  LLM key (`openrouter.key`) are typed settings, set inside the request scope. PR-Agent reads both
+  from its settings (verified for its GitHub provider and its LiteLLM handler), so they are not
+  environment variables, and a `{env[...]}` reference finds nothing. The environment of the PR-Agent
+  process is built from scratch: runtime variables (`PATH`, `HOME`, proxy and certificate settings,
+  the tiktoken cache), endpoints (`GITHUB__BASE_URL`, `OPENROUTER__API_BASE`), model names and a
+  few switches. Nothing of the parent environment passes on. The values of `job.env` are not in it
+  either.
+- **Nothing a job or a repository sends is evaluated.** Dynaconf evaluates a text that starts with
+  `@format`, `@jinja`, `@get`, `@read_file` and similar markers when the setting is read; such a
+  text can read an environment variable or any other setting, a secret included, into the prompt
+  and from there into a public comment. Dynaconf only does that while its `AUTO_CAST_FOR_DYNACONF`
+  setting is on. It is switched off in three places: in the environment (Dynaconf reads it before
+  the first variable, which PR-Agent's own setting of it comes too late for), as the first typed
+  setting of each job, and by the settings guard before and after every settings file it lets
+  PR-Agent merge. As a safety net the guard turns any value still waiting for evaluation back into
+  its text after each merge. A `this.<section>.<key>` reference would still resolve a typed secret
+  if evaluation were on, so the switch is what keeps `@jinja {{ this.github.user_token }}` literal.
+  It also covers texts PR-Agent stores in its settings itself, such as the body of a linked ticket.
+  Tests prove this with PR-Agent's real loaders and `_apply_repo_settings_file`, and by rendering
+  PR-Agent's review prompt. The Dynaconf version they were written against is pinned in
+  `tests/unit/test_dependency_pin.py`.
+- **`job.env` values keep their type.** They are not read as TOML. The type of an option is the
+  type of PR-Agent's own default for it (all options of the four tools are switches, integers or
+  text): a switch takes `true` or `false` (any case), an integer option takes an integer, and
+  everything else, instructions above all, stays exactly the text that was sent (`123`, `[1]`,
+  `2026-01-01` and `true` in an instructions field are text). A value that does not fit the type of
+  its option is an `invalid_job` that names the option, never the value. An option PR-Agent does
+  not know is kept as text.
+- **Precedence**: PR-Agent's defaults, then the repository's `.pr_agent.toml`, then the options of
+  the job. The guard puts the options of the job back after each repository file, so the project
+  settings of the app win over the repository file; a repository can only set what the app does not
+  manage. The settings that route a request or a credential, select the model, bound the cost or
+  switch publishing and callbacks cannot be set by a repository at all: the key list
+  `PROTECTED_SETTINGS` (model roles, fallbacks, token and reasoning budgets, endpoints, tokens,
+  publishing switches) and the sections in `PROTECTED_SECTIONS`, which are pinned as a whole so a
+  key PR-Agent does not declare cannot be added either (`model_routing`, which can swap the model per
+  pull request size, `openrouter` provider routing and limits, `litellm`, `openai`, `azure_ad`,
+  `aws`, `vertexai` and every provider section PR-Agent reads a key or endpoint from). A unit test
+  feeds a malicious file with all of these through PR-Agent's own merge function; another compares
+  the provider sections with PR-Agent's own list, so a new provider after an upgrade is noticed.
+  A job cannot set the options the runner pins itself (`PR_REVIEWER__FINAL_UPDATE_MESSAGE`,
+  `PR_REVIEWER__ENABLE_REVIEW_LABELS_SECURITY` and `_EFFORT`): `invalid_job`.
+- **Where `.pr_agent.toml` comes from.** PR-Agent 0.47.0 reads it from the **default branch** of the
+  repository (contents API without a ref), not from the head of the pull request and not from the
+  base branch of a pull request into another branch. The author of a pull request therefore cannot
+  change how the review is configured by changing the file in that pull request; a change takes
+  effect once it is merged into the default branch. The runner keeps it that way: the setting that
+  would name another branch (`config.config_branch`, also the environment variable
+  `PR_AGENT_CONFIG_BRANCH`, which the minimal environment drops) and per-directory settings files
+  (`config.enable_per_directory_settings`) are pinned, so a repository file cannot redirect the
+  lookup. The organization-wide settings repository (`<owner>/pr-agent-settings`) is not read
+  (`config.use_global_settings_file` is off). The agent rules file `AGENTS.md`
+  (`config.repo_context_files`) is read from the default branch as well
+  (`config.repo_context_from_default_branch`, pinned to `true`: a repository file could otherwise
+  switch it to the branch a pull request targets). Repository settings files stay enabled (single
+  tenant, trusted repositories).
 - `config.repo_context_files` stays at PR-Agent's default `["AGENTS.md"]` on purpose: the rules a
   project writes down for agents help the review. It costs a few tokens and one extra GitHub call
   per run, and it puts repository text into the prompt, which the repositories of a single tenant
   are trusted to do. Revisit this for a multi-tenant setup.
+- `job.env` cannot carry credentials, endpoints or model settings. The only LLM endpoint override
+  is `llm.baseUrl`, accepted for loopback addresses.
 
 ## Identity patch
 
