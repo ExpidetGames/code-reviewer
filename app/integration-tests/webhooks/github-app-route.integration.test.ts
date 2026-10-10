@@ -614,6 +614,8 @@ describe("a delivery that was turned away for a reason that can change", () => {
     ).toEqual(["unknown_installation"]);
 
     await h.deliver("installation.created", { deliveryId: "delivery-2" });
+    const [repository] = await h.repositories.list();
+    await h.projects.activateProject(repository!.id);
     const redelivered = await h.deliver("pull_request.opened", {
       deliveryId: "delivery-1",
     });

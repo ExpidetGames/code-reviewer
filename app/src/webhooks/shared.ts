@@ -11,6 +11,7 @@ import {
   createGithubAppWebhookHandler,
   type WebhookHandler,
 } from "./github-app-handler.ts";
+import { getProjectService } from "../projects/shared.ts";
 import { consoleWebhookLogger } from "./logger.ts";
 import {
   createLoggingReviewTriggerIntake,
@@ -33,6 +34,7 @@ export function getGithubAppWebhookHandler(): WebhookHandler {
     integrations: createIntegrationsRepository(db),
     deliveries: createWebhookDeliveriesRepository(db),
     sync: getIntegrationSync(),
+    projects: getProjectService(),
     intake: getReviewTriggerIntake(),
     logger: consoleWebhookLogger,
   });
