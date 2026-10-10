@@ -15,6 +15,8 @@ export async function PUT(
   const { repositoryId } = await context.params;
   return createProjectRouteHandler({
     // The second guard behind the proxy (src/auth/README.md): called first, before any data is read.
+    // The proxy answers a request without a session with 401 (or 403) before it gets here; if it ever
+    // does not (a changed matcher), `requireUser()` redirects to the login page (a 307 for this PUT).
     requireUser: () => requireUser(),
     service: getProjectService(),
   })(request, repositoryId);
