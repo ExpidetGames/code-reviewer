@@ -79,6 +79,7 @@ app/                               Next.js project (pnpm)
   src/<owner>/foo.test.ts          unit test beside the code
   src/<owner>/foo.integration.test.ts   single-owner integration test beside the code
   src/test-support/                shared test setup (network guard); not product code
+  src/ci/                          structure test of .github/workflows/ci.yml
   integration-tests/               cross-owner integration tests (planned)
     http/ webhooks/ workflows/ compatibility/ support/   closed list; support/ holds no tests
   e2e/<area>/<journey>.e2e.ts      Playwright; areas: app/, auth/, reviews/, jobs/, settings/
@@ -150,8 +151,8 @@ App (`app/`, Node version from `.nvmrc`, pnpm):
   `E2E_PORT` (default 3417, never 3000 or 3100) so it never touches another running server. Without a
   downloaded Chromium, run with an installed Chrome: `PLAYWRIGHT_CHANNEL=chrome`.
 - ESLint flat config (Next.js core-web-vitals and TypeScript rules, `no-explicit-any` as an error,
-  Vitest and Playwright plugin rules against focused and skipped tests) and `tsc --noEmit` with
-  `strict`.
+  Vitest and Playwright plugin rules against focused and skipped tests), Prettier with its defaults
+  (`pnpm format` fixes, `pnpm format:check` verifies) and `tsc --noEmit` with `strict`.
 
 Runner (`runner/`, Python version pinned in `.python-version`, uv, `uv.lock` committed):
 
@@ -171,7 +172,7 @@ no process identifiers in titles), `verify:server-only-canary`, the Docker test 
 |---|---|---|
 | Install | `make install` | `pnpm --dir app install --frozen-lockfile`, `uv --directory runner sync --locked` |
 | Everything before a PR | `make verify` | lint, typecheck, unit and host integration tests of both parts |
-| Lint | `make lint` | `pnpm lint`; `ruff check`, `ruff format --check` |
+| Lint | `make lint` | `pnpm lint`, `pnpm format:check`; `ruff check`, `ruff format --check` |
 | Typecheck | `make typecheck` | `pnpm typecheck`; `pyright` |
 | Unit tests | `make test-unit` | `pnpm test`; `pytest -m unit` |
 | Integration tests (host) | `make test-integration` | `pnpm test:int`; `pytest -m "integration or contract"` |
@@ -190,11 +191,29 @@ Planned targets: `test-engine`, `test-stack-up`, `test-stack-down`, `test:docker
 
 ## 8. CI
 
-Planned (see the CI ticket): one workflow with jobs for app (lint, typecheck, unit, build), runner
-(ruff, pyright, pytest unit), integration, e2e and engine, ending in a single required check
-`ci-passed` that accepts skipped jobs. Runs on pull requests into `development`, `main` and `CR-*`
-epic branches, and on pushes to `development` and `main`. No repository secrets in test jobs.
-`main` accepts pull requests only from `development` or `hotfix/*`.
+`.github/workflows/ci.yml` (workflow "CI") runs on pull requests into `development`, `main` and `CR-*`
+epic branches, and on pushes to `development` and `main`. A new push to a pull request cancels its
+superseded run; runs for pushes are never cancelled. No repository secrets in test jobs, the token is
+limited to `contents: read` (the `changes` job also reads pull requests for the path filter), every job has a
+timeout, third-party actions are pinned to a major version or a commit hash. The structure of the
+file is pinned by `app/src/ci/ci-workflow.test.ts`.
+
+| Job | Runs | What |
+|---|---|---|
+| `changes` | pull requests | Path filter: `app` (anything except `runner/**` and Markdown), `runner` (anything except `app/**` and Markdown), `workflows` (`.github/**`). |
+| `app-fast` | app changed | `pnpm format:check`, `lint`, `typecheck`, `test` (unit), `test:int` (host), `build` with placeholder env. |
+| `runner-fast` | runner changed | `ruff check`, `ruff format --check`, `pyright`, `pytest -m unit`, `pytest -m "integration or contract"`. |
+| `e2e` | app changed | `playwright install --with-deps chromium`, then the journeys against the production build: `@smoke` only on pull requests into `development` and `CR-*`, all (without `@flaky`) on pull requests into `main` and on pushes. |
+| `actionlint` | workflows changed | actionlint with `.github/actionlint.yaml`. |
+| `ci-passed` ("All checks passed?") | always | Fails on any failed or cancelled job, accepts skipped jobs. |
+
+Pushes and pull requests into `main` run every job. `ci-passed` is the only check that branch
+protection requires (on `development`, `main` and the `CR-*` pattern), so a job skipped by the path
+filter never blocks a merge. Branch protection is a GitHub setting and is not stored in the repository.
+
+Planned, added with the suites they run: the Docker stack jobs (`integration`, `engine`), the
+`nightly.yml` workflow and `enforce-pr-source-branch.yml`. `main` accepts pull requests only from
+`development` or `hotfix/*`.
 
 ## 9. Test cases in Jira
 
