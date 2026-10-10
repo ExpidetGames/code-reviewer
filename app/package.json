@@ -7,8 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
+    "format": "prettier --write . ../fakes",
+    "format:check": "prettier --check . ../fakes",
     "typecheck": "next typegen && tsc --noEmit --pretty false",
     "test": "vitest run --project unit",
     "test:watch": "vitest --project unit",
@@ -16,6 +16,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
+    "better-auth": "1.7.7",
     "better-sqlite3": "^13.0.3",
     "kysely": "^0.29.6",
     "next": "16.4.0",
