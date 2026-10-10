@@ -38,11 +38,10 @@ import re
 import subprocess
 import sys
 import time
-import urllib.error
 import urllib.request
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import jwt
 
@@ -177,11 +176,14 @@ def write_record(
 def parse_result(stdout: str) -> dict[str, Any]:
     """The runner prints the result as the last line of stdout."""
     lines = [line for line in stdout.splitlines() if line.strip()]
+    unreadable: dict[str, Any] = {"ok": False, "errorCode": "unreadable_result"}
     try:
-        parsed = json.loads(lines[-1])
+        parsed: object = json.loads(lines[-1])
     except (IndexError, json.JSONDecodeError):
-        return {"ok": False, "errorCode": "unreadable_result"}
-    return parsed if isinstance(parsed, dict) else {"ok": False, "errorCode": "unreadable_result"}
+        return unreadable
+    if not isinstance(parsed, dict):
+        return unreadable
+    return cast(dict[str, Any], parsed)
 
 
 def build_job(
