@@ -130,11 +130,17 @@ export function RunsPageContent({
     );
   return (
     <>
-      <RunsFilterForm filter={data.filter} projects={data.projects} />
+      {/* Keyed on the filter too: the selects only know their `defaultValue` at the start, so after
+          "Reset filter" or Back and Forward they must start over with the filter of the address. */}
+      <RunsFilterForm
+        key={`filter:${filterKey(data.filter)}`}
+        filter={data.filter}
+        projects={data.projects}
+      />
       {/* Keyed on the filter: a page that stays mounted behind another one starts over when its
           address, and so its data, changes. */}
       <RunsList
-        key={filterKey(data.filter)}
+        key={`list:${filterKey(data.filter)}`}
         initial={data.snapshot}
         filter={data.filter}
         {...(api === undefined ? {} : { api })}

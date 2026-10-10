@@ -7,12 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RequestResult } from "../../ui/json-request.ts";
 import type { RunDetailSnapshot, RunDetailView } from "../run-view.ts";
 import type { RunsApi } from "./api.ts";
-import {
-  DETAIL_POLL_FAILED_TEXT,
-  LOG_SHORTENED_TEXT,
-  NO_LOG_TEXT,
-  RunDetail,
-} from "./run-detail.tsx";
+import { DETAIL_POLL_FAILED_TEXT } from "./poll-messages.ts";
+import { LOG_SHORTENED_TEXT, NO_LOG_TEXT, RunDetail } from "./run-detail.tsx";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -327,5 +323,41 @@ describe("polling the detail page", () => {
     await pass(60_000);
 
     expect(api.detail).not.toHaveBeenCalled();
+  });
+
+  // CR-35-T12
+  it("says the session ended and stops asking when the answer is a refusal that asking again cannot fix", async () => {
+    const running = detail({ status: "running", finishedAt: null });
+    const api = apiAnswering([
+      { ok: false, status: 401, code: "UNAUTHENTICATED", issues: [] },
+    ]);
+    render(<RunDetail initial={snap(running)} api={api} />);
+
+    await pass(3000);
+
+    expect(screen.getByRole("status").textContent).toContain(
+      "Your session has ended. Sign in again.",
+    );
+    expect(screen.getByRole("status").textContent).toContain(
+      "no longer updates",
+    );
+    await pass(600_000);
+    expect(api.detail).toHaveBeenCalledTimes(1);
+  });
+
+  it("says the run is gone and stops asking when it was not found", async () => {
+    const running = detail({ status: "running", finishedAt: null });
+    const api = apiAnswering([
+      { ok: false, status: 404, code: "RUN_NOT_FOUND", issues: [] },
+    ]);
+    render(<RunDetail initial={snap(running)} api={api} />);
+
+    await pass(3000);
+
+    expect(screen.getByRole("status").textContent).toContain(
+      "This run no longer exists.",
+    );
+    await pass(600_000);
+    expect(api.detail).toHaveBeenCalledTimes(1);
   });
 });

@@ -41,7 +41,7 @@ export const RUN_STATUS_PRESENTATION: Record<JobStatus, RunStatusPresentation> =
     },
     cancelled: {
       label: "Cancelled",
-      description: "The run was dropped before it started.",
+      description: "The run was stopped before it produced a review.",
       symbol: "⊘",
       settled: true,
     },

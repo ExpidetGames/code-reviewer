@@ -7,7 +7,6 @@
 import type { JsonValue, ReviewCommand } from "../integrations/types.ts";
 import type { JobStatus } from "../jobs/job-status.ts";
 import type { Job, JobTriggerKind } from "../jobs/job-types.ts";
-import { webAddress } from "../ui/web-address.ts";
 import { describeErrorCode } from "./error-copy.ts";
 import { runDurationMs } from "./run-duration.ts";
 
@@ -20,7 +19,7 @@ export type RunRowView = {
   /** The `owner/name` of the repository (a text from GitHub, rendered as text). */
   project: string;
   prNumber: number;
-  /** The link to the pull request when it is a web address, otherwise null. */
+  /** The link to the pull request when it is an `https://github.com/` address, otherwise null. */
   prUrl: string | null;
   command: ReviewCommand;
   triggerKind: JobTriggerKind;
@@ -69,11 +68,12 @@ export type RunsSnapshot = {
 export type RunDetailSnapshot = { generatedAt: string; run: RunDetailView };
 
 /**
- * The comment link, only when it points to github.com over https (no other host, no credentials, no
- * port). Anything else, including a `javascript:` address, is no link: the comment of a run is
- * written by the runner and must not take a person anywhere else.
+ * A link to GitHub, only when it points to github.com over https (no other host, no credentials, no
+ * port). Anything else, including a `javascript:` address, is no link: the comment of a run is written
+ * by the runner and the pull request address comes with a delivery, and neither may take a person
+ * anywhere else. Used for both links of a run.
  */
-export function safeCommentUrl(url: unknown): string | null {
+export function safeGithubUrl(url: unknown): string | null {
   if (typeof url !== "string" || url.length === 0 || url.length > 2048)
     return null;
   let parsed: URL;
@@ -137,7 +137,7 @@ function describeTrigger(kind: JobTriggerKind, actor: string): string {
   }
 }
 
-function problemOf(job: Job): string | null {
+function problemOf(job: RunRowSource): string | null {
   if (job.status === "failed" || job.status === "cancelled") {
     return job.errorCode === null
       ? job.status === "failed"
@@ -155,7 +155,7 @@ export function toRunRowView(job: Job, project: string, now: Date): RunRowView {
     repositoryId: job.repositoryId,
     project,
     prNumber: job.prNumber,
-    prUrl: webAddress(job.prUrl),
+    prUrl: safeGithubUrl(job.prUrl),
     command: job.command,
     triggerKind: job.triggerKind,
     trigger: describeTrigger(job.triggerKind, job.actorLogin),
@@ -182,7 +182,7 @@ export function toRunDetailView(
   const cleaned = redact(cleanLog(stored.logTail));
   const overlong = cleaned.length > MAX_LOG_CHARS;
   const commentUrl =
-    job.status === "succeeded" ? safeCommentUrl(stored.commentUrl) : null;
+    job.status === "succeeded" ? safeGithubUrl(stored.commentUrl) : null;
   const error =
     job.errorCode === null ? null : describeErrorCode(job.errorCode);
   return {

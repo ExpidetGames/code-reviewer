@@ -18,18 +18,21 @@ last run. Jobs are made and changed only by the job queue (`src/jobs`); this mod
 | `ui/`             | `RunsList`, `RunDetail`, `RunStatusBadge`, the page contents (`runs-page.tsx`, `run-detail-page.tsx`) and the browser side of the polling (`api.ts`)                                                               |
 
 The read side of the table is `src/db/repositories/runs-repository.ts` (a join with the repository name,
-newest first, and the newest job of each repository); it only reads.
+newest first, and the newest job of each repository); it only reads. The list is read without the
+stored result, the arguments and the lease (every open tab asks every few seconds), and the newest job
+of a repository is one lookup per repository on the index `jobs_repository_recent`
+(`repository_id, created_at, id`).
 
 ## What a person sees
 
-| Status       | Label     | Meaning                                                                      |
-| ------------ | --------- | ---------------------------------------------------------------------------- |
-| `queued`     | Waiting   | Waiting for a runner (or for its debounce)                                   |
-| `running`    | Running   | A runner holds it                                                            |
-| `succeeded`  | Succeeded | The review was published                                                     |
-| `failed`     | Failed    | Ended without a review; the error code is translated                         |
-| `cancelled`  | Cancelled | Dropped before it started (project switched off, pull request closed, draft) |
-| `superseded` | Replaced  | A newer commit made it unnecessary; the page links the newer run             |
+| Status       | Label     | Meaning                                                                                                |
+| ------------ | --------- | ------------------------------------------------------------------------------------------------------ |
+| `queued`     | Waiting   | Waiting for a runner (or for its debounce)                                                             |
+| `running`    | Running   | A runner holds it                                                                                      |
+| `succeeded`  | Succeeded | The review was published                                                                               |
+| `failed`     | Failed    | Ended without a review; the error code is translated                                                   |
+| `cancelled`  | Cancelled | Stopped before it produced a review (project switched off, pull request closed or turned into a draft) |
+| `superseded` | Replaced  | A newer commit made it unnecessary; the page links the newer run                                       |
 
 A run has no pull request title (the job stores the number, the address and the head commit), so none
 is shown. The "Started by" line is `Automatic`, `Comment by <login>` or `Started by <login>`.
@@ -42,7 +45,9 @@ settled (so a run that starts after the page was opened still appears: a deviati
 "stop after the last state", which holds for the page of one run: it stops asking once the run is
 settled). A page nobody looks at (another tab, or a page Next.js keeps mounted but hidden) does not
 ask, and asks at once when it is shown again. A failed request keeps the last data on screen and shows
-"Updating failed"; the next attempt runs on schedule. With Cache Components a page that was left stays
+"Updating failed"; the next attempt runs on schedule, and the wait doubles with every further failure in
+a row (up to a minute). A failure that asking again cannot fix (the session ended, the person is not
+allowed, the run is gone) stops polling and says so. With Cache Components a page that was left stays
 mounted, so state is tied to server data: the polled snapshot is shown only while the server snapshot
 it was fetched next to is still the current one, and the list is keyed on its filter.
 
@@ -56,9 +61,8 @@ and its `errorMessage` are not in any view, list, detail or polling answer (`run
 fields only; tests search the answers for them). The log is cleaned (terminal escapes and control
 characters out) and passed through the same redaction the runner API uses for results, with the secrets
 the app knows. Everything that came from outside (project name, login, a question of `/ask`, the log)
-is rendered as text. The only link made from stored data is the comment link, and only when it is an
-`https://github.com/` address (`rel="noopener noreferrer"`); a pull request address is linked only
-when it is an http(s) address.
+is rendered as text. The only link made from stored data are the comment link and the pull request link, and only when they are `https://github.com/` addresses
+(`rel="noopener noreferrer"`, one rule: `safeGithubUrl`).
 
 ## Access
 

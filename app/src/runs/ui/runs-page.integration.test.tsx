@@ -117,6 +117,40 @@ describe("the Runs page", () => {
     ).toBe("/runs");
   });
 
+  it("moves the selects with the address when the filter is reset or the person goes back", async () => {
+    const app = await openRuns();
+    const data = (
+      searchParams: Record<string, string | string[] | undefined>,
+    ) =>
+      loadRunsPage(searchParams, {
+        runs: app.f.runs,
+        projects: createProjectService({
+          projects: createProjectsRepository(app.f.db),
+        }),
+      });
+    const { rerender } = render(
+      <RunsPageContent
+        data={await data({
+          repository: app.f.repositoryId,
+          status: "failed",
+        })}
+      />,
+    );
+    const values = () => [
+      (screen.getByLabelText("Project") as HTMLSelectElement).value,
+      (screen.getByLabelText("Status") as HTMLSelectElement).value,
+    ];
+    expect(values()).toEqual([app.f.repositoryId, "failed"]);
+
+    // "Reset filter" is a link to /runs: the page renders again with no filter.
+    rerender(<RunsPageContent data={await data({})} />);
+    expect(values()).toEqual(["", ""]);
+
+    // Back brings the filter back.
+    rerender(<RunsPageContent data={await data({ status: "succeeded" })} />);
+    expect(values()).toEqual(["", "succeeded"]);
+  });
+
   // CR-35-T03
   it("explains an empty result and offers to reset the filter", async () => {
     const app = await openRuns();

@@ -10,7 +10,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 import type { ProjectListView, ProjectRowView } from "./list-view.ts";
-import { formatUtc, ProjectList } from "./project-list.tsx";
+import { ProjectList } from "./project-list.tsx";
 
 afterEach(cleanup);
 
@@ -103,6 +103,25 @@ describe("the project list with repositories", () => {
         .getByRole("switch", { name: "Review acme/widgets" })
         .getAttribute("aria-checked"),
     ).toBe("true");
+  });
+
+  it("names a last run with the words of the Runs page", () => {
+    renderList([
+      row({
+        repositoryId: "a",
+        fullName: "acme/a",
+        lastRun: { status: "queued", at: "2026-10-10T12:00:00Z" },
+      }),
+      row({
+        repositoryId: "b",
+        fullName: "acme/b",
+        lastRun: { status: "superseded", at: "2026-10-10T12:00:00Z" },
+      }),
+    ]);
+
+    const [waiting, replaced] = screen.getAllByRole("listitem");
+    expect(waiting?.textContent).toContain("Last run: Waiting");
+    expect(replaced?.textContent).toContain("Last run: Replaced");
   });
 
   it("links the last run to the runs of that project", () => {
@@ -232,15 +251,5 @@ describe("the project list with repositories", () => {
     renderList([row({ url: null })]);
 
     expect(screen.queryByRole("link", { name: /on GitHub/ })).toBeNull();
-  });
-});
-
-describe("a time in the list", () => {
-  it("is written in UTC the same way on the server and in the browser", () => {
-    expect(formatUtc("2026-10-10T12:34:56.789Z")).toBe("2026-10-10 12:34 UTC");
-  });
-
-  it("says it is unknown when the text is no time", () => {
-    expect(formatUtc("yesterday")).toBe("unknown time");
   });
 });

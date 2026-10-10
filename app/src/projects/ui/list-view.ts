@@ -7,23 +7,11 @@ import type {
   ProjectStatus,
 } from "../../db/repositories/projects-repository.ts";
 import type { ProjectService } from "../service.ts";
+import type { JobStatus } from "../../jobs/job-status.ts";
 import { webAddress } from "../../ui/web-address.ts";
 
-export { webAddress };
-
-/** The status of a run, as the jobs module names it (src/jobs). */
-export const RUN_STATUSES = [
-  "queued",
-  "running",
-  "succeeded",
-  "failed",
-  "superseded",
-  "cancelled",
-] as const;
-export type RunStatus = (typeof RUN_STATUSES)[number];
-
 export type LastRun = {
-  status: RunStatus;
+  status: JobStatus;
   /** ISO 8601 time the run last changed (finished, or started when it is still going). */
   at: string;
 };

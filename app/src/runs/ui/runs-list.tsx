@@ -16,10 +16,8 @@ import {
   type RunsApi,
   type RunsFilter,
 } from "./api.ts";
+import { describePollFailure, POLL_FAILED_TEXT } from "./poll-messages.ts";
 import { RunStatusBadge } from "./status-badge.tsx";
-
-export const POLL_FAILED_TEXT =
-  "Updating failed. The list shows the last data it got; it keeps trying.";
 
 function TimeLine({ run }: { run: RunRowView }) {
   if (run.startedAt === null)
@@ -98,7 +96,7 @@ export function RunsList({
   filter: RunsFilter;
   api?: RunsApi;
 }) {
-  const { data, failed } = useLiveSnapshot({
+  const { data, failed, failureCode, stopped } = useLiveSnapshot({
     initial,
     fetchLatest: () => api.list(filter),
     isSettled: (snapshot) =>
@@ -112,7 +110,7 @@ export function RunsList({
     <>
       {failed ? (
         <p role="status" className="alert alert-warning run-notice">
-          {POLL_FAILED_TEXT}
+          {describePollFailure(failureCode, stopped, POLL_FAILED_TEXT)}
         </p>
       ) : null}
       {data.runs.length === 0 ? (

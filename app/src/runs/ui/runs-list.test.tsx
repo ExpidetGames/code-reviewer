@@ -6,7 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RequestResult } from "../../ui/json-request.ts";
 import type { RunRowView, RunsSnapshot } from "../run-view.ts";
 import type { RunsApi } from "./api.ts";
-import { POLL_FAILED_TEXT, RunsList } from "./runs-list.tsx";
+import { POLL_FAILED_TEXT } from "./poll-messages.ts";
+import { RunsList } from "./runs-list.tsx";
 
 beforeEach(() => {
   vi.useFakeTimers();

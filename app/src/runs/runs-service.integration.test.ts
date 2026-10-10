@@ -1,6 +1,8 @@
 // Pins down the runs read side against a real SQLite file: the jobs are made through the job queue
 // (enqueue, claim, complete) and read back as the pages see them.
 import { describe, expect, it } from "vitest";
+import { sql } from "kysely";
+import { sha } from "../test-support/jobs.ts";
 import { createRunsFixture } from "../test-support/runs.ts";
 import { createLastRunSource, parseRunsFilter } from "./runs-service.ts";
 
@@ -244,6 +246,16 @@ describe("the filter of a request", () => {
       ok: false,
     });
     expect(parseRunsFilter({ repositoryId: "   " })).toEqual({ ok: false });
+    expect(parseRunsFilter({ status: "  " })).toEqual({ ok: false });
+  });
+
+  it("trims white space around a value instead of silently matching nothing", () => {
+    expect(
+      parseRunsFilter({ repositoryId: " repo-1 ", status: " failed " }),
+    ).toEqual({
+      ok: true,
+      filter: { repositoryId: "repo-1", status: "failed" },
+    });
   });
 });
 
@@ -290,5 +302,91 @@ describe("the last run of each repository", () => {
       status: "queued",
       at: job.createdAt,
     });
+  });
+});
+
+describe("the read side with many jobs", () => {
+  async function withManyJobs(count: number) {
+    const f = await createRunsFixture();
+    for (let n = 1; n <= count; n += 1) {
+      f.clock.advance(1000);
+      await f.queue.enqueue({
+        repositoryId: n % 5 === 0 ? f.otherRepositoryId : f.repositoryId,
+        prNumber: n,
+        prUrl: `https://github.com/acme/widgets/pull/${n}`,
+        headSha: sha("a"),
+        command: "review",
+        triggerKind: "manual",
+        actorLogin: "octocat",
+      });
+    }
+    return f;
+  }
+
+  it("finds the newest job of each repository with one index lookup each, however many jobs there are", async () => {
+    const f = await withManyJobs(5000);
+    const source = createLastRunSource({ runs: f.runsRepository });
+    const ids = [f.repositoryId, f.otherRepositoryId];
+
+    const started = performance.now();
+    const lastRuns = await source(ids);
+    const took = performance.now() - started;
+
+    expect(lastRuns.get(f.repositoryId)).toMatchObject({ status: "queued" });
+    expect(lastRuns.size).toBe(2);
+    // The scan of every job of a repository per job row took many seconds here; a lookup takes
+    // milliseconds. The bound is generous so a loaded machine does not make this flaky.
+    expect(took).toBeLessThan(1000);
+
+    const plan = await sql<{ detail: string }>`
+      explain query plan
+      select id from jobs where repository_id = ${f.repositoryId}
+      order by created_at desc, id desc limit 1`.execute(f.db);
+    expect(plan.rows.map((row) => row.detail).join("\n")).toContain(
+      "USING COVERING INDEX jobs_repository_recent",
+    );
+    expect(plan.rows.map((row) => row.detail).join("\n")).not.toContain(
+      "TEMP B-TREE",
+    );
+  }, 120_000);
+
+  it("reads the newest runs of one repository without sorting them all", async () => {
+    const f = await withManyJobs(1500);
+
+    const started = performance.now();
+    const { runs, hasMore } = await f.runsRepository.list({
+      repositoryId: f.repositoryId,
+      limit: 100,
+    });
+    const took = performance.now() - started;
+
+    expect(runs).toHaveLength(100);
+    expect(hasMore).toBe(true);
+    expect(took).toBeLessThan(1000);
+  }, 120_000);
+
+  it("reads the list without the stored result, the arguments or anything of the lease", async () => {
+    const f = await createRunsFixture();
+    await f.finished({
+      ok: true,
+      result: { ok: true, logTail: "a long log", commentUrl: null },
+    });
+
+    const { runs } = await f.runsRepository.list({ limit: 10 });
+
+    expect(Object.keys(runs[0]?.job ?? {}).sort()).toEqual([
+      "actorLogin",
+      "claimedAt",
+      "command",
+      "createdAt",
+      "errorCode",
+      "finishedAt",
+      "id",
+      "prNumber",
+      "prUrl",
+      "repositoryId",
+      "status",
+      "triggerKind",
+    ]);
   });
 });

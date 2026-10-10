@@ -11,10 +11,12 @@ import { formatDuration } from "../run-duration.ts";
 import { isSettled, RUN_STATUS_PRESENTATION } from "../run-status.ts";
 import type { RunDetailSnapshot, RunDetailView } from "../run-view.ts";
 import { browserRunsApi, RUNS_POLL, type RunsApi } from "./api.ts";
+import {
+  describePollFailure,
+  DETAIL_POLL_FAILED_TEXT,
+} from "./poll-messages.ts";
 import { RunStatusBadge } from "./status-badge.tsx";
 
-export const DETAIL_POLL_FAILED_TEXT =
-  "Updating failed. This page shows the last data it got; it keeps trying.";
 export const NO_LOG_TEXT = "No log available.";
 export const LOG_SHORTENED_TEXT =
   "The log was shortened: only the end of it is shown.";
@@ -84,7 +86,7 @@ export function RunDetail({
   initial: RunDetailSnapshot;
   api?: RunsApi;
 }) {
-  const { data, failed } = useLiveSnapshot({
+  const { data, failed, failureCode, stopped } = useLiveSnapshot({
     initial,
     fetchLatest: () => api.detail(initial.run.id),
     isSettled: (snapshot) => isSettled(snapshot.run.status),
@@ -97,7 +99,7 @@ export function RunDetail({
     <div className="run-detail">
       {failed ? (
         <p role="status" className="alert alert-warning">
-          {DETAIL_POLL_FAILED_TEXT}
+          {describePollFailure(failureCode, stopped, DETAIL_POLL_FAILED_TEXT)}
         </p>
       ) : null}
       <section aria-labelledby="run-summary">

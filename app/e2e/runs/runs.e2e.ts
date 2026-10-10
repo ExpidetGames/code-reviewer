@@ -270,6 +270,19 @@ test.describe("the runs pages", () => {
       .first()
       .click();
     await expect(runs.getByRole("listitem")).toHaveCount(3);
+    // The selects follow the reset, they do not keep the old choice.
+    await expect(page.getByLabel("Project")).toHaveValue("");
+    await expect(page.getByLabel("Status")).toHaveValue("");
+
+    // Back returns to the page before the reset, selects and list together.
+    await page.goBack();
+    await expect(page.getByLabel("Status")).toHaveValue("running");
+    await expect(
+      page.getByRole("heading", { name: "No runs for this filter" }),
+    ).toBeVisible();
+    await page.goForward();
+    await expect(page.getByLabel("Status")).toHaveValue("");
+    await expect(runs.getByRole("listitem")).toHaveCount(3);
 
     await runs.getByRole("link", { name: `${GADGETS.fullName} #21` }).click();
     await expect(

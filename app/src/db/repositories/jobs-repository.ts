@@ -120,8 +120,14 @@ export type JobsRepository = {
   list(filter?: JobListFilter): Promise<Job[]>;
 };
 
-/** A stored row as the rest of the app sees it; also used by the read side (`runs-repository.ts`). */
-export function toJob(row: JobsTable): Job {
+/**
+ * The three columns that hold a fixed vocabulary, decoded; a stored value this version does not know
+ * is a bug or a database from the future, and fails loudly. Also used by the read side
+ * (`runs-repository.ts`).
+ */
+export function decodeJobVocabulary(
+  row: Pick<JobsTable, "id" | "status" | "command" | "trigger_kind">,
+) {
   if (!isJobStatus(row.status))
     throw new Error(
       `Stored job ${row.id} has the unknown status "${row.status}".`,
@@ -138,6 +144,12 @@ export function toJob(row: JobsTable): Job {
     throw new Error(
       `Stored job ${row.id} has the unknown trigger kind "${row.trigger_kind}".`,
     );
+  return { status: row.status, command, triggerKind };
+}
+
+/** A stored row as the rest of the app sees it; also used by the read side (`runs-repository.ts`). */
+export function toJob(row: JobsTable): Job {
+  const { status, command, triggerKind } = decodeJobVocabulary(row);
   return {
     id: row.id,
     repositoryId: row.repository_id,
@@ -149,7 +161,7 @@ export function toJob(row: JobsTable): Job {
     triggerKind,
     actorLogin: row.actor_login,
     deliveryId: row.delivery_id,
-    status: row.status,
+    status,
     runAfter: row.run_after,
     attempts: row.attempts,
     runnerId: row.runner_id,

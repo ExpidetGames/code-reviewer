@@ -26,6 +26,13 @@ const broken: RequestResult<Snapshot> = {
   issues: [],
 };
 
+const refused = (code: string): RequestResult<Snapshot> => ({
+  ok: false,
+  status: 401,
+  code,
+  issues: [],
+});
+
 function Probe({
   initial,
   fetchLatest,
@@ -35,7 +42,7 @@ function Probe({
   fetchLatest: () => Promise<RequestResult<Snapshot>>;
   idleIntervalMs?: number | null;
 }) {
-  const { data, failed } = useLiveSnapshot({
+  const { data, failed, failureCode, stopped } = useLiveSnapshot({
     initial,
     fetchLatest,
     isSettled: (value) => value.state === "done",
@@ -46,6 +53,7 @@ function Probe({
     <p>
       {data.state}:{data.n}
       {failed ? " (update failed)" : ""}
+      {stopped ? ` (stopped: ${failureCode})` : ""}
     </p>
   );
 }
@@ -198,5 +206,72 @@ describe("polling for fresh data", () => {
     await pass(0);
     expect(fetchLatest).toHaveBeenCalledTimes(2);
     expect(container.textContent).toBe("running:1");
+  });
+
+  it("stops for good when the failure cannot get better by asking again", async () => {
+    for (const code of ["UNAUTHENTICATED", "ACCESS_DENIED", "RUN_NOT_FOUND"]) {
+      const fetchLatest = vi.fn(async () => refused(code));
+      const { container, unmount } = render(
+        <Probe
+          initial={{ state: "running", n: 0 }}
+          fetchLatest={fetchLatest}
+        />,
+      );
+
+      await pass(3000);
+      expect(container.textContent).toContain(`(stopped: ${code})`);
+      await pass(600_000);
+
+      expect(fetchLatest).toHaveBeenCalledTimes(1);
+      unmount();
+    }
+  });
+
+  it("waits twice as long after each further failure in a row, up to a minute, and starts over after an answer", async () => {
+    const answers = [broken, broken, broken, ok({ state: "running", n: 4 })];
+    const fetchLatest = vi.fn(async () => answers.shift() ?? broken);
+    render(
+      <Probe initial={{ state: "running", n: 0 }} fetchLatest={fetchLatest} />,
+    );
+
+    await pass(3000); // first failure: the next try is on schedule
+    expect(fetchLatest).toHaveBeenCalledTimes(1);
+    await pass(2999);
+    expect(fetchLatest).toHaveBeenCalledTimes(1);
+    await pass(1); // 3000 later
+    expect(fetchLatest).toHaveBeenCalledTimes(2);
+    await pass(5999); // second failure: twice as long
+    expect(fetchLatest).toHaveBeenCalledTimes(2);
+    await pass(1);
+    expect(fetchLatest).toHaveBeenCalledTimes(3);
+    await pass(11_999); // third failure: four times
+    expect(fetchLatest).toHaveBeenCalledTimes(3);
+    await pass(1);
+    expect(fetchLatest).toHaveBeenCalledTimes(4);
+
+    // An answer ends the backoff.
+    await pass(3000);
+    expect(fetchLatest).toHaveBeenCalledTimes(5);
+
+    answers.push(broken, broken, broken, broken, broken, broken);
+    for (let i = 0; i < 6; i += 1) await pass(60_000);
+    const calls = fetchLatest.mock.calls.length;
+    await pass(60_000);
+    expect(fetchLatest.mock.calls.length - calls).toBe(1);
+  });
+
+  it("drops the failure when the server renders new data", async () => {
+    const fetchLatest = vi.fn(async () => refused("UNAUTHENTICATED"));
+    const { container, rerender } = render(
+      <Probe initial={{ state: "running", n: 0 }} fetchLatest={fetchLatest} />,
+    );
+    await pass(3000);
+    expect(container.textContent).toContain("stopped");
+
+    rerender(
+      <Probe initial={{ state: "done", n: 1 }} fetchLatest={fetchLatest} />,
+    );
+
+    expect(container.textContent).toBe("done:1");
   });
 });

@@ -4,7 +4,7 @@ import {
   cleanLog,
   MAX_LOG_CHARS,
   readStoredResult,
-  safeCommentUrl,
+  safeGithubUrl,
   toRunDetailView,
   toRunRowView,
 } from "./run-view.ts";
@@ -41,11 +41,11 @@ function job(overrides: Partial<Job> = {}): Job {
   };
 }
 
-describe("the comment link of a run", () => {
+describe("the links of a run", () => {
   // CR-35-T14
   it("accepts an https address on github.com and nothing else", () => {
     expect(
-      safeCommentUrl("https://github.com/acme/widgets/pull/7#issuecomment-1"),
+      safeGithubUrl("https://github.com/acme/widgets/pull/7#issuecomment-1"),
     ).toBe("https://github.com/acme/widgets/pull/7#issuecomment-1");
 
     for (const bad of [
@@ -54,6 +54,11 @@ describe("the comment link of a run", () => {
       "http://github.com/acme/widgets/pull/7",
       "https://evil.example/acme/widgets/pull/7",
       "https://github.com.evil.example/acme",
+      "https://github.com.evil.com/acme/widgets/pull/7",
+      "https://evilgithub.com/acme/widgets/pull/7",
+      "https://notgithub.com/acme",
+      "https://gist.github.com/acme",
+      "https://www.github.com/acme",
       "https://evil.example/https://github.com/",
       "https://user:pw@github.com/acme",
       "https://github.com:8443/acme",
@@ -65,7 +70,7 @@ describe("the comment link of a run", () => {
       undefined,
       42,
     ]) {
-      expect(safeCommentUrl(bad)).toBeNull();
+      expect(safeGithubUrl(bad)).toBeNull();
     }
   });
 });
@@ -179,10 +184,21 @@ describe("the row of a run", () => {
     ).toBeNull();
   });
 
-  it("leaves out a pull request address that is no web address", () => {
+  it("links the pull request only when it is a github.com address, like the comment link", () => {
+    for (const bad of [
+      "javascript:alert(1)",
+      "https://evil.example/acme/widgets/pull/7",
+      "https://evilgithub.com/acme/widgets/pull/7",
+      "http://github.com/acme/widgets/pull/7",
+    ])
+      expect(toRunRowView(job({ prUrl: bad }), "p", NOW).prUrl).toBeNull();
     expect(
-      toRunRowView(job({ prUrl: "javascript:alert(1)" }), "p", NOW).prUrl,
-    ).toBeNull();
+      toRunRowView(
+        job({ prUrl: "https://github.com/acme/widgets/pull/7" }),
+        "p",
+        NOW,
+      ).prUrl,
+    ).toBe("https://github.com/acme/widgets/pull/7");
   });
 });
 

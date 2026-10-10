@@ -6,23 +6,8 @@ import { formatUtc } from "../../ui/format-time.ts";
 import { NoRepositories } from "./no-repositories.tsx";
 import { ProjectToggle } from "./project-toggle.tsx";
 import type { ProjectsApi } from "./api.ts";
-import type {
-  LastRun,
-  ProjectListView,
-  ProjectRowView,
-  RunStatus,
-} from "./list-view.ts";
-
-export { formatUtc };
-
-const RUN_COPY: Record<RunStatus, string> = {
-  queued: "Queued",
-  running: "Running",
-  succeeded: "Succeeded",
-  failed: "Failed",
-  superseded: "Replaced by a newer run",
-  cancelled: "Cancelled",
-};
+import { RUN_STATUS_PRESENTATION } from "../../runs/run-status.ts";
+import type { LastRun, ProjectListView, ProjectRowView } from "./list-view.ts";
 
 const STATE_COPY: Record<ProjectRowView["status"], string> = {
   active: "Active",
@@ -40,7 +25,7 @@ function LastRunStatus({
   if (run === null) return <span className="muted">No run yet</span>;
   return (
     <span>
-      {RUN_COPY[run.status]}{" "}
+      {RUN_STATUS_PRESENTATION[run.status].label}{" "}
       <time dateTime={run.at} className="muted">
         {formatUtc(run.at)}
       </time>{" "}

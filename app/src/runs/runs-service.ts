@@ -29,28 +29,24 @@ const MAX_ID_LENGTH = 128;
 const RUN_ID =
   /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
-/** An empty value means "no filter"; an unknown status or an odd repository id is invalid. */
+/**
+ * An empty value means "no filter". Surrounding white space is not part of a value; a value that is
+ * nothing but white space, an unknown status and an overlong repository id are invalid.
+ */
 export function parseRunsFilter(input: RunsFilterInput): ParsedRunsFilter {
-  const { repositoryId, status } = input;
-  if (
-    repositoryId !== undefined &&
-    repositoryId !== "" &&
-    (repositoryId.length > MAX_ID_LENGTH || repositoryId.trim() === "")
-  )
-    return { ok: false };
-  if (status !== undefined && status !== "" && !isRunStatus(status))
-    return { ok: false };
-  return {
-    ok: true,
-    filter: {
-      ...(repositoryId === undefined || repositoryId === ""
-        ? {}
-        : { repositoryId }),
-      ...(status === undefined || status === "" || !isRunStatus(status)
-        ? {}
-        : { status }),
-    },
-  };
+  const filter: RunsFilter = {};
+  if (input.repositoryId !== undefined && input.repositoryId !== "") {
+    const repositoryId = input.repositoryId.trim();
+    if (repositoryId === "" || repositoryId.length > MAX_ID_LENGTH)
+      return { ok: false };
+    filter.repositoryId = repositoryId;
+  }
+  if (input.status !== undefined && input.status !== "") {
+    const status = input.status.trim();
+    if (!isRunStatus(status)) return { ok: false };
+    filter.status = status;
+  }
+  return { ok: true, filter };
 }
 
 export type RunsService = {
