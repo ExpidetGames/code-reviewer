@@ -92,7 +92,11 @@ function assembleHarness(
   });
 
   // The same access rule the server uses, on the same database and the same fake GitHub.
-  const policy = createRuntimeAccessPolicy({ auth, config });
+  const policy = createRuntimeAccessPolicy({
+    auth,
+    config,
+    orgCheckTimeoutMs: options.githubRequestTimeoutMs,
+  });
 
   /** Sends a request to the auth handler the way the route handler does. */
   function request(

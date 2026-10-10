@@ -24,6 +24,8 @@ export type AccessRuntimeOptions = {
   /** Only tests replace the global `fetch`. */
   fetchImpl?: typeof fetch;
   now?: () => Date;
+  /** How long the check may take. Only tests change the default. */
+  orgCheckTimeoutMs?: number;
 };
 
 export function createRuntimeAccessPolicy({
@@ -31,6 +33,7 @@ export function createRuntimeAccessPolicy({
   config,
   fetchImpl,
   now,
+  orgCheckTimeoutMs = ORG_CHECK_TIMEOUT_MS,
 }: AccessRuntimeOptions): AccessPolicy {
   const org = config.access.org;
   const orgDependencies: OrgAccessDependencies | undefined =
@@ -56,7 +59,7 @@ export function createRuntimeAccessPolicy({
               apiBaseUrl: config.github.apiBaseUrl,
               org,
               accessToken,
-              timeoutMs: ORG_CHECK_TIMEOUT_MS,
+              timeoutMs: orgCheckTimeoutMs,
               fetchImpl,
             });
           },
