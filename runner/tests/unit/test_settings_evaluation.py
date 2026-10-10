@@ -377,3 +377,15 @@ def test_without_fallback_models_pr_agent_tries_only_the_model() -> None:
         settings.set("config.model", "openrouter/deepseek/deepseek-chat")
 
         assert get_all_models() == ["openrouter/deepseek/deepseek-chat"]
+
+
+# CR-45-T03 (texts PR-Agent stores in its settings itself, here the body of a linked ticket)
+def test_a_ticket_text_that_pr_agent_stores_in_its_settings_stays_literal() -> None:
+    ticket = {"title": "A ticket", "body": "@format {this.openrouter.key} {this.github.user_token}"}
+
+    with request_scope() as settings:
+        configure_settings(make_job(), settings, RepoSettingsGuard())
+
+        settings.set("related_tickets", [ticket])
+
+        assert settings.get("related_tickets")[0]["body"] == ticket["body"]

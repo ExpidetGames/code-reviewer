@@ -92,6 +92,7 @@ How a job becomes PR-Agent configuration (`pr_agent_config.py`, `pr_agent_runtim
   PR-Agent merge. As a safety net the guard turns any value still waiting for evaluation back into
   its text after each merge. A `this.<section>.<key>` reference would still resolve a typed secret
   if evaluation were on, so the switch is what keeps `@jinja {{ this.github.user_token }}` literal.
+  It also covers texts PR-Agent stores in its settings itself, such as the body of a linked ticket.
   Tests prove this with PR-Agent's real loaders and `_apply_repo_settings_file`, and by rendering
   PR-Agent's review prompt. The Dynaconf version they were written against is pinned in
   `tests/unit/test_dependency_pin.py`.
