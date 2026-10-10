@@ -193,14 +193,16 @@ Planned targets: `test-engine`, `test-stack-up`, `test-stack-down`, `test:docker
 
 `.github/workflows/ci.yml` (workflow "CI") runs on pull requests into `development`, `main` and `CR-*`
 epic branches, and on pushes to `development` and `main`. A new push to a pull request cancels its
-superseded run; runs for pushes are never cancelled. No repository secrets in test jobs, the token is
+superseded run. A run for a push is never cancelled or replaced: the concurrency group of a push
+contains the commit hash, so every pushed commit gets its own run. No repository secrets in test jobs, the token is
 limited to `contents: read` (the `changes` job also reads pull requests for the path filter), every job has a
-timeout, third-party actions are pinned to a major version or a commit hash. The structure of the
+timeout, GitHub's own actions are pinned to a major version, every other action and the actionlint Docker
+image to a commit hash or image digest, and the uv version is pinned. The structure of the
 file is pinned by `app/src/ci/ci-workflow.test.ts`.
 
 | Job | Runs | What |
 |---|---|---|
-| `changes` | pull requests | Path filter: `app` (anything except `runner/**` and Markdown), `runner` (anything except `app/**` and Markdown), `workflows` (`.github/**`). |
+| `changes` | pull requests | Path filter: `app` (anything except `runner/**`, top-level Markdown and `fakes/**` Markdown; Markdown inside `app/` stays because Prettier checks it), `runner` (anything except `app/**` and Markdown), `workflows` (`.github/**`). |
 | `app-fast` | app changed | `pnpm format:check`, `lint`, `typecheck`, `test` (unit), `test:int` (host), `build` with placeholder env. |
 | `runner-fast` | runner changed | `ruff check`, `ruff format --check`, `pyright`, `pytest -m unit`, `pytest -m "integration or contract"`. |
 | `e2e` ("E2E: browser journeys") | app changed | `playwright install --with-deps chromium`, then the journeys against the production build: `@smoke` only on pull requests into `development` and `CR-*`, all (without `@flaky`) on pull requests into `main` and on pushes. |

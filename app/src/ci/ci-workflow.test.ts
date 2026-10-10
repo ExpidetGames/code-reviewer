@@ -48,6 +48,17 @@ function runCommands(job: Job): string[] {
   return steps(job).flatMap((step) => (step.run ? [step.run] : []));
 }
 
+// Every command line of every run step, trimmed, so a test can match a whole command instead of
+// a substring ("pnpm test" must not be satisfied by "pnpm test:int").
+function commandLines(job: Job): string[] {
+  return runCommands(job).flatMap((command) =>
+    command
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line !== ""),
+  );
+}
+
 function allRunCommands(): string[] {
   return jobs.flatMap(([, job]) => runCommands(job));
 }
@@ -77,35 +88,46 @@ describe("CI workflow triggers and jobs", () => {
 
   // CR-16-T01
   it("checks formatting, lint, types, unit tests and the production build of the app", () => {
-    const commands = runCommands(jobNamed("app-fast")).join("\n");
+    const lines = commandLines(jobNamed("app-fast"));
 
-    expect(commands).toContain("pnpm format:check");
-    expect(commands).toContain("pnpm lint");
-    expect(commands).toContain("pnpm typecheck");
-    expect(commands).toContain("pnpm test");
-    expect(commands).toContain("pnpm build");
+    for (const command of [
+      "pnpm format:check",
+      "pnpm lint",
+      "pnpm typecheck",
+      "pnpm test",
+      "pnpm build",
+    ]) {
+      expect(lines, command).toContain(command);
+    }
   });
 
   // CR-16-T01
   it("checks lint, formatting, types and the unit, integration and contract tests of the runner", () => {
-    const commands = runCommands(jobNamed("runner-fast")).join("\n");
+    const lines = commandLines(jobNamed("runner-fast"));
 
-    expect(commands).toContain("uv run ruff check .");
-    expect(commands).toContain("uv run ruff format --check .");
-    expect(commands).toContain("uv run pyright");
-    expect(commands).toContain("uv run pytest -m unit");
-    expect(commands).toContain('uv run pytest -m "integration or contract"');
+    for (const command of [
+      "uv run ruff check .",
+      "uv run ruff format --check .",
+      "uv run pyright",
+      "uv run pytest -m unit",
+      'uv run pytest -m "integration or contract"',
+    ]) {
+      expect(lines, command).toContain(command);
+    }
   });
 
+  // CR-16-T01
   it("runs the browser smoke tests against the production build with the system libraries installed", () => {
-    const commands = runCommands(jobNamed("e2e")).join("\n");
+    const lines = commandLines(jobNamed("e2e"));
 
-    expect(commands).toContain(
+    expect(lines).toContain(
       "pnpm exec playwright install --with-deps chromium",
     );
-    expect(commands).toContain("pnpm test:e2e");
+    expect(lines).toContain("pnpm test:e2e --grep @smoke --grep-invert @flaky");
+    expect(lines).toContain("pnpm test:e2e --grep-invert @flaky");
   });
 
+  // CR-16-T01
   it("lints the workflow files with actionlint", () => {
     const commands = runCommands(jobNamed("actionlint")).join("\n");
 
@@ -130,16 +152,100 @@ describe("CI workflow aggregate check", () => {
     expect(aggregate.if).toBe("${{ always() }}");
   });
 
-  // CR-16-T09
-  it("fails the aggregate job on failed or cancelled jobs and accepts skipped ones", () => {
-    const aggregate = jobNamed("ci-passed");
-    const failStep = steps(aggregate).find((step) =>
+  // CR-16-T04
+  it("fails the aggregate job when any job failed or was cancelled", () => {
+    const failStep = steps(jobNamed("ci-passed")).find((step) =>
       step.run?.includes("exit 1"),
     );
 
     expect(failStep?.if).toContain("contains(needs.*.result, 'failure')");
     expect(failStep?.if).toContain("contains(needs.*.result, 'cancelled')");
+  });
+
+  // CR-16-T09
+  it("does not fail the aggregate job on skipped jobs", () => {
+    const failStep = steps(jobNamed("ci-passed")).find((step) =>
+      step.run?.includes("exit 1"),
+    );
+
     expect(failStep?.if).not.toContain("skipped");
+  });
+
+  // CR-16-T04
+  it("runs the app, runner, browser and workflow jobs independently so one red job stops no other", () => {
+    for (const id of ["app-fast", "runner-fast", "e2e", "actionlint"]) {
+      expect(jobNamed(id).needs, id).toBe("changes");
+    }
+  });
+});
+
+describe("CI workflow path filter", () => {
+  const filterStep = steps(jobNamed("changes")).find(
+    (step) => step.id === "filter",
+  );
+  const filters = parse(String(filterStep?.with?.filters)) as Record<
+    string,
+    string[]
+  >;
+
+  // dorny/paths-filter with predicate-quantifier "every": a changed file counts for a filter when
+  // it matches every pattern, so "**" plus negations reads "anything except ...". Globs are
+  // translated by hand because the action matches dotfiles and node:path does not.
+  function matches(pattern: string, file: string): boolean {
+    const negated = pattern.startsWith("!");
+    const source = (negated ? pattern.slice(1) : pattern)
+      .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+      .replace(/\*\*\//g, "\u0000")
+      .replace(/\*\*/g, "\u0001")
+      .replace(/\*/g, "[^/]*")
+      .replace(/\u0000/g, "(?:.*/)?")
+      .replace(/\u0001/g, ".*");
+    return new RegExp(`^${source}$`).test(file) !== negated;
+  }
+
+  function touched(filter: string, file: string): boolean {
+    return (filters[filter] ?? []).every((pattern) => matches(pattern, file));
+  }
+
+  // CR-16-T09
+  it("skips both sides for a change to a Markdown file at the top level", () => {
+    expect(touched("app", "README.md")).toBe(false);
+    expect(touched("runner", "README.md")).toBe(false);
+  });
+
+  // CR-16-T09
+  it("keeps Markdown inside app in the app filter because Prettier checks it", () => {
+    expect(touched("app", "app/AGENTS.md")).toBe(true);
+    expect(touched("runner", "app/AGENTS.md")).toBe(false);
+  });
+
+  // CR-16-T09
+  it("sends a runner-only change to the runner side only", () => {
+    expect(touched("runner", "runner/src/code_reviewer_runner/cli.py")).toBe(
+      true,
+    );
+    expect(touched("app", "runner/src/code_reviewer_runner/cli.py")).toBe(
+      false,
+    );
+    expect(touched("runner", "runner/docs/notes.md")).toBe(false);
+  });
+
+  // CR-16-T09
+  it("sends a change to a shared file to both sides", () => {
+    for (const file of [
+      ".nvmrc",
+      "Makefile",
+      ".github/workflows/ci.yml",
+      "fakes/github/server.ts",
+    ]) {
+      expect(touched("app", file), `app ${file}`).toBe(true);
+      expect(touched("runner", file), `runner ${file}`).toBe(true);
+    }
+  });
+
+  // CR-16-T09
+  it("lints the workflow files when anything under .github changes", () => {
+    expect(filters.workflows).toEqual([".github/**"]);
   });
 });
 
@@ -199,6 +305,30 @@ describe("CI workflow security", () => {
       expect(action).not.toMatch(/@(main|master|latest)\b/);
     }
   });
+
+  // CR-16-T06
+  it("pins every action that is not maintained by GitHub to a commit hash", () => {
+    const thirdParty = allUses().filter(
+      (action) => !action.startsWith("actions/"),
+    );
+
+    expect(thirdParty.length).toBeGreaterThan(0);
+    for (const action of thirdParty) {
+      expect(action, action).toMatch(/@[0-9a-f]{40}$/);
+    }
+  });
+
+  // CR-16-T06
+  it("pins every Docker image started by a run step to an image digest", () => {
+    const dockerLines = allRunCommands()
+      .flatMap((command) => command.split("\n"))
+      .filter((line) => /\bdocker\s+(run|pull|create)\b/.test(line));
+
+    expect(dockerLines.length).toBeGreaterThan(0);
+    for (const line of dockerLines) {
+      expect(line, line).toMatch(/\S+@sha256:[0-9a-f]{64}/);
+    }
+  });
 });
 
 describe("CI workflow installation and runtimes", () => {
@@ -234,9 +364,15 @@ describe("CI workflow installation and runtimes", () => {
       "runner",
     );
     expect(readFileSync(`${repoRoot}.nvmrc`, "utf8").trim()).toMatch(/^\d+/);
-    expect(
-      readFileSync(`${repoRoot}runner/.python-version`, "utf8").trim(),
-    ).toMatch(/^3\.\d+/);
+  });
+
+  // CR-16-T07
+  it("pins the uv version used by the runner job", () => {
+    const setupUv = steps(jobNamed("runner-fast")).find((step) =>
+      step.uses?.startsWith("astral-sh/setup-uv@"),
+    );
+
+    expect(setupUv?.with?.version).toMatch(/^\d+\.\d+\.\d+$/);
   });
 
   // CR-16-T07
@@ -250,11 +386,18 @@ describe("CI workflow installation and runtimes", () => {
 
 describe("CI workflow concurrency", () => {
   // CR-16-T08
-  it("cancels a superseded run for a pull request but never a run for a push", () => {
+  it("cancels a superseded run for a pull request", () => {
     const cancel = workflow.concurrency?.["cancel-in-progress"];
 
     expect(workflow.concurrency?.group).toContain("github.ref");
-    expect(typeof cancel).toBe("string");
     expect(cancel).toBe("${{ github.event_name == 'pull_request' }}");
+  });
+
+  // CR-16-T08
+  it("gives every pushed commit its own concurrency group so no push run is cancelled or replaced", () => {
+    const group = String(workflow.concurrency?.group);
+
+    expect(group).toContain("github.event_name == 'push' && github.sha");
+    expect(group).toContain("|| github.ref");
   });
 });
