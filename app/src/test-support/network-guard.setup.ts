@@ -17,7 +17,8 @@ const allowedExtraHosts = new Set(
 export function isAllowedHost(host: string): boolean {
   const normalized = host.toLowerCase().replace(/^\[|\]$/g, "");
   if (allowedExtraHosts.has(normalized)) return true;
-  if (normalized === "localhost" || normalized.endsWith(".localhost")) return true;
+  if (normalized === "localhost" || normalized.endsWith(".localhost"))
+    return true;
   if (normalized === "::1" || normalized === "::ffff:127.0.0.1") return true;
   return /^127(\.\d{1,3}){3}$/.test(normalized);
 }
@@ -27,14 +28,17 @@ type ConnectTarget = { host: string } | { socketPath: string };
 // net.Socket#connect accepts (options), (path) and (port[, host]); with no host it means
 // localhost. Node's own net.connect passes the already normalized form [options, callback].
 function resolveTarget(args: unknown[]): ConnectTarget {
-  const [first, second] = Array.isArray(args[0]) ? (args[0] as unknown[]) : args;
+  const [first, second] = Array.isArray(args[0])
+    ? (args[0] as unknown[])
+    : args;
   if (first !== null && typeof first === "object") {
     const options = first as { host?: string; path?: string };
     if (options.path) return { socketPath: options.path };
     return { host: options.host ?? "localhost" };
   }
   // A numeric string is a port (Node accepts it); only other strings are unix socket paths.
-  if (typeof first === "string" && Number.isNaN(Number(first))) return { socketPath: first };
+  if (typeof first === "string" && Number.isNaN(Number(first)))
+    return { socketPath: first };
   return { host: typeof second === "string" ? second : "localhost" };
 }
 
@@ -58,5 +62,8 @@ net.Socket.prototype.connect = function guardedConnect(
     return this;
   }
   // The overloads of connect cannot be forwarded with a plain spread in TypeScript.
-  return (originalConnect as (...forwarded: unknown[]) => net.Socket).apply(this, args);
+  return (originalConnect as (...forwarded: unknown[]) => net.Socket).apply(
+    this,
+    args,
+  );
 } as typeof net.Socket.prototype.connect;
