@@ -8,7 +8,6 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 import pytest
-
 from pr_agent.algo.utils import decode_user_text_args
 
 from code_reviewer_runner.job import Job, parse_job
@@ -118,7 +117,9 @@ def test_a_model_name_that_already_has_the_openrouter_prefix_is_not_prefixed_twi
 
 
 # CR-45-T06
-def test_without_fallback_models_the_list_is_emptied_so_no_model_of_another_vendor_is_tried() -> None:
+def test_without_fallback_models_the_list_is_emptied_so_no_model_of_another_vendor_is_tried() -> (
+    None
+):
     assert build_typed_settings(make_job())["config.fallback_models"] == []
 
 
@@ -175,7 +176,9 @@ def test_without_a_context_window_the_limits_of_pr_agent_stay_untouched() -> Non
 
 # CR-45-T01
 def test_the_options_of_the_job_are_never_put_into_the_environment() -> None:
-    job = make_job(env={"PR_REVIEWER__NUM_MAX_FINDINGS": "3", "PR_REVIEWER__EXTRA_INSTRUCTIONS": "x"})
+    job = make_job(
+        env={"PR_REVIEWER__NUM_MAX_FINDINGS": "3", "PR_REVIEWER__EXTRA_INSTRUCTIONS": "x"}
+    )
 
     env = environment(job)
 
@@ -258,7 +261,7 @@ def test_the_first_typed_setting_switches_dynaconf_evaluation_off() -> None:
     assert build_typed_settings(make_job())["AUTO_CAST_FOR_DYNACONF"] is False
 
 
-def test_a_repository_can_neither_pick_another_branch_for_its_settings_nor_add_directory_files() -> None:
+def test_a_repository_cannot_move_its_settings_to_another_branch_or_directory() -> None:
     settings = build_typed_settings(make_job())
 
     assert settings["config.config_branch"] == ""
@@ -266,7 +269,9 @@ def test_a_repository_can_neither_pick_another_branch_for_its_settings_nor_add_d
 
 
 # CR-45-T04
-@pytest.mark.parametrize("text", ["true", "123", "[1]", "2026-01-01", "1.5", "{a = 1}", "@format x"])
+@pytest.mark.parametrize(
+    "text", ["true", "123", "[1]", "2026-01-01", "1.5", "{a = 1}", "@format x"]
+)
 def test_an_option_that_holds_text_in_pr_agent_stays_the_text_that_was_sent(text: str) -> None:
     settings = build_option_settings(
         {"PR_REVIEWER__EXTRA_INSTRUCTIONS": text}, defaults({"pr_reviewer.extra_instructions": ""})
@@ -326,7 +331,9 @@ def test_a_value_the_type_of_the_option_does_not_allow_is_refused_by_option_name
     default: object, text: str
 ) -> None:
     with pytest.raises(InvalidOption) as caught:
-        build_option_settings({"PR_REVIEWER__OPTION": text}, defaults({"pr_reviewer.option": default}))
+        build_option_settings(
+            {"PR_REVIEWER__OPTION": text}, defaults({"pr_reviewer.option": default})
+        )
 
     assert caught.value.key == "PR_REVIEWER__OPTION"
     assert not text or text not in str(caught.value)

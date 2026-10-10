@@ -1,3 +1,4 @@
+# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false
 """Keeps a reviewed repository from taking over what the host decides.
 
 A repository may ship a `.pr_agent.toml`, which PR-Agent merges into its settings while it prepares
@@ -100,15 +101,15 @@ def neutralize_unevaluated_values(settings: Any) -> int:
     def walk(node: Any) -> None:
         nonlocal count
         if isinstance(node, dict):
-            slots: list[tuple[Any, Any]] = list(dict.items(node))  # pyright: ignore
-            for key, value in slots:
+            # dict.items and list.__iter__ read the raw values; a Dynaconf node evaluates on access.
+            for key, value in list(dict.items(node)):
                 if _waits_for_evaluation(value):
                     dict.__setitem__(node, key, _text_of(value))
                     count += 1
                 else:
                     walk(value)
         elif isinstance(node, list):
-            for index, value in enumerate(list.copy(node)):  # pyright: ignore
+            for index, value in enumerate(list(node)):
                 if _waits_for_evaluation(value):
                     list.__setitem__(node, index, _text_of(value))
                     count += 1

@@ -1,8 +1,9 @@
 """Helpers shared by the unit tests that run PR-Agent's real settings code (not a test file)."""
 
 import copy
+import importlib
 import json
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any
 
@@ -41,9 +42,13 @@ def current() -> Any:  # Any: PR-Agent ships no type information
 
 
 @contextmanager
-def request_scope() -> Iterator[Any]:
+def request_scope() -> Generator[Any]:
     """A request scope like the runner's: a copy of PR-Agent's own settings, loaded first."""
     global_settings = current()
     global_settings.get("CONFIG.MODEL")  # Dynaconf loads lazily; a copy of an unread one is empty
     with request_cycle_context({"settings": copy.deepcopy(global_settings)}):
         yield current()
+
+
+def pr_agent_module(name: str) -> Any:  # Any: PR-Agent ships no type information
+    return importlib.import_module(name)
