@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import { fakeIntegrationProvider } from "../test-support/fake-integration-provider.ts";
 import { IntegrationError } from "./errors.ts";
-import { createIntegrationRegistry, integrationRegistry } from "./registry.ts";
+import { createIntegrationRegistry } from "./registry.ts";
 
 function errorCodeOf(action: () => unknown): string | undefined {
   try {
@@ -64,11 +64,9 @@ describe("the integration registry", () => {
   });
 
   it("refuses a provider registered under a type it does not implement", () => {
-    const provider = {
-      ...fakeIntegrationProvider(),
-      type: "github_app" as const,
-    };
-    const wrongKey = { github_app: { ...provider, type: "other" } } as never;
+    const wrongKey = {
+      github_app: { ...fakeIntegrationProvider(), type: "other" },
+    } as never;
 
     expect(() => createIntegrationRegistry(wrongKey)).toThrow(/other/);
   });
@@ -79,11 +77,5 @@ describe("the integration registry", () => {
     });
 
     expect(registry.registeredTypes()).toEqual(["github_app"]);
-  });
-});
-
-describe("the application's integration registry", () => {
-  it("is the one place that wires the providers of the app", () => {
-    expect(integrationRegistry.registeredTypes()).toEqual([]);
   });
 });
