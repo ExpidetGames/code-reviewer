@@ -67,6 +67,7 @@ describe("starting the database", () => {
       "integrations",
       "kysely_migration",
       "kysely_migration_lock",
+      "repositories",
     ]);
     const { rows } = await sql<{
       name: string;
