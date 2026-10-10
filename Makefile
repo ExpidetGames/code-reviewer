@@ -9,7 +9,7 @@ RUNNER := uv --directory runner
 
 help:
 	@echo "make install           install app and runner dependencies from the lockfiles"
-	@echo "make lint              lint both parts (runner also checks formatting)"
+	@echo "make lint              lint and format check, both parts"
 	@echo "make typecheck         typecheck both parts"
 	@echo "make test-unit         unit tests of both parts"
 	@echo "make test-integration  integration tests that run on the host (app and runner)"
@@ -23,6 +23,7 @@ install:
 lint: lint-app lint-runner
 lint-app:
 	$(APP) lint
+	$(APP) format:check
 lint-runner:
 	$(RUNNER) run ruff check .
 	$(RUNNER) run ruff format --check .

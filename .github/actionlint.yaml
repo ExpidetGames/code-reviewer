@@ -1,0 +1,5 @@
+# Configuration for actionlint (see .github/workflows/ci.yml, job "actionlint").
+# Only GitHub-hosted runners are used, so there are no custom runner labels to declare. Add labels
+# here if a self-hosted runner is ever introduced, otherwise actionlint rejects them.
+self-hosted-runner:
+  labels: []

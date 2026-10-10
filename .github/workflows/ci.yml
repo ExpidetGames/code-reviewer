@@ -1,0 +1,205 @@
+name: CI
+
+# Pull requests into development, main and epic branches (CR-*), and pushes to development and
+# main. No repository secrets are used. The single required status check is "ci-passed" (see
+# TESTING.md, section CI): path-skipped jobs never block a merge because it accepts skipped jobs.
+on:
+  pull_request:
+    branches: [development, main, "CR-*"]
+  push:
+    branches: [development, main]
+
+permissions:
+  contents: read
+
+# A new push to a pull request cancels the superseded run. Runs for pushes are never cancelled or
+# replaced: their group contains the commit hash, so every pushed commit gets its own run (with a
+# shared group GitHub would drop all but the newest waiting run).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CI: "true"
+
+jobs:
+  # Decides which parts a pull request touches. The filter step only runs on pull requests (it
+  # reads the changed files through the API, so no checkout is needed). Pushes and pull requests
+  # into main run every job: the job conditions below handle that and ignore the filter outputs.
+  changes:
+    name: Detect changed paths
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      app: ${{ steps.filter.outputs.app }}
+      runner: ${{ steps.filter.outputs.runner }}
+      workflows: ${{ steps.filter.outputs.workflows }}
+    steps:
+      - name: Filter changed paths
+        id: filter
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          predicate-quantifier: every
+          filters: |
+            app:
+              - '**'
+              - '!runner/**'
+              - '!*.md'
+              - '!fakes/**/*.md'
+            runner:
+              - '**'
+              - '!app/**'
+              - '!**/*.md'
+            workflows:
+              - '.github/**'
+
+  app-fast:
+    name: "App: static, unit tests & build"
+    needs: changes
+    if: ${{ github.event_name == 'push' || github.base_ref == 'main' || needs.changes.outputs.app == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: app/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Check formatting
+        run: pnpm format:check
+      - name: Lint
+        run: pnpm lint
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Unit tests
+        run: pnpm test
+      - name: Integration tests on the host
+        run: pnpm test:int
+      - name: Build
+        # Placeholder environment for the production build. Required settings get a dummy value
+        # here when they are introduced (for example the database path); real values never belong
+        # in CI.
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+        run: pnpm build
+
+  runner-fast:
+    name: "Runner: static & tests"
+    needs: changes
+    if: ${{ github.event_name == 'push' || github.base_ref == 'main' || needs.changes.outputs.runner == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: runner
+    steps:
+      - uses: actions/checkout@v7
+      # The Python version comes from runner/.python-version, which uv reads from the working
+      # directory.
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.0"
+          enable-cache: true
+          cache-dependency-glob: runner/uv.lock
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Lint
+        run: uv run ruff check .
+      - name: Check formatting
+        run: uv run ruff format --check .
+      - name: Typecheck
+        run: uv run pyright
+      - name: Unit tests
+        run: uv run pytest -m unit
+      - name: Integration and contract tests on the host
+        run: uv run pytest -m "integration or contract"
+
+  e2e:
+    name: "E2E: browser journeys"
+    needs: changes
+    if: ${{ github.event_name == 'push' || github.base_ref == 'main' || needs.changes.outputs.app == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: app/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install the browser and its system libraries
+        run: pnpm exec playwright install --with-deps chromium
+      # Playwright builds the app and serves the production build itself (playwright.config.ts).
+      # Pull requests into development and epic branches run the smoke journeys, everything else
+      # (release pull requests into main, pushes) runs all journeys. Journeys tagged @flaky are
+      # quarantined and only run in the nightly workflow.
+      - name: Run the smoke journeys
+        if: ${{ github.event_name == 'pull_request' && github.base_ref != 'main' }}
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+        run: pnpm test:e2e --grep @smoke --grep-invert @flaky
+      - name: Run all journeys
+        if: ${{ github.event_name != 'pull_request' || github.base_ref == 'main' }}
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+        run: pnpm test:e2e --grep-invert @flaky
+      - name: Upload the Playwright report
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            app/playwright-report
+            app/test-results
+          retention-days: 14
+          if-no-files-found: ignore
+
+  actionlint:
+    name: Lint workflow files
+    needs: changes
+    if: ${{ github.event_name == 'push' || github.base_ref == 'main' || needs.changes.outputs.workflows == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      # Uses .github/actionlint.yaml. The image bundles shellcheck for the run steps.
+      - name: Run actionlint
+        run: docker run --rm --volume "$PWD:/repo" --workdir /repo rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 -color
+
+  # The only check that branch protection requires. It runs even when jobs fail or are skipped,
+  # fails on any failed or cancelled job and accepts skipped jobs (path filter).
+  ci-passed:
+    name: All checks passed?
+    needs: [changes, app-fast, runner-fast, e2e, actionlint]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Show the result of every job
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: echo "$NEEDS"
+      - name: Fail if a job failed or was cancelled
+        if: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+        run: exit 1
