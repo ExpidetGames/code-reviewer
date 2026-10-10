@@ -87,3 +87,6 @@ exact PR-Agent version (`identity_patch.PATCHED_FOR_VERSION`) and refused for an
 
 `scripts/manual_review.py` runs a real review against the sandbox repository; see its docstring.
 It needs `--yes`, posts a real comment and costs a few cents.
+`--no-identity-patch` starts the runner without the identity patch, as a control for the spike
+(CR-11). Results of the spike runs (second review, result capture, measurements) are in
+`docs/spike/`.
