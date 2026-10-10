@@ -8,9 +8,10 @@ job's `llm.baseUrl` is pointed at a small server on 127.0.0.1 inside this proces
 every chat completion with a canned review, so a run needs no model and costs nothing.
 
 Prints exactly one line of JSON: per child the exit code (or the signal that ended it), the wall
-time, the peak resident set size (`ru_maxrss` of the waited child, so only that process) and the
-last line of its stdout parsed as JSON; plus, when the container has the counters, the peak memory
-of the whole container (`memory.peak`, includes the page cache) and the number of OOM kills.
+time, the CPU time, the peak resident set size (`ru_maxrss` of the waited child, so only that
+process) and the last line of its stdout parsed as JSON; plus, when the container has the
+counters, the peak memory of the whole container (`memory.peak`, includes the page cache) and the
+number of OOM kills.
 The exit code is 0 if every child exited with 0.
 """
 
@@ -138,14 +139,16 @@ def run_child(index: int, command: list[str], job: str) -> dict[str, Any]:
         text = out.read()
         stderr_text = err.read()
     signaled = os.WIFSIGNALED(status)
+    result = _parse_result(text)
     return {
         "index": index,
         "exitCode": None if signaled else os.waitstatus_to_exitcode(status),
         "signal": signal.Signals(os.WTERMSIG(status)).name if signaled else None,
         "wallMs": wall_ms,
         "peakRssMb": round(peak_rss_mb(usage.ru_maxrss, sys.platform), 1),
-        "result": _parse_result(text),
-        "resultText": text[-RESULT_TEXT_CHARS:],
+        "cpuSeconds": round(usage.ru_utime + usage.ru_stime, 2),
+        "result": result,
+        "resultText": "" if result is not None else text[-RESULT_TEXT_CHARS:],
         "stderrTail": stderr_text[-STDERR_TAIL_CHARS:],
     }
 

@@ -157,3 +157,13 @@ def test_stdout_of_a_child_that_is_no_json_is_kept_as_text(bad: str) -> None:
     child: dict[str, Any] = report["children"][0]
     assert child["result"] is None
     assert child["resultText"].strip() == bad
+
+
+# CR-13-T01 (tool): the CPU time is part of the server sizing
+def test_the_cpu_time_of_a_busy_child_is_reported_in_seconds() -> None:
+    _, report = run_wrapper(
+        child="import time; end = time.process_time() + 0.5\nwhile time.process_time() < end: pass"
+    )
+
+    child: dict[str, Any] = report["children"][0]
+    assert 0.4 <= child["cpuSeconds"] < 5

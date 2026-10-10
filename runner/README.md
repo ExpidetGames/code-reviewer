@@ -83,6 +83,16 @@ a second review of the same pull request would fail instead of editing its comme
 `GithubProvider._resolve_user_login` is replaced to return `<slug>[bot]`. The patch is tied to the
 exact PR-Agent version (`identity_patch.PATCHED_FOR_VERSION`) and refused for any other.
 
+## Measuring memory and duration
+
+`scripts/measure_runs.py` starts one or several runner processes against the sandbox pull requests
+(small, medium, large) and reports the peak memory (`ru_maxrss` of each process) and the duration of
+each, with minimum, median and maximum over repeats. It runs on the host or inside the runner image
+with a memory limit (`--docker IMAGE --memory 2g`), where it also reads the peak memory and the OOM
+kills of the whole container. `--fake-llm` replaces the model with a canned local answer, so a run
+costs nothing. The results and the numbers derived from them (default `RUNNER_CONCURRENCY`, server
+size) are in `docs/spike/cr-13-measurements.md`. Like the manual run it needs `--yes`.
+
 ## Manual run
 
 `scripts/manual_review.py` runs a real review against the sandbox repository; see its docstring.
