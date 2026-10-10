@@ -11,6 +11,7 @@ import { migration as createAllowedLoginPins } from "./20261010133000_create_all
 import { migration as createIntegrations } from "./20261010134000_create_integrations.ts";
 import { migration as createRepositories } from "./20261010143000_create_repositories.ts";
 import { migration as createWebhookDeliveries } from "./20261010170000_create_webhook_deliveries.ts";
+import { migration as createProjects } from "./20261010190000_create_projects.ts";
 
 const migrations: Record<string, Migration> = {
   "0001_create_app_meta": createAppMeta,
@@ -21,6 +22,7 @@ const migrations: Record<string, Migration> = {
   "20261010134000_create_integrations": createIntegrations,
   "20261010143000_create_repositories": createRepositories,
   "20261010170000_create_webhook_deliveries": createWebhookDeliveries,
+  "20261010190000_create_projects": createProjects,
 };
 
 export const migrationProvider: MigrationProvider = {

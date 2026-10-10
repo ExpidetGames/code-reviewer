@@ -129,6 +129,10 @@ holds the repositories each integration can see. A repository the platform stops
 inactive (`active = 0`), never deleted; `reconcile` makes the rows of one integration match a
 complete list in one transaction.
 
+`projects` (migration `20261010190000_create_projects`, repository `projects-repository.ts`) holds
+the repositories that are reviewed: one row per repository (`repository_id` unique), created by the
+first activation, switched off with `active = 0`, never deleted; see `src/projects/README.md`.
+
 `webhook_deliveries` (migration `20261010170000_create_webhook_deliveries`, repository
 `webhook-deliveries-repository.ts`) holds the delivery ids the webhook route has accepted, so a
 redelivery produces no second trigger; rows are pruned after 7 days; see `src/webhooks/README.md`.
