@@ -174,10 +174,55 @@ def test_the_last_edit_of_the_review_wins(recorder: CommentRecorder) -> None:
     assert recorder.comment_url(Command.REVIEW) == "https://x/second"
 
 
-def test_the_review_is_recognised_by_its_heading_when_the_marker_is_missing(
+# CR-12 review finding: the heading alone is no identity (it is configurable, and PR-Agent keeps it
+# in a standalone comment that does not replace the canonical review).
+def test_a_review_heading_without_the_hidden_marker_is_not_the_result(
     recorder: CommentRecorder,
 ) -> None:
     record(recorder, "created", "https://x/review", "## PR Reviewer Guide 🔍\n\ntext")
+    record(recorder, "created", "https://x/incremental", "## Incremental PR Reviewer Guide 🔍\n\nx")
+
+    assert recorder.comment_url(Command.REVIEW) is None
+
+
+def test_the_improve_heading_without_the_hidden_marker_is_not_the_result(
+    recorder: CommentRecorder,
+) -> None:
+    record(recorder, "created", "https://x/improve", "## PR Code Suggestions ✨\n\ntext")
+
+    assert recorder.comment_url(Command.IMPROVE) is None
+
+
+def test_the_standalone_review_of_pr_agent_is_not_the_result_but_the_canonical_review_is(
+    recorder: CommentRecorder,
+) -> None:
+    from pr_agent.tools.pr_reviewer import PRReviewer
+
+    canonical = f"## PR Reviewer Guide 🔍\n\n{REVIEW_MARKER}\n\nHere are some key observations"
+    standalone = PRReviewer._as_non_authoritative_review(canonical)  # pyright: ignore[reportPrivateUsage]
+    assert standalone.startswith("## Standalone PR Review")
+
+    record(recorder, "created", "https://x/standalone", standalone)
+    assert recorder.comment_url(Command.REVIEW) is None
+
+    record(recorder, "edited", "https://x/canonical", canonical)
+    assert recorder.comment_url(Command.REVIEW) == "https://x/canonical"
+
+
+def test_the_marker_counts_only_as_an_exact_line_near_the_top(recorder: CommentRecorder) -> None:
+    far_down = "intro\n\n\n\n\n\n" + REVIEW_MARKER
+    record(recorder, "created", "https://x/quoted", f"text quoting {REVIEW_MARKER} inline")
+    record(recorder, "created", "https://x/far", far_down)
+
+    assert recorder.comment_url(Command.REVIEW) is None
+
+
+def test_the_link_reference_form_of_the_marker_is_accepted(recorder: CommentRecorder) -> None:
+    from pr_agent.algo.comment_identity import hidden_marker_forms
+
+    reference = hidden_marker_forms(REVIEW_MARKER)[-1]
+    assert reference != REVIEW_MARKER
+    record(recorder, "created", "https://x/review", f"## PR Reviewer Guide 🔍\n\n{reference}\n\nx")
 
     assert recorder.comment_url(Command.REVIEW) == "https://x/review"
 
