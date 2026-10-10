@@ -25,6 +25,7 @@ dev = [
     "pytest-timeout",
     "ruff",
     "pyright",
+    "jsonschema",
     "pyjwt>=2.15.1",
     "cryptography>=50.0.2",
 ]
