@@ -33,6 +33,7 @@ describe("reading the LLM configuration of the running server", () => {
     expect(status).toEqual({
       configured: false,
       issues: [{ code: "LLM_API_KEY_MISSING", variable: "LLM_API_KEY" }],
+      warnings: [],
     });
   });
 });
