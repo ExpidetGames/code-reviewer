@@ -1,0 +1,193 @@
+# Testing
+
+This file is the source of truth for how Code Reviewer is tested. A change without the tests it
+requires (section 3) is not done. If code and this file disagree, fix one of them in the same PR.
+
+Status markers: "exists" means it works in the repository today; "planned" means a later ticket adds
+it. Do not document planned things as if they existed in READMEs or PR descriptions.
+
+## 1. Principles
+
+- Test at the lowest level that can prove the behavior, and prove each behavior at one level only.
+- Deterministic: no `sleep` or fixed waits (wait for the condition), time and randomness are
+  injected, every test brings its own data.
+- No real external service in any automated test: no real GitHub, no real LLM, no internet. External
+  systems are replaced by fakes (section 5). Real model runs are manual and never part of CI.
+- No silent skip. Which suite runs a file is decided by its location and name, not by a runtime
+  check. A suite that needs infrastructure (Docker stack) fails loudly when it is missing, it never
+  skips.
+- Never weaken, skip or delete a test to get green. Never raise retries to hide flakiness. Report
+  flaky tests.
+- Flaky e2e journeys are quarantined with `@flaky` in the title in the same PR that opens a repair
+  ticket (PRs skip them, the nightly run still runs them). Unit and integration tests have no
+  quarantine: fix at once, or skip in code with the reason right beside the skip.
+- Time budget: a PR CI run over 15 minutes, or a smoke run over 5 minutes, is a defect to be fixed
+  like a red test.
+- No coverage threshold. Coverage may be run for information only.
+- No secrets in tests, logs or output. Test values are fixed dummies.
+
+## 2. Levels
+
+| Level | Tool | Runs on | What belongs here | Status |
+|---|---|---|---|---|
+| App unit | Vitest, project `unit` | host | Pure logic: signature verification, event filtering, job state machine, backoff, comment formatting, input validation, React components. Collaborators are fakes. No database, no network. | exists |
+| App integration | Vitest, project `integration` | host or Docker stack | Real SQLite file plus real Kysely repositories; route handlers driven through the real handler (webhook, runner API, auth) including refusals; GitHub client code against the GitHub fake. | project exists, no tests yet |
+| Contract | Vitest in `app/integration-tests/compatibility/`, pytest in `runner/tests/contract/` | host | Pins the runner HTTP API and the GitHub webhook payload subset. One machine-readable source in `contracts/` is validated by both sides. | planned |
+| Runner unit | pytest, marker `unit` | host | Job loop with a fake clock, heartbeat, lease loss, backoff, shutdown, PR-Agent command and env construction, output parsing, log truncation, secret redaction. Subprocess boundary replaced by a fake. | exists |
+| Runner integration | pytest, marker `integration` | host or Docker stack | Real processes and real loopback sockets: the real loop against the app or a fake runner API, with the fake PR-Agent executable as a real subprocess (exit codes, timeouts, kill). | exists (entry point only) |
+| Engine smoke | pytest, marker `engine` | Docker stack, nightly and release PRs | The real, pinned PR-Agent against the GitHub fake and the LLM fake. Asserts the shape of what was posted, never review quality. Deselected by default. | marker exists, no tests yet |
+| E2E | Playwright, chromium | production build (`next build` and `next start`), later the Docker stack | User-visible flows. At most about 8 `@smoke` journeys. | exists (start page) |
+| Manual | none | a developer machine | Real PR-Agent against a real model on a sandbox repository before a release. The result goes into the PR description. Never in CI. | n/a |
+
+SQLite is a file, so integration tests are cheap and may run on the host. The rule stays: anything
+that touches Kysely and a real SQLite file is `*.integration.test.ts`; pure logic never opens a
+database.
+
+## 3. Required tests by change type
+
+| Change | Required | Level |
+|---|---|---|
+| Bug fix | A test that is red before the fix and green after | Lowest level at which the bug shows |
+| Logic: state machine, filtering, backoff, formatting | Normal case, edge cases, failure cases | Unit (app or runner) |
+| Repository, SQL or transaction (claim, lease) | Against real SQLite, including concurrent claim by two runners | App integration |
+| HTTP route, server action, webhook handler | Through the real handler, including refusals: bad signature, missing or wrong token, not signed in, not on the allow list, invalid input | App integration |
+| Auth, GitHub App credentials, tokens, anything handling secrets | Same as a route; refusal cases are mandatory; plus a test that secrets do not appear in logs or responses | App integration or runner unit |
+| Runner API or webhook payload shape | Contract test on both sides | Contract |
+| Runner process handling (spawn, timeout, kill, parallelism) | Real subprocess with the fake PR-Agent | Runner integration |
+| New core user flow | One e2e journey; `@smoke` only for a real core path | E2E |
+| PR-Agent upgrade, config or prompt change | Engine smoke green; note the PR-Agent version in the PR | Engine smoke |
+| Purely visual change | No automated test; the ticket says so explicitly | none |
+| Refactor without behavior change | No new test; all existing tests stay green | none |
+
+## 4. Where tests live and how they are named
+
+```
+app/                               Next.js project (pnpm)
+  src/<owner>/foo.ts               code
+  src/<owner>/foo.test.ts          unit test beside the code
+  src/<owner>/foo.integration.test.ts   single-owner integration test beside the code
+  src/test-support/                shared test setup (network guard); not product code
+  integration-tests/               cross-owner integration tests (planned)
+    http/ webhooks/ workflows/ compatibility/ support/   closed list; support/ holds no tests
+  e2e/<area>/<journey>.e2e.ts      Playwright; areas: app/, auth/, reviews/, jobs/, settings/
+runner/                            Python project (uv)
+  src/code_reviewer_runner/        code
+  tests/unit/test_<module>.py
+  tests/integration/test_<behavior_area>.py
+  tests/contract/test_<contract>.py      (planned)
+  tests/engine/test_<engine_area>.py     (planned)
+fakes/                             shared fake servers and fixtures (see fakes/README.md)
+contracts/                         runner API and webhook schemas (planned)
+```
+
+- App: unit `*.test.ts(x)`, integration `*.integration.test.ts(x)`, e2e `*.e2e.ts`. E2E files never
+  end in `.test.ts`, because Vitest would pick them up.
+- Runner: the level of a test is its directory; `tests/conftest.py` applies the marker and rejects a
+  test outside the level directories. Files are `test_*.py`.
+- New top-level test folders or new `integration-tests/` categories need an agreed change to this
+  file first.
+- App test titles are plain English behavior sentences ("rejects a delivery whose signature does not
+  match the body"): no implementation words and no ticket, ADR or section identifiers. Runner test
+  function names are behavior sentences too (`test_a_claimed_job_is_released_when_the_heartbeat_is_rejected`).
+  E2E titles are full sentences with tags (`@smoke`, `@flaky`).
+- Link a test to its Jira test case with a comment above the test (`// CR-27-T03` or `# CR-27-T03`),
+  never in the title.
+- Every test file starts with a short comment or docstring: which behavior it pins down and why.
+- One behavior per test. Given, when, then is the shape of the body (arrange, act, assert separated by
+  blank lines), not keywords in the code.
+- Mocks are reset per test (Vitest `clearMocks` and `restoreMocks`; pytest fixtures are
+  function-scoped by default). Use `vi.mock` or monkeypatching only for your own collaborators in unit
+  tests.
+
+## 5. Fakes and the network guard
+
+Principle: fake at the process boundary with a real server speaking the real protocol, so the
+production client code runs unchanged. Test stack values are fixed dummies; no env files, no secrets.
+
+| Dependency | Unit | Integration, e2e |
+|---|---|---|
+| GitHub REST API and App installation tokens | In-memory implementation of our `GitHubClient` interface | `fakes/github` HTTP server; base URL from `GITHUB_API_BASE`; verifies the App JWT; seeded repos, PRs and diffs; assertions read what was posted |
+| GitHub webhooks (inbound) | Signature verification as a pure function (HMAC-SHA256) | The fake signs and delivers payloads exactly like GitHub (`X-Hub-Signature-256`, `X-GitHub-Delivery`, `X-GitHub-Event`); fixtures are real payloads reduced to the fields we read |
+| GitHub login (OAuth) | n/a | `fakes/github` also serves the OAuth authorize, token and user endpoints. Exactly one e2e file signs in through the form; all other journeys use an API shortcut proven equivalent by its own test |
+| LLM providers | Not reachable: runner unit tests never start PR-Agent | `fakes/llm`: OpenAI-compatible `chat/completions` with scripted answers, malformed output, 429, 500 and slow responses; dummy API key |
+| PR-Agent | Subprocess boundary behind a small protocol; unit tests use a fake implementation | `PR_AGENT_COMMAND` points at `fakes/pr-agent/fake_pr_agent.py` (succeed, exit 1, hang, print secrets, huge output, crash). Only engine smoke runs the real PR-Agent |
+| Runner and app | Fake HTTP client | Real HTTP against the app or an in-process fake runner API checked against `contracts/` |
+| Time | Injected clock | Short leases and intervals via env, not sleeping |
+
+Network guard (exists, applies to every automated test):
+
+- App: `app/src/test-support/network-guard.setup.ts` is a Vitest setup file for the `unit` and
+  `integration` projects. Any TCP connection (fetch, `http`, `https`, raw `net`) to a host other than
+  loopback fails with the error code `NETWORK_GUARD_BLOCKED`. Extra hosts, such as compose service
+  names, are allowed with the comma separated `TEST_ALLOWED_HOSTS` variable.
+- Runner: pytest runs with `--disable-socket --allow-unix-socket --allow-hosts=127.0.0.1,::1,localhost`
+  (pytest-socket), configured in `runner/pyproject.toml`. Connections to other hosts raise
+  `SocketConnectBlockedError`. DNS lookups are not blocked, but the connection that would follow is.
+- The guard covers the test process only. A subprocess started by a test (for example the fake
+  PR-Agent) is not guarded and must itself only talk to loopback fakes.
+
+## 6. Tooling
+
+App (`app/`, Node version from `.nvmrc`, pnpm):
+
+- Vitest with projects `unit` and `integration` in `vitest.config.mts`. Both use the node
+  environment, reset mocks per test and load the network guard. `unit`: timeout 10 s. `integration`:
+  forks pool, timeout 30 s, hook timeout 60 s. At most 4 workers; override with `TEST_MAX_WORKERS`.
+- Playwright (`playwright.config.ts`): `testDir: e2e`, `*.e2e.ts` only, chromium, `forbidOnly` and
+  one retry on CI, trace and screenshot on failure. It builds the app and runs `next start` on
+  `E2E_PORT` (default 3417, never 3000 or 3100) so it never touches another running server. Without a
+  downloaded Chromium, run with an installed Chrome: `PLAYWRIGHT_CHANNEL=chrome`.
+- ESLint flat config (Next.js core-web-vitals and TypeScript rules, `no-explicit-any` as an error,
+  Vitest `no-focused-tests` and `no-disabled-tests`) and `tsc --noEmit` with `strict`.
+
+Runner (`runner/`, Python version pinned in `.python-version`, uv, `uv.lock` committed):
+
+- pytest with `--strict-markers`; markers `unit` (default level), `integration`, `contract`, `engine`;
+  `engine` is deselected by default, run it with `-m engine`. `pytest-timeout`: 10 s per test by
+  default (raise per level when the level needs it). `pytest-socket` as described above.
+- `ruff check` and `ruff format --check`, `pyright` in strict mode.
+
+Planned: `verify:structure` (placement and naming rules, test files must be discovered by a runner,
+no process identifiers in titles), `verify:server-only-canary`, the Docker test stack
+(`docker/compose.test.yml`), `contracts/`.
+
+## 7. Commands
+
+| Task | Command (repository root) | What it runs |
+|---|---|---|
+| Install | `make install` | `pnpm --dir app install --frozen-lockfile`, `uv --directory runner sync --locked` |
+| Everything before a PR | `make verify` | lint, typecheck, unit and host integration tests of both parts |
+| Lint | `make lint` | `pnpm lint`; `ruff check`, `ruff format --check` |
+| Typecheck | `make typecheck` | `pnpm typecheck`; `pyright` |
+| Unit tests | `make test-unit` | `pnpm test`; `pytest -m unit` |
+| Integration tests (host) | `make test-integration` | `pnpm test:int`; `pytest -m "integration or contract"` |
+| E2E | `make test-e2e` | `pnpm test:e2e` (`ARGS="--grep @smoke"` filters) |
+
+Inside `app/`: `pnpm dev | build | start | lint | typecheck | test | test:watch | test:int | test:e2e`.
+Inside `runner/`: `uv sync --locked`, `uv run ruff check .`, `uv run ruff format --check .`,
+`uv run pyright`, `uv run pytest` (default: everything except `engine`), `uv run pytest -m unit`.
+
+`pnpm test:int` passes while no integration test exists (`--passWithNoTests`). Remove that flag with
+the first integration test.
+
+Planned targets: `test-engine`, `test-stack-up`, `test-stack-down`, `test:docker`, `test:e2e:docker`
+(they arrive with the Docker test stack).
+
+## 8. CI
+
+Planned (see the CI ticket): one workflow with jobs for app (lint, typecheck, unit, build), runner
+(ruff, pyright, pytest unit), integration, e2e and engine, ending in a single required check
+`ci-passed` that accepts skipped jobs. Runs on pull requests into `development`, `main` and `CR-*`
+epic branches, and on pushes to `development` and `main`. No repository secrets in test jobs.
+`main` accepts pull requests only from `development` or `hotfix/*`.
+
+## 9. Test cases in Jira
+
+Every story has a "Testfälle" section: one row per behavior with id, type (happy, error, edge,
+security), level, given, when, then. Cases are written when the story is refined. The PR description
+maps every case to a test file and name, or to "manual" or "not applicable" with the reason. Every
+story covers: the happy path, every error it can produce, edge cases (empty, maximum, duplicates and
+replays, ordering and concurrency, expiry, idempotency, large diffs, fork and draft PRs), security
+cases whenever auth, webhooks, the runner API, tokens or user input are touched (secrets must not
+appear in logs, responses or PR comments; PR content is data and never changes runner commands or
+prompt instructions), and a regression case for every bug.
