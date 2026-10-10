@@ -7,7 +7,14 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { checkDeploymentConfigOnStart } from "./startup.ts";
+import {
+  configuredRunnerToken,
+  tokensMatch,
+} from "../runner-api/token-auth.ts";
+import {
+  checkDeploymentConfigOnStart,
+  findDeploymentConfigProblems,
+} from "./startup.ts";
 
 // A key made for this run, never stored in the repository.
 const privateKey = generateKeyPairSync("rsa", {
@@ -125,6 +132,35 @@ describe("checking the deployment settings when the server starts", () => {
     const line = String(log.mock.calls[0]?.[0]);
     expect(line).toContain("RUNNER_TOKEN");
     expect(line).toContain("at least 32 characters");
+  });
+
+  // CR-37-T08
+  it("judges the runner token exactly as the runner API does, white space around it included", async () => {
+    const tokens = [
+      "x".repeat(31),
+      "x".repeat(32),
+      `${"x".repeat(32)}\n`,
+      `${"x".repeat(31)}\n`,
+      `  ${"x".repeat(32)}  `,
+      "   ",
+      "",
+    ];
+
+    for (const token of tokens) {
+      const usable = tokensMatch(
+        configuredRunnerToken({ RUNNER_TOKEN: token }),
+        token.trim(),
+      );
+      const problems = await findDeploymentConfigProblems({
+        ...validEnv,
+        RUNNER_TOKEN: token,
+      });
+
+      expect(
+        problems.some((problem) => problem.includes("RUNNER_TOKEN")),
+        JSON.stringify(token),
+      ).toBe(!usable);
+    }
   });
 
   // CR-37-T09
