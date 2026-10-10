@@ -89,8 +89,10 @@ exact PR-Agent version (`identity_patch.PATCHED_FOR_VERSION`) and refused for an
 (small, medium, large) and reports the peak memory (`ru_maxrss` of each process) and the duration of
 each, with minimum, median and maximum over repeats. It runs on the host or inside the runner image
 with a memory limit (`--docker IMAGE --memory 2g`), where it also reads the peak memory and the OOM
-kills of the whole container. `--fake-llm` replaces the model with a canned local answer, so a run
-costs nothing. The results and the numbers derived from them (default `RUNNER_CONCURRENCY`, server
+kills of the whole container. `--fake-llm` replaces the model with a canned local answer and puts a
+dummy key into the job, so a run costs nothing; but every run, fake or real, posts or edits the real
+review comment of the sandbox pull request, and the canned finding overwrites it. The script exits
+with 1 if a child failed or was killed, and limits repeats and processes to 10. The results and the numbers derived from them (default `RUNNER_CONCURRENCY`, server
 size) are in `docs/spike/cr-13-measurements.md`. Like the manual run it needs `--yes`.
 
 ## Manual run

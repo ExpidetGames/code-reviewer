@@ -111,6 +111,23 @@ def read_cgroup(root: Path = CGROUP_ROOT) -> dict[str, float | int] | None:
     return {"peakMb": peak / (1024 * 1024), "oomKills": kills}
 
 
+def secrets_of(job: str) -> list[str]:
+    """The secret values of a job (installation token, LLM key); nothing if it is not a job."""
+    try:
+        loaded = json.loads(job)
+        values = [loaded["git"]["token"], loaded["llm"]["apiKey"]]
+    except (ValueError, KeyError, TypeError):
+        return []
+    return [value for value in values if isinstance(value, str) and value]
+
+
+def redact(text: str, secrets: list[str]) -> str:
+    """Replace the secrets before the text is cut, so a cut cannot leave half of one behind."""
+    for secret in secrets:
+        text = text.replace(secret, "[REDACTED]")
+    return text
+
+
 def _parse_result(text: str) -> Any:
     for line in reversed(text.strip().splitlines()):
         try:
@@ -120,7 +137,9 @@ def _parse_result(text: str) -> Any:
     return None
 
 
-def run_child(index: int, command: list[str], job: str) -> dict[str, Any]:
+def run_child(
+    index: int, command: list[str], job: str, secrets: list[str] | None = None
+) -> dict[str, Any]:
     with tempfile.TemporaryFile("w+") as out, tempfile.TemporaryFile("w+") as err:
         started = time.monotonic()
         process = subprocess.Popen(
@@ -133,11 +152,13 @@ def run_child(index: int, command: list[str], job: str) -> dict[str, Any]:
         except BrokenPipeError:
             pass
         _, status, usage = os.wait4(process.pid, 0)
+        # reaped here, so tell Popen (its destructor would poll a pid that may be reused)
+        process.returncode = os.waitstatus_to_exitcode(status)
         wall_ms = int((time.monotonic() - started) * 1000)
         out.seek(0)
         err.seek(0)
-        text = out.read()
-        stderr_text = err.read()
+        text = redact(out.read(), secrets or [])
+        stderr_text = redact(err.read(), secrets or [])
     signaled = os.WIFSIGNALED(status)
     result = _parse_result(text)
     return {
@@ -172,9 +193,12 @@ def main(argv: list[str] | None = None) -> int:
         loaded["llm"]["baseUrl"] = f"http://127.0.0.1:{port}/v1"
         job = json.dumps(loaded)
 
+    secrets = secrets_of(job)
     started = time.monotonic()
     with ThreadPoolExecutor(max_workers=args.concurrency or args.count) as pool:
-        futures = [pool.submit(run_child, index, command, job) for index in range(args.count)]
+        futures = [
+            pool.submit(run_child, index, command, job, secrets) for index in range(args.count)
+        ]
         children = [future.result() for future in futures]
     if server is not None:
         server.shutdown()

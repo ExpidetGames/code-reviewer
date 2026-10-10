@@ -1,7 +1,7 @@
 # CR-13 spike: memory and duration of one PR-Agent process
 
 Date: 2026-10-10. Everything below was measured with `runner/scripts/measure_runs.py` (wrapper
-`measure_child.py`), see "Setup". Raw numbers are reproducible with the commands at the end.
+`measure_child.py`), see "Setup". The raw JSON lines (without the log texts) are in `docs/spike/data/cr-13/`; the memory runs can be repeated with the commands at the end, the real-model runs by nature cannot.
 
 ## Result in short
 
@@ -13,8 +13,9 @@ Date: 2026-10-10. Everything below was measured with `runner/scripts/measure_run
   (measured: 321, 615, 909, 1203 MB for N = 1 to 4).
 - **Default `RUNNER_CONCURRENCY`: 3 for a runner container with 2 GiB**, in general
   `floor((container MiB - 256) / 482)`, which is about 1.5 slots per GiB (table below).
-- **Server for Coolify: 8 GB RAM and 4 vCPU recommended**, 4 GB / 2 vCPU as the lowest workable size
-  with `RUNNER_CONCURRENCY=1` or 2 (calculation below).
+- **Server for Coolify: 8 GB RAM and 4 vCPU recommended.** The budget adds up to 3.9 GB, so 4 GB / 2 vCPU
+  fits with `RUNNER_CONCURRENCY=3` on paper, but with no margin on figures that are partly estimates
+  (calculation below).
 - Duration is dominated by the model: 41 to 176 s (small), 67 to 80 s (medium), 71 to 200 s (large) with
   `deepseek/deepseek-v3.2`; PR-Agent's own part (GitHub requests, diff handling) is 9 to 22 s with CPU
   time of 3 to 4.4 s.
@@ -71,6 +72,8 @@ the engine suite (CR-41): a fake GitHub with a multi-megabyte diff.
 ## Duration with the real model (CR-13-T03, T04)
 
 One process at a time, in the container, `deepseek/deepseek-v3.2`. Duration is the runner's `durationMs`
+(`measure_runs.py` reports exactly this as `durationSeconds`; the wrapper's wall time is 1 to 2 s longer, it
+includes the start of the process and the imports)
 (start of the process until the result), in seconds. Small has six runs (three with the pull request as it
 was in CR-11 with one line changed, three on the original content), medium and large three each.
 
@@ -137,9 +140,11 @@ jobs per installation (2 is a reasonable start).
 | Headroom 25 % (page cache, spikes, deploys that run two containers at once) | 0.8 | |
 | **Total** | **3.9** | |
 
-**Recommendation: 8 GB RAM and 4 vCPU.** 4 GB is the exact sum above and leaves nothing for a deploy
-that briefly runs old and new app containers; with 4 GB use `RUNNER_CONCURRENCY=1` or 2 and a runner limit
-of 1.5 GiB. 4 vCPU because a review needs 3 to 4.4 s of CPU (mostly imports) and Coolify, Docker and the app
+**Recommendation: 8 GB RAM and 4 vCPU.** The sum above is 3.9 GB, so 4 GB is the calculated minimum and
+works with `RUNNER_CONCURRENCY=3`. The reason for 8 GB is margin, not a missing byte: Coolify's 1 GB and the
+OS and Docker figures are estimates that were not measured, the app is a skeleton today, and a deploy briefly
+runs the old and the new app container side by side. If 4 GB is used anyway, take `RUNNER_CONCURRENCY=2`
+and a runner limit of 1.5 GiB for some extra room (saves about 0.5 GB). 4 vCPU because a review needs 3 to 4.4 s of CPU (mostly imports) and Coolify, Docker and the app
 need CPU too; the model wait does not. The disk is outside this ticket (images 0.7 GB runner and 0.3 GB app).
 
 ## Ten large jobs through the default setting (CR-13-T10)
@@ -200,4 +205,27 @@ uv run python scripts/measure_runs.py --size medium --docker code-reviewer-runne
 uv run python scripts/measure_runs.py --size large --fake-llm --docker code-reviewer-runner:measure --memory 2g --count 10 --concurrency 3 --yes
 ```
 
-Spend of this ticket: about 0.12 USD (22 real reviews at 0.002 to 0.011 USD each, the cost reported by the runner).
+App figure (100 MB idle, after 30 requests to `/`; the image is built from `app/` of this branch, the
+values are test values for a local container, not secrets):
+
+```
+docker build -t code-reviewer-app:measure app
+docker volume create crapp-data
+docker run -d --rm --name crapp --memory 1g -p 127.0.0.1::3000 -v crapp-data:/data \
+  -e BETTER_AUTH_SECRET=dummy-secret-for-memory-measurement-0123456789 -e BETTER_AUTH_URL=http://localhost:3000 \
+  -e GITHUB_OAUTH_CLIENT_ID=dummy -e GITHUB_OAUTH_CLIENT_SECRET=dummy code-reviewer-app:measure
+for i in $(seq 30); do curl -s -o /dev/null http://127.0.0.1:$(docker port crapp 3000 | head -1 | sed 's/.*://')/; done
+docker exec crapp sh -c 'grep VmRSS /proc/1/status; cat /sys/fs/cgroup/memory.peak'
+docker stop crapp; docker volume rm crapp-data
+```
+
+Notes on the data: runs with `--fake-llm` overwrite the real review comment of the playground pull request with
+a canned finding (the real runs afterwards put a real review back), and the `costUsd` in their result is
+computed from the fake token counts, not a real cost. Children killed by the out-of-memory killer
+(`exitCode` null) are left out of the min/median/max figures of `measure_runs.py` and counted separately; in
+this report that only concerns the 1 GiB container with four processes (one killed, 284 MB when it died) and
+the negative control with ten at once.
+
+Spend of this ticket: the runner reported 0.1155 USD for the 22 real reviews (0.002 to 0.011 USD each, the
+cost PR-Agent computes from the token counts). Taking the spread of the per-run ranges into account the bill
+is 0.12 to 0.17 USD; the OpenRouter dashboard was not read.
