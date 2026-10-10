@@ -1,8 +1,7 @@
 # CR-50: fair model comparison, every model under identical conditions
 
-Date: 2026-10-10. Draft of the data part. The hit rates are **not scored yet**: a separate blind scorer reads the
-anonymous comments and fills the placeholder tables in "Hit rates (to be filled by the blind scorer)". Everything
-else (method, settings, prices, plan, cost, duration, failures) is measured and final.
+Date: 2026-10-10. Data and blind scoring are final. The recommendation (CR-50-T06) is **pending customer
+decision**.
 
 Follow-up to [`cr-44-model-comparison.md`](cr-44-model-comparison.md) and the CR-48 addendum
 (`cr-48-model-addendum.md`, branch `CR-48-model-addendum`). In CR-44 and CR-48 every run on a playground pull
@@ -23,7 +22,9 @@ DeepSeek V4.1 Flash hit GitHub's comment size limit). Here every run is a first 
 - No run was cut for budget. No model failure: 84 of 84 counted runs ended with `ok: true` and a review comment,
   no comment came near the size limit (largest 7,099 characters), and no log showed "Persistent review state did
   not fit".
-- Cost and duration of the fair runs are in "Results". Hit rates: pending (blind scoring).
+- **Blind-scored hit rates (found of 28):** Sonnet 24 (+1 borderline), DeepSeek V4.1 Flash 23, Opus 22 (+2), Haiku 22
+  (+2), GPT-5.4 mini 18 (+2), DeepSeek V3.2 14 (+2), Gemini 12. False positives: 4 in 84 runs (Haiku 2, GPT-5.4 mini 2).
+  See "Hit rates" and "Results" for cost and duration.
 
 ## Method
 
@@ -51,8 +52,8 @@ DeepSeek V4.1 Flash hit GitHub's comment size limit). Here every run is a first 
 - **Blind preparation:** after every run the comment text is saved under a random 6-character id, with model names
   scrubbed (the scrub found nothing to remove in any of the 84 comments; the comments never contain the model
   name), and the pull request number is the only thing in `index.csv` (`id,pr`, sorted by id, not by run order).
-  The mapping `id -> model, run, cost, duration` is kept separately. The scorer gets only the comment files and
-  `index.csv`. **The developer did not score.** The anonymous comments contain no "resolved findings" section and no
+  The mapping `id -> model, run, cost, duration` is kept separately. The scorer got only the comment files and
+  `index.csv`. **The developer did not score**; the scorer never saw the mapping. The anonymous comments contain no "resolved findings" section and no
   earlier state (checked: 0 of 84).
 - **Scoring (for the scorer, per CR-44):** a planted problem counts as found when the findings of that run name it;
   a sentence about it inside a finding about something else counts as found and is named as borderline. The problems
@@ -191,35 +192,123 @@ Tokens, average of 4 runs per cell:
 Per model (counted runs): Haiku 0.0362, Sonnet 0.6626, Opus 1.4047, GPT-5.4 mini 0.2109, Gemini 0.4280 (+0.0521 for
 the lost run), DeepSeek V3.2 0.0686, DeepSeek V4.1 Flash 0.0445.
 
-## Hit rates (to be filled by the blind scorer) (CR-50-T04)
+## Hit rates (CR-50-T04)
 
-Hit rate = planted problems found in the comments of the counted runs, out of (problems x 4 runs): small
-2 x 4 = 8, medium 3 x 4 = 12, large 2 x 4 = 8. Fill in after the mapping has been applied.
+Scored blind: a separate scorer read the 84 anonymous comments in `index.csv` order without model names, run
+order or cost, and recorded a verdict per comment and planted problem (`found`, `borderline`, `missed`) plus,
+per comment, the number of false positives and of extra valid findings. The mapping was applied only after
+the scoring was complete. Possible per cell: small 2 problems x 4 runs = 8, medium 3 x 4 = 12, large 2 x 4 = 8,
+total 28. "(+n)" is the number of borderline calls on top of the found ones; they are not added to the totals.
+The table is ordered by found, then borderline.
 
-| Model | Hit rate small (#1, of 8) | Hit rate medium (#2, of 12) | Hit rate large (#3, of 8) | Total (of 28) | False positives | Borderline calls |
-|---|---|---|---|---|---|---|
-| `anthropic/claude-haiku-5.5` | | | | | | |
-| `anthropic/claude-sonnet-5.5` | | | | | | |
-| `anthropic/claude-opus-5.5` | | | | | | |
-| `openai/gpt-5.4-mini` | | | | | | |
-| `google/gemini-3.8-flash` | | | | | | |
-| `deepseek/deepseek-v3.2` | | | | | | |
-| `deepseek/deepseek-v4.1-flash` | | | | | | |
+| Model | Small (#1, of 8) | Medium (#2, of 12) | Large (#3, of 8) | **Total found (of 28)** | Borderline (extra) | False positives | Extra valid findings |
+|---|---|---|---|---|---|---|---|
+| `anthropic/claude-sonnet-5.5` | 8 | 8 (+1) | 8 | **24** | 1 | 0 | 6 |
+| `deepseek/deepseek-v4.1-flash` | 8 | 8 | 7 | **23** | 0 | 0 | 3 |
+| `anthropic/claude-haiku-5.5` | 8 | 6 (+2) | 8 | **22** | 2 | 2 | 2 |
+| `anthropic/claude-opus-5.5` | 8 | 6 (+2) | 8 | **22** | 2 | 0 | 8 |
+| `openai/gpt-5.4-mini` | 6 | 4 (+2) | 8 | **18** | 2 | 2 | 2 |
+| `deepseek/deepseek-v3.2` | 8 | 0 | 6 (+2) | **14** | 2 | 0 | 2 |
+| `google/gemini-3.8-flash` | 4 | 0 | 8 | **12** | 0 | 0 | 4 |
 
-Per planted problem (found out of 4 runs):
+Per planted problem (runs with the problem found, out of 4; "(+n)" borderline):
 
 | Model | #1 A | #1 B | #2 A | #2 B | #2 C | #3 A | #3 B |
 |---|---|---|---|---|---|---|---|
-| `anthropic/claude-haiku-5.5` | | | | | | | |
-| `anthropic/claude-sonnet-5.5` | | | | | | | |
-| `anthropic/claude-opus-5.5` | | | | | | | |
-| `openai/gpt-5.4-mini` | | | | | | | |
-| `google/gemini-3.8-flash` | | | | | | | |
-| `deepseek/deepseek-v3.2` | | | | | | | |
-| `deepseek/deepseek-v4.1-flash` | | | | | | | |
+| `anthropic/claude-sonnet-5.5` | 4 of 4 | 4 of 4 | 2 (+1) of 4 | 4 of 4 | 2 of 4 | 4 of 4 | 4 of 4 |
+| `deepseek/deepseek-v4.1-flash` | 4 of 4 | 4 of 4 | 4 of 4 | 0 of 4 | 4 of 4 | 4 of 4 | 3 of 4 |
+| `anthropic/claude-haiku-5.5` | 4 of 4 | 4 of 4 | 2 of 4 | 2 (+2) of 4 | 2 of 4 | 4 of 4 | 4 of 4 |
+| `anthropic/claude-opus-5.5` | 4 of 4 | 4 of 4 | 0 of 4 | 2 (+2) of 4 | 4 of 4 | 4 of 4 | 4 of 4 |
+| `openai/gpt-5.4-mini` | 4 of 4 | 2 of 4 | 4 of 4 | 0 (+2) of 4 | 0 of 4 | 4 of 4 | 4 of 4 |
+| `deepseek/deepseek-v3.2` | 4 of 4 | 4 of 4 | 0 of 4 | 0 of 4 | 0 of 4 | 4 of 4 | 2 (+2) of 4 |
+| `google/gemini-3.8-flash` | 4 of 4 | 0 of 4 | 0 of 4 | 0 of 4 | 0 of 4 | 4 of 4 | 4 of 4 |
 
-Comparison with the earlier, unfair numbers (CR-44, CR-48; hit rates of the medium pull request were over 5
-runs there): to be added by the scorer after the mapping is applied.
+False positives and extra valid findings per pull request (counts over the 4 runs of the cell):
+
+| Model | FP #1 | FP #2 | FP #3 | Extra valid #1 | #2 | #3 |
+|---|---|---|---|---|---|---|
+| `anthropic/claude-sonnet-5.5` | 0 | 0 | 0 | 3 | 3 | 0 |
+| `deepseek/deepseek-v4.1-flash` | 0 | 0 | 0 | 0 | 3 | 0 |
+| `anthropic/claude-haiku-5.5` | 0 | 1 | 1 | 0 | 1 | 1 |
+| `anthropic/claude-opus-5.5` | 0 | 0 | 0 | 4 | 4 | 0 |
+| `openai/gpt-5.4-mini` | 0 | 1 | 1 | 0 | 2 | 0 |
+| `deepseek/deepseek-v3.2` | 0 | 0 | 0 | 0 | 2 | 0 |
+| `google/gemini-3.8-flash` | 0 | 0 | 0 | 0 | 4 | 0 |
+
+Reading (facts only; the recommendation is CR-50-T06 below):
+
+- On the small (#1) and the large (#3) pull request most models find nearly everything in every run. The medium
+  pull request (#2) is the one that separates the models. Sonnet finds 8 of 12 (+1 borderline) and
+  DeepSeek V4.1 Flash 8 of 12, Haiku and Opus 6 of 12 (+2), GPT-5.4 mini 4 of 12 (+2), DeepSeek V3.2 and Gemini 0 of 12.
+- **#2 A, #2 B and #2 C are found by very different models.** #2 A: DeepSeek V4.1 Flash and GPT-5.4 mini 4 of 4,
+  Haiku and Sonnet 2 of 4, Opus 0 of 4. #2 B: only Sonnet finds it in all 4 runs. #2 C: DeepSeek V4.1 Flash and Opus 4 of 4,
+  Sonnet and Haiku 2 of 4, GPT-5.4 mini 0 of 4.
+- DeepSeek V4.1 Flash is first on the medium pull request together with Sonnet, and total 23 of 28 against 24 for
+  Sonnet, at 0.0037 USD against 0.0552 USD average cost (see "Results").
+- False positives: 4 in total over 84 runs (Haiku 2, GPT-5.4 mini 2); all other models 0.
+- Gemini finds nothing on the medium pull request in 4 runs; on the small pull request it misses one problem
+  completely (#1 B, 0 of 4).
+- Extra valid findings (true remarks beyond the planted problems) are counted separately and are not hits:
+  Opus 8, Sonnet 6, Gemini 4, DeepSeek V4.1 Flash 3, Haiku 2, GPT-5.4 mini 2, DeepSeek V3.2 2. The text of these
+  notes is not published (it would name unplanted findings of the playground).
+- Cell size is 4 runs. Differences of one or two problems between neighbouring models in the totals are within the
+  run-to-run spread, which this test shows directly: several models find a problem in 2 of 4 runs.
+
+### Scoring criteria (neutral)
+
+Fixed per pull request before scoring and applied in id order, followed by a consistency pass. The per-problem
+criteria name the code under review and are kept with the private notes, like the list of planted problems; these
+are the general rules:
+
+- **found:** a finding whose subject is the problem and that names the failure case or consequence at the right
+  code location. Hedged wording ("if X can happen, this fails") still counts when the failure case is named.
+- **borderline:** the problem appears only as a sentence inside a finding about something else; or the finding is
+  vague but points at the right place and consequence; or it addresses an adjacent aspect of the same code
+  without naming the core failure.
+- **missed:** not mentioned.
+- A separate finding that says a weak test hides the problem counts as found only if it names the problem itself;
+  standalone remarks about a weak test are recorded as extra valid findings.
+- **false positive:** a finding that claims a defect that does not exist in the diff (contradicted by the code in
+  the diff or by language or runtime behaviour). Style suggestions, speculation flagged as uncertain and true but
+  unplanted findings are not false positives. True but unplanted findings are counted as **extra valid**.
+  Design remarks that describe real behaviour accurately and claim no defect are counted in neither column.
+- Findings that restate the same problem in several places count once.
+
+## Comparison with CR-44 and CR-48
+
+Earlier numbers (CR-44, CR-48): found out of 14 in the two required runs (small 4, medium 6, large 4), medium also
+out of 15 over five runs. DeepSeek V4.1 Flash had no medium result.
+
+| Model | CR-44/48 total (of 14) | CR-44/48 medium (of 15) | CR-50 total (of 28) | CR-50 medium (of 12) |
+|---|---|---|---|---|
+| `anthropic/claude-sonnet-5.5` | 13 | 13 | 24 | 8 |
+| `deepseek/deepseek-v4.1-flash` | 8 (of 8, no medium) | not scorable | 23 | 8 |
+| `anthropic/claude-opus-5.5` | 12 | 11 | 22 | 6 |
+| `anthropic/claude-haiku-5.5` | 11 | 9 | 22 | 6 |
+| `openai/gpt-5.4-mini` | 10 | 6 | 18 | 4 |
+| `deepseek/deepseek-v3.2` | 8 | 4 | 14 | 0 |
+| `google/gemini-3.8-flash` | 6 | 1 | 12 | 0 |
+
+The order of the models is almost the same, but the medium pull request scores are lower in this fair run for
+Sonnet (8 of 12 against 13 of 15), Opus, Haiku and DeepSeek V3.2 (0 against 4 of 15). Why the numbers differ:
+
+1. **Shared comment state.** In CR-44 and CR-48 all runs of a pull request edited one persistent review comment.
+   PR-Agent keeps the findings of earlier runs in that comment and reads them again, so every later run started
+   from the accumulated state of the runs before it (on #2 up to 93 findings, which finally filled GitHub's comment
+   limit and made the five DeepSeek V4.1 Flash runs of CR-48 unscorable). What a run found, and what
+   the scorer saw in the comment, could therefore depend on which models ran before it. Here
+   every run is a first review, with no earlier state, so each cell measures only that model.
+2. **Order and number of runs.** CR-44/48 ran models in a fixed order; here the order is random per round. The cells
+   have 4 runs for every model, not 2 (5 on the medium pull request).
+3. **A different scorer and stricter written criteria.** CR-44/48 were scored manually by the developer who ran the
+   tests (not blind); CR-50 was scored blind with criteria fixed in advance (a problem counts as found
+   only with its failure case named at the right place). Some earlier "found" calls may be "borderline" under these criteria.
+4. **Diff size for the Claude models on #3** is larger than in CR-44 (see "Observations"), a smaller effect.
+
+We cannot separate these causes with the data we have, and we do not claim that the shared state alone explains
+the gap. The fair run is the one to trust for ranking the models; the earlier tables are the ones to keep only as
+history. The medium pull request lowered the scores of the models that earlier found most there, which fits an
+earlier advantage from carried-over findings, but this is an interpretation and was not tested.
 
 ## Failures (CR-50-T03)
 
@@ -243,7 +332,7 @@ runs there): to be added by the scorer after the mapping is applied.
 - Runner note: `ok: true` from the runner does not guarantee that the comment text can be read later; the
   repeat above is a reminder that a run with a lost result is paid but useless.
 
-## Observations (cost and speed, not quality)
+## Observations (cost and speed)
 
 - Order of cost per large review: Opus 0.24 USD, Sonnet 0.12 USD, Gemini 0.05, GPT-5.4 mini 0.03, DeepSeek V3.2
   0.012, Haiku 0.006, DeepSeek V4.1 Flash 0.003. Only the two Anthropic models above Haiku exceed the customer's
@@ -253,8 +342,7 @@ runs there): to be added by the scorer after the mapping is applied.
 - Since all models now get the whole diff of #3 (37k PR-Agent tokens), the costs of the large pull request are
   higher than in CR-44 for Claude (54.7k input tokens, as already seen in CR-48 for Opus); CR-44's 45.0k came from
   an older cut of the diff.
-- Hit rates and the recommendation (CR-50-T06) follow after blind scoring. The recommendation must not be taken
-  from this draft.
+- The recommendation (CR-50-T06) is pending the customer decision.
 
 ## Test cases
 
@@ -263,9 +351,9 @@ runs there): to be added by the scorer after the mapping is applied.
 | CR-50-T01 | Section "Model ids and prices" and "Pilot and plan": all seven ids exist once, prices listed, pilot run, projection 3.32 USD with 15 percent margin (limit 4.25 for 4 runs). |
 | CR-50-T02 | Every run has a `precheck.json` (comments before, bot comments deleted, comments after, bot comments after = 0); 86 of 86 show 0 bot comments after the deletion and before the run. Summary in "Method" and in the appendix columns. |
 | CR-50-T03 | "Settings" table (identical), 4 counted runs in each of the 21 cells, order mixed per round with seed 980016226; failures in "Failures". |
-| CR-50-T04 | Anonymous comments (84) and `index.csv` prepared; mapping kept separately. Scoring is done by a separate blind scorer; the hit-rate tables above are placeholders. |
+| CR-50-T04 | Anonymous comments (84) and `index.csv`; scored by a separate blind scorer without model names, the mapping applied afterwards (section "Hit rates"). |
 | CR-50-T05 | Total 2.9075 USD (limit 5.00), per model and in total in "Results", confirmed by OpenRouter's key counter. |
-| CR-50-T06 | Pending: needs the hit rates. |
+| CR-50-T06 | Pending customer decision. |
 | CR-50-T07 | This report names the problems only as #1 A/B, #2 A/B/C and #3 A/B. |
 
 ## Commands
