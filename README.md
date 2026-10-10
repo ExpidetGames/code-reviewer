@@ -110,3 +110,4 @@ Pull requests flow upwards:
 3. `development` -> PR into `main` for releases.
 
 Direct pushes to `main` and `development` are not allowed; all changes go through pull requests.
+
