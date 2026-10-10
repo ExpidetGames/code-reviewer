@@ -7,7 +7,7 @@ import { defineConfig } from "vitest/config";
 // E2E specs (*.e2e.ts) are run by Playwright and never matched by Vitest.
 const alias = { "@": fileURLToPath(new URL("./src", import.meta.url)) };
 const setupFiles = ["./src/test-support/network-guard.setup.ts"];
-const maxWorkers = Number(process.env.TEST_MAX_WORKERS ?? 4);
+const maxWorkers = Number(process.env.TEST_MAX_WORKERS) || 4;
 
 export default defineConfig({
   test: {

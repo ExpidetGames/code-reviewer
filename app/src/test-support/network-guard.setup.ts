@@ -33,7 +33,8 @@ function resolveTarget(args: unknown[]): ConnectTarget {
     if (options.path) return { socketPath: options.path };
     return { host: options.host ?? "localhost" };
   }
-  if (typeof first === "string") return { socketPath: first };
+  // A numeric string is a port (Node accepts it); only other strings are unix socket paths.
+  if (typeof first === "string" && Number.isNaN(Number(first))) return { socketPath: first };
   return { host: typeof second === "string" ? second : "localhost" };
 }
 

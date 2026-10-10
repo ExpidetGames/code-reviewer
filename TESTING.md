@@ -15,15 +15,23 @@ it. Do not document planned things as if they existed in READMEs or PR descripti
   systems are replaced by fakes (section 5). Real model runs are manual and never part of CI.
 - No silent skip. Which suite runs a file is decided by its location and name, not by a runtime
   check. A suite that needs infrastructure (Docker stack) fails loudly when it is missing, it never
-  skips.
-- Never weaken, skip or delete a test to get green. Never raise retries to hide flakiness. Report
-  flaky tests.
-- Flaky e2e journeys are quarantined with `@flaky` in the title in the same PR that opens a repair
-  ticket (PRs skip them, the nightly run still runs them). Unit and integration tests have no
-  quarantine: fix at once, or skip in code with the reason right beside the skip.
+  skips. Known gap until `verify:structure` lands (planned): an app test file outside the Vitest
+  project globs (for example `app/integration-tests/x.test.ts` without the `.integration` infix) is
+  not run by any project and nothing reports it, so check the suffix rules in section 4 by hand.
+  The runner side has no such gap: a pytest file outside `tests/<level>/` is a collection error.
+- Never weaken, skip or delete a test to get green. Never raise retries to hide flakiness (the one
+  Playwright retry on CI is the accepted baseline, it is not a place to add more). Report flaky
+  tests.
+- No skipped or focused tests in code: ESLint rejects `.skip` and `.only` tests in
+  Vitest files (`vitest/no-disabled-tests`, `vitest/no-focused-tests`) and in Playwright files
+  (`playwright/no-skipped-test`, `playwright/no-focused-test`).
+- The only quarantine is for e2e journeys: a journey failing twice without a code change gets
+  `@flaky` in its title in the same PR that opens a repair ticket (PRs skip tagged journeys with
+  `--grep-invert @flaky`, the nightly run still runs them). Unit and integration tests have no
+  quarantine: fix at once, or report to the project lead; do not skip.
 - Time budget: a PR CI run over 15 minutes, or a smoke run over 5 minutes, is a defect to be fixed
   like a red test.
-- No coverage threshold. Coverage may be run for information only.
+- No coverage threshold and no coverage command for now. Add both together if the customer asks.
 - No secrets in tests, logs or output. Test values are fixed dummies.
 
 ## 2. Levels
@@ -38,6 +46,10 @@ it. Do not document planned things as if they existed in READMEs or PR descripti
 | Engine smoke | pytest, marker `engine` | Docker stack, nightly and release PRs | The real, pinned PR-Agent against the GitHub fake and the LLM fake. Asserts the shape of what was posted, never review quality. Deselected by default. | marker exists, no tests yet |
 | E2E | Playwright, chromium | production build (`next build` and `next start`), later the Docker stack | User-visible flows. At most about 8 `@smoke` journeys. | exists (start page) |
 | Manual | none | a developer machine | Real PR-Agent against a real model on a sandbox repository before a release. The result goes into the PR description. Never in CI. | n/a |
+
+Unit means no database, no real process and no outside network. The one exception is the network
+guard's own tests (app and runner): they open sockets on loopback to prove that loopback stays
+reachable while everything else is blocked.
 
 SQLite is a file, so integration tests are cheap and may run on the host. The rule stays: anything
 that touches Kysely and a real SQLite file is `*.integration.test.ts`; pure logic never opens a
@@ -134,17 +146,19 @@ App (`app/`, Node version from `.nvmrc`, pnpm):
   environment, reset mocks per test and load the network guard. `unit`: timeout 10 s. `integration`:
   forks pool, timeout 30 s, hook timeout 60 s. At most 4 workers; override with `TEST_MAX_WORKERS`.
 - Playwright (`playwright.config.ts`): `testDir: e2e`, `*.e2e.ts` only, chromium, `forbidOnly` and
-  one retry on CI, trace and screenshot on failure. It builds the app and runs `next start` on
+  one retry on CI (the accepted baseline, see section 1), trace and screenshot on failure. It builds the app and runs `next start` on
   `E2E_PORT` (default 3417, never 3000 or 3100) so it never touches another running server. Without a
   downloaded Chromium, run with an installed Chrome: `PLAYWRIGHT_CHANNEL=chrome`.
 - ESLint flat config (Next.js core-web-vitals and TypeScript rules, `no-explicit-any` as an error,
-  Vitest `no-focused-tests` and `no-disabled-tests`) and `tsc --noEmit` with `strict`.
+  Vitest and Playwright plugin rules against focused and skipped tests) and `tsc --noEmit` with
+  `strict`.
 
 Runner (`runner/`, Python version pinned in `.python-version`, uv, `uv.lock` committed):
 
 - pytest with `--strict-markers`; markers `unit` (default level), `integration`, `contract`, `engine`;
-  `engine` is deselected by default, run it with `-m engine`. `pytest-timeout`: 10 s per test by
-  default (raise per level when the level needs it). `pytest-socket` as described above.
+  `engine` is deselected by default, run it with `-m engine`. `pytest-timeout` per level, set in
+  `tests/conftest.py` from the test's directory: unit 10 s, integration and contract 60 s, engine
+  180 s. `pytest-socket` as described above.
 - `ruff check` and `ruff format --check`, `pyright` in strict mode.
 
 Planned: `verify:structure` (placement and naming rules, test files must be discovered by a runner,
@@ -165,7 +179,8 @@ no process identifiers in titles), `verify:server-only-canary`, the Docker test 
 
 Inside `app/`: `pnpm dev | build | start | lint | typecheck | test | test:watch | test:int | test:e2e`.
 Inside `runner/`: `uv sync --locked`, `uv run ruff check .`, `uv run ruff format --check .`,
-`uv run pyright`, `uv run pytest` (default: everything except `engine`), `uv run pytest -m unit`.
+`uv run pyright`, `uv run pytest` (default: everything except `engine`), `uv run pytest -m unit`,
+`uv run pytest -m "integration or contract"`.
 
 `pnpm test:int` passes while no integration test exists (`--passWithNoTests`). Remove that flag with
 the first integration test.

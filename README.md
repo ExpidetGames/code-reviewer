@@ -38,6 +38,9 @@ cd app
 pnpm dev          # http://localhost:3000, shows an empty start page for now
 ```
 
+Agents and parallel worktrees must not use ports 3000 or 3100 (see `AGENTS.md`); start the dev
+server on your own port instead: `pnpm dev --port 3417`.
+
 Production build:
 
 ```sh
@@ -74,8 +77,8 @@ Or per part:
 |---|---|---|
 | Lint | `pnpm lint` | `uv run ruff check .` and `uv run ruff format --check .` |
 | Typecheck | `pnpm typecheck` | `uv run pyright` |
-| Tests | `pnpm test` | `uv run pytest` |
-| Integration | `pnpm test:int` | `uv run pytest -m integration` |
+| Unit tests | `pnpm test` | `uv run pytest -m unit` |
+| Integration | `pnpm test:int` | `uv run pytest -m "integration or contract"` |
 
 End-to-end tests run against a production build on port 3417:
 

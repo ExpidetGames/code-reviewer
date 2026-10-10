@@ -1,7 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
 // Own port per checkout; never 3000 or 3100 so parallel work in other worktrees is safe.
-const port = Number(process.env.E2E_PORT ?? 3417);
+const port = Number(process.env.E2E_PORT) || 3417;
 const baseURL = `http://127.0.0.1:${port}`;
 
 export default defineConfig({
@@ -10,7 +10,7 @@ export default defineConfig({
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  workers: Number(process.env.E2E_WORKERS ?? 2),
+  workers: Number(process.env.E2E_WORKERS) || 2,
   timeout: 60_000,
   reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : "list",
   use: {

@@ -50,6 +50,21 @@ describe("network guard", () => {
   });
 
   // CR-14-T06
+  it("blocks a socket whose port is given as a numeric string", async () => {
+    const socket = new net.Socket();
+    // Node accepts a numeric string as a port, so the guard must not mistake it for a unix path.
+    const connect = socket.connect.bind(socket) as unknown as (
+      port: string,
+      host: string,
+    ) => net.Socket;
+    connect("80", "203.0.113.10");
+
+    const [error] = (await once(socket, "error")) as [NodeJS.ErrnoException];
+
+    expect(error.code).toBe("NETWORK_GUARD_BLOCKED");
+  });
+
+  // CR-14-T06
   it("still allows requests to loopback", async () => {
     const response = await fetch(`http://127.0.0.1:${port}/`);
 

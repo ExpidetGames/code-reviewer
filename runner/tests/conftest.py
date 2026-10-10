@@ -11,6 +11,9 @@ import pytest
 
 _LEVELS = ("unit", "integration", "contract", "engine")
 _TESTS_ROOT = Path(__file__).parent
+# Seconds per test, by level (pytest-timeout). Integration and contract tests start processes
+# and servers; engine tests run the real PR-Agent.
+_TIMEOUTS = {"unit": 10, "integration": 60, "contract": 60, "engine": 180}
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
@@ -23,3 +26,4 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
                 "place the test in the directory of its level"
             )
         item.add_marker(getattr(pytest.mark, level))
+        item.add_marker(pytest.mark.timeout(_TIMEOUTS[level]))

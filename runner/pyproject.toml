@@ -37,7 +37,6 @@ addopts = [
     "-m",
     "not engine",
 ]
-timeout = 10
 filterwarnings = [
     # pytest-socket warns about every blocked connection; the tests assert the block themselves.
     "ignore:A test tried to use socket.socket.connect\\(\\):UserWarning",

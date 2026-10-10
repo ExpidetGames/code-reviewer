@@ -17,7 +17,8 @@ test.describe("start page", () => {
 
     expect(response?.status()).toBe(200);
     await expect(page.locator("body")).toHaveText("", { useInnerText: true });
-    await page.waitForLoadState("networkidle");
+    await page.waitForLoadState("load");
+    await expect(page).toHaveTitle("Code Reviewer");
     expect(consoleErrors).toEqual([]);
   });
 });
