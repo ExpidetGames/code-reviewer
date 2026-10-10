@@ -197,7 +197,8 @@ value), set Literal.
 | `REVIEW_DEBOUNCE_SECONDS` | optional | A number from 0 to 600 | How long a push to a pull request waits before its automatic review starts. Empty: 90. |
 | `DATABASE_BUSY_TIMEOUT_MS` | optional | A number of milliseconds | How long a database write waits for a lock. Empty: 5000. |
 | `BACKUP_TIME` | optional | `HH:MM` in UTC, or `off` | When the app backs up the database every day. Empty: `02:30`. Use `off` only together with a Coolify scheduled task, [section 8](#8-storage-and-backups). |
-| `RUNNER_CONCURRENCY` | optional | A whole number from 1 to 32 | How many reviews the runner runs at once, [section 9](#9-runner-sizing-and-runner_concurrency). Empty: 3 (right for the runner's 2 GiB). Raise it only together with `mem_limit` of the runner. |
+| `RUNNER_CONCURRENCY` | optional | A whole number from 1 to 32 | How many reviews the runner runs at once, [section 9](#9-runner-sizing-and-runner_concurrency). Empty: 3 (right for the runner's 2 GiB). Raise it only together with `RUNNER_MEMORY_LIMIT`. |
+| `RUNNER_MEMORY_LIMIT` | optional | A Docker memory size such as `3g` or `1536m` | The memory the runner container may use. Empty: 2g. Change it together with `RUNNER_CONCURRENCY`, the pairs are in [section 9](#9-runner-sizing-and-runner_concurrency). |
 | `RUNNER_JOB_TIMEOUT_SECONDS` | optional | A number of seconds | Hard timeout of one review; the runner ends a longer one and reports `timeout`. Empty: 1200 (20 minutes). |
 | `RUNNER_POLL_INTERVAL_SECONDS` | optional | A number of seconds | How long the runner waits between two requests for work when nothing is waiting. Empty: 5. |
 | `RUNNER_ID` | optional | A name | Shown in the app's logs as the name of this runner (letters, digits and `._:@-`). Empty: `runner-<container host name>`. |
@@ -335,15 +336,17 @@ RUNNER_CONCURRENCY = floor( (runner memory in MiB - 256) / (321 x 1.5) )
 ```
 
 256 MiB is reserved for the runner's own loop; 321 MiB is the measured peak of one process, 1.5 is a safety
-factor. The runner container in `compose.coolify.yml` is limited to **2 GiB** (`mem_limit: 2g`), which gives
-**3** parallel reviews, about 1.5 per GiB. Use this table if you change the limit:
+factor. The runner container in `compose.coolify.yml` is limited to **2 GiB** (`2g`, the default of the
+variable `RUNNER_MEMORY_LIMIT`), which gives **3** parallel reviews, about 1.5 per GiB. To run more, set the
+two variables as a pair in Coolify's *Environment Variables* and redeploy; no change to the tracked Compose
+file is needed. Pairs that follow the formula:
 
-| Runner memory (MiB) | `RUNNER_CONCURRENCY` |
-|---|---|
-| 1024 | 1 |
-| 2048 | 3 |
-| 3072 | 5 |
-| 4096 | 7 |
+| Runner memory (MiB) | `RUNNER_MEMORY_LIMIT` | `RUNNER_CONCURRENCY` |
+|---|---|---|
+| 1024 | `1g` | 1 |
+| 2048 | `2g` | 3 |
+| 3072 | `3g` | 5 |
+| 4096 | `4g` | 7 |
 
 The limit and the number belong together: more parallel reviews than the memory allows get processes
 killed, and a reviewer sees a failed run. Other limits can apply before memory does: the model provider's
@@ -353,7 +356,7 @@ Server size (CR-13, `docs/spike/cr-13-measurements.md`): operating system 0.3 GB
 about 1 GB, app 0.5 GB, runner 1 GB with three busy slots, 25 percent headroom: **3.9 GB**, so 4 GB is the
 calculated minimum. **Recommended: 8 GB RAM and 4 vCPU**, because Coolify's share and the operating system
 are estimates, a deployment builds the images on the same machine, and a redeploy briefly runs more
-containers. On a 4 GB server use `RUNNER_CONCURRENCY=2` and a runner limit of 1.5 GiB. Disk: the images
+containers. On a 4 GB server use `RUNNER_CONCURRENCY=2` and `RUNNER_MEMORY_LIMIT=1536m`. Disk: the images
 need about 1 GB, Docker's build cache more.
 
 ### Stopping the runner
@@ -365,7 +368,7 @@ job back into the queue, so the review is run again by the next runner. The Comp
 `stop_grace_period: 90s`, 90 seconds (the 60, five more between the polite and the hard kill of a stuck
 review, up to ten to send the report, and some margin), because Docker's default of 10 seconds would kill the
 runner before it has reported anything. The runner's image starts it behind `tini`, which passes the signal
-on, so no `init: true` is needed. `docker/smoke/compose.sh` proves this with a fake review. Do not stop the
+on, so no `init: true` is needed. `docker/smoke/compose.sh` proves that Docker waits for the runner's report instead of killing it after 10 seconds (with a fake review and a shortened grace period of 20 seconds; the 60 + 5 + 10 arithmetic is pinned by unit tests). Do not stop the
 runner with `docker kill`. Whether Coolify waits for `stop_grace_period` when it redeploys is not verified
 (see [What is verified](#what-is-verified)); the worst case is a job that is taken back when its lease runs out
 two minutes later.

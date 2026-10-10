@@ -141,8 +141,14 @@ describe("compose.coolify.yml services", () => {
 
   // CR-39-T12
   it("limits the memory of the runner to the 2 GiB its number of parallel reviews is calculated for, as compose.yml does", () => {
-    expect(service(coolify, "runner").mem_limit).toBe("2g");
-    expect(service(plain, "runner").mem_limit).toBe("2g");
+    // Overridable (RUNNER_MEMORY_LIMIT) because the tracked file cannot be edited on Coolify; the
+    // default is the 2 GiB the default concurrency is calculated for.
+    expect(service(coolify, "runner").mem_limit).toBe(
+      "${RUNNER_MEMORY_LIMIT:-2g}",
+    );
+    expect(service(plain, "runner").mem_limit).toBe(
+      "${RUNNER_MEMORY_LIMIT:-2g}",
+    );
     expect(service(coolify, "app")).not.toHaveProperty("mem_limit");
   });
 

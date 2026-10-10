@@ -72,10 +72,11 @@ services:
     image: ${RUNNER_IMAGE:-ghcr.io/expidetgames/code-reviewer-runner:development}
     restart: unless-stopped
     # No published port: the runner only talks to the app, over the compose network.
-    # The memory the runner may use as a whole: 2 GiB, the figure the number of parallel reviews
-    # (RUNNER_CONCURRENCY, about 1.5 per GiB) is calculated from, see docs/deployment-coolify.md. A
-    # review needs about 320 MB; without a limit too many at once could take the whole server's memory.
-    mem_limit: 2g
+    # The memory the runner may use as a whole: 2 GiB by default, the figure the number of parallel
+    # reviews (RUNNER_CONCURRENCY, about 1.5 per GiB) is calculated from, see docs/deployment-coolify.md,
+    # section 9, for the pairs to choose from. A review needs about 320 MB; without a limit too many at
+    # once could take the whole server's memory. Change both settings together.
+    mem_limit: ${RUNNER_MEMORY_LIMIT:-2g}
     # `docker compose stop` and a redeploy send SIGTERM. The loop then stops claiming, gives running
     # reviews 60 seconds to finish (RUNNER_SHUTDOWN_GRACE_SECONDS, not passed on here so that it cannot
     # outgrow this value), reports what is left as runner_shutdown, and exits. Docker's default of 10

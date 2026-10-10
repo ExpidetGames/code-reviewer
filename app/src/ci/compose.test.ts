@@ -346,6 +346,13 @@ function documented(): Map<string, { value: string; explained: boolean }> {
         result.set(match[1] ?? "", { value: match[2] ?? "", explained });
       }
     }
+    // `# NAME: what the compose files do with it`: a variable the code reads that is not a setting
+    // (the compose files fix it or only the test stack sets it). It is written without an equals
+    // sign so that nobody takes it for a line to uncomment.
+    for (const line of lines) {
+      const note = /^# ([A-Z][A-Z0-9_]*): \S/.exec(line);
+      if (note) result.set(note[1] ?? "", { value: "", explained: true });
+    }
   }
   return result;
 }

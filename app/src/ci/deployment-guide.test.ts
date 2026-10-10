@@ -48,9 +48,11 @@ function section(heading: string): string {
 /** Every variable named in .env.example, set or only shown in a comment. */
 function envExampleVariables(): Set<string> {
   return new Set(
-    [...envExample.matchAll(/^#?\s?([A-Z][A-Z0-9_]*)=/gm)].map(
-      (match) => match[1] as string,
-    ),
+    [
+      ...envExample.matchAll(/^#?\s?([A-Z][A-Z0-9_]*)=/gm),
+      // `# NAME: ...` explains a variable that is not a setting (fixed by the compose files).
+      ...envExample.matchAll(/^# ([A-Z][A-Z0-9_]*): \S/gm),
+    ].map((match) => match[1] as string),
   );
 }
 
@@ -119,6 +121,8 @@ describe("the Coolify guide and the environment variables", () => {
     const withDefault = [
       ...Object.entries(appEnvironment),
       ...Object.entries(coolify.services.runner?.environment ?? {}),
+      // The memory limit of the runner is a setting too, though not an environment variable.
+      ["RUNNER_MEMORY_LIMIT", String(coolify.services.runner?.mem_limit)],
     ]
       .filter(([, value]) => /^\$\{[A-Z0-9_]+:-/.test(String(value)))
       .map(([name]) => name)
@@ -300,6 +304,17 @@ describe("the runner in the Coolify guide", () => {
   });
 
   // CR-51-T03
+  it("explains the memory limit of the runner, which is what a higher RUNNER_CONCURRENCY needs", () => {
+    const rows = variableRows(section("6. Environment variables"));
+    const row = rows.find((entry) => entry.names[0] === "RUNNER_MEMORY_LIMIT");
+
+    expect(row?.required).toBe("optional");
+    expect(row?.cells.join("|")).toContain("Empty: 2g");
+    expect(row?.cells.join("|")).toContain("RUNNER_CONCURRENCY");
+    expect(runnerSection).toContain("`RUNNER_MEMORY_LIMIT`");
+  });
+
+  // CR-51-T03
   it("names the runner settings the Compose file does not pass on, and why", () => {
     const notUsed = byRequirement("not used");
 
@@ -316,6 +331,11 @@ describe("the runner in the Coolify guide", () => {
   it("explains that a stop gives running reviews time to finish and report", () => {
     expect(guide).toContain("`runner_shutdown`");
     expect(guide).toContain("90 seconds");
+    // What the smoke test proves, said no stronger than it is: it runs with a shorter grace period.
+    expect(guide).toContain(
+      "proves that Docker waits for the runner's report instead of killing it after 10 seconds",
+    );
+    expect(guide).not.toContain("compose.sh` proves this");
   });
 
   it("tells how to restrict what the runner can reach, naming the three places it needs", () => {
@@ -393,13 +413,18 @@ describe("the runner sizing in the Coolify guide", () => {
 
   // CR-39-T12
   it("gives the number of parallel reviews the formula gives, for every memory size in its table", () => {
-    const rows = [...sizing.matchAll(/^\| (\d+) \| (\d+) \|$/gm)].map(
-      (match) => [Number(match[1]), Number(match[2])] as const,
+    const rows = [
+      ...sizing.matchAll(/^\| (\d+) \| `(\d+)g` \| (\d+) \|$/gm),
+    ].map(
+      (match) =>
+        [Number(match[1]), Number(match[2]), Number(match[3])] as const,
     );
 
     expect(rows.length).toBeGreaterThanOrEqual(4);
-    for (const [mib, concurrency] of rows)
+    for (const [mib, gib, concurrency] of rows) {
+      expect(gib * 1024, `${String(mib)} MiB as a Docker limit`).toBe(mib);
       expect(concurrency, `${String(mib)} MiB`).toBe(slots(mib));
+    }
   });
 
   // CR-39-T12
@@ -414,8 +439,9 @@ describe("the runner sizing in the Coolify guide", () => {
   it("describes the memory limit that the Compose file really sets for the runner", () => {
     const limit = coolify.services.runner?.mem_limit;
 
-    expect(limit).toBe("2g");
-    expect(sizing).toContain("`mem_limit: 2g`");
+    expect(limit).toBe("${RUNNER_MEMORY_LIMIT:-2g}");
+    expect(sizing).toContain("`RUNNER_MEMORY_LIMIT`");
+    expect(sizing).toContain("**2 GiB** (`2g`, the default of");
     expect(sizing).toContain(`**${String(slots(2048))}** parallel reviews`);
   });
 });
