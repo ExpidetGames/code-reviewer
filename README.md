@@ -62,6 +62,28 @@ cd runner
 uv run code-reviewer-runner --version
 ```
 
+### Run one PR-Agent job
+
+`code-reviewer-run-job` runs one PR-Agent command (`review`, `improve`, `describe` or `ask`) for one
+pull request. The job is JSON on stdin (`runner/src/code_reviewer_runner/job.py` documents the
+shape: pull request URL, command, installation token and bot login, LLM model and key). The result
+is exactly one line of JSON on stdout (`ok`, `durationMs`, `commentUrl`, `errorCode`, `logTail`,
+`usage`), and the exit code is 0 for `ok` and 1 otherwise. PR-Agent is pinned to one version
+(`runner/pyproject.toml`); the runner patches the identity lookup of that exact version, so a
+PR-Agent upgrade needs a conscious change of both (see `runner/src/code_reviewer_runner/identity_patch.py`).
+
+```sh
+echo '{}' | uv run code-reviewer-run-job     # an invalid job: {"ok":false,"errorCode":"invalid_job",...}
+```
+
+A real run against the sandbox repository (posts a real comment, costs a few cents; needs the App
+credentials and an OpenRouter key in the environment, see the docstring of the script):
+
+```sh
+cd runner
+uv run python scripts/manual_review.py
+```
+
 ## Container images
 
 Two images are built from the repository, each with its own Dockerfile and `.dockerignore`:
@@ -69,7 +91,7 @@ Two images are built from the repository, each with its own Dockerfile and `.doc
 | Image | Build | Notes |
 |---|---|---|
 | `ghcr.io/expidetgames/code-reviewer-app` | `docker build -t code-reviewer-app app` | Next.js standalone server on port 3000, runs as uid 10001. The database lives in the volume `/data` (`DATABASE_PATH=/data/app.db`); it is created and migrated on start. |
-| `ghcr.io/expidetgames/code-reviewer-runner` | `docker build -t code-reviewer-runner runner` | Python (version of `runner/.python-version`) with the runner installed by uv from `uv.lock`, runs as uid 10001. PR-Agent is added with its own ticket. |
+| `ghcr.io/expidetgames/code-reviewer-runner` | `docker build -t code-reviewer-runner runner` | Python (version of `runner/.python-version`) with the runner installed by uv from `uv.lock`, runs as uid 10001. Holds PR-Agent (pinned, from `uv.lock`) and its tiktoken encodings, so a job needs no download besides GitHub and the LLM. |
 
 ```sh
 docker run --rm -p 3000:3000 -v code-reviewer-data:/data code-reviewer-app

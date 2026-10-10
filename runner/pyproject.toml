@@ -3,10 +3,13 @@ name = "code-reviewer-runner"
 version = "0.1.0"
 description = "Worker that picks up review jobs from the Code Reviewer app and runs PR-Agent."
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "pr-agent==0.47.0",
+]
 
 [project.scripts]
 code-reviewer-runner = "code_reviewer_runner.cli:main"
+code-reviewer-run-job = "code_reviewer_runner.runner:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -22,6 +25,8 @@ dev = [
     "pytest-timeout",
     "ruff",
     "pyright",
+    "pyjwt>=2.15.1",
+    "cryptography>=50.0.2",
 ]
 
 [tool.pytest.ini_options]
@@ -40,6 +45,8 @@ addopts = [
 filterwarnings = [
     # pytest-socket warns about every blocked connection; the tests assert the block themselves.
     "ignore:A test tried to use socket.socket.connect\\(\\):UserWarning",
+    # Raised while PR-Agent itself is imported; not ours to fix.
+    "ignore:Support for class-based `config` is deprecated:DeprecationWarning",
 ]
 markers = [
     "unit: pure logic on the host, no real process or network (default level)",
