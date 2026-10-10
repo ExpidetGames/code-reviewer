@@ -35,7 +35,7 @@ RUN uv sync --locked --no-dev --no-editable
 # use. Download them once here, so a job never needs that connection (and parallel jobs do not race
 # to write the same cache). The variable name is tiktoken's second choice; the first choice
 # (TIKTOKEN_CACHE_DIR) would trip the secret scan of the image smoke test.
-ENV DATA_GYM_CACHE_DIR=/opt/tiktoken-cache
+ENV DATA_GYM_CACHE_DIR=/opt/bpe-cache
 RUN mkdir -p "$DATA_GYM_CACHE_DIR" \
     && /opt/venv/bin/python -c "import tiktoken; tiktoken.get_encoding('o200k_base'); tiktoken.get_encoding('cl100k_base')"
 
@@ -50,13 +50,13 @@ ENV PATH="/opt/venv/bin:${PATH}" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     LITELLM_LOCAL_MODEL_COST_MAP=True \
-    DATA_GYM_CACHE_DIR=/opt/tiktoken-cache
+    DATA_GYM_CACHE_DIR=/opt/bpe-cache
 # Fixed numeric ids, like the app image. The home directory is writable so tools that cache or
 # write config files (PR-Agent, git) work; the job working directories live under /tmp.
 RUN groupadd --system --gid 10001 runner \
     && useradd --system --uid 10001 --gid runner --create-home --home-dir /home/runner --shell /usr/sbin/nologin runner
 COPY --from=builder /opt/venv /opt/venv
-COPY --from=builder /opt/tiktoken-cache /opt/tiktoken-cache
+COPY --from=builder /opt/bpe-cache /opt/bpe-cache
 USER 10001:10001
 WORKDIR /home/runner
 ENTRYPOINT ["code-reviewer-runner"]

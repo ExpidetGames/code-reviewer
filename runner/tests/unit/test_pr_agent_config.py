@@ -114,7 +114,7 @@ def test_nothing_from_the_parent_environment_leaks_except_the_plain_runtime_vari
         "PATH": "/usr/bin",
         "HOME": "/home/runner",
         "LANG": "C.UTF-8",
-        "DATA_GYM_CACHE_DIR": "/opt/tiktoken-cache",
+        "DATA_GYM_CACHE_DIR": "/opt/bpe-cache",
         "GITHUB_APP_PRIVATE_KEY_PATH": "/secret/app.pem",
         "OPENROUTER_API_KEY": "should-not-pass",
         "GITHUB__USER_TOKEN": "parent-token",
@@ -127,7 +127,7 @@ def test_nothing_from_the_parent_environment_leaks_except_the_plain_runtime_vari
     assert env["PATH"] == "/usr/bin"
     assert env["HOME"] == "/home/runner"
     assert env["LANG"] == "C.UTF-8"
-    assert env["DATA_GYM_CACHE_DIR"] == "/opt/tiktoken-cache"
+    assert env["DATA_GYM_CACHE_DIR"] == "/opt/bpe-cache"
     assert env["GITHUB__USER_TOKEN"] == TOKEN
     assert "GITHUB_APP_PRIVATE_KEY_PATH" not in env
     assert "OPENROUTER_API_KEY" not in env
