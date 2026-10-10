@@ -629,3 +629,51 @@ def test_absurdly_deep_json_is_an_invalid_job_not_a_crash() -> None:
 
     assert code == 1
     assert json.loads(out.getvalue())["errorCode"] == "invalid_job"
+
+
+def test_a_tool_option_like_true_does_not_blank_the_result_of_a_good_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def double() -> bool:
+        logger.info("inline key issues are on: true")
+        provider_with_pull().publish_comment(f"## PR Reviewer Guide\n\n{REVIEW_MARKER}\n\nbody")
+        return True
+
+    use_double(monkeypatch, double)
+    job = make_job(env={"PR_REVIEWER__INLINE_KEY_ISSUES": "true"})
+    out = io.StringIO()
+    capture = LogCapture(Redactor(job.secrets))
+    logger.remove()
+    sink = logger.add(capture, level="INFO", format="{message}")
+    try:
+        result = runner.run_job(job, capture, time.monotonic())
+    finally:
+        logger.remove(sink)
+
+    runner._ResultChannel(out).write(result, job.secrets)  # pyright: ignore[reportPrivateUsage]
+    printed = json.loads(out.getvalue())
+    assert printed["ok"] is True
+    assert printed["commentUrl"] == "https://github.com/octo/repo/pull/7#c1"
+    assert "inline key issues are on: true" in printed["logTail"]
+
+
+def test_the_watchdog_still_prints_a_timeout_result_when_the_log_tail_cannot_be_built(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class BrokenCapture(LogCapture):
+        def tail(self) -> str:
+            raise RuntimeError("cannot build the tail")
+
+    exits: list[int] = []
+    monkeypatch.setattr(runner.os, "_exit", exits.append)
+    monkeypatch.setattr(runner, "HARD_TIMEOUT_GRACE_SECONDS", 0.0)
+    out = io.StringIO()
+    channel = runner._ResultChannel(out)  # pyright: ignore[reportPrivateUsage]
+
+    timer = runner._start_watchdog(  # pyright: ignore[reportPrivateUsage]
+        0.01, channel, time.monotonic(), BrokenCapture(Redactor([])), []
+    )
+    timer.join(timeout=5)
+
+    assert exits == [1]
+    assert json.loads(out.getvalue())["errorCode"] == "timeout"

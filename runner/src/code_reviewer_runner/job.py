@@ -49,7 +49,6 @@ _MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,199}")
 # keys: PR-Agent has many sections (litellm, openai, azure, push_outputs, ...) that route requests
 # or credentials, and a new PR-Agent version can add more.
 _ENV_KEY = re.compile(r"(PR_REVIEWER|PR_DESCRIPTION|PR_CODE_SUGGESTIONS|PR_QUESTIONS)__[A-Z0-9_]+")
-_SECRET_LOOKING_KEY = re.compile(r"KEY|TOKEN|SECRET|PASSWORD|PRIVATE")
 
 
 class Command(StrEnum):
@@ -95,10 +94,9 @@ class Job:
     @property
     def secrets(self) -> tuple[str, ...]:
         """Every value that must never appear in an output."""
-        from_env = tuple(
-            value for key, value in self.env.items() if _SECRET_LOOKING_KEY.search(key)
-        )
-        return (self.git.token, self.llm.api_key, *from_env)
+        # `env` is a closed list of tool options and holds no credentials, so its values are not
+        # secrets: treating a value such as "true" as one would blank the result of a good run.
+        return (self.git.token, self.llm.api_key)
 
 
 def _invalid(detail: str) -> JobError:

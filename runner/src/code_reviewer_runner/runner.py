@@ -194,8 +194,23 @@ def _start_watchdog(
     """Last resort for a command that blocks the event loop and so ignores the soft timeout."""
 
     def fire() -> None:
-        result = _failure(ErrorCode.TIMEOUT, "the command did not stop in time", started, capture)
-        if channel.write(result, secrets) is not None:
+        try:
+            result = _failure(
+                ErrorCode.TIMEOUT, "the command did not stop in time", started, capture
+            )
+        except Exception:
+            result = JobResult(
+                ok=False,
+                duration_ms=_elapsed_ms(started),
+                comment_url=None,
+                error_code=ErrorCode.TIMEOUT,
+                log_tail="timeout: the command did not stop in time",
+            )
+        try:
+            written = channel.write(result, secrets)
+        except Exception:
+            written = 1
+        if written is not None:
             os._exit(1)
 
     timer = threading.Timer(seconds + HARD_TIMEOUT_GRACE_SECONDS, fire)

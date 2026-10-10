@@ -278,15 +278,11 @@ def test_extra_environment_is_limited_to_the_settings_of_the_four_tools() -> Non
         assert parse(valid_job(env={key: "x"})).env == {key: "x"}
 
 
-def test_extra_environment_values_that_look_like_secrets_are_registered_for_redaction() -> None:
-    job = parse(
-        valid_job(env={"PR_REVIEWER__EXTRA_INSTRUCTIONS": "plain", "PR_REVIEWER__API_KEY": "hush"})
-    )
+def test_extra_environment_values_are_not_treated_as_secrets() -> None:
+    job = parse(valid_job(env={"PR_REVIEWER__INLINE_KEY_ISSUES": "true"}))
 
-    assert "hush" in job.secrets
-    assert "plain" not in job.secrets
-    assert job.git.token in job.secrets
-    assert job.llm.api_key in job.secrets
+    assert job.env == {"PR_REVIEWER__INLINE_KEY_ISSUES": "true"}
+    assert job.secrets == (job.git.token, job.llm.api_key)
 
 
 def test_the_llm_endpoint_can_only_be_overridden_with_a_loopback_address() -> None:
