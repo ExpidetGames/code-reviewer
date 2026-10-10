@@ -35,7 +35,7 @@ This runs `pnpm --dir app install --frozen-lockfile` and `uv --directory runner 
 
 ```sh
 cd app
-pnpm dev          # http://localhost:3000, shows an empty start page for now
+pnpm dev          # http://localhost:3000, needs the sign in settings below
 ```
 
 Agents and parallel worktrees must not use ports 3000 or 3100 (see `AGENTS.md`); start the dev
@@ -55,6 +55,16 @@ created and migrated when the server starts; a missing directory stops the start
 message. Settings and the database layer are described in `app/.env.example` and
 `app/src/db/README.md`.
 
+### Sign in
+
+Every page except the login page needs a session, and GitHub is the only way to get one. The server
+refuses to start until the four sign in settings in `app/.env.example` are set: a random
+`BETTER_AUTH_SECRET`, the address of the app in `BETTER_AUTH_URL`, and the client id and secret of
+a GitHub OAuth app of your own (GitHub > Settings > Developer settings > OAuth Apps). Register
+`<BETTER_AUTH_URL>/api/auth/callback/github` as its "Authorization callback URL". Until the access
+list ticket (CR-19) lands, every GitHub account can sign in, so do not expose an instance yet.
+How it works: `app/src/auth/README.md`.
+
 ## Run the runner locally
 
 ```sh
@@ -72,7 +82,9 @@ Two images are built from the repository, each with its own Dockerfile and `.doc
 | `ghcr.io/expidetgames/code-reviewer-runner` | `docker build -t code-reviewer-runner runner` | Python (version of `runner/.python-version`) with the runner installed by uv from `uv.lock`, runs as uid 10001. PR-Agent is added with its own ticket. |
 
 ```sh
-docker run --rm -p 3000:3000 -v code-reviewer-data:/data code-reviewer-app
+docker run --rm -p 3000:3000 -v code-reviewer-data:/data \
+  -e BETTER_AUTH_SECRET=... -e BETTER_AUTH_URL=http://localhost:3000 \
+  -e GITHUB_OAUTH_CLIENT_ID=... -e GITHUB_OAUTH_CLIENT_SECRET=... code-reviewer-app
 docker run --rm code-reviewer-runner --version
 ```
 
@@ -106,7 +118,8 @@ Or per part:
 | Unit tests | `pnpm test` | `uv run pytest -m unit` |
 | Integration | `pnpm test:int` | `uv run pytest -m "integration or contract"` |
 
-End-to-end tests run against a production build on port 3417:
+End-to-end tests run against a production build on port 3417 (`E2E_PORT`), next to a fake GitHub on
+a fake GitHub on a random port (`fakes/github`):
 
 ```sh
 make test-e2e                              # needs a Playwright browser:
