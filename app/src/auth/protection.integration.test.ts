@@ -15,8 +15,20 @@ import { concretePath, discoverRoutes } from "../test-support/routes.ts";
 import { createAccessProxy } from "./access-proxy.ts";
 
 // Every route of the app and whether it needs a session. A new route must be added here.
-const PUBLIC_ROUTES = ["/login", "/api/health", "/api/auth/[...all]"] as const;
+const PUBLIC_ROUTES = [
+  "/login",
+  "/api/health",
+  "/api/auth/[...all]",
+  // GitHub signs its deliveries; the route checks the signature itself (src/webhooks/README.md).
+  "/api/webhooks/github-app",
+] as const;
 const PROTECTED_ROUTES = ["/", "/projects", "/runs", "/settings"] as const;
+// Data routes: a visitor without a session gets 401 instead of a redirect.
+const PROTECTED_DATA_ROUTES = [
+  "/api/repositories/[repositoryId]/project",
+  "/api/repositories/[repositoryId]/project/settings",
+  "/api/review-settings",
+] as const;
 // Files the proxy matcher leaves out on purpose (src/proxy.ts), so no session rule applies to them.
 const OUTSIDE_THE_PROXY = ["/favicon.ico"] as const;
 
@@ -51,6 +63,7 @@ describe("a request without a session", () => {
     const known = [
       ...PUBLIC_ROUTES,
       ...PROTECTED_ROUTES,
+      ...PROTECTED_DATA_ROUTES,
       ...OUTSIDE_THE_PROXY,
     ].sort();
 
@@ -67,6 +80,19 @@ describe("a request without a session", () => {
 
       expect(response.status).toBe(307);
       expect(response.headers.get("location")).toBe(`${TEST_BASE_URL}/login`);
+    },
+  );
+
+  // CR-18-T07
+  it.each(PROTECTED_DATA_ROUTES)(
+    "is answered with 401 for the data route %s",
+    async (route) => {
+      const app = await createGuardedApp();
+
+      const response = await app.visit(concretePath(route), undefined, "PUT");
+
+      expect(response.status).toBe(401);
+      expect(await response.json()).toEqual({ error: "UNAUTHENTICATED" });
     },
   );
 

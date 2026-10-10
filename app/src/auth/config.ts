@@ -1,5 +1,10 @@
 // Reads the sign-in settings from the environment. The only place that knows the variable names.
 // A problem is reported with the variable names only, never with a value (they include secrets).
+import {
+  ALLOW_TEST_GITHUB_ENDPOINTS_FLAG,
+  resolveGithubEndpoint,
+  testGithubEndpointsAllowed,
+} from "../github-endpoints.ts";
 import { parseAccessConfig, type AccessConfig } from "./access-config.ts";
 
 export const AUTH_ERROR_CODES = ["AUTH_CONFIG_INVALID"] as const;
@@ -69,7 +74,7 @@ export function loadAuthConfig(env: Env): AuthConfig {
       "BETTER_AUTH_URL must be an https address in production (plain http is only accepted for localhost)",
     );
   }
-  const allowTestEndpoints = env.ALLOW_TEST_GITHUB_ENDPOINTS === "true";
+  const allowTestEndpoints = testGithubEndpointsAllowed(env);
   const clientId = required(env, "GITHUB_OAUTH_CLIENT_ID", problems);
   const clientSecret = required(env, "GITHUB_OAUTH_CLIENT_SECRET", problems);
   const oauthBaseUrl = optionalBaseUrl(
@@ -81,7 +86,7 @@ export function loadAuthConfig(env: Env): AuthConfig {
   );
   const apiBaseUrl = optionalBaseUrl(
     env,
-    "GITHUB_API_BASE",
+    "GITHUB_API_BASE_URL",
     DEFAULT_GITHUB_API_BASE_URL,
     allowTestEndpoints,
     problems,
@@ -153,10 +158,7 @@ function isLoopbackHost(hostname: string): boolean {
   );
 }
 
-// The GitHub endpoints default to the real GitHub. The token exchange sends the client secret and
-// the authorization code to whatever they name, so an override is only accepted together with
-// ALLOW_TEST_GITHUB_ENDPOINTS=true, which only the test stack sets (it points the sign in at
-// fakes/github).
+// The rule for the GitHub addresses is shared with the GitHub App settings (src/github-endpoints.ts).
 function optionalBaseUrl(
   env: Env,
   name: string,
@@ -164,18 +166,12 @@ function optionalBaseUrl(
   allowed: boolean,
   problems: string[],
 ): string {
-  const value = env[name]?.trim();
-  if (!value) return fallback;
-  if (!allowed) {
-    problems.push(
-      `${name} may only be set together with ALLOW_TEST_GITHUB_ENDPOINTS=true (test stack only); unset it to use the real GitHub`,
-    );
-    return fallback;
-  }
-  const url = parseHttpUrl(value);
-  if (!url) {
-    problems.push(`${name} must be an http or https URL`);
-    return fallback;
-  }
-  return url.origin + url.pathname.replace(/\/+$/, "");
+  const endpoint = resolveGithubEndpoint(env[name], fallback, allowed);
+  if (endpoint.ok) return endpoint.url;
+  problems.push(
+    endpoint.problem === "invalid"
+      ? `${name} must be an http or https URL`
+      : `${name} may only be set together with ${ALLOW_TEST_GITHUB_ENDPOINTS_FLAG}=true (test stack only); unset it to use the real GitHub`,
+  );
+  return fallback;
 }
