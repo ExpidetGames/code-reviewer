@@ -39,7 +39,7 @@ it. Do not document planned things as if they existed in READMEs or PR descripti
 | Level | Tool | Runs on | What belongs here | Status |
 |---|---|---|---|---|
 | App unit | Vitest, project `unit` | host | Pure logic: signature verification, event filtering, job state machine, backoff, comment formatting, input validation, React components. Collaborators are fakes. No database, no network. | exists |
-| App integration | Vitest, project `integration` | host or Docker stack | Real SQLite file plus real Kysely repositories; route handlers driven through the real handler (webhook, runner API, auth) including refusals; GitHub client code against the GitHub fake. | project exists, no tests yet |
+| App integration | Vitest, project `integration` | host or Docker stack | Real SQLite file plus real Kysely repositories; route handlers driven through the real handler (webhook, runner API, auth) including refusals; GitHub client code against the GitHub fake. | exists (database layer; handlers and GitHub fake planned) |
 | Contract | Vitest in `app/integration-tests/compatibility/`, pytest in `runner/tests/contract/` | host | Pins the runner HTTP API and the GitHub webhook payload subset. One machine-readable source in `contracts/` is validated by both sides. | planned |
 | Runner unit | pytest, marker `unit` | host | Job loop with a fake clock, heartbeat, lease loss, backoff, shutdown, PR-Agent command and env construction, output parsing, log truncation, secret redaction. Subprocess boundary replaced by a fake. | exists |
 | Runner integration | pytest, marker `integration` | host or Docker stack | Real processes and real loopback sockets: the real loop against the app or a fake runner API, with the fake PR-Agent executable as a real subprocess (exit codes, timeouts, kill). | exists (entry point only) |
@@ -78,7 +78,7 @@ app/                               Next.js project (pnpm)
   src/<owner>/foo.ts               code
   src/<owner>/foo.test.ts          unit test beside the code
   src/<owner>/foo.integration.test.ts   single-owner integration test beside the code
-  src/test-support/                shared test setup (network guard); not product code
+  src/test-support/                shared test setup (network guard, SQLite template and child process helpers); not product code
   src/ci/                          structure test of .github/workflows/ci.yml
   integration-tests/               cross-owner integration tests (planned)
     http/ webhooks/ workflows/ compatibility/ support/   closed list; support/ holds no tests
@@ -148,7 +148,8 @@ App (`app/`, Node version from `.nvmrc`, pnpm):
   forks pool, timeout 30 s, hook timeout 60 s. At most 4 workers; override with `TEST_MAX_WORKERS`.
 - Playwright (`playwright.config.ts`): `testDir: e2e`, `*.e2e.ts` only, chromium, `forbidOnly` and
   one retry on CI (the accepted baseline, see section 1), trace and screenshot on failure. It builds the app and runs `next start` on
-  `E2E_PORT` (default 3417, never 3000 or 3100) so it never touches another running server. Without a
+  `E2E_PORT` (default 3417, never 3000 or 3100) so it never touches another running server, with
+  `DATABASE_PATH` pointing to a fresh file under `test-results/e2e-data/`. Without a
   downloaded Chromium, run with an installed Chrome: `PLAYWRIGHT_CHANNEL=chrome`.
 - ESLint flat config (Next.js core-web-vitals and TypeScript rules, `no-explicit-any` as an error,
   Vitest and Playwright plugin rules against focused and skipped tests), Prettier with its defaults
@@ -183,8 +184,22 @@ Inside `runner/`: `uv sync --locked`, `uv run ruff check .`, `uv run ruff format
 `uv run pyright`, `uv run pytest` (default: everything except `engine`), `uv run pytest -m unit`,
 `uv run pytest -m "integration or contract"`.
 
-`pnpm test:int` passes while no integration test exists (`--passWithNoTests`). Remove that flag with
-the first integration test.
+### Integration tests and SQLite
+
+- `src/test-support/db-template.global-setup.ts` (the `integration` project's global setup) creates a
+  temporary directory, runs all migrations into one template file and removes it at the end of the run.
+- `createTestDatabase()` (`src/test-support/test-database.ts`) copies the template into a new
+  temporary directory per test, opens it through the production `openDatabase`, and removes the
+  directory and the connection after the test (`createTestDirectory()` and `track()` do the same
+  for tests that open their own files). No two tests, files or workers share a database file.
+- A second connection or a second app instance is a real child process (`db-process.ts` runs
+  `db-child.ts`): better-sqlite3 blocks its own thread while it waits for a lock, so a lock held in
+  the test process could never be released while the write waits. Node runs `db-child.ts` directly
+  (type stripping), so files it imports from `src/db/` use relative imports with a `.ts` extension
+  and no TypeScript-only runtime syntax (enums, parameter properties); `erasableSyntaxOnly` in
+  `tsconfig.json` enforces the latter.
+- Tests of file system errors that depend on permissions (a read-only directory) fail when the tests
+  run as root, because root may write anywhere. Run the suite as a normal user.
 
 Planned targets: `test-engine`, `test-stack-up`, `test-stack-down`, `test:docker`, `test:e2e:docker`
 (they arrive with the Docker test stack).

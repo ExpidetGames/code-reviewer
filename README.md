@@ -49,8 +49,11 @@ pnpm build
 pnpm start
 ```
 
-The app needs no configuration yet. Configuration will be documented in `app/.env.example` once
-the first setting exists.
+The app keeps its data in a SQLite file. Copy `app/.env.example` to `app/.env.local` and create the
+directory it points to (`mkdir data` in the repository root for the example value). The file is
+created and migrated when the server starts; a missing directory stops the start with a clear
+message. Settings and the database layer are described in `app/.env.example` and
+`app/src/db/README.md`.
 
 ## Run the runner locally
 
