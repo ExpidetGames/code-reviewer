@@ -122,3 +122,31 @@ describe("signing in with a GitHub account that hides its email address", () => 
     expect(user.email_verified).toBe(0);
   });
 });
+
+describe("signing in with a second GitHub account that has the same email address", () => {
+  // Extra case beyond the Jira table: the user follows the GitHub id, not the email address.
+  it("does not give it the user of the first account", async () => {
+    const harness = await createAuthHarness({
+      users: [
+        OCTOCAT,
+        {
+          id: 999001,
+          login: "other-account",
+          name: "Other Account",
+          email: OCTOCAT.email,
+        },
+      ],
+    });
+    await harness.signIn("octocat");
+
+    const { response } = await harness.signIn("other-account");
+
+    expect(response.headers.get("location")).toContain("/login?error=");
+    const users = await harness.db.selectFrom("users").selectAll().execute();
+    expect(users).toHaveLength(1);
+    expect(users[0]).toMatchObject({ github_login: "octocat" });
+    expect(
+      await harness.db.selectFrom("sessions").selectAll().execute(),
+    ).toHaveLength(1);
+  });
+});

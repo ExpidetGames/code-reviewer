@@ -78,6 +78,10 @@ export function createAuth({
         createdAt: "created_at",
         updatedAt: "updated_at",
       },
+      // The user is the GitHub account (its id), never an email address. Without this, a second
+      // GitHub account that reports the same verified email (the first one gave it up) would be
+      // linked to the first account's user and inherit its access.
+      accountLinking: { enabled: false },
       // The GitHub token is kept (the access check by organization needs it later), encrypted
       // with the secret.
       encryptOAuthTokens: true,

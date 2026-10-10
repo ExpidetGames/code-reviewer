@@ -35,6 +35,9 @@ neither listed as public nor as protected there.
 - `users.github_login` is written from the GitHub profile at every sign in (`overrideUserInfo`) and
   nowhere else (`/update-user` is not reachable). The identity is the GitHub id in
   `accounts.account_id`, so a renamed GitHub account keeps its user.
+- The user is the GitHub account, never an email address: account linking is off. Otherwise a
+  second GitHub account that reports the same verified email (the first one gave it up) would be
+  linked to the first account's user and inherit its access.
 - An account without any readable email gets `<github id>@users.noreply.github.com`, marked
   unverified.
 - The GitHub access token is kept (encrypted with `BETTER_AUTH_SECRET`) for the organization check
