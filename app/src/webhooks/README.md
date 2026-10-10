@@ -30,14 +30,17 @@ Each step ends the request when it fails; nothing before step 5 writes anything.
 | 5    | Claim: the delivery id is claimed in `webhook_deliveries`; an id that succeeded before is a duplicate, an id another request holds right now is in progress                              | `202` `duplicate`; `409` `WEBHOOK_DELIVERY_IN_PROGRESS`                                                              |
 | 6    | Identify: `identifyWebhook` names the installation; the integration is loaded by `(github_app, externalId)`                                                                              |                                                                                                                      |
 | 7    | Translate: `parseEvent` gives `review_trigger`, `installation_changed` or `ignored`                                                                                                      |                                                                                                                      |
-| 8    | Act: a trigger goes through `canTrigger` to the intake; an installation change to the shared sync                                                                                        | `202` with the outcome                                                                                               |
+| 8    | Act: a trigger needs an active project for its repository (`project_not_active` otherwise), then goes through `canTrigger` to the intake; an installation change to the shared sync      | `202` with the outcome                                                                                               |
 
 Answers carry only an error code or `{ "status": "accepted", "outcome": ... }`, never the body, a
 signature or a secret. Log lines name the delivery id, the event and the outcome, and nothing else.
 
 The outcomes of step 6 to 8 are `trigger_enqueued`, `installation_changed`, `ignored` (a genuine event
 that starts nothing, such as `pull_request` `closed`, or a command from a user without write access),
-`trigger_not_allowed` (`canTrigger` said no), `integration_disabled` (the installation is suspended or
+`trigger_not_allowed` (`canTrigger` said no), `project_not_active` (the repository has no active project: never
+activated, deactivated, or gone from the installation; nothing is handed to the intake and, like
+`trigger_not_allowed`, the delivery id can be claimed again, so redelivering it after the project was
+activated works), `integration_disabled` (the installation is suspended or
 removed: its own installation events still go through, everything else is not looked at) and
 `unknown_installation` (no row for the installation and the event is not an installation event). They
 are stored with the delivery. Anything unexpected before the claim (a stream error, a registry problem)
@@ -62,7 +65,7 @@ wants:
 - Only a delivery that **succeeded** (`trigger_enqueued`, `installation_changed`) stays a duplicate
   (`202 duplicate`, nothing done) for 7 days.
 - A delivery that was turned away for a reason that can change (`unknown_installation`,
-  `integration_disabled`, `trigger_not_allowed`, `ignored`, for example a pull request delivery that
+  `integration_disabled`, `trigger_not_allowed`, `project_not_active`, `ignored`, for example a pull request delivery that
   raced the `installation.created` sync, or a command from a user who gets write access later) is
   recorded with that outcome for diagnostics, but the id can be claimed again: redelivering it
   handles it anew.
@@ -106,9 +109,10 @@ and knows nothing about jobs. The intake of the running app is `createJobQueueRe
 
 - `opened` and `updated` become an automatic `webhook` job for the command `review`; a `command`
   trigger becomes a `comment` job with its command and arguments.
-- It is a thin mapping on purpose. It adds **no trigger policy**: whether the repository has an active
-  project (CR-24), whether a draft waits, the debounce of `synchronize` (CR-31) are decided around
-  it, not in the queue.
+- It is a thin mapping on purpose. It adds **no trigger policy**: whether a draft waits and the
+  debounce of `synchronize` (CR-31) are decided around it, not in the queue. Whether a repository has an
+  active project is decided before the intake, by the route (`projects` in the handler's dependencies,
+  see `src/projects/README.md`): the intake only ever sees triggers of active projects.
 - What the queue does with a job (the same delivery gives the same job; one automatic job per pull
   request, head commit and command; a newer commit replaces the waiting job) is described in
   `src/jobs/README.md`. That is the replay protection the signature cannot give: a captured signed body
@@ -127,7 +131,9 @@ and knows nothing about jobs. The intake of the running app is `createJobQueueRe
 
 `src/test-support/webhook-harness.ts` starts everything the route needs: a real SQLite file, the fake
 GitHub API, the real GitHub App provider, a `RecordingReviewTriggerIntake`
-(`recording-review-trigger-intake.ts`, which can fail or take its time) and the handler. Tests send
+(`recording-review-trigger-intake.ts`, which can fail or take its time), the project service and the
+handler (`seedInstallation()` also activates the seeded repository as a project; pass
+`{ activateProject: false }` for the opposite). Tests send
 signed requests built by `fakes/github/webhooks.ts` from the recorded payloads in
 `fakes/fixtures/github-webhooks/`. `integration-tests/webhooks/github-app-route.integration.test.ts`
 covers every behavior above; `github-app-route-file.integration.test.ts` calls the real `route.ts`

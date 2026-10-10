@@ -11,7 +11,10 @@ import { createJobQueue } from "../../src/jobs/job-queue.ts";
 import { startWebhookHarness } from "../../src/test-support/webhook-harness.ts";
 import { TEST_WEBHOOK_SECRET } from "../../src/test-support/github-app.ts";
 import { webhookDelivery } from "../../../fakes/github/webhooks.ts";
-import { createGithubAppWebhookHandler } from "../../src/webhooks/github-app-handler.ts";
+import {
+  createGithubAppWebhookHandler,
+  type GithubAppWebhookDeps,
+} from "../../src/webhooks/github-app-handler.ts";
 import { createJobQueueReviewTriggerIntake } from "../../src/webhooks/job-queue-intake.ts";
 
 const OPENED_HEAD = "1f3a5c7e9b2d4f60a8c1e3b5d7f90a2c4e6b8d01";
@@ -26,7 +29,9 @@ function withHeadSha(fixture: string, sha: string): PullRequestPayload {
 }
 
 /** The webhook harness with the job queue intake instead of the recording one. */
-async function startHarness() {
+async function startHarness(
+  options: { projects?: GithubAppWebhookDeps["projects"] } = {},
+) {
   const h = await startWebhookHarness();
   const queue = createJobQueue(h.db);
   const repositories = createRepositoriesRepository(h.db);
@@ -45,6 +50,7 @@ async function startHarness() {
     integrations: h.integrations,
     deliveries: h.deliveries,
     sync: h.sync,
+    projects: options.projects ?? h.projects,
     intake,
     logger: {
       info: (line) => routeLog.push(line),
@@ -169,8 +175,14 @@ describe("a pull request delivery with the job queue behind the route", () => {
   });
 
   it("answers 500 and releases the delivery when the repository is not synchronized yet, so a redelivery works", async () => {
-    const { h, queue, send, routeLog } = await startHarness();
+    // The project gate cannot see the missing row, so it is replaced by one that lets everything
+    // pass: this is the race between a delivery and the synchronization, which the intake must
+    // survive.
+    const { h, queue, send, routeLog } = await startHarness({
+      projects: { hasActiveProject: async () => true },
+    });
     await h.seedInstallation();
+    await h.db.deleteFrom("projects").execute();
     await h.db.deleteFrom("repositories").execute();
 
     const failed = await send("pull_request.opened", { deliveryId: "d-1" });
