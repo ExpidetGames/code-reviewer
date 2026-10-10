@@ -81,7 +81,7 @@ app/                               Next.js project (pnpm)
   src/<owner>/foo.test.ts          unit test beside the code
   src/<owner>/foo.integration.test.ts   single-owner integration test beside the code
   src/test-support/                shared test setup (network guard, SQLite template and child process helpers, the sign in harness: database, real Better Auth and the fake GitHub); not product code
-  src/ci/                          structure tests of the CI and publish workflows and of the Dockerfiles
+  src/ci/                          structure tests of the CI and publish workflows and of the Dockerfiles, and the scan of all tracked files for keys and tokens
   integration-tests/               cross-owner integration tests (exists: webhooks/)
     http/ webhooks/ workflows/ compatibility/ support/   closed list; support/ holds no tests
   e2e/<area>/<journey>.e2e.ts      Playwright; areas: app/, auth/, reviews/, jobs/, settings/
@@ -195,6 +195,10 @@ volume, health check, `depends_on`, one `RUNNER_TOKEN` variable, no secret in `c
 variable read by compose or the code documented in `.env.example`, no secret value there, `.env`
 ignored) are pinned by `app/src/ci/compose.test.ts`. Not covered: real GitHub App credentials and a
 real LLM key (manual, with the deployment ticket), other Docker versions and Windows.
+
+The GitHub App guide `docs/github-app.md` is pinned to the code by
+`app/src/integrations/providers/github-app/setup-doc.test.ts` (its permission and event tables must
+equal the lists in the code); creating the real app on GitHub is a manual step the guide describes.
 
 Planned: `verify:structure` (placement and naming rules, test files must be discovered by a runner,
 no process identifiers in titles), `verify:server-only-canary`, the Docker test stack

@@ -1,12 +1,13 @@
 // Pins down how the GitHub App settings are read from the environment: what is required, which
 // problems are reported by variable name only, and that the secrets stay out of logs and JSON.
-import { generateKeyPairSync } from "node:crypto";
+import { createVerify, generateKeyPairSync } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { loadGithubAppConfig } from "./config.ts";
 import { GithubAppConfigError } from "./errors.ts";
+import { createAppJwt } from "./jwt.ts";
 
 const { privateKey } = generateKeyPairSync("rsa", {
   modulusLength: 2048,
@@ -57,6 +58,43 @@ describe("loading the GitHub App configuration", () => {
     });
 
     expect(config.privateKey).toBe(privateKey.trim());
+  });
+
+  // CR-38-T02
+  it("turns real line breaks and escaped backslash n into the same key, and a JWT signed with it verifies", () => {
+    const publicKey = generateKeyPairSync("rsa", {
+      modulusLength: 2048,
+      privateKeyEncoding: { type: "pkcs1", format: "pem" },
+      publicKeyEncoding: { type: "spki", format: "pem" },
+    });
+    const withBreaks = publicKey.privateKey.trim();
+    const escaped = withBreaks.replace(/\n/g, "\\n");
+
+    const fromBreaks = loadGithubAppConfig({
+      ...complete,
+      GITHUB_APP_PRIVATE_KEY: withBreaks,
+    }).privateKey;
+    const fromEscaped = loadGithubAppConfig({
+      ...complete,
+      GITHUB_APP_PRIVATE_KEY: escaped,
+    }).privateKey;
+
+    expect(fromEscaped).toBe(fromBreaks);
+    const jwt = createAppJwt({
+      appId: "123456",
+      privateKey: fromEscaped,
+      nowMs: 1_700_000_000_000,
+    });
+    const [header, payload, signature] = jwt.split(".") as [
+      string,
+      string,
+      string,
+    ];
+    expect(
+      createVerify("RSA-SHA256")
+        .update(`${header}.${payload}`)
+        .verify(publicKey.publicKey, Buffer.from(signature, "base64url")),
+    ).toBe(true);
   });
 
   it("accepts a key whose line breaks were replaced by backslash n or by spaces", () => {
