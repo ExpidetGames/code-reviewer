@@ -1,4 +1,4 @@
-// Pins down that the production build of the app boots with no configuration and serves an
+// Pins down that the production build of the app boots (migrating a fresh database) and serves an
 // empty start page without console errors. It is the first proof that build and start work.
 import { expect, test } from "@playwright/test";
 

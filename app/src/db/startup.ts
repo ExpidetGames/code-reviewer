@@ -34,6 +34,14 @@ export function getDatabase(): Kysely<Database> {
   return db;
 }
 
+/** Closes the connection opened at startup, if any. */
+export async function closeDatabase(): Promise<void> {
+  const holder = globalThis as GlobalWithDatabase;
+  const db = holder[globalKey];
+  delete holder[globalKey];
+  await db?.destroy();
+}
+
 type StartOptions = {
   env?: Readonly<Record<string, string | undefined>>;
   log?: (message: string) => void;

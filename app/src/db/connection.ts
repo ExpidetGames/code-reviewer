@@ -16,7 +16,7 @@ export function openDatabase(config: DatabaseConfig): Kysely<Database> {
   let sqlite: BetterSqlite3.Database | undefined;
   try {
     sqlite = new BetterSqlite3(config.path, { timeout: config.busyTimeoutMs });
-    sqlite.pragma("journal_mode = WAL");
+    retryWhileBusy(config.busyTimeoutMs, () => sqlite?.pragma("journal_mode = WAL"));
     sqlite.pragma("foreign_keys = ON");
   } catch (cause) {
     sqlite?.close();
@@ -47,6 +47,23 @@ function assertDirectoryUsable(databasePath: string): void {
     accessSync(directory, constants.W_OK);
   } catch {
     throw unusable("is not writable");
+  }
+}
+
+// Switching a brand-new file to WAL while another process does the same fails at once with
+// SQLITE_BUSY: SQLite refuses to wait there because waiting could deadlock, so the busy timeout
+// does not apply. Retrying is the documented way out. It happens once per file (WAL is stored in
+// the file), only at startup, and gives up after the busy timeout like any other lock wait.
+function retryWhileBusy(timeoutMs: number, action: () => void): void {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      return action();
+    } catch (error) {
+      const busy = error instanceof Error && "code" in error && error.code === "SQLITE_BUSY";
+      if (!busy || Date.now() >= deadline) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    }
   }
 }
 
