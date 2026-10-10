@@ -17,6 +17,9 @@ Rules:
 - Dummy values only. No real tokens, keys or private repository data, ever.
 - A fake is configured through an environment variable (for example `GITHUB_API_BASE_URL`), never
   through a switch in production code.
-- Fakes live here, not in `app/` or `runner/`, because more than one test suite uses them.
+- Fakes live here, not in `app/` or `runner/`, because more than one test suite uses them. The one
+  exception for now is the pair of fakes of the runner's engine suite (`runner/tests/engine/fake_github.py`,
+  `fake_llm.py`): only that suite uses them and the runner's ruff and pyright cover them there; they
+  move here when a second suite needs them.
 - Fakes are TypeScript or Python files that run as they are (Node 24 strips the types; no build
   step). The app's `format` and `format:check` scripts cover `fakes/`.

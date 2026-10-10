@@ -127,6 +127,8 @@ def build_typed_settings(job: Job) -> dict[str, bool | int | str | list[str]]:
         "config.repo_context_from_default_branch": True,
         # A re-run edits the review in place; no second "updated to latest commit" comment.
         "pr_reviewer.final_update_message": False,
+        # The same for a description: no extra "updated to latest commit" comment after it.
+        "pr_description.final_update_message": False,
         # Review labels need write scope and surprise users.
         "pr_reviewer.enable_review_labels_security": False,
         "pr_reviewer.enable_review_labels_effort": False,

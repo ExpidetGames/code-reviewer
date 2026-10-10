@@ -74,6 +74,7 @@ describe("the PR-Agent variable names", () => {
     // The runner pins these (CR-45, `RESERVED_OPTIONS`) and refuses a job that sets them.
     const reserved = [
       "PR_REVIEWER__FINAL_UPDATE_MESSAGE",
+      "PR_DESCRIPTION__FINAL_UPDATE_MESSAGE",
       "PR_REVIEWER__ENABLE_REVIEW_LABELS_SECURITY",
       "PR_REVIEWER__ENABLE_REVIEW_LABELS_EFFORT",
     ];
