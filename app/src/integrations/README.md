@@ -12,7 +12,7 @@ platform; the MVP has exactly one kind, the GitHub App (`github_app`, `providers
 | `provider.ts`             | The `IntegrationProvider` interface                                                                                                                                             |
 | `config-schema.ts`        | Field-level validation of an integration's `config` (one error per field) and the secret-key guard                                                                              |
 | `registry.ts`             | `createIntegrationRegistry`, `integrationRegistry`: maps a type to its provider; the only place that imports a provider                                                         |
-| `errors.ts`               | `IntegrationError` with stable codes (`INTEGRATION_TYPE_UNKNOWN`, `INTEGRATION_PROVIDER_NOT_IMPLEMENTED`, ...)                                                                  |
+| `errors.ts`               | `IntegrationError` with stable codes (`INTEGRATION_TYPE_UNKNOWN`, `INTEGRATION_ACCESS_*`, ...), `retryable` and `retryAfterSeconds`                                             |
 | `provider-import-rule.ts` | The import rule that keeps providers out of the rest of the app (see "The boundary")                                                                                            |
 | `providers/<type>/`       | One folder per implementation: `providers/github-app/` (see "The GitHub App provider")                                                                                          |
 | `sync/`                   | `createIntegrationSync`: keeps the `integrations` and `repositories` tables in line with the platform (see "Synchronization")                                                   |
@@ -89,11 +89,25 @@ hand. An unknown pull request fails with `INTEGRATION_PULL_REQUEST_NOT_FOUND`.
 - `verifyWebhook`, `identifyWebhook` and `parseEvent` read a clone of the request (`req.clone()`), so
   the caller can read the body again. They have no side effects.
 - `jobAccess` returns a `GitAccess` for one repository, built with `createGitAccess`. It carries
-  `expiresAt`; jobs have a hard timeout well below the token lifetime, so there is no refresh.
+  `expiresAt`; jobs have a hard timeout well below the token lifetime, so there is no refresh. Every
+  call creates new credentials limited to that repository and the least permissions; nothing is cached
+  between calls or jobs. A failure is an `IntegrationError` with a stable code (see "Job access
+  failures"); a provider never falls back to broader credentials.
 - The token of a `GitAccess` is readable as `access.token` but not enumerable: `JSON.stringify`,
   spreading, `Object.entries` and `console.log` leave it out. Only `revealGitAccess(access)` returns a
-  plain copy with the token, for the runner API's `claim` response. Never log its result. A provider
-  that returns a plain object with a visible token fails the conformance suite.
+  plain copy with the token, for the runner API's `claim` response. It throws
+  `INTEGRATION_ACCESS_TOKEN_MISSING` when the token is missing or empty. Never log its result. A
+  provider that returns a plain object with a visible token fails the conformance suite.
+- **Never spread, clone, cache (`"use cache"`) or return a `GitAccess` from a Server Action.** A cache
+  or a Server Action result would store the token or send it to the browser, and a copy made by
+  spreading or cloning silently loses the hidden token. Only the runner API's claim (CR-28) reveals
+  it, once, in its response. For CR-28 specifically:
+  - The copy that `revealGitAccess` returns is a plain object with an enumerable `token`. Never give
+    it to a logger, an error, a cache or the database; build it as late as possible and drop it after
+    the response.
+  - The claim response carries `Cache-Control: no-store`.
+  - `retryAfterSeconds` of an access failure is `null` when the platform did not say; the 503 mapping
+    needs its own default `Retry-After` for that case (for example 30 seconds).
 - `credentials` and `webhook_secret` in the table are reserved for token integrations. A GitHub App
   keeps neither there: its private key and webhook secret live in the environment of the app (the
   self-hosted wizard will need its own app-level home for them). `INTEGRATION_SECRET_STORAGE` in
@@ -159,9 +173,20 @@ How the interface is met:
   author's repository permission is `admin` or `write` (read with the installation token). The comment's
   `author_association` only serves as the free first filter above: it cannot tell a member with read
   access from one with write access, and the trigger does not carry it.
-- `jobAccess` mints a fresh installation token narrowed to the repository (`client.mintInstallationToken`,
-  the one place that mints a job token; never cached). The rules for permissions and expiry belong to
-  the token ticket and finish this function.
+- `jobAccess` mints a fresh installation token for every call (`client.mintInstallationToken`, the
+  one place that mints a job token; `job-access.ts` holds the scope). The request names exactly one
+  repository by its numeric id (`repository_ids`, so a rename or transfer cannot redirect it) and
+  exactly the permissions `pull_requests: write`, `issues: write`, `contents: read` and
+  `metadata: read` (`JOB_TOKEN_PERMISSIONS`); the app must be registered with at least these. The
+  client refuses a scope without a repository or permissions before any request, and discards a token
+  GitHub reports as broader than asked for (the check fails closed: the answer must say `selected`,
+  list the repositories and the permissions, with known levels). Such a token is switched off at once
+  with a best-effort `DELETE /installation/token`, whose failure is ignored. A mint that times out
+  after GitHub created the token cannot be undone: that unused token stays valid until it expires
+  (about one hour) and nobody has seen it. The result is a `GitAccess` with `expiresAt` (about one
+  hour; jobs end long before, so there is no refresh), the configured API base URL and
+  `botLogin` `<GITHUB_APP_SLUG>[bot]`. Nothing is logged or stored; the private key only signs the
+  App JWT inside the app.
 - Rate limits and failures become `GithubAppError`s with a code and, for a rate limit,
   `retryAfterSeconds`. There is no retry loop. Requests time out after 15 seconds. Messages name the
   call and the status only, never a credential or a response body; `GithubAppError` and
@@ -176,6 +201,25 @@ How the interface is met:
   account has no login is skipped with a warning, so one odd record cannot block the others.
 - Read calls use an installation token that is cached per client until a minute before it expires, and
   asked for again once if GitHub refuses the cached one.
+
+### Job access failures
+
+`jobAccess` rejects with an `IntegrationError`; callers (the runner API's claim) branch on `code` and
+`retryable`, never on GitHub's codes. The original `GithubAppError` is its `cause`.
+
+| Code                                      | GitHub said                                                                                                                 | `retryable` |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| `INTEGRATION_ACCESS_CONNECTION_GONE`      | 404 on the token call: installation deleted                                                                                 | no          |
+| `INTEGRATION_ACCESS_CONNECTION_SUSPENDED` | 403 (not a rate limit): installation suspended                                                                              | no          |
+| `INTEGRATION_ACCESS_SCOPE_REFUSED`        | 422, or a repository reference that is not usable: the repository is not in the installation, or the app lacks a permission | no          |
+| `INTEGRATION_ACCESS_APP_AUTH_FAILED`      | 401: the App JWT was refused (key or app id)                                                                                | no          |
+| `INTEGRATION_ACCESS_RATE_LIMITED`         | 429, or 403 with a rate limit header; `retryAfterSeconds` when given                                                        | yes         |
+| `INTEGRATION_ACCESS_UNAVAILABLE`          | 5xx, a network failure or a timeout                                                                                         | yes         |
+| `INTEGRATION_ACCESS_FAILED`               | anything else (settings missing, an unexpected answer, a token broader than asked for)                                      | no          |
+
+`retryAfterSeconds` is never negative and is `null` when the platform did not say (always for a network
+failure or timeout): the caller then uses its own default. Messages name the call and the status only,
+never a token, JWT, key or response body.
 
 ## Synchronization
 

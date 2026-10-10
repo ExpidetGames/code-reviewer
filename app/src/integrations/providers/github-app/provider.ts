@@ -18,6 +18,11 @@ import {
 import type { GithubAppConfig } from "./config.ts";
 import { GithubAppError } from "./errors.ts";
 import { parseGithubEvent } from "./events.ts";
+import {
+  JOB_TOKEN_PERMISSIONS,
+  jobTokenRepositoryIds,
+  toJobAccessError,
+} from "./job-access.ts";
 import { isValidSignature } from "./webhook-signature.ts";
 import { field, payloadProblems } from "./webhook-fields.ts";
 
@@ -174,27 +179,31 @@ export function createGithubAppProvider(
     },
 
     async jobAccess(integration, repo) {
-      const config = getConfig();
-      const name = repo.fullName.split("/")[1];
-      if (name === undefined || name === "")
-        throw new GithubAppError(
-          "GITHUB_APP_REQUEST_FAILED",
-          "The repository name is not in the form owner/name.",
+      // A fresh token for exactly this repository on every call, never cached or shared between
+      // jobs. A failure is an IntegrationError with a stable code; nothing broader is tried instead.
+      try {
+        const config = getConfig();
+        const repositoryIds = jobTokenRepositoryIds(repo.externalId);
+        if (repo.integrationId !== integration.id || repositoryIds === null)
+          throw new IntegrationError(
+            "INTEGRATION_ACCESS_SCOPE_REFUSED",
+            "The repository does not belong to this integration or has no usable id.",
+          );
+        const minted = await getClient().mintInstallationToken(
+          integration.externalId,
+          { repositoryIds, permissions: JOB_TOKEN_PERMISSIONS },
         );
-      // The single place a job's token is created. CR-23 owns the scoping rules (permissions,
-      // refusing a suspended installation, expiry handling) and finishes them here.
-      const minted = await getClient().mintInstallationToken(
-        integration.externalId,
-        { repositoryNames: [name] },
-      );
-      return createGitAccess({
-        provider: "github",
-        baseUrl: config.apiBaseUrl,
-        token: minted.token,
-        authType: "token",
-        botLogin: `${config.slug}[bot]`,
-        expiresAt: minted.expiresAt,
-      });
+        return createGitAccess({
+          provider: "github",
+          baseUrl: config.apiBaseUrl,
+          token: minted.token,
+          authType: "token",
+          botLogin: `${config.slug}[bot]`,
+          expiresAt: minted.expiresAt,
+        });
+      } catch (error) {
+        throw toJobAccessError(error);
+      }
     },
 
     async getPullRequest(integration, repo, prNumber) {
