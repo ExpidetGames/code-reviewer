@@ -2,7 +2,9 @@
 cannot call GET /user, so the login PR-Agent posts as is injected. The patch is tied to the exact
 PR-Agent version it was written for and refuses to apply to anything else."""
 
+import inspect
 from collections.abc import Iterator
+from importlib.metadata import version
 from typing import Any
 
 import pytest
@@ -128,3 +130,172 @@ def test_a_missing_pr_agent_distribution_is_a_version_mismatch() -> None:
         check_pr_agent_version(installed=None, lookup=lambda: None)
 
     assert caught.value.code is ErrorCode.PR_AGENT_VERSION_MISMATCH
+
+
+# CR-30-T01
+def test_the_real_pr_agent_still_has_a_callable_login_method_on_its_github_provider() -> None:
+    method = getattr(GithubProvider, "_resolve_user_login", None)
+
+    assert callable(method)
+    assert version("pr-agent") == PATCHED_FOR_VERSION
+
+
+# CR-30-T02
+def test_the_patch_on_the_real_provider_returns_the_login_of_the_job_and_keeps_the_signature() -> (
+    None
+):
+    original = inspect.signature(GithubProvider._resolve_user_login)  # pyright: ignore[reportPrivateUsage]
+    # No __init__ and no network: a bare instance cannot reach GitHub, so a returned login proves
+    # that the patch answered on its own.
+    instance: Any = object.__new__(GithubProvider)
+
+    undo = apply_identity_patch("my-review-app[bot]")
+    try:
+        login = instance._resolve_user_login()  # pyright: ignore[reportPrivateUsage]
+        patched = inspect.signature(GithubProvider._resolve_user_login)  # pyright: ignore[reportPrivateUsage]
+    finally:
+        undo()
+
+    assert login == "my-review-app[bot]"
+    assert list(patched.parameters) == list(original.parameters) == ["self"]
+
+
+# CR-30-T03
+def test_a_missing_method_fails_loudly_with_the_method_name_and_the_pr_agent_version() -> None:
+    with pytest.raises(IdentityPatchError) as caught:
+        apply_identity_patch("code-reviewer[bot]", provider_class=NoIdentityMethod)
+
+    assert caught.value.code is ErrorCode.IDENTITY_PATCH_FAILED
+    assert "NoIdentityMethod._resolve_user_login" in caught.value.detail
+    assert "does not exist" in caught.value.detail
+    assert f"pr-agent {version('pr-agent')}" in caught.value.detail
+
+
+# CR-30-T03
+def test_a_method_that_is_not_callable_anymore_is_refused() -> None:
+    class Renamed:
+        _resolve_user_login = "moved to a property"
+
+    with pytest.raises(IdentityPatchError) as caught:
+        apply_identity_patch("code-reviewer[bot]", provider_class=Renamed)
+
+    assert caught.value.code is ErrorCode.IDENTITY_PATCH_FAILED
+    assert Renamed._resolve_user_login == "moved to a property"  # pyright: ignore[reportPrivateUsage]
+
+
+# CR-30-T04
+def test_a_changed_signature_is_refused_and_the_error_shows_expected_and_found() -> None:
+    with pytest.raises(IdentityPatchError) as caught:
+        apply_identity_patch("code-reviewer[bot]", provider_class=WrongSignature)
+
+    assert caught.value.code is ErrorCode.IDENTITY_PATCH_FAILED
+    assert "(self, extra: str) -> str" in caught.value.detail
+    assert "(self)" in caught.value.detail
+    assert f"pr-agent {version('pr-agent')}" in caught.value.detail
+
+
+# CR-30-T04
+def test_a_refused_patch_leaves_the_provider_class_untouched() -> None:
+    before = WrongSignature._resolve_user_login  # pyright: ignore[reportPrivateUsage]
+
+    with pytest.raises(IdentityPatchError):
+        apply_identity_patch("code-reviewer[bot]", provider_class=WrongSignature)
+
+    assert WrongSignature._resolve_user_login is before  # pyright: ignore[reportPrivateUsage]
+
+
+# CR-30-T05
+def test_a_version_mismatch_names_both_versions_and_says_to_check_the_patch() -> None:
+    with pytest.raises(IdentityPatchError) as caught:
+        check_pr_agent_version(installed="0.48.0")
+
+    detail = caught.value.detail
+    assert "0.48.0" in detail
+    assert PATCHED_FOR_VERSION in detail
+    assert "check the identity patch" in detail
+    assert "PATCHED_FOR_VERSION" in detail
+
+
+# CR-30-T06
+def test_applying_the_patch_a_second_time_does_not_wrap_the_patch() -> None:
+    original = GithubProvider._resolve_user_login  # pyright: ignore[reportPrivateUsage]
+    instance: Any = object.__new__(GithubProvider)
+
+    undo_first = apply_identity_patch("code-reviewer[bot]")
+    first = GithubProvider._resolve_user_login  # pyright: ignore[reportPrivateUsage]
+    undo_second = apply_identity_patch("code-reviewer[bot]")
+    try:
+        second = GithubProvider._resolve_user_login  # pyright: ignore[reportPrivateUsage]
+        login = instance._resolve_user_login()  # pyright: ignore[reportPrivateUsage]
+    finally:
+        undo_second()
+        undo_first()
+
+    assert login == "code-reviewer[bot]"
+    assert second is first
+    assert GithubProvider._resolve_user_login is original  # pyright: ignore[reportPrivateUsage]
+
+
+# CR-30-T06
+def test_applying_the_patch_again_with_another_login_replaces_the_login_instead_of_stacking() -> (
+    None
+):
+    original = GithubProvider._resolve_user_login  # pyright: ignore[reportPrivateUsage]
+    instance: Any = object.__new__(GithubProvider)
+
+    apply_identity_patch("first-app[bot]")
+    undo_second = apply_identity_patch("second-app[bot]")
+    try:
+        login = instance._resolve_user_login()  # pyright: ignore[reportPrivateUsage]
+    finally:
+        # One undo is enough only if the second patch was built on the real method. Built on the
+        # first patch, it would restore that one and leave the provider patched.
+        undo_second()
+
+    assert login == "second-app[bot]"
+    assert GithubProvider._resolve_user_login is original  # pyright: ignore[reportPrivateUsage]
+
+
+# CR-30-T07
+@pytest.mark.parametrize("login", ["", "   ", "[bot]", " [bot]", "two words[bot]", "-dash[bot]"])
+def test_the_patch_refuses_an_empty_login_instead_of_falling_back_to_another_identity(
+    login: str,
+) -> None:
+    original = GithubProvider._resolve_user_login  # pyright: ignore[reportPrivateUsage]
+
+    with pytest.raises(IdentityPatchError) as caught:
+        apply_identity_patch(login)
+
+    assert caught.value.code is ErrorCode.IDENTITY_PATCH_FAILED
+    assert "login" in caught.value.detail
+    assert GithubProvider._resolve_user_login is original  # pyright: ignore[reportPrivateUsage]
+
+
+def test_the_patch_refuses_to_apply_when_the_login_chain_of_pr_agent_has_moved() -> None:
+    class Moved:
+        def _resolve_user_login(self) -> str:
+            return ""
+
+        def _agent_login(self) -> str:
+            return "someone"  # no longer asks _resolve_user_login
+
+        def is_comment_authored_by_pr_agent(self, comment: object) -> bool:
+            return self._agent_login() != ""
+
+        def supports_review_finding_state(self) -> bool:
+            return True
+
+    with pytest.raises(IdentityPatchError) as caught:
+        apply_identity_patch("code-reviewer[bot]", provider_class=Moved)
+
+    assert caught.value.code is ErrorCode.IDENTITY_PATCH_FAILED
+    assert "_agent_login" in caught.value.detail
+
+
+def test_the_patch_refuses_a_login_that_is_not_a_string() -> None:
+    original = GithubProvider._resolve_user_login  # pyright: ignore[reportPrivateUsage]
+
+    with pytest.raises(TypeError):
+        apply_identity_patch(42)  # type: ignore[arg-type]
+
+    assert GithubProvider._resolve_user_login is original  # pyright: ignore[reportPrivateUsage]

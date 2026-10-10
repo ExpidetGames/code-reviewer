@@ -1,8 +1,76 @@
 # Code Reviewer runner
 
-Python worker that runs [PR-Agent](https://github.com/qodo-ai/pr-agent) for one job at a time.
-`code-reviewer-run-job` is the entry point of one job; the job loop that claims jobs from the app
-comes with a later ticket. See the repository `README.md` for setup and `TESTING.md` for the tests.
+Python worker that runs [PR-Agent](https://github.com/qodo-ai/pr-agent). `code-reviewer-runner` is
+the job loop: it claims jobs from the app and starts `code-reviewer-run-job`, the entry point of one
+job, as a process of its own for each of them. See the repository `README.md` for setup and
+`TESTING.md` for the tests.
+
+## The job loop
+
+`code-reviewer-runner` (the container's entry point) asks the app for work over HTTP
+(`contracts/runner-api.v1.json`, `app/src/runner-api/README.md`) and keeps up to `RUNNER_CONCURRENCY`
+jobs running. It is configured by environment variables:
+
+| Variable | Meaning | Default |
+|---|---|---|
+| `RUNNER_API_URL` | Base URL of the app, for example `http://app:3000` | required |
+| `RUNNER_TOKEN` | The shared token of the runner API (the app's `RUNNER_TOKEN`) | required |
+| `RUNNER_CONCURRENCY` | Jobs at the same time, 1 to 32. One PR-Agent process needs about 320 MB (CR-13), so `floor((MiB - 256) / (321 * 1.5))` for the memory of the container; 3 for 2 GiB | 3 |
+| `RUNNER_POLL_INTERVAL_SECONDS` | Wait between two claims when nothing is waiting (after a job ends the loop asks again at once) | 5 |
+| `RUNNER_JOB_TIMEOUT_SECONDS` | Hard timeout of one job, see below | 1200 (20 minutes) |
+| `RUNNER_SHUTDOWN_GRACE_SECONDS` | How long running jobs may finish after `SIGTERM` | 60 |
+| `RUNNER_ID` | Free-form id sent as `X-Runner-Id` (bookkeeping only) | `runner-<hostname>` |
+| `PR_AGENT_COMMAND` | The command that runs one job, split like a shell would. Only for test stacks that replace PR-Agent with a fake | `python -m code_reviewer_runner.runner` |
+
+Rules (the CR-29 decisions; tests in `tests/unit/test_job_loop*.py` and `tests/integration/test_job_loop*.py`):
+
+- **One process per job.** The job (with the git token and the LLM key) goes to the process on
+  **stdin**, never in the arguments and never in the environment. The process gets a minimal
+  environment (`PATH`, `HOME`, locale, proxy and certificate settings, the tiktoken cache and its
+  timeout), so it does not see `RUNNER_TOKEN` or the job of another process, and its own working
+  directory (empty, removed afterwards: PR-Agent reads a `pyproject.toml` there). It leads its own
+  process group, so ending a job ends everything it started.
+- **Refused jobs start nothing.** The input is validated with the runner's own `parse_job` before a
+  process is started: an unknown command (`invalid_command`) or platform and any other invalid input
+  (`invalid_job`) are reported with `complete` at once. The platforms are the table in
+  `platforms.py` (`git.provider` to PR-Agent settings; `github` only in the MVP).
+- **Heartbeat** every `heartbeatIntervalSeconds` (30) while the process runs, none after it ends. A
+  `409` means the lease is lost: the process is ended and nothing is reported. Other failed heartbeats
+  are tried again at the next beat.
+- **Hard timeout.** The process gets `RUNNER_JOB_TIMEOUT_SECONDS` as its own limit and reports `timeout`
+  with its log when it hits it. A process that does not stop (or a blocked one) is ended by the loop
+  10 seconds later: `SIGTERM` to its process group, `SIGKILL` 5 seconds after that, and the job is
+  reported as `timeout`. So the effective limit is the timeout plus 10 seconds.
+- **The result** is the last line the process printed on stdout, checked against the contract. A
+  process that ends without a usable line (crash, signal, no output) is reported as `runner_error` with
+  the end of its stderr. The log tail is redacted again with the secrets of the job, the runner token
+  and the lease tokens, and cut to 4 KB; the body of `complete` stays under 48 KB (the app refuses 64 KiB).
+  Only the newest 256 KB of stdout and 64 KB of stderr are kept, however much the process writes.
+- **`complete` is repeated** with growing pauses while the app cannot be reached, for up to 10
+  minutes (the lease is 2 minutes, so the app has taken the job back by then). While the result is being resent the loop keeps sending heartbeats, so the lease cannot lapse and no other runner can take the job a second time; a lost lease (409) stops the attempts. A `409` ends the
+  attempts. A `400` or `413` is answered once with the bare verdict (no log). An answer that is not HTTP (garbage, a cut-off body) counts as the app being unavailable. The answer
+  `status: "queued"` (after a shutdown report) is accepted.
+- **Back-off.** When the app is down or answers 5xx, 429 or 401 to a claim, the loop waits 5, 10, 20, 40,
+  then 60 seconds (never below 5 seconds, even with a shorter poll interval; or the `Retry-After` of a `503`) and starts over after a successful claim. Running
+  jobs are not touched.
+- **Shutdown.** `SIGTERM` or `SIGINT`: no new claims, running jobs may finish for
+  `RUNNER_SHUTDOWN_GRACE_SECONDS`; then they are ended and reported as `failed` with `runner_shutdown`,
+  which the app gives back to the queue (a repeated report may be answered with `409`, which is fine).
+  A second signal skips the wait. The exit code is 0.
+- **No secrets in logs.** The loop logs ids, codes and counts, never the input of a job. Every line
+  passes a masker that knows the runner token, the lease tokens and the credentials of the running jobs.
+- **The image and compose.** The entry point is `tini` (PID 1) in front of the loop, so the helpers of a
+  killed job are reaped and `docker stop` reaches the loop as SIGTERM; `init: true` is not needed.
+  Compose must give the container a `stop_grace_period` of **at least 90 seconds** (60 s grace period
+  + 5 s between SIGTERM and SIGKILL + up to 10 s to report `runner_shutdown`; Docker's default of 10 s
+  would SIGKILL the runner before the jobs are reported). `PR_AGENT_COMMAND` must never be set in a
+  production compose file: the job, with its credentials, would go to that command (the loop logs a
+  warning at start when it is set).
+- The codes the loop adds to the ones of the table below: `runner_shutdown`. `timeout` and
+  `runner_error` are also reported by the loop itself.
+
+The sizing of a container (memory per process, default concurrency) is in
+`docs/spike/cr-13-measurements.md`.
 
 ## One job
 
@@ -74,7 +142,7 @@ and the enum agree. Callers branch on the code, never on the text.
 | `invalid_command` | The command is not one of `review`, `improve`, `describe`, `ask` |
 | `pr_agent_version_mismatch` | The installed PR-Agent is not the version the runner was written for |
 | `identity_patch_failed` | The method the identity patch replaces is missing or has changed |
-| `runner_error` | A failure inside the runner itself |
+| `runner_error` | A failure inside the runner itself (also reported by the job loop for a process that ended without a result) |
 | `command_failed` | PR-Agent reported a failure it handled itself (failure comment, failed flag) and nothing more specific is known |
 | `review_not_published` | `review` returned normally but no review comment was recorded (for example an identity problem) |
 | `pr_not_found` | GitHub answered 404 for the pull request |
@@ -92,7 +160,7 @@ and the enum agree. Callers branch on the code, never on the text.
 | `llm_bad_request` | The LLM provider refused the request (400, 422, context too large) |
 | `llm_output_invalid` | The model answered, but its answer could not be turned into a review |
 | `model_unknown` | PR-Agent does not know the model (set `llm.maxTokens`) or the provider has no such model |
-| `timeout` | The command did not finish within `RUNNER_JOB_TIMEOUT_SECONDS` |
+| `timeout` | The command did not finish within `RUNNER_JOB_TIMEOUT_SECONDS` (also reported by the job loop for a process it had to end) |
 | `unknown` | Something failed that no rule recognises |
 
 ## Settings policy
@@ -170,6 +238,27 @@ An installation token cannot call `GET /user`, so PR-Agent cannot learn which lo
 a second review of the same pull request would fail instead of editing its comment.
 `GithubProvider._resolve_user_login` is replaced to return `<slug>[bot]`. The patch is tied to the
 exact PR-Agent version (`identity_patch.PATCHED_FOR_VERSION`) and refused for any other.
+
+The patch reaches into a private method, so a PR-Agent upgrade must not slip through. Two layers
+protect it:
+
+- At the start of every job the runner checks the installed version, that `_resolve_user_login`
+  exists and takes only `self`, and that the chain that asks it for the login is intact
+  (`is_comment_authored_by_pr_agent` calls `_agent_login`, which calls `_resolve_user_login`; see
+  `identity_funnel.py`). If anything differs, the job is refused before PR-Agent runs, with the
+  result code `pr_agent_version_mismatch` or `identity_patch_failed`. The detail names the method,
+  the installed version and, for a signature change, the expected and the found signature. The
+  runner never falls back to another identity and never posts a duplicate comment instead.
+- `tests/unit/test_dependency_pin.py` and `tests/unit/test_identity_funnel.py` run in the runner CI
+  job against the real, pinned PR-Agent (no network). They fail when the pin, the lock file, the
+  installed package and `PATCHED_FOR_VERSION` disagree, when the methods the patch relies on are
+  gone or changed, or when the fingerprint of one of them (a hash of its syntax tree) differs from
+  the one recorded for 0.47.0. A PR that bumps `pr-agent` therefore turns the check
+  `All checks passed?` red until someone has read the release diff and updated the recorded
+  fingerprints and `PATCHED_FOR_VERSION` together with the pin. The fingerprints are hashes of
+  the syntax tree and were recorded on Python 3.13 (the version of `.python-version` and the
+  image); on another minor version they differ, so the fingerprint tests first assert the
+  interpreter and say so instead of reporting a PR-Agent change that does not exist.
 
 ## Measuring memory and duration
 

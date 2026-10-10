@@ -61,6 +61,13 @@ export type EnqueueJobInput = {
   actorLogin: string;
   /** The webhook delivery the job comes from; makes the enqueue idempotent per delivery. */
   deliveryId?: string | null;
+  /**
+   * The comment the command was written in, for a `comment` job. The comment is recorded with the
+   * job that answers it (a new one, or an equal one that was already waiting or running), and the
+   * same comment never gets a second job (`same_comment`), however often and under whatever
+   * delivery id it arrives.
+   */
+  commentId?: string | null;
   /** Defaults to now. A debounce is a later `runAfter`. */
   runAfter?: Date;
 };
@@ -69,6 +76,8 @@ export type EnqueueJobInput = {
 export const ENQUEUE_EXISTING_REASONS = [
   /** The same delivery was enqueued before (a redelivery or a second request). */
   "same_delivery",
+  /** A job for this comment was created before (a replayed delivery under another delivery id). */
+  "same_comment",
   /** An automatic job for this head commit and command already exists. */
   "same_head",
   /** A waiting or running job for this pull request and command already exists. */

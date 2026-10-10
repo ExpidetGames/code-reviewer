@@ -25,6 +25,7 @@ export type ValidEnqueueInput = {
   triggerKind: JobTriggerKind;
   actorLogin: string;
   deliveryId: string | null;
+  commentId: string | null;
   runAfter: Date | null;
 };
 
@@ -91,6 +92,10 @@ export function validateEnqueueInput(
   if (deliveryId !== null && !isNonEmptyString(deliveryId))
     refuse("deliveryId", "invalid");
 
+  const commentId = fields.commentId ?? null;
+  if (commentId !== null && !isNonEmptyString(commentId))
+    refuse("commentId", "invalid");
+
   const runAfter = fields.runAfter ?? null;
   if (
     runAfter !== null &&
@@ -113,6 +118,7 @@ export function validateEnqueueInput(
       triggerKind: fields.triggerKind as JobTriggerKind,
       actorLogin: fields.actorLogin as string,
       deliveryId: deliveryId as string | null,
+      commentId: commentId as string | null,
       runAfter: runAfter as Date | null,
     },
   };
