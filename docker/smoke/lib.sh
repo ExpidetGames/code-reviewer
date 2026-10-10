@@ -68,7 +68,10 @@ scan_in_image() {
   rm -f "$stderr_file"
 }
 
-readonly PRIVATE_KEY_MARKER='-----BEGIN [A-Z ]*PRIVATE KEY-----'
+# The header of a PEM key, followed by the end of the line, a control character (CR) or an escaped
+# newline (a key inside a JSON or JS string). A library that only checks for the header
+# (`indexOf("-----BEGIN PRIVATE KEY-----")` in a bundled chunk) is followed by a quote and no key.
+readonly PRIVATE_KEY_MARKER='-----BEGIN [A-Z ]*PRIVATE KEY-----($|[[:cntrl:]]|\\n|\\r)'
 
 # CR-17-T09: nothing that must stay out of an image is inside it, and its configuration and build
 # history carry no secrets. This is the proof that the .dockerignore files work.
@@ -91,7 +94,7 @@ $SCAN_OUTPUT"
 
   # grep exits 0 when it found a file, 1 when it found none, 2 on any error (a missing path).
   scan_in_image "$image" "0 1" sh -c \
-    "grep -rIl -e '$PRIVATE_KEY_MARKER' --exclude-dir=node_modules $content_paths"
+    "grep -rIlE -e '$PRIVATE_KEY_MARKER' --exclude-dir=node_modules $content_paths"
   [ -z "$SCAN_OUTPUT" ] || fail "$image contains private key material:
 $SCAN_OUTPUT"
 
