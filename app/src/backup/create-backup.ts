@@ -77,7 +77,7 @@ export function createBackup(options: CreateBackupOptions): BackupResult {
   const createdAt = now();
 
   assertSourceExists(databasePath);
-  assertTargetUsable(backupDir, databasePath);
+  assertBackupTargetUsable(backupDir, databasePath);
   removeStaleTemporaryFiles(backupDir, createdAt);
 
   const temporaryPath = join(
@@ -140,7 +140,11 @@ function assertSourceExists(databasePath: string): void {
   );
 }
 
-function assertTargetUsable(backupDir: string, databasePath: string): void {
+/** Throws BACKUP_TARGET_UNAVAILABLE or BACKUP_TARGET_INSIDE_DATA unless backups can be written to `backupDir`. */
+export function assertBackupTargetUsable(
+  backupDir: string,
+  databasePath: string,
+): void {
   let resolved: string;
   try {
     if (!statSync(backupDir).isDirectory())

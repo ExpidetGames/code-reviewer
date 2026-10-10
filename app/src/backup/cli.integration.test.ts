@@ -24,7 +24,7 @@ const cli = fileURLToPath(new URL("./cli.ts", import.meta.url));
 function run(args: string[], env: Record<string, string>) {
   const result = spawnSync(process.execPath, ["--no-warnings", cli, ...args], {
     // Only what the command needs: nothing of the test runner's environment leaks in.
-    env: { PATH: process.env.PATH ?? "", ...env },
+    env: { NODE_ENV: "test", PATH: process.env.PATH ?? "", ...env },
     encoding: "utf8",
     timeout: 30_000,
   });
