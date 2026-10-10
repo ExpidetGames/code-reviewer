@@ -1,0 +1,160 @@
+"""Manual run of the runner against a real pull request (CR-10-T12), the proof of the spike.
+
+Creates a GitHub App JWT from the private key, exchanges it for an installation token, builds the
+job and starts the runner entry point (`code-reviewer-run-job`) as a real process with the job on
+stdin. Prints the result JSON of the runner and a summary. Neither the installation token nor the
+LLM key is ever printed: the script checks the streams of the runner for both before it prints them.
+
+Needs these environment variables, loaded from the developer's env file with `set -a; . <file>;
+set +a`:
+GITHUB_APP_ID, GITHUB_APP_SLUG, GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_KEY_PATH,
+OPENROUTER_API_KEY.
+
+    uv run python scripts/manual_review.py [--pr-url URL] [--command review] [--model MODEL]
+
+It only talks to the sandbox repository below, on purpose: it posts a real comment.
+"""
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+import urllib.request
+from collections.abc import Mapping, Sequence
+from pathlib import Path
+from typing import Any
+
+import jwt
+
+ALLOWED_REPOSITORY = "ExpidetGames/code-reviewer-playground"
+DEFAULT_PR_URL = f"https://github.com/{ALLOWED_REPOSITORY}/pull/1"
+DEFAULT_MODEL = "deepseek/deepseek-v3.2"
+# Context window of the default model; PR-Agent does not know it and needs it for unknown models.
+DEFAULT_MAX_TOKENS = 163840
+GITHUB_API = "https://api.github.com"
+REQUIRED_ENV = (
+    "GITHUB_APP_ID",
+    "GITHUB_APP_SLUG",
+    "GITHUB_APP_INSTALLATION_ID",
+    "GITHUB_APP_PRIVATE_KEY_PATH",
+    "OPENROUTER_API_KEY",
+)
+
+
+def create_app_jwt(app_id: str, private_key_pem: str, now: float | None = None) -> str:
+    """The JWT an App uses to authenticate as itself (valid for at most 10 minutes)."""
+    issued = int(now if now is not None else time.time())
+    claims = {"iat": issued - 60, "exp": issued + 9 * 60, "iss": app_id}
+    return jwt.encode(claims, private_key_pem, algorithm="RS256")
+
+
+def mint_installation_token(app_id: str, installation_id: str, key_path: Path) -> str:
+    """Exchange the App JWT for an installation access token. The token is only returned."""
+    app_jwt = create_app_jwt(app_id, key_path.read_text())
+    request = urllib.request.Request(
+        f"{GITHUB_API}/app/installations/{installation_id}/access_tokens",
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {app_jwt}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "code-reviewer-manual-review",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:
+        payload: dict[str, Any] = json.load(response)
+    return str(payload["token"])
+
+
+def check_repository(pr_url: str) -> None:
+    match = re.fullmatch(r"https://github\.com/([^/]+/[^/]+)/pull/[1-9][0-9]*", pr_url)
+    if match is None or match.group(1) != ALLOWED_REPOSITORY:
+        raise SystemExit(f"refusing to run: only pull requests of {ALLOWED_REPOSITORY} are allowed")
+
+
+def build_job(
+    pr_url: str, command: str, token: str, bot_login: str, api_key: str, model: str, max_tokens: int
+) -> dict[str, Any]:
+    return {
+        "prUrl": pr_url,
+        "command": command,
+        "git": {
+            "provider": "github",
+            "baseUrl": GITHUB_API,
+            "token": token,
+            "botLogin": bot_login,
+        },
+        "llm": {"provider": "openrouter", "model": model, "apiKey": api_key},
+        "env": {"CONFIG__CUSTOM_MODEL_MAX_TOKENS": str(max_tokens)},
+    }
+
+
+def start_runner(job: Mapping[str, Any]) -> subprocess.CompletedProcess[str]:
+    script = Path(sys.executable).parent / "code-reviewer-run-job"
+    environment = {"PATH": os.environ["PATH"], "HOME": os.environ.get("HOME", "/tmp")}
+    return subprocess.run(
+        [str(script)],
+        input=json.dumps(job),
+        capture_output=True,
+        text=True,
+        env=environment,
+        timeout=20 * 60,
+        check=False,
+    )
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0] if __doc__ else None)
+    parser.add_argument("--pr-url", default=DEFAULT_PR_URL)
+    parser.add_argument("--command", default="review")
+    parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument("--max-tokens", type=int, default=DEFAULT_MAX_TOKENS)
+    args = parser.parse_args(argv)
+
+    check_repository(args.pr_url)
+    missing = [name for name in REQUIRED_ENV if not os.environ.get(name)]
+    if missing:
+        raise SystemExit(f"missing environment variables: {', '.join(missing)}")
+
+    token = mint_installation_token(
+        os.environ["GITHUB_APP_ID"],
+        os.environ["GITHUB_APP_INSTALLATION_ID"],
+        Path(os.environ["GITHUB_APP_PRIVATE_KEY_PATH"]),
+    )
+    api_key = os.environ["OPENROUTER_API_KEY"]
+    job = build_job(
+        args.pr_url,
+        args.command,
+        token,
+        os.environ["GITHUB_APP_SLUG"],
+        api_key,
+        args.model,
+        args.max_tokens,
+    )
+    started = time.monotonic()
+    process = start_runner(job)
+    wall_seconds = time.monotonic() - started
+
+    leaked = [
+        name
+        for name, secret in (("installation token", token), ("LLM key", api_key))
+        for stream in (process.stdout, process.stderr)
+        if secret in stream
+    ]
+    if leaked:
+        print(f"SECRET SCAN FAILED: {', '.join(sorted(set(leaked)))} found in the runner output")
+        return 2
+    print(process.stdout.strip())
+    if process.stderr.strip():
+        print("--- stderr ---")
+        print(process.stderr.strip())
+    print(f"--- exit code {process.returncode}, wall time {wall_seconds:.1f}s, model {args.model}")
+    print("--- secret scan of stdout and stderr: clean (installation token, LLM key)")
+    return process.returncode
+
+
+if __name__ == "__main__":
+    sys.exit(main())
