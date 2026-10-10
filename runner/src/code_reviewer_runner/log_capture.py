@@ -7,6 +7,8 @@ the only way to see why PR-Agent failed, because PR-Agent swallows its own excep
 """
 
 import logging
+import re
+import threading
 from collections import deque
 from typing import Any
 
@@ -23,6 +25,11 @@ _WARNING_LEVEL = 30
 _IMPORTANT_SHARE = 0.5
 _FINAL_FAILURE = "Failed to process the command"
 _NOISE = ("Settings file not found",)
+# Terminal escape sequences (colors, cursor moves, window titles) and control characters. The log
+# comes from a library and from text of the pull request; neither may send commands to the
+# terminal of whoever reads the tail later.
+_ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]")
+_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")  # replaced by a space
 
 
 class LogCapture:
@@ -36,6 +43,10 @@ class LogCapture:
         self._sequence = 0
         # The newest error records (message, exception); the final failure is what matters most.
         self._errors: deque[tuple[str, BaseException | None]] = deque(maxlen=_MAX_COLLECTED)
+        # Set as soon as something of the log could not be kept: an evicted line, a shortened line.
+        self._lost_text = False
+        # The watchdog thread may read while the main thread still logs.
+        self._lock = threading.RLock()
 
     def __call__(self, message: Any) -> None:
         record = message.record
@@ -53,12 +64,20 @@ class LogCapture:
         line = f"{level_name} {text}"
         if exception is not None:
             line += f" [{type(exception).__name__}: {exception}]"
-        line = " ".join(self._redactor.redact(line).split())[:_MAX_LINE_CHARS]
-        self._sequence += 1
-        entry = (self._sequence, level_no, line)
-        self._lines.append(entry)
-        if level_no >= _WARNING_LEVEL:
-            self._important.append(entry)
+        # Clean first, then redact: a secret that an escape sequence or a control character cut
+        # in two is joined by the cleaning and must be found afterwards, not before.
+        line = self._redactor.redact(_clean(line))
+        with self._lock:
+            if len(line) > _MAX_LINE_CHARS:
+                line = line[:_MAX_LINE_CHARS]
+                self._lost_text = True
+            self._sequence += 1
+            entry = (self._sequence, level_no, line)
+            if len(self._lines) == self._lines.maxlen:
+                self._lost_text = True
+            self._lines.append(entry)
+            if level_no >= _WARNING_LEVEL:
+                self._important.append(entry)
 
     @property
     def exceptions(self) -> list[BaseException]:
@@ -78,6 +97,19 @@ class LogCapture:
 
     def tail(self) -> str:
         """The newest lines that fit the byte limit; warnings and errors get priority."""
+        return self.snapshot()[0]
+
+    @property
+    def truncated(self) -> bool:
+        """True if the log held more than `tail()` returns (older lines or characters were cut)."""
+        return self.snapshot()[1]
+
+    def snapshot(self) -> tuple[str, bool]:
+        """The tail and whether the log held more than it, taken together from one state."""
+        with self._lock:
+            return self._select()
+
+    def _select(self) -> tuple[str, bool]:
         budget = self._max_tail_bytes
         chosen: dict[int, str] = {}
         used = 0
@@ -96,7 +128,18 @@ class LogCapture:
             chosen[sequence] = line
             used += size
         text = "\n".join(chosen[sequence] for sequence in sorted(chosen))
-        return fit_to_bytes(text, budget)
+        fitted = fit_to_bytes(text, budget)
+        kept = {sequence for sequence, _, _ in self._lines} | {
+            sequence for sequence, _, _ in self._important
+        }
+        truncated = self._lost_text or len(chosen) < len(kept) or fitted != text
+        return fitted, truncated
+
+
+def _clean(text: str) -> str:
+    """One line: escape sequences removed, control characters turned into spaces (so a progress
+    line with carriage returns stays readable), white space collapsed."""
+    return " ".join(_CONTROL.sub(" ", _ANSI.sub("", text)).split())
 
 
 def _exception(record: Any) -> BaseException | None:

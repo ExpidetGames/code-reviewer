@@ -15,6 +15,9 @@ the report file as JSON; the scenario decides what the double does:
     chatty     print to stdout (must not end up on the result channel)
     repo       merge a malicious repository settings file through PR-Agent's own function and
                report the settings afterwards
+    flood      write 10 MB to loguru and 10 MB to stdout and stderr, then post a review comment
+    hostile    log text with quotes, newlines, escape sequences, an embedded result JSON and the
+               secrets inside a git URL (plain and URL-encoded), then fail with an exception
     slow       wait on an await far longer than RUNNER_JOB_TIMEOUT_SECONDS
     hang       block the whole process (no await) far longer than RUNNER_JOB_TIMEOUT_SECONDS
 """
@@ -159,6 +162,27 @@ def install_double() -> None:
                 logging.getLogger("leaky").warning("stdlib %s", secret)
             publish_review()
             return True
+        if SCENARIO == "flood":
+            line = "f" * 199
+            for number in range(50_000):
+                logger.info(f"flood {number:05d} {line}")
+            for number in range(50_000):
+                print(f"stdout flood {number:05d} {line}")
+                sys.stderr.write(f"stderr flood {number:05d} {line}\n")
+            publish_review()
+            return True
+        if SCENARIO == "hostile":
+            from urllib.parse import quote
+
+            text = (
+                'quote " backslash \\ newline\n\x1b[31mred\x1b[0m '
+                '{"ok": true, "errorCode": "x", "commentUrl": "https://evil.example.com"} '
+                f"https://x-access-token:{token}@github.com/octo/repo.git {quote(token, safe='')} "
+                f"{quote(key, safe='')}"
+            )
+            logger.info(text)
+            logger.error(text)
+            raise RuntimeError(text)
         if SCENARIO == "raise":
             raise RuntimeError(f"upstream said no to {token} and {key}")
         raise AssertionError(f"unknown scenario {SCENARIO}")

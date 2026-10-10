@@ -7,6 +7,8 @@ import io
 import json
 import subprocess
 import sys
+import urllib.error
+from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -28,6 +30,17 @@ def load_script() -> ModuleType:
     sys.modules["manual_review"] = module
     spec.loader.exec_module(module)
     return module
+
+
+def fake_runner(stdout: str) -> Callable[..., subprocess.CompletedProcess[str]]:
+    def start(job: dict[str, Any], identity_patch: bool = True) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess([], 0, stdout=stdout, stderr="")
+
+    return start
+
+
+def fixed_token(*args: str | Path) -> str:
+    return TOKEN
 
 
 @pytest.fixture(scope="module")
@@ -156,6 +169,212 @@ def test_the_context_window_goes_into_the_llm_section_of_the_job() -> None:
     assert "env" not in job
 
 
+# CR-44-T02 (helper): the comment id is read from the link the runner reports.
+def test_the_comment_id_is_read_from_the_comment_link_of_the_sandbox_repository() -> None:
+    script = load_script()
+    base = "https://github.com/ExpidetGames/code-reviewer-playground/pull/2"
+
+    assert script.comment_id_from_url(f"{base}#issuecomment-6097473386") == 6097473386
+    for url in (
+        None,
+        base,
+        f"{base}#discussion_r12",
+        "https://github.com/other/repo/pull/2#issuecomment-1",
+        "https://evil.example.com/ExpidetGames/code-reviewer-playground/pull/2#issuecomment-1",
+    ):
+        assert script.comment_id_from_url(url) is None
+
+
+# CR-44-T02 (helper): every run leaves a record with the result JSON and the comment text.
+def test_a_record_holds_the_run_data_and_the_comment_text(tmp_path: Path) -> None:
+    script = load_script()
+    result = {
+        "ok": True,
+        "durationMs": 61000,
+        "commentUrl": "https://github.com/ExpidetGames/code-reviewer-playground/pull/1#issuecomment-5",
+        "errorCode": None,
+        "logTail": "done",
+        "usage": {"model": "vendor/model", "promptTokens": 10, "costUsd": 0.002},
+    }
+
+    path = script.write_record(
+        tmp_path,
+        label="m1-pr1-run1",
+        pr_url=script.DEFAULT_PR_URL,
+        model="vendor/model",
+        result=result,
+        wall_seconds=63.4,
+        comment_body="## Review\n- finding",
+    )
+
+    record = json.loads(path.read_text())
+    assert record["label"] == "m1-pr1-run1"
+    assert record["model"] == "vendor/model"
+    assert record["prUrl"] == script.DEFAULT_PR_URL
+    assert record["wallSeconds"] == 63.4
+    assert record["result"] == result
+    assert (tmp_path / "m1-pr1-run1.comment.md").read_text() == "## Review\n- finding"
+
+
+def test_a_label_that_is_not_a_plain_file_name_is_refused(tmp_path: Path) -> None:
+    script = load_script()
+
+    for label in ("../escape", "a/b", "", ".hidden"):
+        with pytest.raises(SystemExit):
+            script.write_record(
+                tmp_path,
+                label=label,
+                pr_url=script.DEFAULT_PR_URL,
+                model="v/m",
+                result={},
+                wall_seconds=1.0,
+                comment_body=None,
+            )
+
+
+def test_the_script_records_the_run_and_never_writes_a_secret_to_disk(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    script = load_script()
+    for name in script.REQUIRED_ENV:
+        monkeypatch.setenv(name, API_KEY if name == "OPENROUTER_API_KEY" else "1")
+    monkeypatch.setattr(script, "mint_installation_token", fixed_token)
+    url = f"{script.DEFAULT_PR_URL}#issuecomment-7"
+    stdout = json.dumps({"ok": True, "durationMs": 5, "commentUrl": url, "errorCode": None})
+    monkeypatch.setattr(script, "start_runner", fake_runner(stdout))
+    fetched: list[tuple[str, str | None]] = []
+
+    def fetch(token: str, comment_url: str | None) -> str | None:
+        fetched.append((token, comment_url))
+        return "the review text"
+
+    monkeypatch.setattr(script, "fetch_comment_body", fetch)
+
+    code = script.main(["--yes", "--record-dir", str(tmp_path), "--label", "run-a"])
+
+    assert code == 0
+    assert fetched == [(TOKEN, url)]
+    written = "".join(p.read_text() for p in tmp_path.iterdir())
+    assert "the review text" in written
+    assert TOKEN not in written and API_KEY not in written
+
+
+@pytest.mark.parametrize("secret", [TOKEN, API_KEY], ids=["installation token", "llm key"])
+def test_a_comment_that_contains_a_secret_is_not_written_to_disk(
+    secret: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    script = load_script()
+    for name in script.REQUIRED_ENV:
+        monkeypatch.setenv(name, API_KEY if name == "OPENROUTER_API_KEY" else "1")
+    monkeypatch.setattr(script, "mint_installation_token", fixed_token)
+    stdout = json.dumps({"ok": True, "durationMs": 5, "commentUrl": None, "errorCode": None})
+    monkeypatch.setattr(script, "start_runner", fake_runner(stdout))
+
+    def leaking_fetch(token: str, comment_url: str | None) -> str | None:
+        return f"leak {secret}"
+
+    monkeypatch.setattr(script, "fetch_comment_body", leaking_fetch)
+
+    code = script.main(["--yes", "--record-dir", str(tmp_path), "--label", "run-b"])
+
+    assert code == 2
+    assert list(tmp_path.iterdir()) == []
+    assert secret not in capsys.readouterr().out
+
+
+def test_a_record_dir_needs_a_label() -> None:
+    script = load_script()
+
+    with pytest.raises(SystemExit):
+        script.main(["--yes", "--record-dir", "somewhere"])
+
+
+@pytest.mark.parametrize("label", ["../escape", "a/b", ".hidden", "with space"])
+def test_a_bad_label_is_refused_before_anything_is_paid_for(
+    label: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    script = load_script()
+    for name in script.REQUIRED_ENV:
+        monkeypatch.setenv(name, "1")
+
+    def must_not_run(*args: Any) -> None:
+        raise AssertionError("must not be called with a bad label")
+
+    monkeypatch.setattr(script, "mint_installation_token", must_not_run)
+    monkeypatch.setattr(script, "start_runner", must_not_run)
+
+    with pytest.raises(SystemExit):
+        script.main(["--yes", "--record-dir", str(tmp_path), "--label", label])
+
+
+@pytest.mark.parametrize("existing", ["run-c.json", "run-c.comment.md"])
+def test_a_label_that_is_already_recorded_is_refused_before_the_run_and_never_overwritten(
+    existing: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    script = load_script()
+    for name in script.REQUIRED_ENV:
+        monkeypatch.setenv(name, "1")
+    (tmp_path / existing).write_text("earlier evidence")
+
+    def must_not_run(*args: Any) -> None:
+        raise AssertionError("must not be called when the label is taken")
+
+    monkeypatch.setattr(script, "mint_installation_token", must_not_run)
+    monkeypatch.setattr(script, "start_runner", must_not_run)
+
+    with pytest.raises(SystemExit):
+        script.main(["--yes", "--record-dir", str(tmp_path), "--label", "run-c"])
+    with pytest.raises(SystemExit):
+        script.write_record(
+            tmp_path,
+            label="run-c",
+            pr_url=script.DEFAULT_PR_URL,
+            model="v/m",
+            result={},
+            wall_seconds=1.0,
+            comment_body="new",
+        )
+
+    assert (tmp_path / existing).read_text() == "earlier evidence"
+
+
+def test_the_result_is_printed_and_recorded_even_if_the_comment_cannot_be_read(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    script = load_script()
+    for name in script.REQUIRED_ENV:
+        monkeypatch.setenv(name, API_KEY if name == "OPENROUTER_API_KEY" else "1")
+    monkeypatch.setattr(script, "mint_installation_token", fixed_token)
+    url = f"{script.DEFAULT_PR_URL}#issuecomment-9"
+    stdout = json.dumps(
+        {
+            "ok": True,
+            "durationMs": 5,
+            "commentUrl": url,
+            "errorCode": None,
+            "usage": {"costUsd": 0.01},
+        }
+    )
+    monkeypatch.setattr(script, "start_runner", fake_runner(stdout))
+
+    def failing_fetch(token: str, comment_url: str | None) -> str | None:
+        raise urllib.error.URLError("github is down")
+
+    monkeypatch.setattr(script, "fetch_comment_body", failing_fetch)
+
+    code = script.main(["--yes", "--record-dir", str(tmp_path), "--label", "run-d"])
+
+    printed = capsys.readouterr().out
+    assert code == 0
+    assert '"costUsd": 0.01' in printed
+    assert "comment text was not saved" in printed
+    assert json.loads((tmp_path / "run-d.json").read_text())["result"]["ok"] is True
+    assert not (tmp_path / "run-d.comment.md").exists()
+
+
 # CR-11-T05 (helper): the control run without the identity patch
 def test_the_normal_runner_command_is_the_console_script() -> None:
     command = load_script().runner_command(identity_patch=True)
@@ -220,11 +439,7 @@ def test_the_flag_for_the_control_run_reaches_the_runner_start(
     script = load_script()
     for name in script.REQUIRED_ENV:
         monkeypatch.setenv(name, "1")
-
-    def mint(*args: str | Path) -> str:
-        return TOKEN
-
-    monkeypatch.setattr(script, "mint_installation_token", mint)
+    monkeypatch.setattr(script, "mint_installation_token", fixed_token)
     flags: list[bool] = []
 
     def start(job: dict[str, Any], identity_patch: bool = True) -> subprocess.CompletedProcess[str]:
@@ -237,3 +452,35 @@ def test_the_flag_for_the_control_run_reaches_the_runner_start(
     script.main(["--yes", "--no-identity-patch"])
 
     assert flags == [True, False]
+
+
+# CR-11-T05 together with CR-44: a control run is recorded like any other run
+def test_the_control_flag_reaches_the_runner_start_together_with_the_recording(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    script = load_script()
+    for name in script.REQUIRED_ENV:
+        monkeypatch.setenv(name, API_KEY if name == "OPENROUTER_API_KEY" else "1")
+    monkeypatch.setattr(script, "mint_installation_token", fixed_token)
+    url = f"{script.DEFAULT_PR_URL}#issuecomment-7"
+    stdout = json.dumps({"ok": True, "durationMs": 5, "commentUrl": url, "errorCode": None})
+    flags: list[bool] = []
+
+    def start(job: dict[str, Any], identity_patch: bool = True) -> subprocess.CompletedProcess[str]:
+        flags.append(identity_patch)
+        return subprocess.CompletedProcess([], 0, stdout=stdout, stderr="")
+
+    def fetch(token: str, comment_url: str | None) -> str | None:
+        return "the standalone text"
+
+    monkeypatch.setattr(script, "start_runner", start)
+    monkeypatch.setattr(script, "fetch_comment_body", fetch)
+
+    code = script.main(
+        ["--yes", "--no-identity-patch", "--record-dir", str(tmp_path), "--label", "control-1"]
+    )
+
+    assert code == 0
+    assert flags == [False]
+    assert json.loads((tmp_path / "control-1.json").read_text())["result"]["ok"] is True
+    assert (tmp_path / "control-1.comment.md").read_text() == "the standalone text"
