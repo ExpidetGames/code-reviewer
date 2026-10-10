@@ -1,9 +1,13 @@
-// Builds the access policy the running server uses: the allow list from the configuration plus,
-// in organization mode, the pieces that talk to GitHub and to Better Auth's tables (the stored
-// token, the time of the last check, ending sessions). Kept apart from `access-policy.ts`, which is
+// Builds the access policy the running server uses: the allow list from the configuration, the pins
+// of its logins and, in organization mode, the pieces that talk to GitHub and to Better Auth's
+// tables (the stored token, the time of the last check, ending sessions). Kept apart from `access-policy.ts`, which is
 // pure and tested with fakes.
 import "server-only";
 import { decryptOAuthToken } from "better-auth/oauth2";
+import type { Kysely } from "kysely";
+import { createAllowedLoginPinsRepository } from "../db/repositories/allowed-login-pins-repository.ts";
+import { getDatabase } from "../db/startup.ts";
+import type { Database } from "../db/schema.ts";
 import {
   createAccessPolicy,
   type AccessPolicy,
@@ -16,6 +20,7 @@ import { GITHUB_PROVIDER_ID } from "./github-provider.ts";
 import { loadAuthConfig } from "./config.ts";
 
 export type AccessRuntimeOptions = {
+  db: Kysely<Database>;
   auth: Pick<Auth, "$context">;
   config: Pick<AuthConfig, "access" | "github">;
   /** Only tests replace the global `fetch`. */
@@ -26,6 +31,7 @@ export type AccessRuntimeOptions = {
 };
 
 export function createRuntimeAccessPolicy({
+  db,
   auth,
   config,
   fetchImpl,
@@ -42,6 +48,10 @@ export function createRuntimeAccessPolicy({
           timeoutMs: orgCheckTimeoutMs,
           fetchImpl,
         });
+  const revokeSessions = async (userId: string) => {
+    const context = await auth.$context;
+    await context.internalAdapter.deleteUserSessions(userId);
+  };
   const orgDependencies: OrgAccessDependencies | undefined =
     org === null
       ? undefined
@@ -79,13 +89,11 @@ export function createRuntimeAccessPolicy({
               orgCheckedFor: orgName,
             });
           },
-          async revokeSessions(userId) {
-            const context = await auth.$context;
-            await context.internalAdapter.deleteUserSessions(userId);
-          },
+          revokeSessions,
         };
   return createAccessPolicy({
     config: config.access,
+    loginPins: { ...createAllowedLoginPinsRepository(db), revokeSessions },
     org: orgDependencies,
     now,
   });
@@ -99,6 +107,7 @@ type GlobalWithPolicy = typeof globalThis & { [globalKey]?: AccessPolicy };
 export function getAccessPolicy(): AccessPolicy {
   const holder = globalThis as GlobalWithPolicy;
   holder[globalKey] ??= createRuntimeAccessPolicy({
+    db: getDatabase(),
     auth: getAuth(),
     config: loadAuthConfig(process.env),
   });

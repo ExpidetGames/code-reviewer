@@ -3,7 +3,9 @@
 // user), via `lookupSession`.
 //
 // The rule (config in `access-config.ts`): a login on `ALLOWED_GITHUB_LOGINS` is allowed, checked on
-// every request, so removing a login takes effect at once. Otherwise, with `ALLOWED_GITHUB_ORG` set,
+// every request, so removing a login takes effect at once, but only for the GitHub account the login
+// is bound to (`login-pins.ts`): the same login on another account is an impostor, who is turned away
+// and signed out. Otherwise, with `ALLOWED_GITHUB_ORG` set,
 // the person must be a member of that organization; that costs a call to GitHub, so a yes is
 // remembered on the user (`orgCheckedAt` for `orgCheckedFor`) and asked again every 24 hours, or at
 // once when the configured organization is another one than the one that was checked. With neither
@@ -11,6 +13,7 @@
 import { isLoginListed, type AccessConfig } from "./access-config.ts";
 import { deny, type AccessDecision } from "./access-decision.ts";
 import type { OrgMembership } from "./github-org.ts";
+import { checkLoginPin, type LoginPins } from "./login-pins.ts";
 
 export type {
   AccessDecision,
@@ -24,6 +27,8 @@ export type SessionUser = {
   name: string;
   /** The current GitHub login (refreshed at every sign in). */
   githubLogin: string;
+  /** The stable numeric GitHub id of the account (from its `accounts` row), as text. */
+  githubId: string;
   /** ISO 8601 time of the last successful organization check, or null when there was none. */
   orgCheckedAt: string | null;
   /** The organization that check was made for, or null. */
@@ -51,8 +56,16 @@ export type OrgAccessDependencies = {
   revokeSessions: (userId: string) => Promise<void>;
 };
 
+/** What the rule for listed logins needs from the outside world. */
+export type LoginPinDependencies = LoginPins & {
+  /** Ends every session of the user (somebody else's account that carries a listed login). */
+  revokeSessions: (userId: string) => Promise<void>;
+};
+
 export type CreateAccessPolicyOptions = {
   config: AccessConfig;
+  /** Where listed logins are bound to a GitHub id. Never called for a login that is not listed. */
+  loginPins: LoginPinDependencies;
   /** Needed when `config.org` is set. Never called otherwise. */
   org?: OrgAccessDependencies;
   now?: () => Date;
@@ -64,6 +77,7 @@ const ALLOWED: AccessDecision = { allowed: true };
 
 export function createAccessPolicy({
   config,
+  loginPins,
   org,
   now = () => new Date(),
   logError = console.error,
@@ -74,13 +88,16 @@ export function createAccessPolicy({
   // during an outage or a rate limit every page load would otherwise hit GitHub again.
   const backoffUntil = new Map<string, number>();
 
-  async function revoke(userId: string): Promise<void> {
+  async function revoke(
+    userId: string,
+    revokeSessions: ((userId: string) => Promise<void>) | undefined,
+  ): Promise<void> {
     try {
-      await org?.revokeSessions(userId);
+      await revokeSessions?.(userId);
     } catch {
       // The person is turned away either way; the sessions are refused on every request anyway.
       logError(
-        "[auth] ORG_ACCESS_REVOKE_FAILED: could not end the sessions of a user",
+        "[auth] ACCESS_REVOKE_FAILED: could not end the sessions of a user",
       );
     }
   }
@@ -117,10 +134,10 @@ export function createAccessPolicy({
         }
         return ALLOWED;
       case "not_member":
-        await revoke(user.id);
+        await revoke(user.id, deps.revokeSessions);
         return deny("not_allowed");
       case "token_invalid":
-        await revoke(user.id);
+        await revoke(user.id, deps.revokeSessions);
         return deny("sign_in_again");
       case "unavailable":
         backoffUntil.set(
@@ -132,8 +149,25 @@ export function createAccessPolicy({
   }
 
   return async function accessPolicy(user): Promise<AccessDecision> {
-    if (isLoginListed(config, user.githubLogin)) return ALLOWED;
-    if (config.org === null || org === undefined) return deny("not_allowed");
+    let listed: "none" | "mismatch" | "unavailable" = "none";
+    if (isLoginListed(config, user.githubLogin)) {
+      // The first request of an account that has no pin yet binds the login to it.
+      const pin = await checkLoginPin(
+        loginPins,
+        user.githubLogin,
+        user.githubId,
+      );
+      if (pin === "match") return ALLOWED;
+      listed = pin;
+    }
+    if (config.org === null || org === undefined) {
+      if (listed === "unavailable") return deny("check_failed");
+      // The login is listed but belongs to another account: this one is not who the list means,
+      // and must not keep a session.
+      if (listed === "mismatch")
+        await revoke(user.id, loginPins.revokeSessions);
+      return deny("not_allowed");
+    }
 
     const running = inFlight.get(user.id);
     if (running) return running;
