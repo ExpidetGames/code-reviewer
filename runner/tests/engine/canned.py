@@ -87,3 +87,30 @@ pr_files:
 
 def ask(marker: str = "first run") -> str:
     return f"The helper builds a greeting from a name ({marker})."
+
+
+def review_with_findings(tag: str, count: int, characters: int) -> str:
+    """A review with `count` distinct findings of about `characters` each. Findings of another `tag`
+    are new findings for PR-Agent, so the record of findings grows from run to run."""
+    issues = ""
+    for index in range(count):
+        text = (f"Finding {tag}-{index} " + "word " * (characters // 5))[:characters]
+        issues += f"""    - relevant_file: |
+        greeting.py
+      issue_header: |
+        Issue {tag}-{index}
+      issue_content: |
+        {text}
+      start_line: 2
+      end_line: 2
+"""
+    return f"""```yaml
+review:
+  estimated_effort_to_review_[1-5]: 2
+  relevant_tests: |
+    No
+  key_issues_to_review:
+{issues}  security_concerns: |
+    No
+```
+"""
