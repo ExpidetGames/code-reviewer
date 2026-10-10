@@ -179,3 +179,50 @@ def test_the_final_failure_survives_a_flood_of_earlier_errors(capture: LogCaptur
         logger.exception("Failed to process the command.")
 
     assert str(capture.exceptions[0]) == "the real one"
+
+
+# CR-12-T06
+def test_a_log_that_fits_is_not_marked_as_truncated(capture: LogCapture) -> None:
+    attach(capture)
+
+    logger.info("a short log")
+
+    assert capture.truncated is False
+
+
+# CR-12-T06
+def test_ten_megabytes_of_log_leave_a_four_kilobyte_tail_that_is_marked_as_truncated() -> None:
+    capture = LogCapture(Redactor([TOKEN]))
+    attach(capture)
+
+    for number in range(50_000):
+        logger.info(f"line {number:05d} " + "y" * 200)
+
+    tail = capture.tail()
+    assert len(tail.encode("utf-8")) <= 4096
+    assert "line 49999" in tail
+    assert capture.truncated is True
+
+
+def test_a_single_line_that_had_to_be_shortened_marks_the_log_as_truncated(
+    capture: LogCapture,
+) -> None:
+    attach(capture)
+
+    logger.info("z" * 5000)
+
+    assert capture.truncated is True
+
+
+# CR-12-T09
+def test_terminal_escape_sequences_and_control_characters_are_removed_from_the_tail(
+    capture: LogCapture,
+) -> None:
+    attach(capture)
+
+    logger.info("\x1b[31mred\x1b[0m text\x07 with \x00 bell \x1b]0;title\x07 and\rreturn")
+
+    tail = capture.tail()
+    assert "\x1b" not in tail
+    assert all(ord(character) >= 32 or character == "\n" for character in tail)
+    assert "red text" in tail

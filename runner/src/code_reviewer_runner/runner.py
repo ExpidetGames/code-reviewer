@@ -62,12 +62,14 @@ def _elapsed_ms(started: float) -> int:
 def _failure(code: ErrorCode, detail: str, started: float, capture: LogCapture | None) -> JobResult:
     tail = capture.tail() if capture is not None else ""
     log_tail = f"{code.value}: {detail}" + (f"\n{tail}" if tail else "")
+    fitted = fit_to_bytes(log_tail, MAX_TAIL_BYTES)
     return JobResult(
         ok=False,
         duration_ms=_elapsed_ms(started),
         comment_url=None,
         error_code=code,
-        log_tail=fit_to_bytes(log_tail, MAX_TAIL_BYTES),
+        log_tail=fitted,
+        log_truncated=fitted != log_tail or (capture is not None and capture.truncated),
     )
 
 
@@ -128,6 +130,7 @@ def run_job(
         comment_url=comment_url,
         error_code=error_code,
         log_tail=capture.tail(),
+        log_truncated=capture.truncated,
         usage=usage,
     )
 

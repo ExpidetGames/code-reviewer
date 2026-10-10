@@ -17,12 +17,35 @@ The job is JSON on stdin (the shape is documented in `src/code_reviewer_runner/j
 | `env` | optional options of the four tools, `PR_REVIEWER__*`, `PR_DESCRIPTION__*`, `PR_CODE_SUGGESTIONS__*`, `PR_QUESTIONS__*`, as strings. Nothing else is accepted. |
 
 The result is exactly one line of JSON on stdout: `ok`, `durationMs`, `commentUrl` (or `null`),
-`errorCode` (or `null`), `logTail` (redacted, at most 4 KB) and `usage` (model, tokens, cost).
+`errorCode` (or `null`), `logTail` (redacted, at most 4 KB), `logTruncated` (true if the log held
+more than the tail shows) and `usage` (model, tokens, cost).
 The exit code is 0 for `ok` and 1 otherwise. The environment variable `RUNNER_JOB_TIMEOUT_SECONDS`
 (read from the process environment, not handed to PR-Agent) makes the runner stop the command and
 report `timeout`: first by cancelling it, and if it does not react (a call that blocks the process)
 three seconds later by printing the result and ending the process. The caller should still kill the
 process after its own deadline.
+
+## Where the result comes from
+
+`PRAgent.handle_request` only returns `True` or `False`, and `True` also happens when nothing was
+posted (or when a tool swallowed its own error). So the result does not come from its return value
+(decision of CR-12, see `docs/spike/cr-12-run-result.md`). It is assembled from what the runner
+observes while the command runs:
+
+- `commentUrl`: the comment recorder wraps the two write paths of PR-Agent's GitHub provider
+  (`publish_comment`, `edit_comment`) and picks the review (or improve summary, or answer) comment
+  by its hidden marker. An edited comment counts, which is what a second review does. No GitHub
+  call is made to look the comment up afterwards.
+- `ok` and `errorCode`: false if `handle_request` returned `False` or raised, if the tool marked the
+  command as failed, or if it posted a "Failed to ..." comment. The code is derived from the
+  exception PR-Agent logged (the runner's own log sink reads it off the record), never from text.
+- `logTail`: the runner's own redacting sink, newest lines, warnings and errors first, at most 4 KB,
+  escape sequences and control characters removed.
+
+When there is no comment link: `review` reports `ok: false` with `review_not_published` (a review
+that posted nothing is a failure the caller must see). `improve`, `ask` and `describe` keep
+`ok: true` with `commentUrl: null` (nothing to suggest is a valid outcome; `describe` edits the pull
+request itself and never has a comment).
 
 ## Error codes
 

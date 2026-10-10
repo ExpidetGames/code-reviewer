@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 from github import GithubException
-from litellm.exceptions import AuthenticationError
+from litellm.exceptions import AuthenticationError, InternalServerError, RateLimitError, Timeout
 from loguru import logger
 from pr_agent.agent.pr_agent import PRAgent
 from pr_agent.git_providers.github_provider import GithubProvider
@@ -495,7 +495,15 @@ def test_the_result_is_a_single_line_of_json_with_the_agreed_fields() -> None:
 
     assert out.getvalue().endswith("\n")
     result = json.loads(out.getvalue())
-    assert set(result) == {"ok", "durationMs", "commentUrl", "errorCode", "logTail", "usage"}
+    assert set(result) == {
+        "ok",
+        "durationMs",
+        "commentUrl",
+        "errorCode",
+        "logTail",
+        "logTruncated",
+        "usage",
+    }
     assert isinstance(result["durationMs"], int)
 
 
@@ -677,3 +685,249 @@ def test_the_watchdog_still_prints_a_timeout_result_when_the_log_tail_cannot_be_
 
     assert exits == [1]
     assert json.loads(out.getvalue())["errorCode"] == "timeout"
+
+
+class FakeClock:
+    """Stands in for the `time` module of the runner, so a run takes exactly as long as we say."""
+
+    def __init__(self, seconds: float) -> None:
+        self._seconds = seconds
+
+    def monotonic(self) -> float:
+        return self._seconds
+
+
+def run_for(
+    monkeypatch: pytest.MonkeyPatch, seconds: float, job: Job | None = None
+) -> tuple[JobResult, LogCapture]:
+    monkeypatch.setattr(runner, "time", FakeClock(seconds))
+    capture = LogCapture(Redactor([TOKEN, API_KEY]))
+    logger.remove()
+    sink = logger.add(capture, level="INFO", format="{message}")
+    try:
+        return runner.run_job(job or make_job(), capture, 0.0), capture
+    finally:
+        logger.remove(sink)
+
+
+# CR-12-T01
+def test_a_successful_run_reports_the_exact_duration_the_comment_and_a_string_log(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def double() -> bool:
+        provider_with_pull().publish_comment(f"## PR Reviewer Guide\n\n{REVIEW_MARKER}\n\nbody")
+        return True
+
+    use_double(monkeypatch, double)
+
+    result, _ = run_for(monkeypatch, 12.5)
+
+    printed = json.loads(result.to_line())
+    assert printed["ok"] is True
+    assert printed["durationMs"] == 12500
+    assert printed["commentUrl"] == "https://github.com/octo/repo/pull/7#c1"
+    assert printed["errorCode"] is None
+    assert isinstance(printed["logTail"], str)
+
+
+# CR-12-T02
+def test_an_unknown_exception_gives_a_documented_error_code_the_duration_and_no_comment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def double() -> bool:
+        raise RuntimeError("something nobody expected")
+
+    use_double(monkeypatch, double)
+
+    result, _ = run_for(monkeypatch, 3.0)
+
+    printed = json.loads(result.to_line())
+    assert printed["ok"] is False
+    assert printed["durationMs"] == 3000
+    assert printed["commentUrl"] is None
+    assert printed["errorCode"] in {code.value for code in ErrorCode}
+    assert printed["errorCode"] != "something nobody expected"
+
+
+def llm_error(kind: type[Exception]) -> Exception:
+    arguments: dict[str, str] = {
+        "message": "provider says: slow down please",
+        "llm_provider": "openrouter",
+        "model": "x/y",
+    }
+    return kind(**arguments)
+
+
+# CR-12-T03
+@pytest.mark.parametrize(
+    ("error", "code"),
+    [
+        (RateLimitError, ErrorCode.LLM_RATE_LIMIT),
+        (InternalServerError, ErrorCode.LLM_UNAVAILABLE),
+        (Timeout, ErrorCode.LLM_TIMEOUT),
+    ],
+)
+def test_each_llm_failure_has_its_own_stable_code_and_never_the_raw_message(
+    monkeypatch: pytest.MonkeyPatch, error: type[Exception], code: ErrorCode
+) -> None:
+    async def double() -> bool:
+        try:
+            raise llm_error(error)
+        except Exception:
+            logger.exception("Failed to process the command.")
+        return False
+
+    use_double(monkeypatch, double)
+
+    result, _ = run()
+
+    assert result.ok is False
+    assert result.error_code is code
+    assert "slow down" not in json.dumps(result.to_json()["errorCode"])
+
+
+# CR-12-T04
+@pytest.mark.parametrize(
+    ("status", "code"),
+    [(403, ErrorCode.GIT_FORBIDDEN), (404, ErrorCode.PR_NOT_FOUND)],
+)
+def test_github_403_and_404_give_their_own_stable_codes(
+    monkeypatch: pytest.MonkeyPatch, status: int, code: ErrorCode
+) -> None:
+    async def double() -> bool:
+        try:
+            raise GithubException(status, {"message": "nope"}, {})
+        except GithubException:
+            logger.exception("Failed to process the command.")
+        return False
+
+    use_double(monkeypatch, double)
+
+    result, _ = run()
+
+    assert result.ok is False
+    assert result.error_code is code
+
+
+# CR-12-T06
+def test_a_flood_of_log_lines_gives_a_valid_result_with_a_marked_four_kilobyte_tail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def double() -> bool:
+        for number in range(20_000):
+            logger.info(f"line {number:05d} " + "w" * 200)
+        provider_with_pull().publish_comment(f"## PR Reviewer Guide\n\n{REVIEW_MARKER}\n\nbody")
+        return True
+
+    use_double(monkeypatch, double)
+
+    result, _ = run()
+
+    printed = json.loads(result.to_line())
+    assert printed["ok"] is True
+    assert len(printed["logTail"].encode("utf-8")) <= 4096
+    assert printed["logTruncated"] is True
+
+
+def test_a_short_run_is_not_marked_as_truncated(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def double() -> bool:
+        provider_with_pull().publish_comment(f"## PR Reviewer Guide\n\n{REVIEW_MARKER}\n\nbody")
+        return True
+
+    use_double(monkeypatch, double)
+
+    result, _ = run()
+
+    assert result.to_json()["logTruncated"] is False
+
+
+# CR-12-T07 (the decision is the comment recorder, not the GitHub API: no listing call is made)
+def test_without_a_recorded_comment_the_url_is_null_and_no_extra_github_call_is_made(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[str] = []
+
+    async def double() -> bool:
+        return True
+
+    use_double(monkeypatch, double)
+    monkeypatch.setattr(
+        GithubProvider,
+        "get_issue_comments",
+        lambda self: requests.append("listing") or [],  # pyright: ignore
+        raising=False,
+    )
+
+    result, _ = run(make_job(command="improve"))
+
+    assert result.ok is True
+    assert result.comment_url is None
+    assert requests == []
+
+
+# CR-12-T08
+@pytest.mark.parametrize(
+    "line",
+    [
+        "git clone https://x-access-token:{token}@github.com/octo/repo.git",
+        "fetching https://x-access-token:{quoted}@github.com/octo/repo.git",
+        "header Authorization: token {token}",
+        "key={key} and again {quoted_key}",
+    ],
+)
+def test_secrets_in_a_git_url_or_url_encoded_never_reach_any_field_of_the_result(
+    monkeypatch: pytest.MonkeyPatch, line: str
+) -> None:
+    from urllib.parse import quote
+
+    job = make_job()
+    text = line.format(
+        token=TOKEN, quoted=quote(TOKEN, safe=""), key=API_KEY, quoted_key=quote(API_KEY, safe="")
+    )
+
+    async def double() -> bool:
+        logger.info(text)
+        logger.error(text)
+        provider_with_pull().publish_comment(f"## PR Reviewer Guide\n\n{REVIEW_MARKER}\n\nbody")
+        return True
+
+    use_double(monkeypatch, double)
+
+    result, _ = run(job)
+
+    printed = result.to_line()
+    for secret in (TOKEN, API_KEY, quote(TOKEN, safe=""), quote(API_KEY, safe="")):
+        assert secret not in printed
+
+
+# CR-12-T09
+def test_untrusted_log_text_cannot_break_or_overwrite_the_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hostile = 'quote " backslash \\ newline\n\x1b[31mred\x1b[0m {"ok": true, "errorCode": "x"}'
+
+    async def double() -> bool:
+        logger.info(hostile)
+        logger.warning(hostile)
+        raise RuntimeError(hostile)
+
+    use_double(monkeypatch, double)
+
+    result, _ = run()
+
+    line = result.to_line()
+    assert "\n" not in line
+    assert "\x1b" not in line
+    printed = json.loads(line)
+    assert printed["ok"] is False
+    assert printed["errorCode"] in {code.value for code in ErrorCode}
+    assert isinstance(printed["logTail"], str)
+    assert set(printed) == {
+        "ok",
+        "durationMs",
+        "commentUrl",
+        "errorCode",
+        "logTail",
+        "logTruncated",
+        "usage",
+    }
