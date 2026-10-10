@@ -13,7 +13,8 @@ Code Reviewer wraps PR-Agent: it runs PR-Agent against pull requests and adds a 
 | `app/` | Web app and API: Next.js 16, TypeScript, pnpm |
 | `runner/` | Worker that runs PR-Agent: Python, uv |
 | `compose.yml` | The whole stack on one machine (app and runner), see "Run with Docker Compose" |
-| `docs/` | Guides for operators, for example [`docs/github-app.md`](docs/github-app.md): creating and installing the team's GitHub App |
+| `compose.coolify.yml` | The same stack for Coolify (built from the repository, no published port), see "Deploy on Coolify" |
+| `docs/` | Guides for operators: [`docs/deployment-coolify.md`](docs/deployment-coolify.md) (deploying on Coolify), [`docs/github-app.md`](docs/github-app.md) (creating and installing the team's GitHub App) |
 | `fakes/` | Fake servers and fixtures used by the tests |
 | `TESTING.md` | Testing strategy |
 | `AGENTS.md` | Rules for agents and contributors |
@@ -118,7 +119,8 @@ writable for uid 10001. `make test-images` builds both images and runs their smo
 CI builds and smoke tests both images on pull requests. A push to `development` or `main`
 (`.github/workflows/publish-images.yml`) pushes them to GHCR with the tags `sha-<short commit>` and
 `development` or `latest`. The packages stay private: pulling needs `docker login ghcr.io` with a token
-that may read packages. How the deployment server gets access is decided with the deployment ticket.
+that may read packages. The Coolify deployment does not pull them: Coolify builds the images from the
+repository (reasons in [`docs/deployment-coolify.md`](docs/deployment-coolify.md)).
 
 ## Run with Docker Compose
 
@@ -165,10 +167,10 @@ docker compose -f compose.yml -f compose.build.yml up -d --build --wait
 
 **Data.** The database survives `docker compose down` and image updates (`docker compose pull && docker
 compose up -d`). Only `docker compose down -v` deletes it. The database runs in WAL mode, so
-never copy only `app.db` from a running stack: committed data can still sit in `app.db-wal`. Back it
-up with SQLite's online backup (`VACUUM INTO` or the `.backup` command of the `sqlite3` shell), or
-stop the stack with `docker compose stop` and copy `app.db`, `app.db-wal` and `app.db-shm` together.
-CR-40 automates the backup.
+never copy only `app.db` from a running stack: committed data can still sit in `app.db-wal`. The app
+backs the database up itself every day into the volume `backups` (7 daily and 4 weekly backups); how it
+works, how to restore and how to get the backups off the machine is in
+[`app/src/backup/README.md`](app/src/backup/README.md).
 
 **Network.** The app is published on `127.0.0.1` only. Set `APP_BIND_ADDRESS=0.0.0.0` (and
 `APP_PORT`, and `BETTER_AUTH_URL` to the address people use) to reach it from elsewhere. That address
@@ -186,6 +188,15 @@ the app is down); `docker compose logs runner` shows it.
 `make test-compose` builds both images and runs `docker/smoke/compose.sh` against them with dummy
 settings: validation of the settings, no runner before a healthy app, the stack comes up, the data
 survives `down` and `up`, an app process that exits by itself is restarted. CI runs the same script for pull requests.
+
+## Deploy on Coolify
+
+[`docs/deployment-coolify.md`](docs/deployment-coolify.md) is the step by step guide for the team's
+server: the Coolify resource type, the domain and TLS, every environment variable and where its value
+comes from, storage and backups ([`app/src/backup/README.md`](app/src/backup/README.md)), runner sizing,
+updates and rollback, and a first-run checklist. Coolify builds the images from this repository with the
+Compose file `compose.coolify.yml`. `docker/smoke/instance.sh <base-url>` checks a running instance (health,
+login page, webhook and runner API refuse what they must).
 
 ## Lint, typecheck, test
 

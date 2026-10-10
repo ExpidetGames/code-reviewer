@@ -123,8 +123,9 @@ How the values reach the process depends on how it runs:
 - **Local development:** `app/.env.local` (see [`app/.env.example`](../app/.env.example)). Without
   the four settings `pnpm dev` still starts, but nothing can be read from GitHub.
 
-How the deployment itself is set up (images, volumes, domain) is described with the deployment
-ticket; this guide only needs the public address and the variables.
+How the deployment itself is set up (the Coolify application, domain, volumes, the other variables) is
+described in [`deployment-coolify.md`](deployment-coolify.md); this guide only needs the public address and
+the variables.
 
 ## 4. Check the webhook
 

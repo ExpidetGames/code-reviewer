@@ -114,6 +114,24 @@ dc config --quiet || fail "docker compose config failed with a complete configur
 services=$(dc config --services | sort | tr '\n' ' ')
 [ "$services" = "app runner " ] || fail "expected the services 'app runner', got '$services'"
 
+# CR-39-T02: the file Coolify deploys (compose.coolify.yml) is valid with the same settings, plus the
+# public address it requires, and refuses an empty one by name. Only the configuration is rendered;
+# nothing is built or started from it here.
+step "compose.coolify.yml validates with a complete configuration and names a missing public address"
+coolify_file="$repo_root/compose.coolify.yml"
+# --env-file /dev/null: a developer's own .env in the repository root must not leak into these checks.
+BETTER_AUTH_URL=https://reviews.example.com docker compose --project-name "$project" \
+  --project-directory "$repo_root" --env-file /dev/null --file "$coolify_file" config --quiet ||
+  fail "docker compose config failed on compose.coolify.yml with a complete configuration"
+coolify_services=$(BETTER_AUTH_URL=https://reviews.example.com docker compose --project-name "$project" \
+  --project-directory "$repo_root" --env-file /dev/null --file "$coolify_file" config --services | sort | tr '\n' ' ')
+[ "$coolify_services" = "app runner " ] || fail "compose.coolify.yml defines '$coolify_services', expected 'app runner'"
+if message=$(env -u BETTER_AUTH_URL docker compose --project-name "$project" \
+  --project-directory "$repo_root" --env-file /dev/null --file "$coolify_file" config --quiet 2>&1); then
+  fail "compose.coolify.yml is valid without BETTER_AUTH_URL"
+fi
+grep -q 'BETTER_AUTH_URL' <<<"$message" || fail "the message does not name BETTER_AUTH_URL: $message"
+
 # CR-37-T08: a missing required setting stops `up` with a message naming it, before any container.
 step "a missing runner token stops the start before a container is created"
 if message=$(env -u RUNNER_TOKEN docker compose --project-name "$project" --project-directory "$workdir" \
@@ -161,6 +179,13 @@ port=$(host_port)
 step "the app answers on its published port"
 health=$(curl --silent --fail --max-time 5 "http://127.0.0.1:$port/api/health") || fail_with_logs "GET /api/health failed"
 [ "$health" = '{"status":"ok"}' ] || fail "unexpected health answer: $health"
+
+# CR-39-T01: the smoke test of a running instance, here against the stack on its published port. The
+# runner API (CR-28) is not on this branch yet, so its check is left out and says so; the flag goes
+# when the CR-6 epic is merged, and the check then runs against the real stack.
+step "the instance smoke test passes against the running stack"
+"$here/instance.sh" --skip-runner-endpoint "http://127.0.0.1:$port" ||
+  fail_with_logs "docker/smoke/instance.sh failed against the running stack"
 
 # CR-37-T02
 step "the app is published on loopback only, the runner publishes no port, /data is a named volume"
