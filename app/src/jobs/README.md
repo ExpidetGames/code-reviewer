@@ -38,6 +38,10 @@ reported).
 
 1. **Same delivery.** A job with the same `delivery_id` exists: it is returned (`same_delivery`). This
    makes the webhook route's claim and the enqueue safe to repeat.
+   **Same comment.** A job with the same `comment_id` in the repository exists, whatever became of
+   it: it is returned (`same_comment`). GitHub's delivery id is not covered by the signature, so a
+   captured signed comment replayed under a new delivery id would otherwise run its command again
+   once the first job has finished. Jobs that do not come from a comment have no comment id.
 2. **Automatic jobs** (`trigger_kind = webhook`): one per (repository, pull request, head commit,
    command) while it is waiting, running, succeeded or failed (`same_head`). A superseded or cancelled
    job frees the slot, so a commit that comes back (a force push to an old state) is reviewed again.
@@ -54,7 +58,8 @@ reported).
 `run_after` is `now` unless the caller passes a later time (the debounce of `synchronize` is policy and
 is decided by the webhook handler's trigger policy, CR-31). A manual job is due at once.
 
-Three partial unique indexes enforce the promises even if the code were wrong: one job per delivery id,
+Unique indexes enforce the promises even if the code were wrong: one job per delivery id, one job per
+comment of a repository (partial, where `comment_id` is set; migration `20261011090000_add_job_comment_id`),
 one automatic job per head commit and command in the slot-holding statuses, one running job per pull
 request.
 
@@ -137,8 +142,6 @@ checked in code review.
   without an active project (`project-claim-guard.ts`, wired in CR-46). The runner (CR-29) reports its
   shutdown through `complete` with the error code `runner_shutdown`; the runner API turns that into
   `release`, so the job is requeued with the attempt cap (the runner never calls `release` itself).
-- **CR-32 (comments).** The provider does not cut `args`; the queue refuses more than 10 000 characters
-  (the intake drops such a trigger with a log line instead of failing the delivery). Truncate to 2000
-  with a note before the intake. Comment jobs are exempt from the head commit rule, so a captured signed
-  comment body replayed under a new delivery id runs again once the previous job finished: record the
-  comment id and dedupe on it.
+- **CR-32 (comments).** Done: the provider cuts a question to 2000 characters before the trigger
+  exists (`src/integrations/comment-command.ts`), the trigger carries the comment id, and the queue
+  dedupes on it (`same_comment`). The queue's own limit of 10 000 characters stays as a safety net.
