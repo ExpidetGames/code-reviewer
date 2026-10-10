@@ -67,7 +67,7 @@ describe("the command choice", () => {
     const onQuestion = vi.fn();
     const { rerender } = renderFields({ onCommand, onQuestion });
 
-    await user.selectOptions(screen.getByLabelText("Command"), "ask");
+    await user.selectOptions(screen.getByLabelText("Command to run"), "ask");
     rerender(
       <CommandFields
         command="ask"

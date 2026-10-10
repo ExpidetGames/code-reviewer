@@ -54,7 +54,7 @@ export function CommandFields({
     <>
       <div className="field">
         <label htmlFor={commandId} className="field-label">
-          Command
+          Command to run
         </label>
         <select
           id={commandId}

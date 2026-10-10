@@ -70,3 +70,39 @@ export async function addGithubInstallation(
   );
   expect(response.status()).toBe(201);
 }
+
+export type GithubPullRequest = {
+  number: number;
+  title: string;
+  state?: "open" | "closed";
+  draft?: boolean;
+  author?: { login: string; id: number };
+};
+
+/**
+ * Puts a pull request into a repository of the fake GitHub (replacing one with the same number). The
+ * head commit is derived from the number, so every pull request has its own.
+ */
+export async function addGithubPullRequest(
+  request: APIRequestContext,
+  repositoryFullName: string,
+  pullRequest: GithubPullRequest,
+): Promise<void> {
+  const response = await request.post(
+    `${e2eEnv.githubUrl}/__fake/pull-requests`,
+    {
+      data: {
+        repository: repositoryFullName,
+        pullRequest: {
+          state: "open",
+          headSha: String(pullRequest.number).padStart(40, "a"),
+          headRef: `feature/${String(pullRequest.number)}`,
+          baseRef: "main",
+          author: { login: "alice", id: 1001 },
+          ...pullRequest,
+        },
+      },
+    },
+  );
+  expect(response.status()).toBe(201);
+}

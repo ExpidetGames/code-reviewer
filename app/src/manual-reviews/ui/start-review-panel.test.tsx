@@ -188,7 +188,10 @@ describe("starting a command", () => {
     );
     const user = await renderPanel(api);
     await user.click(await screen.findByRole("radio", { name: /#7/ }));
-    await user.selectOptions(screen.getByLabelText("Command"), "improve");
+    await user.selectOptions(
+      screen.getByLabelText("Command to run"),
+      "improve",
+    );
 
     await user.click(button());
 
@@ -251,7 +254,7 @@ describe("starting a command", () => {
       const { api, startReview } = fakeApi([list([{ number: 7 }])]);
       const user = await renderPanel(api);
       await user.click(await screen.findByRole("radio", { name: /#7/ }));
-      await user.selectOptions(screen.getByLabelText("Command"), "ask");
+      await user.selectOptions(screen.getByLabelText("Command to run"), "ask");
       if (question.trim() !== "")
         await user.type(screen.getByLabelText("Question"), question);
 
@@ -269,7 +272,7 @@ describe("starting a command", () => {
     const { api, startReview } = fakeApi([list([{ number: 7 }])]);
     const user = await renderPanel(api);
     await user.click(await screen.findByRole("radio", { name: /#7/ }));
-    await user.selectOptions(screen.getByLabelText("Command"), "ask");
+    await user.selectOptions(screen.getByLabelText("Command to run"), "ask");
     await user.type(screen.getByLabelText("Question"), "Why was it removed?");
 
     await user.click(button());
@@ -323,9 +326,9 @@ describe("starting a command", () => {
     const user = await renderPanel(api);
     await user.click(await screen.findByRole("radio", { name: /#7/ }));
 
-    expect((screen.getByLabelText("Command") as HTMLSelectElement).value).toBe(
-      "describe",
-    );
+    expect(
+      (screen.getByLabelText("Command to run") as HTMLSelectElement).value,
+    ).toBe("describe");
     cleanup();
     const none = fakeApi([list([{ number: 7 }], [])]);
     const user2 = await renderPanel(none.api);

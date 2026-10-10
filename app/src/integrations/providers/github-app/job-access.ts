@@ -33,8 +33,8 @@ const CODE_FOR: Partial<Record<GithubAppError["code"], IntegrationErrorCode>> =
   };
 
 /**
- * Turns whatever went wrong while getting a job token into an `IntegrationError` with a stable,
- * provider neutral code. The message is the GitHub client's own (it names the call and the status,
+ * Turns whatever went wrong while getting a job token (or while listing pull requests, which fails
+ * the same ways) into an `IntegrationError` with a stable, provider neutral code. The message is the GitHub client's own (it names the call and the status,
  * never a credential or a response body); the original error is kept as `cause`.
  *
  * - 404 on the token call: the installation no longer exists.
