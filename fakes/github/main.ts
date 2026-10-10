@@ -1,0 +1,32 @@
+// Starts the fake GitHub as its own process, for the Playwright journeys and later the Docker test
+// stack. Configuration comes from the environment; the values are dummies shared with the app under
+// test. Test code adds accounts through POST /__fake/users and clears state with POST /__fake/reset.
+//
+//   GITHUB_FAKE_CLIENT_ID      required
+//   GITHUB_FAKE_CLIENT_SECRET  required
+//   GITHUB_FAKE_PORT           default 4010
+//   GITHUB_FAKE_HOST           default 127.0.0.1
+import { startGithubFake } from "./server.ts";
+
+const clientId = process.env.GITHUB_FAKE_CLIENT_ID;
+const clientSecret = process.env.GITHUB_FAKE_CLIENT_SECRET;
+if (!clientId || !clientSecret) {
+  console.error(
+    "GITHUB_FAKE_CLIENT_ID and GITHUB_FAKE_CLIENT_SECRET must be set.",
+  );
+  process.exit(1);
+}
+
+const fake = await startGithubFake({
+  clientId,
+  clientSecret,
+  host: process.env.GITHUB_FAKE_HOST || "127.0.0.1",
+  port: Number(process.env.GITHUB_FAKE_PORT) || 4010,
+});
+console.info(`fake github listening on ${fake.baseUrl}`);
+
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.on(signal, () => {
+    void fake.close().finally(() => process.exit(0));
+  });
+}
