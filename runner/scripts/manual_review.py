@@ -16,10 +16,10 @@ OPENROUTER_API_KEY.
 With `--record-dir`, the run also leaves `DIR/NAME.json` (the result JSON of the runner plus model,
 pull request and wall time) and `DIR/NAME.comment.md` (the text of the review comment as it is right
 after the run, because the next run edits it in place). Nothing is written if a secret shows up in
-either, or if the label is not a plain file name or its record already exists (checked before the
-run, so a bad label cannot waste a paid run). If the comment cannot be read after the run, the result is
-still printed and recorded without the comment text. This is how model comparisons (CR-44) keep every
-run.
+either, or if the label is not a plain file name or its record already exists (checked before
+the run, so a bad label cannot waste a paid run). If the comment cannot be read after the run,
+the result is still printed and recorded without the comment text. This is how model
+comparisons (CR-44) keep every run.
 
 It only talks to the sandbox repository below, on purpose: it posts a real comment and costs real
 money. Nothing runs without `--yes`. The installation token is limited to that one repository and to
