@@ -2,24 +2,12 @@
 // has a project), installation, state, the status of the last run and the switch. Everything that
 // comes from GitHub (names, addresses) is untrusted and rendered as text.
 import Link from "next/link";
+import { formatUtc } from "../../ui/format-time.ts";
 import { NoRepositories } from "./no-repositories.tsx";
 import { ProjectToggle } from "./project-toggle.tsx";
 import type { ProjectsApi } from "./api.ts";
-import type {
-  LastRun,
-  ProjectListView,
-  ProjectRowView,
-  RunStatus,
-} from "./list-view.ts";
-
-const RUN_COPY: Record<RunStatus, string> = {
-  queued: "Queued",
-  running: "Running",
-  succeeded: "Succeeded",
-  failed: "Failed",
-  superseded: "Replaced by a newer run",
-  cancelled: "Cancelled",
-};
+import { RUN_STATUS_PRESENTATION } from "../../runs/run-status.ts";
+import type { LastRun, ProjectListView, ProjectRowView } from "./list-view.ts";
 
 const STATE_COPY: Record<ProjectRowView["status"], string> = {
   active: "Active",
@@ -27,21 +15,23 @@ const STATE_COPY: Record<ProjectRowView["status"], string> = {
   unavailable: "Unavailable",
 };
 
-/** A time as UTC text the server and the browser render the same way. */
-export function formatUtc(iso: string): string {
-  const time = new Date(iso);
-  if (Number.isNaN(time.getTime())) return "unknown time";
-  return `${time.toISOString().slice(0, 16).replace("T", " ")} UTC`;
-}
-
-function LastRunStatus({ run }: { run: LastRun | null }) {
+function LastRunStatus({
+  run,
+  repositoryId,
+}: {
+  run: LastRun | null;
+  repositoryId: string;
+}) {
   if (run === null) return <span className="muted">No run yet</span>;
   return (
     <span>
-      {RUN_COPY[run.status]}{" "}
+      {RUN_STATUS_PRESENTATION[run.status].label}{" "}
       <time dateTime={run.at} className="muted">
         {formatUtc(run.at)}
-      </time>
+      </time>{" "}
+      <Link href={`/runs?repository=${encodeURIComponent(repositoryId)}`}>
+        All runs
+      </Link>
     </span>
   );
 }
@@ -106,7 +96,11 @@ export function ProjectList({
               {STATE_COPY[row.status]}
             </span>
             <span className="small">
-              Last run: <LastRunStatus run={row.lastRun} />
+              Last run:{" "}
+              <LastRunStatus
+                run={row.lastRun}
+                repositoryId={row.repositoryId}
+              />
             </span>
             {row.status === "unavailable" && row.switchedOn ? (
               <span className="muted small">

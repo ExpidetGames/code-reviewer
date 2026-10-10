@@ -46,12 +46,27 @@ type ControlIds = {
   id: string;
   describedBy: string | undefined;
   invalid: boolean;
+  /**
+   * Where the value comes from and the button that takes an own value back. A field with a label
+   * shows them in its head; a field without one (a checkbox, whose label is part of its control)
+   * places them next to the control's own text, so they never float away from it.
+   */
+  origin: ReactNode;
 };
 
 // The settings accept a fallback model, but the app does not send it to the runner yet (lead
 // decision for the MVP, src/review-settings/README.md), so the form says so instead of promising it.
 export const FALLBACK_MODEL_HINT =
   "Stored but not used yet: reviews do not switch to this model when the main model fails. Leave empty for none.";
+
+// Plain-language hints for the two fields people ask about most.
+export const MODEL_HINT =
+  "The AI model that writes the review. Pick one from the list or type the name of any model OpenRouter offers. Smaller models cost less per review, larger ones usually review more thoroughly.";
+
+export function tokenBudgetHint(): string {
+  const { min, max } = REVIEW_SETTING_LIMITS.maxTokens;
+  return `How much of a pull request the model can read in one go. A token is about three quarters of a word, so a bigger budget lets it see more of a large change, but costs more. Between ${min.toLocaleString("en-US")} and ${max.toLocaleString("en-US")}.`;
+}
 
 /**
  * Splits the problems of a save into those that belong to a field of the form and those that do not
@@ -202,25 +217,32 @@ export function SettingsForm({
       ]
         .filter(Boolean)
         .join(" ") || undefined;
+    const origin = (
+      <>
+        <span className="badge badge-source">
+          {sourceText(model, state, name)}
+        </span>
+        {state.overridden[name] ? (
+          <button
+            type="button"
+            className="link-button"
+            aria-label={`${resetLabel} for ${resetFor ?? "this setting"}`}
+            onClick={() => edit(resetField(state, name, model), name)}
+          >
+            {resetLabel}
+          </button>
+        ) : null}
+      </>
+    );
     return (
       <div className="field" data-field={name}>
-        <div className="field-head">
-          {label !== null ? <label htmlFor={id}>{label}</label> : <span />}
-          <span className="badge badge-source">
-            {sourceText(model, state, name)}
-          </span>
-          {state.overridden[name] ? (
-            <button
-              type="button"
-              className="link-button"
-              aria-label={`${resetLabel} for ${resetFor ?? "this setting"}`}
-              onClick={() => edit(resetField(state, name, model), name)}
-            >
-              {resetLabel}
-            </button>
-          ) : null}
-        </div>
-        {control({ id, describedBy, invalid: error !== undefined })}
+        {label !== null ? (
+          <div className="field-head">
+            <label htmlFor={id}>{label}</label>
+            {origin}
+          </div>
+        ) : null}
+        {control({ id, describedBy, invalid: error !== undefined, origin })}
         {hint !== undefined ? (
           <p id={`${id}-hint`} className="muted small">
             {hint}
@@ -269,19 +291,22 @@ export function SettingsForm({
     field(
       name,
       null,
-      ({ id, describedBy }) => (
-        <label className="check" htmlFor={id}>
-          <input
-            id={id}
-            type="checkbox"
-            checked={state.values[name]}
-            aria-describedby={describedBy}
-            onChange={(event) =>
-              edit(setBoolean(state, name, event.target.checked), name)
-            }
-          />
-          {label}
-        </label>
+      ({ id, describedBy, origin }) => (
+        <div className="check-line">
+          <label className="check" htmlFor={id}>
+            <input
+              id={id}
+              type="checkbox"
+              checked={state.values[name]}
+              aria-describedby={describedBy}
+              onChange={(event) =>
+                edit(setBoolean(state, name, event.target.checked), name)
+              }
+            />
+            {label}
+          </label>
+          {origin}
+        </div>
       ),
       hint,
       label,
@@ -307,7 +332,7 @@ export function SettingsForm({
           "model",
           "Model",
           (ids) => textInput("model", ids, { list: datalistId }),
-          "The model reviews run with, as OpenRouter spells it.",
+          MODEL_HINT,
         )}
         {field(
           "fallbackModel",
@@ -323,7 +348,7 @@ export function SettingsForm({
           "maxTokens",
           "Token budget",
           (ids) => textInput("maxTokens", ids, { inputMode: "numeric" }),
-          `How much of a diff goes to the model at once, ${REVIEW_SETTING_LIMITS.maxTokens.min.toLocaleString("en-US")} to ${REVIEW_SETTING_LIMITS.maxTokens.max.toLocaleString("en-US")} tokens.`,
+          tokenBudgetHint(),
         )}
         <CostSummary cost={cost} />
       </fieldset>
@@ -383,16 +408,19 @@ export function SettingsForm({
         {field(
           "allowedCommands",
           null,
-          ({ id, describedBy }) => (
+          ({ id, describedBy, origin }) => (
             <div
               role="group"
               aria-labelledby={`${id}-label`}
               aria-describedby={describedBy}
               id={id}
             >
-              <span id={`${id}-label`} className="field-label">
-                Comment commands people may use
-              </span>
+              <div className="check-line">
+                <span id={`${id}-label`} className="field-label">
+                  Comment commands people may use
+                </span>
+                {origin}
+              </div>
               <div className="check-row">
                 {REVIEW_COMMANDS.map((command) => (
                   <label key={command} className="check">

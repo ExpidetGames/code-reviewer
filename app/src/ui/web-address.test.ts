@@ -1,6 +1,6 @@
 // Pins down which repository addresses the list may turn into a link: web addresses only.
 import { describe, expect, it } from "vitest";
-import { webAddress } from "./list-view.ts";
+import { webAddress } from "./web-address.ts";
 
 describe("the address of a repository", () => {
   it("is kept for an https or http address", () => {

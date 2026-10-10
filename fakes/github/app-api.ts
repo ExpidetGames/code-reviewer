@@ -42,6 +42,37 @@ export type FakePullRequest = {
   author: { login: string; id: number };
 };
 
+/** The body of `POST /__fake/pull-requests`, or null when it is not one. */
+function parsePullRequestControl(
+  text: string,
+): { repository: string; pullRequest: FakePullRequest } | null {
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (typeof body !== "object" || body === null) return null;
+  const { repository, pullRequest } = body as {
+    repository?: unknown;
+    pullRequest?: Partial<FakePullRequest> | null;
+  };
+  if (typeof repository !== "string" || repository === "") return null;
+  if (typeof pullRequest !== "object" || pullRequest === null) return null;
+  const valid =
+    Number.isInteger(pullRequest.number) &&
+    typeof pullRequest.title === "string" &&
+    (pullRequest.state === "open" || pullRequest.state === "closed") &&
+    typeof pullRequest.headSha === "string" &&
+    typeof pullRequest.headRef === "string" &&
+    typeof pullRequest.baseRef === "string" &&
+    typeof pullRequest.author?.login === "string" &&
+    typeof pullRequest.author.id === "number";
+  return valid
+    ? { repository, pullRequest: pullRequest as FakePullRequest }
+    : null;
+}
+
 /** GitHub's permission names mapped to the level the app (or a token) holds. */
 export type FakePermissions = Record<string, "read" | "write" | "admin">;
 
@@ -311,6 +342,16 @@ export function createAppPart(options: FakeAppOptions): AppPart {
       if (!installations.has(body.installation.id))
         controls.addInstallation(body.installation);
       controls.setRepositories(body.installation.id, body.repositories);
+      return send(201, { ok: true });
+    }
+
+    // Control endpoint for a test that runs the fake as its own process (Playwright): adds a pull
+    // request (`addPullRequest`), replacing one with the same number. The body is
+    // `{ repository: "owner/name", pullRequest: FakePullRequest }`.
+    if (path === "/__fake/pull-requests" && method === "POST") {
+      const body = parsePullRequestControl(await readBody(request));
+      if (body === null) return send(400, { message: "Invalid body" });
+      controls.addPullRequest(body.repository, body.pullRequest);
       return send(201, { ok: true });
     }
 

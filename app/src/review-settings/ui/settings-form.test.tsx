@@ -79,6 +79,60 @@ describe("the settings form", () => {
     expect(within(modelField).getByText("Built-in value")).toBeTruthy();
   });
 
+  it("places where a checkbox value comes from right beside the checkbox text", () => {
+    render(
+      <SettingsForm
+        initial={projectModel({ largePrChunking: false })}
+        api={fakeApi().api}
+      />,
+    );
+
+    const label = screen
+      .getByLabelText("Review a large pull request in chunks")
+      .closest("label") as HTMLElement;
+    const line = label.parentElement as HTMLElement;
+
+    expect(line.className).toBe("check-line");
+    expect(label.nextElementSibling?.textContent).toBe("Set for this project");
+    expect(
+      within(line).getByRole("button", {
+        name: "Use default for Review a large pull request in chunks",
+      }),
+    ).toBeTruthy();
+    // No empty head row above a checkbox any more.
+    expect(
+      (line.closest(".field") as HTMLElement).querySelector(".field-head"),
+    ).toBeNull();
+  });
+
+  it("places where the comment commands setting comes from beside its heading", () => {
+    render(<SettingsForm initial={projectModel()} api={fakeApi().api} />);
+
+    const heading = screen.getByText("Comment commands people may use");
+
+    expect(heading.nextElementSibling?.textContent).toBe("Built-in value");
+  });
+
+  it("explains the model and the token budget in plain words", () => {
+    render(<SettingsForm initial={projectModel()} api={fakeApi().api} />);
+
+    const model = screen
+      .getByLabelText("Model")
+      .closest(".field") as HTMLElement;
+    const budget = screen
+      .getByLabelText("Token budget")
+      .closest(".field") as HTMLElement;
+    expect(model.textContent).toContain("The AI model that writes the review");
+    expect(model.textContent).not.toContain("as OpenRouter spells it");
+    expect(budget.textContent).toContain(
+      "How much of a pull request the model can read in one go",
+    );
+    expect(budget.textContent).toContain(
+      "A token is about three quarters of a word",
+    );
+    expect(budget.textContent).toContain("8,000");
+  });
+
   // CR-34-T06
   it("names every wrong value next to its field and sends nothing", async () => {
     const user = userEvent.setup();
