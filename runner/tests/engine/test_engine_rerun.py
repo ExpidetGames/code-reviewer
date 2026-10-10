@@ -1,7 +1,7 @@
 """Pins down the identity patch against the real GitHub provider of PR-Agent: a second review of
 the same pull request edits the first comment of the bot instead of posting a duplicate, although
 `GET /user` is forbidden for an installation token. And pins down that the suite notices when the
-patch does not take effect, because without it the result would be wrong in a way that looks fine."""
+patch does not take effect, because the result would then be wrong in a way that looks fine."""
 
 import canned
 from fake_github import BOT_LOGIN, FakeGithub
@@ -30,7 +30,9 @@ def test_a_second_review_edits_the_first_comment_instead_of_posting_another(
     assert "second run" in visible_text(edited.body)
     assert "first run" not in visible_text(edited.body)
     posts = github.requests_to("POST", r"/repos/octo/widgets/issues/7/comments")
-    patches = github.requests_to("PATCH", rf"/repos/octo/widgets/issues/comments/{first_comment.id}")
+    patches = github.requests_to(
+        "PATCH", rf"/repos/octo/widgets/issues/comments/{first_comment.id}"
+    )
     assert (len(posts), len(patches)) == (1, 1)
     assert github.requests_to("GET", "/user") == []
     result = second.result

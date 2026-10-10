@@ -60,7 +60,11 @@ class LlmRequest:
             if isinstance(content, str):
                 parts.append(content)
             elif isinstance(content, list):
-                parts.extend(str(p.get("text", "")) for p in content if isinstance(p, dict))
+                pieces: list[Any] = content  # pyright: ignore[reportUnknownVariableType]
+                for piece in pieces:
+                    if isinstance(piece, dict):
+                        fields: dict[str, Any] = piece  # pyright: ignore[reportUnknownVariableType]
+                        parts.append(str(fields.get("text", "")))
         return "\n".join(parts)
 
 
@@ -126,6 +130,15 @@ class FakeLlm:
         """`llm.baseUrl` of a job."""
         return f"http://127.0.0.1:{self.port}/api/v1"
 
+    def wait_for_request(self, timeout: float = 90.0) -> None:
+        """Block until the first request has arrived."""
+        deadline = time.monotonic() + timeout
+        with self._changed:
+            while not self.requests:
+                remaining = deadline - time.monotonic()
+                assert remaining > 0, "the job never asked the model"
+                self._changed.wait(remaining)
+
     def wait_for_disconnect(self, timeout: float = 60.0) -> bool:
         """Block until a held request saw its client hang up. True if one did."""
         deadline = time.monotonic() + timeout
@@ -155,8 +168,9 @@ class FakeLlm:
         except ValueError:
             body = {}
         request = LlmRequest(handler.path, handler.headers.get("Authorization", ""), body)
-        with self._lock:
+        with self._changed:
             self.requests.append(request)
+            self._changed.notify_all()
             reply = self._reply_for(request)
         if reply.hold and not self._hold(handler):
             return

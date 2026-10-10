@@ -24,6 +24,8 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
 API_PREFIX = "/api/v3"
+# GitHub refuses a comment longer than this with a 422.
+MAX_COMMENT_CHARS = 65536
 BOT_LOGIN = "code-reviewer[bot]"
 _NOW = "2026-10-10T12:00:00Z"
 
@@ -99,6 +101,8 @@ class FakeGithub:
     # Text of the PR description after PATCH, and how often the pull request was patched.
     patched_bodies: list[str] = field(default_factory=lambda: [])
     patched_titles: list[str] = field(default_factory=lambda: [])
+    # How many comment writes were refused for being longer than GitHub takes.
+    refused_too_long: int = 0
     head_sha: str = "1" * 40
     base_sha: str = "2" * 40
 
@@ -445,7 +449,27 @@ class FakeGithub:
     def _list_comments(self, request: RecordedRequest) -> tuple[int, Any]:
         return 200, [self._comment_json(c) for c in self.comments]
 
+    def _too_long(self, request: RecordedRequest) -> tuple[int, Any] | None:
+        if len(str(request.json().get("body", ""))) <= MAX_COMMENT_CHARS:
+            return None
+        self.refused_too_long += 1
+        return 422, {
+            "message": "Validation Failed",
+            "errors": [
+                {
+                    "resource": "IssueComment",
+                    "code": "unprocessable",
+                    "field": "data",
+                    "message": f"Body is too long (maximum is {MAX_COMMENT_CHARS} characters)",
+                }
+            ],
+            "documentation_url": "https://docs.github.com/rest",
+        }
+
     def _create_comment(self, request: RecordedRequest) -> tuple[int, Any]:
+        refused = self._too_long(request)
+        if refused is not None:
+            return refused
         comment = self._new_comment(str(request.json()["body"]), BOT_LOGIN)
         return 201, self._comment_json(comment)
 
@@ -456,6 +480,9 @@ class FakeGithub:
         comment = self._find(comment_id)
         if comment is None:
             return self._error(404, "Not Found", request)
+        refused = self._too_long(request)
+        if refused is not None:
+            return refused
         comment.body = str(request.json()["body"])
         comment.updated_at = "2026-10-10T12:05:00Z"
         return 200, self._comment_json(comment)
@@ -471,7 +498,10 @@ class FakeGithub:
 def default_file() -> ChangedFile:
     """A small Python change, enough for PR-Agent to build a prompt from."""
     base = 'def greet(name):\n    return "Hello"\n'
-    head = 'def greet(name):\n    return f"Hello, {name}!"\n\n\ndef farewell(name):\n    return f"Bye, {name}"\n'
+    head = (
+        'def greet(name):\n    return f"Hello, {name}!"\n\n\n'
+        'def farewell(name):\n    return f"Bye, {name}"\n'
+    )
     patch = (
         "@@ -1,2 +1,6 @@\n"
         " def greet(name):\n"

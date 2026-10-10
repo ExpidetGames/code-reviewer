@@ -10,9 +10,11 @@ import hashlib
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 import tempfile
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -46,7 +48,7 @@ def bpe_cache_directory() -> Path:
 
 
 def bpe_cache_file() -> Path:
-    return bpe_cache_directory() / hashlib.sha1(_O200K_URL.encode()).hexdigest()  # noqa: S324
+    return bpe_cache_directory() / hashlib.sha1(_O200K_URL.encode()).hexdigest()
 
 
 def visible_text(body: str) -> str:
@@ -100,11 +102,47 @@ class Outcome:
         return found
 
 
+class Canary:
+    """A loopback listener that stands for a host nothing may talk to: it counts connections."""
+
+    def __init__(self) -> None:
+        self._listener = socket.socket()
+        self._listener.bind(("127.0.0.1", 0))
+        self._listener.listen(8)
+        self._lock = threading.Lock()
+        self.connections = 0
+        self._thread = threading.Thread(target=self._accept, daemon=True)
+        self._thread.start()
+
+    @property
+    def port(self) -> int:
+        return int(self._listener.getsockname()[1])
+
+    def _accept(self) -> None:
+        while True:
+            try:
+                connection, _ = self._listener.accept()
+            except OSError:
+                return
+            with self._lock:
+                self.connections += 1
+            connection.close()
+
+    def close(self) -> None:
+        self._listener.close()
+        self._thread.join(timeout=5)
+
+
 class JobProcess:
     """A job that was started and has not finished yet."""
 
     def __init__(
-        self, process: "subprocess.Popen[str]", workdir: Path, home: Path, log: Path, argv: list[str]
+        self,
+        process: "subprocess.Popen[str]",
+        workdir: Path,
+        home: Path,
+        log: Path,
+        argv: list[str],
     ) -> None:
         self.process = process
         self.workdir = workdir
@@ -123,6 +161,13 @@ class JobProcess:
             capture_output=True,
             text=True,
             check=False,
+        )
+        return done.stdout
+
+    def environment_text(self) -> str:
+        """The environment of the running process as `ps` shows it (`ps eww`)."""
+        done = subprocess.run(
+            ["ps", "eww", "-p", str(self.pid)], capture_output=True, text=True, check=False
         )
         return done.stdout
 
@@ -209,7 +254,7 @@ class Engine:
             **(extra_env or {}),
         }
         argv = [str(ENTRY_POINT)] if identity_patch else list(WITHOUT_IDENTITY_PATCH)
-        process = subprocess.Popen(  # noqa: S603
+        process = subprocess.Popen(
             argv,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
