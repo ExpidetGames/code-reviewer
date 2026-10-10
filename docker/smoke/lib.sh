@@ -68,11 +68,55 @@ scan_in_image() {
   rm -f "$stderr_file"
 }
 
-# A PEM key header (extended regular expression). Real key material has something after the header:
-# the end of the line (a PEM file), or the key itself, which in a bundled string follows as an
-# escaped newline. A header that a library only compares against is closed by a quote right away
-# (jose, bundled by Next.js, checks `"-----BEGIN PRIVATE KEY-----"`) and holds no key, so it does not count.
-readonly PRIVATE_KEY_MARKER='-----BEGIN [A-Z ]*PRIVATE KEY-----($|[[:space:]\\A-Za-z0-9+/])'
+# The key scan, a shell script that runs inside the image (sh -c, with the paths as its argument; they
+# may contain globs). Any PEM key header marks a file, except the one harmless shape found in bundled
+# libraries: a comparison such as `x.indexOf("-----BEGIN PRIVATE KEY-----")` (jose, which Next.js
+# bundles next to better-auth, checks the format of a key that way). Comparisons (the header between two quote characters) are cut out of a
+# copy of the file first; the file is reported if any header is left. Every other shape stays
+# caught, also a key that was split, joined or encoded (`"-----BEGIN PRIVATE KEY-----"+body`,
+# `...-----%0AMII`): the header is the signal, not what follows it. A path that does not exist, or a
+# file that cannot be read, fails the scan (it never looks like "nothing found").
+readonly KEY_SCAN_SCRIPT='
+marker="-----BEGIN [A-Z ]*PRIVATE KEY-----"
+hits=$(grep -rIlE -e "$marker" --exclude-dir=node_modules $1)
+status=$?
+[ "$status" -le 1 ] || exit "$status"
+printf "%s\n" "$hits" | while IFS= read -r file; do
+  [ -n "$file" ] || continue
+  if ! rest=$(sed -E "s/(indexOf|startsWith|includes)\(.$marker.\)//g" "$file"); then
+    printf "%s\n" "$file"
+    continue
+  fi
+  if printf "%s\n" "$rest" | grep -qE -e "$marker"; then
+    printf "%s\n" "$file"
+  fi
+done'
+
+# Proves the scan on files made for the purpose, on the machine that runs the smoke test (no Docker
+# needed). Run by assert_image_has_no_secrets before it trusts the scan, and on its own by
+# docker/smoke/test-key-scan.sh.
+assert_key_scan_works() {
+  local dir out
+  dir=$(mktemp -d)
+  printf -- '-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0B\n-----END PRIVATE KEY-----\n' >"$dir/pem.pem"
+  printf -- '-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA\n' >"$dir/rsa.txt"
+  printf -- '{"key":"-----BEGIN PRIVATE KEY-----\\nMIIEvQIBADANBgkq\\n-----END PRIVATE KEY-----"}\n' >"$dir/json.json"
+  printf -- '%s\n' '["-----BEGIN PRIVATE KEY-----","MIIEvQIBADANBgkq"].join("\n")' >"$dir/join.js"
+  printf -- '%s\n' 'const k="-----BEGIN PRIVATE KEY-----"+body;' >"$dir/concat.js"
+  printf -- '%s\n' 'const k="-----BEGIN PRIVATE KEY-----%0AMIIEvQIBADANBgkq";' >"$dir/encoded.js"
+  printf -- '%s\n' 'async function L(a){if("string"!=typeof a||0!==a.indexOf("-----BEGIN PRIVATE KEY-----"))throw TypeError("pkcs8")}' >"$dir/jose.js"
+  printf -- '%s\n' "a.startsWith('-----BEGIN RSA PRIVATE KEY-----')||a.includes(\`-----BEGIN PRIVATE KEY-----\`)" >"$dir/other-comparisons.js"
+  printf -- '%s\n' 'x.indexOf("-----BEGIN PRIVATE KEY-----");const k="-----BEGIN PRIVATE KEY-----\\nMII";' >"$dir/comparison-and-key.js"
+  printf 'nothing to see here\n' >"$dir/clean.txt"
+  out=$(sh -c "$KEY_SCAN_SCRIPT" sh "$dir") || fail "the key scan failed to run on its own test files"
+  out=$(printf '%s\n' "$out" | sed "s#^$dir/##" | sort | tr '\n' ' ')
+  local expected="comparison-and-key.js concat.js encoded.js join.js json.json pem.pem rsa.txt "
+  [ "$out" = "$expected" ] || fail "the key scan is wrong: it reported '$out', expected '$expected'"
+  if sh -c "$KEY_SCAN_SCRIPT" sh "$dir/does-not-exist" >/dev/null 2>&1; then
+    fail "the key scan accepted a path that does not exist"
+  fi
+  rm -rf "$dir"
+}
 
 # CR-17-T09: nothing that must stay out of an image is inside it, and its configuration and build
 # history carry no secrets. This is the proof that the .dockerignore files work.
@@ -93,9 +137,8 @@ assert_image_has_no_secrets() {
   [ -z "$SCAN_OUTPUT" ] || fail "$image contains files that must not be in an image:
 $SCAN_OUTPUT"
 
-  # grep exits 0 when it found a file, 1 when it found none, 2 on any error (a missing path).
-  scan_in_image "$image" "0 1" sh -c \
-    "grep -rIlE -e '$PRIVATE_KEY_MARKER' --exclude-dir=node_modules $content_paths"
+  assert_key_scan_works
+  scan_in_image "$image" "0" sh -c "$KEY_SCAN_SCRIPT" sh "$content_paths"
   [ -z "$SCAN_OUTPUT" ] || fail "$image contains private key material:
 $SCAN_OUTPUT"
 
