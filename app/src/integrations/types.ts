@@ -107,17 +107,37 @@ type ReviewTriggerBase = {
   actor: TriggerActor;
 };
 
+/** The state of a pull request as a delivery reports it (merged pull requests are `closed`). */
+export const TRIGGER_PULL_REQUEST_STATES = ["open", "closed"] as const;
+export type TriggerPullRequestState =
+  (typeof TRIGGER_PULL_REQUEST_STATES)[number];
+
 export type ReviewTrigger =
   | (ReviewTriggerBase & {
       kind: "opened" | "updated";
       command: null;
       args: null;
+      /** The pull request is a draft (work in progress) when the event happened. */
+      draft: boolean;
+      /**
+       * The state of the pull request in the delivery. A late `synchronize` or `reopened` for a pull
+       * request that is closed by now carries `closed`; the automatic trigger policy skips it.
+       */
+      state: TriggerPullRequestState;
     })
   | (ReviewTriggerBase & {
       kind: "command";
       command: ReviewCommand;
-      /** Text after the command; an empty string when there is none. */
+      /**
+       * The question of `ask`, already cut to its maximum length; an empty string for the other
+       * commands, which take no text. Untrusted: it comes from a comment.
+       */
       args: string;
+      /**
+       * The platform's id of the comment that holds the command. The queue starts at most one job
+       * per comment, whatever delivery id the same comment arrives under.
+       */
+      commentId: string;
     });
 
 /** Git platforms the runner knows how to talk to (the runner maps these to PR-Agent settings). */
@@ -194,5 +214,26 @@ export type IntegrationEvent =
       externalId: string;
       action: InstallationAction;
     }
+  /**
+   * A pull request was closed (merged or not). It starts nothing; the app uses it to drop the jobs
+   * that are still waiting for that pull request.
+   */
+  | {
+      kind: "pull_request_closed";
+      repo: RepoRef;
+      prNumber: number;
+      merged: boolean;
+    }
+  /**
+   * A pull request was turned into a draft. It starts nothing; the app drops the pull request's
+   * waiting automatic jobs, because a draft is not reviewed automatically.
+   */
+  | { kind: "pull_request_drafted"; repo: RepoRef; prNumber: number }
+  /**
+   * A delivery of an event the app uses whose payload lacks fields the app reads (or has them with
+   * the wrong type). Nothing can be done with it and a redelivery would not change that; `reason`
+   * names the fields for the logs, never their values.
+   */
+  | { kind: "invalid_payload"; reason: string }
   /** Genuine but of no interest for reviews; `reason` is for logs, never for branching. */
   | { kind: "ignored"; reason: string };

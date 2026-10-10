@@ -1,10 +1,11 @@
 // Translates a verified GitHub delivery into what it means for the app (an IntegrationEvent). Reads
-// only the fields listed in `webhook-fields.ts`. A delivery that is genuine but of no interest, or
-// whose payload does not have the expected shape, is `ignored` with a reason for the logs.
+// only the fields listed in `webhook-fields.ts`. A genuine delivery of no interest is `ignored` with a
+// reason for the logs; a payload that lacks fields the app reads is `invalid_payload`; a closed pull
+// request is its own event (`pull_request_closed`).
+import { parseCommentCommand } from "../../comment-command.ts";
 import type {
   InstallationAction,
   IntegrationEvent,
-  ReviewCommand,
   ReviewTrigger,
 } from "../../types.ts";
 import {
@@ -31,11 +32,21 @@ const PULL_REQUEST_TRIGGER_MAP = {
 } as const;
 
 /** Only these can have write access to a repository; every other commenter is ignored at once. */
-const WRITE_CAPABLE_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+const WRITE_CAPABLE_ASSOCIATIONS: ReadonlySet<unknown> = new Set([
+  "OWNER",
+  "MEMBER",
+  "COLLABORATOR",
+]);
 
-// A command counts only if the comment starts with it (leading whitespace allowed), in any case.
-const COMMAND_PATTERN =
-  /^\s*\/(review|improve|describe|ask)(?=\s|$)\s*([\s\S]*)$/i;
+/**
+ * Whether a commenter with this `author_association` can have write access at all. A cheap first
+ * filter that costs no API call: only OWNER, MEMBER and COLLABORATOR pass, anything else (including
+ * a value GitHub adds later, or none) does not. Whether the commenter really has write access is
+ * then asked from GitHub (the collaborator permission API).
+ */
+export function mayHaveWriteAccess(association: unknown): boolean {
+  return WRITE_CAPABLE_ASSOCIATIONS.has(association);
+}
 
 export type ParseContext = {
   integrationId: string;
@@ -77,10 +88,12 @@ export async function parseGithubEvent(
     return ignored(`the event "${eventName}" is not used`);
 
   const problems = payloadProblems(eventName, payload);
+  // Names the fields only, never their values: the payload is untrusted text.
   if (problems.length > 0)
-    return ignored(
-      `the "${eventName}" payload lacks the expected fields: ${problems.join(", ")}`,
-    );
+    return {
+      kind: "invalid_payload",
+      reason: `the "${eventName}" payload lacks the expected fields: ${problems.join(", ")}`,
+    };
 
   const action = field<string>(payload, "action");
 
@@ -106,6 +119,21 @@ export async function parseGithubEvent(
   }
 
   if (eventName === "pull_request") {
+    // A closed pull request starts no review; the app drops its waiting jobs (merged or not).
+    if (action === "closed")
+      return {
+        kind: "pull_request_closed",
+        repo: repoOf(context),
+        prNumber: field<number>(payload, "number"),
+        merged: field<boolean>(payload, "pull_request.merged"),
+      };
+    // A draft is not reviewed automatically; what already waits for it is dropped.
+    if (action === "converted_to_draft")
+      return {
+        kind: "pull_request_drafted",
+        repo: repoOf(context),
+        prNumber: field<number>(payload, "number"),
+      };
     if (!Object.hasOwn(PULL_REQUEST_TRIGGER_MAP, action))
       return ignored(
         `the pull request action "${action}" does not start a review`,
@@ -121,6 +149,11 @@ export async function parseGithubEvent(
       command: null,
       args: null,
       actor: actorOf(payload),
+      draft: field<boolean>(payload, "pull_request.draft"),
+      state:
+        field<string>(payload, "pull_request.state") === "open"
+          ? "open"
+          : "closed",
     };
     return { kind: "review_trigger", trigger };
   }
@@ -135,18 +168,16 @@ export async function parseGithubEvent(
   if (field<string>(payload, "sender.type") === "Bot")
     return ignored("the comment was written by a bot");
 
-  const match = COMMAND_PATTERN.exec(field<string>(payload, "comment.body"));
-  if (match === null) return ignored("the comment is not a command");
-
   // Cheapest checks first, so a commenter without write access costs as few GitHub calls as
   // possible: the association from the payload (no call), then the permission (one call), and only
-  // then the head commit of the pull request.
-  if (
-    !WRITE_CAPABLE_ASSOCIATIONS.has(
-      field<string>(payload, "comment.author_association"),
-    )
-  )
+  // then the head commit of the pull request. The text of the comment is read after the first of
+  // them: the association is known without reading anything, and the text of a commenter who cannot
+  // use commands is none of our business.
+  if (!mayHaveWriteAccess(field<string>(payload, "comment.author_association")))
     return ignored("the commenter cannot have write access");
+
+  const parsed = parseCommentCommand(field<string>(payload, "comment.body"));
+  if (parsed === null) return ignored("the comment is not a command");
 
   const repo = repoOf(context);
   const actor = actorOf(payload);
@@ -162,8 +193,9 @@ export async function parseGithubEvent(
       prNumber,
       prUrl: `${repo.url}/pull/${prNumber}`,
       headSha: await context.headShaOf(repo.fullName, prNumber),
-      command: (match[1] as string).toLowerCase() as ReviewCommand,
-      args: (match[2] ?? "").trim(),
+      command: parsed.command,
+      args: parsed.args,
+      commentId: String(field<number>(payload, "comment.id")),
       actor,
     },
   };

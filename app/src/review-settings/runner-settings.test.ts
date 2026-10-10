@@ -9,11 +9,11 @@ import {
   INLINE_KEY_ISSUES_VARIABLE,
   LARGE_PR_CHUNKING_VARIABLE,
   MAX_FINDINGS_VARIABLE,
-  RUNNER_ENV_KEY_PATTERN,
   RUNNER_ENV_VARIABLES,
   protectFromSettingsParser,
   toRunnerSettings,
 } from "./runner-settings.ts";
+import { RUNNER_ENV_KEY_PATTERN } from "../runner-api/contract.ts";
 import { builtInReviewSettings, type ReviewSettings } from "./settings.ts";
 
 const base = builtInReviewSettings("deepseek/deepseek-v3.2");
@@ -68,6 +68,19 @@ describe("the PR-Agent variable names", () => {
       if (kind === "switch") expect(fallback).toBe("false");
     },
   );
+
+  // CR-46-T06
+  it("never include an option the runner reserves for itself", () => {
+    // The runner pins these (CR-45, `RESERVED_OPTIONS`) and refuses a job that sets them.
+    const reserved = [
+      "PR_REVIEWER__FINAL_UPDATE_MESSAGE",
+      "PR_REVIEWER__ENABLE_REVIEW_LABELS_SECURITY",
+      "PR_REVIEWER__ENABLE_REVIEW_LABELS_EFFORT",
+    ];
+    const names = RUNNER_ENV_VARIABLES.map(({ name }) => name);
+
+    for (const name of reserved) expect(names).not.toContain(name);
+  });
 
   it("are accepted by the runner's allowlist of job variables", () => {
     for (const { name } of RUNNER_ENV_VARIABLES)

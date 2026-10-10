@@ -39,10 +39,10 @@ it. Do not document planned things as if they existed in READMEs or PR descripti
 | Level | Tool | Runs on | What belongs here | Status |
 |---|---|---|---|---|
 | App unit | Vitest, project `unit` | host | Pure logic: signature verification, event filtering, job state machine, backoff, comment formatting, input validation, React components. Collaborators are fakes. No database, no network. | exists |
-| App integration | Vitest, project `integration` | host or Docker stack | Real SQLite file plus real Kysely repositories; route handlers driven through the real handler (webhook, runner API, auth) including refusals; GitHub client code against the GitHub fake. | exists (database layer, sign in and access guard against the fake GitHub login, GitHub App client and sync against the GitHub fake, the GitHub App webhook route; runner API handlers planned) |
-| Contract | Vitest in `app/integration-tests/compatibility/`, pytest in `runner/tests/contract/` | host | Pins the runner HTTP API and the GitHub webhook payload subset. One machine-readable source in `contracts/` is validated by both sides. | planned |
-| Runner unit | pytest, marker `unit` | host | Job loop with a fake clock, heartbeat, lease loss, backoff, shutdown, PR-Agent command and env construction, output parsing, log truncation, secret redaction. Subprocess boundary replaced by a fake. | exists |
-| Runner integration | pytest, marker `integration` | host or Docker stack | Real processes and real loopback sockets: the real loop against the app or a fake runner API, with the fake PR-Agent executable as a real subprocess (exit codes, timeouts, kill). | exists (entry point only) |
+| App integration | Vitest, project `integration` | host or Docker stack | Real SQLite file plus real Kysely repositories; route handlers driven through the real handler (webhook, runner API, auth) including refusals; GitHub client code against the GitHub fake. | exists (database layer, sign in and access guard against the fake GitHub login, GitHub App client and sync against the GitHub fake, the GitHub App webhook route, the runner API routes claim, heartbeat and complete) |
+| Contract | Vitest in `app/integration-tests/compatibility/`, pytest in `runner/tests/contract/` | host | Pins the runner HTTP API and the GitHub webhook payload subset. One machine-readable source in `contracts/` is validated by both sides. | exists (runner API v1: the app checks its real answers and requests against `contracts/runner-api.v1.json`, the runner checks the examples and rules; webhook payload subset is covered by its own contract test in the GitHub App provider) |
+| Runner unit | pytest, marker `unit` | host | Job loop with a fake clock, heartbeat, lease loss, backoff, shutdown, PR-Agent command and env construction, output parsing, log truncation, secret redaction. Subprocess boundary replaced by a fake. | exists (job loop, API client, reporting, settings, platform table) |
+| Runner integration | pytest, marker `integration` | host or Docker stack | Real processes and real loopback sockets: the real loop against the app or a fake runner API, with the fake PR-Agent executable as a real subprocess (exit codes, timeouts, kill). | exists (entry points; the job runner as a real process with `handle_request` replaced by a double; the job loop with real processes (`fake_job.py`), a real loopback server that checks every request against the contract (`fake_app.py`), real signals, and together with the job runner double) |
 | Engine smoke | pytest, marker `engine` | Docker stack, nightly and release PRs | The real, pinned PR-Agent against the GitHub fake and the LLM fake. Asserts the shape of what was posted, never review quality. Deselected by default. | marker exists, no tests yet |
 | Image smoke | Bash scripts `docker/smoke/app.sh` and `docker/smoke/runner.sh` | Docker daemon (host or CI) | The built container images: the app starts as a non-root user with a fresh volume, turns a visitor without a session away from the start page, answers `/api/health`, creates and migrates the database; the runner answers `--version`; neither image holds env files, git data, keys or secrets. Fails without Docker, never skips. | exists |
 | Compose smoke | Bash script `docker/smoke/compose.sh`, plus `app/src/ci/compose.test.ts` (unit, on the files) | Docker daemon (host or CI) | The Docker Compose stack with dummy settings: the settings are validated before a container exists, the runner does not start while the app is unhealthy, the stack becomes healthy and the runner reports a connection, the database survives `down` and `up`, an app process that exits by itself restarts and the runner reaches it again, a backup of the running stack restores into an empty data volume and the app is healthy again. Fails without Docker, never skips. | exists |
@@ -90,11 +90,11 @@ runner/                            Python project (uv)
   src/code_reviewer_runner/        code
   tests/unit/test_<module>.py
   tests/integration/test_<behavior_area>.py
-  tests/contract/test_<contract>.py      (planned)
+  tests/contract/test_<contract>.py
   tests/engine/test_<engine_area>.py     (planned)
 fakes/                             shared fake servers and fixtures (see fakes/README.md)
 docker/smoke/                      image smoke tests (bash) and their shared helpers
-contracts/                         runner API and webhook schemas (planned)
+contracts/                         runner API schema (runner-api.v1.json) and one valid example per body (examples/)
 ```
 
 - App: unit `*.test.ts(x)`, integration `*.integration.test.ts(x)`, e2e `*.e2e.ts`. E2E files never
@@ -128,7 +128,7 @@ production client code runs unchanged. Test stack values are fixed dummies; no e
 | GitHub webhooks (inbound) | Signature verification as a pure function (HMAC-SHA256) | The fake signs and delivers payloads exactly like GitHub (`X-Hub-Signature-256`, `X-GitHub-Delivery`, `X-GitHub-Event`); fixtures are real payloads reduced to the fields we read |
 | GitHub login (OAuth) | n/a | The same `fakes/github` server serves the OAuth authorize, token and user endpoints (exists, see `fakes/github/README.md`); the app is pointed at it with `GITHUB_OAUTH_BASE_URL` and `GITHUB_API_BASE_URL` (both only with `ALLOW_TEST_GITHUB_ENDPOINTS=true`). Exactly one e2e file signs in through the form (`e2e/auth/login.e2e.ts`); all other journeys will use an API shortcut proven equivalent by its own test (not written yet, no other journey needs a session today) |
 | LLM providers | Not reachable: runner unit tests never start PR-Agent | `fakes/llm`: OpenAI-compatible `chat/completions` with scripted answers, malformed output, 429, 500 and slow responses; dummy API key |
-| PR-Agent | Subprocess boundary behind a small protocol; unit tests use a fake implementation | `PR_AGENT_COMMAND` points at `fakes/pr-agent/fake_pr_agent.py` (succeed, exit 1, hang, print secrets, huge output, crash). Only engine smoke runs the real PR-Agent |
+| PR-Agent | Subprocess boundary behind a small protocol; unit tests use a fake implementation | `PR_AGENT_COMMAND` (read by the job loop) points at a fake PR-Agent such as `fakes/pr-agent/fake_pr_agent.py` (succeed, exit 1, hang, print secrets, huge output, crash); the runner tests use `runner/tests/integration/fake_job.py` the same way. Only engine smoke runs the real PR-Agent |
 | Runner and app | Fake HTTP client | Real HTTP against the app or an in-process fake runner API checked against `contracts/` |
 | Time | Injected clock | Short leases and intervals via env, not sleeping |
 
@@ -173,12 +173,16 @@ Images (`docker/smoke/`, bash): `app.sh <image>` starts the app image with a fre
 container's own health check; it then checks that `/` redirects to `/login` and `/api/health` answers `ok` (the access guard and the database work in the built server), the image user and the uid of PID 1, that the standalone
 server runs, that `/data/app.db` exists, belongs to the unprivileged user and holds a recorded
 migration, and that the log reports no database error. `runner.sh <image>` checks `--version` against
-`runner/pyproject.toml`, the user, a writable `/tmp` and home directory. Both run the secrets scan of
+`runner/pyproject.toml`, the PR-Agent version and offline behavior (see the end of this paragraph), the user, a writable `/tmp` and home directory. Both run the secrets scan of
 `lib.sh` (no `.env*`, `.git`, key or database files, no private key material, no secret-looking
-variable in the image configuration or build history). The scans run as root in a throwaway container and the script stops if a scan itself fails (docker, `find` or `grep` error), so a broken scan can never pass as a clean one; the key content scan covers project-owned paths only, not third-party packages. Containers and volumes are removed on exit,
+variable in the image configuration or build history). The scans run as root in a throwaway container and the script stops if a scan itself fails (docker, `find` or `grep` error), so a broken scan can never pass as a clean one; the key content scan covers project-owned paths only, not third-party packages, and the file name scan lets two public files of third-party packages pass (a public key of LiteLLM and the root certificates of gRPC). Containers and volumes are removed on exit,
 also after a failure. What is not covered: the real push to GHCR and pulling from the deployment
-server (manual, see the PR of the image ticket), and PR-Agent in the runner image (planned with the
-PR-Agent ticket: installed version equals the pinned one, a job through the fake PR-Agent).
+server (manual, see the PR of the image ticket), and a job with a working GitHub and LLM (the engine
+smoke covers that once the fakes exist). `runner.sh` also checks the PR-Agent part of the runner
+image: the installed version equals the pin in `runner/pyproject.toml`, PR-Agent imports and still has
+the method the identity patch replaces, the tiktoken encodings load without network, an invalid job
+gets an `invalid_job` result, and a job through the real PR-Agent with no network at all ends in a
+well formed `git_unavailable` result without a secret in any output.
 
 Compose (`docker/smoke/compose.sh <app image> <runner image>`): works in a temporary directory with a copy
 of `compose.yml`, a project name of its own and dummy settings (the GitHub App key is generated on the
@@ -202,7 +206,7 @@ equal the lists in the code); creating the real app on GitHub is a manual step t
 
 Planned: `verify:structure` (placement and naming rules, test files must be discovered by a runner,
 no process identifiers in titles), `verify:server-only-canary`, the Docker test stack
-(`docker/compose.test.yml`), `contracts/`.
+(`docker/compose.test.yml`).
 
 ## 7. Commands
 
@@ -238,6 +242,10 @@ Inside `runner/`: `uv sync --locked`, `uv run ruff check .`, `uv run ruff format
   (type stripping), so files it imports from `src/db/` use relative imports with a `.ts` extension
   and no TypeScript-only runtime syntax (enums, parameter properties); `erasableSyntaxOnly` in
   `tsconfig.json` enforces the latter.
+- The job queue tests use `createJobQueueFixture()` (`src/test-support/jobs.ts`): a migrated database
+  with one integration and two repositories, and a clock the test moves by hand (leases and timeouts
+  are tested by advancing it, never by waiting). Callers that must overlap are real processes
+  (`jobs-child.ts`, started together by a barrier, with the queue's clock fixed to a given time).
 - Tests of file system errors that depend on permissions (a read-only directory) fail when the tests
   run as root, because root may write anywhere. Run the suite as a normal user.
 
