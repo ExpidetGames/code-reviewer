@@ -8,13 +8,8 @@
 // (stage and stable code, never a credential).
 import type { SessionUser } from "../../auth/access-policy.ts";
 import { isCrossSite } from "../../http/request-checks.ts";
+import type { SyncErrorCode } from "./errors.ts";
 import type { IntegrationSyncService, SyncError } from "./service.ts";
-
-export const SYNC_ERROR_CODES = [
-  /** The request does not come from this site (cross-site `Sec-Fetch-Site` or a foreign `Origin`). 403. */
-  "SYNC_CROSS_SITE_REQUEST",
-] as const;
-export type SyncErrorCode = (typeof SYNC_ERROR_CODES)[number];
 
 export type SyncRouteDependencies = {
   /**
