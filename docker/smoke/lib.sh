@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared helpers of the image smoke tests (docker/smoke/app.sh, docker/smoke/runner.sh). Sourced,
+# Shared helpers of the smoke tests (docker/smoke/app.sh, runner.sh and compose.sh). Sourced,
 # not executed. The smoke tests need a Docker daemon and fail loudly without one; they never skip.
 
 # Output goes to stderr only for failures; progress lines are plain.
@@ -20,6 +20,8 @@ cleanup() {
   for name in "${CLEANUP_VOLUMES[@]:-}"; do
     [ -n "$name" ] && docker volume rm --force "$name" >/dev/null 2>&1
   done
+  # A smoke test with more to clean up (a compose project, a temporary directory) defines this.
+  if declare -F extra_cleanup >/dev/null; then extra_cleanup; fi
   return 0
 }
 trap cleanup EXIT

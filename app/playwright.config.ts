@@ -1,9 +1,18 @@
+import { generateKeyPairSync } from "node:crypto";
 import { defineConfig, devices } from "@playwright/test";
 import { e2eEnv } from "./e2e/helpers/e2e-env";
 
 // Own ports per checkout (E2E_PORT, default 3417; the fake GitHub gets a random one, see
 // e2e/helpers/e2e-env.ts); never 3000 or 3100 so parallel work in other worktrees is safe.
 const baseURL = e2eEnv.appUrl;
+
+// A throwaway RSA key for the GitHub App settings of the app under test, generated on every run and
+// never stored: the journeys do not talk to the GitHub App, but the key stays a usable PEM.
+const githubAppPrivateKey = generateKeyPairSync("rsa", {
+  modulusLength: 2048,
+  publicKeyEncoding: { type: "spki", format: "pem" },
+  privateKeyEncoding: { type: "pkcs1", format: "pem" },
+}).privateKey;
 
 export default defineConfig({
   testDir: "e2e",
@@ -59,6 +68,11 @@ export default defineConfig({
         GITHUB_OAUTH_BASE_URL: e2eEnv.githubUrl,
         GITHUB_API_BASE: e2eEnv.githubUrl,
         ALLOWED_GITHUB_LOGINS: e2eEnv.allowedLogins,
+        RUNNER_TOKEN: e2eEnv.runnerToken,
+        GITHUB_APP_ID: "1",
+        GITHUB_APP_SLUG: "e2e-app",
+        GITHUB_APP_WEBHOOK_SECRET: "e2e-webhook-secret",
+        GITHUB_APP_PRIVATE_KEY: githubAppPrivateKey,
         // Without this flag the server refuses the two overrides above.
         ALLOW_TEST_GITHUB_ENDPOINTS: "true",
       },
