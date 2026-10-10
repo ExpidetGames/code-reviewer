@@ -48,6 +48,8 @@ export const WEBHOOK_DELIVERY_OUTCOMES = [
   "integration_disabled",
   /** The platform said the actor may not start a review. */
   "trigger_not_allowed",
+  /** The repository has no active project, so nothing is reviewed. */
+  "project_not_active",
   /** A review trigger was handed to the intake. */
   "trigger_enqueued",
   /** The installation or its repositories were synchronized. */

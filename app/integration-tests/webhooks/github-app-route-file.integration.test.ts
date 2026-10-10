@@ -8,6 +8,8 @@ import {
   webhookDelivery,
   webhookFixture,
 } from "../../../fakes/github/webhooks.ts";
+import { createRepositoriesRepository } from "../../src/db/repositories/repositories-repository.ts";
+import { getProjectService } from "../../src/projects/shared.ts";
 import { closeDatabase, getDatabase } from "../../src/db/startup.ts";
 import { initializeDatabaseOnStart } from "../../src/db/startup.ts";
 import { TEST_WEBHOOK_SECRET } from "../../src/test-support/github-app.ts";
@@ -111,6 +113,11 @@ describe("the webhook route file", () => {
         secret: TEST_WEBHOOK_SECRET,
       }),
     );
+    // The repository must be a project before its pull requests are reviewed.
+    const [repository] =
+      await createRepositoriesRepository(getDatabase()).list();
+    await getProjectService().activateProject(repository!.id);
+    vi.mocked(console.info).mockClear();
 
     const response = await route.POST(
       webhookDelivery({

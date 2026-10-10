@@ -59,7 +59,9 @@ describe("the migrations of both epics", () => {
       "20261010134000_create_integrations",
       "20261010143000_create_repositories",
       "20261010170000_create_webhook_deliveries",
+      "20261010190000_create_projects",
       "20261010191500_create_jobs",
+      "20261010201500_create_app_settings",
     ]);
   });
 
@@ -100,10 +102,12 @@ describe("starting the database", () => {
       "accounts",
       "allowed_login_pins",
       "app_meta",
+      "app_settings",
       "integrations",
       "jobs",
       "kysely_migration",
       "kysely_migration_lock",
+      "projects",
       "repositories",
       "sessions",
       "users",

@@ -1,76 +1,193 @@
-// The LLM access a job gets, read from the environment. This is the minimum the runner API needs
-// today; the LLM key ticket (CR-26) owns this module and extends it (settings per project, the
-// default model, the cost check). Callers only use `loadLlmAccess` and `revealLlmAccess`.
-import "server-only";
+// Reads the shared LLM access from the environment. The only place that knows the variable names.
+//
+// One LLM account serves the whole instance (a key per project or per user comes later). The app
+// hands the key to the runner with every job. A problem is a *state* ("misconfigured"), not an
+// exception: the app starts anyway, the UI shows the problem and a job fails with `llm_not_configured`
+// when it is claimed. Only the provider and the key can make the state misconfigured. A wrong
+// optional value (`LLM_MODEL`, `LLM_MAX_TOKENS`) is ignored with the default used instead, and
+// reported as a *warning* next to a working configuration: a typo in the model must not stop every
+// review. A problem is reported with the variable name and a stable code, never with a value (the
+// variables hold a secret, and a wrong value may be a secret pasted into the wrong place).
+//
+// The limits below are the ones the runner enforces on a job (runner/README.md, "llm"); a value the
+// runner would refuse is refused here, so it shows up in the UI instead of as a failed job.
 
-/** The providers the runner can talk to (see `llm.provider` in contracts/runner-api.v1.json). */
 export const LLM_PROVIDERS = ["openrouter"] as const;
 export type LlmProvider = (typeof LLM_PROVIDERS)[number];
 
 /**
- * The model used when `LLM_MODEL` is not set: the default after the model comparison (CR-44, lead
- * decision). A project may choose another one (CR-25); this module is replaced by the LLM
- * configuration of CR-26.
+ * The model used when `LLM_MODEL` is not set: the recommendation of the model comparison (measured
+ * 0.0027 USD per review on average against the customer's limit of 0.10 USD).
  */
 export const DEFAULT_LLM_MODEL = "anthropic/claude-haiku-5.5";
 
-/** The stable code of a job that cannot start because the app has no usable LLM access. */
-export const LLM_NOT_CONFIGURED = "llm_not_configured" as const;
+export const LLM_VARIABLES = [
+  "LLM_PROVIDER",
+  "LLM_API_KEY",
+  "LLM_MODEL",
+  "LLM_MAX_TOKENS",
+] as const;
+export type LlmVariable = (typeof LLM_VARIABLES)[number];
 
-/**
- * The LLM access of a job. `apiKey` is readable but not enumerable, so JSON.stringify, spreading
- * and console output leave it out; only `revealLlmAccess` hands it out, for the claim response.
- */
-export type LlmAccess = {
-  provider: LlmProvider;
-  model: string;
-  readonly apiKey: string;
+export const LLM_CONFIG_ISSUE_CODES = [
+  "LLM_PROVIDER_MISSING",
+  "LLM_PROVIDER_UNKNOWN",
+  "LLM_API_KEY_MISSING",
+  "LLM_API_KEY_INVALID",
+  "LLM_MODEL_INVALID",
+  "LLM_MAX_TOKENS_INVALID",
+] as const;
+export type LlmConfigIssueCode = (typeof LLM_CONFIG_ISSUE_CODES)[number];
+
+export type LlmConfigIssue = {
+  code: LlmConfigIssueCode;
+  variable: LlmVariable;
 };
 
-export type LlmAccessResult =
-  | { ok: true; access: LlmAccess }
-  | { ok: false; errorCode: typeof LLM_NOT_CONFIGURED };
+/** What the runner accepts for `llm.apiKey`, `llm.model` and `llm.maxTokens`. */
+export const MAX_LLM_KEY_CHARS = 4096;
+export const MODEL_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,199}$/;
+export const MIN_LLM_CONTEXT_TOKENS = 1000;
+export const MAX_LLM_CONTEXT_TOKENS = 10_000_000;
 
-function isLlmProvider(value: string): value is LlmProvider {
-  return LLM_PROVIDERS.some((provider) => provider === value);
-}
+export type LlmConfig = {
+  provider: LlmProvider;
+  model: string;
+  /** Not enumerable (see `createLlmConfig`): JSON, spreads and logs leave it out. */
+  apiKey: string;
+  /**
+   * The context window (`LLM_MAX_TOKENS`) of a model PR-Agent does not know; null lets PR-Agent
+   * decide. Not the token budget of a review: that is a review setting (src/review-settings) and
+   * replaces this value in a job.
+   */
+  contextWindowTokens: number | null;
+};
 
-function present(value: string | undefined): string | undefined {
-  return value === undefined || value.trim() === "" ? undefined : value.trim();
-}
+export type LlmConfigState =
+  | {
+      status: "configured";
+      config: LlmConfig;
+      /** Optional variables that were wrong and are ignored (the default is used instead). */
+      warnings: readonly LlmConfigIssue[];
+    }
+  | {
+      status: "misconfigured";
+      /** What stops reviews: the provider or the key. */
+      issues: readonly LlmConfigIssue[];
+      warnings: readonly LlmConfigIssue[];
+    };
+
+type Env = Readonly<Record<string, string | undefined>>;
 
 /**
- * Reads `LLM_PROVIDER` (default `openrouter`), `LLM_MODEL` (default `DEFAULT_LLM_MODEL`) and
- * `LLM_API_KEY`. A missing key or a provider the runner does not support is "not configured": the answer never says which setting is wrong, because it ends
- * up in a job's error code, not in a log of settings.
+ * Builds an `LlmConfig` whose `apiKey` is readable (`config.apiKey`) but not enumerable, so passing
+ * the object to a logger, an error or `JSON.stringify` cannot leak the key.
  */
-export function loadLlmAccess(
-  env: Readonly<Record<string, string | undefined>> = process.env,
-): LlmAccessResult {
-  const provider = present(env.LLM_PROVIDER) ?? "openrouter";
-  const model = present(env.LLM_MODEL) ?? DEFAULT_LLM_MODEL;
-  const apiKey = present(env.LLM_API_KEY);
-  if (!isLlmProvider(provider) || apiKey === undefined)
-    return { ok: false, errorCode: LLM_NOT_CONFIGURED };
-
-  const access = { provider, model } as LlmAccess;
-  Object.defineProperty(access, "apiKey", {
+export function createLlmConfig(fields: LlmConfig): LlmConfig {
+  const { apiKey, ...visible } = fields;
+  const config = { ...visible };
+  Object.defineProperty(config, "apiKey", {
     value: apiKey,
     enumerable: false,
     writable: false,
   });
-  return { ok: true, access };
+  return config as LlmConfig;
 }
 
-/** A plain copy with the key, for the claim response. Never log it, store it or cache it. */
-export function revealLlmAccess(access: LlmAccess): {
-  provider: LlmProvider;
-  model: string;
-  apiKey: string;
-} {
+/** Reads and validates the four variables. Never throws; never puts a value into the result. */
+export function loadLlmConfig(env: Env): LlmConfigState {
+  const issues: LlmConfigIssue[] = [];
+  const warnings: LlmConfigIssue[] = [];
+
+  const provider = readProvider(env.LLM_PROVIDER, issues);
+  const apiKey = readApiKey(env.LLM_API_KEY, issues);
+  const model = readModel(env.LLM_MODEL, warnings);
+  const contextWindowTokens = readContextWindow(env.LLM_MAX_TOKENS, warnings);
+
+  if (issues.length > 0 || provider === undefined || apiKey === undefined)
+    return { status: "misconfigured", issues, warnings };
+
   return {
-    provider: access.provider,
-    model: access.model,
-    apiKey: access.apiKey,
+    status: "configured",
+    config: createLlmConfig({ provider, model, apiKey, contextWindowTokens }),
+    warnings,
   };
+}
+
+/**
+ * The model the instance uses unless the review settings choose another: `LLM_MODEL` when it is set
+ * and valid, otherwise the default model. Read on its own so the review settings still have a model
+ * while the provider or the key is wrong.
+ */
+export function configuredLlmModel(env: Env): string {
+  return readModel(env.LLM_MODEL, []);
+}
+
+function readProvider(
+  raw: string | undefined,
+  issues: LlmConfigIssue[],
+): LlmProvider | undefined {
+  const value = raw?.trim().toLowerCase();
+  if (!value) {
+    issues.push({ code: "LLM_PROVIDER_MISSING", variable: "LLM_PROVIDER" });
+    return undefined;
+  }
+  const provider = LLM_PROVIDERS.find((known) => known === value);
+  if (provider === undefined)
+    issues.push({ code: "LLM_PROVIDER_UNKNOWN", variable: "LLM_PROVIDER" });
+  return provider;
+}
+
+function readApiKey(
+  raw: string | undefined,
+  issues: LlmConfigIssue[],
+): string | undefined {
+  const value = raw?.trim();
+  if (!value) {
+    issues.push({ code: "LLM_API_KEY_MISSING", variable: "LLM_API_KEY" });
+    return undefined;
+  }
+  // A key with whitespace or control characters inside is a paste accident; the runner would refuse
+  // the job anyway, so say so here.
+  if (value.length > MAX_LLM_KEY_CHARS || /[\s\p{Cc}]/u.test(value)) {
+    issues.push({ code: "LLM_API_KEY_INVALID", variable: "LLM_API_KEY" });
+    return undefined;
+  }
+  return value;
+}
+
+/** The model of `LLM_MODEL`, or the default when it is not set or not valid (a warning is recorded). */
+function readModel(
+  raw: string | undefined,
+  warnings: LlmConfigIssue[],
+): string {
+  const value = raw?.trim();
+  if (!value) return DEFAULT_LLM_MODEL;
+  if (!MODEL_NAME_PATTERN.test(value)) {
+    warnings.push({ code: "LLM_MODEL_INVALID", variable: "LLM_MODEL" });
+    return DEFAULT_LLM_MODEL;
+  }
+  return value;
+}
+
+/** `null` when `LLM_MAX_TOKENS` is not set, or not valid (a warning is recorded in that case). */
+function readContextWindow(
+  raw: string | undefined,
+  warnings: LlmConfigIssue[],
+): number | null {
+  const value = raw?.trim();
+  if (!value) return null;
+  const number = /^[0-9]{1,8}$/.test(value) ? Number(value) : Number.NaN;
+  if (
+    !Number.isInteger(number) ||
+    number < MIN_LLM_CONTEXT_TOKENS ||
+    number > MAX_LLM_CONTEXT_TOKENS
+  ) {
+    warnings.push({
+      code: "LLM_MAX_TOKENS_INVALID",
+      variable: "LLM_MAX_TOKENS",
+    });
+    return null;
+  }
+  return number;
 }
