@@ -38,6 +38,7 @@ import {
 } from "./errors.ts";
 import { readLimitedBody } from "./limited-body.ts";
 import { consoleWebhookLogger, type WebhookLogger } from "./logger.ts";
+import type { ProjectService } from "../projects/service.ts";
 import type { ReviewTriggerIntake } from "./review-trigger-intake.ts";
 
 /** 1 MiB. GitHub's own limit is 25 MB, but the payloads this app reads are a few kilobytes. */
@@ -59,17 +60,11 @@ const INSTALLATION_EVENTS: ReadonlySet<string> = new Set([
 const EVENT_NAME = /^[a-z][a-z0-9_]{0,63}$/;
 const DELIVERY_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
-/** Which repositories are reviewed at all. Implemented by the project service. */
-export type ProjectGate = {
-  /**
-   * Whether the repository (the integration row and the platform's repository id) has an active
-   * project. Review triggers for any other repository are answered `project_not_active`.
-   */
-  hasActiveProject(
-    integrationId: string,
-    repositoryExternalId: string,
-  ): Promise<boolean>;
-};
+/**
+ * Which repositories are reviewed at all: the project service. Review triggers for a repository
+ * without an active project are answered `project_not_active`.
+ */
+export type ProjectGate = Pick<ProjectService, "hasActiveProject">;
 
 export type GithubAppWebhookDeps = {
   registry: IntegrationRegistry;
