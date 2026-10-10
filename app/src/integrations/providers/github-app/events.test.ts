@@ -1,15 +1,16 @@
 // Pins down which pull request actions start a review: opened, reopened, ready for review and new
-// commits do, everything else does not. A draft pull request is translated like any other, because
-// whether drafts are skipped is decided by the automatic triggers ticket (CR-31), not here.
+// commits do, everything else does not; a closed pull request is its own event. Whether a draft or a
+// disabled setting still stops the review is decided by the automatic trigger policy
+// (src/webhooks/automatic-review-policy.ts), so the translation passes the draft flag on.
 import { describe, expect, it } from "vitest";
 import { webhookFixture } from "../../../../../fakes/github/webhooks.ts";
 import { parseGithubEvent } from "./events.ts";
 
-async function eventOf(fixture: string) {
+async function eventOfPayload(eventName: string, payload: unknown) {
   return parseGithubEvent({
     integrationId: "integration-1",
-    eventName: fixture.split(".")[0] as string,
-    payload: webhookFixture(fixture),
+    eventName,
+    payload,
     hasWriteAccess: async () => {
       throw new Error("a pull request delivery must not ask for permissions");
     },
@@ -19,8 +20,30 @@ async function eventOf(fixture: string) {
   });
 }
 
+async function eventOf(fixture: string) {
+  return eventOfPayload(
+    fixture.split(".")[0] as string,
+    webhookFixture(fixture),
+  );
+}
+
+/** A recorded pull request payload with other values at the given places. */
+function pullRequestWith(
+  fixture: string,
+  changes: { action?: string; pullRequest?: Record<string, unknown> },
+) {
+  const payload = webhookFixture(fixture) as Record<string, unknown> & {
+    pull_request: Record<string, unknown>;
+  };
+  return {
+    ...payload,
+    ...(changes.action === undefined ? {} : { action: changes.action }),
+    pull_request: { ...payload.pull_request, ...changes.pullRequest },
+  };
+}
+
 describe("which pull request actions start a review", () => {
-  // CR-22-T09
+  // CR-22-T09, CR-31-T02
   it.each([
     ["pull_request.opened", "opened"],
     ["pull_request.synchronize", "updated"],
@@ -29,26 +52,108 @@ describe("which pull request actions start a review", () => {
   ])("%s becomes a %s trigger", async (fixture, kind) => {
     expect(await eventOf(fixture)).toMatchObject({
       kind: "review_trigger",
-      trigger: { kind },
+      trigger: { kind, draft: false, state: "open" },
     });
   });
 
-  // CR-22-T09
-  it.each([
-    "pull_request.closed",
-    "pull_request.edited",
-    "pull_request.labeled",
-    "pull_request.converted_to_draft",
-  ])("%s becomes no trigger", async (fixture) => {
-    expect(await eventOf(fixture)).toMatchObject({ kind: "ignored" });
+  // CR-22-T09, CR-31-T03
+  it.each(["edited", "labeled", "assigned", "review_requested"])(
+    "the action %s becomes no trigger",
+    async (action) => {
+      expect(
+        await eventOfPayload(
+          "pull_request",
+          pullRequestWith("pull_request.edited", { action }),
+        ),
+      ).toMatchObject({ kind: "ignored" });
+    },
+  );
+
+  // CR-22-T09, CR-31-T03
+  it.each(["pull_request.edited", "pull_request.labeled"])(
+    "%s becomes no trigger",
+    async (fixture) => {
+      expect(await eventOf(fixture)).toMatchObject({ kind: "ignored" });
+    },
+  );
+
+  it("does not review a pull request that was converted to a draft", async () => {
+    expect(await eventOf("pull_request.converted_to_draft")).toMatchObject({
+      kind: "ignored",
+    });
   });
 
-  // CR-22-T09: the Jira case expects no trigger for a draft; the project lead moved that decision
-  // to CR-31 (drafts are skipped until they are ready), so the translation passes it on.
-  it("translates a pull request opened as a draft like any other", async () => {
+  // CR-31-T03
+  it("reports a closed pull request as closed, merged or not, and as no trigger", async () => {
+    expect(await eventOf("pull_request.closed")).toEqual({
+      kind: "pull_request_closed",
+      repo: {
+        integrationId: "integration-1",
+        externalId: "7001",
+        fullName: "acme/widgets",
+        url: "https://github.com/acme/widgets",
+      },
+      prNumber: 7,
+      merged: true,
+    });
+    expect(
+      await eventOfPayload(
+        "pull_request",
+        pullRequestWith("pull_request.closed", {
+          pullRequest: { merged: false },
+        }),
+      ),
+    ).toMatchObject({ kind: "pull_request_closed", merged: false });
+  });
+});
+
+describe("what a pull request trigger says about the pull request", () => {
+  // CR-31-T04
+  it("translates a pull request opened as a draft like any other and marks it as a draft", async () => {
     expect(await eventOf("pull_request.opened.draft")).toMatchObject({
       kind: "review_trigger",
-      trigger: { kind: "opened", prNumber: 7 },
+      trigger: { kind: "opened", prNumber: 7, draft: true, state: "open" },
+    });
+  });
+
+  // CR-31-T09
+  it("marks the trigger of a late delivery for a closed pull request as closed", async () => {
+    for (const fixture of ["pull_request.synchronize", "pull_request.reopened"])
+      expect(
+        await eventOfPayload(
+          "pull_request",
+          pullRequestWith(fixture, { pullRequest: { state: "closed" } }),
+        ),
+      ).toMatchObject({ kind: "review_trigger", trigger: { state: "closed" } });
+  });
+});
+
+describe("a pull request payload that lacks what the app reads", () => {
+  // CR-31-T14
+  it("is invalid, and the reason names the missing field but no value", async () => {
+    const payload = pullRequestWith("pull_request.opened", {});
+    delete (payload.pull_request as { head?: unknown }).head;
+
+    const event = await eventOfPayload("pull_request", payload);
+
+    expect(event).toEqual({
+      kind: "invalid_payload",
+      reason: expect.stringContaining("pull_request.head.sha"),
+    });
+  });
+
+  // CR-31-T14
+  it("is invalid when the draft flag has the wrong type", async () => {
+    expect(
+      await eventOfPayload(
+        "pull_request",
+        pullRequestWith("pull_request.opened", {
+          pullRequest: { draft: "yes" },
+        }),
+      ),
+    ).toMatchObject({
+      kind: "invalid_payload",
+      reason: expect.stringContaining("pull_request.draft"),
     });
   });
 });

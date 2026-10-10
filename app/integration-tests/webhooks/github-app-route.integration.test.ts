@@ -73,6 +73,7 @@ describe("a pull request delivery", () => {
     const h = await startWebhookHarness();
     await h.seedInstallation();
     await h.deliver("pull_request.opened");
+    h.fake.updatePullRequest("acme/widgets", 7, { headSha: NEW_HEAD });
 
     const response = await h.deliver("pull_request.synchronize", {
       payload: withHeadSha("pull_request.synchronize", NEW_HEAD),
@@ -102,7 +103,7 @@ describe("a pull request delivery", () => {
     const h = await startWebhookHarness();
     await h.seedInstallation();
 
-    const response = await h.deliver("pull_request.closed");
+    const response = await h.deliver("pull_request.edited");
 
     expect(response.status).toBe(202);
     expect(await json(response)).toMatchObject({ outcome: "ignored" });

@@ -12,8 +12,11 @@
 //                an id another request is handling right now                        409
 //   6. identify  `identifyWebhook` names the installation; the integration is loaded
 //   7. translate `parseEvent`: a review trigger, an installation change or "ignored"
-//   8. act       trigger -> the repository must have an active project, then `canTrigger`,
-//                then the intake; change -> the shared sync                          202
+//   8. act       trigger -> the repository must have an active project, then the trigger
+//                policy (automatic-review-policy.ts: drafts, settings, the debounce of a push,
+//                the commit still being the head), then `canTrigger`, then the intake;
+//                closed pull request -> its waiting jobs are dropped;
+//                change -> the shared sync; an unusable payload                     202, 400
 //
 // Only a delivery that succeeded (a trigger handed over, an installation synchronized) stays a
 // duplicate; one that was turned away or failed can be redelivered with the same id. A failure after
@@ -32,6 +35,7 @@ import type {
   IntegrationType,
 } from "../integrations/types.ts";
 import {
+  WebhookPayloadError,
   WebhookProcessingError,
   type WebhookAcceptedOutcome,
   type WebhookErrorCode,
@@ -39,6 +43,12 @@ import {
 import { readLimitedBody } from "./limited-body.ts";
 import { consoleWebhookLogger, type WebhookLogger } from "./logger.ts";
 import type { ProjectService } from "../projects/service.ts";
+import type { ReviewSettings } from "../review-settings/settings.ts";
+import {
+  type AutomaticSkipReason,
+  checkAgainstCurrentPullRequest,
+  decideAutomaticTrigger,
+} from "./automatic-review-policy.ts";
 import type { ReviewTriggerIntake } from "./review-trigger-intake.ts";
 
 /** 1 MiB. GitHub's own limit is 25 MB, but the payloads this app reads are a few kilobytes. */
@@ -66,6 +76,21 @@ const DELIVERY_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
  */
 export type ProjectGate = Pick<ProjectService, "hasActiveProject">;
 
+/** What the trigger policy needs besides the trigger: the project's settings, the wait and the clock. */
+export type AutomaticReviewDeps = {
+  /**
+   * The settings a review of the repository's project uses (project over global over built-in), or
+   * `undefined` when the repository has no project.
+   */
+  settingsFor(
+    integrationId: string,
+    repositoryExternalId: string,
+  ): Promise<ReviewSettings | undefined>;
+  /** How long a push waits before its review may start. */
+  debounceMs: number;
+  now(): Date;
+};
+
 export type GithubAppWebhookDeps = {
   registry: IntegrationRegistry;
   integrations: Pick<IntegrationsRepository, "findByExternalId">;
@@ -73,6 +98,7 @@ export type GithubAppWebhookDeps = {
   /** The process-wide sync service (`getIntegrationSync()`), never one created for the route. */
   sync: Pick<IntegrationSyncService, "handleInstallationChange">;
   projects: ProjectGate;
+  automatic: AutomaticReviewDeps;
   intake: ReviewTriggerIntake;
   logger?: WebhookLogger;
   maxBodyBytes?: number;
@@ -128,7 +154,15 @@ function loggedUnverifiableFor(): WeakSet<WebhookLogger> {
 export function createGithubAppWebhookHandler(
   deps: GithubAppWebhookDeps,
 ): WebhookHandler {
-  const { registry, integrations, deliveries, sync, projects, intake } = deps;
+  const {
+    registry,
+    integrations,
+    deliveries,
+    sync,
+    projects,
+    automatic,
+    intake,
+  } = deps;
   const logger = deps.logger ?? consoleWebhookLogger;
   const maxBodyBytes = deps.maxBodyBytes ?? WEBHOOK_MAX_BODY_BYTES;
 
@@ -136,6 +170,18 @@ export function createGithubAppWebhookHandler(
     WebhookAcceptedOutcome,
     "event_not_used" | "duplicate"
   >;
+
+  /** A pull request event that starts no review; the reason is for the log, the answer is the same. */
+  function skipped(
+    deliveryId: string,
+    prNumber: number,
+    reason: AutomaticSkipReason,
+  ): "trigger_skipped" {
+    logger.info(
+      `[webhook] delivery=${deliveryId} pr=${prNumber} starts no review reason=${reason}`,
+    );
+    return "trigger_skipped";
+  }
 
   /** Steps 6 to 8: everything after the delivery was claimed. */
   async function handleDelivery(
@@ -186,9 +232,29 @@ export function createGithubAppWebhookHandler(
       return "installation_changed";
     }
 
-    // A review trigger. Only an installation event reaches here without a row, and it never yields a
-    // trigger; the check keeps that true even if a provider changes.
+    // A payload that lacks what the app reads cannot be handled, now or on a redelivery: the sender
+    // gets a 400 and nothing is recorded or released as a success.
+    if (event.kind === "invalid_payload")
+      throw new WebhookPayloadError(event.reason);
+
+    // Only an installation event reaches here without a row, and it never yields a review trigger;
+    // the check keeps that true even if a provider changes.
     if (integration === undefined) return "unknown_installation";
+
+    // A closed pull request starts nothing; the jobs still waiting for it are dropped. Only for a
+    // repository with an active project (deactivating a project drops its waiting jobs already).
+    if (event.kind === "pull_request_closed") {
+      if (
+        !(await projects.hasActiveProject(
+          integration.id,
+          event.repo.externalId,
+        ))
+      )
+        return "project_not_active";
+      await intake.discardWaitingJobs(event.repo, integration, event.prNumber);
+      return "waiting_jobs_discarded";
+    }
+
     // Only repositories with an active project are reviewed. Asked before `canTrigger` (one more
     // GitHub call for a command); `parseEvent` has already read the payload, and for a comment it
     // may have asked GitHub, because only it knows which repository the delivery is about.
@@ -199,12 +265,50 @@ export function createGithubAppWebhookHandler(
       ))
     )
       return "project_not_active";
-    if (!(await provider.canTrigger(integration, event.trigger)))
+
+    // The trigger policy for pull request events (a comment command is not subject to it).
+    const trigger = event.trigger;
+    let runAfter: Date | null = null;
+    if (trigger.kind !== "command") {
+      const settings = await automatic.settingsFor(
+        integration.id,
+        trigger.repo.externalId,
+      );
+      if (settings === undefined) return "project_not_active";
+      const decision = decideAutomaticTrigger({
+        trigger,
+        settings,
+        now: automatic.now(),
+        debounceMs: automatic.debounceMs,
+      });
+      if (decision.action === "skip")
+        return skipped(deliveryId, trigger.prNumber, decision.reason);
+      runAfter = decision.runAfter;
+
+      // Deliveries arrive late and out of order. Before a push replaces the waiting job, ask GitHub
+      // whether this commit is still the head (one call per push), so a late delivery for an older
+      // commit cannot take the place of the newest one. A failure of the call fails the delivery
+      // (500, released), so the redelivery is judged again.
+      if (trigger.kind === "updated") {
+        const current = await provider.getPullRequest(
+          integration,
+          trigger.repo,
+          trigger.prNumber,
+        );
+        const stale = checkAgainstCurrentPullRequest(trigger, current);
+        if (stale !== null)
+          return skipped(deliveryId, trigger.prNumber, stale.reason);
+      }
+    }
+
+    if (!(await provider.canTrigger(integration, trigger)))
       return "trigger_not_allowed";
-    await intake.enqueueReviewTrigger(event.trigger, integration, {
-      deliveryId,
-      event: eventName,
-    });
+    await intake.enqueueReviewTrigger(
+      trigger,
+      integration,
+      { deliveryId, event: eventName },
+      runAfter === null ? {} : { runAfter },
+    );
     return "trigger_enqueued";
   }
 
@@ -298,6 +402,8 @@ export function createGithubAppWebhookHandler(
             `[webhook] ${label} cannot be released: ${describeError(releaseError)}`,
           ),
         );
+      if (error instanceof WebhookPayloadError)
+        return fail(400, "WEBHOOK_PAYLOAD_INVALID");
       return fail(
         error instanceof WebhookProcessingError ? error.status : 500,
         "WEBHOOK_PROCESSING_FAILED",

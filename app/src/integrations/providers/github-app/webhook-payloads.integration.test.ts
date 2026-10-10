@@ -159,7 +159,6 @@ describe("the recorded GitHub webhook payloads", () => {
 
   // CR-22-T15
   it.each([
-    "pull_request.closed",
     "pull_request.edited",
     "pull_request.labeled",
     "pull_request.converted_to_draft",

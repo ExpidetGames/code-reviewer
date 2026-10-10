@@ -107,11 +107,23 @@ type ReviewTriggerBase = {
   actor: TriggerActor;
 };
 
+/** The state of a pull request as a delivery reports it (merged pull requests are `closed`). */
+export const TRIGGER_PULL_REQUEST_STATES = ["open", "closed"] as const;
+export type TriggerPullRequestState =
+  (typeof TRIGGER_PULL_REQUEST_STATES)[number];
+
 export type ReviewTrigger =
   | (ReviewTriggerBase & {
       kind: "opened" | "updated";
       command: null;
       args: null;
+      /** The pull request is a draft (work in progress) when the event happened. */
+      draft: boolean;
+      /**
+       * The state of the pull request in the delivery. A late `synchronize` or `reopened` for a pull
+       * request that is closed by now carries `closed`; the automatic trigger policy skips it.
+       */
+      state: TriggerPullRequestState;
     })
   | (ReviewTriggerBase & {
       kind: "command";
@@ -194,5 +206,21 @@ export type IntegrationEvent =
       externalId: string;
       action: InstallationAction;
     }
+  /**
+   * A pull request was closed (merged or not). It starts nothing; the app uses it to drop the jobs
+   * that are still waiting for that pull request.
+   */
+  | {
+      kind: "pull_request_closed";
+      repo: RepoRef;
+      prNumber: number;
+      merged: boolean;
+    }
+  /**
+   * A delivery of an event the app uses whose payload lacks fields the app reads (or has them with
+   * the wrong type). Nothing can be done with it and a redelivery would not change that; `reason`
+   * names the fields for the logs, never their values.
+   */
+  | { kind: "invalid_payload"; reason: string }
   /** Genuine but of no interest for reviews; `reason` is for logs, never for branching. */
   | { kind: "ignored"; reason: string };
