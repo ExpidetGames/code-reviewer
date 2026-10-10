@@ -29,9 +29,13 @@ export default defineConfig({
       },
     },
   ],
-  // The e2e journeys always run against a production build, never the dev server.
+  // The e2e journeys always run against a production build, never the dev server. The server gets
+  // a fresh SQLite file in the (git-ignored) test-results folder; it is migrated on start.
   webServer: {
-    command: `pnpm build && pnpm start --hostname 127.0.0.1 --port ${port}`,
+    command:
+      "pnpm build && rm -rf test-results/e2e-data && mkdir -p test-results/e2e-data && " +
+      `pnpm start --hostname 127.0.0.1 --port ${port}`,
+    env: { DATABASE_PATH: "test-results/e2e-data/app.db" },
     url: baseURL,
     reuseExistingServer: false,
     timeout: 240_000,
