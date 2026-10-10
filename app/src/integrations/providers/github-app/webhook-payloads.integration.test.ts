@@ -115,4 +115,71 @@ describe("the recorded GitHub webhook payloads", () => {
       },
     });
   });
+
+  // CR-22-T15
+  it.each([
+    ["pull_request.opened", "opened", "alice", "1f3a5c7e"],
+    ["pull_request.synchronize", "updated", "alice", "1f3a5c7e"],
+    ["pull_request.reopened", "opened", "alice", "1f3a5c7e"],
+    ["pull_request.ready_for_review", "opened", "alice", "1f3a5c7e"],
+    ["pull_request.opened.draft", "opened", "alice", "1f3a5c7e"],
+    ["pull_request.opened.fork", "opened", "alice", "9e8d7c6b"],
+  ])(
+    "%s is translated into the expected review trigger",
+    async (name, kind, login, headPrefix) => {
+      const provider = createGithubAppProvider({
+        config: testGithubAppConfig(),
+        client: fakeGithubAppClient(),
+      });
+
+      const event = await provider.parseEvent(
+        integration,
+        webhookDelivery({
+          event: "pull_request",
+          payload: webhookFixture(name),
+          secret: TEST_WEBHOOK_SECRET,
+        }),
+      );
+
+      expect(event).toMatchObject({
+        kind: "review_trigger",
+        trigger: {
+          kind,
+          repo: { fullName: "acme/widgets", integrationId: "integration-1" },
+          prNumber: 7,
+          prUrl: "https://github.com/acme/widgets/pull/7",
+          command: null,
+          actor: { login },
+        },
+      });
+      if (event.kind !== "review_trigger") throw new Error("unreachable");
+      expect(event.trigger.headSha.startsWith(headPrefix)).toBe(true);
+    },
+  );
+
+  // CR-22-T15
+  it.each([
+    "pull_request.closed",
+    "pull_request.edited",
+    "pull_request.labeled",
+    "pull_request.converted_to_draft",
+    "push",
+    "ping",
+  ])("%s is deliberately translated into no trigger", async (name) => {
+    const provider = createGithubAppProvider({
+      config: testGithubAppConfig(),
+      client: fakeGithubAppClient(),
+    });
+
+    const event = await provider.parseEvent(
+      integration,
+      webhookDelivery({
+        event: name.split(".")[0] as string,
+        payload: webhookFixture(name),
+        secret: TEST_WEBHOOK_SECRET,
+      }),
+    );
+
+    expect(event.kind).toBe("ignored");
+  });
 });
