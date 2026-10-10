@@ -61,7 +61,7 @@ and its `errorMessage` are not in any view, list, detail or polling answer (`run
 fields only; tests search the answers for them). The log is cleaned (terminal escapes and control
 characters out) and passed through the same redaction the runner API uses for results, with the secrets
 the app knows. Everything that came from outside (project name, login, a question of `/ask`, the log)
-is rendered as text. The only link made from stored data are the comment link and the pull request link, and only when they are `https://github.com/` addresses
+is rendered as text. The links made from stored data are the comment link and the pull request link, and only when they are `https://github.com/` addresses
 (`rel="noopener noreferrer"`, one rule: `safeGithubUrl`).
 
 ## Access

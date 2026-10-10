@@ -137,6 +137,23 @@ function describeTrigger(kind: JobTriggerKind, actor: string): string {
   }
 }
 
+/** The fields of a job the list needs; the list is read without the result, the lease or the arguments. */
+export type RunRowSource = Pick<
+  Job,
+  | "id"
+  | "repositoryId"
+  | "prNumber"
+  | "prUrl"
+  | "command"
+  | "triggerKind"
+  | "actorLogin"
+  | "status"
+  | "createdAt"
+  | "claimedAt"
+  | "finishedAt"
+  | "errorCode"
+>;
+
 function problemOf(job: RunRowSource): string | null {
   if (job.status === "failed" || job.status === "cancelled") {
     return job.errorCode === null
@@ -148,7 +165,11 @@ function problemOf(job: RunRowSource): string | null {
   return null;
 }
 
-export function toRunRowView(job: Job, project: string, now: Date): RunRowView {
+export function toRunRowView(
+  job: RunRowSource,
+  project: string,
+  now: Date,
+): RunRowView {
   const startedAt = job.claimedAt;
   return {
     id: job.id,
