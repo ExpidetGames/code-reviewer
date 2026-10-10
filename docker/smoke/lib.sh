@@ -68,7 +68,11 @@ scan_in_image() {
   rm -f "$stderr_file"
 }
 
-readonly PRIVATE_KEY_MARKER='-----BEGIN [A-Z ]*PRIVATE KEY-----'
+# A PEM key header (extended regular expression). Real key material has something after the header:
+# the end of the line (a PEM file), or the key itself, which in a bundled string follows as an
+# escaped newline. A header that a library only compares against is closed by a quote right away
+# (jose, bundled by Next.js, checks `"-----BEGIN PRIVATE KEY-----"`) and holds no key, so it does not count.
+readonly PRIVATE_KEY_MARKER='-----BEGIN [A-Z ]*PRIVATE KEY-----($|[[:space:]\\A-Za-z0-9+/])'
 
 # CR-17-T09: nothing that must stay out of an image is inside it, and its configuration and build
 # history carry no secrets. This is the proof that the .dockerignore files work.
@@ -91,7 +95,7 @@ $SCAN_OUTPUT"
 
   # grep exits 0 when it found a file, 1 when it found none, 2 on any error (a missing path).
   scan_in_image "$image" "0 1" sh -c \
-    "grep -rIl -e '$PRIVATE_KEY_MARKER' --exclude-dir=node_modules $content_paths"
+    "grep -rIlE -e '$PRIVATE_KEY_MARKER' --exclude-dir=node_modules $content_paths"
   [ -z "$SCAN_OUTPUT" ] || fail "$image contains private key material:
 $SCAN_OUTPUT"
 
