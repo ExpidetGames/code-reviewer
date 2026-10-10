@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   decodeBoolean,
   decodeJson,
+  tryDecodeJson,
   encodeBoolean,
   encodeJson,
   formatTimestamp,
@@ -56,5 +57,17 @@ describe("timestamp columns", () => {
     const date = new Date(Date.UTC(2026, 9, 10, 12, 30, 15, 42));
 
     expect(formatTimestamp(date)).toBe("2026-10-10T12:30:15.042Z");
+  });
+});
+
+describe("reading JSON that may be damaged", () => {
+  it("returns the value of valid text and ok: false for text that is not JSON", () => {
+    expect(tryDecodeJson<{ a: number }>('{"a":1}')).toEqual({
+      ok: true,
+      value: { a: 1 },
+    });
+    expect(tryDecodeJson("null")).toEqual({ ok: true, value: null });
+    for (const text of ["{nope", "", "undefined", '{"a":'])
+      expect(tryDecodeJson(text)).toEqual({ ok: false });
   });
 });
