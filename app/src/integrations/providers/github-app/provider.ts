@@ -127,7 +127,8 @@ export function createGithubAppProvider(
     },
 
     async verifyWebhook(_integration, request) {
-      const body = await request.clone().text();
+      // The bytes as received, not decoded text: the signature covers exactly these.
+      const body = new Uint8Array(await request.clone().arrayBuffer());
       return isValidSignature(
         body,
         request.headers.get("x-hub-signature-256"),

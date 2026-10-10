@@ -44,6 +44,21 @@ describe("verifying a signature", () => {
     expect(isValidSignature(BODY, header, SECRET)).toBe(false);
   });
 
+  it("checks the signature against the bytes that were received, not against decoded text", () => {
+    const received = new Uint8Array([0x7b, 0xff, 0x7d]);
+    const overBytes = createHmac("sha256", SECRET)
+      .update(received)
+      .digest("hex");
+    const overDecodedText = hex(new TextDecoder().decode(received));
+
+    expect(isValidSignature(received, `sha256=${overBytes}`, SECRET)).toBe(
+      true,
+    );
+    expect(
+      isValidSignature(received, `sha256=${overDecodedText}`, SECRET),
+    ).toBe(false);
+  });
+
   // CR-22-T06
   it("compares a signature of the right length in constant time", () => {
     vi.mocked(timingSafeEqual).mockClear();

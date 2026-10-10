@@ -5,16 +5,18 @@
 // the delivery id has a side effect:
 //
 //   1. size      the body is read with a 1 MB limit                               413
-//   2. signature `verifyWebhook(null, request)`: HMAC of the exact body            401
+//   2. signature `verifyWebhook(null, request)`: HMAC of the exact bytes           401
 //   3. shape     the event and delivery headers exist, the body is JSON            400
 //   4. relevance an event the app does not use is answered at once                 202
-//   5. claim     the delivery id is recorded; a known id is a duplicate            202
+//   5. claim     the delivery id is claimed; a succeeded id is a duplicate         202
+//                an id another request is handling right now                        409
 //   6. identify  `identifyWebhook` names the installation; the integration is loaded
 //   7. translate `parseEvent`: a review trigger, an installation change or "ignored"
 //   8. act       trigger -> `canTrigger`, then the intake; change -> the shared sync  202
 //
-// A failure after the claim releases it (nothing is remembered) and answers with a 5xx, so GitHub's
-// redelivery is handled again. The answer is sent when the work is done: the work is small (a few
+// Only a delivery that succeeded (a trigger handed over, an installation synchronized) stays a
+// duplicate; one that was turned away or failed can be redelivered with the same id. A failure after
+// the claim releases it and answers with a 5xx. The answer is sent when the work is done: the work is small (a few
 // GitHub calls at most, each with a 15 second timeout), and a failure has to reach GitHub as a status
 // code, which `after()` could not do.
 import "server-only";
@@ -115,6 +117,7 @@ export function createGithubAppWebhookHandler(
   /** Steps 6 to 8: everything after the delivery was claimed. */
   async function handleDelivery(
     eventName: string,
+    deliveryId: string,
     request: Request,
   ): Promise<Outcome> {
     const provider = registry.resolve(TYPE);
@@ -165,23 +168,30 @@ export function createGithubAppWebhookHandler(
     if (integration === undefined) return "unknown_installation";
     if (!(await provider.canTrigger(integration, event.trigger)))
       return "trigger_not_allowed";
-    await intake.enqueueReviewTrigger(event.trigger, integration);
+    await intake.enqueueReviewTrigger(event.trigger, integration, {
+      deliveryId,
+      event: eventName,
+    });
     return "trigger_enqueued";
   }
 
-  return async function handle(request) {
+  // Webhook secret problems are logged once per logger: an unauthenticated caller can repeat the
+  // request as often as it likes.
+  const loggedUnverifiable = new WeakSet<WebhookLogger>();
+
+  async function handleRequest(request: Request): Promise<Response> {
     // 1. size
     const body = await readLimitedBody(request, maxBodyBytes);
     if (!body.ok) return fail(413, "WEBHOOK_BODY_TOO_LARGE");
 
-    // The provider reads the exact body again, so it gets a request of its own with the text we read.
+    // The provider reads the exact bytes again, so it gets a request of its own with them.
     const headers = new Headers(request.headers);
     headers.delete("content-length");
     headers.delete("transfer-encoding");
     const verified = new Request(request.url, {
       method: "POST",
       headers,
-      body: body.text,
+      body: body.bytes as BodyInit,
     });
 
     // 2. signature
@@ -190,10 +200,15 @@ export function createGithubAppWebhookHandler(
     try {
       genuine = await provider.verifyWebhook(null, verified);
     } catch (error) {
-      logger.error(
-        `[webhook] deliveries cannot be verified: ${describeError(error)}`,
-      );
-      return fail(503, "WEBHOOK_NOT_CONFIGURED");
+      // A delivery that cannot be verified is refused like a forged one; callers learn nothing about
+      // the configuration. The operator reads the cause in the log.
+      if (!loggedUnverifiable.has(logger)) {
+        loggedUnverifiable.add(logger);
+        logger.error(
+          `[webhook] deliveries cannot be verified: ${describeError(error)}`,
+        );
+      }
+      return fail(401, "WEBHOOK_SIGNATURE_INVALID");
     }
     if (!genuine) {
       logger.info("[webhook] refused a delivery with an invalid signature");
@@ -219,11 +234,18 @@ export function createGithubAppWebhookHandler(
 
     // 5. claim
     const label = `delivery=${deliveryId} event=${eventName}`;
+    let token: string;
     try {
-      if ((await deliveries.claim(deliveryId, eventName)) === "duplicate") {
+      const claim = await deliveries.claim(deliveryId, eventName);
+      if (claim.status === "duplicate") {
         logger.info(`[webhook] ${label} outcome=duplicate`);
         return accepted("duplicate");
       }
+      if (claim.status === "in_progress") {
+        logger.info(`[webhook] ${label} is being handled by another request`);
+        return fail(409, "WEBHOOK_DELIVERY_IN_PROGRESS");
+      }
+      token = claim.token;
     } catch (error) {
       logger.error(
         `[webhook] ${label} cannot be recorded: ${describeError(error)}`,
@@ -234,13 +256,13 @@ export function createGithubAppWebhookHandler(
     // 6. to 8.
     let outcome: Outcome;
     try {
-      outcome = await handleDelivery(eventName, verified);
+      outcome = await handleDelivery(eventName, deliveryId, verified);
     } catch (error) {
       logger.error(`[webhook] ${label} failed: ${describeError(error)}`);
-      // Forget the delivery so the redelivery is handled. If this fails too, the claim runs out by
+      // Forget the claim so the redelivery is handled. If this fails too, the claim runs out by
       // itself (WEBHOOK_DELIVERY_PROCESSING_LEASE_MS).
       await deliveries
-        .release(deliveryId)
+        .release(deliveryId, token)
         .catch((releaseError: unknown) =>
           logger.error(
             `[webhook] ${label} cannot be released: ${describeError(releaseError)}`,
@@ -252,8 +274,10 @@ export function createGithubAppWebhookHandler(
       );
     }
 
+    // Only a succeeded delivery stays claimed; the other outcomes are recorded for diagnostics and
+    // the same id can be handled again (see the repository).
     await deliveries
-      .complete(deliveryId, outcome)
+      .complete(deliveryId, token, outcome)
       .catch((error: unknown) =>
         logger.error(
           `[webhook] ${label} outcome cannot be recorded: ${describeError(error)}`,
@@ -261,5 +285,16 @@ export function createGithubAppWebhookHandler(
       );
     logger.info(`[webhook] ${label} outcome=${outcome}`);
     return accepted(outcome);
+  }
+
+  return async function handle(request) {
+    try {
+      return await handleRequest(request);
+    } catch (error) {
+      // Nothing before the claim is expected to throw (a stream error, a registry problem). The
+      // caller gets a generic answer, the log gets the cause.
+      logger.error(`[webhook] request failed: ${describeError(error)}`);
+      return fail(500, "WEBHOOK_PROCESSING_FAILED");
+    }
   };
 }

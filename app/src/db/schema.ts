@@ -50,7 +50,9 @@ export interface WebhookDeliveriesTable {
   event: string;
   /** A WebhookDeliveryOutcome (src/db/repositories/webhook-deliveries-repository.ts). */
   outcome: string;
-  /** ISO 8601 text in UTC: when the delivery was first accepted. */
+  /** Random value of the request that owns the claim; only its owner may complete or release it. */
+  claim_token: string;
+  /** ISO 8601 text in UTC: when the current claim was made. */
   received_at: string;
 }
 

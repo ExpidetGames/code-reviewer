@@ -547,7 +547,7 @@ describe("a delivery that arrives again", () => {
   });
 
   // CR-22-T08
-  it("produces exactly one trigger when two requests with the same id are in flight at once", async () => {
+  it("produces exactly one trigger when requests with the same id are in flight at once, and tells the others to retry", async () => {
     const h = await startWebhookHarness();
     await h.seedInstallation();
     h.intake.delay(50);
@@ -558,11 +558,139 @@ describe("a delivery that arrives again", () => {
       h.deliver("pull_request.opened", { deliveryId: "delivery-1" }),
     ]);
 
-    expect(responses.map((response) => response.status)).toEqual([
-      202, 202, 202,
-    ]);
+    const statuses = responses.map((response) => response.status).sort();
+    expect(statuses).toEqual([202, 409, 409]);
+    const refused = responses.find((response) => response.status === 409);
+    expect(await json(refused!)).toEqual({
+      error: "WEBHOOK_DELIVERY_IN_PROGRESS",
+    });
     expect(h.intake.triggers).toHaveLength(1);
     expect(h.intake.calls).toBe(1);
+    // Once the first one is done the id is a duplicate.
+    const later = await h.deliver("pull_request.opened", {
+      deliveryId: "delivery-1",
+    });
+    expect(await json(later)).toMatchObject({ outcome: "duplicate" });
+  });
+
+  it("lets the retry of a request that arrived during a failing one succeed", async () => {
+    const h = await startWebhookHarness();
+    await h.seedInstallation();
+    h.intake.delay(30);
+    h.intake.failWith(new Error("storage failed"));
+
+    const [first, second] = await Promise.all([
+      h.deliver("pull_request.opened", { deliveryId: "delivery-1" }),
+      h.deliver("pull_request.opened", { deliveryId: "delivery-1" }),
+    ]);
+
+    expect([first.status, second.status].sort()).toEqual([409, 500]);
+    h.intake.recover();
+    const retried = await h.deliver("pull_request.opened", {
+      deliveryId: "delivery-1",
+    });
+    expect(retried.status).toBe(202);
+    expect(h.intake.triggers).toHaveLength(1);
+  });
+});
+
+describe("a delivery that was turned away for a reason that can change", () => {
+  it("is handled when GitHub's redelivery with the same id arrives after the installation became known", async () => {
+    const h = await startWebhookHarness();
+    h.fake.addInstallation({
+      id: 4242,
+      account: { login: "acme", id: 5001, type: "Organization" },
+    });
+    h.fake.setRepositories(4242, [{ id: 7001, fullName: "acme/widgets" }]);
+
+    const early = await h.deliver("pull_request.opened", {
+      deliveryId: "delivery-1",
+    });
+    expect(await json(early)).toMatchObject({
+      outcome: "unknown_installation",
+    });
+    expect(
+      (await h.snapshotTables()).deliveries.map((row) => row.outcome),
+    ).toEqual(["unknown_installation"]);
+
+    await h.deliver("installation.created", { deliveryId: "delivery-2" });
+    const redelivered = await h.deliver("pull_request.opened", {
+      deliveryId: "delivery-1",
+    });
+
+    expect(await json(redelivered)).toMatchObject({
+      outcome: "trigger_enqueued",
+    });
+    expect(h.intake.triggers).toHaveLength(1);
+    expect(h.intake.sources[0]).toEqual({
+      deliveryId: "delivery-1",
+      event: "pull_request",
+    });
+    const again = await h.deliver("pull_request.opened", {
+      deliveryId: "delivery-1",
+    });
+    expect(await json(again)).toMatchObject({ outcome: "duplicate" });
+    expect(h.intake.triggers).toHaveLength(1);
+  });
+
+  it("is handled when the commenter has write access by the time the delivery is redelivered", async () => {
+    const h = await startWebhookHarness();
+    await h.seedInstallation();
+    addOpenPullRequest(h);
+    h.fake.setCollaboratorPermission("acme/widgets", "bob", "read");
+    const refused = await h.deliver("issue_comment.created.review", {
+      deliveryId: "delivery-1",
+    });
+    expect(await json(refused)).toMatchObject({ outcome: "ignored" });
+
+    h.fake.setCollaboratorPermission("acme/widgets", "bob", "write");
+    const redelivered = await h.deliver("issue_comment.created.review", {
+      deliveryId: "delivery-1",
+    });
+
+    expect(await json(redelivered)).toMatchObject({
+      outcome: "trigger_enqueued",
+    });
+    expect(h.intake.triggers).toHaveLength(1);
+  });
+
+  it("is handled when the installation is enabled again by the time the delivery is redelivered", async () => {
+    const h = await startWebhookHarness();
+    const integration = await h.seedInstallation();
+    await h.integrations.setStatus(integration.id, "disabled");
+    const refused = await h.deliver("pull_request.opened", {
+      deliveryId: "delivery-1",
+    });
+    expect(await json(refused)).toMatchObject({
+      outcome: "integration_disabled",
+    });
+
+    await h.integrations.setStatus(integration.id, "active");
+    const redelivered = await h.deliver("pull_request.opened", {
+      deliveryId: "delivery-1",
+    });
+
+    expect(await json(redelivered)).toMatchObject({
+      outcome: "trigger_enqueued",
+    });
+  });
+
+  it("is handled when the platform refused the actor at first", async () => {
+    let allowed = false;
+    const h = await startWebhookHarness({
+      wrapProvider: (provider) => ({
+        ...provider,
+        canTrigger: async () => allowed,
+      }),
+    });
+    await h.seedInstallation();
+    await h.deliver("pull_request.opened", { deliveryId: "delivery-1" });
+    expect(h.intake.calls).toBe(0);
+
+    allowed = true;
+    await h.deliver("pull_request.opened", { deliveryId: "delivery-1" });
+
+    expect(h.intake.triggers).toHaveLength(1);
   });
 });
 
@@ -622,17 +750,84 @@ describe("a delivery whose handling fails", () => {
     expect(h.intake.triggers).toHaveLength(1);
   });
 
-  it("answers 503 and handles nothing when the webhook secret is not configured", async () => {
+  it("refuses like a forged delivery when the webhook secret is not configured, and logs the cause once", async () => {
     const h = await startWebhookHarness({
       env: { GITHUB_APP_WEBHOOK_SECRET: undefined },
     });
 
-    const response = await h.deliver("pull_request.opened");
+    const first = await h.deliver("pull_request.opened");
+    const second = await h.deliver("pull_request.opened");
 
-    expect(response.status).toBe(503);
-    expect(await json(response)).toEqual({ error: "WEBHOOK_NOT_CONFIGURED" });
+    for (const response of [first, second]) {
+      expect(response.status).toBe(401);
+      expect(await json(response)).toEqual({
+        error: "WEBHOOK_SIGNATURE_INVALID",
+      });
+    }
     expect(h.intake.calls).toBe(0);
-    expect(h.errorLines.join("\n")).toContain("GITHUB_APP_WEBHOOK_SECRET");
+    expect(h.errorLines).toHaveLength(1);
+    expect(h.errorLines[0]).toContain("GITHUB_APP_WEBHOOK_SECRET");
+  });
+
+  it("answers a generic 500 and logs the cause when something before the claim fails", async () => {
+    const h = await startWebhookHarness();
+    const failing = new ReadableStream({
+      pull(controller) {
+        controller.error(new Error("connection reset by peer"));
+      },
+    });
+
+    const response = await h.handler(
+      new Request("https://app.test/api/webhooks/github-app", {
+        method: "POST",
+        body: failing,
+        duplex: "half",
+      } as RequestInit),
+    );
+
+    expect(response.status).toBe(500);
+    expect(await json(response)).toEqual({
+      error: "WEBHOOK_PROCESSING_FAILED",
+    });
+    expect(h.errorLines).toHaveLength(1);
+  });
+
+  it("hands the delivery id and the event name to the intake", async () => {
+    const h = await startWebhookHarness();
+    await h.seedInstallation();
+
+    await h.deliver("pull_request.opened", { deliveryId: "delivery-1" });
+
+    expect(h.intake.sources).toEqual([
+      { deliveryId: "delivery-1", event: "pull_request" },
+    ]);
+  });
+});
+
+describe("the signature covers the bytes that were received", () => {
+  const invalidUtf8 = new Uint8Array([0x7b, 0x22, 0xff, 0x22, 0x7d]);
+
+  it("is checked over the original bytes: a valid signature over bytes that are not UTF-8 passes the check", async () => {
+    const h = await startWebhookHarness();
+
+    const response = await h.deliverRaw(invalidUtf8);
+
+    // Past the signature, then refused because the bytes are not JSON.
+    expect(response.status).toBe(400);
+    expect(await json(response)).toEqual({ error: "WEBHOOK_BODY_NOT_JSON" });
+  });
+
+  it("is not satisfied by the signature of the text those bytes decode to", async () => {
+    const h = await startWebhookHarness();
+    const decoded = new TextDecoder().decode(invalidUtf8);
+
+    const response = await h.deliverRaw(
+      invalidUtf8,
+      {},
+      signWebhookBody(decoded, TEST_WEBHOOK_SECRET),
+    );
+
+    expect(response.status).toBe(401);
   });
 });
 

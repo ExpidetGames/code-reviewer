@@ -28,8 +28,18 @@ function chunked(chunks: string[], onPull?: () => void): ReadableStream {
 }
 
 describe("reading a limited body", () => {
+  it("keeps the exact bytes, also when they are not valid UTF-8", async () => {
+    const received = new Uint8Array([0x7b, 0xff, 0xfe, 0x7d]);
+
+    const body = await readLimitedBody(post(received), 10);
+
+    expect(body).toMatchObject({ ok: true });
+    if (!body.ok) throw new Error("unreachable");
+    expect([...body.bytes]).toEqual([0x7b, 0xff, 0xfe, 0x7d]);
+  });
+
   it("returns the text of a body below the limit", async () => {
-    expect(await readLimitedBody(post("héllo"), 100)).toEqual({
+    expect(await readLimitedBody(post("héllo"), 100)).toMatchObject({
       ok: true,
       text: "héllo",
     });
@@ -53,6 +63,7 @@ describe("reading a limited body", () => {
   it("returns an empty text for a request without a body", async () => {
     expect(await readLimitedBody(post(null), 10)).toEqual({
       ok: true,
+      bytes: new Uint8Array(),
       text: "",
     });
   });
@@ -92,7 +103,7 @@ describe("reading a limited body", () => {
   it("ignores a declared length that is not a number and reads the body", async () => {
     const request = post("abc", { "content-length": "many" });
 
-    expect(await readLimitedBody(request, 10)).toEqual({
+    expect(await readLimitedBody(request, 10)).toMatchObject({
       ok: true,
       text: "abc",
     });

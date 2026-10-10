@@ -21,7 +21,10 @@ export function webhookFixture(name: string): Record<string, unknown> {
 }
 
 /** The value of the `X-Hub-Signature-256` header for a body. */
-export function signWebhookBody(body: string, secret: string): string {
+export function signWebhookBody(
+  body: string | Uint8Array,
+  secret: string,
+): string {
   return `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;
 }
 

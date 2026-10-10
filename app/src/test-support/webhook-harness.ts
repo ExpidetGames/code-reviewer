@@ -91,7 +91,7 @@ export async function startWebhookHarness(
    * `signature` says otherwise. A header set to `null` is left out.
    */
   function deliverRaw(
-    body: string,
+    body: string | Uint8Array,
     headers: Record<string, string | null> = {},
     signature?: string | null,
   ): Promise<Response> {
@@ -112,7 +112,7 @@ export async function startWebhookHarness(
       new Request("https://app.test/api/webhooks/github-app", {
         method: "POST",
         headers: requestHeaders,
-        body,
+        body: body as BodyInit,
       }),
     );
   }

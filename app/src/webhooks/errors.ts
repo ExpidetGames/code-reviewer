@@ -4,7 +4,7 @@
 export const WEBHOOK_ERROR_CODES = [
   /** The body is larger than the limit. 413. */
   "WEBHOOK_BODY_TOO_LARGE",
-  /** The signature is missing, malformed or does not match the body. 401. */
+  /** The signature is missing, malformed or does not match the body, or deliveries cannot be verified at all. 401. */
   "WEBHOOK_SIGNATURE_INVALID",
   /** The `X-GitHub-Event` header is missing or malformed. 400. */
   "WEBHOOK_EVENT_HEADER_INVALID",
@@ -12,9 +12,9 @@ export const WEBHOOK_ERROR_CODES = [
   "WEBHOOK_DELIVERY_HEADER_INVALID",
   /** The body is not valid JSON. 400. */
   "WEBHOOK_BODY_NOT_JSON",
-  /** The app cannot check deliveries (for example the webhook secret is not configured). 503. */
-  "WEBHOOK_NOT_CONFIGURED",
-  /** Handling the delivery failed; the delivery is not remembered, so a redelivery is handled. 5xx. */
+  /** Another request is handling this delivery right now; GitHub shows it as failed and it can be redelivered. 409. */
+  "WEBHOOK_DELIVERY_IN_PROGRESS",
+  /** Handling the delivery failed; it can be redelivered. 5xx. */
   "WEBHOOK_PROCESSING_FAILED",
 ] as const;
 export type WebhookErrorCode = (typeof WEBHOOK_ERROR_CODES)[number];
