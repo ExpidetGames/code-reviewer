@@ -10,6 +10,7 @@ import {
   PULL_REQUEST_STATES,
   REVIEW_COMMANDS,
   REVIEW_TRIGGER_KINDS,
+  TRIGGER_PULL_REQUEST_STATES,
   type GitAccess,
   type IntegrationEvent,
   type PullRequestRef,
@@ -75,7 +76,14 @@ export function isReviewTrigger(value: unknown): value is ReviewTrigger {
     "args",
     "actor",
   ];
-  if (!hasExactKeys(value, keys)) return false;
+  // Only a pull request trigger knows whether the pull request is a draft and whether it is open.
+  if (
+    !hasExactKeys(
+      value,
+      value.kind === "command" ? keys : [...keys, "draft", "state"],
+    )
+  )
+    return false;
   if (!isOneOf(REVIEW_TRIGGER_KINDS, value.kind)) return false;
   if (!isRepoRef(value.repo) || !isActor(value.actor)) return false;
   if (!Number.isInteger(value.prNumber) || (value.prNumber as number) < 1)
@@ -88,7 +96,12 @@ export function isReviewTrigger(value: unknown): value is ReviewTrigger {
       isOneOf(REVIEW_COMMANDS, value.command) && typeof value.args === "string"
     );
   }
-  return value.command === null && value.args === null;
+  return (
+    value.command === null &&
+    value.args === null &&
+    typeof value.draft === "boolean" &&
+    isOneOf(TRIGGER_PULL_REQUEST_STATES, value.state)
+  );
 }
 
 export function isPullRequestRef(value: unknown): value is PullRequestRef {
@@ -131,7 +144,22 @@ export function isIntegrationEvent(value: unknown): value is IntegrationEvent {
       isNonEmptyString(value.externalId) &&
       isOneOf(INSTALLATION_ACTIONS, value.action)
     );
-  if (value.kind === "ignored")
+  if (value.kind === "pull_request_closed")
+    return (
+      hasExactKeys(value, ["kind", "repo", "prNumber", "merged"]) &&
+      isRepoRef(value.repo) &&
+      Number.isInteger(value.prNumber) &&
+      (value.prNumber as number) >= 1 &&
+      typeof value.merged === "boolean"
+    );
+  if (value.kind === "pull_request_drafted")
+    return (
+      hasExactKeys(value, ["kind", "repo", "prNumber"]) &&
+      isRepoRef(value.repo) &&
+      Number.isInteger(value.prNumber) &&
+      (value.prNumber as number) >= 1
+    );
+  if (value.kind === "ignored" || value.kind === "invalid_payload")
     return (
       hasExactKeys(value, ["kind", "reason"]) && isNonEmptyString(value.reason)
     );

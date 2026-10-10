@@ -543,6 +543,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "cryptography" },
+    { name = "jsonschema" },
     { name = "pyjwt" },
     { name = "pyright" },
     { name = "pytest" },
@@ -557,6 +558,7 @@ requires-dist = [{ name = "pr-agent", specifier = "==0.47.0" }]
 [package.metadata.requires-dev]
 dev = [
     { name = "cryptography", specifier = ">=50.0.2" },
+    { name = "jsonschema" },
     { name = "pyjwt", specifier = ">=2.15.1" },
     { name = "pyright" },
     { name = "pytest" },
