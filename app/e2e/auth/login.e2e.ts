@@ -5,6 +5,8 @@ import { expect, test } from "@playwright/test";
 import {
   addGithubAccount,
   signInThroughTheForm,
+  signOutThroughTheMenu,
+  userMenuButton,
   type GithubAccount,
 } from "../helpers/github-fake";
 
@@ -26,12 +28,12 @@ test.describe("signing in and out", () => {
   }) => {
     await signInThroughTheForm(page, account);
 
-    await expect(page).toHaveURL(/\/$/);
-    await expect(page.getByText(`Signed in as ${account.name}`)).toBeVisible();
+    await expect(page).toHaveURL(/\/projects$/);
+    await expect(userMenuButton(page, account)).toBeVisible();
 
     await page.reload();
 
-    await expect(page.getByText(`Signed in as ${account.name}`)).toBeVisible();
+    await expect(userMenuButton(page, account)).toBeVisible();
   });
 
   // CR-18-T02
@@ -40,7 +42,7 @@ test.describe("signing in and out", () => {
   }) => {
     await signInThroughTheForm(page, account);
 
-    await page.getByRole("button", { name: "Sign out" }).click();
+    await signOutThroughTheMenu(page, account);
 
     await expect(page).toHaveURL(/\/login$/);
     await page.goto("/");

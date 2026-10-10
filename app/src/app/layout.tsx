@@ -1,15 +1,26 @@
 import type { Metadata } from "next";
+import { initialThemeScript } from "@/theme/theme";
+import { ThemeSync } from "@/theme/theme-sync";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Code Reviewer",
+  title: { default: "Code Reviewer", template: "%s · Code Reviewer" },
   description: "Automatic code reviews for GitHub pull requests.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en">
-      <body>{children}</body>
+    // suppressHydrationWarning: the script below sets data-theme on <html> before React hydrates.
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        {/* Applies a stored light/dark choice while the HTML is parsed, so the page never flashes
+            the wrong mode. Without a stored choice the CSS follows the system setting. */}
+        <script dangerouslySetInnerHTML={{ __html: initialThemeScript() }} />
+      </head>
+      <body>
+        <ThemeSync />
+        {children}
+      </body>
     </html>
   );
 }

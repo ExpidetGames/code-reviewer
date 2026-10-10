@@ -1,19 +1,579 @@
+/*
+ * Design tokens and the small UI kit of Code Reviewer.
+ *
+ * The color values are the Octestra brand tokens (blue primary, navy ink), adapted: Octestra keeps
+ * raw HSL channels for Tailwind, here every token is a complete color made with light-dark(), so
+ * one declaration holds both modes and components only ever write var(--token). Colors are never
+ * written outside this block.
+ *
+ * Light and dark: the page follows the system setting (color-scheme: light dark). The toggle sets
+ * data-theme="light" or "dark" on <html> (src/theme/theme.ts), which pins color-scheme; without the
+ * attribute the system decides.
+ */
 :root {
   color-scheme: light dark;
-  --background: #ffffff;
-  --foreground: #171717;
+
+  --background: light-dark(hsl(0 0% 100%), hsl(218 72% 6%));
+  --foreground: light-dark(hsl(218 72% 8%), hsl(210 40% 96%));
+  --card: light-dark(hsl(0 0% 100%), hsl(218 65% 9%));
+  --card-foreground: var(--foreground);
+  --muted: light-dark(hsl(210 35% 95%), hsl(218 50% 14%));
+  --muted-foreground: light-dark(hsl(215 20% 38%), hsl(215 25% 66%));
+  --border: light-dark(hsl(210 30% 86%), hsl(218 45% 20%));
+  --primary: light-dark(hsl(210 78% 40%), hsl(210 80% 62%));
+  --primary-foreground: light-dark(hsl(0 0% 100%), hsl(218 72% 6%));
+  --accent: light-dark(hsl(205 75% 92%), hsl(210 60% 18%));
+  --accent-foreground: light-dark(hsl(210 78% 28%), hsl(210 80% 78%));
+  --secondary: light-dark(hsl(210 40% 94%), hsl(218 50% 16%));
+  --secondary-foreground: light-dark(hsl(218 72% 15%), hsl(210 40% 96%));
+  --destructive: light-dark(hsl(0 72% 42%), hsl(0 84% 62%));
+  --destructive-foreground: light-dark(hsl(0 0% 100%), hsl(218 72% 6%));
+  --ring: var(--primary);
+
+  /* Status colors for run states (later tickets): text on the matching soft background. */
+  --success: light-dark(hsl(142 70% 26%), hsl(142 60% 62%));
+  --success-soft: light-dark(hsl(142 55% 92%), hsl(142 40% 14%));
+  --warning: light-dark(hsl(32 90% 28%), hsl(40 90% 66%));
+  --warning-soft: light-dark(hsl(40 90% 90%), hsl(36 50% 14%));
+  --danger: light-dark(hsl(0 72% 38%), hsl(0 84% 70%));
+  --danger-soft: light-dark(hsl(0 80% 95%), hsl(0 50% 15%));
+  --info: var(--accent-foreground);
+  --info-soft: var(--accent);
+
+  --radius: 0.5rem;
+  --header-height: 3.5rem;
+  --content-width: 72rem;
+  --gutter: 1rem;
+  --font-sans:
+    system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+/* Base */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
   margin: 0;
   color: var(--foreground);
   background: var(--background);
-  font-family: system-ui, sans-serif;
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  line-height: 1.25;
+}
+
+p {
+  margin: 0;
+}
+
+a {
+  color: var(--primary);
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.muted {
+  color: var(--muted-foreground);
+}
+
+/* Text for screen readers only. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* UI kit: buttons, cards, alerts, page header, empty state */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 2.5rem;
+  padding: 0.5rem 1rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  font-size: 0.9375rem;
+  font-weight: 500;
+  line-height: 1.25;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--primary) 88%, var(--foreground));
+}
+
+.btn-secondary {
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  border-color: var(--border);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--accent);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--foreground);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: var(--muted);
+}
+
+.btn-destructive {
+  background: var(--destructive);
+  color: var(--destructive-foreground);
+}
+
+.btn-block {
+  width: 100%;
+}
+
+.card {
+  background: var(--card);
+  color: var(--card-foreground);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) + 0.25rem);
+  padding: 1.5rem;
+}
+
+.alert {
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius);
+  font-size: 0.9375rem;
+}
+
+.alert-error {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border: 1px solid var(--danger);
+}
+
+.page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.page-header-text {
+  min-width: 0;
+}
+
+.page-header h1 {
+  font-size: 1.5rem;
+  overflow-wrap: anywhere;
+}
+
+.page-header p {
+  margin-top: 0.25rem;
+  color: var(--muted-foreground);
+}
+
+.page-header-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 3rem 1.5rem;
+  border: 1px dashed var(--border);
+  border-radius: calc(var(--radius) + 0.25rem);
+  background: var(--muted);
+  text-align: center;
+}
+
+.empty-state h2 {
+  font-size: 1.125rem;
+}
+
+.empty-state p {
+  max-width: 32rem;
+  color: var(--muted-foreground);
+}
+
+.page-loading {
+  min-height: 10rem;
+}
+
+/* Login page */
+
+.auth-page {
+  display: grid;
+  min-height: 100dvh;
+  place-items: center;
+  padding: var(--gutter);
+}
+
+.auth-card {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: 100%;
+  max-width: 24rem;
+}
+
+.auth-card h1 {
+  font-size: 1.5rem;
+}
+
+/* App shell */
+
+.app-shell {
+  display: flex;
+  min-height: 100dvh;
+  flex-direction: column;
+}
+
+.skip-link {
+  position: absolute;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 100;
+  padding: 0.5rem 1rem;
+  border-radius: var(--radius);
+  background: var(--primary);
+  color: var(--primary-foreground);
+  transform: translateY(-200%);
+}
+
+.skip-link:focus {
+  transform: none;
+}
+
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  border-bottom: 1px solid var(--border);
+  background: var(--card);
+}
+
+.app-header-inner {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  max-width: var(--content-width);
+  min-height: var(--header-height);
+  margin: 0 auto;
+  padding: 0.5rem var(--gutter);
+}
+
+.brand {
+  flex: none;
+  color: var(--foreground);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.header-end {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  margin-left: auto;
+}
+
+.menu-button {
+  display: none;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.5rem;
+  padding: 0.25rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--secondary);
+  cursor: pointer;
+}
+
+/* Three bars, drawn with a shadow so no extra element or image is needed. */
+.menu-icon {
+  width: 1rem;
+  height: 2px;
+  background: currentcolor;
+  box-shadow:
+    0 -5px 0 currentcolor,
+    0 5px 0 currentcolor;
+}
+
+.main-nav {
+  display: flex;
+}
+
+.nav-list {
+  display: flex;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nav-link {
+  display: block;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius);
+  color: var(--muted-foreground);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.nav-link:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+.nav-link[aria-current="page"] {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+.app-main {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  max-width: var(--content-width);
+  margin: 0 auto;
+  padding: 1.5rem var(--gutter) 3rem;
+}
+
+.app-main:focus {
+  outline: none;
+}
+
+/* User menu */
+
+.user-menu {
+  position: relative;
+  min-width: 0;
+}
+
+.user-menu-button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: 100%;
+  min-height: 2.5rem;
+  padding: 0.25rem 0.5rem 0.25rem 0.25rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.user-menu-button:hover,
+.user-menu-button[aria-expanded="true"] {
+  background: var(--muted);
+}
+
+.user-menu-name {
+  overflow: hidden;
+  max-width: 14rem;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.avatar {
+  display: inline-grid;
+  flex: none;
+  width: 2rem;
+  height: 2rem;
+  overflow: hidden;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-foreground);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.user-menu-panel {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: 16rem;
+  max-width: calc(100vw - 2 * var(--gutter));
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) + 0.25rem);
+  background: var(--card);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--foreground) 14%, transparent);
+}
+
+.user-menu-person {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.user-menu-person strong,
+.user-menu-person span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-menu-person span {
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+}
+
+.user-menu-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.user-menu-label {
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.theme-toggle {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.25rem;
+  padding: 0.25rem;
+  border-radius: var(--radius);
+  background: var(--muted);
+}
+
+.theme-toggle button {
+  min-height: 2rem;
+  padding: 0.25rem 0.5rem;
+  border: 0;
+  border-radius: calc(var(--radius) - 0.125rem);
+  background: transparent;
+  cursor: pointer;
+}
+
+.theme-toggle button[aria-pressed="true"] {
+  background: var(--card);
+  box-shadow: 0 0 0 1px var(--border);
+  font-weight: 600;
+}
+
+/* Narrow screens: the navigation folds into the "Menu" button. */
+@media (max-width: 47.99rem) {
+  .menu-button {
+    display: inline-flex;
+  }
+
+  .main-nav {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    left: 0;
+    display: none;
+    padding: 0.5rem var(--gutter) 0.75rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--card);
+  }
+
+  .main-nav[data-open="true"] {
+    display: block;
+  }
+
+  .nav-list {
+    flex-direction: column;
+  }
+
+  .nav-link {
+    padding: 0.75rem;
+  }
+
+  /* The name stays available to screen readers, the avatar is enough to see. */
+  .user-menu-name {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .user-menu-button {
+    padding: 0.25rem;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .btn,
+  .nav-link,
+  .user-menu-button {
+    transition:
+      background-color 0.15s ease,
+      color 0.15s ease;
+  }
 }

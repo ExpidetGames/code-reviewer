@@ -20,6 +20,6 @@ export const e2eEnv = {
   // ALLOWED_GITHUB_LOGINS of the app under test: the accounts of the journeys that sign in. A new
   // journey that signs in with an account of its own adds the login here. Accounts that are not
   // listed are refused (see e2e/auth/allow-list.e2e.ts).
-  allowedLogins: ["login-journey"].join(","),
+  allowedLogins: ["login-journey", "nav-journey"].join(","),
   authSecret: "e2e-auth-secret-0123456789-0123456789-abcdef",
 };
