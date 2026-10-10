@@ -5,15 +5,20 @@ import "server-only";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import type { SessionUser } from "./access-policy.ts";
+import { getAccessPolicy } from "./access-runtime.ts";
 import { getAuth } from "./auth.ts";
-import { getSessionUser } from "./session-user.ts";
+import { loginPath, lookupSession } from "./session-user.ts";
 
 /** The user of the current request. Without a valid session the person is sent to the login page. */
 export async function requireUser(): Promise<SessionUser> {
   // Read the request first: that is what keeps this out of the static shell. Opening the auth
   // instance (and so the database) before it would run at build time.
   const requestHeaders = await headers();
-  const user = await getSessionUser(getAuth(), requestHeaders);
-  if (!user) redirect("/login");
-  return user;
+  const lookup = await lookupSession(
+    getAuth(),
+    requestHeaders,
+    getAccessPolicy(),
+  );
+  if (lookup.kind !== "user") redirect(loginPath(lookup));
+  return lookup.user;
 }

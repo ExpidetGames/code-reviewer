@@ -2,9 +2,13 @@
 // src/auth/access.ts. The logic is in src/auth/access-proxy.ts so it can be tested without a server.
 import type { NextRequest } from "next/server";
 import { createAccessProxy } from "./auth/access-proxy.ts";
+import { getAccessPolicy } from "./auth/access-runtime.ts";
 import { getAuth } from "./auth/auth.ts";
 
-const accessProxy = createAccessProxy({ getAuth });
+const accessProxy = createAccessProxy({
+  getAuth,
+  getPolicy: getAccessPolicy,
+});
 
 export function proxy(request: NextRequest) {
   return accessProxy(request);
