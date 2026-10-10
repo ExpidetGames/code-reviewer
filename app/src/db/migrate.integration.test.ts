@@ -54,6 +54,7 @@ describe("starting the database", () => {
     ).toEqual(expectedMigrations);
     expect(await userTables(db)).toEqual([
       "app_meta",
+      "integrations",
       "kysely_migration",
       "kysely_migration_lock",
     ]);

@@ -34,6 +34,17 @@ export function isReservedIntegrationType(
   return RESERVED_INTEGRATION_TYPES.some((type) => type === value);
 }
 
+/**
+ * Which secrets a type may keep in its table row. A GitHub App keeps none there: its private key and
+ * webhook secret live in the environment of the app. A type that stores credentials adds them here.
+ */
+export const INTEGRATION_SECRET_STORAGE: Record<
+  IntegrationType,
+  { credentials: boolean; webhookSecret: boolean }
+> = {
+  github_app: { credentials: false, webhookSecret: false },
+};
+
 export const INTEGRATION_STATUSES = ["active", "disabled"] as const;
 export type IntegrationStatus = (typeof INTEGRATION_STATUSES)[number];
 
