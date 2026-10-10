@@ -64,10 +64,21 @@ export interface VerificationsTable {
   updated_at: string;
 }
 
+/** Which GitHub account a login on the allow list is bound to (src/auth/login-pins.ts). */
+export interface AllowedLoginPinsTable {
+  /** The lower-cased GitHub login. */
+  login: string;
+  /** The numeric GitHub id, as text. */
+  github_id: string;
+  /** ISO 8601 text in UTC. */
+  pinned_at: string;
+}
+
 export interface Database {
   app_meta: AppMetaTable;
   users: UsersTable;
   sessions: SessionsTable;
   accounts: AccountsTable;
   verifications: VerificationsTable;
+  allowed_login_pins: AllowedLoginPinsTable;
 }

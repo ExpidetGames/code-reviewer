@@ -54,6 +54,7 @@ describe("starting the database", () => {
     ).toEqual(expectedMigrations);
     expect(await userTables(db)).toEqual([
       "accounts",
+      "allowed_login_pins",
       "app_meta",
       "kysely_migration",
       "kysely_migration_lock",
