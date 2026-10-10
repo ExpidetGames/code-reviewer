@@ -1,6 +1,6 @@
 // Pins down the real route file `POST /api/webhooks/github-app` with the wiring the running server
 // uses: the database opened at start, the process-wide sync service, the registry configured from
-// the environment, and the logging intake. The details of each behavior are in
+// the environment, and the job queue intake. The details of each behavior are in
 // github-app-route.integration.test.ts; this file proves the pieces are connected.
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -97,7 +97,7 @@ describe("the webhook route file", () => {
     ]);
   });
 
-  it("logs the trigger of a pull request delivery with the logging intake", async () => {
+  it("puts the trigger of a pull request delivery into the job queue", async () => {
     const { route, github } = await startRoute();
     github.fake.addInstallation({
       id: 4242,
@@ -111,24 +111,39 @@ describe("the webhook route file", () => {
         secret: TEST_WEBHOOK_SECRET,
       }),
     );
-    vi.mocked(console.info).mockClear();
 
     const response = await route.POST(
       webhookDelivery({
         event: "pull_request",
         payload: webhookFixture("pull_request.opened"),
         secret: TEST_WEBHOOK_SECRET,
+        deliveryId: "delivery-2",
       }),
     );
 
     expect(response.status).toBe(202);
-    const logged = vi
-      .mocked(console.info)
-      .mock.calls.map((call) => String(call[0]))
-      .join("\n");
-    expect(logged).toContain(
-      "review trigger kind=opened repo=acme/widgets pr=7 head=1f3a5c7e9b2d",
-    );
+    expect(
+      await getDatabase()
+        .selectFrom("jobs")
+        .select([
+          "pr_number",
+          "head_sha",
+          "command",
+          "trigger_kind",
+          "status",
+          "delivery_id",
+        ])
+        .execute(),
+    ).toEqual([
+      {
+        pr_number: 7,
+        head_sha: "1f3a5c7e9b2d4f60a8c1e3b5d7f90a2c4e6b8d01",
+        command: "review",
+        trigger_kind: "webhook",
+        status: "queued",
+        delivery_id: "delivery-2",
+      },
+    ]);
   });
 
   it("refuses a delivery with a wrong signature and writes nothing", async () => {

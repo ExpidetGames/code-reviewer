@@ -38,6 +38,11 @@ export type RepositoriesRepository = {
     active?: boolean;
   }): Promise<StoredRepository[]>;
   get(id: string): Promise<StoredRepository | undefined>;
+  /** The row for a repository as the platform names it (its id within one integration). */
+  findByExternalId(
+    integrationId: string,
+    externalId: string,
+  ): Promise<StoredRepository | undefined>;
   /**
    * Makes the rows of one integration match the full list the platform gave: adds new repositories,
    * follows renames, reactivates returning ones and deactivates missing ones, in one transaction.
@@ -93,6 +98,16 @@ export function createRepositoriesRepository(
         .selectFrom("repositories")
         .selectAll()
         .where("id", "=", id)
+        .executeTakeFirst();
+      return row === undefined ? undefined : toStored(row);
+    },
+
+    async findByExternalId(integrationId, externalId) {
+      const row = await db
+        .selectFrom("repositories")
+        .selectAll()
+        .where("integration_id", "=", integrationId)
+        .where("external_id", "=", externalId)
         .executeTakeFirst();
       return row === undefined ? undefined : toStored(row);
     },

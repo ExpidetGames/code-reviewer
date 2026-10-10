@@ -216,6 +216,10 @@ Inside `runner/`: `uv sync --locked`, `uv run ruff check .`, `uv run ruff format
   (type stripping), so files it imports from `src/db/` use relative imports with a `.ts` extension
   and no TypeScript-only runtime syntax (enums, parameter properties); `erasableSyntaxOnly` in
   `tsconfig.json` enforces the latter.
+- The job queue tests use `createJobQueueFixture()` (`src/test-support/jobs.ts`): a migrated database
+  with one integration and two repositories, and a clock the test moves by hand (leases and timeouts
+  are tested by advancing it, never by waiting). Callers that must overlap are real processes
+  (`jobs-child.ts`, started together by a barrier, with the queue's clock fixed to a given time).
 - Tests of file system errors that depend on permissions (a read-only directory) fail when the tests
   run as root, because root may write anywhere. Run the suite as a normal user.
 
