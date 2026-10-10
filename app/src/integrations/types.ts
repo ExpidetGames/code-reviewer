@@ -162,6 +162,20 @@ export type PullRequestRef = {
   author: TriggerActor;
 };
 
+/**
+ * A connection the platform itself can enumerate (GitHub App: an installation). Used to create and
+ * update `integrations` rows without a user adding them by hand.
+ */
+export type DiscoveredConnection = {
+  /** The platform's id for the connection (GitHub App: the installation id). */
+  externalId: string;
+  displayName: string;
+  /** Non-secret settings, valid for the provider's `validateConfig`. */
+  config: { [key: string]: JsonValue };
+  /** The platform has paused the connection (GitHub: a suspended installation). */
+  suspended: boolean;
+};
+
 export const INSTALLATION_ACTIONS = [
   "created",
   "deleted",

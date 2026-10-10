@@ -39,6 +39,11 @@ export type IntegrationsRepository = {
   ): Promise<Integration | undefined>;
   list(): Promise<Integration[]>;
   setStatus(id: string, status: IntegrationStatus): Promise<void>;
+  /** Replaces the display name and the config (for example after the account was renamed). */
+  updateDetails(
+    id: string,
+    details: { displayName: string; config: { [key: string]: JsonValue } },
+  ): Promise<void>;
 };
 
 function toIntegration(row: IntegrationsTable): Integration {
@@ -77,6 +82,16 @@ function assertStatus(status: unknown): asserts status is IntegrationStatus {
     );
 }
 
+function assertNoSecretInConfig(config: { [key: string]: JsonValue }): void {
+  // Names only, never values: the message must be safe to log.
+  const suspicious = findSecretLikeKeys(config);
+  if (suspicious.length > 0)
+    throw new IntegrationError(
+      "INTEGRATION_SECRET_NOT_ALLOWED",
+      `The config must not hold secrets (offending keys: ${suspicious.join(", ")}).`,
+    );
+}
+
 function assertValidInput(input: NewIntegration): void {
   if (!isIntegrationType(input.type))
     throw new IntegrationError(
@@ -102,13 +117,7 @@ function assertValidInput(input: NewIntegration): void {
       `Integrations of type "${input.type}" do not store a webhook secret.`,
     );
 
-  // Names only, never values: the message must be safe to log.
-  const suspicious = findSecretLikeKeys(input.config);
-  if (suspicious.length > 0)
-    throw new IntegrationError(
-      "INTEGRATION_SECRET_NOT_ALLOWED",
-      `The config must not hold secrets (offending keys: ${suspicious.join(", ")}).`,
-    );
+  assertNoSecretInConfig(input.config);
 }
 
 export function createIntegrationsRepository(
@@ -185,6 +194,24 @@ export function createIntegrationsRepository(
       const result = await db
         .updateTable("integrations")
         .set({ status, updated_at: formatTimestamp(now()) })
+        .where("id", "=", id)
+        .executeTakeFirst();
+      if (Number(result.numUpdatedRows) === 0)
+        throw new IntegrationError(
+          "INTEGRATION_NOT_FOUND",
+          `No integration with id ${id}.`,
+        );
+    },
+
+    async updateDetails(id, details) {
+      assertNoSecretInConfig(details.config);
+      const result = await db
+        .updateTable("integrations")
+        .set({
+          display_name: details.displayName,
+          config: encodeJson(details.config),
+          updated_at: formatTimestamp(now()),
+        })
         .where("id", "=", id)
         .executeTakeFirst();
       if (Number(result.numUpdatedRows) === 0)
