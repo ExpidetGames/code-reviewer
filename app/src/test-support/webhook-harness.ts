@@ -2,6 +2,7 @@
 // GitHub API, the real GitHub App provider behind a registry), the delivery record, a recording
 // intake and the route's handler wired to all of them. `deliver*` builds signed requests like GitHub.
 import { vi } from "vitest";
+import type { FakePullRequest } from "../../../fakes/github/server.ts";
 import {
   signWebhookBody,
   webhookDelivery,
@@ -13,11 +14,38 @@ import { createWebhookDeliveriesRepository } from "../db/repositories/webhook-de
 import type { IntegrationProvider } from "../integrations/provider.ts";
 import { createIntegrationRegistry } from "../integrations/registry.ts";
 import { createProjectService } from "../projects/service.ts";
-import { createGithubAppWebhookHandler } from "../webhooks/github-app-handler.ts";
+import { AUTOMATIC_REVIEW_DEBOUNCE_MS } from "../webhooks/automatic-review-policy.ts";
+import {
+  createGithubAppWebhookHandler,
+  type AutomaticReviewDeps,
+} from "../webhooks/github-app-handler.ts";
+import {
+  builtInReviewSettings,
+  type ReviewSettings,
+} from "../review-settings/settings.ts";
 import type { WebhookLogger } from "../webhooks/logger.ts";
 import { TEST_WEBHOOK_SECRET } from "./github-app.ts";
 import { startSyncHarness } from "./integration-sync-harness.ts";
 import { createRecordingReviewTriggerIntake } from "./recording-review-trigger-intake.ts";
+
+/** The head commit of pull request 7 in the recorded payloads. */
+export const FIXTURE_HEAD_SHA = "1f3a5c7e9b2d4f60a8c1e3b5d7f90a2c4e6b8d01";
+
+/** Pull request 7 as the recorded payloads describe it; GitHub knows it when the head is checked. */
+export function fixturePullRequest(
+  overrides: Partial<FakePullRequest> = {},
+): FakePullRequest {
+  return {
+    number: 7,
+    title: "Add widget caching",
+    state: "open",
+    headSha: FIXTURE_HEAD_SHA,
+    headRef: "feature/caching",
+    baseRef: "main",
+    author: { login: "alice", id: 1001 },
+    ...overrides,
+  };
+}
 
 export async function startWebhookHarness(
   options: {
@@ -25,6 +53,12 @@ export async function startWebhookHarness(
     env?: Record<string, string | undefined>;
     /** Changes the real provider, for example to make `canTrigger` refuse. */
     wrapProvider?: (provider: IntegrationProvider) => IntegrationProvider;
+    /** The review settings every project uses; default: the built-in values (everything on). */
+    reviewSettings?: Partial<ReviewSettings>;
+    /** How long a push waits (default: the policy's 90 seconds). */
+    debounceMs?: number;
+    /** The clock of the trigger policy (default: the real one). */
+    now?: () => Date;
   } = {},
 ) {
   const base = await startSyncHarness(
@@ -48,12 +82,22 @@ export async function startWebhookHarness(
     info: (line) => infoLines.push(line),
     error: (line) => errorLines.push(line),
   };
+  const settings: ReviewSettings = {
+    ...builtInReviewSettings("test/model"),
+    ...options.reviewSettings,
+  };
+  const automatic: AutomaticReviewDeps = {
+    settingsFor: async () => settings,
+    debounceMs: options.debounceMs ?? AUTOMATIC_REVIEW_DEBOUNCE_MS,
+    now: options.now ?? (() => new Date()),
+  };
   const handler = createGithubAppWebhookHandler({
     registry,
     integrations: base.integrations,
     deliveries,
     sync: base.sync,
     projects,
+    automatic,
     intake,
     logger,
     ...(options.maxBodyBytes === undefined
@@ -78,6 +122,10 @@ export async function startWebhookHarness(
       "4242",
     );
     if (integration === undefined) throw new Error("seeding failed");
+    // Pull request 7, as the recorded payloads describe it: an open pull request whose head commit
+    // is the one in the fixtures. A push is judged against it, so a test that wants another head
+    // commit changes it with `fake.updatePullRequest`.
+    base.fake.addPullRequest("acme/widgets", fixturePullRequest());
     if (options.activateProject !== false) {
       const [repository] = await base.repositories.list({
         integrationId: integration.id,
@@ -160,6 +208,7 @@ export async function startWebhookHarness(
     parseEvent,
     deliveries,
     projects,
+    automatic,
     intake,
     handler,
     infoLines,

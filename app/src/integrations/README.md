@@ -61,7 +61,15 @@ The route (`POST /api/webhooks/github-app`, see `src/webhooks/README.md`) never 
    instead of `parseEvent`, and the sync creates the row after GitHub confirmed the installation (see
    "Synchronization").
 3. `parseEvent(integration, request)`: what does it mean? An `IntegrationEvent`:
-   - `review_trigger` with a `ReviewTrigger` (opened, updated or a comment command),
+   - `review_trigger` with a `ReviewTrigger` (opened, updated or a comment command); an opened or
+     updated trigger also says whether the pull request is a `draft` and its `state` (`open` or
+     `closed`), a command trigger does not,
+   - `pull_request_closed` with the repository, the pull request number and whether it was merged:
+     it starts nothing, the app drops the pull request's waiting jobs,
+   - `pull_request_drafted` with the repository and the number: a pull request was turned into a draft,
+     the app drops its waiting automatic jobs,
+   - `invalid_payload` with a `reason` (field names only) for an event the app uses whose payload lacks
+     fields it reads; the route answers 400,
    - `installation_changed` with the connection's `externalId` and an action (`created`, `deleted`,
      `suspended`, `unsuspended`, `repositories_changed`) for the repository sync,
    - `ignored` with a `reason` for the logs, for everything else that is genuine but not relevant.
@@ -158,13 +166,22 @@ How the interface is met:
     delivery become `installation_changed` (the repository lists in the payload are not used: the sync
     reads GitHub's current state).
   - `pull_request` `opened`, `reopened` and `ready_for_review` become a `review_trigger` of kind
-    `opened`, `synchronize` one of kind `updated`; everything else is ignored. The repository is the
-    one the pull request targets, so a pull request from a fork is reviewed like any other.
-    Drafts are not filtered here (the trigger has no draft flag): the automatic triggers ticket decides.
+    `opened`, `synchronize` one of kind `updated`; `closed` becomes `pull_request_closed`; everything
+    else is ignored. The repository is the one the pull request targets, so a pull request from a fork
+    is reviewed like any other. Drafts are not filtered here: the trigger carries the draft flag and
+    the state of the pull request, and the trigger policy (`src/webhooks/automatic-review-policy.ts`)
+    decides. A payload without a field of `webhook-fields.ts` (for example the head commit) is
+    `invalid_payload`.
   - `issue_comment` `created` on an open pull request becomes a `command` trigger when the text starts
-    with `/review`, `/improve`, `/describe` or `/ask` (leading whitespace and any case allowed); the
-    head commit, which a comment delivery does not carry, is read from GitHub. Comments of bots, edited
-    and deleted comments and comments on issues are ignored. The arguments are not truncated here.
+    with `/review`, `/improve`, `/describe` or `/ask` (leading whitespace and any case allowed; the
+    word must end there, so `/reviewer` is nothing). `comment-command.ts` is the one parser: only
+    `/ask` takes text (the rest of the comment, trimmed, markdown images and links to images replaced by
+    `[image link removed]`, at most 2000 UTF-16 units; a longer question
+    is cut and ends with a note, and `/ask` without a question is no command); text after any other
+    command is dropped, because PR-Agent would read it as options. The trigger carries the id of the
+    comment (`commentId`), and the head commit, which a comment delivery does not carry, is read
+    from GitHub. Comments of bots (the app's own included), edited and deleted comments, comments on
+    issues and on closed or merged pull requests are ignored.
     To cost a commenter without write access as few calls as possible, the order is: the payload's
     `author_association` (only `OWNER`, `MEMBER` and `COLLABORATOR` can have write access; others
     are ignored with no call), then the permission (one call), and only then the pull request for its
