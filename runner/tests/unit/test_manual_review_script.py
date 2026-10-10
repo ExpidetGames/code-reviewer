@@ -91,7 +91,7 @@ def test_the_script_does_not_print_the_secrets_even_if_the_runner_output_has_the
         args=[], returncode=0, stdout=f'{{"logTail": "{TOKEN}"}}', stderr=f"oops {API_KEY}"
     )
 
-    def start(job: dict[str, Any]) -> subprocess.CompletedProcess[str]:
+    def start(job: dict[str, Any], identity_patch: bool = True) -> subprocess.CompletedProcess[str]:
         return leaking
 
     monkeypatch.setattr(script, "start_runner", start)
@@ -152,3 +152,71 @@ def test_the_context_window_goes_into_the_llm_section_of_the_job() -> None:
 
     assert job["llm"]["maxTokens"] == 1000
     assert "env" not in job
+
+
+# CR-11-T05 (helper): the control run without the identity patch
+def test_the_normal_runner_command_is_the_console_script() -> None:
+    command = load_script().runner_command(identity_patch=True)
+
+    assert Path(command[0]).name == "code-reviewer-run-job"
+    assert len(command) == 1
+
+
+def test_the_control_command_starts_the_runner_with_the_identity_patch_switched_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    command = load_script().runner_command(identity_patch=False)
+
+    assert command[:2] == [sys.executable, "-c"]
+    from code_reviewer_runner import runner
+
+    seen: list[object] = []
+    # The snippet assigns the module attribute; let monkeypatch put the original back afterwards.
+    monkeypatch.setattr(runner, "apply_identity_patch", runner.apply_identity_patch)
+
+    def fake_main(argv: list[str]) -> int:
+        seen.append(runner.apply_identity_patch("x"))
+        return 0
+
+    monkeypatch.setattr(runner, "main", fake_main)
+    with pytest.raises(SystemExit):
+        exec(command[2], {})  # the snippet is our own constant
+    (undo,) = seen
+    assert callable(undo)
+    undo()  # must be a harmless no-op, the real patch would have replaced a method
+
+
+def test_the_control_command_still_refuses_an_invalid_job_like_the_real_entry_point() -> None:
+    command = load_script().runner_command(identity_patch=False)
+
+    process = subprocess.run(
+        command, input="not json", capture_output=True, text=True, timeout=60, check=False
+    )
+
+    assert process.returncode == 1
+    assert '"errorCode":"invalid_job"' in process.stdout
+
+
+def test_the_flag_for_the_control_run_reaches_the_runner_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    script = load_script()
+    for name in script.REQUIRED_ENV:
+        monkeypatch.setenv(name, "1")
+
+    def mint(*args: str | Path) -> str:
+        return TOKEN
+
+    monkeypatch.setattr(script, "mint_installation_token", mint)
+    flags: list[bool] = []
+
+    def start(job: dict[str, Any], identity_patch: bool = True) -> subprocess.CompletedProcess[str]:
+        flags.append(identity_patch)
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="{}", stderr="")
+
+    monkeypatch.setattr(script, "start_runner", start)
+
+    script.main(["--yes"])
+    script.main(["--yes", "--no-identity-patch"])
+
+    assert flags == [True, False]
