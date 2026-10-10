@@ -166,6 +166,21 @@ describe("a member of the allowed organization", () => {
     expect(await sessionCount(harness)).toBe(0);
   });
 
+  it("is asked to sign in again after 24 hours when the stored token cannot be read any more", async () => {
+    const { harness, cookies, visit } = await signedInMember();
+    // What a rotated BETTER_AUTH_SECRET leaves behind: ciphertext that no longer decrypts.
+    await harness.db
+      .updateTable("accounts")
+      .set({ access_token: "00".repeat(40) })
+      .execute();
+
+    vi.setSystemTime(Date.now() + 25 * HOUR);
+    const page = await visit("/", cookies);
+
+    expect(loginRedirect(page)).toBe("/login?error=sign_in_again");
+    expect(await sessionCount(harness)).toBe(0);
+  });
+
   it("is turned away while GitHub cannot answer, keeps the session, and is let back in when it can", async () => {
     const { harness, cookies, visit } = await signedInMember();
     harness.github.failMembershipEndpoint({ kind: "status", status: 503 });

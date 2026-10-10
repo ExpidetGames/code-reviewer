@@ -61,8 +61,13 @@ Every page except the login page needs a session, and GitHub is the only way to 
 refuses to start until the four sign in settings in `app/.env.example` are set: a random
 `BETTER_AUTH_SECRET`, the address of the app in `BETTER_AUTH_URL`, and the client id and secret of
 a GitHub OAuth app of your own (GitHub > Settings > Developer settings > OAuth Apps). Register
-`<BETTER_AUTH_URL>/api/auth/callback/github` as its "Authorization callback URL". Until the access
-list ticket (CR-19) lands, every GitHub account can sign in, so do not expose an instance yet.
+`<BETTER_AUTH_URL>/api/auth/callback/github` as its "Authorization callback URL".
+
+Signing in is limited to people you name: set `ALLOWED_GITHUB_LOGINS` (comma separated GitHub
+logins) and/or `ALLOWED_GITHUB_ORG` (members of one GitHub organization). If both are set, either
+is enough. If neither is set, nobody can sign in; the server starts and logs one warning. A login
+removed from the list loses access on the next request (after a restart with the new value);
+organization membership is checked at sign in and again every 24 hours.
 How it works: `app/src/auth/README.md`.
 
 ## Run the runner locally
@@ -84,7 +89,8 @@ Two images are built from the repository, each with its own Dockerfile and `.doc
 ```sh
 docker run --rm -p 3000:3000 -v code-reviewer-data:/data \
   -e BETTER_AUTH_SECRET=... -e BETTER_AUTH_URL=http://localhost:3000 \
-  -e GITHUB_OAUTH_CLIENT_ID=... -e GITHUB_OAUTH_CLIENT_SECRET=... code-reviewer-app
+  -e GITHUB_OAUTH_CLIENT_ID=... -e GITHUB_OAUTH_CLIENT_SECRET=... \
+  -e ALLOWED_GITHUB_LOGINS=octocat,hubot code-reviewer-app
 docker run --rm code-reviewer-runner --version
 ```
 

@@ -50,7 +50,7 @@ describe("checking the sign in configuration when the server starts", () => {
     const exit = vi.fn();
     const log = vi.fn();
     const warn = vi.fn();
-    const { ALLOWED_GITHUB_LOGINS: _unused, ...withoutList } = validEnv;
+    const withoutList = { ...validEnv, ALLOWED_GITHUB_LOGINS: undefined };
 
     checkAuthConfigOnStart({ env: withoutList, log, warn, exit });
 

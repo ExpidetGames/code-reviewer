@@ -58,6 +58,7 @@ export default defineConfig({
         GITHUB_OAUTH_CLIENT_SECRET: e2eEnv.githubClientSecret,
         GITHUB_OAUTH_BASE_URL: e2eEnv.githubUrl,
         GITHUB_API_BASE: e2eEnv.githubUrl,
+        ALLOWED_GITHUB_LOGINS: e2eEnv.allowedLogins,
         // Without this flag the server refuses the two overrides above.
         ALLOW_TEST_GITHUB_ENDPOINTS: "true",
       },

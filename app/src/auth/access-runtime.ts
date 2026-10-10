@@ -49,12 +49,19 @@ export function createRuntimeAccessPolicy({
               (account) => account.providerId === GITHUB_PROVIDER_ID,
             )?.accessToken;
             if (!stored) return "token_invalid";
-            // The instance type of `$context` is specific to our options; the function wants the
-            // general context type. They are the same object.
-            const accessToken = await decryptOAuthToken(
-              stored,
-              context as unknown as Parameters<typeof decryptOAuthToken>[1],
-            );
+            // After the secret was rotated the stored token cannot be read any more; a new sign in
+            // replaces it.
+            let accessToken: string;
+            try {
+              // The instance type of `$context` is specific to our options; the function wants
+              // the general context type. They are the same object.
+              accessToken = await decryptOAuthToken(
+                stored,
+                context as unknown as Parameters<typeof decryptOAuthToken>[1],
+              );
+            } catch {
+              return "token_invalid";
+            }
             return checkOrgMembership({
               apiBaseUrl: config.github.apiBaseUrl,
               org,
