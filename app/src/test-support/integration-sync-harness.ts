@@ -1,0 +1,99 @@
+// Everything a test of the synchronization needs: a real SQLite file, the registry with the real
+// GitHub App provider and client, the fake GitHub API behind it, and `deliver`, which does what the
+// webhook route does with a delivery (verify, identify, find the row, translate, hand over).
+import {
+  webhookDelivery,
+  webhookFixture,
+} from "../../../fakes/github/webhooks.ts";
+import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
+import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
+import { createDefaultIntegrationRegistry } from "../integrations/registry.ts";
+import {
+  createIntegrationSync,
+  type InstallationChangeResult,
+} from "../integrations/sync/service.ts";
+import { TEST_WEBHOOK_SECRET } from "./github-app.ts";
+import { startGithubAppHarness } from "./github-app-harness.ts";
+import { createTestDatabase } from "./test-database.ts";
+
+export async function startSyncHarness(
+  options: {
+    requestTimeoutMs?: number;
+    /** Replaces or (with undefined) removes GitHub App variables. */
+    env?: Record<string, string | undefined>;
+  } = {},
+) {
+  const github = await startGithubAppHarness();
+  Object.assign(github.env, options.env);
+  const { db } = await createTestDatabase();
+  const registry = createDefaultIntegrationRegistry({
+    env: github.env,
+    githubClient: {
+      now: github.clock.now,
+      requestTimeoutMs: options.requestTimeoutMs ?? 5000,
+    },
+  });
+  const logged: string[] = [];
+  const sync = createIntegrationSync({
+    db,
+    registry,
+    log: (line) => logged.push(line),
+  });
+  const integrations = createIntegrationsRepository(db);
+  const repositories = createRepositoriesRepository(db);
+
+  /** The webhook route's job for an installation delivery, step by step as the README describes. */
+  async function deliver(
+    fixture: string,
+  ): Promise<
+    InstallationChangeResult | "refused" | "unidentified" | "ignored"
+  > {
+    const provider = registry.resolve("github_app");
+    const request = webhookDelivery({
+      event: fixture.split(".")[0] as string,
+      payload: webhookFixture(fixture),
+      secret: TEST_WEBHOOK_SECRET,
+    });
+    if (!(await provider.verifyWebhook(null, request))) return "refused";
+    const identity = await provider.identifyWebhook(request);
+    if (identity === null) return "unidentified";
+    const known = await integrations.findByExternalId(
+      "github_app",
+      identity.externalId,
+    );
+    // An installation without a row can only be a "created" delivery (or a leftover); the route
+    // then parses with a stand-in, because the row is created from GitHub's confirmation.
+    const event = await provider.parseEvent(
+      known ?? {
+        id: "unknown",
+        type: "github_app",
+        displayName: "",
+        externalId: identity.externalId,
+        config: {},
+        credentials: null,
+        webhookSecret: null,
+        status: "active",
+        createdAt: "",
+        updatedAt: "",
+      },
+      request,
+    );
+    if (event.kind !== "installation_changed") return "ignored";
+    return sync.handleInstallationChange({
+      type: "github_app",
+      externalId: event.externalId,
+      action: event.action,
+    });
+  }
+
+  return {
+    ...github,
+    db,
+    registry,
+    sync,
+    integrations,
+    repositories,
+    logged,
+    deliver,
+  };
+}

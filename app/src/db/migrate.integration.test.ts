@@ -1,7 +1,7 @@
 // Pins down the schema bootstrap: a missing file is created and fully migrated, a second start
 // changes nothing, a failing migration leaves no trace, and the migrated schema follows the
 // portable column conventions.
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { sql, type Kysely } from "kysely";
 import type { Migration, MigrationProvider } from "kysely/migration";
@@ -32,6 +32,49 @@ async function userTables(db: Kysely<Database>): Promise<string[]> {
   );
 }
 
+describe("the list of migrations", () => {
+  it("names every migration after the first with a UTC timestamp prefix", async () => {
+    const keys = Object.keys(await migrationProvider.getMigrations()).sort();
+
+    expect(keys[0]).toBe("0001_create_app_meta");
+    for (const key of keys.slice(1))
+      expect(key, key).toMatch(/^\d{14}_[a-z0-9_]+$/);
+  });
+});
+
+describe("the migrations of both epics", () => {
+  // CR-43-T01
+  it("run on an empty database in one fixed, ascending order: login tables first, then the GitHub integration", async () => {
+    const { migrationsApplied } = await startDatabase({
+      path: join(await createTestDirectory(), "app.db"),
+      busyTimeoutMs: 1000,
+    });
+
+    expect(migrationsApplied).toEqual([
+      "0001_create_app_meta",
+      "20261010123800_create_auth_tables",
+      "20261010125500_add_user_org_checked_at",
+      "20261010131500_add_user_org_checked_for",
+      "20261010133000_create_allowed_login_pins",
+      "20261010134000_create_integrations",
+      "20261010143000_create_repositories",
+      "20261010170000_create_webhook_deliveries",
+    ]);
+  });
+
+  // CR-43-T01
+  it("have unique names and a registered file each, so no two branches can share a slot", async () => {
+    const files = readdirSync(join(import.meta.dirname, "migrations"))
+      .filter((name) => /^\d.*\.ts$/.test(name) && !name.includes(".test."))
+      .map((name) => name.replace(/\.ts$/, ""))
+      .sort();
+    const keys = Object.keys(await migrationProvider.getMigrations()).sort();
+
+    expect(keys).toEqual(files);
+    expect(new Set(keys.map((key) => key.slice(0, 14))).size).toBe(keys.length);
+  });
+});
+
 describe("starting the database", () => {
   // CR-15-T01
   it("creates a missing file and applies every migration in order", async () => {
@@ -56,11 +99,14 @@ describe("starting the database", () => {
       "accounts",
       "allowed_login_pins",
       "app_meta",
+      "integrations",
       "kysely_migration",
       "kysely_migration_lock",
+      "repositories",
       "sessions",
       "users",
       "verifications",
+      "webhook_deliveries",
     ]);
     const { rows } = await sql<{
       name: string;

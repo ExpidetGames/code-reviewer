@@ -1,8 +1,11 @@
 // What the production server checks about the deployment when it starts, besides sign in (see
 // src/auth/startup.ts): the shared token of the runner and the credentials of the GitHub App. A
 // missing value would otherwise show up later as a failing runner or webhook with a less helpful
-// message. Called from `src/instrumentation.ts`. A problem is reported with variable names only,
-// never with a value (they are secrets).
+// message. Called from `src/instrumentation.ts`. The GitHub App part is judged by the same loader
+// the provider uses (src/integrations/providers/github-app/config.ts, reached through the registry),
+// so the two cannot disagree. A problem is reported with variable names only, never with a value (they are secrets).
+
+import { findGithubAppConfigProblem } from "../integrations/registry.ts";
 
 export const DEPLOY_ERROR_CODES = ["DEPLOY_CONFIG_INVALID"] as const;
 export type DeployErrorCode = (typeof DEPLOY_ERROR_CODES)[number];
@@ -31,19 +34,10 @@ export function findDeploymentConfigProblems(env: Env): string[] {
       `RUNNER_TOKEN must be at least ${String(MIN_RUNNER_TOKEN_LENGTH)} characters long`,
     );
 
-  // Written out one by one on purpose: src/ci/compose.test.ts finds the variable names the code
-  // reads by their literal use and checks that .env.example documents each of them.
-  if (!has(env, "GITHUB_APP_ID")) problems.push("GITHUB_APP_ID is not set");
-  if (!has(env, "GITHUB_APP_SLUG")) problems.push("GITHUB_APP_SLUG is not set");
-  if (!has(env, "GITHUB_APP_WEBHOOK_SECRET"))
-    problems.push("GITHUB_APP_WEBHOOK_SECRET is not set");
-  if (
-    !has(env, "GITHUB_APP_PRIVATE_KEY") &&
-    !has(env, "GITHUB_APP_PRIVATE_KEY_PATH")
-  )
-    problems.push(
-      "GITHUB_APP_PRIVATE_KEY (or GITHUB_APP_PRIVATE_KEY_PATH) is not set",
-    );
+  // The GitHub App settings have exactly one reader, the provider's loader; this check only asks it
+  // whether the settings are usable (it names variables, never values).
+  const githubAppProblem = findGithubAppConfigProblem(env);
+  if (githubAppProblem !== null) problems.push(githubAppProblem);
 
   return problems;
 }

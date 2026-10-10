@@ -6,12 +6,14 @@ import { e2eEnv } from "./e2e/helpers/e2e-env";
 // e2e/helpers/e2e-env.ts); never 3000 or 3100 so parallel work in other worktrees is safe.
 const baseURL = e2eEnv.appUrl;
 
-// A throwaway RSA key for the GitHub App settings of the app under test, generated on every run and
-// never stored: the journeys do not talk to the GitHub App, but the key stays a usable PEM.
+// A throwaway key for the GitHub App settings of the app under test, new for every run and never
+// written anywhere. No journey asks GitHub for a token, so the key is only there to make the
+// settings complete (the webhook route verifies deliveries only with complete settings, and the
+// production server refuses to start with an unusable key).
 const githubAppPrivateKey = generateKeyPairSync("rsa", {
   modulusLength: 2048,
-  publicKeyEncoding: { type: "spki", format: "pem" },
   privateKeyEncoding: { type: "pkcs1", format: "pem" },
+  publicKeyEncoding: { type: "spki", format: "pem" },
 }).privateKey;
 
 export default defineConfig({
@@ -66,13 +68,13 @@ export default defineConfig({
         GITHUB_OAUTH_CLIENT_ID: e2eEnv.githubClientId,
         GITHUB_OAUTH_CLIENT_SECRET: e2eEnv.githubClientSecret,
         GITHUB_OAUTH_BASE_URL: e2eEnv.githubUrl,
-        GITHUB_API_BASE: e2eEnv.githubUrl,
+        GITHUB_API_BASE_URL: e2eEnv.githubUrl,
+        GITHUB_APP_ID: e2eEnv.githubAppId,
+        GITHUB_APP_SLUG: e2eEnv.githubAppSlug,
+        GITHUB_APP_WEBHOOK_SECRET: e2eEnv.githubAppWebhookSecret,
+        GITHUB_APP_PRIVATE_KEY: githubAppPrivateKey,
         ALLOWED_GITHUB_LOGINS: e2eEnv.allowedLogins,
         RUNNER_TOKEN: e2eEnv.runnerToken,
-        GITHUB_APP_ID: "1",
-        GITHUB_APP_SLUG: "e2e-app",
-        GITHUB_APP_WEBHOOK_SECRET: "e2e-webhook-secret",
-        GITHUB_APP_PRIVATE_KEY: githubAppPrivateKey,
         // Without this flag the server refuses the two overrides above.
         ALLOW_TEST_GITHUB_ENDPOINTS: "true",
       },
