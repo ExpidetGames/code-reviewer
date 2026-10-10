@@ -3,7 +3,7 @@
 Everything that depends on a git platform (GitHub, later Bitbucket and others) lives behind the
 `IntegrationProvider` interface. Jobs, the runner API, the database and the UI know only the
 normalized types below and never see a platform payload. An integration is one connection to a
-platform; the MVP has exactly one kind, the GitHub App (`github_app`), implemented by its own tickets.
+platform; the MVP has exactly one kind, the GitHub App (`github_app`, `providers/github-app/`).
 
 | File                      | Role                                                                                                                                                                            |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -14,10 +14,12 @@ platform; the MVP has exactly one kind, the GitHub App (`github_app`), implement
 | `registry.ts`             | `createIntegrationRegistry`, `integrationRegistry`: maps a type to its provider; the only place that imports a provider                                                         |
 | `errors.ts`               | `IntegrationError` with stable codes (`INTEGRATION_TYPE_UNKNOWN`, `INTEGRATION_PROVIDER_NOT_IMPLEMENTED`, ...)                                                                  |
 | `provider-import-rule.ts` | The import rule that keeps providers out of the rest of the app (see "The boundary")                                                                                            |
-| `providers/<type>/`       | One folder per implementation (none yet; the GitHub App arrives with the GitHub integration tickets)                                                                            |
+| `providers/<type>/`       | One folder per implementation: `providers/github-app/` (see "The GitHub App provider")                                                                                          |
+| `sync/`                   | `createIntegrationSync`: keeps the `integrations` and `repositories` tables in line with the platform (see "Synchronization")                                                   |
 
-The table is `integrations` (`src/db/migrations/20261010120000_create_integrations.ts`), the only code that
-touches it is `src/db/repositories/integrations-repository.ts`.
+The tables are `integrations` (`src/db/migrations/20261010120000_create_integrations.ts`) and
+`repositories` (`src/db/migrations/20261010143000_create_repositories.ts`); the only code that touches
+them is `src/db/repositories/integrations-repository.ts` and `repositories-repository.ts`.
 
 ## The interface in short
 
@@ -26,6 +28,8 @@ interface IntegrationProvider {
   type: IntegrationType;
   connect: ConnectFlow; // install redirect, OAuth or token form
   validateConfig(config: unknown): ConfigValidationResult;
+  discoverConnections?(): Promise<DiscoveredConnection[]>; // GitHub App: the installations
+  findConnection?(externalId: string): Promise<DiscoveredConnection | null>;
   listRepositories(i: Integration): Promise<RepoRef[]>;
   ensureWebhook?(i: Integration, repo: RepoRef): Promise<void>; // only for per-repo webhooks
   verifyWebhook(i: Integration | null, req: Request): Promise<boolean>;
@@ -52,6 +56,10 @@ The route never looks into a platform payload. For a shared webhook (GitHub App)
 1. `verifyWebhook(null, request)`: is the delivery genuine? (HMAC of the body with the shared secret.)
 2. `identifyWebhook(request)`: which connection is it? Returns `{ externalId }` (the GitHub
    installation id); the route finds the row with `findByExternalId(type, externalId)`.
+   A delivery about an installation that has no row yet (`installation` `created`, normally) cannot
+   be found this way: the route then calls `sync.handleInstallationChange` with the identified id
+   instead of `parseEvent`, and the sync creates the row after GitHub confirmed the installation (see
+   "Synchronization").
 3. `parseEvent(integration, request)`: what does it mean? An `IntegrationEvent`:
    - `review_trigger` with a `ReviewTrigger` (opened, updated or a comment command),
    - `installation_changed` with the connection's `externalId` and an action (`created`, `deleted`,
@@ -73,6 +81,11 @@ hand. An unknown pull request fails with `INTEGRATION_PULL_REQUEST_NOT_FOUND`.
 
 - `canTrigger` is about the trigger: may this event start a job (for example, does the comment author
   have write access)? It is not about the app's own permissions on the platform.
+- `discoverConnections` and `findConnection` are optional and only for platforms that can list the
+  connections of the app. Both reject when the platform cannot be asked: a failure must never look
+  like "no connections".
+- `listRepositories` returns every repository or rejects. A partial list would make the sync think
+  the missing repositories are gone.
 - `verifyWebhook`, `identifyWebhook` and `parseEvent` read a clone of the request (`req.clone()`), so
   the caller can read the body again. They have no side effects.
 - `jobAccess` returns a `GitAccess` for one repository, built with `createGitAccess`. It carries
@@ -94,6 +107,80 @@ hand. An unknown pull request fails with `INTEGRATION_PULL_REQUEST_NOT_FOUND`.
 - An explicit `null` in a config counts as not given. `NaN` and `Infinity` are refused.
 - `external_id` (the platform's id for the connection) is required; the table holds one integration
   per `(type, external_id)`.
+
+## The GitHub App provider
+
+`providers/github-app/` implements the interface for our own GitHub App; one installation is one
+integration (`external_id` is the installation id).
+
+| File                                                     | Role                                                                                                                                                                                         |
+| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `config.ts`                                              | `loadGithubAppConfig(env)`: reads `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_PRIVATE_KEY` or `GITHUB_APP_PRIVATE_KEY_PATH`, `GITHUB_APP_WEBHOOK_SECRET`, optional `GITHUB_API_BASE_URL` |
+| `jwt.ts`                                                 | The App JWT (RS256)                                                                                                                                                                          |
+| `client.ts`, `mappers.ts`                                | The GitHub client: installations, installation repositories, pull requests, collaborator permission, installation tokens. Returns normalized shapes                                          |
+| `provider.ts`                                            | `createGithubAppProvider`                                                                                                                                                                    |
+| `events.ts`, `webhook-fields.ts`, `webhook-signature.ts` | Webhook signature, the list of payload fields that are read, and their translation into `IntegrationEvent`s                                                                                  |
+| `errors.ts`                                              | `GithubAppError` and its stable codes (`GITHUB_APP_CONFIG_INVALID`, `_AUTH_FAILED`, `_FORBIDDEN`, `_NOT_FOUND`, `_RATE_LIMITED`, `_UNAVAILABLE`, `_REQUEST_FAILED`)                          |
+| `fake-client.ts`, `test-config.ts`                       | In-memory client and test configuration for the provider's unit tests                                                                                                                        |
+
+Settings come from the environment (see `.env.example`). Missing or invalid values fail with
+`GITHUB_APP_CONFIG_INVALID` and an error that names the variables, never their values. The provider is
+created when the app loads but reads the settings on first use, so a missing variable breaks only the
+calls that need GitHub. The private key and the webhook secret are not enumerable properties of the
+configuration, like the token of a `GitAccess`.
+
+How the interface is met:
+
+- `verifyWebhook`: HMAC-SHA256 of the raw body with the app's webhook secret against
+  `X-Hub-Signature-256`, compared in constant time. `identifyWebhook`: `installation.id` of the payload
+  (null for a `ping`).
+- `parseEvent` reads only the fields listed in `webhook-fields.ts`, and the contract test
+  (`webhook-payloads.integration.test.ts`) checks the recorded payloads in
+  `fakes/fixtures/github-webhooks/` against that list.
+  - `installation` `created`, `deleted`, `suspend`, `unsuspend` and every `installation_repositories`
+    delivery become `installation_changed` (the repository lists in the payload are not used: the sync
+    reads GitHub's current state).
+  - `pull_request` `opened`, `reopened` and `ready_for_review` become a `review_trigger` of kind
+    `opened`, `synchronize` one of kind `updated`; everything else is ignored. The repository is the
+    one the pull request targets, so a pull request from a fork is reviewed like any other.
+    Drafts are not filtered here (the trigger has no draft flag): the automatic triggers ticket decides.
+  - `issue_comment` `created` on an open pull request becomes a `command` trigger when the text starts
+    with `/review`, `/improve`, `/describe` or `/ask` (leading whitespace and any case allowed); the
+    head commit, which a comment delivery does not carry, is read from GitHub. Comments of bots, edited
+    and deleted comments and comments on issues are ignored. The arguments are not truncated here.
+- `canTrigger`: `opened` and `updated` triggers are always allowed; a command is allowed when the
+  author's repository permission is `admin` or `write` (read with the installation token). The comment's
+  `author_association` is not used: it cannot tell a member with read access from one with write access,
+  and the trigger does not carry it.
+- `jobAccess` mints a fresh installation token narrowed to the repository (`client.mintInstallationToken`,
+  the one place that mints a job token; never cached). The rules for permissions and expiry belong to
+  the token ticket and finish this function.
+- Rate limits and failures become `GithubAppError`s with a code and, for a rate limit,
+  `retryAfterSeconds`. There is no retry loop. Requests time out after 15 seconds. Messages name the
+  call and the status only, never a credential or a response body.
+- Read calls use an installation token that is cached per client until a minute before it expires, and
+  asked for again once if GitHub refuses the cached one.
+
+## Synchronization
+
+`sync/service.ts` (`createIntegrationSync`) keeps the tables in line with the platform. A repository row
+is `active` while the platform lists it for its integration and becomes inactive when it does not;
+nothing is deleted, so projects and past reviews keep their reference. A repository that comes back
+gets its old row back. New repositories are active in this table; whether a project reviews them is
+decided when a project is activated for the repository, not here.
+
+| Entry point                          | When                                                       | What                                                                                                                                                                                                                                                                                |
+| ------------------------------------ | ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `runStartupSync` (`sync/startup.ts`) | When the server starts (`instrumentation.ts`), not awaited | `syncAll`; logs the result; never stops the start                                                                                                                                                                                                                                   |
+| `syncAll()`                          | Start, and later the button in the UI                      | Creates, updates and disables integrations from `discoverConnections`, then reads every active integration's repositories                                                                                                                                                           |
+| `handleInstallationChange(change)`   | The webhook route, for an `installation_changed` event     | `deleted`: disable and deactivate all repositories without a call to GitHub. `suspended`: disable. `unsuspended`/`created`/`repositories_changed`: read the repositories again. A connection without a row is first confirmed with `findConnection` (App JWT) and only then created |
+| `syncIntegration(id)`                | Single integration                                         | Reads its repositories                                                                                                                                                                                                                                                              |
+
+All of them return a summary and never reject because of the platform (`errors` lists each failure by
+stage and stable code). The rule: the tables change to "gone" only after GitHub answered completely. A
+5xx, a timeout, a refused JWT, a failing later page or missing settings are reported and change
+nothing. Work on the same installation runs one after the other (`keyed-lock.ts`), and each run reads
+GitHub's current state inside the lock, so repeating or overlapping triggers end in the same state.
 
 ## Types and reserved values
 
@@ -137,3 +224,9 @@ the body) and translates it like a real one would. Options: the repositories it 
 trigger, the access it hands out, the pull requests it knows, a failure for `jobAccess`. It records every call in `calls`. `fakeIntegration()` builds an `Integration` value.
 Use it in jobs, runner API and UI tests; pass it to `createIntegrationRegistry({ github_app: fake })`
 when the code under test resolves through a registry.
+
+The real GitHub App provider is tested against `fakes/github/app-api.ts`, a fake GitHub REST API over
+real HTTP (see `fakes/github/app-api.md`), and against recorded webhook payloads. For tests outside the
+provider folder, `createDefaultIntegrationRegistry({ env })` builds the real provider from an
+environment, and `src/test-support/integration-sync-harness.ts` gives a database, the fake GitHub, a
+sync service and `deliver(fixture)`, which does what the webhook route does with a delivery.

@@ -125,6 +125,11 @@ string or a timestamp string format. Route handlers and server code get the conn
 git platforms; see `src/integrations/README.md`. It keeps no secret of a GitHub App, and the
 repository refuses secret-looking keys in `config`.
 
+`repositories` (migration `20261010143000_create_repositories`, repository `repositories-repository.ts`)
+holds the repositories each integration can see. A repository the platform stops listing becomes
+inactive (`active = 0`), never deleted; `reconcile` makes the rows of one integration match a
+complete list in one transaction.
+
 `app_meta` (a key/value table for facts about the installation) exists to prove the setup. Product
 tables come with the tickets that need them: add the migration, the row type in `schema.ts` and the
 repository in the same change.
