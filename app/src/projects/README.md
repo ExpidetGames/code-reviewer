@@ -25,7 +25,7 @@ touches it is `src/db/repositories/projects-repository.ts`.
 
 - The row is created by the first activation and **never deleted**. Deactivating sets `active = 0`;
   activating again switches the same row back on, so its settings (`projects.settings`, JSON text,
-  written by the settings ticket) survive and there is never a second row (`repository_id` is unique).
+  the review setting overrides, `src/review-settings/README.md`) survive and there is never a second row (`repository_id` is unique).
 - A repository that disappears from GitHub keeps its project row untouched, **including `active = 1`**.
   The list shows it as `unavailable`, it cannot be activated (`PROJECT_REPOSITORY_UNAVAILABLE`), and
   `getActiveProjectForRepository` / `hasActiveProject` answer "no project" for it, so no review is

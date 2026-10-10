@@ -6,6 +6,7 @@
 // request comes from, its content type and its body, then the service. Every refusal is
 // `{ "error": <code> }` with a stable code from `errors.ts`.
 import type { SessionUser } from "../auth/access-policy.ts";
+import { isCrossSite, isJsonRequest } from "../http/request-checks.ts";
 import { readLimitedBody } from "../webhooks/limited-body.ts";
 import {
   PROJECT_ERROR_STATUS,
@@ -40,39 +41,9 @@ function refusal(code: ProjectErrorCode): Response {
   );
 }
 
-// Defense in depth for a session cookie that is `SameSite=Lax` already. Browsers say where a request
-// comes from in `Sec-Fetch-Site`; only `same-origin` (and `none`, a request the user typed) is let
-// through, so even a sibling subdomain (`same-site`) is refused. A browser that does not send it is
-// judged by `Origin` against the host the request was addressed to. A client that sends neither (curl,
-// a script) is no browser and can only act with a cookie it already holds.
-function isCrossSite(request: Request): boolean {
-  const fetchSite = request.headers.get("sec-fetch-site");
-  if (fetchSite !== null)
-    return fetchSite !== "same-origin" && fetchSite !== "none";
-  const origin = request.headers.get("origin");
-  if (origin === null) return false;
-  const host =
-    request.headers.get("x-forwarded-host") ??
-    request.headers.get("host") ??
-    new URL(request.url).host;
-  try {
-    return new URL(origin).host !== host;
-  } catch {
-    return true; // "null" or garbage
-  }
-}
-
-// A cross-site form can send `text/plain` or form encoded bodies without a preflight, but not
-// `application/json`, so insisting on it is a second layer against another site switching a project
-// with the user's cookie.
-function isJson(request: Request): boolean {
-  const type = request.headers.get("content-type") ?? "";
-  return /^application\/json\s*(;|$)/i.test(type);
-}
-
 /** `true` or `false` for a body `{ "active": boolean }`; throws the `ProjectError` to answer with. */
 async function readActive(request: Request): Promise<boolean> {
-  if (!isJson(request))
+  if (!isJsonRequest(request))
     throw new ProjectError(
       "PROJECT_CONTENT_TYPE_UNSUPPORTED",
       "The body must be application/json.",
