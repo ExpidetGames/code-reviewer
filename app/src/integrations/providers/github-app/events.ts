@@ -168,14 +168,16 @@ export async function parseGithubEvent(
   if (field<string>(payload, "sender.type") === "Bot")
     return ignored("the comment was written by a bot");
 
-  const parsed = parseCommentCommand(field<string>(payload, "comment.body"));
-  if (parsed === null) return ignored("the comment is not a command");
-
   // Cheapest checks first, so a commenter without write access costs as few GitHub calls as
   // possible: the association from the payload (no call), then the permission (one call), and only
-  // then the head commit of the pull request.
+  // then the head commit of the pull request. The text of the comment is read after the first of
+  // them: the association is known without reading anything, and the text of a commenter who cannot
+  // use commands is none of our business.
   if (!mayHaveWriteAccess(field<string>(payload, "comment.author_association")))
     return ignored("the commenter cannot have write access");
+
+  const parsed = parseCommentCommand(field<string>(payload, "comment.body"));
+  if (parsed === null) return ignored("the comment is not a command");
 
   const repo = repoOf(context);
   const actor = actorOf(payload);

@@ -13,8 +13,11 @@ import re
 
 IMAGE_LINK_PLACEHOLDER = "[image link removed]"
 
-# Any `![...]` with what follows it in brackets or parentheses.
-_MARKDOWN_IMAGE = re.compile(r"!\[[^\]]*\](?:[ \t]*\([^)\n]*\)?|[ \t]*\[[^\]\n]*\])?")
+# Any `![...]` with what follows it in brackets or parentheses. Every part is bounded, as on the app
+# side: an unbounded alt text that fails at the end of the text makes every `![` scan to the end.
+_MARKDOWN_IMAGE = re.compile(
+    r"!\[[^\]\n]{0,500}\](?:[ \t]{0,20}\([^)\n]{0,2000}\)?|[ \t]{0,20}\[[^\]\n]{0,500}\])?"
+)
 # The pattern PR-Agent finds links with (`pr_questions.py`), plus case insensitivity.
 _LINK = re.compile(r"https?://[^\s'\"<>)\]]+", re.IGNORECASE)
 # A link with an image extension anywhere in it (path, query or fragment) is removed.

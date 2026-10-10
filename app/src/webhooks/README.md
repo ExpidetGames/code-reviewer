@@ -168,12 +168,17 @@ rules, in the order they are applied:
 | Only `created` comments count; `edited` and `deleted` do not (an edited comment must not start a second job)                                                                                                   | provider | `ignored`             |
 | The comment is on a pull request (the payload has `issue.pull_request`), and the pull request is open (closed and merged ones take no commands)                                                                | provider | `ignored`             |
 | The author is not a bot (this includes the app's own comments, so a review that quotes `/review` cannot loop)                                                                                                  | provider | `ignored`             |
-| The text starts with a command (`/ask` needs a question; an unknown command is nothing)                                                                                                                        | provider | `ignored`             |
 | The author can have write access (`author_association` is `OWNER`, `MEMBER` or `COLLABORATOR`) and really has it (collaborator permission `admin` or `write`). Anyone else gets no reply; the reason is logged | provider | `ignored`             |
+| The text starts with a command (`/ask` needs a question; an unknown command is nothing)                                                                                                                        | provider | `ignored`             |
 | The repository has an active project                                                                                                                                                                           | handler  | `project_not_active`  |
 | The project allows the command (setting `allowedCommands`, "Comment commands people may use")                                                                                                                  | handler  | `command_not_allowed` |
 | `canTrigger` (the permission, asked again)                                                                                                                                                                     | handler  | `trigger_not_allowed` |
 | Otherwise a `comment` job with the command, the question (for `/ask`) and the author                                                                                                                           | intake   | `trigger_enqueued`    |
+
+The text of a comment is read only after the bot check and the `author_association` check, and only
+its first 8000 UTF-16 units are looked at; every pattern that reads it is bounded (a comment of 65 536
+characters made of `![` once kept the parser busy for seconds). Tests pin a time limit for hostile
+shapes on both sides.
 
 Replays: the same delivery id is a `duplicate` (the route). The same comment under another delivery id
 (the signature does not cover the delivery id) finds the job of the comment, whatever became of it:

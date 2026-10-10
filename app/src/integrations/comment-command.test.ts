@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import askQuestionImages from "../../../fakes/fixtures/ask-question-images.json" with { type: "json" };
 import {
   ASK_QUESTION_MAX_CHARS,
+  ASK_QUESTION_RAW_MAX_CHARS,
   ASK_QUESTION_TRUNCATION_NOTE,
   IMAGE_LINK_PLACEHOLDER,
   parseCommentCommand,
@@ -178,5 +179,89 @@ describe("removing image links from a question", () => {
         /https?:\/\/\S*\.(png|jpe?g|gif|webp)/i,
       );
     }
+  });
+});
+
+// The parser runs on every comment of every commenter, before anything is known about them, so no
+// text may make it slow. GitHub allows 65 536 characters in a comment.
+describe("reading hostile comments", () => {
+  const BIG = 64_000;
+  const shapes: [string, string][] = [
+    ["unclosed markdown images", "![".repeat(BIG / 2)],
+    ["closed empty markdown images", "![]".repeat(BIG / 3)],
+    ["short markdown images", "![a]".repeat(BIG / 4)],
+    ["images with open parentheses", "![a](".repeat(BIG / 5)],
+    ["one very long alt text", `![${"a".repeat(BIG)}`],
+    ["one very long link target", `![a](${"a".repeat(BIG)}`],
+    ["an image followed by many spaces", `![a]${" ".repeat(BIG)}x`],
+    ["many brackets", "[".repeat(BIG)],
+    ["many closing brackets", "]".repeat(BIG)],
+    ["many exclamation marks", "!".repeat(BIG)],
+    ["many parentheses", "(".repeat(BIG)],
+    ["many schemes", "http://".repeat(BIG / 7)],
+    ["many secure schemes", "https://".repeat(BIG / 8)],
+    ["one very long link", `https://x.test/${"a".repeat(BIG)}`],
+    ["many extensions in one link", `https://x.test/${".png".repeat(BIG / 4)}`],
+    ["many dots in one link", `https://x.test/${".".repeat(BIG)}`],
+    ["many links", "https://x.test/a.png ".repeat(BIG / 21)],
+    ["many line breaks", "\n".repeat(BIG)],
+    ["many mixed white space", " \t\n".repeat(BIG / 3)],
+  ];
+
+  // CR-32-T04
+  it.each(shapes)("reads %s quickly", (_name, text) => {
+    for (const body of [`/ask ${text}`, text, `${text}\n/ask x`]) {
+      const start = performance.now();
+      parseCommentCommand(body);
+      const elapsed = performance.now() - start;
+
+      expect(elapsed).toBeLessThan(500);
+    }
+  });
+
+  // The patterns are bounded on their own, not only because the question is cut before them.
+  it.each(shapes)("removes image links from %s quickly", (_name, text) => {
+    const start = performance.now();
+    removeImageLinks(text);
+
+    expect(performance.now() - start).toBeLessThan(500);
+  });
+
+  it("reads white space before a command quickly", () => {
+    const start = performance.now();
+    parseCommentCommand(`${" ".repeat(BIG)}/ask what?`);
+    parseCommentCommand(`${" ".repeat(BIG)}no command`);
+
+    expect(performance.now() - start).toBeLessThan(500);
+  });
+
+  it("looks at no more than the raw maximum of a question, and says it was cut", () => {
+    const result = parseCommentCommand(
+      `/ask ${"q".repeat(ASK_QUESTION_RAW_MAX_CHARS * 3)}`,
+    );
+
+    expect(result?.args).toBe(
+      `${"q".repeat(ASK_QUESTION_MAX_CHARS)}\n\n${ASK_QUESTION_TRUNCATION_NOTE}`,
+    );
+  });
+
+  it("says a question was cut also when its first part shrinks below the maximum once links are removed", () => {
+    const links = "![image](https://x.test/a.png) ".repeat(
+      ASK_QUESTION_RAW_MAX_CHARS,
+    );
+
+    const result = parseCommentCommand(`/ask ${links}`);
+
+    expect(result?.args).toContain(ASK_QUESTION_TRUNCATION_NOTE);
+    expect(result?.args).not.toContain("https://");
+  });
+
+  it("removes an image that begins inside the raw maximum and ends outside it", () => {
+    const text = `${"a".repeat(ASK_QUESTION_RAW_MAX_CHARS - 12)} ![image](https://evil.test/a.png) tail`;
+
+    const args = parseCommentCommand(`/ask ${text}`)?.args ?? "";
+
+    expect(args).not.toContain("evil.test");
+    expect(args).not.toContain("![image]");
   });
 });

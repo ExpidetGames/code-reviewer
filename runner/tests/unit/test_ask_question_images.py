@@ -8,6 +8,7 @@ cannot reach an address of the sender's choice. Both sides must give the results
 fixture `fakes/fixtures/ask-question-images.json`."""
 
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -115,3 +116,31 @@ def test_a_question_without_images_is_left_alone() -> None:
     question = "Why was the cache removed? See https://example.com/docs/page.\nThanks!"
 
     assert make_job(question).args == (question,)
+
+
+BIG = 64_000
+ADVERSARIAL = {
+    "unclosed images": "![" * (BIG // 2),
+    "empty images": "![]" * (BIG // 3),
+    "short images": "![a]" * (BIG // 4),
+    "images with open parentheses": "![a](" * (BIG // 5),
+    "one long alt text": "![" + "a" * BIG,
+    "one long target": "![a](" + "a" * BIG,
+    "an image and many spaces": "![a]" + " " * BIG + "x",
+    "many brackets": "[" * BIG,
+    "many exclamation marks": "!" * BIG,
+    "many schemes": "http://" * (BIG // 7),
+    "one long link": "https://x.test/" + "a" * BIG,
+    "many extensions": "https://x.test/" + ".png" * (BIG // 4),
+    "many dots": "https://x.test/" + "." * BIG,
+    "many links": "https://x.test/a.png " * (BIG // 21),
+    "many line breaks": "\n" * BIG,
+}
+
+
+@pytest.mark.parametrize("text", list(ADVERSARIAL.values()), ids=list(ADVERSARIAL))
+def test_hostile_text_is_cleaned_quickly(text: str) -> None:
+    start = time.monotonic()
+    remove_image_links(text)
+
+    assert time.monotonic() - start < 0.5
