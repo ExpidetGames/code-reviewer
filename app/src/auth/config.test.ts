@@ -172,3 +172,32 @@ describe("loading the sign-in configuration", () => {
     ).not.toThrow();
   });
 });
+
+describe("loading the allow list as part of the sign-in configuration", () => {
+  // CR-19-T12
+  it("reads the logins and the organization next to the other settings", () => {
+    const config = loadAuthConfig({
+      ...validEnv,
+      ALLOWED_GITHUB_LOGINS: "Octocat, hubot",
+      ALLOWED_GITHUB_ORG: "my-org",
+    });
+
+    expect([...config.access.logins]).toEqual(["octocat", "hubot"]);
+    expect(config.access.org).toBe("my-org");
+  });
+
+  // CR-19-T03
+  it("starts without an allow list, which admits nobody", () => {
+    const config = loadAuthConfig(validEnv);
+
+    expect(config.access.logins.size).toBe(0);
+    expect(config.access.org).toBeNull();
+  });
+
+  it("refuses an organization name that is not one, by variable name only", () => {
+    const error = loadError({ ...validEnv, ALLOWED_GITHUB_ORG: "a/b" });
+
+    expect(error.message).toContain("ALLOWED_GITHUB_ORG");
+    expect(error.message).not.toContain("a/b");
+  });
+});

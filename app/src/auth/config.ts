@@ -1,5 +1,6 @@
 // Reads the sign-in settings from the environment. The only place that knows the variable names.
 // A problem is reported with the variable names only, never with a value (they include secrets).
+import { parseAccessConfig, type AccessConfig } from "./access-config.ts";
 
 export const AUTH_ERROR_CODES = ["AUTH_CONFIG_INVALID"] as const;
 export type AuthErrorCode = (typeof AUTH_ERROR_CODES)[number];
@@ -29,6 +30,8 @@ export type AuthConfig = {
     /** `/user` and `/user/emails` live below this URL. */
     apiBaseUrl: string;
   };
+  /** Who may use this instance (`ALLOWED_GITHUB_LOGINS`, `ALLOWED_GITHUB_ORG`). */
+  access: AccessConfig;
   /** Whether the cookies get the `Secure` attribute: exactly when `BETTER_AUTH_URL` is https. */
   secureCookies: boolean;
 };
@@ -84,6 +87,8 @@ export function loadAuthConfig(env: Env): AuthConfig {
     problems,
   );
 
+  const access = parseAccessConfig(env, problems);
+
   if (
     problems.length > 0 ||
     secret === undefined ||
@@ -100,6 +105,7 @@ export function loadAuthConfig(env: Env): AuthConfig {
     secret,
     baseUrl,
     github: { clientId, clientSecret, oauthBaseUrl, apiBaseUrl },
+    access,
     secureCookies: baseUrl.startsWith("https://"),
   };
 }

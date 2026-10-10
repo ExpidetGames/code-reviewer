@@ -8,6 +8,7 @@ const validEnv = {
   BETTER_AUTH_URL: "http://localhost:3000",
   GITHUB_OAUTH_CLIENT_ID: "id",
   GITHUB_OAUTH_CLIENT_SECRET: "secret-value",
+  ALLOWED_GITHUB_LOGINS: "octocat",
 };
 
 describe("checking the sign in configuration when the server starts", () => {
@@ -42,5 +43,41 @@ describe("checking the sign in configuration when the server starts", () => {
     expect(line).toContain("BETTER_AUTH_SECRET");
     expect(line).toContain("GITHUB_OAUTH_CLIENT_SECRET");
     expect(line).not.toContain("\n");
+  });
+
+  // CR-19-T03
+  it("warns once, clearly, when nobody is on the allow list, and still starts", () => {
+    const exit = vi.fn();
+    const log = vi.fn();
+    const warn = vi.fn();
+    const { ALLOWED_GITHUB_LOGINS: _unused, ...withoutList } = validEnv;
+
+    checkAuthConfigOnStart({ env: withoutList, log, warn, exit });
+
+    expect(exit).not.toHaveBeenCalled();
+    expect(log).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledTimes(1);
+    const line = String(warn.mock.calls[0]?.[0]);
+    expect(line).toContain("ALLOWED_GITHUB_LOGINS");
+    expect(line).toContain("ALLOWED_GITHUB_ORG");
+    expect(line).toContain("nobody");
+    expect(line).not.toContain("\n");
+  });
+
+  it("does not warn when a list or an organization is set", () => {
+    for (const env of [
+      validEnv,
+      {
+        ...validEnv,
+        ALLOWED_GITHUB_LOGINS: undefined,
+        ALLOWED_GITHUB_ORG: "o",
+      },
+    ]) {
+      const warn = vi.fn();
+
+      checkAuthConfigOnStart({ env, log: vi.fn(), warn, exit: vi.fn() });
+
+      expect(warn).not.toHaveBeenCalled();
+    }
   });
 });
