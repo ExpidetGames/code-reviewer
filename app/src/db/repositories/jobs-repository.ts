@@ -361,6 +361,38 @@ export function createJobsRepository(
             };
         }
 
+        // 1b. The same comment again, under another delivery id (a replayed signed body, or two
+        // deliveries of one comment): one answer per comment, whatever became of its job.
+        if (input.commentId !== null) {
+          const sameComment = await trx
+            .selectFrom("job_comments")
+            .innerJoin("jobs", "jobs.id", "job_comments.job_id")
+            .selectAll("jobs")
+            .where("job_comments.repository_id", "=", input.repositoryId)
+            .where("job_comments.comment_id", "=", input.commentId)
+            .executeTakeFirst();
+          if (sameComment !== undefined)
+            return {
+              status: "existing",
+              job: toJob(sameComment),
+              reason: "same_comment",
+            };
+        }
+
+        // The comment is answered by the job that comes out of the steps below, a new one or an
+        // equal one that exists already; either way the comment is recorded, so its replay finds it.
+        const recordComment = async (jobId: string) => {
+          if (input.commentId === null) return;
+          await trx
+            .insertInto("job_comments")
+            .values({
+              repository_id: input.repositoryId,
+              comment_id: input.commentId,
+              job_id: jobId,
+            })
+            .execute();
+        };
+
         const samePullRequest = () =>
           trx
             .selectFrom("jobs")
@@ -377,12 +409,14 @@ export function createJobsRepository(
             .where("trigger_kind", "=", "webhook")
             .where("status", "in", [...SLOT_HOLDING_STATUSES])
             .executeTakeFirst();
-          if (sameHead !== undefined)
+          if (sameHead !== undefined) {
+            await recordComment(sameHead.id);
             return {
               status: "existing",
               job: toJob(sameHead),
               reason: "same_head",
             };
+          }
         } else {
           // 2. A job started by a person never duplicates one that is still waiting or running.
           const active = await samePullRequest()
@@ -392,6 +426,7 @@ export function createJobsRepository(
             .orderBy("id")
             .executeTakeFirst();
           if (active !== undefined) {
+            await recordComment(active.id);
             // A person does not wait for a debounce: a waiting job that was held back (an automatic
             // job after `synchronize`) is due now.
             const pulledForward =
@@ -444,6 +479,7 @@ export function createJobsRepository(
           })
           .returningAll()
           .executeTakeFirstOrThrow();
+        await recordComment(id);
 
         // 4. An automatic job replaces the waiting automatic jobs of the same pull request, command
         // and arguments: they would review an older state. Jobs a person asked for are never

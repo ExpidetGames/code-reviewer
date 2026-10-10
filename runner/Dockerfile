@@ -51,6 +51,12 @@ ENV PATH="/opt/venv/bin:${PATH}" \
     PYTHONDONTWRITEBYTECODE=1 \
     LITELLM_LOCAL_MODEL_COST_MAP=True \
     DATA_GYM_CACHE_DIR=/opt/bpe-cache
+# tini is PID 1: the job loop ends the process groups of its jobs, and the helpers it kills are
+# re-parented to PID 1, which has to reap them or they stay as zombies. tini also passes SIGTERM on
+# to the loop, so a plain `docker stop` is an orderly shutdown without `init: true` in compose.
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends tini \
+    && rm -rf /var/lib/apt/lists/*
 # Fixed numeric ids, like the app image. The home directory is writable so tools that cache or
 # write config files (PR-Agent, git) work; the job working directories live under /tmp.
 RUN groupadd --system --gid 10001 runner \
@@ -59,4 +65,4 @@ COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder /opt/bpe-cache /opt/bpe-cache
 USER 10001:10001
 WORKDIR /home/runner
-ENTRYPOINT ["code-reviewer-runner"]
+ENTRYPOINT ["/usr/bin/tini", "--", "code-reviewer-runner"]

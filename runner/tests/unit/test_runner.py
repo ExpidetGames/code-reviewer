@@ -20,6 +20,7 @@ from pr_agent.agent.pr_agent import PRAgent
 from pr_agent.git_providers.github_provider import GithubProvider
 
 from code_reviewer_runner import runner
+from code_reviewer_runner.identity_patch import PATCHED_FOR_VERSION
 from code_reviewer_runner.job import Job, parse_job
 from code_reviewer_runner.log_capture import LogCapture
 from code_reviewer_runner.redaction import Redactor
@@ -364,6 +365,28 @@ def test_a_missing_identity_method_stops_the_job_before_handle_request(
     assert calls == []
 
 
+# CR-30-T04
+def test_a_moved_login_chain_stops_the_job_before_handle_request_and_names_the_step(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def double() -> bool:
+        return True
+
+    def agent_login(self: Any) -> str:
+        return "somebody"  # the step that used to ask _resolve_user_login
+
+    calls = use_double(monkeypatch, double)
+    monkeypatch.setattr(GithubProvider, "_agent_login", agent_login)
+
+    result, _ = run()
+
+    assert result.ok is False
+    assert result.error_code is ErrorCode.IDENTITY_PATCH_FAILED
+    assert "GithubProvider._agent_login" in result.log_tail
+    assert f"pr-agent {PATCHED_FOR_VERSION}" in result.log_tail
+    assert calls == []
+
+
 def test_another_pr_agent_version_stops_the_job_before_handle_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -378,6 +401,7 @@ def test_another_pr_agent_version_stops_the_job_before_handle_request(
     result, _ = run()
 
     assert result.error_code is ErrorCode.PR_AGENT_VERSION_MISMATCH
+    assert "9.9.9" in result.log_tail
     assert calls == []
 
 
@@ -476,6 +500,29 @@ def test_a_manipulated_pull_request_url_starts_no_process_and_opens_no_connectio
 
     assert code == 1
     assert json.loads(out.getvalue())["errorCode"] == "invalid_job"
+
+
+# CR-30-T07
+@pytest.mark.parametrize("bot_login", ["", "   ", "[bot]", "bad login", 42, None])
+def test_a_job_without_a_usable_bot_login_is_refused_before_pr_agent_is_loaded(
+    bot_login: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def must_not_run(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("PR-Agent must not be started without a bot login")
+
+    monkeypatch.setattr(runner, "run_job", must_not_run)
+    original = GithubProvider._resolve_user_login  # pyright: ignore[reportPrivateUsage]
+    out = io.StringIO()
+    job = job_json(git={**job_json()["git"], "botLogin": bot_login})
+
+    code = runner.main([], stdin=io.StringIO(json.dumps(job)), stdout=out)
+
+    result = json.loads(out.getvalue())
+    assert code == 1
+    assert result["ok"] is False
+    assert result["errorCode"] == "invalid_job"
+    assert "git.botLogin" in result["logTail"]
+    assert GithubProvider._resolve_user_login is original  # pyright: ignore[reportPrivateUsage]
 
 
 # CR-10-T07

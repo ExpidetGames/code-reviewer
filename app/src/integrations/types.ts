@@ -128,8 +128,16 @@ export type ReviewTrigger =
   | (ReviewTriggerBase & {
       kind: "command";
       command: ReviewCommand;
-      /** Text after the command; an empty string when there is none. */
+      /**
+       * The question of `ask`, already cut to its maximum length; an empty string for the other
+       * commands, which take no text. Untrusted: it comes from a comment.
+       */
       args: string;
+      /**
+       * The platform's id of the comment that holds the command. The queue starts at most one job
+       * per comment, whatever delivery id the same comment arrives under.
+       */
+      commentId: string;
     });
 
 /** Git platforms the runner knows how to talk to (the runner maps these to PR-Agent settings). */
