@@ -17,7 +17,7 @@ import {
 import { SettingsForm } from "../../review-settings/ui/settings-form.tsx";
 import type { ProjectService } from "../service.ts";
 import type { ProjectRowView } from "./list-view.ts";
-import { loadProjectList } from "./list-view.ts";
+import { loadProjectRow } from "./list-view.ts";
 
 export type ProjectSettingsPageData =
   | { kind: "not_found" }
@@ -32,13 +32,12 @@ export type ProjectSettingsPageData =
 export async function loadProjectSettingsPage(
   repositoryId: string,
   deps: {
-    projects: Pick<ProjectService, "listProjects">;
+    projects: Pick<ProjectService, "findProject">;
     settings: Pick<ReviewSettingsService, "getProjectSettings">;
     config: () => ConfigStatus;
   },
 ): Promise<ProjectSettingsPageData> {
-  const { rows } = await loadProjectList({ projects: deps.projects });
-  const row = rows.find((candidate) => candidate.repositoryId === repositoryId);
+  const row = await loadProjectRow(repositoryId, { projects: deps.projects });
   if (row === undefined) return { kind: "not_found" };
   const config = deps.config();
   if (!row.hasProject) return { kind: "no_project", row, config };
@@ -93,7 +92,10 @@ export function ProjectSettingsPageContent({
       ) : (
         <>
           <p className="muted">{STATE_TEXT[row.status]}</p>
+          {/* Keyed on the server data: with Cache Components a page that was left stays mounted, and
+              when it is shown again with fresh data the form must start from that data. */}
           <SettingsForm
+            key={JSON.stringify(data.model)}
             initial={data.model}
             repositoryId={row.repositoryId}
             {...(api === undefined ? {} : { api })}

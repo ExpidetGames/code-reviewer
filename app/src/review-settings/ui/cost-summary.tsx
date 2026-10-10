@@ -1,7 +1,10 @@
 // The estimated cost of one review with the model (and the fallback model), and the warnings of the
 // cost guard (src/review-settings/cost.ts): above the customer's limit, a model without a known
-// price, a token budget that does not fit the model's context window. Warnings advise, they never
-// block a save. Model names are typed by people, so they are rendered as text like everything else.
+// price. Those two advise and never block a save; a token budget that does not fit the model's
+// context window is different: the service refuses that save, and the warning says so. The fallback
+// model is never called in the MVP (src/review-settings/README.md), so it is listed as "not used
+// yet" and gets no estimate and no cost warning (its context window still counts, as the save is
+// refused for it too). Model names are typed by people, so they are rendered as text like everything else.
 import {
   REVIEW_COST_LIMIT_USD,
   type ModelCostEstimate,
@@ -62,30 +65,36 @@ export function CostSummary({ cost }: { cost: ReviewCostGuard | null }) {
       <ul>
         <Estimate label="Model" estimate={cost.primary} />
         {cost.fallback !== null ? (
-          <Estimate label="Fallback model" estimate={cost.fallback} />
+          <li>
+            Fallback model <span className="mono">{cost.fallback.model}</span>:{" "}
+            <span className="muted">not used yet, so not counted</span>
+          </li>
         ) : null}
       </ul>
-      {cost.warnings.map((warning) => (
-        <div
-          key={`${warning.model}-${warning.kind}`}
-          role="status"
-          className="alert alert-warning"
-        >
-          {warning.kind === "above_limit" ? (
-            <>
-              The estimated cost of the {whichText(warning.model)}{" "}
-              <span className="mono">{modelOf(cost, warning.model)}</span> is
-              above the limit of {LIMIT_TEXT} per review. You can still save it.
-            </>
-          ) : (
-            <>
-              No price is known for{" "}
-              <span className="mono">{modelOf(cost, warning.model)}</span>, so
-              its cost cannot be estimated.
-            </>
-          )}
-        </div>
-      ))}
+      {cost.warnings
+        .filter((warning) => warning.model === "primary")
+        .map((warning) => (
+          <div
+            key={`${warning.model}-${warning.kind}`}
+            role="status"
+            className="alert alert-warning"
+          >
+            {warning.kind === "above_limit" ? (
+              <>
+                The estimated cost of the {whichText(warning.model)}{" "}
+                <span className="mono">{modelOf(cost, warning.model)}</span> is
+                above the limit of {LIMIT_TEXT} per review. You can still save
+                it.
+              </>
+            ) : (
+              <>
+                No price is known for{" "}
+                <span className="mono">{modelOf(cost, warning.model)}</span>, so
+                its cost cannot be estimated.
+              </>
+            )}
+          </div>
+        ))}
       {cost.exceedsContext.map((which) => (
         <div
           key={`context-${which}`}
@@ -94,8 +103,8 @@ export function CostSummary({ cost }: { cost: ReviewCostGuard | null }) {
         >
           The token budget is larger than the context window of the{" "}
           {whichText(which)}{" "}
-          <span className="mono">{modelOf(cost, which)}</span>. Reviews with it
-          would fail.
+          <span className="mono">{modelOf(cost, which)}</span>. Saving is
+          refused until the token budget or the model is changed.
         </div>
       ))}
     </div>

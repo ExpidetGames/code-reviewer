@@ -10,6 +10,7 @@ import {
   signInThroughTheForm,
   type GithubAccount,
 } from "../helpers/github-fake";
+import { e2eEnv } from "../helpers/e2e-env";
 
 const account: GithubAccount = {
   id: 7300002,
@@ -33,6 +34,17 @@ test.describe("the project list and the settings pages", () => {
       },
       [{ id: 9200001, fullName: REPOSITORY }],
     );
+  });
+
+  // The global defaults are shared by every spec of the run: put them back as they were found.
+  test.afterAll(async ({ browser }) => {
+    const page = await browser.newPage({ baseURL: e2eEnv.appUrl });
+    await signInThroughTheForm(page, account);
+    const response = await page.request.put("/api/review-settings", {
+      data: { settings: {} },
+    });
+    expect(response.status()).toBe(200);
+    await page.close();
   });
 
   // CR-34-T14, CR-24-T12
@@ -110,34 +122,43 @@ test.describe("the project list and the settings pages", () => {
   });
 
   // CR-34-T14
-  test("a person changes a global default and the project, which has no value of its own for it, follows", async ({
+  test("a person changes a global default and the project they opened before, which has no value of its own for it, shows the new one", async ({
     page,
   }) => {
     await signInThroughTheForm(page, account);
+    // The project page is visited first: Next keeps it mounted (hidden) while the person is
+    // elsewhere and shows it again later, which must not bring back the old value.
+    await page.getByRole("link", { name: REPOSITORY, exact: true }).click();
+    const budget = () =>
+      page
+        .getByLabel("Token budget", { exact: true })
+        .filter({ visible: true });
+    await expect(budget()).toHaveValue("100000");
+    await expect(
+      page.locator(".field", { has: budget() }).getByText("Built-in value"),
+    ).toBeVisible();
+
     await page.getByRole("link", { name: "Settings" }).click();
     await expect(
       page.getByRole("heading", { level: 1, name: "Settings" }),
     ).toBeVisible();
-
-    await page.getByLabel("Token budget", { exact: true }).fill("60000");
+    await budget().fill("60000");
     await page.getByRole("button", { name: "Save defaults" }).click();
     await expect(
       page.getByRole("status").filter({ hasText: "Saved." }),
     ).toBeVisible();
-    await page.reload();
-    await expect(page.getByLabel("Token budget", { exact: true })).toHaveValue(
-      "60000",
-    );
-
+    // No reload here: it would drop the pages Next keeps mounted, which is what this step is about.
     await page.getByRole("link", { name: "Projects" }).click();
     await page.getByRole("link", { name: REPOSITORY, exact: true }).click();
-    await expect(page.getByLabel("Token budget", { exact: true })).toHaveValue(
-      "60000",
-    );
-    const field = page.locator(".field", {
-      has: page.getByLabel("Token budget", { exact: true }),
-    });
-    await expect(field.getByText("Global default")).toBeVisible();
+    await expect(
+      page.getByRole("heading", { level: 1, name: REPOSITORY }),
+    ).toBeVisible();
+    await expect(budget()).toHaveValue("60000");
+    await expect(
+      page.locator(".field", { has: budget() }).getByText("Global default"),
+    ).toBeVisible();
+    await page.reload();
+    await expect(budget()).toHaveValue("60000");
   });
 
   // CR-34-T09

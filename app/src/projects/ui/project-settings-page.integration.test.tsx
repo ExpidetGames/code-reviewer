@@ -129,6 +129,32 @@ describe("the settings page of a project", () => {
     expect(within(inherited).getByText("Global default")).toBeTruthy();
   });
 
+  // A page that was left stays mounted (Cache Components) and is shown again with fresh data.
+  it("shows the new value and its source when the page is rendered again after a global default changed", async () => {
+    const app = await openProject();
+    const before = await app.load();
+    if (before.kind !== "ready") throw new Error("expected a project");
+    const view = render(
+      <ProjectSettingsPageContent data={before} api={app.api} />,
+    );
+    expect(
+      (screen.getByLabelText("Token budget") as HTMLInputElement).value,
+    ).toBe("100000");
+
+    await app.service.updateGlobalSettings({ maxTokens: 70_000 }, "octocat");
+    const after = await app.load();
+    if (after.kind !== "ready") throw new Error("expected a project");
+    view.rerender(<ProjectSettingsPageContent data={after} api={app.api} />);
+
+    const field = screen
+      .getByLabelText("Token budget")
+      .closest(".field") as HTMLElement;
+    expect(
+      (screen.getByLabelText("Token budget") as HTMLInputElement).value,
+    ).toBe("70000");
+    expect(within(field).getByText("Global default")).toBeTruthy();
+  });
+
   // CR-34-T05
   it("saves a valid change through the route and the next job resolves the new value, while an earlier snapshot keeps the old one", async () => {
     const user = userEvent.setup();

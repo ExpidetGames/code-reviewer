@@ -891,6 +891,13 @@ button {
   padding-left: 1.25rem;
 }
 
+.confirm {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .form-actions {
   display: flex;
   flex-wrap: wrap;

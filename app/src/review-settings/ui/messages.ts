@@ -4,7 +4,10 @@
 import { REVIEW_SETTING_LIMITS, type ReviewSettingField } from "../settings.ts";
 import type { ReviewSettingIssueCode } from "../validate.ts";
 import type { ReviewSettingsErrorCode } from "../errors.ts";
-import type { TransportErrorCode } from "../../ui/json-request.ts";
+import {
+  describeTransportFailure,
+  GENERIC_FAILURE,
+} from "../../ui/transport-messages.ts";
 
 const GENERIC_ISSUE = "This value is not valid.";
 const MODEL_FIELDS: readonly string[] = ["model", "fallbackModel"];
@@ -78,10 +81,7 @@ export function describeIssue(
   return hasIssueCopy(code) ? ISSUE_COPY[code](field) : GENERIC_ISSUE;
 }
 
-const SAVE_FAILURE_COPY: Record<
-  ReviewSettingsErrorCode | TransportErrorCode,
-  string
-> = {
+const SAVE_FAILURE_COPY: Record<ReviewSettingsErrorCode, string> = {
   REVIEW_SETTINGS_INVALID:
     "Some settings are not valid. Fix the marked fields and save again.",
   REVIEW_SETTINGS_REQUEST_INVALID:
@@ -93,18 +93,11 @@ const SAVE_FAILURE_COPY: Record<
     "The request was not understood. Reload the page and try again.",
   REVIEW_SETTINGS_PROJECT_NOT_FOUND:
     "This repository has no project yet. Activate it on the Projects page first.",
-  UNAUTHENTICATED: "Your session has ended. Sign in again.",
-  ACCESS_DENIED:
-    "Your GitHub account is not allowed to use this Code Reviewer instance.",
-  NETWORK_ERROR:
-    "The server could not be reached. Check your connection and try again.",
-  UNEXPECTED_RESPONSE:
-    "The server answered with something unexpected. Reload the page and try again.",
 };
 
 /** The sentence for a save (or reset) that failed as a whole. */
 export function describeSaveFailure(code: string): string {
-  return Object.hasOwn(SAVE_FAILURE_COPY, code)
-    ? SAVE_FAILURE_COPY[code as keyof typeof SAVE_FAILURE_COPY]
-    : "Something went wrong. Reload the page and try again.";
+  if (Object.hasOwn(SAVE_FAILURE_COPY, code))
+    return SAVE_FAILURE_COPY[code as ReviewSettingsErrorCode];
+  return describeTransportFailure(code) ?? GENERIC_FAILURE;
 }

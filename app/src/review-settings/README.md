@@ -150,7 +150,7 @@ wrong value is named next to its field with a sentence from `ui/messages.ts` (a 
 the answer of the server is shown the same way, including `EXCEEDS_MODEL_CONTEXT`. The estimated
 cost updates while typing (`estimateReviewCost`) and shows the `above_limit` and `cost_unknown`
 warnings and a token budget above the context window; warnings never block a save. The **fallback
-model** is stored but not sent to the runner in the MVP, and the form says so next to the field.
+model** is stored but not sent to the runner in the MVP: the form says so next to the field and the cost summary lists it as "not used yet" without an estimate or a cost warning (a context window that is too small still blocks the save, so that warning stays). A form is keyed on the server data, so a page that Next keeps mounted after a navigation starts from fresh data when it is shown again; "Use the defaults for everything" asks for a confirmation first.
 
 The claim of the runner API and the webhook intake use `service.resolveForRepository(repositoryId)`
 (`shared.ts`: `getReviewSettingsService()`), then `toRunnerSettings` and the checks above.

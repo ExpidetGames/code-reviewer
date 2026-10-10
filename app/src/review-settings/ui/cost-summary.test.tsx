@@ -56,7 +56,7 @@ describe("the cost summary", () => {
     expect(screen.getAllByText(/cannot be estimated/)).toHaveLength(2);
   });
 
-  it("warns about a fallback model on its own", () => {
+  it("lists the fallback model as not used yet, with no estimate and no cost warning", () => {
     render(
       <CostSummary
         cost={estimateReviewCost({
@@ -66,8 +66,18 @@ describe("the cost summary", () => {
       />,
     );
 
-    expect(screen.getByRole("status").textContent).toMatch(/fallback model/);
-    expect(screen.getByText(/Fallback model/)).toBeTruthy();
+    expect(screen.getByText(/not used yet, so not counted/)).toBeTruthy();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("gives an unknown fallback model no warning either", () => {
+    render(
+      <CostSummary
+        cost={estimateReviewCost({ ...base, fallbackModel: "acme/mystery-1" })}
+      />,
+    );
+
+    expect(screen.queryByRole("status")).toBeNull();
   });
 
   it("warns when the token budget is larger than the context window of the model", () => {
@@ -81,7 +91,23 @@ describe("the cost summary", () => {
       />,
     );
 
-    expect(screen.getByRole("status").textContent).toMatch(/context window/);
+    const warning = screen.getByRole("status").textContent;
+    expect(warning).toMatch(/context window/);
+    expect(warning).toMatch(/Saving is refused/);
+  });
+
+  it("still warns when the fallback model's context window is too small, because the save is refused for it too", () => {
+    render(
+      <CostSummary
+        cost={estimateReviewCost({
+          ...base,
+          fallbackModel: "deepseek/deepseek-v3.2",
+          maxTokens: 500_000,
+        })}
+      />,
+    );
+
+    expect(screen.getByRole("status").textContent).toMatch(/fallback model/);
   });
 
   it("renders a model name with HTML as text", () => {

@@ -42,6 +42,8 @@ export type ProjectService = {
   ): Promise<boolean>;
   /** Every repository with its integration, project and status, for the project list. */
   listProjects(): Promise<ProjectListEntry[]>;
+  /** One entry of the list by the id of its repository; undefined for an id the list does not have. */
+  findProject(repositoryId: string): Promise<ProjectListEntry | undefined>;
 };
 
 // A repository id is a UUID made by this app; anything else that is plausible is simply unknown.
@@ -122,6 +124,17 @@ export function createProjectService(deps: {
 
     listProjects() {
       return projects.list();
+    },
+
+    async findProject(repositoryId) {
+      // An id that cannot be one of ours is simply not found.
+      if (
+        typeof repositoryId !== "string" ||
+        repositoryId.trim() === "" ||
+        repositoryId.length > MAX_ID_LENGTH
+      )
+        return undefined;
+      return projects.find(repositoryId);
     },
   };
 }

@@ -2,7 +2,10 @@
 // GitHub App can read (plus the ones that disappeared but kept a project), with its installation,
 // its state and the status of its last run. Plain data: the components render it and the page only
 // wires the services in, so nothing here depends on Next.js.
-import type { ProjectStatus } from "../../db/repositories/projects-repository.ts";
+import type {
+  ProjectListEntry,
+  ProjectStatus,
+} from "../../db/repositories/projects-repository.ts";
 import type { ProjectService } from "../service.ts";
 
 /** The status of a run, as the jobs module names it (src/jobs). */
@@ -59,6 +62,22 @@ export function webAddress(url: string): string | null {
   }
 }
 
+function toRowView(
+  { repository, project, status }: ProjectListEntry,
+  lastRun: LastRun | null,
+): ProjectRowView {
+  return {
+    repositoryId: repository.id,
+    fullName: repository.fullName,
+    url: webAddress(repository.url),
+    installation: repository.integration.displayName,
+    status,
+    hasProject: project !== null,
+    switchedOn: project?.active ?? false,
+    lastRun,
+  };
+}
+
 export async function loadProjectList(deps: {
   projects: Pick<ProjectService, "listProjects">;
   lastRuns?: LastRunSource;
@@ -68,15 +87,17 @@ export async function loadProjectList(deps: {
     entries.map((entry) => entry.repository.id),
   );
   return {
-    rows: entries.map(({ repository, project, status }) => ({
-      repositoryId: repository.id,
-      fullName: repository.fullName,
-      url: webAddress(repository.url),
-      installation: repository.integration.displayName,
-      status,
-      hasProject: project !== null,
-      switchedOn: project?.active ?? false,
-      lastRun: lastRuns.get(repository.id) ?? null,
-    })),
+    rows: entries.map((entry) =>
+      toRowView(entry, lastRuns.get(entry.repository.id) ?? null),
+    ),
   };
+}
+
+/** One row of the list (without the status of its last run), or undefined for an unknown repository. */
+export async function loadProjectRow(
+  repositoryId: string,
+  deps: { projects: Pick<ProjectService, "findProject"> },
+): Promise<ProjectRowView | undefined> {
+  const entry = await deps.projects.findProject(repositoryId);
+  return entry === undefined ? undefined : toRowView(entry, null);
 }

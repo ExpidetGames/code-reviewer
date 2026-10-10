@@ -3,13 +3,13 @@
 // codes, never the other way round). A code written out in a sentence is a bug, so an unknown code
 // gets a generic one.
 import type { SyncErrorCode } from "../../integrations/sync/errors.ts";
-import type { TransportErrorCode } from "../../ui/json-request.ts";
+import {
+  describeTransportFailure,
+  GENERIC_FAILURE,
+} from "../../ui/transport-messages.ts";
 import type { ProjectErrorCode } from "../errors.ts";
 
-const FAILURE_COPY: Record<
-  ProjectErrorCode | SyncErrorCode | TransportErrorCode,
-  string
-> = {
+const FAILURE_COPY: Record<ProjectErrorCode | SyncErrorCode, string> = {
   PROJECT_REQUEST_INVALID:
     "The request was not understood. Reload the page and try again.",
   PROJECT_CROSS_SITE_REQUEST:
@@ -26,16 +26,7 @@ const FAILURE_COPY: Record<
     "The GitHub App installation of this repository is suspended or removed, so the repository cannot be activated.",
   SYNC_CROSS_SITE_REQUEST:
     "The request did not come from this page. Reload the page and try again.",
-  UNAUTHENTICATED: "Your session has ended. Sign in again.",
-  ACCESS_DENIED:
-    "Your GitHub account is not allowed to use this Code Reviewer instance.",
-  NETWORK_ERROR:
-    "The server could not be reached. Check your connection and try again.",
-  UNEXPECTED_RESPONSE:
-    "The server answered with something unexpected. Reload the page and try again.",
 };
-
-const GENERIC_FAILURE = "Something went wrong. Reload the page and try again.";
 
 function hasCopy(code: string): code is keyof typeof FAILURE_COPY {
   return Object.hasOwn(FAILURE_COPY, code);
@@ -43,15 +34,28 @@ function hasCopy(code: string): code is keyof typeof FAILURE_COPY {
 
 /** The sentence for the code a route answered with (or a transport code). */
 export function describeFailure(code: string): string {
-  return hasCopy(code) ? FAILURE_COPY[code] : GENERIC_FAILURE;
+  if (hasCopy(code)) return FAILURE_COPY[code];
+  return describeTransportFailure(code) ?? GENERIC_FAILURE;
 }
 
 const GENERIC_SYNC_PROBLEM = "GitHub could not be read.";
 
-// The codes of the GitHub App provider's errors (the sync reports the code of the error it met). They
-// are spelled out here because the UI may not import a provider (src/integrations/README.md, "The
-// boundary"); a code that is not listed gets the generic sentence.
-const SYNC_PROBLEM_COPY: Record<string, string> = {
+// The codes of the GitHub App provider's errors, which the sync reports (it reports the code of the
+// error it met). Spelled out here because the UI may not import a provider (src/integrations/README.md,
+// "The boundary"); `providers/github-app/sync-copy.test.ts` compares this list with the provider's
+// own, so a new provider code without copy fails there. An unlisted code gets the generic sentence.
+export const SYNC_PROBLEM_CODES = [
+  "GITHUB_APP_CONFIG_INVALID",
+  "GITHUB_APP_AUTH_FAILED",
+  "GITHUB_APP_FORBIDDEN",
+  "GITHUB_APP_NOT_FOUND",
+  "GITHUB_APP_RATE_LIMITED",
+  "GITHUB_APP_UNAVAILABLE",
+  "GITHUB_APP_REQUEST_FAILED",
+] as const;
+type SyncProblemCode = (typeof SYNC_PROBLEM_CODES)[number];
+
+const SYNC_PROBLEM_COPY: Record<SyncProblemCode, string> = {
   GITHUB_APP_CONFIG_INVALID:
     "The GitHub App settings are incomplete or not valid, so GitHub could not be asked.",
   GITHUB_APP_AUTH_FAILED:
@@ -68,7 +72,6 @@ const SYNC_PROBLEM_COPY: Record<string, string> = {
 
 /** The sentence for the stable code of one problem the sync reported; nothing is lost, only translated. */
 export function describeSyncProblem(code: string): string {
-  return Object.hasOwn(SYNC_PROBLEM_COPY, code)
-    ? (SYNC_PROBLEM_COPY[code] ?? GENERIC_SYNC_PROBLEM)
-    : GENERIC_SYNC_PROBLEM;
+  const known = SYNC_PROBLEM_CODES.find((candidate) => candidate === code);
+  return known === undefined ? GENERIC_SYNC_PROBLEM : SYNC_PROBLEM_COPY[known];
 }

@@ -257,7 +257,7 @@ describe("the settings form", () => {
     expect(save).toHaveBeenCalledWith({});
   });
 
-  it("resets a project to the defaults for everything and shows the inherited values", async () => {
+  it("resets a project to the defaults for everything after a confirmation, and shows the inherited values", async () => {
     const user = userEvent.setup();
     const { api, reset } = fakeApi({
       ok: true,
@@ -270,6 +270,10 @@ describe("the settings form", () => {
     await user.click(
       screen.getByRole("button", { name: "Use the defaults for everything" }),
     );
+    expect(reset).not.toHaveBeenCalled();
+    await user.click(
+      screen.getByRole("button", { name: "Yes, use the defaults" }),
+    );
 
     expect(reset).toHaveBeenCalledTimes(1);
     await screen.findByText(/Saved\./);
@@ -277,6 +281,109 @@ describe("the settings form", () => {
       (screen.getByLabelText("Most findings per review") as HTMLInputElement)
         .value,
     ).toBe("5");
+  });
+
+  it("does not reset anything when the person cancels the confirmation", async () => {
+    const user = userEvent.setup();
+    const { api, reset } = fakeApi();
+    render(
+      <SettingsForm initial={projectModel({ maxFindings: 9 })} api={api} />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Use the defaults for everything" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(reset).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: "Use the defaults for everything" }),
+    ).toBeTruthy();
+  });
+
+  it("takes the problem of a field away as soon as the person changes it", async () => {
+    const user = userEvent.setup();
+    render(<SettingsForm initial={projectModel()} api={fakeApi().api} />);
+    const findings = screen.getByLabelText("Most findings per review");
+    await user.clear(findings);
+    await user.type(findings, "abc");
+    await user.click(
+      screen.getByRole("button", { name: "Save project settings" }),
+    );
+    expect(screen.getByText("Enter a whole number.")).toBeTruthy();
+
+    await user.clear(findings);
+    await user.type(findings, "7");
+
+    expect(screen.queryByText("Enter a whole number.")).toBeNull();
+    expect(findings.getAttribute("aria-invalid")).toBe("false");
+  });
+
+  it("shows a problem of the server that belongs to no field, with the message at the foot", async () => {
+    const user = userEvent.setup();
+    const { api } = fakeApi({
+      ok: false,
+      status: 400,
+      code: "REVIEW_SETTINGS_INVALID",
+      issues: [{ field: "settings", code: "INVALID_TYPE" }],
+    });
+    render(<SettingsForm initial={projectModel()} api={api} />);
+
+    await user.click(
+      screen.getByRole("button", { name: "Save project settings" }),
+    );
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/Some settings are not valid/);
+    expect(alert.textContent).toMatch(/This value is not valid/);
+  });
+
+  it("locks the controls while a save is running, so no keystroke is lost", async () => {
+    const user = userEvent.setup();
+    let finish: (value: { ok: true; data: unknown }) => void = () => undefined;
+    const save = vi.fn<SettingsApi["save"]>(
+      () => new Promise((resolve) => (finish = resolve)),
+    );
+    render(<SettingsForm initial={projectModel()} api={{ save }} />);
+
+    await user.click(
+      screen.getByRole("button", { name: "Save project settings" }),
+    );
+
+    // A disabled fieldset disables its controls without touching their own `disabled` property.
+    const findings = screen.getByLabelText("Most findings per review");
+    expect(findings.matches(":disabled")).toBe(true);
+    expect(screen.getByLabelText("Model").matches(":disabled")).toBe(true);
+    finish({ ok: true, data: answerFor(projectModel()) });
+    await screen.findByText(/Saved\./);
+    expect(findings.matches(":disabled")).toBe(false);
+  });
+
+  it("names every reset button after what the person sees, never after the internal field name", async () => {
+    render(
+      <SettingsForm
+        initial={projectModel({
+          largePrChunking: false,
+          inlineKeyIssues: true,
+          autoReviewOnOpen: false,
+          autoReviewOnPush: false,
+          allowedCommands: ["review"],
+          extraInstructions: "x",
+        })}
+        api={fakeApi().api}
+      />,
+    );
+
+    const names = screen
+      .getAllByRole("button", { name: /^Use default for / })
+      .map((button) => button.getAttribute("aria-label"));
+
+    expect(names.length).toBe(6);
+    for (const name of names) expect(name).not.toMatch(/[a-z][A-Z]/);
+    expect(names).toContain(
+      "Use default for Review a large pull request in chunks",
+    );
+    expect(names).toContain("Use default for comment commands");
   });
 
   // CR-34-T05

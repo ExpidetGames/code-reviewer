@@ -262,3 +262,17 @@ describe("the lookups", () => {
     ]);
   });
 });
+
+describe("finding one project entry", () => {
+  it("returns the entry of a repository and nothing for an id that cannot be one of ours", async () => {
+    const { service, first } = await setup();
+
+    expect(await service.findProject(first.id)).toMatchObject({
+      repository: { id: first.id },
+      status: "inactive",
+    });
+    expect(await service.findProject("")).toBeUndefined();
+    expect(await service.findProject("x".repeat(129))).toBeUndefined();
+    expect(await service.findProject("no-such-repository")).toBeUndefined();
+  });
+});

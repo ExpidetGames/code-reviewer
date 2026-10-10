@@ -44,7 +44,9 @@ export function GlobalSettingsPageContent({
           Every project uses these unless it sets a value of its own on its
           settings page.
         </p>
+        {/* Keyed on the server data, see project-settings-page.tsx. */}
         <SettingsForm
+          key={JSON.stringify(data.model)}
           initial={data.model}
           {...(api === undefined ? {} : { api })}
         />
