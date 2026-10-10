@@ -74,6 +74,79 @@ export interface AllowedLoginPinsTable {
   pinned_at: string;
 }
 
+export interface IntegrationsTable {
+  id: string;
+  /** An IntegrationType (src/integrations/types.ts). */
+  type: string;
+  display_name: string;
+  /** The platform's id for the connection, for example a GitHub installation id. */
+  external_id: string;
+  /** JSON text: settings only, never a secret. */
+  config: string;
+  /** JSON text, reserved for token integrations. Null for a GitHub App. */
+  credentials: string | null;
+  webhook_secret: string | null;
+  /** An IntegrationStatus. */
+  status: string;
+  /** ISO 8601 text in UTC. */
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RepositoriesTable {
+  id: string;
+  /** The integration (for a GitHub App: the installation) that gives access to the repository. */
+  integration_id: string;
+  /** The platform's id of the repository. */
+  external_id: string;
+  /** "owner/name". */
+  full_name: string;
+  url: string;
+  /** 1 while the platform still lists the repository for the integration, 0 once it does not. */
+  active: number;
+  /** ISO 8601 text in UTC. */
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProjectsTable {
+  id: string;
+  /** The repository this project reviews; unique, so a repository has at most one project. */
+  repository_id: string;
+  /** 1 while the project is switched on, 0 after it was deactivated. */
+  active: number;
+  /** JSON text: the project's setting overrides, '{}' until some are saved. */
+  settings: string;
+  /** ISO 8601 text in UTC. */
+  created_at: string;
+  updated_at: string;
+}
+
+/** One setting of the whole instance (src/db/repositories/app-settings-repository.ts). */
+export interface AppSettingsTable {
+  /** The name of the setting, for example "review_defaults". */
+  key: string;
+  /** JSON text. */
+  value: string;
+  /** ISO 8601 text in UTC. */
+  updated_at: string;
+  /** The GitHub login of the person who saved it last, or null. */
+  updated_by: string | null;
+}
+
+export interface WebhookDeliveriesTable {
+  /** The platform's delivery id (GitHub: `X-GitHub-Delivery`). */
+  delivery_id: string;
+  /** The event name of the delivery, for example "pull_request". */
+  event: string;
+  /** A WebhookDeliveryOutcome (src/db/repositories/webhook-deliveries-repository.ts). */
+  outcome: string;
+  /** Random value of the request that owns the claim; only its owner may complete or release it. */
+  claim_token: string;
+  /** ISO 8601 text in UTC: when the current claim was made. */
+  received_at: string;
+}
+
 export interface Database {
   app_meta: AppMetaTable;
   users: UsersTable;
@@ -81,4 +154,9 @@ export interface Database {
   accounts: AccountsTable;
   verifications: VerificationsTable;
   allowed_login_pins: AllowedLoginPinsTable;
+  integrations: IntegrationsTable;
+  repositories: RepositoriesTable;
+  projects: ProjectsTable;
+  webhook_deliveries: WebhookDeliveriesTable;
+  app_settings: AppSettingsTable;
 }

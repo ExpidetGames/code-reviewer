@@ -205,6 +205,8 @@ function variablesRead(): Set<string> {
     add(source, /\benv\[\s*"([A-Z][A-Z0-9_]+)"\s*\]/g);
     // Helpers that take the environment first and the variable name second.
     add(source, /\(\s*env,\s*"([A-Z][A-Z0-9_]+)"/g);
+    // A switch whose name is kept in a constant ending in _FLAG and read as env[CONSTANT].
+    add(source, /\bconst [A-Z][A-Z0-9_]*_FLAG\s*=\s*"([A-Z][A-Z0-9_]+)"/g);
   }
   for (const file of sourceFiles(`${repoRoot}runner/src`)) {
     if (!file.endsWith(".py")) continue;
