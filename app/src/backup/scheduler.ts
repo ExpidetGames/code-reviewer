@@ -95,7 +95,7 @@ function describeOutcome(
       finishedAt: finishedAt.toISOString(),
       ok: true,
       errorCode: null,
-      message: outcome.rotationProblem,
+      rotationIncomplete: outcome.rotationProblem !== null,
       fileName: outcome.backup.fileName,
       bytes: outcome.backup.bytes,
     };
@@ -104,7 +104,7 @@ function describeOutcome(
     finishedAt: finishedAt.toISOString(),
     ok: false,
     errorCode: outcome.error.code,
-    message: outcome.error.message,
+    rotationIncomplete: false,
     fileName: null,
     bytes: null,
   };

@@ -3,18 +3,27 @@
 //
 //   write <db>   writes in a loop: each transaction inserts the same key into app_meta and
 //                app_settings; after every commit it prints the number of commits so far, one per line
+//   idle <db>    opens the database like the running app does (WAL, one read) and keeps it open,
+//                doing nothing, and prints "idle"
 //   lock <db>    takes the database for itself (exclusive locking mode, an open write) so that every
 //                other connection gets SQLITE_BUSY, and prints "locked"
 import BetterSqlite3 from "better-sqlite3";
 
 const [command, databasePath] = process.argv.slice(2);
-if (!databasePath || (command !== "write" && command !== "lock"))
-  throw new Error("Usage: backup-writer-child.ts <write|lock> <database>");
+if (
+  !databasePath ||
+  (command !== "write" && command !== "lock" && command !== "idle")
+)
+  throw new Error("Usage: backup-writer-child.ts <write|lock|idle> <database>");
 
 const sqlite = new BetterSqlite3(databasePath, { timeout: 5000 });
 sqlite.pragma("journal_mode = WAL");
 
-if (command === "lock") {
+if (command === "idle") {
+  sqlite.prepare("select count(*) from sqlite_master").get();
+  console.log("idle");
+  setInterval(() => undefined, 60_000);
+} else if (command === "lock") {
   sqlite.pragma("locking_mode = EXCLUSIVE");
   sqlite.exec("begin immediate");
   sqlite.exec(

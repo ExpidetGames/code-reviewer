@@ -1,9 +1,9 @@
 // The handler behind GET /api/backup/status: the picture of the backups for the people who run the
-// instance (schedule, target, last scheduled run, newest backup). It serves no backup file and no
-// path: a backup holds sessions and tokens and is fetched from the server's volume, never over HTTP.
+// instance (schedule, target, last scheduled run, newest backup). It serves no backup file, no path
+// and no error text, only stable error codes (the words are in the log): a backup holds sessions and tokens and is fetched from the server's volume, never over HTTP.
 // The user check is passed in so tests need no session; the route file wires the real one.
 import type { SessionUser } from "../auth/access-policy.ts";
-import { BackupError } from "./errors.ts";
+import { BackupError, type BackupErrorCode } from "./errors.ts";
 import type { BackupStatus } from "./status.ts";
 
 const NO_STORE = { "cache-control": "no-store" };
@@ -24,7 +24,7 @@ export function createBackupStatusHandler({
       return Response.json(readStatus(), { headers: NO_STORE });
     } catch (error) {
       // The only expected failure is an invalid setting; the code says which kind, nothing more.
-      const code =
+      const code: BackupErrorCode =
         error instanceof BackupError ? error.code : "BACKUP_STATUS_UNAVAILABLE";
       return Response.json({ error: code }, { status: 500, headers: NO_STORE });
     }

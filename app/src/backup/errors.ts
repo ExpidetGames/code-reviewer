@@ -2,6 +2,7 @@
 // text. Messages name paths and error codes of the operating system, never data from the database.
 export const BACKUP_ERROR_CODES = [
   "BACKUP_CONFIG_INVALID",
+  "BACKUP_STATUS_UNAVAILABLE",
   "BACKUP_SOURCE_MISSING",
   "BACKUP_SOURCE_INVALID",
   "BACKUP_SOURCE_LOCKED",

@@ -25,6 +25,7 @@ async function setup(env: Record<string, string> = {}) {
 }
 
 describe("the backup status", () => {
+  // CR-40-T14
   it("reports the newest backup, the number of backups and a healthy target", async () => {
     const { config, backupDir } = await setup();
     createBackup({
@@ -52,6 +53,7 @@ describe("the backup status", () => {
     expect(status.stale).toBe(false);
   });
 
+  // CR-40-T16
   it("flags a missing target with its error code and no backups", async () => {
     const { config, backupDir } = await setup();
 
@@ -70,6 +72,7 @@ describe("the backup status", () => {
     expect(status.stale).toBe(true);
   });
 
+  // CR-40-T14
   it("calls the backups stale when the newest is older than a day and a half", async () => {
     const { config, backupDir } = await setup();
     createBackup({
@@ -83,15 +86,24 @@ describe("the backup status", () => {
     );
   });
 
-  it("never calls the backups stale while the scheduler is switched off", async () => {
-    const { config } = await setup({ BACKUP_TIME: "off" });
+  // CR-40-T16
+  it("calls the backups stale also when the scheduler is switched off, so a failing external task shows", async () => {
+    const { config, backupDir } = await setup({ BACKUP_TIME: "off" });
 
-    const status = readBackupStatus({ config, lastRun: null, now: NOW });
+    const without = readBackupStatus({ config, lastRun: null, now: NOW });
+    createBackup({
+      databasePath: config.databasePath,
+      backupDir,
+      now: () => new Date("2026-10-10T02:30:00Z"),
+    });
+    const fresh = readBackupStatus({ config, lastRun: null, now: NOW });
 
-    expect(status.schedule).toEqual({ enabled: false, timeUtc: null });
-    expect(status.stale).toBe(false);
+    expect(without.schedule).toEqual({ enabled: false, timeUtc: null });
+    expect(without.stale).toBe(true);
+    expect(fresh.stale).toBe(false);
   });
 
+  // CR-40-T12
   it("passes the last scheduled run through and shows no directory path", async () => {
     const { config, backupDir } = await setup();
     const lastRun = {
@@ -99,7 +111,7 @@ describe("the backup status", () => {
       finishedAt: "2026-10-10T02:30:01.000Z",
       ok: false,
       errorCode: "BACKUP_TARGET_UNAVAILABLE" as const,
-      message: "The backup target does not exist.",
+      rotationIncomplete: false,
       fileName: null,
       bytes: null,
     };

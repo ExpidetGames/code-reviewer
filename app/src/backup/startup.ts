@@ -5,7 +5,7 @@
 // An invalid setting ends the start with one readable line, like the other settings of a deployment:
 // a typo must not turn into "no backups" without anybody noticing.
 import "server-only";
-import { loadBackupConfig } from "./config.ts";
+import { formatBackupTime, loadBackupConfig } from "./config.ts";
 import { assertBackupTargetUsable } from "./create-backup.ts";
 import { BackupError } from "./errors.ts";
 import { runBackupJob } from "./run-backup.ts";
@@ -58,7 +58,7 @@ export function startBackupSchedulerOnStart({
     record: recordBackupRun,
   });
   log.info(
-    `[backup] daily backup scheduled at ${String(time.hour).padStart(2, "0")}:${String(time.minute).padStart(2, "0")} UTC into ${backupDir}`,
+    `[backup] daily backup scheduled at ${formatBackupTime(time)} UTC into ${backupDir}`,
   );
   return scheduler;
 }

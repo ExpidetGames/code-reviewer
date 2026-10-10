@@ -66,7 +66,8 @@ backup succeeded: a failing backup never shrinks the history.
 
 An invalid `BACKUP_TIME` stops the start with `BACKUP_CONFIG_INVALID` (a typo must not become "no
 backups"). If the target cannot be written to when the app starts, an error line says so and the app
-keeps running; the status route shows the same problem.
+keeps running; the status route shows the same problem. `BACKUP_TIME` is read only by the scheduler:
+the `backup` and `restore` commands ignore it, so a typo there never blocks a restore.
 
 ## Where the backups are, and getting them off the server
 
@@ -105,14 +106,18 @@ one line with an error code when the backup fails, which Coolify shows as a fail
 task. Run the same command by hand with `docker compose exec app node backup/cli.ts backup`.
 
 A failed scheduled run is logged as `[backup] <CODE>: <message>` (error level) and shown by
-`GET /api/backup/status` (`lastRun`, `target`, `stale`). A page that shows this status in the settings
+`GET /api/backup/status` (`lastRun`, `target`, `stale`; only stable error codes, never paths or error
+text, which stay in the log). `stale` looks at the newest backup in the directory, whoever made it:
+with `BACKUP_TIME=off` and a Coolify task that fails every night it turns true after a day and a half. A page that shows this status in the settings
 UI does not exist yet. There is no external alerting in the MVP.
 
 ## Restore
 
 The app must be stopped: a restore replaces the file the app has open. The command checks the backup
-first (`PRAGMA integrity_check`) and stops before touching anything if it fails; otherwise the current
-database is moved aside, not deleted.
+first (`PRAGMA integrity_check`) and stops before touching anything if it fails. It also refuses
+(`RESTORE_FAILED`, "in use") when another process still has the database open, which is what a
+running app is. Otherwise the current database is moved aside, not deleted, under a name that never
+replaces an earlier one (`app.db.before-restore-<time>`, with `-2`, `-3` added when it is taken).
 
 1. Pick the backup (newest first): `ls -t /backups`. If it is on another machine, put it into the
    backup directory of the server first, owned by uid 10001 with mode `0600`.
@@ -148,19 +153,20 @@ transfer): try the next older backup. The database is unchanged in that case.
 
 ## Errors
 
-| Code                        | Meaning                                                                               |
-| --------------------------- | ------------------------------------------------------------------------------------- |
-| `BACKUP_CONFIG_INVALID`     | `BACKUP_TIME` is not `HH:MM` or `off`                                                 |
-| `BACKUP_SOURCE_MISSING`     | the database file does not exist (check `DATABASE_PATH`, is the data volume mounted?) |
-| `BACKUP_SOURCE_INVALID`     | the database file is not a SQLite database                                            |
-| `BACKUP_SOURCE_LOCKED`      | another process kept the database locked for longer than 10 seconds                   |
-| `BACKUP_TARGET_UNAVAILABLE` | the target does not exist, is not a directory or cannot be written to                 |
-| `BACKUP_TARGET_INSIDE_DATA` | the target lies inside the database's directory                                       |
-| `BACKUP_WRITE_FAILED`       | writing failed, for example a full disk; nothing was published                        |
-| `BACKUP_VERIFY_FAILED`      | the new file failed `integrity_check`; it was discarded                               |
-| `RESTORE_BACKUP_MISSING`    | the file to restore does not exist                                                    |
-| `RESTORE_BACKUP_INVALID`    | the file to restore failed `integrity_check`; nothing was changed                     |
-| `RESTORE_FAILED`            | the data directory is unusable or the swap failed; the previous database was put back |
+| Code                        | Meaning                                                                                                       |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `BACKUP_CONFIG_INVALID`     | `BACKUP_TIME` is not `HH:MM` or `off`                                                                         |
+| `BACKUP_SOURCE_MISSING`     | the database file does not exist (check `DATABASE_PATH`, is the data volume mounted?)                         |
+| `BACKUP_SOURCE_INVALID`     | the database file is not a SQLite database                                                                    |
+| `BACKUP_SOURCE_LOCKED`      | another process kept the database locked for longer than 10 seconds                                           |
+| `BACKUP_TARGET_UNAVAILABLE` | the target does not exist, is not a directory or cannot be written to                                         |
+| `BACKUP_TARGET_INSIDE_DATA` | the target lies inside the database's directory                                                               |
+| `BACKUP_WRITE_FAILED`       | writing failed, for example a full disk; nothing was published                                                |
+| `BACKUP_VERIFY_FAILED`      | the new file failed `integrity_check`; it was discarded                                                       |
+| `RESTORE_BACKUP_MISSING`    | the file to restore does not exist                                                                            |
+| `RESTORE_BACKUP_INVALID`    | the file to restore failed `integrity_check`; nothing was changed                                             |
+| `RESTORE_FAILED`            | the data directory is unusable, the database is in use, or the swap failed; the previous database is in place |
+| `BACKUP_STATUS_UNAVAILABLE` | the status route could not read the status (served instead of an error text)                                  |
 
 The command exits with 0, 1 (the job failed, one line on stderr) or 2 (wrong command line). Logs name
 paths, sizes and error codes, never data from the database. No HTTP route serves a backup file.

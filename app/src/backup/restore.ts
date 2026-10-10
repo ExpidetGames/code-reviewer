@@ -1,17 +1,21 @@
 // Puts a backup back as the live database. The app must be stopped: this replaces the file the app
-// has open.
+// has open. A database that another process still has open is refused (step 3).
 //
 // Order of events, chosen so that a problem found early changes nothing:
 //   1. the backup is checked (`PRAGMA integrity_check`); a missing or damaged one stops here,
 //   2. it is copied next to the database under a temporary name and checked again (a copy that
 //      went wrong must not become the database),
-//   3. the current database, with its -wal and -shm files, is moved aside under a name that carries
-//      the time (never deleted: if the restore was a mistake, the old data is still there),
-//   4. the copy gets the name of the database.
+//   3. the current database must not be in use (exclusive locking mode succeeds only when no other
+//      process has it open; a running app is refused),
+//   4. the current database, with its -wal and -shm files, is moved aside under a name that carries
+//      the time and never replaces an earlier one (never deleted: if the restore was a mistake, the
+//      old data is still there),
+//   5. the copy gets the name of the database.
 // The -wal and -shm of the old database must move with it: SQLite would replay a log that belongs to
-// another file into the restored one. If step 4 fails, step 3 is undone.
+// another file into the restored one. If step 5 fails, step 4 is undone.
 //
 // No `server-only` import: the command line (cli.ts) runs this code without Next.js.
+import BetterSqlite3 from "better-sqlite3";
 import { randomBytes } from "node:crypto";
 import {
   accessSync,
@@ -24,10 +28,10 @@ import {
   openSync,
   renameSync,
   statSync,
-  unlinkSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { BackupError, describeError, errorCode } from "./errors.ts";
+import { removeQuietly, renameNoOverwrite } from "./fs-util.ts";
 import { TEMP_FILE_PREFIX, TEMP_FILE_SUFFIX } from "./names.ts";
 import { integrityProblem } from "./verify.ts";
 
@@ -38,7 +42,11 @@ export type RestoreOptions = {
   databasePath: string;
   now?: () => Date;
   /** Steps a test can reach into; production code passes nothing. */
-  hooks?: { afterOldDatabaseMoved?: () => void };
+  hooks?: {
+    /** Runs before each file of the old database is moved aside. */
+    beforeMove?: (path: string) => void;
+    afterOldDatabaseMoved?: () => void;
+  };
 };
 
 export type RestoreResult = {
@@ -47,6 +55,8 @@ export type RestoreResult = {
   previousKeptAs: string | null;
 };
 
+// How long the in-use check waits for a lock before it decides the database is in use.
+const IN_USE_TIMEOUT_MS = 1000;
 const SIDE_FILES = ["", "-wal", "-shm"] as const;
 
 export function restoreBackup(options: RestoreOptions): RestoreResult {
@@ -68,7 +78,9 @@ export function restoreBackup(options: RestoreOptions): RestoreResult {
     dataDir,
     `${TEMP_FILE_PREFIX}restore-${randomBytes(6).toString("hex")}${TEMP_FILE_SUFFIX}`,
   );
-  let moved: Array<{ from: string; to: string }> = [];
+  // Owned here, filled by moveAside one rename at a time: whatever was moved before a failure is
+  // known to the undo below.
+  const moved: Move[] = [];
   try {
     copyFileSync(backupPath, temporaryPath, constants.COPYFILE_EXCL);
     const copyProblem = integrityProblem(temporaryPath);
@@ -79,8 +91,8 @@ export function restoreBackup(options: RestoreOptions): RestoreResult {
       );
     makePrivate(temporaryPath);
 
-    const stamp = stampOf(now());
-    moved = moveAside(databasePath, stamp);
+    assertNotInUse(databasePath);
+    moveAside(databasePath, stampOf(now()), moved, options.hooks?.beforeMove);
     options.hooks?.afterOldDatabaseMoved?.();
     renameSync(temporaryPath, databasePath);
     return {
@@ -89,15 +101,19 @@ export function restoreBackup(options: RestoreOptions): RestoreResult {
         moved.find((entry) => entry.from === databasePath)?.to ?? null,
     };
   } catch (error) {
-    undoMoves(moved);
+    const notUndone = undoMoves(moved);
     removeQuietly(temporaryPath);
-    throw error instanceof BackupError
-      ? error
-      : new BackupError(
-          "RESTORE_FAILED",
-          `Restoring into "${dataDir}" failed (${errorCode(error) ?? "error"}): ${describeError(error)}. The previous database was put back.`,
-          { cause: error },
-        );
+    if (error instanceof BackupError && notUndone.length === 0) throw error;
+    const reason =
+      error instanceof Error ? describeError(error) : String(error);
+    throw new BackupError(
+      "RESTORE_FAILED",
+      `Restoring into "${dataDir}" failed (${errorCode(error) ?? "error"}): ${reason}. ` +
+        (notUndone.length === 0
+          ? "The previous database is in place."
+          : `The previous database could not be put back completely; its files are: ${notUndone.map((move) => move.to).join(", ")}. Rename them back by hand before starting the app.`),
+      { cause: error },
+    );
   }
 }
 
@@ -148,35 +164,80 @@ function stampOf(at: Date): string {
     .replace(/\.\d+Z$/, "Z");
 }
 
-function moveAside(
+export type Move = { from: string; to: string };
+
+/**
+ * Fails (RESTORE_FAILED) when another process has the database open, which is what a running app
+ * is: the restore would replace the file under its feet, and its later writes would go to the old
+ * database. Exclusive locking mode asks SQLite for the one thing an open connection of another
+ * process prevents. A file that is not a database (a damaged one is a reason to restore) passes.
+ */
+function assertNotInUse(databasePath: string): void {
+  if (!existsSync(databasePath)) return;
+  let sqlite: BetterSqlite3.Database | undefined;
+  try {
+    sqlite = new BetterSqlite3(databasePath, {
+      fileMustExist: true,
+      timeout: IN_USE_TIMEOUT_MS,
+    });
+    sqlite.pragma("locking_mode = EXCLUSIVE");
+    sqlite.exec("begin immediate");
+    sqlite.prepare("select count(*) from sqlite_master").get();
+    sqlite.exec("rollback");
+  } catch (error) {
+    if (
+      errorCode(error) !== "SQLITE_BUSY" &&
+      errorCode(error) !== "SQLITE_LOCKED"
+    )
+      return;
+    throw new BackupError(
+      "RESTORE_FAILED",
+      `The database "${databasePath}" is in use by another process. Stop the app first (and the runner, if it uses the same volume), then restore. Nothing was changed.`,
+      { cause: error },
+    );
+  } finally {
+    sqlite?.close();
+  }
+}
+
+// Moves the old database and its -wal and -shm files to `<name>.before-restore-<time>`, with a
+// number added when that name is taken (two restores in one second keep both). Every rename that
+// happened is pushed to `moved` at once, so a later failure can undo the earlier ones.
+/** Exported for its tests. */
+export function moveAside(
   databasePath: string,
   stamp: string,
-): Array<{ from: string; to: string }> {
-  const moved: Array<{ from: string; to: string }> = [];
-  for (const side of SIDE_FILES) {
-    const from = `${databasePath}${side}`;
-    if (!existsSync(from)) continue;
-    const to = `${from}.before-restore-${stamp}`;
-    renameSync(from, to);
-    moved.push({ from, to });
+  moved: Move[],
+  beforeMove: ((path: string) => void) | undefined,
+): void {
+  const present = SIDE_FILES.map((side) => `${databasePath}${side}`).filter(
+    (path) => existsSync(path),
+  );
+  if (present.length === 0) return;
+  for (let number = 1; ; number += 1) {
+    const tag = `before-restore-${stamp}${number > 1 ? `-${String(number)}` : ""}`;
+    if (present.some((path) => existsSync(`${path}.${tag}`))) continue;
+    for (const from of present) {
+      beforeMove?.(from);
+      const to = `${from}.${tag}`;
+      if (!renameNoOverwrite(from, to))
+        throw new Error(`"${to}" appeared while the restore was running`);
+      moved.push({ from, to });
+    }
+    return;
   }
-  return moved;
 }
 
-function undoMoves(moved: Array<{ from: string; to: string }>): void {
-  for (const { from, to } of [...moved].reverse()) {
+/** Puts moved files back, newest move first. Returns the moves that could not be undone. */
+/** Exported for its tests. */
+export function undoMoves(moved: readonly Move[]): Move[] {
+  const failed: Move[] = [];
+  for (const move of [...moved].reverse()) {
     try {
-      renameSync(to, from);
+      renameSync(move.to, move.from);
     } catch {
-      // Nothing more can be done; the message of the original error tells where the files are.
+      failed.push(move);
     }
   }
-}
-
-function removeQuietly(path: string): void {
-  try {
-    unlinkSync(path);
-  } catch {
-    // Not created yet, or already gone.
-  }
+  return failed;
 }

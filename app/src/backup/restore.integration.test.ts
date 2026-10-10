@@ -13,10 +13,13 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { startDatabase } from "../db/startup.ts";
 import {
+  holdDatabaseOpen,
   integrityOf,
   namesIn,
   seedInstance,
+  startBackgroundWriter,
   tableCounts,
+  writerKeys,
 } from "../test-support/backup-harness.ts";
 import {
   createTestDatabase,
@@ -25,7 +28,7 @@ import {
 } from "../test-support/test-database.ts";
 import { createBackup } from "./create-backup.ts";
 import { BackupError } from "./errors.ts";
-import { restoreBackup } from "./restore.ts";
+import { moveAside, restoreBackup, undoMoves, type Move } from "./restore.ts";
 
 const NOW = new Date("2026-10-11T08:00:00Z");
 
@@ -84,16 +87,16 @@ describe("restoring a backup", () => {
   });
 
   // CR-40-T10
-  it("replaces an existing database, keeps it aside, and drops its stale write-ahead log", async () => {
+  it("replaces an existing database, keeps it aside and leaves no write-ahead log of the old one next to the new", async () => {
     const { backup, expected } = await aBackup();
     const current = await createTestDatabase();
+    await seedInstance(current.db);
+    // The app was killed while it wrote: its -wal and -shm files stay behind.
     await current.db.destroy();
-    writeFileSync(
-      `${current.config.path}-wal`,
-      "stale log of the old database",
-    );
-    writeFileSync(`${current.config.path}-shm`, "stale index");
-    const oldBytes = readFileSync(current.config.path);
+    const writer = await startBackgroundWriter(current.config.path);
+    await writer.committed(20);
+    writer.stop();
+    await new Promise((resolve) => setTimeout(resolve, 200));
 
     const result = restoreBackup({
       backupPath: backup.path,
@@ -107,15 +110,10 @@ describe("restoring a backup", () => {
     expect(result.previousKeptAs).toBe(
       `${current.config.path}.before-restore-20261011T080000Z`,
     );
-    expect(readFileSync(result.previousKeptAs ?? "").equals(oldBytes)).toBe(
-      true,
+    // Nothing of the old database is lost: what the killed app wrote is in the kept file.
+    expect(writerKeys(result.previousKeptAs ?? "").both).toBeGreaterThanOrEqual(
+      20,
     );
-    expect(namesIn(current.directory)).toEqual([
-      "app.db",
-      "app.db-shm.before-restore-20261011T080000Z",
-      "app.db-wal.before-restore-20261011T080000Z",
-      "app.db.before-restore-20261011T080000Z",
-    ]);
   });
 
   // CR-40-T11
@@ -196,6 +194,57 @@ describe("restoring a backup", () => {
     expect(namesIn(current.directory)).toEqual(["app.db"]);
   });
 
+  // CR-40-T11
+  it("keeps the database kept by an earlier restore when a second restore happens in the same second", async () => {
+    const { backup, expected } = await aBackup();
+    const current = await createTestDatabase();
+    await seedInstance(current.db);
+    await current.db.destroy();
+    const first = restoreBackup({
+      backupPath: backup.path,
+      databasePath: current.config.path,
+      now: () => NOW,
+    });
+    const keptFirst = readFileSync(first.previousKeptAs ?? "");
+
+    const second = restoreBackup({
+      backupPath: backup.path,
+      databasePath: current.config.path,
+      now: () => NOW,
+    });
+
+    expect(second.previousKeptAs).toBe(
+      `${current.config.path}.before-restore-20261011T080000Z-2`,
+    );
+    expect(readFileSync(first.previousKeptAs ?? "").equals(keptFirst)).toBe(
+      true,
+    );
+    expect(tableCounts(current.config.path)).toEqual(expected);
+  });
+
+  // CR-40-T11
+  it("refuses to replace a database that another process has open, as the running app does, and changes nothing", async () => {
+    const { backup } = await aBackup();
+    const current = await createTestDatabase();
+    await seedInstance(current.db);
+    await holdDatabaseOpen(current.config.path);
+    const before = readFileSync(current.config.path);
+    const filesBefore = namesIn(current.directory);
+
+    const error = failureOf(() =>
+      restoreBackup({
+        backupPath: backup.path,
+        databasePath: current.config.path,
+      }),
+    );
+
+    expect(error.code).toBe("RESTORE_FAILED");
+    expect(error.message).toContain("in use");
+    expect(error.message).toContain("Stop the app");
+    expect(readFileSync(current.config.path).equals(before)).toBe(true);
+    expect(namesIn(current.directory)).toEqual(filesBefore);
+  });
+
   it("refuses a data directory that does not exist", async () => {
     const { backup } = await aBackup();
     const missingDir = join(await createTestDirectory(), "nowhere", "app.db");
@@ -205,5 +254,68 @@ describe("restoring a backup", () => {
     );
 
     expect(error.code).toBe("RESTORE_FAILED");
+  });
+});
+
+describe("moving the old database aside", () => {
+  async function aDatabaseWithSideFiles() {
+    const directory = await createTestDirectory();
+    const databasePath = join(directory, "app.db");
+    writeFileSync(databasePath, "database");
+    writeFileSync(`${databasePath}-wal`, "log");
+    writeFileSync(`${databasePath}-shm`, "index");
+    return { directory, databasePath };
+  }
+
+  // CR-40-T10
+  it("moves the database, its write-ahead log and its index to one name", async () => {
+    const { directory, databasePath } = await aDatabaseWithSideFiles();
+    const moved: Move[] = [];
+
+    moveAside(databasePath, "20261011T080000Z", moved, undefined);
+
+    expect(namesIn(directory)).toEqual([
+      "app.db-shm.before-restore-20261011T080000Z",
+      "app.db-wal.before-restore-20261011T080000Z",
+      "app.db.before-restore-20261011T080000Z",
+    ]);
+    expect(moved).toHaveLength(3);
+  });
+
+  // CR-40-T11
+  it("reports the files it moved before a later rename failed, so that they can be put back", async () => {
+    const { directory, databasePath } = await aDatabaseWithSideFiles();
+    const filesBefore = namesIn(directory);
+    const moved: Move[] = [];
+
+    expect(() =>
+      moveAside(databasePath, "20261011T080000Z", moved, (path) => {
+        if (path.endsWith("-wal")) throw new Error("simulated failure");
+      }),
+    ).toThrowError("simulated failure");
+
+    // The database is already aside; the caller's list says so.
+    expect(moved.map((move) => move.from)).toEqual([databasePath]);
+    expect(undoMoves(moved)).toEqual([]);
+    expect(namesIn(directory)).toEqual(filesBefore);
+    expect(readFileSync(databasePath, "utf8")).toBe("database");
+  });
+
+  // CR-40-T11
+  it("names the files it could not put back", async () => {
+    const { directory, databasePath } = await aDatabaseWithSideFiles();
+    const moved: Move[] = [];
+    moveAside(databasePath, "20261011T080000Z", moved, undefined);
+    // Something took the old name in the meantime: renaming back onto a directory fails.
+    mkdirSync(`${databasePath}-wal`);
+    writeFileSync(join(`${databasePath}-wal`, "occupied"), "x");
+
+    const failed = undoMoves(moved);
+
+    expect(failed.map((move) => move.from)).toEqual([`${databasePath}-wal`]);
+    expect(namesIn(directory)).toContain(
+      "app.db-wal.before-restore-20261011T080000Z",
+    );
+    expect(readFileSync(databasePath, "utf8")).toBe("database");
   });
 });

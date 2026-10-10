@@ -23,7 +23,10 @@ function setting(env: Env, name: string, fallback: string): string {
   return value ? value : fallback;
 }
 
-export function loadBackupConfig(env: Env): BackupConfig {
+/** Where the database is and where the backups go: all that `backup` and `restore` need. */
+export function loadBackupPaths(
+  env: Env,
+): Pick<BackupConfig, "databasePath" | "backupDir"> {
   return {
     databasePath: setting(
       env,
@@ -31,8 +34,24 @@ export function loadBackupConfig(env: Env): BackupConfig {
       DEFAULT_DATABASE_PATH_FOR_BACKUP,
     ),
     backupDir: setting(env, "BACKUP_DIR", DEFAULT_BACKUP_DIR),
-    time: parseTime(setting(env, "BACKUP_TIME", DEFAULT_BACKUP_TIME)),
   };
+}
+
+/** When the scheduler runs. Kept apart from the paths: a typo here must not stop a restore. */
+export function loadBackupSchedule(env: Env): BackupConfig["time"] {
+  return parseTime(setting(env, "BACKUP_TIME", DEFAULT_BACKUP_TIME));
+}
+
+export function loadBackupConfig(env: Env): BackupConfig {
+  return { ...loadBackupPaths(env), time: loadBackupSchedule(env) };
+}
+
+/** "02:30" for the time of day of the schedule. */
+export function formatBackupTime(time: {
+  hour: number;
+  minute: number;
+}): string {
+  return `${String(time.hour).padStart(2, "0")}:${String(time.minute).padStart(2, "0")}`;
 }
 
 function parseTime(text: string): BackupConfig["time"] {

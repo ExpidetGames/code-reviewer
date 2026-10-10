@@ -17,6 +17,7 @@ const STATUS: BackupStatus = {
 };
 
 describe("the backup status handler", () => {
+  // CR-40-T12
   it("answers with the status and forbids caching", async () => {
     const handler = createBackupStatusHandler({
       requireUser: async () => USER,
@@ -30,6 +31,7 @@ describe("the backup status handler", () => {
     expect(await response.json()).toEqual(STATUS);
   });
 
+  // CR-40-T12
   it("reads nothing when there is no signed in user", async () => {
     const readStatus = vi.fn(() => STATUS);
     const handler = createBackupStatusHandler({
@@ -43,6 +45,7 @@ describe("the backup status handler", () => {
     expect(readStatus).not.toHaveBeenCalled();
   });
 
+  // CR-40-T12
   it("answers with a stable error code when the settings are invalid", async () => {
     const handler = createBackupStatusHandler({
       requireUser: async () => USER,
@@ -55,5 +58,22 @@ describe("the backup status handler", () => {
 
     expect(response.status).toBe(500);
     expect(await response.json()).toEqual({ error: "BACKUP_CONFIG_INVALID" });
+  });
+
+  // CR-40-T12
+  it("tells an unexpected failure by its code only, never by its text or a path", async () => {
+    const handler = createBackupStatusHandler({
+      requireUser: async () => USER,
+      readStatus: () => {
+        throw new Error('cannot read "/data/app.db": EACCES');
+      },
+    });
+
+    const response = await handler();
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      error: "BACKUP_STATUS_UNAVAILABLE",
+    });
   });
 });

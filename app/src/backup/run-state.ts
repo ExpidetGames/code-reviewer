@@ -10,10 +10,10 @@ export type BackupRunRecord = {
   startedAt: string;
   finishedAt: string;
   ok: boolean;
-  /** Set when the run failed. */
+  /** Set when the run failed. The reason in words is in the log, not here: this is served by the status route. */
   errorCode: BackupErrorCode | null;
-  /** The reason of a failure, or a note on a rotation that could not delete everything. */
-  message: string | null;
+  /** True when the backup is fine but the rotation could not delete every old backup. */
+  rotationIncomplete: boolean;
   fileName: string | null;
   bytes: number | null;
 };

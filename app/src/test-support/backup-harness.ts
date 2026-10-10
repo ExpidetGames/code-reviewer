@@ -220,12 +220,25 @@ export function writerKeys(path: string): {
  * Starts a process that takes the database for itself, so that any other connection gets
  * SQLITE_BUSY ("permanently locked"). Resolves once it holds the lock.
  */
-export async function holdDatabaseExclusively(
+export function holdDatabaseExclusively(databasePath: string): Promise<void> {
+  return startHolder("lock", databasePath);
+}
+
+/**
+ * Starts a process that has the database open and does nothing with it, which is what the running
+ * app looks like to a restore. Resolves once it is open.
+ */
+export function holdDatabaseOpen(databasePath: string): Promise<void> {
+  return startHolder("idle", databasePath);
+}
+
+async function startHolder(
+  command: "lock" | "idle",
   databasePath: string,
 ): Promise<void> {
   const child = spawn(
     process.execPath,
-    ["--no-warnings", writerScript, "lock", databasePath],
+    ["--no-warnings", writerScript, command, databasePath],
     { stdio: ["pipe", "pipe", "pipe"] },
   );
   running.add(child);
@@ -234,7 +247,7 @@ export async function holdDatabaseExclusively(
   await new Promise<void>((resolve, reject) => {
     createInterface({ input: child.stdout }).once("line", () => resolve());
     child.once("exit", (code) =>
-      reject(new Error(`lock holder exited with ${code}: ${stderr}`)),
+      reject(new Error(`${command} holder exited with ${code}: ${stderr}`)),
     );
   });
 }

@@ -4,17 +4,20 @@
 import { describe, expect, it, vi } from "vitest";
 import { BackupError } from "./errors.ts";
 import type { BackupJobOutcome } from "./run-backup.ts";
+import type { BackupRunRecord } from "./run-state.ts";
 import { nextRunAfter, startBackupScheduler } from "./scheduler.ts";
 
 const TIME = { hour: 2, minute: 30 };
 
 describe("nextRunAfter", () => {
+  // CR-40-T14
   it("is today when the time of day is still ahead", () => {
     expect(nextRunAfter(new Date("2026-10-10T01:00:00Z"), TIME)).toEqual(
       new Date("2026-10-10T02:30:00Z"),
     );
   });
 
+  // CR-40-T14
   it("is tomorrow when the time of day has passed or is right now", () => {
     expect(nextRunAfter(new Date("2026-10-10T02:30:00Z"), TIME)).toEqual(
       new Date("2026-10-11T02:30:00Z"),
@@ -24,6 +27,7 @@ describe("nextRunAfter", () => {
     );
   });
 
+  // CR-40-T14
   it("rolls over month and year ends", () => {
     expect(nextRunAfter(new Date("2026-12-31T12:00:00Z"), TIME)).toEqual(
       new Date("2027-01-01T02:30:00Z"),
@@ -75,6 +79,7 @@ function fakeTime(start: string) {
 }
 
 describe("the backup scheduler", () => {
+  // CR-40-T14
   it("arms a timer for the next run time and runs the job when it fires", () => {
     const time = fakeTime("2026-10-10T01:00:00Z");
     const run = vi.fn(successOutcome);
@@ -104,6 +109,7 @@ describe("the backup scheduler", () => {
     ]);
   });
 
+  // CR-40-T14
   it("arms the run of the next day after a run", () => {
     const time = fakeTime("2026-10-10T01:00:00Z");
     startBackupScheduler({
@@ -121,13 +127,10 @@ describe("the backup scheduler", () => {
     expect(pending[0]?.delay).toBe(24 * 60 * 60 * 1000);
   });
 
+  // CR-40-T16
   it("records a failed run with its error code and keeps the schedule", () => {
     const time = fakeTime("2026-10-10T01:00:00Z");
-    const recorded: Array<{
-      ok: boolean;
-      errorCode: string | null;
-      message: string | null;
-    }> = [];
+    const recorded: BackupRunRecord[] = [];
     startBackupScheduler({
       time: TIME,
       run: () => ({
@@ -148,12 +151,14 @@ describe("the backup scheduler", () => {
       expect.objectContaining({
         ok: false,
         errorCode: "BACKUP_TARGET_UNAVAILABLE",
-        message: "the volume is missing",
       }),
     ]);
+    // The record is served by the status route: the reason in words stays in the log.
+    expect(JSON.stringify(recorded)).not.toContain("the volume is missing");
     expect(time.timers.filter((t) => !t.cancelled)).toHaveLength(1);
   });
 
+  // CR-40-T16
   it("records a crashing run as a failure without leaking the schedule", () => {
     const time = fakeTime("2026-10-10T01:00:00Z");
     const recorded: Array<{ ok: boolean; errorCode: string | null }> = [];

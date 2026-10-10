@@ -3,7 +3,7 @@
 // restart of the app and after a backup made by hand.
 import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import type { BackupConfig } from "./config.ts";
+import { formatBackupTime, type BackupConfig } from "./config.ts";
 import { assertBackupTargetUsable } from "./create-backup.ts";
 import { BackupError, type BackupErrorCode } from "./errors.ts";
 import { parseBackupFileName } from "./names.ts";
@@ -18,7 +18,10 @@ export type BackupStatus = {
   lastRun: BackupRunRecord | null;
   newestBackup: { fileName: string; createdAt: string; bytes: number } | null;
   backupCount: number;
-  /** True when the scheduler is on and there is no backup younger than a day and a half. */
+  /**
+   * True when there is no backup younger than a day and a half, whoever makes them (the scheduler
+   * of the app or a Coolify task): the directory is the truth, a task that fails every night shows here.
+   */
   stale: boolean;
 };
 
@@ -37,9 +40,7 @@ export function readBackupStatus({
   return {
     schedule: {
       enabled,
-      timeUtc: config.time
-        ? `${String(config.time.hour).padStart(2, "0")}:${String(config.time.minute).padStart(2, "0")}`
-        : null,
+      timeUtc: config.time ? formatBackupTime(config.time) : null,
     },
     target: targetState(config),
     lastRun,
@@ -52,9 +53,8 @@ export function readBackupStatus({
       : null,
     backupCount: backups.length,
     stale:
-      enabled &&
-      (newest === undefined ||
-        now.getTime() - newest.at.getTime() > STALE_AFTER_MS),
+      newest === undefined ||
+      now.getTime() - newest.at.getTime() > STALE_AFTER_MS,
   };
 }
 

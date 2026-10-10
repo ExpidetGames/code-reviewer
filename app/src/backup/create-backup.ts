@@ -18,14 +18,10 @@ import {
   closeSync,
   constants,
   fsyncSync,
-  linkSync,
-  existsSync,
   openSync,
   readdirSync,
   realpathSync,
-  renameSync,
   statSync,
-  unlinkSync,
 } from "node:fs";
 import { basename, dirname, join, sep } from "node:path";
 import {
@@ -40,6 +36,7 @@ import {
   backupFileName,
   isTempFileName,
 } from "./names.ts";
+import { removeQuietly, renameNoOverwrite } from "./fs-util.ts";
 import { integrityProblem } from "./verify.ts";
 
 export const DEFAULT_SOURCE_BUSY_TIMEOUT_MS = 10_000;
@@ -91,7 +88,7 @@ export function createBackup(options: CreateBackupOptions): BackupResult {
       temporaryPath,
       options.busyTimeoutMs ?? DEFAULT_SOURCE_BUSY_TIMEOUT_MS,
     );
-    callHook(options.hooks?.afterWrite, temporaryPath);
+    options.hooks?.afterWrite?.(temporaryPath);
     const problem = integrityProblem(temporaryPath);
     if (problem !== null)
       throw new BackupError(
@@ -99,12 +96,14 @@ export function createBackup(options: CreateBackupOptions): BackupResult {
         `The new backup failed the integrity check and was discarded: ${problem}`,
       );
     flushToDisk(temporaryPath);
-    callHook(options.hooks?.beforePublish, temporaryPath);
+    options.hooks?.beforePublish?.(temporaryPath);
     const path = publish(temporaryPath, backupDir, createdAt);
     return {
       fileName: basename(path),
       path,
-      bytes: statSync(path).size,
+      // The path is only known at run time (the backup directory is a setting): without the comment
+      // Turbopack would trace the whole project into the standalone output.
+      bytes: statSync(/* turbopackIgnore: true */ path).size,
       createdAt,
     };
   } catch (error) {
@@ -226,13 +225,6 @@ function sourceFailureCode(code: string | undefined): BackupErrorCode {
   return "BACKUP_WRITE_FAILED";
 }
 
-function callHook(
-  hook: ((temporaryPath: string) => void) | undefined,
-  temporaryPath: string,
-): void {
-  hook?.(temporaryPath);
-}
-
 function flushToDisk(path: string): void {
   const fd = openSync(path, "r+");
   try {
@@ -242,42 +234,15 @@ function flushToDisk(path: string): void {
   }
 }
 
-// Gives the temporary file its final name without replacing anything: a hard link fails if the name
-// is taken, then the temporary name is dropped. Where the file system has no hard links, an
-// existence check and a rename do the same job.
+// Gives the temporary file its final name without replacing anything (see renameNoOverwrite); a
+// name that is taken moves on to the next sequence number.
 function publish(temporaryPath: string, backupDir: string, at: Date): string {
   for (let sequence = 1; sequence <= MAX_SEQUENCE; sequence += 1) {
     const path = join(backupDir, backupFileName(at, sequence));
-    try {
-      linkSync(temporaryPath, path);
-      unlinkSync(temporaryPath);
-      return path;
-    } catch (error) {
-      if (errorCode(error) === "EEXIST") continue;
-      if (!HARD_LINKS_UNSUPPORTED.has(errorCode(error) ?? "")) throw error;
-    }
-    if (existsSync(path)) continue;
-    renameSync(temporaryPath, path);
-    return path;
+    if (renameNoOverwrite(temporaryPath, path)) return path;
   }
   throw new BackupError(
     "BACKUP_WRITE_FAILED",
     `Could not find a free backup name for ${at.toISOString()} in "${backupDir}".`,
   );
-}
-
-const HARD_LINKS_UNSUPPORTED = new Set([
-  "EPERM",
-  "ENOTSUP",
-  "EOPNOTSUPP",
-  "ENOSYS",
-  "EXDEV",
-]);
-
-function removeQuietly(path: string): void {
-  try {
-    unlinkSync(path);
-  } catch {
-    // Already gone, or not ours to remove; the original error is what matters.
-  }
 }

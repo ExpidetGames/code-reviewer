@@ -18,6 +18,7 @@ function recorder() {
 const PRODUCTION = { NODE_ENV: "production", BACKUP_DIR: "/no/such/volume" };
 
 describe("starting the backup scheduler", () => {
+  // CR-40-T14
   it("starts nothing outside production", () => {
     const startScheduler = vi.fn();
 
@@ -31,6 +32,7 @@ describe("starting the backup scheduler", () => {
     expect(startScheduler).not.toHaveBeenCalled();
   });
 
+  // CR-40-T16
   it("starts the timer with the configured time and says so", () => {
     const stop = vi.fn();
     const startScheduler = vi.fn(() => ({ stop }));
@@ -51,6 +53,7 @@ describe("starting the backup scheduler", () => {
     );
   });
 
+  // CR-40-T16
   it("warns loudly that the target cannot be used, and still starts the timer", () => {
     const startScheduler = vi.fn(() => ({ stop: () => undefined }));
     const { lines, log } = recorder();
@@ -62,6 +65,7 @@ describe("starting the backup scheduler", () => {
     expect(startScheduler).toHaveBeenCalledTimes(1);
   });
 
+  // CR-40-T16
   it("warns that nothing is scheduled when BACKUP_TIME is off", () => {
     const startScheduler = vi.fn();
     const { lines, log } = recorder();
@@ -79,6 +83,7 @@ describe("starting the backup scheduler", () => {
     expect(startScheduler).not.toHaveBeenCalled();
   });
 
+  // CR-40-T16
   it("ends the start with one readable line when BACKUP_TIME is invalid", () => {
     const exit = vi.fn();
     const startScheduler = vi.fn();

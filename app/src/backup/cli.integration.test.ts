@@ -2,8 +2,14 @@
 // `node cli.ts backup` and `node cli.ts restore <file>`. It runs as a real process (the way it runs
 // in the container), so exit codes, output and files on disk are what is checked.
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, statSync, truncateSync } from "node:fs";
-import { join } from "node:path";
+import {
+  mkdirSync,
+  readFileSync,
+  statSync,
+  symlinkSync,
+  truncateSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { startDatabase } from "../db/startup.ts";
@@ -104,14 +110,34 @@ describe("the backup command", () => {
     expect(namesIn(target)).toEqual([]);
   });
 
-  it("exits with 1 and names the setting when BACKUP_TIME is invalid", async () => {
-    const { env } = await setup();
+  // CR-40-T08
+  it("does not care about an invalid BACKUP_TIME, which only the scheduler uses", async () => {
+    const { env, target } = await setup();
 
     const result = run(["backup"], { ...env, BACKUP_TIME: "teatime" });
 
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("BACKUP_CONFIG_INVALID");
-    expect(result.stderr).toContain("BACKUP_TIME");
+    expect(result.status).toBe(0);
+    expect(namesIn(target)).toHaveLength(1);
+  });
+
+  // CR-40-T08
+  it("really runs when started through a symlinked folder, as a scheduled task may start it", async () => {
+    const { env, target } = await setup();
+    const link = join(await createTestDirectory(), "linked-backup-folder");
+    symlinkSync(dirname(cli), link);
+
+    const result = spawnSync(
+      process.execPath,
+      ["--no-warnings", join(link, "cli.ts"), "backup"],
+      {
+        env: { NODE_ENV: "test", PATH: process.env.PATH ?? "", ...env },
+        encoding: "utf8",
+      },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("[backup] created");
+    expect(namesIn(target)).toHaveLength(1);
   });
 
   it("prints the usage and exits with 2 for an unknown command", async () => {
@@ -183,5 +209,22 @@ describe("the restore command", () => {
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("RESTORE_BACKUP_MISSING");
+  });
+
+  // CR-40-T11
+  it("restores although BACKUP_TIME is invalid, because a restore is needed exactly when things are wrong", async () => {
+    const { env } = await setup();
+    expect(run(["backup"], env).status).toBe(0);
+    const [fileName] = namesIn(env.BACKUP_DIR);
+    const databasePath = join(await createTestDirectory(), "app.db");
+
+    const result = run(["restore", join(env.BACKUP_DIR, fileName ?? "")], {
+      ...env,
+      DATABASE_PATH: databasePath,
+      BACKUP_TIME: "teatime",
+    });
+
+    expect(result.status).toBe(0);
+    expect(tableCounts(databasePath).users).toBe(2);
   });
 });
