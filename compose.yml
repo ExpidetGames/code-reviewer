@@ -41,6 +41,8 @@ services:
       # runs and shows a configuration error, and review jobs fail with a stable error code.
       LLM_PROVIDER: ${LLM_PROVIDER:-openrouter}
       LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-}
       DATABASE_BUSY_TIMEOUT_MS: ${DATABASE_BUSY_TIMEOUT_MS:-}
     healthcheck:
       # Node is in the image, curl is not. /api/health is public and reads the database. Declared

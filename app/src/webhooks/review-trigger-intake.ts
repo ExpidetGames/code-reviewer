@@ -15,8 +15,8 @@ export type ReviewTriggerSource = {
 
 export type ReviewTriggerIntake = {
   /**
-   * Takes over a trigger that came out of a verified delivery from an active integration, for which
-   * `canTrigger` said yes. Contract:
+   * Takes over a trigger that came out of a verified delivery from an active integration, for a
+   * repository with an active project, for which `canTrigger` said yes. Contract:
    *
    * - It resolves once the trigger is recorded. If it rejects, the route answers with a `5xx` and
    *   releases the delivery, so the redelivery (GitHub's "Redeliver" keeps the delivery id) arrives

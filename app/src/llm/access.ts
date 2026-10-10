@@ -1,0 +1,108 @@
+// What a job gets from the shared LLM configuration, and how a missing configuration is reported.
+//
+// The claim of the runner API calls `resolveLlmAccess` once per claim, with the environment as it is
+// at that moment (so a key that is fixed while the app runs is used by the next claim). A
+// configuration that does not work fails the job with `llm_not_configured`; the job is not handed to
+// the runner and not retried, because nothing a retry does can fix an environment variable.
+import {
+  createLlmConfig,
+  type LlmConfig,
+  type LlmConfigIssue,
+  type LlmConfigState,
+} from "./config.ts";
+
+/** The job error code of a claim that found no usable LLM configuration. */
+export const LLM_NOT_CONFIGURED_ERROR = "llm_not_configured" as const;
+
+/**
+ * The LLM part of a job: the same value as the configuration (`apiKey` is readable but not
+ * enumerable: JSON, spreads, entries and console output leave it out). Only `revealLlmAccess` hands
+ * the key out, for the runner API's claim response.
+ */
+export type LlmAccess = LlmConfig;
+
+export type LlmAccessResult =
+  | { ok: true; access: LlmAccess }
+  | {
+      ok: false;
+      errorCode: typeof LLM_NOT_CONFIGURED_ERROR;
+      /** Which variables are wrong. Names and codes only, never a value. */
+      issues: readonly LlmConfigIssue[];
+    };
+
+export const createLlmAccess = createLlmConfig;
+
+/** Stable codes of `LlmAccessError`. */
+export const LLM_ACCESS_ERROR_CODES = ["LLM_ACCESS_HAS_NO_KEY"] as const;
+export type LlmAccessErrorCode = (typeof LLM_ACCESS_ERROR_CODES)[number];
+
+export class LlmAccessError extends Error {
+  readonly code: LlmAccessErrorCode;
+  /** The message names the code's meaning only, never a value. */
+  readonly safeMessage = true as const;
+
+  constructor(code: LlmAccessErrorCode, message: string) {
+    super(message);
+    this.name = "LlmAccessError";
+    this.code = code;
+  }
+}
+
+/**
+ * A plain copy with the key included, for the one place that must send it on. Calling it is a
+ * deliberate act; do not log, store or return its result to a browser. Throws
+ * `LLM_ACCESS_HAS_NO_KEY` when there is no key, so a broken access is never sent to a runner as if
+ * it were usable (the claim fails the job instead).
+ */
+export function revealLlmAccess(access: LlmAccess): LlmAccess {
+  if (typeof access.apiKey !== "string" || access.apiKey === "")
+    throw new LlmAccessError(
+      "LLM_ACCESS_HAS_NO_KEY",
+      "The LLM access has no key to hand out.",
+    );
+  return {
+    provider: access.provider,
+    model: access.model,
+    apiKey: access.apiKey,
+    contextWindowTokens: access.contextWindowTokens,
+  };
+}
+
+export function resolveLlmAccess(state: LlmConfigState): LlmAccessResult {
+  if (state.status === "configured") return { ok: true, access: state.config };
+  return {
+    ok: false,
+    errorCode: LLM_NOT_CONFIGURED_ERROR,
+    issues: state.issues,
+  };
+}
+
+const MASK = "[redacted]";
+
+// The forms a secret takes in an error text besides the plain one: percent-encoded (in a URL),
+// escaped for JSON (in a logged body) and base64 (in an `Authorization: Basic` header or a dump).
+function forms(secret: string): string[] {
+  const jsonEscaped = JSON.stringify(secret).slice(1, -1);
+  const base64 = Buffer.from(secret, "utf8").toString("base64");
+  return [
+    ...new Set([secret, encodeURIComponent(secret), jsonEscaped, base64]),
+  ];
+}
+
+/**
+ * Replaces the secrets in a text with a mask, in the plain, percent-encoded, JSON-escaped and base64
+ * form: for example an error text a runner reports. Empty secrets are ignored. **Best effort**: a
+ * secret that was cut, split or transformed in some other way is not found. Pass every key that may
+ * be in the text: the key *handed out with the claim* of the job (it may have been rotated since)
+ * and the current one.
+ */
+export function maskSecretInText(text: string, ...secrets: string[]): string {
+  let masked = text;
+  // Longest first, so a secret that contains another one is masked as a whole.
+  const all = secrets
+    .filter((secret) => secret !== "")
+    .flatMap(forms)
+    .sort((a, b) => b.length - a.length);
+  for (const form of all) masked = masked.split(form).join(MASK);
+  return masked;
+}

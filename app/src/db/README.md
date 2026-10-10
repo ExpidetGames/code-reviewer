@@ -129,9 +129,17 @@ holds the repositories each integration can see. A repository the platform stops
 inactive (`active = 0`), never deleted; `reconcile` makes the rows of one integration match a
 complete list in one transaction.
 
+`projects` (migration `20261010190000_create_projects`, repository `projects-repository.ts`) holds
+the repositories that are reviewed: one row per repository (`repository_id` unique), created by the
+first activation, switched off with `active = 0`, never deleted; see `src/projects/README.md`.
+
 `webhook_deliveries` (migration `20261010170000_create_webhook_deliveries`, repository
 `webhook-deliveries-repository.ts`) holds the delivery ids the webhook route has accepted, so a
 redelivery produces no second trigger; rows are pruned after 7 days; see `src/webhooks/README.md`.
+
+`app_settings` (migration `20261010201500_create_app_settings`, repository `app-settings-repository.ts`) holds
+settings of the whole instance, one row per setting with a JSON value; the first is `review_defaults`, the
+global default values of the review settings (`src/review-settings/README.md`).
 
 `app_meta` (a key/value table for facts about the installation) exists to prove the setup. Product
 tables come with the tickets that need them: add the migration, the row type in `schema.ts` and the
