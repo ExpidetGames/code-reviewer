@@ -116,7 +116,7 @@ The Projects page (`src/app/(app)/projects/page.tsx`) and the settings page of o
 
 | File                           | Role                                                                                                                                                                                                                                                           |
 | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ui/list-view.ts`              | `loadProjectList` / `loadProjectRow`: one row per repository from `listProjects()` (or one from `findProject()`), with the status of its last run. `LastRunSource` is the seam for the jobs module; until it is wired the list says "No run yet".              |
+| `ui/list-view.ts`              | `loadProjectList` / `loadProjectRow`: one row per repository from `listProjects()` (or one from `findProject()`), with the status of its last run. `LastRunSource` is the seam for the jobs table (wired by `getLastRunSource()` in `src/runs/shared.ts`); without one the list says "No run yet".              |
 | `ui/project-list.tsx`          | The list: name (a link to the settings once there is a project), installation, state, last run and the switch; the empty state with the install steps (`no-repositories.tsx`).                                                                                 |
 | `ui/project-toggle.tsx`        | The switch. Calls `PUT /api/repositories/:id/project` and refreshes; a refusal is shown as a sentence (`ui/messages.ts`), never as a code. Off projects cannot be switched on while the GitHub App is not configured.                                          |
 | `ui/sync-button.tsx`           | "Sync from GitHub": `POST /api/integrations/sync`, says how many repositories are new and what went wrong at GitHub.                                                                                                                                           |
@@ -129,8 +129,9 @@ The components never touch the database: pages call the services (`getProjectSer
 address becomes a link only when it is an http(s) address. The configuration hints
 (`src/config-status/`) name the variables of a missing GitHub App setting or LLM key, never a value.
 
-**Jobs, later:** when the jobs module lands, pass a `LastRunSource` to `loadProjectsPage` in
-`projects/page.tsx` (the last job per repository); the list already renders it.
+**Last run:** `projects/page.tsx` passes `getLastRunSource()` (`src/runs/shared.ts`) to
+`loadProjectsPage`: the newest job of each repository, whatever its status, with the time it last
+changed (finished, else started, else queued). The list links it to the runs of that project.
 
 ## Testing
 

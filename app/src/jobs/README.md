@@ -4,8 +4,9 @@ A job is one requested run of a command (`review`, `improve`, `describe`, `ask`)
 The queue lives in SQLite (table `jobs`, migration `20261010191500_create_jobs`); runners take jobs
 from it through the runner API (CR-28), webhooks and the UI put jobs in. Everything goes through
 `createJobQueue` (`job-queue.ts`), which checks input and calls the jobs repository
-(`src/db/repositories/jobs-repository.ts`, the only code that touches the table). The running server
-gets its queue from `getJobQueue()` (`shared.ts`).
+(`src/db/repositories/jobs-repository.ts`, the only code that changes the table). The running server
+gets its queue from `getJobQueue()` (`shared.ts`). The pages that show runs read the table through
+`src/db/repositories/runs-repository.ts` (read only; `src/runs/README.md`).
 
 | File            | Role                                                                                                                                                                                                                              |
 | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
