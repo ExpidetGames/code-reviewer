@@ -19,7 +19,7 @@
 import "server-only";
 import type { IntegrationsRepository } from "../db/repositories/integrations-repository.ts";
 import type { RepositoriesRepository } from "../db/repositories/repositories-repository.ts";
-import { IntegrationError, hasSafeMessage } from "../integrations/errors.ts";
+import { IntegrationError } from "../integrations/errors.ts";
 import { revealGitAccess } from "../integrations/normalized.ts";
 import type { IntegrationRegistry } from "../integrations/registry.ts";
 import type { GitAccess, RepoRef } from "../integrations/types.ts";
@@ -291,7 +291,7 @@ export async function handleClaim(
       prepared = await prepare(deps, claimed);
     } catch (error) {
       deps.logger.error(
-        `[runner-api] claim runner=${runnerId} job=${claimed.job.id} failed: ${hasSafeMessage(error) ? describeError(error) : "unexpected error"}`,
+        `[runner-api] claim runner=${runnerId} job=${claimed.job.id} failed: ${describeError(error)}`,
       );
       await giveBack(deps, claimed, "claim_failed");
       return errorResponse(500, "RUNNER_INTERNAL_ERROR");

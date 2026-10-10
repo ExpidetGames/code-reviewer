@@ -125,9 +125,11 @@ checked in code review.
   for the newer one. Also check that the repository has an active project, skip drafts, debounce through
   `runAfter`, and call `discardWaitingForPr` when a pull request closes.
 - **CR-24 (projects).** Call `cancelWaitingForRepository` when a project is deactivated.
-- **CR-28/CR-29 (runner).** Until CR-31 and CR-24 are in, the intake enqueues for every repository and
+- **CR-28/CR-29 (runner).** The runner API exists (`src/runner-api/README.md`); it uses `release` for
+  "token creation failed". Until CR-31 and CR-24 are in, the intake enqueues for every repository and
   closed pull requests keep their waiting jobs. The runner API must not be enabled (or shipped) before
-  they are, or old jobs would run with paid model calls. Use `release` for "token creation failed" and
+  they are, or old jobs would run with paid model calls; its claim guard is the hook that skips jobs of
+  repositories without an active project once the projects are there. The runner (CR-29) uses `release`
   for the runner shutdown.
 - **CR-32 (comments).** The provider does not cut `args`; the queue refuses more than 10 000 characters
   (the intake drops such a trigger with a log line instead of failing the delivery). Truncate to 2000
