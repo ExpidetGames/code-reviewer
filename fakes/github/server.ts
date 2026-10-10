@@ -174,7 +174,10 @@ export async function startGithubFake(
         : undefined;
       if (bearer !== undefined) credentials.push(bearer);
 
-      const failure = takeFailure(path, url.search);
+      // The control endpoints of the test itself are not GitHub and never fail on purpose.
+      const failure = path.startsWith("/__fake/")
+        ? undefined
+        : takeFailure(path, url.search);
       if (failure?.delayMs !== undefined)
         await new Promise((resolve) => setTimeout(resolve, failure.delayMs));
       if (failure?.status !== undefined) {

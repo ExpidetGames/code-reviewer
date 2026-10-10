@@ -7,6 +7,7 @@ import {
   OCTOCAT,
   TEST_CLIENT_ID,
 } from "../../src/test-support/auth-harness.ts";
+import { TEST_APP_ID, testAppKeys } from "../../src/test-support/github-app.ts";
 import { startTestGithub } from "../../src/test-support/github-fake.ts";
 import { startGithubAppHarness } from "../../src/test-support/github-app-harness.ts";
 
@@ -74,6 +75,51 @@ describe("one fake GitHub for the sign in and the GitHub integration", () => {
     } finally {
       await signInOnly.close();
     }
+  });
+
+  it("answers 404 for the sign in paths when only the GitHub App API is switched on", async () => {
+    const appOnly = await startGithubFake({
+      appId: TEST_APP_ID,
+      publicKeyPem: testAppKeys().publicKey,
+    });
+    try {
+      for (const path of [
+        "/login/oauth/authorize?client_id=x&redirect_uri=http://localhost/cb",
+        "/user",
+        "/user/emails",
+        "/user/memberships/orgs/acme",
+        "/__fake/users",
+      ]) {
+        const response = await fetch(`${appOnly.baseUrl}${path}`);
+        expect(response.status, path).toBe(404);
+      }
+      const token = await fetch(`${appOnly.baseUrl}/login/oauth/access_token`, {
+        method: "POST",
+      });
+      expect(token.status).toBe(404);
+    } finally {
+      await appOnly.close();
+    }
+  });
+
+  // CR-43-T04
+  it("keeps its control endpoints out of the injected failures", async () => {
+    const github = await startTestGithub();
+    github.fail({ status: 503 }); // every request, any path
+
+    const health = await fetch(`${github.baseUrl}/__fake/health`);
+    const api = await fetch(`${github.baseUrl}/app/installations`);
+    const reset = await fetch(`${github.baseUrl}/__fake/reset`, {
+      method: "POST",
+    });
+
+    expect(health.status).toBe(200);
+    expect(api.status).toBe(503);
+    expect(reset.status).toBe(200);
+    // The reset cleared the failure, so the API answers normally again (401: no App JWT).
+    expect((await fetch(`${github.baseUrl}/app/installations`)).status).toBe(
+      401,
+    );
   });
 
   it("refuses half a pair of options", async () => {

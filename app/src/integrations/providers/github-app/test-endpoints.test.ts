@@ -87,6 +87,37 @@ describe("the test endpoints of GitHub", () => {
     ).toBe(explicit);
   });
 
+  // CR-43-T03
+  it("read the flag alike: surrounding whitespace is ignored, other spellings are off", () => {
+    for (const [flag, allowed] of [
+      [" true ", true],
+      ["TRUE", false],
+      ["1", false],
+    ] as const) {
+      const signIn = () =>
+        loadAuthConfig({
+          ...signInEnv,
+          GITHUB_API_BASE_URL: FAKE,
+          ALLOW_TEST_GITHUB_ENDPOINTS: flag,
+        });
+      const app = () =>
+        loadGithubAppConfig(
+          testGithubAppEnv({
+            GITHUB_API_BASE_URL: FAKE,
+            ALLOW_TEST_GITHUB_ENDPOINTS: flag,
+          }),
+        );
+
+      if (allowed) {
+        expect(signIn().github.apiBaseUrl).toBe(FAKE);
+        expect(app().apiBaseUrl).toBe(FAKE);
+      } else {
+        expect(signIn).toThrow("ALLOW_TEST_GITHUB_ENDPOINTS");
+        expect(app).toThrow();
+      }
+    }
+  });
+
   it("no longer know the old name GITHUB_API_BASE", () => {
     const config = loadAuthConfig({ ...signInEnv, GITHUB_API_BASE: FAKE });
 

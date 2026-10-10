@@ -93,7 +93,7 @@ github.fail({
   pathIncludes: "/installation/repositories",
   status: 503,
   times: 1,
-}); // or delayMs, headers, any path
+}); // or delayMs, headers; any path except the /__fake/* control endpoints
 github.fail({
   pathIncludes: "/app/installations",
   responseDelayMs: 300,
