@@ -87,14 +87,16 @@ Reading:
 - **DeepSeek V4.1 Flash is below the estimate**: 38.3k input tokens (factor 1.20, against about 31.5k for V3.2 in
   CR-44), but the billed cost is far lower than the list price times the tokens. List price for the two large
   runs would be 0.0164 and 0.0153 USD; the reported costs are 0.0082 and 0.0019 USD. The same effect shows on the
-  other runs (the medium run 1 would be 0.0114 USD at list price and cost 0.0063). The most likely explanation is
-  cached input tokens billed at a lower price when the same prompt is sent again within minutes (unverified: the
-  runner result has no cache field). It matters for how the costs below are read: **DeepSeek's cost depends on
-  whether the prompt was cached**, in real use a single review of a new pull request will probably cost closer
-  to the list price. At list price DeepSeek would cost about 0.015 USD for the large pull request (estimate
-  0.0132, measured tokens 0.0151), still a fraction of the limit.
+  other runs (the medium run 1 would be 0.0114 USD at list price and cost 0.0063). **The cause is unknown.**
+  Cached input tokens billed at a lower price would be one hypothesis, but it does not explain the numbers: several
+  runs cost less than the list price of their output tokens alone (large run 2: 3,125 output tokens are 0.0038 USD
+  at list price, the run cost 0.0019 USD), and the runner result has no cache field. It was not investigated
+  further. It matters for how the costs below are read: the measured DeepSeek costs are what OpenRouter charged,
+  but they may be lower than what a later review of another pull request costs. At list price DeepSeek would cost
+  about 0.015 USD for the large pull request (estimate 0.0132, measured tokens 0.0151), still a fraction of the
+  limit.
 - The reported cost agrees with the real bill: the sum of the reported costs (1.0059 USD) is 1 percent above the
-  increase of OpenRouter's key usage counter over the whole ticket (0.9967 USD). For Opus the cost equals list
+  increase of OpenRouter's key usage counter over the whole ticket (0.997 USD). For Opus the cost equals list
   price times tokens exactly.
 
 ## Budget and plan (CR-48-T02, T03, T04)
@@ -106,11 +108,11 @@ Reading:
 
 Projection after the pilot: Opus input tokens scale from the pilot (small about 4.5k, medium about 11.9k, large
 54.7k) and output about 0.5k to 1.8k tokens: a small review about 0.03 USD, a medium one about 0.08 USD, the large
-one 0.24 USD, so the full plan of 9 runs is about 0.92 USD (2 x 0.03 + 5 x 0.08 + 2 x 0.24). DeepSeek about 0.05
-USD. Total about 0.97 USD, and 1.12 USD with the 15 percent margin, below 2.00 USD. **No run had to be cut**, the
+one 0.24 USD, so the full plan of 9 runs is about 0.94 USD (2 x 0.03 + 5 x 0.08 + 2 x 0.24). DeepSeek about 0.05
+USD. Total about 0.99 USD, and 1.14 USD with the 15 percent margin, below 2.00 USD. **No run had to be cut**, the
 full plan of 9 runs per model ran. The running total was tracked after every run (every cost read from the result
 JSON, together with a check that the next run could not cross 2.00 USD); the end result is 1.006 USD, the
-projection was within 4 percent.
+projection was within 2 percent.
 
 | Item | USD |
 |---|---|
@@ -118,7 +120,7 @@ projection was within 4 percent.
 | 9 runs `deepseek/deepseek-v4.1-flash` | 0.0467 |
 | **Total (CR-48-T04)** | **1.0059** |
 
-The five DeepSeek runs on the medium pull request that could not be scored are included in the total (0.0314
+The five DeepSeek runs on the medium pull request that could not be scored are included in the total (0.0316
 USD). No other paid call was made. A few attempts to start runs or to edit the playground were refused by the
 sandbox of this work session before they started and cost nothing.
 
@@ -172,12 +174,10 @@ scorable.
 Reading: Opus finds #2 B in every run and #2 C in four of five, like Sonnet, but #2 A only in two of five runs
 (Sonnet and Haiku four of five). Opus therefore ends below Sonnet on the medium pull request even though it is
 the larger, more expensive model. #1 and #3 are found by every model that was scored there, as in CR-44. For
-#2 A the finding that names the problem directly came in two runs; in the other three runs Opus reported the
-missing range checks only for the import of coupon definitions, which does not name the problem itself and is
-not counted.
+#2 A: found in two of five runs (one of them borderline, see below), not found in the other three.
 
 Notes on borderline calls: one. In Opus medium run 4 (not a required run) #2 A is named in one sentence of a
-finding about the coupon import, and is counted as found like the comparable calls in CR-44; strict counting
+finding about something else, and is counted as found like the comparable calls in CR-44; strict counting
 gives 10 of 15 instead of 11. The required-run total (12 of 14) does not depend on it.
 
 ### Medium pull request: DeepSeek runs not scorable
@@ -200,10 +200,8 @@ pull request). The runner reports `ok: true` for such a run, which is a risk for
 
 ### False positives (CR-48-T04 of the CR-44 list)
 
-None in the 18 runs. Both models made remarks beyond the planted problems that are real (an inconsistency in how
-the engine reports oversized amounts, extra remarks about the same code areas of #1 and #3); like in CR-44 they
-count as neither hit nor false positive. Two DeepSeek findings on #1 B are hedged ("if empty orders are possible"),
-they name the problem and count as found.
+None in the 18 runs. Both models also made remarks beyond the planted problems that are real; like in CR-44 they
+count as neither hit nor false positive.
 
 ### Failures
 
@@ -250,15 +248,15 @@ medium pull request not scorable) were measured with the CR-44 method; the defau
 `anthropic/claude-haiku-5.5`. Re-measure when PR-Agent, the prompts or the model list change."
 
 Limits of this test: the same as in CR-44 (three small playground pull requests, one language, two to five
-runs per cell, one manual judge), plus the missing DeepSeek medium cell, and DeepSeek's cost depends on prompt
-caching, which was probably active during these back-to-back runs.
+runs per cell, one manual judge), plus the missing DeepSeek medium cell, and the unexplained gap between DeepSeek's
+reported cost and its list price (see "Model ids and prices").
 
 ## Test cases
 
 | Case | Result |
 |---|---|
 | CR-48-T01 | Section "Model ids and prices": both ids exist at OpenRouter (`anthropic/claude-opus-5.5`, `deepseek/deepseek-v4.1-flash`), prices and the estimate are in the report, written before the first paid run. |
-| CR-48-T02 | Pilot of each model on the large pull request (Opus 0.2419 USD, DeepSeek 0.0082 USD), measured cost, projection of the full plan (about 0.97 USD, 1.12 USD with margin). |
+| CR-48-T02 | Pilot of each model on the large pull request (Opus 0.2419 USD, DeepSeek 0.0082 USD), measured cost, projection of the full plan (about 0.99 USD, 1.14 USD with margin). |
 | CR-48-T03 | Full plan of CR-44 (2 runs per pull request, 5 on the medium one) ran for both models, nothing cut; results in the same tables as CR-44. One cell (DeepSeek, medium pull request) is marked as not scorable and explained. |
 | CR-48-T04 | Total spend 1.0059 USD (limit 2.00 USD), per model and in total in "Budget and plan". |
 | CR-48-T05 | Section "Recommendation": the default stays `anthropic/claude-haiku-5.5`. |
