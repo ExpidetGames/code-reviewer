@@ -10,6 +10,9 @@
 #
 # Every setting is read from the environment of this command or from `.env` (see .env.example for
 # what each one means). No secret is written in this file.
+#
+# On Coolify use compose.coolify.yml instead (docs/deployment-coolify.md): same services, but built
+# from the repository and without a published port.
 name: code-reviewer
 
 services:
@@ -47,6 +50,7 @@ services:
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-}
       LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-}
+      REVIEW_DEBOUNCE_SECONDS: ${REVIEW_DEBOUNCE_SECONDS:-}
       DATABASE_BUSY_TIMEOUT_MS: ${DATABASE_BUSY_TIMEOUT_MS:-}
       # When the app backs up the database every day (HH:MM, UTC), or "off". Empty: the default.
       BACKUP_TIME: ${BACKUP_TIME:-}

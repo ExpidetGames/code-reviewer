@@ -1,0 +1,104 @@
+# Code Reviewer on Coolify. This is the Compose file of a Coolify "Docker Compose" application that is
+# built from this repository (Docker Compose Location: /compose.coolify.yml). The step by step guide
+# is docs/deployment-coolify.md; read it before changing anything here.
+#
+# How it differs from compose.yml (the file for one machine without a proxy), and why:
+#   - The images are built on the Coolify server from the checkout (build:), not pulled from GHCR:
+#     the GHCR packages are private, and a registry login on the server would be one more long lived
+#     credential. A token that expires there also breaks Coolify's own pulls from ghcr.io.
+#   - No host port is published (no ports: key). Coolify's proxy reaches the app over the Docker network; the domain
+#     goes into Coolify's "Domains" field of the service app with the port, https://<domain>:3000.
+#     A published host port would bypass the proxy (and its TLS).
+#   - BETTER_AUTH_URL has no default: it must be the public https address, and Coolify refuses to
+#     deploy while a required variable (written with :? after its name) is empty.
+#   - Every value is a reference to a variable. Coolify turns each reference into a variable under
+#     "Environment Variables"; no value is written in this file.
+#
+# Everything else (services, volumes, restart policy, health check, runner wiring) is the same as in
+# compose.yml. app/src/ci/coolify-compose.test.ts fails when the two files drift apart.
+services:
+  app:
+    build:
+      context: app
+    restart: unless-stopped
+    expose:
+      - "3000"
+    volumes:
+      # The SQLite database (/data/app.db). Survives a redeploy; deleted only when the volume is.
+      - data:/data
+      # The daily backups (BACKUP_DIR=/backups, fixed by the image), apart from the data. To get them
+      # off the server see docs/deployment-coolify.md.
+      - backups:/backups
+    environment:
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:?}
+      GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:?}
+      GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET:?}
+      ALLOWED_GITHUB_LOGINS: ${ALLOWED_GITHUB_LOGINS:-}
+      ALLOWED_GITHUB_ORG: ${ALLOWED_GITHUB_ORG:-}
+      GITHUB_APP_ID: ${GITHUB_APP_ID:?}
+      GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:?}
+      GITHUB_APP_WEBHOOK_SECRET: ${GITHUB_APP_WEBHOOK_SECRET:?}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:?}
+      # The runner presents the same token; both services read the one variable.
+      RUNNER_TOKEN: ${RUNNER_TOKEN:?}
+      # One shared LLM access for the team. Not needed for the stack to start: without a key the app
+      # runs and shows a configuration error, and review jobs fail with a stable error code.
+      LLM_PROVIDER: ${LLM_PROVIDER:-openrouter}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-}
+      REVIEW_DEBOUNCE_SECONDS: ${REVIEW_DEBOUNCE_SECONDS:-}
+      DATABASE_BUSY_TIMEOUT_MS: ${DATABASE_BUSY_TIMEOUT_MS:-}
+      # When the app backs up the database every day (HH:MM, UTC), or "off". Empty: the default.
+      BACKUP_TIME: ${BACKUP_TIME:-}
+    healthcheck:
+      # Node is in the image, curl is not. /api/health is public and reads the database. A Compose
+      # health check is the only kind Coolify uses for a Compose application.
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  runner:
+    build:
+      context: runner
+    restart: unless-stopped
+    # No port and no domain: the runner only talks to the app, over the Docker network.
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      APP_URL: http://app:3000
+      RUNNER_TOKEN: ${RUNNER_TOKEN:?}
+    # PLACEHOLDER until the job loop exists (CR-29), the same one as in compose.yml. CR-29 deletes
+    # `entrypoint` from both files so that the image's own entry point, the real loop, runs.
+    entrypoint:
+      - python
+      - -u
+      - -c
+      - |
+        import os, signal, sys, time, urllib.request
+        signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+        base = os.environ["APP_URL"].rstrip("/")
+        print(f"runner placeholder (no job loop yet): watching {base}")
+        connected = None
+        while True:
+            try:
+                with urllib.request.urlopen(base + "/api/health", timeout=5) as answer:
+                    now = answer.status == 200
+            except Exception:
+                now = False
+            if now != connected:
+                connected = now
+                print(f"connected to {base}" if now else f"cannot reach {base}, retrying")
+            time.sleep(5)
+
+volumes:
+  data:
+  backups:
