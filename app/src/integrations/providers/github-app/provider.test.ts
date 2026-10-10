@@ -384,13 +384,29 @@ describe("translating comment deliveries", () => {
       expect(await eventOf(fixture)).toMatchObject({ kind: "ignored" });
   });
 
-  it("ignores commands on a closed pull request and comments written by a bot", async () => {
+  it("ignores commands on a closed pull request", async () => {
     expect(await eventOf("issue_comment.created.closed")).toMatchObject({
       kind: "ignored",
     });
-    expect(await eventOf("issue_comment.created.bot")).toMatchObject({
-      kind: "ignored",
+  });
+
+  // CR-32-T10
+  it("ignores a comment written by a bot even when the bot has write access", async () => {
+    const { client, provider } = setup({
+      permissions: {
+        "acme/widgets#bob": "write",
+        "acme/widgets#code-reviewer-test[bot]": "write",
+      },
     });
+
+    const event = await provider.parseEvent(
+      integration,
+      delivery("issue_comment.created.bot"),
+    );
+
+    expect(event).toMatchObject({ kind: "ignored" });
+    // The type of the sender stops it before anybody asks GitHub about the bot.
+    expect(client.calls).toEqual([]);
   });
 
   it("asks GitHub nothing for a commenter who cannot have write access", async () => {

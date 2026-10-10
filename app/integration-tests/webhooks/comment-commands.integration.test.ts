@@ -324,7 +324,13 @@ describe("who may start a command", () => {
   ])(
     "creates no job for a comment of the app's own bot that %s",
     async (_name, body) => {
-      const { queue, send, outcome, writesToGithub } = await start();
+      const { h, queue, send, outcome, writesToGithub } = await start();
+      // The bot has write access on GitHub too, so only its type can keep it out.
+      h.fake.setCollaboratorPermission(
+        "acme/widgets",
+        "code-reviewer-test[bot]",
+        "write",
+      );
 
       const response = await send(
         comment("issue_comment.created.bot", { body }),
