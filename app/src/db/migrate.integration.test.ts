@@ -62,7 +62,7 @@ describe("the migrations of both epics", () => {
       "20261010190000_create_projects",
       "20261010191500_create_jobs",
       "20261010201500_create_app_settings",
-      "20261011090000_add_job_comment_id",
+      "20261011090000_create_job_comments",
     ]);
   });
 
@@ -105,6 +105,7 @@ describe("starting the database", () => {
       "app_meta",
       "app_settings",
       "integrations",
+      "job_comments",
       "jobs",
       "kysely_migration",
       "kysely_migration_lock",

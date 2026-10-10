@@ -38,10 +38,13 @@ reported).
 
 1. **Same delivery.** A job with the same `delivery_id` exists: it is returned (`same_delivery`). This
    makes the webhook route's claim and the enqueue safe to repeat.
-   **Same comment.** A job with the same `comment_id` in the repository exists, whatever became of
-   it: it is returned (`same_comment`). GitHub's delivery id is not covered by the signature, so a
-   captured signed comment replayed under a new delivery id would otherwise run its command again
-   once the first job has finished. Jobs that do not come from a comment have no comment id.
+   **Same comment.** The comment (`commentId`, a `comment` job) is in `job_comments` already: the job
+   that answered it is returned (`same_comment`), whatever became of that job. GitHub's delivery id is
+   not covered by the signature, so a captured signed comment replayed under a new delivery id would
+   otherwise run its command again once the first job has finished. `job_comments` has one row per
+   (repository, comment) and names the job that answers it. The row is written for every comment that
+   gets an answer: for the job it created, and for the equal job it found already waiting or running
+   (`already_active`), so the replay of that second comment is recognised later too.
 2. **Automatic jobs** (`trigger_kind = webhook`): one per (repository, pull request, head commit,
    command) while it is waiting, running, succeeded or failed (`same_head`). A superseded or cancelled
    job frees the slot, so a commit that comes back (a force push to an old state) is reviewed again.
@@ -58,8 +61,8 @@ reported).
 `run_after` is `now` unless the caller passes a later time (the debounce of `synchronize` is policy and
 is decided by the webhook handler's trigger policy, CR-31). A manual job is due at once.
 
-Unique indexes enforce the promises even if the code were wrong: one job per delivery id, one job per
-comment of a repository (partial, where `comment_id` is set; migration `20261011090000_add_job_comment_id`),
+Unique indexes enforce the promises even if the code were wrong: one job per delivery id, one answer
+per comment of a repository (the primary key of `job_comments`, migration `20261011090000_create_job_comments`),
 one automatic job per head commit and command in the slot-holding statuses, one running job per pull
 request.
 

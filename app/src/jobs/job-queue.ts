@@ -31,6 +31,9 @@ export type JobQueue = {
    * Creates a job, or returns the one that makes a new job unnecessary.
    *
    * - The same delivery id enqueued twice gives the first job back (`same_delivery`).
+   * - The same comment (`commentId`) of a repository enqueued twice, under any delivery id, gives
+   *   the job that answered it back (`same_comment`), whatever became of that job. A comment is
+   *   recorded with the job that answers it, also when that job existed already (`already_active`).
    * - Automatic (`webhook`) jobs: one per repository, pull request, head commit and command, as long
    *   as that job is waiting, running or finished (`same_head`). A new automatic job replaces the
    *   waiting jobs of the same pull request and command (they become `superseded`); a running job

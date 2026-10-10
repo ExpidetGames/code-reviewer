@@ -349,15 +349,18 @@ export function createGithubAppWebhookHandler(
     const trigger = event.trigger;
     let runAfter: Date | null = null;
 
+    // The settings of the project decide for a command (which ones people may use) and for an
+    // automatic trigger (the policy below).
+    const settings = await automatic.settingsFor(
+      integration.id,
+      trigger.repo.externalId,
+    );
+    if (settings === undefined) return "project_not_active";
+
     // A comment command is not subject to the policy for automatic reviews (drafts, the automatic
     // switches, the debounce): a person asked for it. The project decides which commands people may
     // use at all.
     if (trigger.kind === "command") {
-      const settings = await automatic.settingsFor(
-        integration.id,
-        trigger.repo.externalId,
-      );
-      if (settings === undefined) return "project_not_active";
       if (!isCommandAllowed(settings, trigger.command)) {
         // Names the command, never the arguments: they are the user's words.
         logger.info(
@@ -367,11 +370,6 @@ export function createGithubAppWebhookHandler(
       }
     } else {
       // The trigger policy for pull request events.
-      const settings = await automatic.settingsFor(
-        integration.id,
-        trigger.repo.externalId,
-      );
-      if (settings === undefined) return "project_not_active";
       const decision = decideAutomaticTrigger({
         trigger,
         settings,

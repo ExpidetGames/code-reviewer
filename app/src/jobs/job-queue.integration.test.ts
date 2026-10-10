@@ -39,7 +39,6 @@ describe("enqueueing a job", () => {
       triggerKind: "webhook",
       actorLogin: "octocat",
       deliveryId: "delivery-1",
-      commentId: null,
       status: "queued",
       runAfter: T0.toISOString(),
       attempts: 0,
@@ -1322,20 +1321,33 @@ describe("listing jobs with a limit", () => {
 });
 
 describe("a job that comes from a comment", () => {
+  async function recordedComments(
+    fixture: Awaited<ReturnType<typeof createJobQueueFixture>>,
+  ) {
+    return fixture.db
+      .selectFrom("job_comments")
+      .select(["repository_id", "comment_id", "job_id"])
+      .orderBy("comment_id")
+      .execute();
+  }
+
   // CR-32-T12
-  it("stores the comment it came from", async () => {
+  it("records the comment it came from", async () => {
     const fixture = await createJobQueueFixture();
 
     const job = await fixture.enqueueNew({
       triggerKind: "comment",
       commentId: "99001",
     });
+    await fixture.enqueueNew({ headSha: sha("b") });
 
-    expect(job.commentId).toBe("99001");
-    expect((await fixture.queue.get(job.id))?.commentId).toBe("99001");
-    expect((await fixture.enqueueNew({ headSha: sha("b") })).commentId).toBe(
-      null,
-    );
+    expect(await recordedComments(fixture)).toEqual([
+      {
+        repository_id: fixture.repositoryId,
+        comment_id: "99001",
+        job_id: job.id,
+      },
+    ]);
   });
 
   // CR-32-T12
@@ -1389,6 +1401,44 @@ describe("a job that comes from a comment", () => {
   });
 
   // CR-32-T12
+  it("is recorded too when a second comment finds the same command still waiting, so its replay creates nothing later", async () => {
+    const fixture = await createJobQueueFixture();
+    const first = await fixture.enqueueNew({
+      triggerKind: "comment",
+      commentId: "99001",
+    });
+
+    const second = await fixture.enqueue({
+      triggerKind: "comment",
+      commentId: "99002",
+    });
+    const claimed = await fixture.queue.claimNext("runner-a");
+    await fixture.queue.complete(first.id, claimed?.leaseToken ?? "", {
+      ok: true,
+      result: {},
+    });
+    const replayOfSecond = await fixture.enqueue({
+      triggerKind: "comment",
+      commentId: "99002",
+    });
+
+    expect(second).toMatchObject({
+      status: "existing",
+      reason: "already_active",
+      job: { id: first.id },
+    });
+    expect(replayOfSecond).toMatchObject({
+      status: "existing",
+      reason: "same_comment",
+      job: { id: first.id },
+    });
+    expect(
+      (await recordedComments(fixture)).map((row) => row.comment_id),
+    ).toEqual(["99001", "99002"]);
+    expect(await fixture.queue.list()).toHaveLength(1);
+  });
+
+  // CR-32-T12
   it("is created for another comment asking for the same thing, once the first job has finished", async () => {
     const fixture = await createJobQueueFixture();
     const first = await fixture.enqueueNew({
@@ -1422,22 +1472,21 @@ describe("a job that comes from a comment", () => {
     expect(other.status).toBe("created");
   });
 
-  it("is refused by the database too when the same comment gets a second job", async () => {
+  it("is refused by the database too when a comment is recorded twice", async () => {
     const fixture = await createJobQueueFixture();
     const first = await fixture.enqueueNew({
       triggerKind: "comment",
       commentId: "99001",
     });
-    const stored = await fixture.db
-      .selectFrom("jobs")
-      .selectAll()
-      .where("id", "=", first.id)
-      .executeTakeFirstOrThrow();
 
     await expect(
       fixture.db
-        .insertInto("jobs")
-        .values({ ...stored, id: "another-id", delivery_id: "other" })
+        .insertInto("job_comments")
+        .values({
+          repository_id: fixture.repositoryId,
+          comment_id: "99001",
+          job_id: first.id,
+        })
         .execute(),
     ).rejects.toThrow(/UNIQUE/);
   });

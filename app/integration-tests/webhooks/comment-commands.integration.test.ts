@@ -137,7 +137,6 @@ describe("a command in a comment", () => {
         args: "",
         triggerKind: "comment",
         actorLogin: "bob",
-        commentId: "99001",
         prNumber: 7,
         headSha: FIXTURE_HEAD_SHA,
         status: "queued",
@@ -180,6 +179,23 @@ describe("a command in a comment", () => {
       expect(await queue.list()).toMatchObject([{ command, args: "" }]);
     },
   );
+
+  it("replaces markdown images and links to images in a question, so the runner is never made to fetch them", async () => {
+    const { queue, send } = await start();
+
+    await send(
+      comment("issue_comment.created.ask", {
+        body: "/ask is ![image](http://169.254.169.254/latest/meta-data/) and https://evil.test/a.PNG?x=1 fine?",
+      }),
+    );
+
+    expect(await queue.list()).toMatchObject([
+      {
+        command: "ask",
+        args: "is [image link removed] and [image link removed] fine?",
+      },
+    ]);
+  });
 
   it("cuts a question over 2000 characters and says so in the job", async () => {
     const { queue, send, logLines } = await start();

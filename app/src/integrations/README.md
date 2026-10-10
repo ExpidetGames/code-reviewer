@@ -175,7 +175,8 @@ How the interface is met:
   - `issue_comment` `created` on an open pull request becomes a `command` trigger when the text starts
     with `/review`, `/improve`, `/describe` or `/ask` (leading whitespace and any case allowed; the
     word must end there, so `/reviewer` is nothing). `comment-command.ts` is the one parser: only
-    `/ask` takes text (the rest of the comment, trimmed, at most 2000 characters; a longer question
+    `/ask` takes text (the rest of the comment, trimmed, markdown images and links to images replaced by
+    `[image link removed]`, at most 2000 UTF-16 units; a longer question
     is cut and ends with a note, and `/ask` without a question is no command); text after any other
     command is dropped, because PR-Agent would read it as options. The trigger carries the id of the
     comment (`commentId`), and the head commit, which a comment delivery does not carry, is read

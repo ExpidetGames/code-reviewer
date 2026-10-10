@@ -124,6 +124,9 @@ export function fakeIntegration(
   };
 }
 
+// Every comment without an id of its own gets a new one, so two comments never look like one.
+let commentCounter = 0;
+
 const COMMAND_PATTERN =
   /^\s*\/(review|improve|describe|ask)(?=\s|$)\s*([\s\S]*)$/i;
 
@@ -267,7 +270,7 @@ export function fakeIntegrationProvider(
             kind: "command",
             command: match[1]!.toLowerCase() as "review",
             args: (match[2] ?? "").trim(),
-            commentId: event.comment?.id ?? "comment-1",
+            commentId: event.comment?.id ?? `comment-${(commentCounter += 1)}`,
           },
         };
       }

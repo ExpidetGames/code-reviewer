@@ -177,11 +177,16 @@ rules, in the order they are applied:
 
 Replays: the same delivery id is a `duplicate` (the route). The same comment under another delivery id
 (the signature does not cover the delivery id) finds the job of the comment, whatever became of it:
-the queue stores the comment id and refuses a second job for it (`same_comment`, see `src/jobs/README.md`).
+the queue records the comment id with the job that answers it and refuses a second job for it (`same_comment`, see `src/jobs/README.md`).
 A second comment with the same command is a new job unless an equal one is still waiting or running.
 
-The question is untrusted input. It is cut to 2000 characters (the job ends with a note when that
-happened), travels as the job's `args`, is handed to the runner as exactly one argument of an `ask`
+The question is untrusted input. Markdown images and links to images are replaced by
+`[image link removed]` first: PR-Agent's `/ask` downloads the first one it finds from the runner (a
+HEAD request with redirects, and a failure is posted back with the address), which would let a user
+make the runner request an address of their choice. The runner removes them again from the question it
+receives (`runner/src/code_reviewer_runner/question_images.py`); both sides must give the results in
+`fakes/fixtures/ask-question-images.json`. The question is then cut to 2000 UTF-16 units, never inside
+a surrogate pair (the job ends with a note when that happened), travels as the job's `args`, is handed to the runner as exactly one argument of an `ask`
 job (the runner API refuses an `ask` job without one and sends no arguments for any other command),
 and is never put into settings or environment variables. It is never logged. No reply is posted for
 a refused command: the app only reacts through the review it posts when the job has run.
