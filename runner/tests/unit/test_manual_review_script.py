@@ -6,6 +6,7 @@ import importlib.util
 import json
 import subprocess
 import sys
+import urllib.error
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
@@ -257,8 +258,12 @@ def test_the_script_records_the_run_and_never_writes_a_secret_to_disk(
     assert TOKEN not in written and API_KEY not in written
 
 
+@pytest.mark.parametrize("secret", [TOKEN, API_KEY], ids=["installation token", "llm key"])
 def test_a_comment_that_contains_a_secret_is_not_written_to_disk(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    secret: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     script = load_script()
     for name in script.REQUIRED_ENV:
@@ -268,7 +273,7 @@ def test_a_comment_that_contains_a_secret_is_not_written_to_disk(
     monkeypatch.setattr(script, "start_runner", fake_runner(stdout))
 
     def leaking_fetch(token: str, comment_url: str | None) -> str | None:
-        return f"leak {API_KEY}"
+        return f"leak {secret}"
 
     monkeypatch.setattr(script, "fetch_comment_body", leaking_fetch)
 
@@ -276,7 +281,7 @@ def test_a_comment_that_contains_a_secret_is_not_written_to_disk(
 
     assert code == 2
     assert list(tmp_path.iterdir()) == []
-    assert API_KEY not in capsys.readouterr().out
+    assert secret not in capsys.readouterr().out
 
 
 def test_a_record_dir_needs_a_label() -> None:
@@ -284,3 +289,86 @@ def test_a_record_dir_needs_a_label() -> None:
 
     with pytest.raises(SystemExit):
         script.main(["--yes", "--record-dir", "somewhere"])
+
+
+@pytest.mark.parametrize("label", ["../escape", "a/b", ".hidden", "with space"])
+def test_a_bad_label_is_refused_before_anything_is_paid_for(
+    label: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    script = load_script()
+    for name in script.REQUIRED_ENV:
+        monkeypatch.setenv(name, "1")
+
+    def must_not_run(*args: Any) -> None:
+        raise AssertionError("must not be called with a bad label")
+
+    monkeypatch.setattr(script, "mint_installation_token", must_not_run)
+    monkeypatch.setattr(script, "start_runner", must_not_run)
+
+    with pytest.raises(SystemExit):
+        script.main(["--yes", "--record-dir", str(tmp_path), "--label", label])
+
+
+@pytest.mark.parametrize("existing", ["run-c.json", "run-c.comment.md"])
+def test_a_label_that_is_already_recorded_is_refused_before_the_run_and_never_overwritten(
+    existing: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    script = load_script()
+    for name in script.REQUIRED_ENV:
+        monkeypatch.setenv(name, "1")
+    (tmp_path / existing).write_text("earlier evidence")
+
+    def must_not_run(*args: Any) -> None:
+        raise AssertionError("must not be called when the label is taken")
+
+    monkeypatch.setattr(script, "mint_installation_token", must_not_run)
+    monkeypatch.setattr(script, "start_runner", must_not_run)
+
+    with pytest.raises(SystemExit):
+        script.main(["--yes", "--record-dir", str(tmp_path), "--label", "run-c"])
+    with pytest.raises(SystemExit):
+        script.write_record(
+            tmp_path,
+            label="run-c",
+            pr_url=script.DEFAULT_PR_URL,
+            model="v/m",
+            result={},
+            wall_seconds=1.0,
+            comment_body="new",
+        )
+
+    assert (tmp_path / existing).read_text() == "earlier evidence"
+
+
+def test_the_result_is_printed_and_recorded_even_if_the_comment_cannot_be_read(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    script = load_script()
+    for name in script.REQUIRED_ENV:
+        monkeypatch.setenv(name, API_KEY if name == "OPENROUTER_API_KEY" else "1")
+    monkeypatch.setattr(script, "mint_installation_token", fixed_token)
+    url = f"{script.DEFAULT_PR_URL}#issuecomment-9"
+    stdout = json.dumps(
+        {
+            "ok": True,
+            "durationMs": 5,
+            "commentUrl": url,
+            "errorCode": None,
+            "usage": {"costUsd": 0.01},
+        }
+    )
+    monkeypatch.setattr(script, "start_runner", fake_runner(stdout))
+
+    def failing_fetch(token: str, comment_url: str | None) -> str | None:
+        raise urllib.error.URLError("github is down")
+
+    monkeypatch.setattr(script, "fetch_comment_body", failing_fetch)
+
+    code = script.main(["--yes", "--record-dir", str(tmp_path), "--label", "run-d"])
+
+    printed = capsys.readouterr().out
+    assert code == 0
+    assert '"costUsd": 0.01' in printed
+    assert "comment text was not saved" in printed
+    assert json.loads((tmp_path / "run-d.json").read_text())["result"]["ok"] is True
+    assert not (tmp_path / "run-d.comment.md").exists()

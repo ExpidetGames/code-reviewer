@@ -5,18 +5,26 @@ command `review`, installation token, models through OpenRouter. Everything belo
 `runner/scripts/manual_review.py` (extended in this ticket with `--record-dir` and `--label`, see
 "Method"). The customer limit is at most 0.10 USD per review on average.
 
+## Decision
+
+Decided by the project lead on 2026-10-10 on the basis of this report: the default review model is
+**`anthropic/claude-haiku-5.5`**, **`anthropic/claude-sonnet-5.5`** is the per-project alternative (with the
+CR-25 warning above 0.10 USD estimated), and **`openai/gpt-5.4-mini`** is the second alternative. Re-measure when
+PR-Agent, the prompts or the model list change.
+
 ## Result in short
 
-- **Recommended default: `anthropic/claude-haiku-5.5`.** Average 0.0027 USD per review (largest 0.0052 USD),
+- **Default: `anthropic/claude-haiku-5.5`.** Average 0.0027 USD per review (largest 0.0052 USD),
   about 23 s per review, no failed run, no false positive. It found both planted problems of the small
   and of the large pull request in every run and, on the hard medium pull request, 9 of 15 planted
   problems in five runs. It is about 6 times cheaper than GPT-5.4 mini, 2.4 times cheaper than the DeepSeek reference
   and 18 times cheaper than Sonnet.
 - **Alternative 1 (best quality, highest cost): `anthropic/claude-sonnet-5.5`.** Found the most planted
   problems (13 of 14 in the two required runs, 13 of 15 on the medium pull request in five runs), average
-  0.049 USD per review, **but 0.1004 USD for the large pull request**, i.e. slightly over the limit for a
-  single large review, although the average over the three sizes is half of the limit. Good as a
-  per-project override for important repositories, where the warning of CR-25 (above 0.10 USD estimated) applies.
+  0.049 USD per review, **but 0.1004 USD for the large pull request** (about 0.12 USD when the estimate uses
+  the Claude tokenizer factor), i.e. over the limit for a single large review, although the average over the
+  three sizes is half of the limit. Good as a per-project override for important repositories, where the warning
+  of CR-25 (above 0.10 USD estimated) applies.
 - **Alternative 2 (other vendor): `openai/gpt-5.4-mini`.** Average 0.015 USD, 34 s, no failure, no false
   positive, finds the problems of the small and large pull request but only 6 of 15 on the medium one.
 - **Not recommended:** `google/gemini-3.8-flash` (finds the fewest planted problems, 1 of 15 on the medium pull
@@ -77,21 +85,29 @@ models with at least 64k context whose price for the assumed large review (32,00
 output tokens) is below 0.10 USD, strong coding or general models of different vendors that are not tiny:
 Anthropic, Google, OpenAI and the DeepSeek reference. Prices are USD per million tokens.
 
-| Model id | Vendor | Input | Output | Estimate large review: 32k in + 3k out | Below 0.10 USD? |
-|---|---|---|---|---|---|
-| `deepseek/deepseek-v3.2` (reference) | DeepSeek | 0.259 | 0.80 | 0.0083 + 0.0024 = **0.0107** | yes |
-| `google/gemini-3.8-flash` | Google | 0.75 | 3.75 | 0.0240 + 0.0113 = **0.0353** | yes |
-| `openai/gpt-5.4-mini` | OpenAI | 0.75 | 4.50 | 0.0240 + 0.0135 = **0.0375** | yes |
-| `anthropic/claude-sonnet-5.5` | Anthropic | 2.00 | 10.00 | 0.0640 + 0.0300 = **0.0940** | yes, barely |
-| `anthropic/claude-haiku-5.5` (supplementary) | Anthropic | 0.10 | 0.50 | 0.0032 + 0.0015 = **0.0047** | yes |
+| Model id | Vendor | Input | Output | Estimate large review: 32k in + 3k out | Estimate with tokenizer factor | Measured, large PR (avg of 2) |
+|---|---|---|---|---|---|---|
+| `deepseek/deepseek-v3.2` (reference) | DeepSeek | 0.259 | 0.80 | 0.0083 + 0.0024 = **0.0107** | factor 1.0: 0.0107 | 0.0100 |
+| `google/gemini-3.8-flash` | Google | 0.75 | 3.75 | 0.0240 + 0.0113 = **0.0353** | factor 1.3 (41.6k in): 0.0425 | 0.0472 |
+| `openai/gpt-5.4-mini` | OpenAI | 0.75 | 4.50 | 0.0240 + 0.0135 = **0.0375** | factor 1.0: 0.0375 | 0.0186 |
+| `anthropic/claude-sonnet-5.5` | Anthropic | 2.00 | 10.00 | 0.0640 + 0.0300 = **0.0940** | factor 1.4 (44.8k in): **0.1196, above 0.10** | 0.1003 |
+| `anthropic/claude-haiku-5.5` (supplementary) | Anthropic | 0.10 | 0.50 | 0.0032 + 0.0015 = **0.0047** | factor 1.4 (44.8k in): 0.0060 | 0.0051 |
 
 Formula: `32,000 x input price / 1,000,000 + 3,000 x output price / 1,000,000`. The estimate for the large pull
 request is the one that matters for the limit, small and medium reviews cost less.
-Measured against the estimate (large pull request, average of two runs): DeepSeek 0.0100, Gemini 0.0472,
-GPT-5.4 mini 0.0186, Haiku 0.0051 (all as estimated or lower), **Sonnet 0.1003, above the estimate**,
-because Claude counts the same diff as 45k tokens instead of 32k. So for Sonnet "below 10 cent" holds in
-the estimate and is missed by 0.4 percent in the measurement. Reasoning models also bill their thinking as
-output tokens, which the estimate of 3k output tokens does not cover (Gemini used 2k to 14k output tokens).
+
+The plain estimate (32k in) is wrong for models whose tokenizer counts the same pruned diff higher: PR-Agent
+cuts the large diff to 32k tokens by its own count, but Claude sees 44.8k to 45.0k tokens (factor 1.4) and
+Gemini 41.0k (factor 1.3); DeepSeek and GPT-5.4 mini see about 30.5k to 31.5k (factor 1.0). With the factor
+the large-pull-request estimate for **Sonnet is 0.1196 USD, above the limit**: T01 ("every candidate is below
+10 cent for a large pull request") holds for the plain estimate but **not for Sonnet once the tokenizer is
+taken into account**. The measured 0.1003 USD is only that low because Sonnet wrote about 1k output tokens
+instead of the assumed 3k. Measured against the plain estimate (large pull request, average of two runs):
+DeepSeek 0.0100 and GPT-5.4 mini 0.0186 are below it; **Haiku 0.0051 (estimate 0.0047) and Gemini 0.0472
+(estimate 0.0353, plus 34 percent) are above it, and Sonnet 0.1003 (estimate 0.0940) as well**. Haiku and
+Sonnet through the tokenizer, Gemini mainly through reasoning tokens, which are billed as output tokens and
+which the estimate of 3k output tokens does not cover (Gemini used 2k to 14k output tokens). For CR-25's
+estimator: use the factor per vendor, and warn above 0.10 USD for Sonnet.
 
 Other models below the limit that were not tried (budget and time, not a judgement): for example
 `moonshotai/kimi-k2.7-code` (0.0315), `qwen/qwen3-coder-next` (0.0062), `mistralai/devstral-2512` (0.0188),
@@ -112,7 +128,7 @@ request sizes is not known).
 | `deepseek/deepseek-v3.2` (reference) | 2 of 4 | 2 of 6 | 4 of 4 | 8 of 14 | 0 | 1 (`llm_output_invalid`) | 0.0066 / 0.0104 | 96 / 157 |
 | `google/gemini-3.8-flash` | 2 of 4 | 0 of 6 | 4 of 4 | 6 of 14 | 0 | 0 | 0.0355 / 0.0610 | 51 / 98 |
 
-Duration is over the successful runs (DeepSeek over all six: 90 s average). Cost per size (average of the two runs, USD):
+Durations are over the successful runs (DeepSeek over all six runs: 90 s average). Cost per size (average of the two runs, USD):
 
 | Model | Small (#1) | Medium (#2) | Large (#3) |
 |---|---|---|---|
@@ -124,11 +140,10 @@ Duration is over the successful runs (DeepSeek over all six: 90 s average). Cost
 
 ### Per planted problem type (CR-44-T03)
 
-The planted problems, by type only: **small #1** (A) an off-by-one in a top-N helper, (B) a missing empty-input
-check in a summary helper; **medium #2** (A) a rule without range validation of its percentage, (B) a JSON
-import without error handling or shape validation, (C) a test without any assertion; **large #3** (A) a unit
-mismatch in a price calculation, (B) a duplicate identifier in one of 60 generated data files. "Found" is
-runs with the problem named, out of the runs. The medium pull request is shown for all five runs.
+The planted problems are labeled neutrally on purpose (the repository is public, the playground pull requests
+should stay a blind benchmark): **#1** A and B, **#2** A, B and C, **#3** A and B. The descriptions are kept in
+the private notes. "Found" is runs with the problem named, out of the runs. The medium pull request is shown for
+all five runs.
 
 | Model | #1 A | #1 B | #2 A (5 runs) | #2 B (5 runs) | #2 C (5 runs) | #3 A | #3 B |
 |---|---|---|---|---|---|---|---|
@@ -138,41 +153,40 @@ runs with the problem named, out of the runs. The medium pull request is shown f
 | `deepseek/deepseek-v3.2` | 1 of 2 (1 run failed) | 1 of 2 (1 run failed) | 2 of 5 | 2 of 5 | 0 of 5 | 2 of 2 | 2 of 2 |
 | `google/gemini-3.8-flash` | 2 of 2 | 0 of 2 | 0 of 5 | 0 of 5 | 1 of 5 | 2 of 2 | 2 of 2 |
 
-Reading: the large pull request (a tax unit error and a duplicate id) is found by every model every time;
-the small one by all but Gemini (never the empty-input crash). The medium pull request separates the models:
-only Claude finds the unvalidated JSON import and the test without assertion with any regularity; the
-percentage range check is found by Claude and GPT-5.4 mini in four of five runs. Hit rates over the five runs
-of the medium pull request (of 15): Sonnet 13, Haiku 9, GPT-5.4 mini 6, DeepSeek 4, Gemini 1.
-Related smaller problem of the medium pull request (an unparseable expiry date makes a coupon never expire): named by
-Sonnet in all five runs, by Haiku in three, by DeepSeek in two and by none of the others.
+Reading: #3 is found by every model every time; #1 by all but Gemini (never #1 B). The medium pull request
+separates the models. Only Sonnet finds #2 B regularly (5 of 5); Haiku, the default, finds #2 A and #2 C
+(4 of 5 each) but #2 B in only 1 of 5 runs, fewer than GPT-5.4 mini and DeepSeek (2 of 5 each). #2 A is found by
+Sonnet, Haiku and GPT-5.4 mini in four of five runs. Hit rates over the five runs of the medium pull request
+(of 15): Sonnet 13, Haiku 9, GPT-5.4 mini 6, DeepSeek 4, Gemini 1. A smaller secondary problem on #2 (D) was named
+by Sonnet in all five runs, by Haiku in three, by DeepSeek in two and by none of the others (not counted in the
+hit rates).
 
-Notes on borderline calls: Sonnet's second medium run names the percentage rule only in one sentence ("unlike
-`bulkDiscount`, coupon and percentage rules do no range validation"), counted as found; Haiku's fifth medium run names the
-import's missing validation in one sentence, counted as found. If both are not counted, Sonnet has 12 and Haiku 8
-of 15.
+Notes on borderline calls (counted as found, each named in only one sentence of a finding about something else):
+Sonnet medium run 2 and run 4 for #2 A, and Haiku medium run 5 for #2 B. Strict counting without these three
+gives Sonnet 11 and Haiku 8 of 15; the ranking does not change.
 
 ### False positives (CR-44-T04)
 
 One false positive in all 45 runs:
 
-- `anthropic/claude-sonnet-5.5`, medium pull request, run 1: "stacked percentages add rather than compound ... this is
-  undocumented". The behavior is documented in the engine's doc comment ("all applicable discounts are added
-  up"), and adding is a design choice, so the finding points to no real problem.
+- `anthropic/claude-sonnet-5.5`, medium pull request, run 1: a remark on the stacking mode of the discount engine
+  whose "undocumented" half is wrong, because the engine's own doc comment describes the behavior. The same
+  finding contains a second, valid point (the allocation of a cap depends on the order of the rules), so it is
+  only partly a false positive; it is counted as one.
 
-Judged as real problems that were not planted, therefore no false positives: the discount in "best-only" mode is
-not capped to the subtotal while the total is (named by every model in some runs; real, since the reported
-discount can exceed the subtotal), a weak assertion in the small pull request's test (Sonnet, Haiku), a coupon
-with both `percent` and `amountCents` (DeepSeek), negative discount amounts lowering the total (Sonnet, Haiku).
-Findings that were inaccurate in wording but right in substance, such as DeepSeek's tax finding saying the rates
-"represent percentages" in one run, were not counted as false positives.
+Real problems that were not planted are counted as neither hit nor false positive: several models reported
+inconsistencies in the discount engine's handling of oversized or negative amounts (named by every model in some
+runs), and Sonnet and Haiku also pointed to a weak assertion in the test of #1. Findings that were inaccurate in
+wording but right in substance (one DeepSeek finding on #3 A words a detail of the data wrongly) were not counted
+as false positives.
 
 ### Failures (CR-44-T05)
 
 | Model | Run | Error code | What happened | Cost |
 |---|---|---|---|---|
-| `deepseek/deepseek-v3.2` | #1 run 1 | `llm_output_invalid` | The model answered the review in Chinese prose instead of the YAML structure; PR-Agent could not parse it, no review was published and it posted a "Failed to review PR" comment on the pull request. The same pull request reviewed again was fine. | 0.0047 |
+| `deepseek/deepseek-v3.2` | #1 run 1 | `llm_output_invalid` | The model put Chinese reasoning text into a field of its YAML answer (`start_line:` followed by Chinese prose), which broke parsing; PR-Agent could not parse the answer, no review was published and it posted a "Failed to review PR" comment on the pull request. The same pull request reviewed again was fine. | 0.0047 |
 
-All other 32 runs ended with `ok: true` and a review comment. The log of another DeepSeek run shows the
+All other 44 runs (29 of the 30 required runs) ended with `ok: true` and a review comment. The log of another DeepSeek run shows the
 warning "Review output failed schema validation" (the review was still published), and one DeepSeek run of the
 medium pull request published a review without any finding ("No major issues detected"), counted as a run with
 0 hits, not as a failure. The failure rate is 1 of 6 required runs for DeepSeek and 0 of 6 for every other
@@ -190,24 +204,24 @@ contains no secret.
 ## Observations worth keeping
 
 - **Claude tokenizer:** the large pull request, pruned to 32k tokens by PR-Agent, is 45k tokens for Claude. A
-  price estimate with 32k input tokens underestimates a Claude review by 40 percent on the input side. For
-  CR-25's estimate use a factor of 1.4 for Claude models (or take the prompt tokens from the result's `usage`
-  after the first runs).
+  price estimate with 32k input tokens is 29 percent below the real input of a Claude review (the real input is
+  40 percent above the estimate). For CR-25's estimate use a factor of 1.4 on the input tokens for Claude models,
+  1.3 for Gemini (or take the prompt tokens from the result's `usage` after the first runs).
 - **Reasoning tokens decide the cost of Gemini:** the medium pull request cost 0.049 USD with Gemini 3.8 Flash
   (8k to 14k output tokens) against 0.002 USD with Haiku, which gave better findings. A cheap per-token price
   does not mean a cheap review; the default model has to be judged on the measured cost of a review.
 - **Speed:** Claude models answered in 14 to 34 s, GPT-5.4 mini in 15 to 54 s, Gemini 21 to 98 s, DeepSeek
   58 to 157 s. For the wait time in the UI the Claude models are the best.
-- **Variance:** the same model on the same pull request found different problems in different runs (Haiku and
-  GPT on the medium one, 1 to 3 of 3). Two runs show the tendency, not a stable rate; the follow-up of CR-11
+- **Variance:** the same model on the same pull request found different problems in different runs (Haiku found 1 to 3 of 3 and
+  GPT-5.4 mini 0 to 2 of 3 on the medium one). Two runs show the tendency, not a stable rate; the follow-up of CR-11
   (give earlier findings to the model) does not change that.
 
-## Recommendation (CR-44-T07)
+## Recommendation and decision (CR-44-T07)
 
 | Role | Model id | Why |
 |---|---|---|
 | **Default** | `anthropic/claude-haiku-5.5` | Within the limit by a wide margin (0.0027 USD average, 0.0052 USD largest, about 5 percent of the limit even for a large review), 23 s, no failure and no false positive in 9 runs, both problems of the small and the large pull request in every run, 9 of 15 on the hard medium pull request. |
-| Alternative for important repositories | `anthropic/claude-sonnet-5.5` | Best quality in this test (13 of 14, medium 13 of 15). Average 0.049 USD, but 0.100 USD for a large pull request, so a project override must show the warning of CR-25 and a large review can exceed the limit by a hair. |
+| Alternative for important repositories | `anthropic/claude-sonnet-5.5` | Best quality in this test (13 of 14, medium 13 of 15). Average 0.049 USD, but 0.100 USD measured and about 0.12 USD estimated with the tokenizer factor for a large pull request, so a project override must show the warning of CR-25 and a large review can exceed the limit. |
 | Alternative from another vendor | `openai/gpt-5.4-mini` | 0.015 USD average, 0.026 USD largest, no failure, finds the easy and the large problems, weaker on the medium pull request (6 of 15). |
 
 Exact OpenRouter ids: `anthropic/claude-haiku-5.5`, `anthropic/claude-sonnet-5.5`, `openai/gpt-5.4-mini`;
@@ -219,10 +233,11 @@ about 4 of 15 planted problems on the medium pull request at 18 times the averag
 difference is worth the money is the customer's decision per project; the default should be the model that
 always stays under the limit.
 
-Proposed entry for the decision log: "Default review model is `anthropic/claude-haiku-5.5` via OpenRouter
-(CR-44, measured 0.0027 USD average per review on the playground pull requests, limit 0.10 USD). Per-project override
-allowed; alternatives `anthropic/claude-sonnet-5.5` and `openai/gpt-5.4-mini`. Re-measure when PR-Agent, the
-prompts or the model list change." The project lead records it (the log lives outside this repository).
+Decision log entry (decided by the project lead, see "Decision" above): "Default review model is
+`anthropic/claude-haiku-5.5` via OpenRouter (CR-44, measured 0.0027 USD average per review on the playground
+pull requests, limit 0.10 USD). Per-project override allowed; alternatives `anthropic/claude-sonnet-5.5` and
+`openai/gpt-5.4-mini`. Re-measure when PR-Agent, the prompts or the model list change." The log itself lives
+outside this repository.
 
 Limits of this test: three small playground pull requests with planted problems, one language (TypeScript),
 two to five runs per cell, one judge (manual). It ranks the models for this kind of problem; it does not
@@ -232,13 +247,13 @@ measure how many problems a model finds in a real, large codebase.
 
 | Case | Result |
 |---|---|
-| CR-44-T01 | Section "Candidates and price calculation": every candidate is below 0.10 USD for the assumed large review in the estimate (Sonnet 0.094); the measured Sonnet review of the large pull request was 0.1003 USD. |
+| CR-44-T01 | Section "Candidates and price calculation": every candidate is below 0.10 USD for the plain estimate of the large review (Sonnet 0.094). With the tokenizer factor Sonnet is about 0.12 USD, so T01 is **not met for Sonnet** (measured 0.1003 USD); the other four stay under the limit in both estimates. |
 | CR-44-T02 | 45 recorded reviews (5 models x 3 pull requests x 2 runs = 30, plus runs 3 to 5 of the medium pull request for each model = 15). The appendix lists every run with its result values; all runs of a pull request point to the same comment link, because the comment is edited in place. The comment text of every run was saved right after the run (outside the repository), the result JSON of every run too. |
 | CR-44-T03 | Hit rate per model and pull request and per planted problem type above. |
 | CR-44-T04 | False positives per model above (one in total, judged and justified). |
 | CR-44-T05 | Failures per model with error code above (one: `llm_output_invalid`). |
 | CR-44-T06 | Scan of all records, runner output and this report: no secret. |
-| CR-44-T07 | Recommendation with the default, two alternatives and a proposed decision log entry. |
+| CR-44-T07 | Recommendation with the default, two alternatives and the decision log entry (decided by the project lead). |
 
 ## Commands
 
