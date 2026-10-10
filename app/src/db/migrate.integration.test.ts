@@ -101,6 +101,7 @@ describe("starting the database", () => {
       "allowed_login_pins",
       "app_meta",
       "integrations",
+      "jobs",
       "kysely_migration",
       "kysely_migration_lock",
       "repositories",

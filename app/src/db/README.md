@@ -133,6 +133,11 @@ complete list in one transaction.
 `webhook-deliveries-repository.ts`) holds the delivery ids the webhook route has accepted, so a
 redelivery produces no second trigger; rows are pruned after 7 days; see `src/webhooks/README.md`.
 
+`jobs` (migration `20261010191500_create_jobs`, repository `jobs-repository.ts`, claim in
+`jobs-claim.ts`) is the job queue; the rules (dedupe, supersession, leases, attempts, timeouts) are
+in `src/jobs/README.md`. `jobs-claim.ts` holds the one statement written for SQLite (see its head
+comment); everything else is query builder code.
+
 `app_meta` (a key/value table for facts about the installation) exists to prove the setup. Product
 tables come with the tickets that need them: add the migration, the row type in `schema.ts` and the
 repository in the same change.

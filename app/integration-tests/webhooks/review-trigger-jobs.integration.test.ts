@@ -1,0 +1,217 @@
+// Pins down how a verified delivery ends up in the job queue: through the real webhook handler, the
+// real GitHub App provider, the real queue and a real SQLite file. The intake is a thin mapping from
+// a trigger to a job; what the queue does with it (supersede, dedupe) is covered in
+// src/jobs/job-queue.integration.test.ts, so these tests only show that the pieces are connected and
+// that a redelivery or a replay produces no second job.
+import { describe, expect, it } from "vitest";
+import { webhookFixture } from "../../../fakes/github/webhooks.ts";
+import { createRepositoriesRepository } from "../../src/db/repositories/repositories-repository.ts";
+import { createIntegrationRegistry } from "../../src/integrations/registry.ts";
+import { createJobQueue } from "../../src/jobs/job-queue.ts";
+import { startWebhookHarness } from "../../src/test-support/webhook-harness.ts";
+import { TEST_WEBHOOK_SECRET } from "../../src/test-support/github-app.ts";
+import { webhookDelivery } from "../../../fakes/github/webhooks.ts";
+import { createGithubAppWebhookHandler } from "../../src/webhooks/github-app-handler.ts";
+import { createJobQueueReviewTriggerIntake } from "../../src/webhooks/job-queue-intake.ts";
+
+const OPENED_HEAD = "1f3a5c7e9b2d4f60a8c1e3b5d7f90a2c4e6b8d01";
+const NEW_HEAD = "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00";
+
+type PullRequestPayload = { pull_request: { head: { sha: string } } };
+
+function withHeadSha(fixture: string, sha: string): PullRequestPayload {
+  const payload = webhookFixture(fixture) as unknown as PullRequestPayload;
+  payload.pull_request.head.sha = sha;
+  return payload;
+}
+
+/** The webhook harness with the job queue intake instead of the recording one. */
+async function startHarness() {
+  const h = await startWebhookHarness();
+  const queue = createJobQueue(h.db);
+  const repositories = createRepositoriesRepository(h.db);
+  const logLines: string[] = [];
+  const intake = createJobQueueReviewTriggerIntake({
+    queue,
+    repositories,
+    logger: {
+      info: (line) => logLines.push(line),
+      error: (line) => logLines.push(line),
+    },
+  });
+  const handler = createGithubAppWebhookHandler({
+    registry: createIntegrationRegistry({ github_app: h.provider }),
+    integrations: h.integrations,
+    deliveries: h.deliveries,
+    sync: h.sync,
+    intake,
+    logger: { info: () => undefined, error: () => undefined },
+  });
+  const send = (
+    fixture: string,
+    options: { deliveryId?: string; payload?: unknown } = {},
+  ) =>
+    handler(
+      webhookDelivery({
+        event: fixture.split(".")[0] as string,
+        payload: (options.payload ?? webhookFixture(fixture)) as never,
+        secret: TEST_WEBHOOK_SECRET,
+        ...(options.deliveryId === undefined
+          ? {}
+          : { deliveryId: options.deliveryId }),
+      }),
+    );
+  return { h, queue, intake, send, logLines };
+}
+
+function addOpenPullRequest(h: Awaited<ReturnType<typeof startHarness>>["h"]) {
+  h.fake.addPullRequest("acme/widgets", {
+    number: 7,
+    title: "Add widget caching",
+    state: "open",
+    headSha: OPENED_HEAD,
+    headRef: "feature/caching",
+    baseRef: "main",
+    author: { login: "alice", id: 1001 },
+  });
+}
+
+describe("a pull request delivery with the job queue behind the route", () => {
+  it("creates one waiting review job for the opened pull request that is due at once", async () => {
+    const { h, queue, send } = await startHarness();
+    await h.seedInstallation();
+
+    const response = await send("pull_request.opened", { deliveryId: "d-1" });
+
+    expect(response.status).toBe(202);
+    const [job, ...rest] = await queue.list();
+    expect(rest).toEqual([]);
+    expect(job).toMatchObject({
+      prNumber: 7,
+      headSha: OPENED_HEAD,
+      command: "review",
+      args: "",
+      triggerKind: "webhook",
+      status: "queued",
+      deliveryId: "d-1",
+      actorLogin: expect.any(String),
+    });
+    expect(Date.parse(job?.runAfter ?? "")).toBeLessThanOrEqual(Date.now());
+    const repository = await createRepositoriesRepository(
+      h.db,
+    ).findByExternalId(
+      (await h.integrations.findByExternalId("github_app", "4242"))?.id ?? "",
+      "7001",
+    );
+    expect(job?.repositoryId).toBe(repository?.id);
+  });
+
+  it("replaces the waiting job when the pull request is updated", async () => {
+    const { h, queue, send } = await startHarness();
+    await h.seedInstallation();
+    await send("pull_request.opened", { deliveryId: "d-1" });
+
+    await send("pull_request.synchronize", {
+      deliveryId: "d-2",
+      payload: withHeadSha("pull_request.synchronize", NEW_HEAD),
+    });
+
+    expect(
+      (await queue.list()).map((job) => [job.headSha, job.status]),
+    ).toEqual([
+      [OPENED_HEAD, "superseded"],
+      [NEW_HEAD, "queued"],
+    ]);
+  });
+
+  // CR-27-T08
+  it("creates no second job when the same signed body is replayed under a new delivery id", async () => {
+    const { h, queue, send } = await startHarness();
+    await h.seedInstallation();
+
+    await send("pull_request.opened", { deliveryId: "d-1" });
+    const replay = await send("pull_request.opened", {
+      deliveryId: "d-replay",
+    });
+
+    expect(replay.status).toBe(202);
+    expect(await queue.list()).toHaveLength(1);
+  });
+
+  it("creates no second job when the intake gets the same delivery twice", async () => {
+    const { h, queue, intake } = await startHarness();
+    const integration = await h.seedInstallation();
+    const trigger = {
+      kind: "opened" as const,
+      command: null,
+      args: null,
+      repo: {
+        integrationId: integration.id,
+        externalId: "7001",
+        fullName: "acme/widgets",
+        url: "https://github.test/acme/widgets",
+      },
+      prNumber: 7,
+      prUrl: "https://github.test/acme/widgets/pull/7",
+      headSha: OPENED_HEAD,
+      actor: { login: "alice", externalId: "1001" },
+    };
+    const source = { deliveryId: "d-1", event: "pull_request" };
+
+    await intake.enqueueReviewTrigger(trigger, integration, source);
+    await intake.enqueueReviewTrigger(trigger, integration, source);
+
+    expect(await queue.list()).toHaveLength(1);
+  });
+
+  it("answers 500 and releases the delivery when the repository is not synchronized yet, so a redelivery works", async () => {
+    const { h, queue, send } = await startHarness();
+    await h.seedInstallation();
+    await h.db.deleteFrom("repositories").execute();
+
+    const failed = await send("pull_request.opened", { deliveryId: "d-1" });
+
+    expect(failed.status).toBe(500);
+    expect(await failed.json()).toEqual({ error: "WEBHOOK_PROCESSING_FAILED" });
+    expect(await queue.list()).toEqual([]);
+    expect(await h.snapshotTables()).toMatchObject({ deliveries: [] });
+  });
+});
+
+describe("a comment delivery with the job queue behind the route", () => {
+  it("creates a comment job with the command and its arguments", async () => {
+    const { h, queue, send } = await startHarness();
+    await h.seedInstallation();
+    addOpenPullRequest(h);
+    h.fake.setCollaboratorPermission("acme/widgets", "bob", "write");
+
+    const response = await send("issue_comment.created.ask", {
+      deliveryId: "d-1",
+    });
+
+    expect(response.status).toBe(202);
+    expect(await queue.list()).toMatchObject([
+      {
+        prNumber: 7,
+        headSha: OPENED_HEAD,
+        command: "ask",
+        args: "what does the cache key contain?\nPlease be brief.",
+        triggerKind: "comment",
+        actorLogin: "bob",
+        status: "queued",
+      },
+    ]);
+  });
+
+  it("does not log the arguments of a command", async () => {
+    const { h, send, logLines } = await startHarness();
+    await h.seedInstallation();
+    addOpenPullRequest(h);
+    h.fake.setCollaboratorPermission("acme/widgets", "bob", "write");
+
+    await send("issue_comment.created.ask", { deliveryId: "d-1" });
+
+    expect(logLines.join("\n")).toContain("job created");
+    expect(logLines.join("\n")).not.toContain("cache key");
+  });
+});
