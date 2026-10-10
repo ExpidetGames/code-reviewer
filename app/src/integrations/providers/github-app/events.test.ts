@@ -4,7 +4,7 @@
 // (src/webhooks/automatic-review-policy.ts), so the translation passes the draft flag on.
 import { describe, expect, it } from "vitest";
 import { webhookFixture } from "../../../../../fakes/github/webhooks.ts";
-import { parseGithubEvent } from "./events.ts";
+import { mayHaveWriteAccess, parseGithubEvent } from "./events.ts";
 
 async function eventOfPayload(eventName: string, payload: unknown) {
   return parseGithubEvent({
@@ -157,5 +157,83 @@ describe("a pull request payload that lacks what the app reads", () => {
       kind: "invalid_payload",
       reason: expect.stringContaining("pull_request.draft"),
     });
+  });
+});
+
+describe("which comment authors can have write access", () => {
+  // CR-32-T08
+  it.each([
+    ["OWNER", true],
+    ["MEMBER", true],
+    ["COLLABORATOR", true],
+    ["CONTRIBUTOR", false],
+    ["FIRST_TIME_CONTRIBUTOR", false],
+    ["FIRST_TIMER", false],
+    ["NONE", false],
+    ["SOMETHING_NEW", false],
+    ["owner", false],
+    ["", false],
+    [undefined, false],
+    [null, false],
+    [7, false],
+  ])("answers %s with %s", (association, expected) => {
+    expect(mayHaveWriteAccess(association)).toBe(expected);
+  });
+});
+
+describe("the order in which a comment is looked at", () => {
+  async function commentEvent(changes: {
+    body: string;
+    association?: string;
+    senderType?: string;
+  }) {
+    const payload = webhookFixture("issue_comment.created.review") as Record<
+      string,
+      Record<string, unknown>
+    >;
+    payload.comment = {
+      ...payload.comment,
+      body: changes.body,
+      author_association: changes.association ?? "COLLABORATOR",
+    };
+    if (changes.senderType !== undefined)
+      payload.sender = { ...payload.sender, type: changes.senderType };
+    return eventOfPayload("issue_comment", payload);
+  }
+
+  // CR-32-T09
+  it("reads the text of nobody who cannot have write access", async () => {
+    const event = await commentEvent({
+      body: "plain words",
+      association: "NONE",
+    });
+
+    expect(event).toEqual({
+      kind: "ignored",
+      reason: "the commenter cannot have write access",
+    });
+  });
+
+  // CR-32-T10
+  it("reads the text of no bot", async () => {
+    const event = await commentEvent({
+      body: "plain words",
+      senderType: "Bot",
+    });
+
+    expect(event).toEqual({
+      kind: "ignored",
+      reason: "the comment was written by a bot",
+    });
+  });
+
+  it("is quick for a hostile comment of a commenter who cannot have write access", async () => {
+    const start = performance.now();
+    await commentEvent({
+      body: `/ask ${"![".repeat(32_000)}`,
+      association: "NONE",
+    });
+
+    expect(performance.now() - start).toBeLessThan(500);
   });
 });

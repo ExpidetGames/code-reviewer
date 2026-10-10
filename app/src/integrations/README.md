@@ -173,9 +173,15 @@ How the interface is met:
     decides. A payload without a field of `webhook-fields.ts` (for example the head commit) is
     `invalid_payload`.
   - `issue_comment` `created` on an open pull request becomes a `command` trigger when the text starts
-    with `/review`, `/improve`, `/describe` or `/ask` (leading whitespace and any case allowed); the
-    head commit, which a comment delivery does not carry, is read from GitHub. Comments of bots, edited
-    and deleted comments and comments on issues are ignored. The arguments are not truncated here.
+    with `/review`, `/improve`, `/describe` or `/ask` (leading whitespace and any case allowed; the
+    word must end there, so `/reviewer` is nothing). `comment-command.ts` is the one parser: only
+    `/ask` takes text (the rest of the comment, trimmed, markdown images and links to images replaced by
+    `[image link removed]`, at most 2000 UTF-16 units; a longer question
+    is cut and ends with a note, and `/ask` without a question is no command); text after any other
+    command is dropped, because PR-Agent would read it as options. The trigger carries the id of the
+    comment (`commentId`), and the head commit, which a comment delivery does not carry, is read
+    from GitHub. Comments of bots (the app's own included), edited and deleted comments, comments on
+    issues and on closed or merged pull requests are ignored.
     To cost a commenter without write access as few calls as possible, the order is: the payload's
     `author_association` (only `OWNER`, `MEMBER` and `COLLABORATOR` can have write access; others
     are ignored with no call), then the permission (one call), and only then the pull request for its

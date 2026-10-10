@@ -31,6 +31,8 @@ from enum import StrEnum
 from typing import Any, NoReturn
 from urllib.parse import SplitResult, urlsplit
 
+from code_reviewer_runner.platforms import PLATFORMS
+from code_reviewer_runner.question_images import remove_image_links
 from code_reviewer_runner.result import ErrorCode
 
 MAX_JOB_BYTES = 1024 * 1024
@@ -100,6 +102,7 @@ class GitAccess:
     base_url: str
     token: str
     bot_login: str
+    provider: str = "github"
 
 
 @dataclass(frozen=True)
@@ -187,8 +190,9 @@ def _checked_url(value: str, field_name: str) -> SplitResult:
 def _git_access(data: dict[str, Any]) -> GitAccess:
     git = _section(data, "git")
     _check_fields(git, _GIT_FIELDS, "git.")
-    if _string(git, "provider", "git.") != "github":
-        raise _invalid("git.provider must be 'github'")
+    provider = _string(git, "provider", "git.")
+    if provider not in PLATFORMS:
+        raise _invalid(f"git.provider must be one of: {', '.join(sorted(PLATFORMS))}")
     base_url = _string(git, "baseUrl", "git.").rstrip("/")
     _checked_url(base_url, "git.baseUrl")
     token = _secret(git, "token", "git.")
@@ -196,6 +200,7 @@ def _git_access(data: dict[str, Any]) -> GitAccess:
     if not _BOT_LOGIN.fullmatch(bot_login):
         raise _invalid("git.botLogin must be an app slug, optionally with the [bot] suffix")
     return GitAccess(
+        provider=provider,
         base_url=base_url,
         token=token,
         bot_login=bot_login if bot_login.endswith("[bot]") else f"{bot_login}[bot]",
@@ -308,7 +313,9 @@ def _args(data: dict[str, Any], command: Command) -> tuple[str, ...]:
     question: Any = raw[0]  # pyright: ignore[reportUnknownVariableType]
     if not isinstance(question, str) or not question.strip() or len(question) > MAX_QUESTION_CHARS:
         raise _invalid("the question must be a non-empty string of at most 4000 characters")
-    return (question,)
+    # The question is a comment of somebody else: PR-Agent would download an image it links to from
+    # here, so none reaches it (the app removes them too, this is the second line).
+    return (remove_image_links(question),)
 
 
 def _env(data: dict[str, Any]) -> dict[str, str]:

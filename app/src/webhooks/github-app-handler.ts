@@ -14,7 +14,9 @@
 //   7. translate `parseEvent`: a review trigger, an installation change or "ignored"
 //   8. act       trigger -> the repository must have an active project, then the trigger
 //                policy (automatic-review-policy.ts: drafts, settings, the debounce of a push;
-//                then the commit still being the head, checked against GitHub, failing open), then `canTrigger`, then the intake;
+//                then the commit still being the head, checked against GitHub, failing open) or,
+//                for a comment command, the project's list of allowed commands; then
+//                `canTrigger`, then the intake;
 //                closed pull request -> its waiting jobs are dropped;
 //                change -> the shared sync; an unusable payload                     202, 400
 //
@@ -52,6 +54,7 @@ import {
   checkAgainstCurrentPullRequest,
   decideAutomaticTrigger,
 } from "./automatic-review-policy.ts";
+import { isCommandAllowed } from "../review-settings/effective.ts";
 import type { ReviewTriggerIntake } from "./review-trigger-intake.ts";
 
 /** 1 MiB. GitHub's own limit is 25 MB, but the payloads this app reads are a few kilobytes. */
@@ -343,15 +346,30 @@ export function createGithubAppWebhookHandler(
     )
       return "project_not_active";
 
-    // The trigger policy for pull request events (a comment command is not subject to it).
     const trigger = event.trigger;
     let runAfter: Date | null = null;
-    if (trigger.kind !== "command") {
-      const settings = await automatic.settingsFor(
-        integration.id,
-        trigger.repo.externalId,
-      );
-      if (settings === undefined) return "project_not_active";
+
+    // The settings of the project decide for a command (which ones people may use) and for an
+    // automatic trigger (the policy below).
+    const settings = await automatic.settingsFor(
+      integration.id,
+      trigger.repo.externalId,
+    );
+    if (settings === undefined) return "project_not_active";
+
+    // A comment command is not subject to the policy for automatic reviews (drafts, the automatic
+    // switches, the debounce): a person asked for it. The project decides which commands people may
+    // use at all.
+    if (trigger.kind === "command") {
+      if (!isCommandAllowed(settings, trigger.command)) {
+        // Names the command, never the arguments: they are the user's words.
+        logger.info(
+          `[webhook] delivery=${deliveryId} pr=${trigger.prNumber} command=${trigger.command} is not allowed in the project of ${trigger.repo.fullName}`,
+        );
+        return "command_not_allowed";
+      }
+    } else {
+      // The trigger policy for pull request events.
       const decision = decideAutomaticTrigger({
         trigger,
         settings,
