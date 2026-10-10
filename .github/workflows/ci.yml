@@ -124,7 +124,7 @@ jobs:
         run: uv run pytest -m "integration or contract"
 
   e2e:
-    name: "${{ (github.event_name == 'pull_request' && github.base_ref != 'main') && 'E2E: smoke' || 'E2E: full' }}"
+    name: "E2E: browser journeys"
     needs: changes
     if: ${{ github.event_name == 'push' || github.base_ref == 'main' || needs.changes.outputs.app == 'true' }}
     runs-on: ubuntu-24.04

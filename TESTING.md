@@ -203,7 +203,7 @@ file is pinned by `app/src/ci/ci-workflow.test.ts`.
 | `changes` | pull requests | Path filter: `app` (anything except `runner/**` and Markdown), `runner` (anything except `app/**` and Markdown), `workflows` (`.github/**`). |
 | `app-fast` | app changed | `pnpm format:check`, `lint`, `typecheck`, `test` (unit), `test:int` (host), `build` with placeholder env. |
 | `runner-fast` | runner changed | `ruff check`, `ruff format --check`, `pyright`, `pytest -m unit`, `pytest -m "integration or contract"`. |
-| `e2e` | app changed | `playwright install --with-deps chromium`, then the journeys against the production build: `@smoke` only on pull requests into `development` and `CR-*`, all (without `@flaky`) on pull requests into `main` and on pushes. |
+| `e2e` ("E2E: browser journeys") | app changed | `playwright install --with-deps chromium`, then the journeys against the production build: `@smoke` only on pull requests into `development` and `CR-*`, all (without `@flaky`) on pull requests into `main` and on pushes. |
 | `actionlint` | workflows changed | actionlint with `.github/actionlint.yaml`. |
 | `ci-passed` ("All checks passed?") | always | Fails on any failed or cancelled job, accepts skipped jobs. |
 
