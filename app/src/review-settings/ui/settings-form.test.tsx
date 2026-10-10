@@ -351,4 +351,35 @@ describe("the settings form", () => {
       screen.getByText(/Last saved 2026-10-10 12:34 UTC by octocat/),
     ).toBeTruthy();
   });
+
+  // CR-34-T05 (without a stand-in, a project form talks to the route of its repository)
+  it("saves a project through the settings route of its repository when no stand-in is handed in", async () => {
+    const user = userEvent.setup();
+    const seen: Array<{ url: string; method: string | undefined }> = [];
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+      seen.push({ url, method: init?.method });
+      return new Response("{}", { status: 200 });
+    });
+    render(<SettingsForm initial={projectModel()} repositoryId="repo-9" />);
+
+    await user.click(
+      screen.getByRole("button", { name: "Save project settings" }),
+    );
+
+    await screen.findByRole("alert");
+    expect(seen).toEqual([
+      { url: "/api/repositories/repo-9/project/settings", method: "PUT" },
+    ]);
+    vi.unstubAllGlobals();
+  });
+
+  // CR-34 (CR-46 review: the fallback model is stored but not sent to the runner yet)
+  it("says that the fallback model is stored but not used yet", () => {
+    render(<SettingsForm initial={projectModel()} api={fakeApi().api} />);
+
+    const field = screen
+      .getByLabelText("Fallback model", { exact: true })
+      .closest(".field") as HTMLElement;
+    expect(within(field).getByText(/Stored but not used yet/)).toBeTruthy();
+  });
 });

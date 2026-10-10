@@ -43,15 +43,23 @@ import { signOut } from "../auth/actions.ts";
 import ProjectsPage from "../app/(app)/projects/page.tsx";
 import RunsPage from "../app/(app)/runs/page.tsx";
 import SettingsPage from "../app/(app)/settings/page.tsx";
+import ProjectSettingsPage from "../app/(app)/projects/[repositoryId]/page.tsx";
 
 const APP_PAGES = [
   { path: "/projects", render: ProjectsPage },
   { path: "/runs", render: RunsPage },
   { path: "/settings", render: SettingsPage },
+  {
+    path: "/projects/some-repository",
+    render: () =>
+      ProjectSettingsPage({
+        params: Promise.resolve({ repositoryId: "some-repository" }),
+      } as Parameters<typeof ProjectSettingsPage>[0]),
+  },
 ] as const;
 
-async function startApp() {
-  const harness = await createAuthHarness();
+async function startApp(existing?: AuthHarness) {
+  const harness = existing ?? (await createAuthHarness());
   request.harness = harness;
   const proxy = createAccessProxy({
     getAuth: () => harness.auth,
@@ -109,6 +117,32 @@ describe("a visitor without a session", () => {
       const digest = await redirectTarget(render);
 
       expect(digest).toMatch(/^NEXT_REDIRECT;[a-z]+;\/login;/);
+    },
+  );
+});
+
+describe("a signed in person who is not on the allow list", () => {
+  // CR-34-T12
+  it.each(APP_PAGES)(
+    "is sent to the login page with the reason from $path, by the proxy and by the page itself",
+    async ({ path, render }) => {
+      const signedIn = await startApp();
+      const { cookies } = await signedIn.signIn();
+      const app = await startApp(
+        signedIn.restart({ allowedLogins: ["somebody-else"] }),
+      );
+
+      const response = await app.visit(path, cookies);
+      app.sendCookies(cookies);
+      const digest = await redirectTarget(render);
+
+      expect(response.status).toBe(307);
+      expect(response.headers.get("location")).toBe(
+        `${TEST_BASE_URL}/login?error=not_allowed`,
+      );
+      expect(digest).toMatch(
+        /^NEXT_REDIRECT;[a-z]+;\/login\?error=not_allowed;/,
+      );
     },
   );
 });

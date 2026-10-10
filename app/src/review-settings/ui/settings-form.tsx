@@ -17,7 +17,11 @@ import { Button } from "../../ui/button.tsx";
 import { estimateReviewCost } from "../cost.ts";
 import { MODEL_PRICES } from "../model-pricing.ts";
 import { REVIEW_SETTING_LIMITS, type ReviewSettingField } from "../settings.ts";
-import { browserGlobalSettingsApi, type SettingsApi } from "./api.ts";
+import {
+  browserGlobalSettingsApi,
+  browserProjectSettingsApi,
+  type SettingsApi,
+} from "./api.ts";
 import { CostSummary } from "./cost-summary.tsx";
 import { modelFromAnswer, type SettingsFormModel } from "./form-model.ts";
 import {
@@ -38,6 +42,11 @@ type ControlIds = {
   describedBy: string | undefined;
   invalid: boolean;
 };
+
+// The settings accept a fallback model, but the app does not send it to the runner yet (lead
+// decision for the MVP, src/review-settings/README.md), so the form says so instead of promising it.
+export const FALLBACK_MODEL_HINT =
+  "Stored but not used yet: reviews do not switch to this model when the main model fails. Leave empty for none.";
 
 const SAVED_TEXT =
   "Saved. Reviews that start from now on use these values; a review that is already running keeps the values it started with.";
@@ -278,7 +287,7 @@ export function SettingsForm({
               list: datalistId,
               placeholder: "None",
             }),
-          "Tried when the model fails. Leave empty for none.",
+          FALLBACK_MODEL_HINT,
         )}
         {field(
           "maxTokens",

@@ -18,6 +18,14 @@ export default async function ProjectSettingsPage({
 }: PageProps<"/projects/[repositoryId]">) {
   await requireUser();
   const { repositoryId } = await params;
+  return <ProjectSettingsContent repositoryId={repositoryId} />;
+}
+
+async function ProjectSettingsContent({
+  repositoryId,
+}: {
+  repositoryId: string;
+}) {
   const data = await loadProjectSettingsPage(repositoryId, {
     projects: getProjectService(),
     settings: getReviewSettingsService(),

@@ -21,7 +21,7 @@ import { loadProjectsPage, ProjectsPageContent } from "./projects-page.tsx";
 afterEach(cleanup);
 
 const LLM_KEY = "dummy-llm-key-0123456789";
-const WORKING_ENV = {
+const WORKING_ENV: Record<string, string | undefined> = {
   ...testGithubAppEnv(),
   LLM_PROVIDER: "openrouter",
   LLM_API_KEY: LLM_KEY,

@@ -292,6 +292,21 @@ export function createAppPart(options: FakeAppOptions): AppPart {
     const unauthorized = () => send(401, { message: "Bad credentials" });
     const notFound = () => send(404, { message: "Not Found" });
 
+    // Control endpoint for a test that runs the fake as its own process (Playwright): installs the
+    // app for an account with these repositories, or replaces the repositories of an installation
+    // that exists already. The body is `{ installation, repositories }` (the in-process controls
+    // `addInstallation` and `setRepositories`, in one request).
+    if (path === "/__fake/installations" && method === "POST") {
+      const body = JSON.parse(await readBody(request)) as {
+        installation: FakeInstallation;
+        repositories: FakeRepository[];
+      };
+      if (!installations.has(body.installation.id))
+        controls.addInstallation(body.installation);
+      controls.setRepositories(body.installation.id, body.repositories);
+      return send(201, { ok: true });
+    }
+
     // App JWT endpoints
     if (path === "/app/installations" && method === "GET") {
       if (bearer === undefined || !jwtIsValid(bearer)) return unauthorized();
