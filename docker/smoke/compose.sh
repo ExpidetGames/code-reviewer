@@ -8,8 +8,9 @@
 # dummy settings (the keys are generated here and never leave this machine; nothing in this script
 # signs in), so it never touches a real `.env`, a real stack or a real volume. It proves what a
 # unit test on the files cannot: the settings are validated before a container exists, the runner
-# waits for a healthy app, the stack comes up, the database survives `down` and `up`, and a killed
-# app container comes back by itself. Containers, networks and volumes are removed on exit, also
+# waits for a healthy app, the stack comes up, the database survives `down` and `up`, a killed
+# app container comes back by itself, and a backup made in the running stack restores into an empty
+# data volume. Containers, networks and volumes are removed on exit, also
 # after a failure.
 set -euo pipefail
 
@@ -214,5 +215,41 @@ wait_until "the app to restart and become healthy" "$WAIT_SECONDS" app_restarted
 runner_is_running || fail_with_logs "the runner is not running after the app restarted"
 wait_until "the runner to reach the restarted app" 60 runner_reports_connection_last
 [ "$(docker inspect --format '{{.RestartCount}}' "$(container_of runner)")" = "0" ] || fail "the runner had to be restarted"
+
+# CR-40-T04, CR-40-T10, CR-40-T12: the backup command in the running app container writes a verified
+# file with restrictive permissions to the /backups volume (not to /data); after the data volume is
+# thrown away, the documented restore (a one-off container on the same volumes) brings the data back
+# and the app becomes healthy on it. The database holds the marker record from the step above.
+step "a backup of the running stack restores into an empty data volume and the app is healthy again"
+backup_output=$(dc exec -T app node backup/cli.ts backup 2>&1) || fail_with_logs "the backup command failed: $backup_output"
+backup_file=$(dc exec -T app sh -c 'ls /backups' | head -n 1 | tr -d '\r')
+[[ "$backup_file" =~ ^code-reviewer-[0-9]{8}T[0-9]{6}Z\.db$ ]] || fail "unexpected backup file name: '$backup_file'"
+grep -q "created /backups/$backup_file " <<<"$backup_output" || fail "the backup output does not name the file: $backup_output"
+[ "$(dc exec -T app sh -c "stat -c %a /backups/$backup_file" | tr -d '\r')" = "600" ] || fail "the backup is not readable by its owner only"
+dc exec -T app sh -c 'ls /data' | grep -q 'code-reviewer-' && fail "a backup was written into /data"
+backups_mount=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/backups"}}{{.Type}}{{end}}{{end}}' "$(container_of app)")
+[ "$backups_mount" = "volume" ] || fail "/backups is not a volume of the app: '$backups_mount'"
+
+dc down --timeout 20 >/dev/null 2>&1 || fail "docker compose down failed before the restore"
+docker volume rm "${project}_data" >/dev/null || fail "could not remove the data volume"
+restore_output=$(dc run --rm --no-deps -T app node backup/cli.ts restore "/backups/$backup_file" 2>&1) ||
+  fail "the restore command failed: $restore_output"
+grep -q "restored /backups/$backup_file to /data/app.db" <<<"$restore_output" || fail "unexpected restore output: $restore_output"
+dc up --detach --wait --wait-timeout "$WAIT_SECONDS" >/dev/null 2>&1 || fail_with_logs "docker compose up failed after the restore"
+app_is_healthy || fail_with_logs "the app is not healthy after the restore: '$(health_of app)'"
+restored=$(dc exec -T app node --no-warnings -e '
+  const { DatabaseSync } = require("node:sqlite");
+  const db = new DatabaseSync("/data/app.db", { readOnly: true });
+  console.log(db.prepare("select value from smoke_marker").get().value);
+') || fail_with_logs "could not read the marker record after the restore"
+[ "$restored" = "kept" ] || fail "the marker record is missing after the restore (got '$restored')"
+
+# CR-40-T07: a backup that cannot be made fails the command with a message and leaves no file.
+step "a backup into a directory that is not there fails with a message and creates nothing"
+if failure=$(dc exec -T -e BACKUP_DIR=/nowhere app node backup/cli.ts backup 2>&1); then
+  fail "the backup command succeeded although its target is missing"
+fi
+grep -q 'BACKUP_TARGET_UNAVAILABLE' <<<"$failure" || fail "the failure does not name its code: $failure"
+[ "$(dc exec -T app sh -c 'ls /backups | wc -l' | tr -d '\r')" = "1" ] || fail "the failed backup changed /backups"
 
 step "compose smoke test passed"

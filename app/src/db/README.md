@@ -1,7 +1,8 @@
 # Database layer
 
 Kysely on SQLite (better-sqlite3). The whole layer lives in this folder; nothing else in the app
-opens a database or writes SQL.
+opens a database or writes SQL. The one exception is `src/backup/` (backup and restore: `VACUUM INTO`,
+`integrity_check`, a command line that runs without Next.js; see its README).
 
 | File                        | Role                                                                                                                                                                         |
 | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

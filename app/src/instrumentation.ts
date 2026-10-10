@@ -25,4 +25,8 @@ export async function register(): Promise<void> {
   });
   const { runStartupSync } = await import("./integrations/sync/startup.ts");
   void runStartupSync();
+  // Last: the daily backup timer (production only). It needs nothing from the app's own connection,
+  // and a problem with it never stops the app from serving.
+  const { startBackupSchedulerOnStart } = await import("./backup/startup.ts");
+  startBackupSchedulerOnStart();
 }

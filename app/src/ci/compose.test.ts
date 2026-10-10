@@ -64,6 +64,23 @@ describe("compose services", () => {
     expect(Object.keys(compose.volumes ?? {})).toContain("data");
   });
 
+  // CR-40-T04
+  it("keeps the backups in a named volume of their own on /backups, apart from /data", () => {
+    const app = service("app");
+
+    expect(app.volumes).toContain("backups:/backups");
+    expect(Object.keys(compose.volumes ?? {})).toContain("backups");
+    expect(app.volumes?.some((volume) => volume.endsWith(":/data"))).toBe(true);
+    expect(
+      app.volumes?.filter((volume) => volume.split(":")[0] === "data"),
+    ).toEqual(["data:/data"]);
+  });
+
+  // CR-40-T14
+  it("lets the operator choose the time of the daily backup without writing it into the file", () => {
+    expect(service("app").environment?.BACKUP_TIME).toBe("${BACKUP_TIME:-}");
+  });
+
   // CR-37-T02
   it("publishes the app on loopback unless an address is chosen on purpose", () => {
     const ports = service("app").ports ?? [];
