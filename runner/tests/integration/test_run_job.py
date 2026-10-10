@@ -3,6 +3,7 @@ out on stdout, nothing leaks to either stream, and the environment, argv and wor
 free of secrets. PR-Agent's `handle_request` is replaced by a double (pr_agent_double.py), so the
 real configuration, patch and recorder run but nothing reaches a network."""
 
+import hashlib
 import json
 import os
 import subprocess
@@ -86,7 +87,8 @@ def test_a_valid_review_job_calls_handle_request_once_in_user_mode_and_reports_s
     assert seen["git_provider"] == "github"
     assert seen["model"] == "openrouter/deepseek/deepseek-chat"
     assert seen["fallback_models"] == []
-    assert seen["token_in_settings"] is True
+    assert seen["token_sha256"] == hashlib.sha256(TOKEN.encode()).hexdigest()
+    assert seen["key_sha256"] == hashlib.sha256(API_KEY.encode()).hexdigest()
 
 
 # CR-10-T02
@@ -197,7 +199,90 @@ def test_the_environment_of_the_parent_does_not_reach_pr_agent(tmp_path: Path) -
 
     names = set(seen["environ_names"])
     assert names.isdisjoint(parent)
-    assert {"GITHUB__USER_TOKEN", "OPENROUTER__KEY", "CONFIG__MODEL", "PATH"} <= names
+    assert {"CONFIG__MODEL", "GITHUB__BASE_URL", "PATH"} <= names
+
+
+# CR-45-T07
+def test_neither_the_token_nor_the_llm_key_is_in_the_process_environment_of_the_run(
+    tmp_path: Path,
+) -> None:
+    _, seen = run_double("publish", tmp_path)
+
+    assert seen["secret_in_environ"] is False
+    assert {"GITHUB__USER_TOKEN", "OPENROUTER__KEY", "OPENROUTER_API_KEY"}.isdisjoint(
+        seen["environ_names"]
+    )
+    assert seen["token_sha256"] == hashlib.sha256(TOKEN.encode()).hexdigest()
+
+
+# CR-45-T07
+def test_the_process_environment_holds_no_option_of_the_job(tmp_path: Path) -> None:
+    env = {"PR_REVIEWER__EXTRA_INSTRUCTIONS": "@format {env[PATH]}"}
+
+    _, seen = run_double("publish", tmp_path, stdin=job(env=env))
+
+    assert not [name for name in seen["environ_names"] if name.startswith("PR_")]
+
+
+# CR-45-T01
+def test_a_project_rule_that_references_the_environment_stays_literal_in_the_real_process(
+    tmp_path: Path,
+) -> None:
+    rule = "@format {env[PATH]} {this.openrouter.key}"
+    env = {
+        "PR_REVIEWER__EXTRA_INSTRUCTIONS": rule,
+        "PR_REVIEWER__NUM_MAX_FINDINGS": "3",
+        "PR_REVIEWER__INLINE_KEY_ISSUES": "true",
+    }
+
+    process, seen = run_double("publish", tmp_path, stdin=job(env=env))
+
+    assert result_of(process)["ok"] is True
+    assert seen["auto_cast"] is False
+    assert seen["options"] == {
+        "extra_instructions": rule,
+        "num_max_findings": 3,
+        "inline_key_issues": True,
+    }
+
+
+# CR-45-T04
+def test_an_option_value_of_the_wrong_type_is_an_invalid_job_that_names_the_option(
+    tmp_path: Path,
+) -> None:
+    env = {"PR_REVIEWER__NUM_MAX_FINDINGS": f"[1] {API_KEY}"}
+
+    process, seen = run_double("publish", tmp_path, stdin=job(env=env))
+
+    result = result_of(process)
+    assert process.returncode == 1
+    assert result["errorCode"] == "invalid_job"
+    assert "PR_REVIEWER__NUM_MAX_FINDINGS" in result["logTail"]
+    assert API_KEY not in process.stdout + process.stderr
+    assert seen == {}
+
+
+# CR-45-T05
+def test_the_context_window_of_the_job_lifts_the_clamp_inside_the_real_process(
+    tmp_path: Path,
+) -> None:
+    llm = {**job()["llm"], "maxTokens": 100000}
+
+    process, seen = run_double("publish", tmp_path, stdin=job(llm=llm))
+
+    assert result_of(process)["ok"] is True
+    assert seen["max_model_tokens"] == 100000
+    assert seen["custom_model_max_tokens"] == 100000
+
+
+# CR-45-T06
+def test_the_fallback_models_of_the_job_reach_pr_agent(tmp_path: Path) -> None:
+    llm = {**job()["llm"], "fallbackModels": ["qwen/qwen3-coder"]}
+
+    process, seen = run_double("publish", tmp_path, stdin=job(llm=llm))
+
+    assert result_of(process)["ok"] is True
+    assert seen["fallback_models"] == ["openrouter/qwen/qwen3-coder"]
 
 
 # CR-10-T01
@@ -233,7 +318,7 @@ def test_a_malicious_repository_settings_file_cannot_change_model_endpoints_or_c
     assert after["model_weak"] == "openrouter/deepseek/deepseek-chat"
     assert after["model_reasoning"] == "openrouter/deepseek/deepseek-chat"
     assert after["fallback_models"] == []
-    assert after["custom_model_max_tokens"] == "163840"
+    assert after["custom_model_max_tokens"] == 163840
     assert after["publish_output"] is True
     assert after["openrouter_base"] == "https://openrouter.ai/api/v1"
     assert after["openrouter_key_is_ours"] is True
@@ -242,6 +327,31 @@ def test_a_malicious_repository_settings_file_cannot_change_model_endpoints_or_c
     assert after["extra_headers"] is None
     assert not after["callbacks"]
     assert after["repo_option"] == "a legitimate repository option"
+
+
+# CR-45-T03
+def test_a_repository_rule_that_references_a_secret_stays_literal_in_the_real_process(
+    tmp_path: Path,
+) -> None:
+    process, seen = run_double("repo_eval", tmp_path)
+
+    assert result_of(process)["ok"] is True
+    after = seen["after_repo_file"]
+    expected = "@format {this.openrouter.key} {this.github.user_token} {env[PATH]}"
+    assert after["reviewer_instructions"] == expected
+    assert after["description_instructions"] == "@jinja {{ this.github.user_token }}"
+    assert after["prompt_has_text"] is True
+    assert after["prompt_has_token"] is False
+    assert after["prompt_has_key"] is False
+
+
+# CR-45 (the options of the job win over the repository file; this is the documented precedence)
+def test_the_options_of_the_job_win_over_the_repository_file_in_the_real_process(
+    tmp_path: Path,
+) -> None:
+    _, seen = run_double("repo", tmp_path, stdin=job(env={"PR_REVIEWER__NUM_MAX_FINDINGS": "3"}))
+
+    assert seen["after_repo_file"]["num_max_findings"] == 3
 
 
 # The job timeout, soft (an await) and hard (a call that blocks everything).
