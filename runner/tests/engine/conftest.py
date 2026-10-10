@@ -39,5 +39,7 @@ def llm() -> Iterator[FakeLlm]:
 
 
 @pytest.fixture
-def engine(github: FakeGithub, llm: FakeLlm, tmp_path: Path) -> Engine:
-    return Engine(github, llm, tmp_path)
+def engine(github: FakeGithub, llm: FakeLlm, tmp_path: Path) -> Iterator[Engine]:
+    fixture = Engine(github, llm, tmp_path)
+    yield fixture
+    fixture.cleanup()

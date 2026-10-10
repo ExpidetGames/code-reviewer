@@ -5,6 +5,7 @@ PR-Agent 0.47.0 always posts a one line "Failed to ..." comment when a command f
 still write. That comment is not a review and is never reported as the result, so the checks below
 look for review comments (the hidden marker) and for the reported URL, not for an empty PR."""
 
+import json
 import re
 import time
 
@@ -89,8 +90,6 @@ def test_a_model_that_never_answers_ends_with_the_timeout_code_and_no_process_is
 
 
 def _stdin(engine: Engine) -> str:
-    import json
-
     return json.dumps(engine.job("review"))
 
 

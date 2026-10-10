@@ -210,7 +210,7 @@ How a job becomes PR-Agent configuration (`pr_agent_config.py`, `pr_agent_runtim
   feeds a malicious file with all of these through PR-Agent's own merge function; another compares
   the provider sections with PR-Agent's own list, so a new provider after an upgrade is noticed.
   A job cannot set the options the runner pins itself (`PR_REVIEWER__FINAL_UPDATE_MESSAGE`,
-  `PR_REVIEWER__ENABLE_REVIEW_LABELS_SECURITY` and `_EFFORT`): `invalid_job`.
+  `PR_DESCRIPTION__FINAL_UPDATE_MESSAGE`, `PR_REVIEWER__ENABLE_REVIEW_LABELS_SECURITY` and `_EFFORT`): `invalid_job`.
 - **Where `.pr_agent.toml` comes from.** PR-Agent 0.47.0 reads it from the **default branch** of the
   repository (contents API without a ref), not from the head of the pull request and not from the
   base branch of a pull request into another branch. The author of a pull request therefore cannot
@@ -265,7 +265,7 @@ protect it:
 `tests/engine/` runs the real, pinned PR-Agent through `code-reviewer-run-job` (one process per job)
 against a fake GitHub and a fake OpenAI-compatible LLM on loopback ports, with no real network and no
 real model: `uv run python scripts/prime_tiktoken_cache.py` once (the only step that needs the
-internet), then `uv run pytest -m engine` (about 4 minutes; CI runs it for pull requests that change
+internet), then `uv run pytest -m engine` (about 4 minutes; CI runs it in a network namespace for pull requests that change
 the runner and nightly). The suite pins down the four commands, the second review that edits the
 first comment, the error codes for a rate limited, silent, wrong or unreachable model or GitHub, that
 no credential is found in any output, what a hostile `.pr_agent.toml` cannot do, and what happens with

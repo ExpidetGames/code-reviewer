@@ -11,7 +11,13 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 from fake_github import FakeGithub
 from fake_llm import FakeLlm, Reply
-from harness import API_KEY, Engine, Outcome
+from harness import (
+    API_KEY,
+    Engine,
+    Outcome,
+    credentials_travel_only_in_headers,
+    sent_to_fakes,
+)
 
 SECRET_FREE = "[REDACTED]"
 
@@ -54,12 +60,14 @@ def assert_no_secret(engine: Engine, outcome: Outcome, secrets: list[str]) -> No
         "argv": " ".join(outcome.argv),
         "comments": "\n".join(comment.body for comment in github.comments),
         "pull request text": "\n".join([*github.patched_bodies, *github.patched_titles]),
+        "requests to the fakes": sent_to_fakes(github, engine.llm),
     }
-    for path in outcome.files():
-        texts[f"file {path.name}"] = path.read_bytes().decode("utf-8", errors="replace")
+    for name, content in outcome.files().items():
+        texts[f"file {name}"] = content.decode("utf-8", errors="replace")
     for name, text in texts.items():
         for secret in secrets:
             assert secret not in text, f"a secret is in the {name}"
+    assert credentials_travel_only_in_headers(github, engine.llm)
 
 
 # CR-41-T12
@@ -77,28 +85,37 @@ def test_no_credential_of_the_job_is_in_any_output_of_a_run(
     assert outcome.result["logTail"].count(API_KEY) == 0
 
 
+def assert_secret_replaced_in_place(outcome: Outcome, expected_text: str) -> None:
+    """The secret was replaced where it stood (the redactor), not the whole tail blanked (the last
+    line of defence, which would also satisfy a check for the word alone)."""
+    result = outcome.result
+    assert result["logTail"] != SECRET_FREE
+    assert result["logTruncated"] is False
+    assert expected_text in result["logTail"]
+
+
 # CR-41-T12
 @pytest.mark.parametrize("command", ["review", "ask"])
-def test_a_quoted_llm_key_is_replaced_in_the_log_tail(
+def test_a_quoted_llm_key_is_replaced_in_place_in_the_log_tail(
     engine: Engine, github: FakeGithub, llm: FakeLlm, command: str
 ) -> None:
     llm_rate_limit(github, llm)
 
     outcome = engine.run(command)
 
-    assert SECRET_FREE in outcome.result["logTail"]
+    assert_secret_replaced_in_place(outcome, f"Incorrect API key provided: {SECRET_FREE}")
     assert API_KEY not in outcome.stdout
 
 
 # CR-41-T12
-def test_a_quoted_github_token_is_replaced_in_the_log_tail(
+def test_a_quoted_github_token_is_replaced_in_place_in_the_log_tail(
     engine: Engine, github: FakeGithub
 ) -> None:
     comment_write_fails(github, engine.llm)
 
     outcome = engine.run("review")
 
-    assert SECRET_FREE in outcome.result["logTail"]
+    assert_secret_replaced_in_place(outcome, f"(token {SECRET_FREE})")
     assert github.token not in outcome.stdout
 
 

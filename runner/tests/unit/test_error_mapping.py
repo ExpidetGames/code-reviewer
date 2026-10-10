@@ -198,22 +198,21 @@ def test_a_failure_comment_text_about_unparsable_output_maps_to_llm_output_inval
     )
 
 
+class FallbackEligibleError(ValueError):
+    """PR-Agent's class of the same name: a model specific output or fit failure (a ValueError)."""
+
+
 # CR-41-T08
 def test_a_model_answer_without_a_review_after_the_fallbacks_maps_to_llm_output_invalid() -> None:
     # What PR-Agent 0.47.0 raises when the answer parses but holds no review mapping (found by the
-    # engine suite): a ValueError subclass wrapped by the fallback facade.
-    class FallbackEligibleError(ValueError):
-        pass
-
+    # engine suite), wrapped by the fallback facade.
     cause = FallbackEligibleError("model response did not contain a non-empty review mapping")
 
     assert classify_failure([exhausted_fallbacks(cause)], []) is ErrorCode.LLM_OUTPUT_INVALID
 
 
+# CR-41-T08
 def test_a_context_that_does_not_fit_stays_unclassified_as_output_invalid() -> None:
-    class FallbackEligibleError(ValueError):
-        pass
-
     cause = FallbackEligibleError("No PR diff fits the /review request for some-model")
 
     assert classify_failure([exhausted_fallbacks(cause)], []) is not ErrorCode.LLM_OUTPUT_INVALID

@@ -1,0 +1,41 @@
+name: Engine tests
+
+# The engine suite: the real, pinned PR-Agent through the job entry point against a fake GitHub and
+# a fake LLM (runner/tests/engine). One definition for the two workflows that run it: ci.yml (pull
+# requests that change the runner and pull requests into main) and nightly.yml. It is not started
+# by anything else. No repository secrets: the fakes need none, and the suite must never talk to a
+# real model or a real GitHub. The caller's token (contents: read) is all this workflow can use.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  engine:
+    name: "Runner: engine tests (real PR-Agent, fake GitHub and LLM)"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: runner
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.0"
+          enable-cache: true
+          cache-dependency-glob: runner/uv.lock
+      - name: Install dependencies
+        run: uv sync --locked
+      # PR-Agent counts tokens with a tiktoken encoding that it downloads on first use. The
+      # download is the only network use of this job besides the installation, so it is cached.
+      - name: Restore the tiktoken encoding
+        uses: actions/cache@v4
+        with:
+          path: /tmp/data-gym-cache
+          key: tiktoken-o200k_base-v1
+      # Fills the cache if needed (with retries), then runs `pytest -m engine` in a network
+      # namespace that has a loopback interface and nothing else.
+      - name: Engine tests without network
+        run: scripts/run_engine_offline.sh

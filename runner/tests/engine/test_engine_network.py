@@ -6,6 +6,7 @@ before PR-Agent starts."""
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 from fake_github import FakeGithub
@@ -57,23 +58,27 @@ def test_a_job_that_sends_the_llm_key_to_a_foreign_host_is_refused_before_pr_age
 
 
 # CR-41-T14 (the guard itself works, so the claims above are not empty)
-def test_the_connection_guard_records_and_refuses_a_connection_to_a_foreign_host(
-    tmp_path: object,
+@pytest.mark.parametrize(
+    "attempt",
+    [
+        "socket.create_connection(('203.0.113.7', 80), timeout=1)",
+        "socket.getaddrinfo('example.invalid', 80)",
+        "socket.gethostbyname('example.invalid')",
+        "socket.gethostbyname_ex('example.invalid')",
+        "socket.gethostbyaddr('203.0.113.7')",
+        "socket.socket(socket.AF_INET, socket.SOCK_DGRAM).sendto(b'x', ('203.0.113.7', 53))",
+    ],
+)
+def test_the_connection_guard_records_and_refuses_a_foreign_host(
+    tmp_path: Path, attempt: str
 ) -> None:
-    log = os.path.join(str(tmp_path), "connections.jsonl")
-    environment = {**os.environ, "PYTHONPATH": str(GUARD), "ENGINE_CONNECT_LOG": log}
-    code = (
-        "import socket\n"
-        "try:\n"
-        "    socket.create_connection(('203.0.113.7', 80), timeout=1)\n"
-        "except OSError as error:\n"
-        "    print(error)\n"
-    )
+    log = tmp_path / "connections.jsonl"
+    environment = {**os.environ, "PYTHONPATH": str(GUARD), "ENGINE_CONNECT_LOG": str(log)}
+    code = f"import socket\ntry:\n    {attempt}\nexcept OSError as error:\n    print(error)\n"
 
     done = subprocess.run(
         [sys.executable, "-c", code], env=environment, capture_output=True, text=True, check=False
     )
 
     assert "only loopback is reachable" in done.stdout
-    with open(log) as handle:
-        assert '"allowed": false' in handle.read()
+    assert '"allowed": false' in log.read_text()

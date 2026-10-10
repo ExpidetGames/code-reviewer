@@ -66,7 +66,7 @@ def test_a_question_reaches_the_model_and_the_answer_is_posted_as_the_bot(
 def test_a_description_replaces_the_text_of_the_pull_request_without_a_comment(
     engine: Engine, github: FakeGithub
 ) -> None:
-    outcome = engine.run("describe", env={"PR_DESCRIPTION__FINAL_UPDATE_MESSAGE": "false"})
+    outcome = engine.run("describe")
 
     assert outcome.returncode == 0
     assert len(github.patched_bodies) == 1
@@ -77,17 +77,14 @@ def test_a_description_replaces_the_text_of_the_pull_request_without_a_comment(
     assert result["commentUrl"] is None
 
 
-# CR-41-T04 (the default settings of a job)
-def test_a_description_also_posts_the_status_line_unless_the_job_switches_it_off(
+# CR-41-T04 (the runner pins the status comment off, a repository file cannot bring it back)
+def test_no_status_comment_follows_a_description_even_if_the_repository_file_asks_for_one(
     engine: Engine, github: FakeGithub
 ) -> None:
-    # Documents what the runner does today: PR-Agent's `pr_description.final_update_message` is on
-    # and the runner does not pin it (it pins the reviewer's), so a description is followed by a
-    # one line comment that links the pull request. It is not the description, and it is not the
-    # result: the commentUrl stays null.
+    github.put_file(".pr_agent.toml", "[pr_description]\nfinal_update_message = true\n")
+
     outcome = engine.run("describe")
 
-    assert len(github.patched_bodies) == 1
-    assert [comment.body.startswith("**[PR Description]") for comment in github.comments] == [True]
     assert outcome.result["ok"] is True
-    assert outcome.result["commentUrl"] is None
+    assert len(github.patched_bodies) == 1
+    assert github.comments == []

@@ -15,7 +15,7 @@ import subprocess
 import sys
 import tempfile
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -90,16 +90,14 @@ class Outcome:
             return []
         return [json.loads(line) for line in self.connect_log.read_text().splitlines()]
 
-    def files(self) -> list[Path]:
-        """Every file the job left in its working directory and home."""
-        found: list[Path] = []
-        for root in (self.workdir, self.home):
-            found.extend(
-                path
-                for path in root.rglob("*")
-                if path.is_file() and path != self.connect_log and "connections" not in path.name
-            )
-        return found
+    def files(self) -> dict[str, bytes]:
+        """Every file the job left behind, by path relative to its home (the working directory and
+        the temporary directory are inside it)."""
+        return {
+            str(path.relative_to(self.home)): path.read_bytes()
+            for path in sorted(self.home.rglob("*"))
+            if path.is_file()
+        }
 
 
 class Canary:
@@ -180,8 +178,18 @@ class JobProcess:
             return False
         return False
 
+    def kill(self) -> None:
+        """End the process if it still runs, so a failing test leaves nothing behind."""
+        if self.process.poll() is None:
+            self.process.kill()
+            self.process.communicate()
+
     def finish(self, stdin: str, timeout: float = 150) -> Outcome:
-        stdout, stderr = self.process.communicate(stdin, timeout=timeout)
+        try:
+            stdout, stderr = self.process.communicate(stdin, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            self.kill()
+            raise
         return Outcome(
             self.process.returncode,
             stdout,
@@ -201,6 +209,12 @@ class Engine:
     llm: FakeLlm
     tmp_path: Path
     _runs: int = 0
+    _started: list["JobProcess"] = field(default_factory=lambda: [])
+
+    def cleanup(self) -> None:
+        """Kill every job process that is still running (called when the test is over)."""
+        for job in self._started:
+            job.kill()
 
     def job(
         self,
@@ -243,11 +257,14 @@ class Engine:
         home = self.tmp_path / f"run-{self._runs}"
         workdir = home / "work"
         workdir.mkdir(parents=True)
+        temporary = home / "tmp"
+        temporary.mkdir()
         log = self.tmp_path / f"connections-{self._runs}.jsonl"
         environment = {
             "PATH": os.environ["PATH"],
             "HOME": str(home),
             "LANG": "C.UTF-8",
+            "TMPDIR": str(temporary),
             "PYTHONPATH": str(GUARD),
             "ENGINE_CONNECT_LOG": str(log),
             "TIKTOKEN_CACHE_DIR": str(bpe_cache_directory()),
@@ -263,7 +280,9 @@ class Engine:
             cwd=workdir,
             env=environment,
         )
-        return JobProcess(process, workdir, home, log, argv)
+        job = JobProcess(process, workdir, home, log, argv)
+        self._started.append(job)
+        return job
 
     def run(
         self,
@@ -279,3 +298,24 @@ class Engine:
         started = self.start(extra_env, identity_patch)
         body = job if job is not None else self.job(command, **job_options)
         return started.finish(body if isinstance(body, str) else json.dumps(body), timeout)
+
+
+def sent_to_fakes(github: FakeGithub, llm: FakeLlm) -> str:
+    """Everything the job put into requests to the fakes, except the Authorization headers, which
+    carry the credentials by design: bodies, paths and queries of both."""
+    parts = [json.dumps(request.body) for request in llm.requests]
+    parts += [request.path for request in llm.requests]
+    parts += [request.body.decode(errors="replace") for request in github.requests]
+    parts += [f"{request.path}?{json.dumps(request.query)}" for request in github.requests]
+    return "\n".join(parts)
+
+
+def credentials_travel_only_in_headers(github: FakeGithub, llm: FakeLlm) -> bool:
+    """The LLM got the LLM key as a bearer token and nothing else, GitHub got the token."""
+    llm_ok = all(request.authorization == f"Bearer {API_KEY}" for request in llm.requests)
+    github_ok = all(
+        request.authorization.split(" ")[0] in ("token", "Bearer")
+        and request.authorization.split(" ")[-1] == github.token
+        for request in github.requests
+    )
+    return llm_ok and github_ok

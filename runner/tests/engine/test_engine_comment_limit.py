@@ -6,7 +6,9 @@ posted and later edited in place. A review so long that the state no longer fits
 its marker: PR-Agent cannot find it again, so every run posts another copy, and the job reports
 `review_not_published` although a (cut) review is on the pull request. The second test documents
 that behaviour as it is today; it is the groundwork for the ticket that changes it, and that
-ticket changes the test with it."""
+ticket changes the test with it.
+
+The second test pins a bug, not a wish: it is expected to change in CR-49."""
 
 import canned
 from fake_github import MAX_COMMENT_CHARS, FakeGithub
@@ -42,8 +44,8 @@ def test_a_review_near_the_comment_limit_is_posted_and_edited_in_place(
     assert second.result["commentUrl"] == first.result["commentUrl"]
 
 
-# CR-49-T05
-def test_a_review_beyond_the_comment_limit_is_cut_posted_without_its_marker_and_not_reported(
+# CR-49-T05 (EXPECTED TO CHANGE IN CR-49: it asserts today's behaviour, which CR-49 replaces)
+def test_today_a_review_beyond_the_comment_limit_is_cut_posted_without_its_marker_and_not_reported(
     engine: Engine, github: FakeGithub, llm: FakeLlm
 ) -> None:
     llm.replies["review"] = review_of_size("first run", 70_000)
@@ -51,6 +53,7 @@ def test_a_review_beyond_the_comment_limit_is_cut_posted_without_its_marker_and_
     first = engine.run("review")
     second = engine.run("review")
 
+    # CR-49: expected to change. After the fix a review of this size is published and found again.
     for outcome in (first, second):
         assert outcome.returncode != 0
         assert outcome.result["ok"] is False

@@ -91,7 +91,8 @@ class FakeGithub:
     body: str = ""
     default_branch: str = "main"
     files: list[ChangedFile] = field(default_factory=lambda: [default_file()])
-    # Files of the repository by (path, ref): `.pr_agent.toml` and `AGENTS.md` of the base branch.
+    # Files of the repository by (path, ref) with the canonical ref (see `put_file`): the
+    # `.pr_agent.toml` and `AGENTS.md` of the default branch, or of the head of the pull request.
     repo_files: dict[tuple[str, str], str] = field(default_factory=lambda: {})
     comments: list[Comment] = field(default_factory=lambda: [])
     requests: list[RecordedRequest] = field(default_factory=lambda: [])
@@ -103,6 +104,7 @@ class FakeGithub:
     patched_titles: list[str] = field(default_factory=lambda: [])
     # How many comment writes were refused for being longer than GitHub takes.
     refused_too_long: int = 0
+    head_ref: str = "feature/greeting"
     head_sha: str = "1" * 40
     base_sha: str = "2" * 40
 
@@ -309,7 +311,7 @@ class FakeGithub:
             "url": self._api(f"/pulls/{self.number}"),
             "html_url": self._web(f"/pull/{self.number}"),
             "issue_url": self._api(f"/issues/{self.number}"),
-            "head": self._branch_ref("feature/greeting", self.head_sha),
+            "head": self._branch_ref(self.head_ref, self.head_sha),
             "base": self._branch_ref(self.default_branch, self.base_sha),
             "changed_files": len(self.files),
             "commits": 1,
@@ -398,20 +400,32 @@ class FakeGithub:
             "html_url": self._web(f"/blob/{ref or self.default_branch}/{path}"),
         }
 
+    def _canonical_ref(self, ref: str) -> str:
+        """Names for the same commit: no ref (the contents API then reads the default branch), the
+        default branch, and the sha the pull request is based on. The head has its own names."""
+        if ref in ("", self.default_branch, self.base_sha):
+            return self.default_branch
+        if ref in (self.head_sha, self.head_ref):
+            return self.head_ref
+        return ref
+
+    def put_file(self, path: str, text: str, ref: str | None = None) -> None:
+        """A file of the repository at a ref (the default branch if none is given)."""
+        self.repo_files[(path, self._canonical_ref(ref or self.default_branch))] = text
+
     def _file_text(self, path: str, ref: str) -> str | None:
-        """The text of a file at a ref. The head and the base of the pull request have their own."""
+        """The text of a file at a ref, or None (a 404). Strictly by ref: the head of the pull
+        request, its base and the default branch do not see each other's files, and a file the
+        pull request adds does not exist at the base."""
+        ref = self._canonical_ref(ref)
         for file in self.files:
-            if file.filename == path:
-                if ref in (self.head_sha, "feature/greeting"):
-                    return file.head_content
-                return file.base_content
-        if (path, ref) in self.repo_files:
-            return self.repo_files[(path, ref)]
-        # A file of the repository, asked for without a ref or by the default branch or its sha.
-        for known in ("", self.default_branch, self.base_sha):
-            if (path, known) in self.repo_files:
-                return self.repo_files[(path, known)]
-        return None
+            if file.filename != path:
+                continue
+            if ref == self.head_ref:
+                return file.head_content
+            if ref == self.default_branch:
+                return None if file.status == "added" else file.base_content
+        return self.repo_files.get((path, ref))
 
     def _issue(self, request: RecordedRequest) -> tuple[int, Any]:
         return 200, {

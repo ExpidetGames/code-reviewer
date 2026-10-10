@@ -181,9 +181,15 @@ Engine suite (`runner/tests/engine/`, `uv run pytest -m engine`, about 4 minutes
   fixed error status for every request (429, 401), error texts that quote the key, and held
   requests that report whether the client hung up. Both are Python so the runner's own ruff and
   pyright cover them; they stay here until a second suite needs them, then they move to `fakes/`.
-- Only loopback is reachable, and the suite proves it: `connect_guard/sitecustomize.py` is put on the
-  PYTHONPATH of the job process, records every connection and name lookup in a file and refuses
-  anything but loopback (a test shows the guard works). pytest-socket guards the test process only.
+- Only loopback is reachable, at two levels. On every machine, a Python level guard:
+  `connect_guard/sitecustomize.py` is put on the PYTHONPATH of the job process and records and refuses
+  every connection, datagram and name lookup that goes through the `socket` module (`connect`,
+  `connect_ex`, `sendto`, `getaddrinfo`, `gethostbyname*`, `gethostbyaddr`) to anything but
+  loopback; the libraries PR-Agent uses all go through them, and a test shows the guard works. It
+  does not see code that bypasses the module (the C level `_socket`, a subprocess). In CI the
+  operating system adds the guarantee: `scripts/run_engine_offline.sh` runs the suite in a network
+  namespace (`unshare --net`) that has a loopback interface and no route out, and checks first that
+  there really is none. pytest-socket guards the test process only.
 - The one step that needs the internet is outside the tests: PR-Agent counts tokens with a tiktoken
   encoding that is downloaded on first use. Run `uv run python scripts/prime_tiktoken_cache.py` once
   per machine (CI does it before the tests, the runner image bakes it in); without the cache the
@@ -256,7 +262,7 @@ Inside `runner/`: `uv sync --locked`, `uv run ruff check .`, `uv run ruff format
 - Tests of file system errors that depend on permissions (a read-only directory) fail when the tests
   run as root, because root may write anywhere. Run the suite as a normal user.
 
-`make test-engine` runs the engine suite (after priming the tiktoken cache, see above). Planned targets: `test-stack-up`,
+`make test-engine` runs the engine suite on your machine (after priming the tiktoken cache, see above; without the network namespace, which is Linux and CI only). Planned targets: `test-stack-up`,
 `test-stack-down`, `test:docker`, `test:e2e:docker` (they arrive with the Docker test stack).
 
 ## 8. CI
@@ -275,7 +281,7 @@ file is pinned by `app/src/ci/ci-workflow.test.ts`.
 | `changes` | pull requests | Path filter: `app` (anything except `runner/**`, top-level Markdown and `fakes/**` Markdown; Markdown inside `app/` stays because Prettier checks it), `runner` (anything except `app/**` and Markdown), `workflows` (`.github/**`). |
 | `app-fast` | app changed | `pnpm format:check`, `lint`, `typecheck`, `test` (unit), `test:int` (host), `build` with placeholder env. |
 | `runner-fast` | runner changed | `ruff check`, `ruff format --check`, `pyright`, `pytest -m unit`, `pytest -m "integration or contract"`. |
-| `engine` | pull requests that change the runner, and every pull request into `main` (never pushes, never app-only changes) | `uv sync --locked`, `scripts/prime_tiktoken_cache.py` (the one step with internet), `pytest -m engine`. No Docker stack, no secrets, `contents: read`, 20 minutes. |
+| `engine` | pull requests that change the runner, and every pull request into `main` (never pushes, never app-only changes) | Calls `engine.yml` (the one definition, also used by the nightly workflow): `uv sync --locked`, the tiktoken encoding from the cache (`scripts/prime_tiktoken_cache.py` fills it, with retries, the one step with internet), then `pytest -m engine` in a network namespace without network. No Docker stack, no secrets, `contents: read`, 20 minutes. |
 | `e2e` ("E2E: browser journeys") | app changed | `playwright install --with-deps chromium`, then the journeys against the production build: `@smoke` only on pull requests into `development` and `CR-*`, all (without `@flaky`) on pull requests into `main` and on pushes. |
 | `image-app`, `image-runner` | pull requests: app (runner) changed, or any pull request into `main` | Builds the image with `docker/build-push-action` (`load`, no push, GHA layer cache), then runs its smoke test. No registry login, read-only token. Pushes do not run these jobs because the publish workflow builds the same images. |
 | `actionlint` | workflows changed | actionlint with `.github/actionlint.yaml`. |
@@ -295,7 +301,7 @@ test stops the job before the login, so no tag moves. The structure of both file
 `app/src/ci/images-workflow.test.ts`; `app/src/ci/dockerfiles.test.ts` pins the runtime versions,
 digests, user and `.dockerignore` rules of the Dockerfiles.
 
-`.github/workflows/nightly.yml` (workflow "Nightly") runs the same engine job every night on the default branch and on demand (`workflow_dispatch`); its structure is pinned by `app/src/ci/nightly-workflow.test.ts`, the engine job of `ci.yml` by `ci-workflow.test.ts`.
+`.github/workflows/nightly.yml` (workflow "Nightly") calls the same `engine.yml` every night on the default branch and on demand (`workflow_dispatch`). The structure is pinned by `app/src/ci/engine-workflow.test.ts` (the shared job), `nightly-workflow.test.ts` and `ci-workflow.test.ts` (the callers).
 
 Planned, added with the suites they run: the Docker stack job (`integration`) and `enforce-pr-source-branch.yml`. `main` accepts pull requests only from
 `development` or `hotfix/*`.

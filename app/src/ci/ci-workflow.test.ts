@@ -20,6 +20,7 @@ type Step = {
 } & Record<string, unknown>;
 type Job = {
   name?: string;
+  uses?: string;
   needs?: string | string[];
   if?: string;
   "timeout-minutes"?: number;
@@ -117,17 +118,12 @@ describe("CI workflow triggers and jobs", () => {
   });
 
   // CR-41-T15
-  it("runs the engine suite with the real PR-Agent in its own job, with the tiktoken cache primed first", () => {
+  it("runs the engine suite through the shared engine workflow in its own job", () => {
     const job = jobNamed("engine");
-    const lines = commandLines(job);
 
     expect(job.needs).toBe("changes");
-    expect(job.defaults?.run?.["working-directory"]).toBe("runner");
-    expect(lines).toContain("uv run pytest -m engine");
-    expect(lines).toContain("uv run python scripts/prime_tiktoken_cache.py");
-    expect(
-      lines.indexOf("uv run python scripts/prime_tiktoken_cache.py"),
-    ).toBeLessThan(lines.indexOf("uv run pytest -m engine"));
+    expect(job.uses).toBe("./.github/workflows/engine.yml");
+    expect(job.steps).toBeUndefined();
   });
 
   // CR-41-T15
@@ -142,14 +138,13 @@ describe("CI workflow triggers and jobs", () => {
   });
 
   // CR-41-T15
-  it("keeps the engine job read-only, without secrets and with a time limit", () => {
+  it("keeps the engine job read-only and without secrets", () => {
     const job = jobNamed("engine");
 
-    expect(job.permissions).toBeUndefined(); // the workflow level grants contents: read only
+    expect(job.permissions).toEqual({ contents: "read" });
     expect(workflow.permissions).toEqual({ contents: "read" });
     expect(JSON.stringify(job)).not.toContain("secrets.");
-    expect(job["timeout-minutes"]).toBeGreaterThan(0);
-    expect(job["timeout-minutes"]).toBeLessThanOrEqual(30);
+    expect(job).not.toHaveProperty("secrets");
   });
 
   // CR-16-T01
@@ -431,7 +426,9 @@ describe("CI workflow installation and runtimes", () => {
 
   // CR-16-T07
   it("limits the run time of every job", () => {
-    for (const [id, job] of jobs) {
+    // A job that calls a reusable workflow cannot have its own limit; the called workflow has one
+    // (engine-workflow.test.ts).
+    for (const [id, job] of jobs.filter(([, job]) => !job.uses)) {
       expect(job["timeout-minutes"], `${id} timeout`).toBeGreaterThan(0);
       expect(job["timeout-minutes"], `${id} timeout`).toBeLessThanOrEqual(30);
     }
