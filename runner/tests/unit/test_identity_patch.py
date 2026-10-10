@@ -72,8 +72,11 @@ def test_the_patch_feeds_the_authorship_check_that_decides_whether_a_review_is_e
 
 
 def test_without_the_patch_the_authorship_check_cannot_be_answered(
-    provider: Any,
+    provider: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # Inside GitHub Actions PR-Agent assumes the Actions bot identity instead of failing.
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+
     class Comment:
         user = type("Author", (), {"login": "code-reviewer[bot]"})()
 
