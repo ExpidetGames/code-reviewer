@@ -11,6 +11,15 @@ vi.mock("./auth/startup.ts", () => ({
 vi.mock("./auth/config.ts", () => ({
   loadAuthConfig: () => ({ access: {} }),
 }));
+// Stands for the production deployment check: it needs a moment to finish, and records only then. In
+// every other environment the real check does nothing, so the stand-in records nothing either.
+vi.mock("./deploy/startup.ts", () => ({
+  checkDeploymentConfigOnStart: async () => {
+    if (process.env.NODE_ENV !== "production") return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    calls.push("deploy-check");
+  },
+}));
 vi.mock("./db/startup.ts", () => ({
   getDatabase: () => ({}),
   initializeDatabaseOnStart: async () => void calls.push("database"),
@@ -53,5 +62,23 @@ describe("starting the server", () => {
 
     expect(warn).not.toHaveBeenCalled();
     expect(calls).toContain("database");
+  });
+
+  // CR-38 review: the check ends the process on a bad configuration, so nothing may start before it
+  // has finished (a `void` instead of an `await` would let the database open first).
+  it("finishes the deployment check in production before the database is opened", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("LLM_PROVIDER", "openrouter");
+    vi.stubEnv("LLM_API_KEY", "dummy-llm-key-0123456789");
+
+    await register();
+
+    expect(calls).toEqual([
+      "auth-check",
+      "deploy-check",
+      "database",
+      "pins",
+      "sync",
+    ]);
   });
 });
