@@ -1,19 +1,24 @@
 import { Suspense } from "react";
 import { signInWithGithub } from "@/auth/actions";
 import { loginErrorMessage } from "@/auth/login-errors";
+import { Button } from "@/ui/button";
 
 export default function LoginPage({ searchParams }: PageProps<"/login">) {
   return (
-    <main>
-      <h1>Code Reviewer</h1>
-      <p>Sign in to continue.</p>
-      {/* The error code is part of the URL, so it is read at request time, behind a boundary. */}
-      <Suspense fallback={null}>
-        <LoginError searchParams={searchParams} />
-      </Suspense>
-      <form action={signInWithGithub}>
-        <button type="submit">Sign in with GitHub</button>
-      </form>
+    <main className="auth-page">
+      <div className="card auth-card">
+        <h1>Code Reviewer</h1>
+        <p className="muted">Sign in to continue.</p>
+        {/* The error code is part of the URL, so it is read at request time, behind a boundary. */}
+        <Suspense fallback={null}>
+          <LoginError searchParams={searchParams} />
+        </Suspense>
+        <form action={signInWithGithub}>
+          <Button type="submit" className="btn-block">
+            Sign in with GitHub
+          </Button>
+        </form>
+      </div>
     </main>
   );
 }
@@ -26,5 +31,9 @@ async function LoginError({
     typeof error === "string" ? error : undefined,
   );
   if (!message) return null;
-  return <p role="alert">{message}</p>;
+  return (
+    <p role="alert" className="alert alert-error">
+      {message}
+    </p>
+  );
 }

@@ -16,7 +16,7 @@ import { createAccessProxy } from "./access-proxy.ts";
 
 // Every route of the app and whether it needs a session. A new route must be added here.
 const PUBLIC_ROUTES = ["/login", "/api/health", "/api/auth/[...all]"] as const;
-const PROTECTED_ROUTES = ["/"] as const;
+const PROTECTED_ROUTES = ["/", "/projects", "/runs", "/settings"] as const;
 // Files the proxy matcher leaves out on purpose (src/proxy.ts), so no session rule applies to them.
 const OUTSIDE_THE_PROXY = ["/favicon.ico"] as const;
 
