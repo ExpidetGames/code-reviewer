@@ -262,7 +262,13 @@ function publish(temporaryPath: string, backupDir: string, at: Date): string {
   );
 }
 
-const HARD_LINKS_UNSUPPORTED = new Set(["EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS", "EXDEV"]);
+const HARD_LINKS_UNSUPPORTED = new Set([
+  "EPERM",
+  "ENOTSUP",
+  "EOPNOTSUPP",
+  "ENOSYS",
+  "EXDEV",
+]);
 
 function removeQuietly(path: string): void {
   try {

@@ -47,7 +47,9 @@ export function runBackupJob({
     const failure =
       error instanceof BackupError
         ? error
-        : new BackupError("BACKUP_WRITE_FAILED", String(error), { cause: error });
+        : new BackupError("BACKUP_WRITE_FAILED", String(error), {
+            cause: error,
+          });
     log.error(`[backup] ${failure.code}: ${failure.message}`);
     return { ok: false, error: failure };
   }

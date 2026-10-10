@@ -24,7 +24,13 @@ async function setup() {
 
 function logger() {
   const lines: string[] = [];
-  return { lines, log: { info: (m: string) => lines.push(m), error: (m: string) => lines.push(m) } };
+  return {
+    lines,
+    log: {
+      info: (m: string) => lines.push(m),
+      error: (m: string) => lines.push(m),
+    },
+  };
 }
 
 /** An old "backup" file: only its name matters to the rotation. */
@@ -40,7 +46,10 @@ describe("the backup job", () => {
     const { config, target } = await setup();
     // 40 consecutive days: well beyond 7 daily and 4 weekly backups.
     const planted = Array.from({ length: 40 }, (_, index) =>
-      plant(target, new Date(NOW.getTime() - (index + 1) * 86_400_000).toISOString()),
+      plant(
+        target,
+        new Date(NOW.getTime() - (index + 1) * 86_400_000).toISOString(),
+      ),
     );
     writeFileSync(join(target, "notes.txt"), "keep me");
     writeFileSync(join(target, "app.db"), "not a backup name");
@@ -60,17 +69,24 @@ describe("the backup job", () => {
     expect(left.length).toBeLessThan(planted.length / 2);
     expect(left).toContain(planted[0]);
     expect(left).not.toContain(planted[30]);
-    const backupsLeft = left.filter((name) => name.startsWith("code-reviewer-"));
+    const backupsLeft = left.filter((name) =>
+      name.startsWith("code-reviewer-"),
+    );
     // Every planted backup plus the new one either stayed or was reported as removed.
     if (outcome.ok)
-      expect(outcome.removed.length + backupsLeft.length).toBe(planted.length + 1);
+      expect(outcome.removed.length + backupsLeft.length).toBe(
+        planted.length + 1,
+      );
   });
 
   // CR-40-T07
   it("deletes nothing when the backup fails, even though old backups are beyond the retention", async () => {
     const { directory, target } = await setup();
     const old = Array.from({ length: 30 }, (_, index) =>
-      plant(target, new Date(NOW.getTime() - (index + 1) * 86_400_000).toISOString()),
+      plant(
+        target,
+        new Date(NOW.getTime() - (index + 1) * 86_400_000).toISOString(),
+      ),
     );
     const { lines, log } = logger();
 
@@ -93,10 +109,15 @@ describe("the backup job", () => {
     const missing = join(directory, "..", "no-such-volume");
     const { lines, log } = logger();
 
-    const outcome = runBackupJob({ databasePath: config.path, backupDir: missing, log });
+    const outcome = runBackupJob({
+      databasePath: config.path,
+      backupDir: missing,
+      log,
+    });
 
     expect(outcome.ok).toBe(false);
-    if (!outcome.ok) expect(outcome.error.code).toBe("BACKUP_TARGET_UNAVAILABLE");
+    if (!outcome.ok)
+      expect(outcome.error.code).toBe("BACKUP_TARGET_UNAVAILABLE");
     expect(lines.join("\n")).toContain(missing);
   });
 
@@ -118,7 +139,11 @@ describe("the backup job", () => {
       `[backup] created ${outcome.backup.path} (${String(outcome.backup.bytes)} bytes)`,
     ]);
     const text = lines.join("\n");
-    for (const secret of ["dummy-session-token-for-tests", "example.test", "ada"]) {
+    for (const secret of [
+      "dummy-session-token-for-tests",
+      "example.test",
+      "ada",
+    ]) {
       expect(text).not.toContain(secret);
     }
   });

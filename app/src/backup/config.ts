@@ -1,0 +1,47 @@
+// The backup settings from the environment. The only place that knows the variable names of the
+// backup (DATABASE_PATH is the database layer's own variable, read here with the same default).
+//
+// No `server-only` import: the command line (cli.ts) runs this code without Next.js.
+import { BackupError } from "./errors.ts";
+
+export const DEFAULT_BACKUP_DIR = "/backups";
+export const DEFAULT_BACKUP_TIME = "02:30";
+/** The same default as src/db/config.ts (a test keeps the two equal). */
+export const DEFAULT_DATABASE_PATH_FOR_BACKUP = "/data/app.db";
+
+export type BackupConfig = {
+  databasePath: string;
+  backupDir: string;
+  /** When the scheduler runs, in UTC; null when it is switched off. */
+  time: { hour: number; minute: number } | null;
+};
+
+type Env = Readonly<Record<string, string | undefined>>;
+
+function setting(env: Env, name: string, fallback: string): string {
+  const value = env[name]?.trim();
+  return value ? value : fallback;
+}
+
+export function loadBackupConfig(env: Env): BackupConfig {
+  return {
+    databasePath: setting(
+      env,
+      "DATABASE_PATH",
+      DEFAULT_DATABASE_PATH_FOR_BACKUP,
+    ),
+    backupDir: setting(env, "BACKUP_DIR", DEFAULT_BACKUP_DIR),
+    time: parseTime(setting(env, "BACKUP_TIME", DEFAULT_BACKUP_TIME)),
+  };
+}
+
+function parseTime(text: string): BackupConfig["time"] {
+  if (text.toLowerCase() === "off") return null;
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(text);
+  if (!match)
+    throw new BackupError(
+      "BACKUP_CONFIG_INVALID",
+      'BACKUP_TIME must be a time of day in UTC written HH:MM (for example "02:30"), or "off".',
+    );
+  return { hour: Number(match[1]), minute: Number(match[2]) };
+}

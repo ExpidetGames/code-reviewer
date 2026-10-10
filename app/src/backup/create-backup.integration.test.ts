@@ -76,7 +76,10 @@ describe("creating a backup", () => {
     copyFileSync(config.path, plainCopy);
     expect(tableCounts(plainCopy).users).toBe(0);
 
-    const result = createBackup({ databasePath: config.path, backupDir: target });
+    const result = createBackup({
+      databasePath: config.path,
+      backupDir: target,
+    });
 
     expect(tableCounts(result.path).users).toBe(2);
     expect(tableCounts(result.path).sessions).toBe(1);
@@ -181,7 +184,10 @@ describe("creating a backup", () => {
   it("makes the backup readable by its owner only", async () => {
     const { config, target } = await setup();
 
-    const result = createBackup({ databasePath: config.path, backupDir: target });
+    const result = createBackup({
+      databasePath: config.path,
+      backupDir: target,
+    });
 
     expect(statSync(result.path).mode & 0o777).toBe(0o600);
   });

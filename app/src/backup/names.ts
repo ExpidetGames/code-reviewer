@@ -39,7 +39,10 @@ export function parseBackupFileName(name: string): ParsedBackupName | null {
     .map(Number) as [number, number, number, number, number, number];
   const at = new Date(Date.UTC(year, month - 1, day, hour, minute, second));
   // Date.UTC rolls over (month 13 becomes January): only a name that survives the round trip is real.
-  if (backupFileName(at, 1).slice(0, STAMP_LENGTH) !== name.slice(0, STAMP_LENGTH)) return null;
+  if (
+    backupFileName(at, 1).slice(0, STAMP_LENGTH) !== name.slice(0, STAMP_LENGTH)
+  )
+    return null;
   return { at, sequence: match[7] === undefined ? 1 : Number(match[7]) };
 }
 

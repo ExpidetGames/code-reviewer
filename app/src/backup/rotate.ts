@@ -3,7 +3,11 @@
 import { readdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { describeError } from "./errors.ts";
-import { DEFAULT_RETENTION, planRotation, type RetentionRule } from "./retention.ts";
+import {
+  DEFAULT_RETENTION,
+  planRotation,
+  type RetentionRule,
+} from "./retention.ts";
 
 export type RotationResult = {
   /** File names that were deleted. */
