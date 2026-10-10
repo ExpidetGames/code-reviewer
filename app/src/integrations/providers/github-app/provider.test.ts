@@ -257,6 +257,8 @@ describe("translating pull request deliveries", () => {
       command: null,
       args: null,
       actor: { login: "alice", externalId: "1001" },
+      draft: false,
+      state: "open",
     });
   });
 
@@ -279,9 +281,10 @@ describe("translating pull request deliveries", () => {
     expect(trigger.headSha).toMatch(/^9e8d7c6b/);
   });
 
-  it("ignores actions that do not start a review", async () => {
+  it("ignores actions that do not start a review, and reports a closed pull request as such", async () => {
     expect(await eventOf("pull_request.closed")).toMatchObject({
-      kind: "ignored",
+      kind: "pull_request_closed",
+      prNumber: 7,
     });
     expect(await eventOf("pull_request.labeled")).toMatchObject({
       kind: "ignored",
@@ -385,7 +388,7 @@ describe("translating comment deliveries", () => {
 });
 
 describe("translating other deliveries", () => {
-  it("ignores events the app does not use and payloads of the wrong shape", async () => {
+  it("ignores events the app does not use and calls payloads of the wrong shape invalid", async () => {
     const { provider } = setup();
 
     expect(await eventOf("ping")).toMatchObject({ kind: "ignored" });
@@ -398,7 +401,7 @@ describe("translating other deliveries", () => {
           secret: TEST_WEBHOOK_SECRET,
         }),
       ),
-    ).toMatchObject({ kind: "ignored" });
+    ).toMatchObject({ kind: "invalid_payload" });
     expect(
       await provider.parseEvent(
         integration,
