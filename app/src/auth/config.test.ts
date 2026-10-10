@@ -84,7 +84,7 @@ describe("loading the sign-in configuration", () => {
     const config = loadAuthConfig({
       ...validEnv,
       GITHUB_OAUTH_BASE_URL: "http://127.0.0.1:4000/",
-      GITHUB_API_BASE: "http://127.0.0.1:4000/",
+      GITHUB_API_BASE_URL: "http://127.0.0.1:4000/",
       ALLOW_TEST_GITHUB_ENDPOINTS: "true",
     });
 
@@ -92,7 +92,7 @@ describe("loading the sign-in configuration", () => {
     expect(config.github.apiBaseUrl).toBe("http://127.0.0.1:4000");
   });
 
-  it.each(["GITHUB_OAUTH_BASE_URL", "GITHUB_API_BASE"])(
+  it.each(["GITHUB_OAUTH_BASE_URL", "GITHUB_API_BASE_URL"])(
     "refuses %s without the test flag, because the client secret would be sent there",
     (name) => {
       const error = loadError({ ...validEnv, [name]: "http://127.0.0.1:4000" });
@@ -107,9 +107,9 @@ describe("loading the sign-in configuration", () => {
       loadError({
         ...validEnv,
         ALLOW_TEST_GITHUB_ENDPOINTS: "true",
-        GITHUB_API_BASE: "api.github.com",
+        GITHUB_API_BASE_URL: "api.github.com",
       }).message,
-    ).toContain("GITHUB_API_BASE");
+    ).toContain("GITHUB_API_BASE_URL");
   });
 
   it("ignores the test flag when no endpoint is overridden", () => {
