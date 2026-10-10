@@ -82,11 +82,19 @@ def test_the_script_does_not_print_the_secrets_even_if_the_runner_output_has_the
     script = load_script()
     for name in script.REQUIRED_ENV:
         monkeypatch.setenv(name, API_KEY if name == "OPENROUTER_API_KEY" else "1")
-    monkeypatch.setattr(script, "mint_installation_token", lambda *args: TOKEN)
+
+    def mint(*args: str | Path) -> str:
+        return TOKEN
+
+    monkeypatch.setattr(script, "mint_installation_token", mint)
     leaking = subprocess.CompletedProcess(
         args=[], returncode=0, stdout=f'{{"logTail": "{TOKEN}"}}', stderr=f"oops {API_KEY}"
     )
-    monkeypatch.setattr(script, "start_runner", lambda job: leaking)
+
+    def start(job: dict[str, Any]) -> subprocess.CompletedProcess[str]:
+        return leaking
+
+    monkeypatch.setattr(script, "start_runner", start)
 
     code = script.main([])
 
