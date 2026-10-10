@@ -484,3 +484,17 @@ def test_the_control_flag_reaches_the_runner_start_together_with_the_recording(
     assert flags == [False]
     assert json.loads((tmp_path / "control-1.json").read_text())["result"]["ok"] is True
     assert (tmp_path / "control-1.comment.md").read_text() == "the standalone text"
+
+
+# The runner prints the result as the last line; anything else is an unreadable result.
+def test_the_last_line_of_the_runner_output_is_the_result() -> None:
+    script = load_script()
+
+    assert script.parse_result('noise\n{"ok": true}\n\n') == {"ok": True}
+
+
+@pytest.mark.parametrize("stdout", ["", "not json", "[1, 2]", '"text"', "42"])
+def test_output_without_a_json_object_as_last_line_is_an_unreadable_result(stdout: str) -> None:
+    script = load_script()
+
+    assert script.parse_result(stdout) == {"ok": False, "errorCode": "unreadable_result"}
