@@ -138,6 +138,11 @@ first activation, switched off with `active = 0`, never deleted; see `src/projec
 `webhook-deliveries-repository.ts`) holds the delivery ids the webhook route has accepted, so a
 redelivery produces no second trigger; rows are pruned after 7 days; see `src/webhooks/README.md`.
 
+`jobs` (migration `20261010191500_create_jobs`, repository `jobs-repository.ts`, claim in
+`jobs-claim.ts`) is the job queue; the rules (dedupe, supersession, leases, attempts, timeouts) are
+in `src/jobs/README.md`. `jobs-claim.ts` holds the one statement written for SQLite (see its head
+comment); everything else is query builder code.
+
 `app_settings` (migration `20261010201500_create_app_settings`, repository `app-settings-repository.ts`) holds
 settings of the whole instance, one row per setting with a JSON value; the first is `review_defaults`, the
 global default values of the review settings (`src/review-settings/README.md`).

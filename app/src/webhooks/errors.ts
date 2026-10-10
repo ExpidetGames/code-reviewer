@@ -12,6 +12,8 @@ export const WEBHOOK_ERROR_CODES = [
   "WEBHOOK_DELIVERY_HEADER_INVALID",
   /** The body is not valid JSON. 400. */
   "WEBHOOK_BODY_NOT_JSON",
+  /** The signature is valid, but the payload of an event the app uses lacks fields it reads (for example no head commit). 400. */
+  "WEBHOOK_PAYLOAD_INVALID",
   /** Another request is handling this delivery right now; GitHub shows it as failed and it can be redelivered. 409. */
   "WEBHOOK_DELIVERY_IN_PROGRESS",
   /** Handling the delivery failed; it can be redelivered. 5xx. */
@@ -31,7 +33,16 @@ export const WEBHOOK_ACCEPTED_OUTCOMES = [
   "trigger_not_allowed",
   /** The repository has no active project (never activated, deactivated, or gone from the installation). */
   "project_not_active",
+  /** A comment command the project's settings do not allow; nothing was handed to the intake. */
+  "command_not_allowed",
   "trigger_enqueued",
+  /**
+   * A pull request event that deliberately starts no review: a draft, a closed pull request, a
+   * setting that switches it off, or a commit that is no longer the head. The reason is logged.
+   */
+  "trigger_skipped",
+  /** A pull request was closed; the jobs still waiting for it were dropped (possibly none). */
+  "waiting_jobs_discarded",
   "installation_changed",
 ] as const;
 export type WebhookAcceptedOutcome = (typeof WEBHOOK_ACCEPTED_OUTCOMES)[number];
@@ -49,5 +60,15 @@ export class WebhookProcessingError extends Error {
     super(message, options);
     this.name = "WebhookProcessingError";
     this.status = status;
+  }
+}
+
+/** Thrown inside the handler for a payload that is signed but not usable; answered with 400. */
+export class WebhookPayloadError extends Error {
+  readonly safeMessage = true as const;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "WebhookPayloadError";
   }
 }

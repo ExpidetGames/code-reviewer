@@ -1,0 +1,284 @@
+# Code Reviewer runner
+
+Python worker that runs [PR-Agent](https://github.com/qodo-ai/pr-agent). `code-reviewer-runner` is
+the job loop: it claims jobs from the app and starts `code-reviewer-run-job`, the entry point of one
+job, as a process of its own for each of them. See the repository `README.md` for setup and
+`TESTING.md` for the tests.
+
+## The job loop
+
+`code-reviewer-runner` (the container's entry point) asks the app for work over HTTP
+(`contracts/runner-api.v1.json`, `app/src/runner-api/README.md`) and keeps up to `RUNNER_CONCURRENCY`
+jobs running. It is configured by environment variables:
+
+| Variable | Meaning | Default |
+|---|---|---|
+| `RUNNER_API_URL` | Base URL of the app, for example `http://app:3000` | required |
+| `RUNNER_TOKEN` | The shared token of the runner API (the app's `RUNNER_TOKEN`) | required |
+| `RUNNER_CONCURRENCY` | Jobs at the same time, 1 to 32. One PR-Agent process needs about 320 MB (CR-13), so `floor((MiB - 256) / (321 * 1.5))` for the memory of the container; 3 for 2 GiB | 3 |
+| `RUNNER_POLL_INTERVAL_SECONDS` | Wait between two claims when nothing is waiting (after a job ends the loop asks again at once) | 5 |
+| `RUNNER_JOB_TIMEOUT_SECONDS` | Hard timeout of one job, see below | 1200 (20 minutes) |
+| `RUNNER_SHUTDOWN_GRACE_SECONDS` | How long running jobs may finish after `SIGTERM` | 60 |
+| `RUNNER_ID` | Free-form id sent as `X-Runner-Id` (bookkeeping only) | `runner-<hostname>` |
+| `PR_AGENT_COMMAND` | The command that runs one job, split like a shell would. Only for test stacks that replace PR-Agent with a fake | `python -m code_reviewer_runner.runner` |
+
+Rules (the CR-29 decisions; tests in `tests/unit/test_job_loop*.py` and `tests/integration/test_job_loop*.py`):
+
+- **One process per job.** The job (with the git token and the LLM key) goes to the process on
+  **stdin**, never in the arguments and never in the environment. The process gets a minimal
+  environment (`PATH`, `HOME`, locale, proxy and certificate settings, the tiktoken cache and its
+  timeout), so it does not see `RUNNER_TOKEN` or the job of another process, and its own working
+  directory (empty, removed afterwards: PR-Agent reads a `pyproject.toml` there). It leads its own
+  process group, so ending a job ends everything it started.
+- **Refused jobs start nothing.** The input is validated with the runner's own `parse_job` before a
+  process is started: an unknown command (`invalid_command`) or platform and any other invalid input
+  (`invalid_job`) are reported with `complete` at once. The platforms are the table in
+  `platforms.py` (`git.provider` to PR-Agent settings; `github` only in the MVP).
+- **Heartbeat** every `heartbeatIntervalSeconds` (30) while the process runs, none after it ends. A
+  `409` means the lease is lost: the process is ended and nothing is reported. Other failed heartbeats
+  are tried again at the next beat.
+- **Hard timeout.** The process gets `RUNNER_JOB_TIMEOUT_SECONDS` as its own limit and reports `timeout`
+  with its log when it hits it. A process that does not stop (or a blocked one) is ended by the loop
+  10 seconds later: `SIGTERM` to its process group, `SIGKILL` 5 seconds after that, and the job is
+  reported as `timeout`. So the effective limit is the timeout plus 10 seconds.
+- **The result** is the last line the process printed on stdout, checked against the contract. A
+  process that ends without a usable line (crash, signal, no output) is reported as `runner_error` with
+  the end of its stderr. The log tail is redacted again with the secrets of the job, the runner token
+  and the lease tokens, and cut to 4 KB; the body of `complete` stays under 48 KB (the app refuses 64 KiB).
+  Only the newest 256 KB of stdout and 64 KB of stderr are kept, however much the process writes.
+- **`complete` is repeated** with growing pauses while the app cannot be reached, for up to 10
+  minutes (the lease is 2 minutes, so the app has taken the job back by then). While the result is being resent the loop keeps sending heartbeats, so the lease cannot lapse and no other runner can take the job a second time; a lost lease (409) stops the attempts. A `409` ends the
+  attempts. A `400` or `413` is answered once with the bare verdict (no log). An answer that is not HTTP (garbage, a cut-off body) counts as the app being unavailable. The answer
+  `status: "queued"` (after a shutdown report) is accepted.
+- **Back-off.** When the app is down or answers 5xx, 429 or 401 to a claim, the loop waits 5, 10, 20, 40,
+  then 60 seconds (never below 5 seconds, even with a shorter poll interval; or the `Retry-After` of a `503`) and starts over after a successful claim. Running
+  jobs are not touched.
+- **Shutdown.** `SIGTERM` or `SIGINT`: no new claims, running jobs may finish for
+  `RUNNER_SHUTDOWN_GRACE_SECONDS`; then they are ended and reported as `failed` with `runner_shutdown`,
+  which the app gives back to the queue (a repeated report may be answered with `409`, which is fine).
+  A second signal skips the wait. The exit code is 0.
+- **No secrets in logs.** The loop logs ids, codes and counts, never the input of a job. Every line
+  passes a masker that knows the runner token, the lease tokens and the credentials of the running jobs.
+- **The image and compose.** The entry point is `tini` (PID 1) in front of the loop, so the helpers of a
+  killed job are reaped and `docker stop` reaches the loop as SIGTERM; `init: true` is not needed.
+  Compose must give the container a `stop_grace_period` of **at least 90 seconds** (60 s grace period
+  + 5 s between SIGTERM and SIGKILL + up to 10 s to report `runner_shutdown`; Docker's default of 10 s
+  would SIGKILL the runner before the jobs are reported). `PR_AGENT_COMMAND` must never be set in a
+  production compose file: the job, with its credentials, would go to that command (the loop logs a
+  warning at start when it is set).
+- The codes the loop adds to the ones of the table below: `runner_shutdown`. `timeout` and
+  `runner_error` are also reported by the loop itself.
+
+The sizing of a container (memory per process, default concurrency) is in
+`docs/spike/cr-13-measurements.md`.
+
+## One job
+
+The job is JSON on stdin (the shape is documented in `src/code_reviewer_runner/job.py`):
+
+| Field | Meaning |
+|---|---|
+| `prUrl`, `command` | `https://<host>/<owner>/<repo>/pull/<n>` on the host of `git.baseUrl`; one of `review`, `improve`, `describe`, `ask` |
+| `args` | `ask` only: exactly one string, the question |
+| `git` | `provider` (`github`), `baseUrl`, `token` (installation token), `botLogin` (`<app slug>[bot]`) |
+| `llm` | `provider` (`openrouter`), `model`, `apiKey`; optional `baseUrl` (loopback only, for test fakes), `maxTokens` and `fallbackModels` (see below) |
+| `env` | optional options of the four tools, `PR_REVIEWER__*`, `PR_DESCRIPTION__*`, `PR_CODE_SUGGESTIONS__*`, `PR_QUESTIONS__*`, as strings; one option per key (`PR_REVIEWER__NUM_MAX_FINDINGS`, never a second `__`). Nothing else is accepted. See "Settings policy" for how the values are read. |
+
+`llm.maxTokens` (integer, 1000 to 10,000,000) is the context window the runner gives PR-Agent. It
+sets `config.custom_model_max_tokens` (used for a model PR-Agent does not know) and
+`config.max_model_tokens` (the upper bound PR-Agent applies to every model, default 32,000), both
+to the same value; without `maxTokens` PR-Agent's own values stay. The value also applies to the
+fallback models PR-Agent does not know, so use the smallest window of the models in the chain.
+
+`llm.fallbackModels` (optional list of at most five model names, same characters as `model`, no
+repeats, none equal to `model`) is the chain PR-Agent tries, in order, when the model fails. Every
+entry gets the `openrouter/` prefix like `model`. Without the field there is no fallback: PR-Agent's
+own default fallback model belongs to another vendor and is never used. An entry that is not a valid
+model name, a list that is too long or one with a repeat is an `invalid_job`. A review that needed
+a fallback model reports `usage.fallbackUsed`.
+
+The result is exactly one line of JSON on stdout: `ok`, `durationMs`, `commentUrl` (or `null`),
+`errorCode` (or `null`), `logTail` (redacted, at most 4 KB), `logTruncated` (true if the runner's log sink, which sees PR-Agent's records at INFO and above,
+held more than the tail shows; output on stdout and stderr is not counted) and `usage` (model, tokens, cost).
+The exit code is 0 for `ok` and 1 otherwise. The environment variable `RUNNER_JOB_TIMEOUT_SECONDS`
+(read from the process environment, not handed to PR-Agent) makes the runner stop the command and
+report `timeout`: first by cancelling it, and if it does not react (a call that blocks the process)
+three seconds later by printing the result and ending the process. The caller should still kill the
+process after its own deadline.
+
+## Where the result comes from
+
+`PRAgent.handle_request` only returns `True` or `False`, and `True` also happens when nothing was
+posted (or when a tool swallowed its own error). So the result does not come from its return value
+(decision of CR-12, see `docs/spike/cr-12-run-result.md`). It is assembled from what the runner
+observes while the command runs:
+
+- `commentUrl`: the comment recorder wraps the two write paths of PR-Agent's GitHub provider
+  (`publish_comment`, `edit_comment`) and picks the review (or improve summary, or answer) comment
+  by its hidden marker only: the marker must be an exact line within the first five lines of the
+  comment (or its link-reference form), as PR-Agent itself checks it. The visible heading does not
+  count: it is configurable, and the "Standalone PR Review" comment that PR-Agent posts when it
+  cannot verify its identity keeps the heading but drops the marker. An edited comment counts, which
+  is what a second review does. No GitHub call is made to look the comment up afterwards.
+- `ok` and `errorCode`: false if `handle_request` returned `False` or raised, if the tool marked the
+  command as failed, or if it posted a "Failed to ..." comment. The code is derived from the
+  exception PR-Agent logged (the runner's own log sink reads it off the record), never from text.
+- `logTail`: the runner's own redacting sink, newest lines, warnings and errors first, at most 4 KB,
+  escape sequences removed, control characters turned into spaces, then redacted.
+
+When there is no comment link: `review` reports `ok: false` with `review_not_published` (a review
+that posted nothing, or only a standalone comment, is a failure the caller must see). `improve`, `ask` and `describe` keep
+`ok: true` with `commentUrl: null` (nothing to suggest is a valid outcome; `describe` edits the pull
+request itself and never has a comment).
+
+## Error codes
+
+Defined once, in `ErrorCode` (`src/code_reviewer_runner/result.py`); a test checks that this list
+and the enum agree. Callers branch on the code, never on the text.
+
+| Code | Meaning |
+|---|---|
+| `invalid_job` | The job is not valid JSON or a field is missing, malformed or not allowed |
+| `invalid_command` | The command is not one of `review`, `improve`, `describe`, `ask` |
+| `pr_agent_version_mismatch` | The installed PR-Agent is not the version the runner was written for |
+| `identity_patch_failed` | The method the identity patch replaces is missing or has changed |
+| `runner_error` | A failure inside the runner itself (also reported by the job loop for a process that ended without a result) |
+| `command_failed` | PR-Agent reported a failure it handled itself (failure comment, failed flag) and nothing more specific is known |
+| `review_not_published` | `review` returned normally but no review comment was recorded (for example an identity problem) |
+| `pr_not_found` | GitHub answered 404 for the pull request |
+| `git_auth` | GitHub rejected the token (401) |
+| `git_forbidden` | GitHub refused the request (403) |
+| `git_rate_limit` | GitHub rate limit (429, or 403 with a rate limit message) |
+| `git_unavailable` | GitHub could not be reached, timed out or answered 5xx |
+| `git_unprocessable` | GitHub answered 422 |
+| `git_provider_init` | PR-Agent could not create its GitHub client and no cause is known |
+| `llm_auth` | The LLM provider rejected the key (401, 403). Called `llm_auth_failed` in some planning notes; this is the same thing |
+| `llm_quota` | The LLM account has no credit left (402) |
+| `llm_rate_limit` | The LLM provider rate limit (429) |
+| `llm_timeout` | The LLM provider did not answer in time |
+| `llm_unavailable` | The LLM provider could not be reached or answered 5xx |
+| `llm_bad_request` | The LLM provider refused the request (400, 422, context too large) |
+| `llm_output_invalid` | The model answered, but its answer could not be turned into a review |
+| `model_unknown` | PR-Agent does not know the model (set `llm.maxTokens`) or the provider has no such model |
+| `timeout` | The command did not finish within `RUNNER_JOB_TIMEOUT_SECONDS` (also reported by the job loop for a process it had to end) |
+| `unknown` | Something failed that no rule recognises |
+
+## Settings policy
+
+How a job becomes PR-Agent configuration (`pr_agent_config.py`, `pr_agent_runtime.py`,
+`repo_settings_guard.py`):
+
+- **No secret in the process environment.** The installation token (`github.user_token`) and the
+  LLM key (`openrouter.key`) are typed settings, set inside the request scope. PR-Agent reads both
+  from its settings (verified for its GitHub provider and its LiteLLM handler), so they are not
+  environment variables, and a `{env[...]}` reference finds nothing. The environment of the PR-Agent
+  process is built from scratch: runtime variables (`PATH`, `HOME`, proxy and certificate settings,
+  the tiktoken cache), endpoints (`GITHUB__BASE_URL`, `OPENROUTER__API_BASE`), model names and a
+  few switches. Nothing of the parent environment passes on. The values of `job.env` are not in it
+  either.
+- **Nothing a job or a repository sends is evaluated.** Dynaconf evaluates a text that starts with
+  `@format`, `@jinja`, `@get`, `@read_file` and similar markers when the setting is read; such a
+  text can read an environment variable or any other setting, a secret included, into the prompt
+  and from there into a public comment. Dynaconf only does that while its `AUTO_CAST_FOR_DYNACONF`
+  setting is on. It is switched off in three places: in the environment (Dynaconf reads it before
+  the first variable, which PR-Agent's own setting of it comes too late for), as the first typed
+  setting of each job, and by the settings guard before and after every settings file it lets
+  PR-Agent merge. As a safety net the guard turns any value still waiting for evaluation back into
+  its text after each merge. A `this.<section>.<key>` reference would still resolve a typed secret
+  if evaluation were on, so the switch is what keeps `@jinja {{ this.github.user_token }}` literal.
+  It also covers texts PR-Agent stores in its settings itself, such as the body of a linked ticket.
+  Tests prove this with PR-Agent's real loaders and `_apply_repo_settings_file`, and by rendering
+  PR-Agent's review prompt. The Dynaconf version they were written against is pinned in
+  `tests/unit/test_dependency_pin.py`.
+- **`job.env` values keep their type.** They are not read as TOML. The type of an option is the
+  type of PR-Agent's own default for it (all options of the four tools are switches, integers or
+  text): a switch takes `true` or `false` (any case), an integer option takes an integer, and
+  everything else, instructions above all, stays exactly the text that was sent (`123`, `[1]`,
+  `2026-01-01` and `true` in an instructions field are text). A value that does not fit the type of
+  its option is an `invalid_job` that names the option, never the value. An option PR-Agent does
+  not know is kept as text.
+- **Precedence**: PR-Agent's defaults, then the repository's `.pr_agent.toml`, then the options of
+  the job. The guard puts the options of the job back after each repository file, so the project
+  settings of the app win over the repository file; a repository can only set what the app does not
+  manage. The settings that route a request or a credential, select the model, bound the cost or
+  switch publishing and callbacks cannot be set by a repository at all: the key list
+  `PROTECTED_SETTINGS` (model roles, fallbacks, token and reasoning budgets, endpoints, tokens,
+  publishing switches) and the sections in `PROTECTED_SECTIONS`, which are pinned as a whole so a
+  key PR-Agent does not declare cannot be added either (`model_routing`, which can swap the model per
+  pull request size, `openrouter` provider routing and limits, `litellm`, `openai`, `azure_ad`,
+  `aws`, `vertexai` and every provider section PR-Agent reads a key or endpoint from). A unit test
+  feeds a malicious file with all of these through PR-Agent's own merge function; another compares
+  the provider sections with PR-Agent's own list, so a new provider after an upgrade is noticed.
+  A job cannot set the options the runner pins itself (`PR_REVIEWER__FINAL_UPDATE_MESSAGE`,
+  `PR_REVIEWER__ENABLE_REVIEW_LABELS_SECURITY` and `_EFFORT`): `invalid_job`.
+- **Where `.pr_agent.toml` comes from.** PR-Agent 0.47.0 reads it from the **default branch** of the
+  repository (contents API without a ref), not from the head of the pull request and not from the
+  base branch of a pull request into another branch. The author of a pull request therefore cannot
+  change how the review is configured by changing the file in that pull request; a change takes
+  effect once it is merged into the default branch. The runner keeps it that way: the setting that
+  would name another branch (`config.config_branch`, also the environment variable
+  `PR_AGENT_CONFIG_BRANCH`, which the minimal environment drops) and per-directory settings files
+  (`config.enable_per_directory_settings`) are pinned, so a repository file cannot redirect the
+  lookup. The organization-wide settings repository (`<owner>/pr-agent-settings`) is not read
+  (`config.use_global_settings_file` is off). The agent rules file `AGENTS.md`
+  (`config.repo_context_files`) is read from the default branch as well
+  (`config.repo_context_from_default_branch`, pinned to `true`: a repository file could otherwise
+  switch it to the branch a pull request targets). Repository settings files stay enabled (single
+  tenant, trusted repositories).
+- `config.repo_context_files` stays at PR-Agent's default `["AGENTS.md"]` on purpose: the rules a
+  project writes down for agents help the review. It costs a few tokens and one extra GitHub call
+  per run, and it puts repository text into the prompt, which the repositories of a single tenant
+  are trusted to do. Revisit this for a multi-tenant setup.
+- `job.env` cannot carry credentials, endpoints or model settings. The only LLM endpoint override
+  is `llm.baseUrl`, accepted for loopback addresses.
+
+## Identity patch
+
+An installation token cannot call `GET /user`, so PR-Agent cannot learn which login it posts as and
+a second review of the same pull request would fail instead of editing its comment.
+`GithubProvider._resolve_user_login` is replaced to return `<slug>[bot]`. The patch is tied to the
+exact PR-Agent version (`identity_patch.PATCHED_FOR_VERSION`) and refused for any other.
+
+The patch reaches into a private method, so a PR-Agent upgrade must not slip through. Two layers
+protect it:
+
+- At the start of every job the runner checks the installed version, that `_resolve_user_login`
+  exists and takes only `self`, and that the chain that asks it for the login is intact
+  (`is_comment_authored_by_pr_agent` calls `_agent_login`, which calls `_resolve_user_login`; see
+  `identity_funnel.py`). If anything differs, the job is refused before PR-Agent runs, with the
+  result code `pr_agent_version_mismatch` or `identity_patch_failed`. The detail names the method,
+  the installed version and, for a signature change, the expected and the found signature. The
+  runner never falls back to another identity and never posts a duplicate comment instead.
+- `tests/unit/test_dependency_pin.py` and `tests/unit/test_identity_funnel.py` run in the runner CI
+  job against the real, pinned PR-Agent (no network). They fail when the pin, the lock file, the
+  installed package and `PATCHED_FOR_VERSION` disagree, when the methods the patch relies on are
+  gone or changed, or when the fingerprint of one of them (a hash of its syntax tree) differs from
+  the one recorded for 0.47.0. A PR that bumps `pr-agent` therefore turns the check
+  `All checks passed?` red until someone has read the release diff and updated the recorded
+  fingerprints and `PATCHED_FOR_VERSION` together with the pin. The fingerprints are hashes of
+  the syntax tree and were recorded on Python 3.13 (the version of `.python-version` and the
+  image); on another minor version they differ, so the fingerprint tests first assert the
+  interpreter and say so instead of reporting a PR-Agent change that does not exist.
+
+## Measuring memory and duration
+
+`scripts/measure_runs.py` starts one or several runner processes against the sandbox pull requests
+(small, medium, large) and reports the peak memory (`ru_maxrss` of each process) and the duration of
+each, with minimum, median and maximum over repeats. It runs on the host or inside the runner image
+with a memory limit (`--docker IMAGE --memory 2g`), where it also reads the peak memory and the OOM
+kills of the whole container. `--fake-llm` replaces the model with a canned local answer and puts a
+dummy key into the job, so a run costs nothing; but every run, fake or real, posts or edits the real
+review comment of the sandbox pull request, and the canned finding overwrites it. The script exits
+with 1 if a child failed or was killed, and limits repeats and processes to 10. The results and the numbers derived from them (default `RUNNER_CONCURRENCY`, server
+size) are in `docs/spike/cr-13-measurements.md`. Like the manual run it needs `--yes`.
+
+## Manual run
+
+`scripts/manual_review.py` runs a real review against the sandbox repository; see its docstring.
+It needs `--yes`, posts a real comment and costs a few cents.
+`--no-identity-patch` starts the runner without the identity patch, as a control for the spike
+(CR-11). The report of that spike is `docs/spike/cr-11-second-run.md`; the reports of the
+other spike tickets are added to the same folder.
+With `--record-dir DIR --label NAME` it also saves the result JSON and the text of the review comment
+right after the run (the next run edits the comment in place); nothing is saved if a secret shows up in
+either. The model comparison of CR-44 (`docs/spike/cr-44-model-comparison.md`) was made this way.

@@ -31,6 +31,30 @@ const testGithubAppConfig = (
   overrides: Record<string, string | undefined> = {},
 ) => loadGithubAppConfig(testGithubAppEnv(overrides));
 
+/** A recorded payload as far as these tests reach into it. */
+type Damageable = {
+  pull_request: {
+    head: { sha?: string };
+    draft: unknown;
+    state: unknown;
+    merged?: boolean;
+  };
+  installation?: unknown;
+};
+
+/** A recorded comment payload as far as these tests reach into it. */
+type CommentPayload = {
+  action?: string;
+  issue: { number: unknown; state?: string };
+  comment: {
+    id?: number;
+    body: unknown;
+    author_association?: string;
+  };
+  sender: { type?: string };
+  installation?: unknown;
+};
+
 const FIXTURES = join(
   dirname(fileURLToPath(import.meta.url)),
   "../../../../../fakes/fixtures/github-webhooks",
@@ -61,6 +85,136 @@ describe("the recorded GitHub webhook payloads", () => {
     const event = name.split(".")[0] as keyof typeof WEBHOOK_READ_FIELDS;
 
     expect(payloadProblems(event, webhookFixture(name))).toEqual([]);
+  });
+
+  // CR-31-T18
+  it.each([
+    "pull_request.opened",
+    "pull_request.synchronize",
+    "pull_request.closed",
+  ])(
+    "%s has every field the automatic reviews read, with the right type",
+    (name) => {
+      const payload = webhookFixture(name) as Record<string, unknown> & {
+        action: string;
+        number: number;
+        pull_request: {
+          draft: boolean;
+          state: string;
+          merged: boolean;
+          head: { sha: string };
+        };
+        repository: { id: number; full_name: string };
+        installation: { id: number };
+      };
+
+      // The parser is held to the same list: a field it reads must be listed, so a payload without
+      // one of these is invalid, and so is a fixture whose schema drifted.
+      const listed = WEBHOOK_READ_FIELDS.pull_request.map((spec) => spec.path);
+      for (const path of [
+        "action",
+        "number",
+        "pull_request.draft",
+        "pull_request.state",
+        "pull_request.merged",
+        "pull_request.head.sha",
+        "repository.id",
+        "installation.id",
+      ])
+        expect(listed, path).toContain(path);
+      expect(payloadProblems("pull_request", payload)).toEqual([]);
+      expect(typeof payload.action).toBe("string");
+      expect(Number.isInteger(payload.number)).toBe(true);
+      expect(typeof payload.pull_request.draft).toBe("boolean");
+      expect(["open", "closed"]).toContain(payload.pull_request.state);
+      expect(typeof payload.pull_request.merged).toBe("boolean");
+      expect(payload.pull_request.head.sha).toMatch(/^[0-9a-f]{40}$/);
+      expect(typeof payload.repository.id).toBe("number");
+      expect(typeof payload.repository.full_name).toBe("string");
+      expect(Number.isInteger(payload.installation.id)).toBe(true);
+    },
+  );
+
+  // CR-32-T15
+  it.each([
+    "issue_comment.created.review",
+    "issue_comment.created.on-issue",
+    "issue_comment.created.bot",
+  ])(
+    "%s has every field the comment commands read, with the right type",
+    (name) => {
+      const payload = webhookFixture(name) as Record<string, unknown> & {
+        action: string;
+        issue: { number: number; state: string; pull_request?: unknown };
+        comment: { id: number; body: string; author_association: string };
+        sender: { type: string };
+        installation: { id: number };
+      };
+
+      const listed = WEBHOOK_READ_FIELDS.issue_comment.map((spec) => spec.path);
+      for (const path of [
+        "action",
+        "issue.number",
+        "issue.state",
+        "issue.pull_request",
+        "comment.id",
+        "comment.body",
+        "comment.author_association",
+        "sender.type",
+        "installation.id",
+      ])
+        expect(listed, path).toContain(path);
+      expect(payloadProblems("issue_comment", payload)).toEqual([]);
+      expect(typeof payload.action).toBe("string");
+      expect(Number.isInteger(payload.issue.number)).toBe(true);
+      expect(typeof payload.comment.id).toBe("number");
+      expect(typeof payload.comment.body).toBe("string");
+      expect(typeof payload.comment.author_association).toBe("string");
+      expect(["User", "Bot"]).toContain(payload.sender.type);
+      expect(Number.isInteger(payload.installation.id)).toBe(true);
+      // Only a comment on a pull request carries `issue.pull_request`.
+      expect("pull_request" in payload.issue).toBe(
+        name !== "issue_comment.created.on-issue",
+      );
+    },
+  );
+
+  // CR-32-T15
+  it.each([
+    ["action", (p: CommentPayload) => delete p.action],
+    ["issue.number", (p: CommentPayload) => (p.issue.number = "7")],
+    ["issue.state", (p: CommentPayload) => delete p.issue.state],
+    ["comment.id", (p: CommentPayload) => delete p.comment.id],
+    ["comment.body", (p: CommentPayload) => (p.comment.body = null)],
+    [
+      "comment.author_association",
+      (p: CommentPayload) => delete p.comment.author_association,
+    ],
+    ["sender.type", (p: CommentPayload) => delete p.sender.type],
+    ["installation.id", (p: CommentPayload) => delete p.installation],
+  ])("reports a comment payload whose %s drifted", (path, damage) => {
+    const payload = webhookFixture("issue_comment.created.review");
+
+    damage(payload as unknown as CommentPayload);
+
+    expect(payloadProblems("issue_comment", payload)).toContain(path);
+  });
+
+  it.each([
+    [
+      "pull_request.head.sha",
+      (p: Damageable) => delete p.pull_request.head.sha,
+    ],
+    ["pull_request.draft", (p: Damageable) => (p.pull_request.draft = "false")],
+    ["pull_request.merged", (p: Damageable) => delete p.pull_request.merged],
+    ["pull_request.state", (p: Damageable) => (p.pull_request.state = 1)],
+    ["installation.id", (p: Damageable) => delete p.installation],
+  ])("reports a payload whose %s drifted", (path, damage) => {
+    const payload = webhookFixture("pull_request.opened");
+
+    damage(payload as unknown as Damageable);
+
+    expect(payloadProblems("pull_request", payload)).toContain(path);
   });
 
   // CR-21-T14
@@ -158,28 +312,24 @@ describe("the recorded GitHub webhook payloads", () => {
   );
 
   // CR-22-T15
-  it.each([
-    "pull_request.closed",
-    "pull_request.edited",
-    "pull_request.labeled",
-    "pull_request.converted_to_draft",
-    "push",
-    "ping",
-  ])("%s is deliberately translated into no trigger", async (name) => {
-    const provider = createGithubAppProvider({
-      config: testGithubAppConfig(),
-      client: fakeGithubAppClient(),
-    });
+  it.each(["pull_request.edited", "pull_request.labeled", "push", "ping"])(
+    "%s is deliberately translated into no trigger",
+    async (name) => {
+      const provider = createGithubAppProvider({
+        config: testGithubAppConfig(),
+        client: fakeGithubAppClient(),
+      });
 
-    const event = await provider.parseEvent(
-      integration,
-      webhookDelivery({
-        event: name.split(".")[0] as string,
-        payload: webhookFixture(name),
-        secret: TEST_WEBHOOK_SECRET,
-      }),
-    );
+      const event = await provider.parseEvent(
+        integration,
+        webhookDelivery({
+          event: name.split(".")[0] as string,
+          payload: webhookFixture(name),
+          secret: TEST_WEBHOOK_SECRET,
+        }),
+      );
 
-    expect(event.kind).toBe("ignored");
-  });
+      expect(event.kind).toBe("ignored");
+    },
+  );
 });

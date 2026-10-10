@@ -4,7 +4,9 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { afterEach } from "vitest";
 
-const childScript = fileURLToPath(new URL("./db-child.ts", import.meta.url));
+const defaultChildScript = fileURLToPath(
+  new URL("./db-child.ts", import.meta.url),
+);
 const running = new Set<ChildProcessWithoutNullStreams>();
 
 afterEach(() => {
@@ -21,7 +23,10 @@ export type DbProcess = {
   exited: Promise<number | null>;
 };
 
-export function startDbProcess(args: string[]): DbProcess {
+export function startDbProcess(
+  args: string[],
+  childScript: string = defaultChildScript,
+): DbProcess {
   const child = spawn(
     process.execPath,
     ["--no-warnings", "--conditions=react-server", childScript, ...args],
