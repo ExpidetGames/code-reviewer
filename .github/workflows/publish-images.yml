@@ -1,0 +1,109 @@
+name: Publish images
+
+# Builds the app and runner images and pushes them to GHCR when development or main changes.
+# Pull requests never push: their image builds live in ci.yml (jobs image-app and image-runner) and
+# have no registry access. This workflow is the only one with the right to write packages.
+#
+# Both images are built and smoke tested first; only when both pass does the job log in and push,
+# so a failing build or smoke test never moves a tag. The pushes themselves are ordered so that the
+# floating tags (development, latest) move last: first the sha-<short> tags of both images, then
+# the floating tags of both. If a push fails half way, some sha tags may exist, but no floating tag
+# points at a half published release.
+on:
+  push:
+    branches: [development, main]
+
+permissions:
+  contents: read
+
+# Publishes of one branch run one at a time and a running publish is never cancelled. GitHub keeps
+# only the newest waiting run per group, so when pushes come in quickly an intermediate commit may
+# get no sha tag; the floating tag always ends on the newest commit.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  APP_IMAGE: ghcr.io/expidetgames/code-reviewer-app
+  RUNNER_IMAGE: ghcr.io/expidetgames/code-reviewer-runner
+
+jobs:
+  publish:
+    name: Build, smoke test and push both images
+    # A fork pushing to its own development or main has no right to this namespace.
+    if: ${{ github.repository == 'ExpidetGames/code-reviewer' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      # sha-<short> always, plus development (branch development) or latest (branch main).
+      - name: Work out the tags
+        id: tags
+        run: |
+          case "$GITHUB_REF_NAME" in
+            main) channel=latest ;;
+            development) channel=development ;;
+            *) echo "Unexpected branch $GITHUB_REF_NAME: only development and main are published." >&2; exit 1 ;;
+          esac
+          {
+            echo "sha_tag=sha-${GITHUB_SHA::7}"
+            echo "channel_tag=$channel"
+          } >> "$GITHUB_OUTPUT"
+      - name: Build the app image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: app
+          load: true
+          push: false
+          tags: |
+            ${{ env.APP_IMAGE }}:${{ steps.tags.outputs.sha_tag }}
+            ${{ env.APP_IMAGE }}:${{ steps.tags.outputs.channel_tag }}
+          labels: org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=app
+          cache-to: type=gha,mode=max,scope=app
+      - name: Smoke test the app image
+        env:
+          IMAGE: ${{ env.APP_IMAGE }}:${{ steps.tags.outputs.sha_tag }}
+        run: docker/smoke/app.sh "$IMAGE"
+      - name: Build the runner image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: runner
+          load: true
+          push: false
+          tags: |
+            ${{ env.RUNNER_IMAGE }}:${{ steps.tags.outputs.sha_tag }}
+            ${{ env.RUNNER_IMAGE }}:${{ steps.tags.outputs.channel_tag }}
+          labels: org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=runner
+          cache-to: type=gha,mode=max,scope=runner
+      - name: Smoke test the runner image
+        env:
+          IMAGE: ${{ env.RUNNER_IMAGE }}:${{ steps.tags.outputs.sha_tag }}
+        run: docker/smoke/runner.sh "$IMAGE"
+      # The login comes last, right before the push, so nothing above ever sees the token.
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Commit tags of both images first, floating tags last.
+      - name: Push the commit tags
+        env:
+          SHA_TAG: ${{ steps.tags.outputs.sha_tag }}
+        run: |
+          docker push "$APP_IMAGE:$SHA_TAG"
+          docker push "$RUNNER_IMAGE:$SHA_TAG"
+      - name: Push the floating tags
+        env:
+          CHANNEL_TAG: ${{ steps.tags.outputs.channel_tag }}
+        run: |
+          docker push "$APP_IMAGE:$CHANNEL_TAG"
+          docker push "$RUNNER_IMAGE:$CHANNEL_TAG"
