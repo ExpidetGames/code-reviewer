@@ -33,6 +33,11 @@ export function track<T extends Kysely<Database>>(db: T): T {
   return db;
 }
 
+/** Runs `cleanup` after the test, before the databases and directories are removed. */
+export function cleanUpAfterTest(cleanup: () => Promise<void>): void {
+  cleanups.push(cleanup);
+}
+
 /** An empty temporary directory, removed after the test. */
 export async function createTestDirectory(): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), "cr-db-test-"));

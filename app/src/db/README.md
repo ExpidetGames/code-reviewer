@@ -3,17 +3,17 @@
 Kysely on SQLite (better-sqlite3). The whole layer lives in this folder; nothing else in the app
 opens a database or writes SQL.
 
-| File                        | Role                                                                                                                                                           |
-| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `config.ts`                 | Reads `DATABASE_PATH` and `DATABASE_BUSY_TIMEOUT_MS` from the environment                                                                                      |
-| `connection.ts`             | `openDatabase(config)`: checks the directory, opens the file, sets the pragmas                                                                                 |
-| `dialect.ts`                | Kysely's SQLite dialect with `begin immediate` transactions and transactional DDL                                                                              |
-| `migrate.ts`, `migrations/` | `migrateToLatest(db)` and the ordered list of migrations                                                                                                       |
-| `startup.ts`                | What the server does on start; `getDatabase()` hands the connection out                                                                                        |
-| `schema.ts`                 | Row types of every table (`Database`)                                                                                                                          |
-| `codecs.ts`                 | The only code that knows how JSON, booleans and timestamps are stored                                                                                          |
-| `repositories/`             | One small module per table (or aggregate); the only code that queries it                                                                                       |
-| `errors.ts`                 | `DatabaseError` with stable codes (`DATABASE_CONFIG_INVALID`, `DATABASE_DIRECTORY_UNAVAILABLE`, `DATABASE_OPEN_FAILED`, `DATABASE_LOCKED`, `MIGRATION_FAILED`) |
+| File                        | Role                                                                                                                                                                         |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `config.ts`                 | Reads `DATABASE_PATH` and `DATABASE_BUSY_TIMEOUT_MS` from the environment                                                                                                    |
+| `connection.ts`             | `openDatabase(config)`: checks the directory, opens the file, sets the pragmas                                                                                               |
+| `dialect.ts`                | Kysely's SQLite dialect with `begin immediate` transactions and transactional DDL                                                                                            |
+| `migrate.ts`, `migrations/` | `migrateToLatest(db)` and the ordered list of migrations                                                                                                                     |
+| `startup.ts`                | What the server does on start; `getDatabase()` hands the connection out                                                                                                      |
+| `schema.ts`                 | Row types of every table (`Database`)                                                                                                                                        |
+| `codecs.ts`                 | The only code that knows how JSON, booleans and timestamps are stored                                                                                                        |
+| `repositories/`             | One small module per table (or aggregate); the only code that queries it. Exception: `users`, `sessions`, `accounts` and `verifications` belong to Better Auth (`src/auth/`) |
+| `errors.ts`                 | `DatabaseError` with stable codes (`DATABASE_CONFIG_INVALID`, `DATABASE_DIRECTORY_UNAVAILABLE`, `DATABASE_OPEN_FAILED`, `DATABASE_LOCKED`, `MIGRATION_FAILED`)               |
 
 ## Why better-sqlite3
 
