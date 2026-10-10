@@ -10,6 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import pytest
 
@@ -365,6 +366,8 @@ def test_a_command_that_awaits_too_long_is_stopped_with_the_timeout_code(tmp_pat
     assert process.returncode == 1
     assert result["errorCode"] == "timeout"
     assert result["ok"] is False
+    # CR-12-T05: the measured duration is the time until the stop, not zero and not the 120 s wait
+    assert result["durationMs"] >= 3000
 
 
 def test_a_command_that_blocks_the_whole_process_is_ended_by_the_watchdog(tmp_path: Path) -> None:
@@ -382,3 +385,37 @@ def test_the_timeout_variable_of_the_parent_is_not_handed_to_pr_agent(tmp_path: 
     _, seen = run_double("publish", tmp_path, extra_env={"RUNNER_JOB_TIMEOUT_SECONDS": "300"})
 
     assert "RUNNER_JOB_TIMEOUT_SECONDS" not in seen["environ_names"]
+
+
+# CR-12-T06
+def test_ten_megabytes_of_output_give_a_valid_single_line_result_with_a_marked_tail(
+    tmp_path: Path,
+) -> None:
+    process, _ = run_double("flood", tmp_path, timeout=55)
+
+    result = result_of(process)
+    assert process.returncode == 0
+    assert result["ok"] is True
+    assert len(result["logTail"].encode("utf-8")) <= 4096
+    assert result["logTruncated"] is True
+    assert "flood 49999" in result["logTail"]
+    assert len(process.stdout) < 10_000
+
+
+# CR-12-T08 and CR-12-T09
+def test_hostile_log_text_and_secrets_in_urls_leave_a_valid_result_without_secrets(
+    tmp_path: Path,
+) -> None:
+    process, _ = run_double("hostile", tmp_path)
+
+    result = result_of(process)
+    assert process.returncode == 1
+    assert result["ok"] is False
+    assert result["commentUrl"] is None
+    assert result["errorCode"] == "unknown"
+    assert "\x1b" not in result["logTail"]  # decoded: the raw line escapes it anyway
+    assert "red" in result["logTail"]
+    assert "evil.example.com" in result["logTail"]  # it is data in the string, not a field
+    for stream in (process.stdout, process.stderr):
+        for secret in (TOKEN, API_KEY, quote(TOKEN, safe=""), quote(API_KEY, safe="")):
+            assert secret not in stream

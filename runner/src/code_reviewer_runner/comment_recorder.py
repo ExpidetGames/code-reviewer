@@ -15,16 +15,16 @@ from typing import Any, Literal
 from code_reviewer_runner.job import Command
 
 BODY_HEAD_CHARS = 600
-_REVIEW_IDENTITIES = (
+# Only the hidden marker identifies a comment, as PR-Agent itself does (`comment_matches_identity`):
+# an exact line within the first lines. The visible heading is configurable, and the "Standalone PR
+# Review" comment that PR-Agent posts when it cannot verify its identity keeps the heading but drops
+# the marker, so a heading would turn a non-authoritative comment into the result.
+_REVIEW_MARKERS = (
     "<!-- pr-agent:review:full -->",
     "<!-- pr-agent:review:incremental -->",
-    "## PR Reviewer Guide",
-    "## Incremental PR Reviewer Guide",
 )
-_IMPROVE_IDENTITIES = (
-    "<!-- pr-agent:improve:summary -->",
-    "## PR Code Suggestions",
-)
+_IMPROVE_MARKERS = ("<!-- pr-agent:improve:summary -->",)
+_MARKER_LINES = 5
 # The tools publish these when a command fails but they still return normally.
 _FAILURE_PREFIXES = ("Failed to ",)
 
@@ -77,11 +77,19 @@ class CommentRecorder:
             return None
         if command is Command.ASK:
             return candidates[-1].url if candidates else None
-        identities = _REVIEW_IDENTITIES if command is Command.REVIEW else _IMPROVE_IDENTITIES
+        markers = _REVIEW_MARKERS if command is Command.REVIEW else _IMPROVE_MARKERS
         for event in reversed(candidates):
-            if any(identity in event.body_head for identity in identities):
+            if _carries_marker(event.body_head, markers):
                 return event.url
         return None
+
+
+def _carries_marker(body: str, markers: tuple[str, ...]) -> bool:
+    """True if one of the first lines is exactly a marker or its link-reference form."""
+    from pr_agent.algo.comment_identity import hidden_marker_forms  # loaded by now, see runner.py
+
+    forms = {form for marker in markers for form in hidden_marker_forms(marker)}
+    return any(line.strip() in forms for line in body.splitlines()[:_MARKER_LINES])
 
 
 def _url_of(comment: Any) -> str | None:

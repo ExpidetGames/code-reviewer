@@ -68,7 +68,7 @@ uv run code-reviewer-runner --version
 pull request. The job is JSON on stdin (`runner/src/code_reviewer_runner/job.py` documents the
 shape: pull request URL, command, installation token and bot login, LLM model and key). The result
 is exactly one line of JSON on stdout (`ok`, `durationMs`, `commentUrl`, `errorCode`, `logTail`,
-`usage`), and the exit code is 0 for `ok` and 1 otherwise. PR-Agent is pinned to one version
+`logTruncated`, `usage`), and the exit code is 0 for `ok` and 1 otherwise. PR-Agent is pinned to one version
 (`runner/pyproject.toml`); the runner patches the identity lookup of that exact version, so a
 PR-Agent upgrade needs a conscious change of both (see `runner/src/code_reviewer_runner/identity_patch.py`).
 

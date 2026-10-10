@@ -60,14 +60,18 @@ def _elapsed_ms(started: float) -> int:
 
 
 def _failure(code: ErrorCode, detail: str, started: float, capture: LogCapture | None) -> JobResult:
-    tail = capture.tail() if capture is not None else ""
-    log_tail = f"{code.value}: {detail}" + (f"\n{tail}" if tail else "")
+    tail, truncated = capture.snapshot() if capture is not None else ("", False)
+    # The code and the detail are the most important part: they stay, the old log lines make room.
+    header = f"{code.value}: {detail}"
+    room = max(MAX_TAIL_BYTES - len(header.encode("utf-8")) - 1, 0)
+    fitted = fit_to_bytes(tail, room)
     return JobResult(
         ok=False,
         duration_ms=_elapsed_ms(started),
         comment_url=None,
         error_code=code,
-        log_tail=fit_to_bytes(log_tail, MAX_TAIL_BYTES),
+        log_tail=fit_to_bytes(header + (f"\n{fitted}" if fitted else ""), MAX_TAIL_BYTES),
+        log_truncated=truncated or fitted != tail,
     )
 
 
@@ -130,12 +134,14 @@ def run_job(
         if error_code in (None, ErrorCode.UNKNOWN) and (failed_flag or failure_comment):
             error_code = ErrorCode.COMMAND_FAILED
         error_code = error_code or ErrorCode.UNKNOWN
+    log_tail, log_truncated = capture.snapshot()
     return JobResult(
         ok=ok,
         duration_ms=_elapsed_ms(started),
         comment_url=comment_url,
         error_code=error_code,
-        log_tail=capture.tail(),
+        log_tail=log_tail,
+        log_truncated=log_truncated,
         usage=usage,
     )
 
@@ -145,7 +151,7 @@ def _ensure_clean(result: JobResult, secrets: Sequence[str]) -> JobResult:
     line = result.to_line()
     if not any(secret and secret in line for secret in secrets):
         return result
-    return replace(result, log_tail=REDACTED, comment_url=None)
+    return replace(result, log_tail=REDACTED, log_truncated=True, comment_url=None)
 
 
 class _ResultChannel:
@@ -213,6 +219,7 @@ def _start_watchdog(
                 comment_url=None,
                 error_code=ErrorCode.TIMEOUT,
                 log_tail="timeout: the command did not stop in time",
+                log_truncated=True,
             )
         try:
             written = channel.write(result, secrets)
