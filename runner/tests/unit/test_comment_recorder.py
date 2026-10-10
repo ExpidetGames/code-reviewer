@@ -1,0 +1,231 @@
+"""Pins down the comment recorder: PR-Agent returns no URL of what it posted, so the runner wraps
+the two write paths of the GitHub provider (create and edit a comment) and picks the comment of the
+command from what was recorded, by the hidden marker PR-Agent puts into its own comments."""
+
+from collections.abc import Iterator
+from dataclasses import dataclass
+from typing import Any
+
+import pytest
+from pr_agent.git_providers.github_provider import GithubProvider
+
+from code_reviewer_runner.comment_recorder import (
+    CommentRecorder,
+    install_comment_recorder,
+)
+from code_reviewer_runner.job import Command
+
+REVIEW_MARKER = "<!-- pr-agent:review:full -->"
+IMPROVE_MARKER = "<!-- pr-agent:improve:summary -->"
+
+
+@dataclass
+class StubComment:
+    html_url: str
+    body: str = ""
+    is_temporary: bool = False
+
+
+class StubPull:
+    """The PyGithub pull request: creating an issue comment returns a comment with a URL."""
+
+    def __init__(self) -> None:
+        self.created = 0
+
+    def create_issue_comment(self, body: str) -> StubComment:
+        self.created += 1
+        return StubComment(html_url=f"https://github.com/o/r/pull/1#issuecomment-{self.created}")
+
+
+class FailingEdit(StubComment):
+    def edit(self, body: str) -> None:
+        raise OSError("not used: edit_comment is replaced in this test")
+
+
+@pytest.fixture
+def recorder() -> Iterator[CommentRecorder]:
+    recorder, uninstall = install_comment_recorder()
+    try:
+        yield recorder
+    finally:
+        uninstall()
+
+
+def provider_with_pull() -> Any:  # Any: PR-Agent's provider methods are untyped
+    instance = object.__new__(GithubProvider)
+    instance.pr = StubPull()  # type: ignore[assignment]
+    instance.issue_main = None
+    instance.max_comment_chars = 65000
+    return instance
+
+
+def test_a_created_comment_is_recorded_with_its_url_and_the_start_of_its_body(
+    recorder: CommentRecorder,
+) -> None:
+    provider = provider_with_pull()
+
+    created = provider.publish_comment(f"## PR Reviewer Guide\n\n{REVIEW_MARKER}\n\nbody")
+
+    assert created is not None
+    assert len(recorder.events) == 1
+    event = recorder.events[0]
+    assert event.kind == "created"
+    assert event.url == "https://github.com/o/r/pull/1#issuecomment-1"
+    assert REVIEW_MARKER in event.body_head
+    assert event.temporary is False
+
+
+def test_the_original_return_value_of_publish_comment_is_unchanged(
+    recorder: CommentRecorder,
+) -> None:
+    provider = provider_with_pull()
+
+    created = provider.publish_comment("hello")
+
+    assert isinstance(created, StubComment)
+    assert recorder.events[0].url == created.html_url
+
+
+def test_an_edited_comment_is_recorded_with_the_url_of_the_edited_comment(
+    recorder: CommentRecorder,
+) -> None:
+    class Editable(StubComment):
+        def edit(self, body: str) -> None:
+            self.body = body
+
+    comment = Editable(html_url="https://github.com/o/r/pull/1#issuecomment-99")
+    provider = provider_with_pull()
+
+    result = provider.edit_comment(comment, f"## PR Reviewer Guide\n\n{REVIEW_MARKER}\n\nnew")
+
+    assert result is None
+    assert comment.body.endswith("new")
+    assert recorder.events[0].kind == "edited"
+    assert recorder.events[0].url == "https://github.com/o/r/pull/1#issuecomment-99"
+
+
+def test_a_failed_edit_is_not_recorded_as_a_published_comment(recorder: CommentRecorder) -> None:
+    from github import GithubException
+
+    class Rejecting(StubComment):
+        def edit(self, body: str) -> None:
+            raise GithubException(403, {"message": "no"}, {})
+
+    provider = provider_with_pull()
+
+    result = provider.edit_comment(Rejecting(html_url="https://github.com/o/r/pull/1#c"), "x")
+
+    assert result is False
+    assert recorder.events == []
+
+
+def test_uninstalling_restores_the_original_methods() -> None:
+    provider_class: Any = GithubProvider  # Any: PR-Agent's provider methods are untyped
+    original_publish = provider_class.publish_comment
+    original_edit = provider_class.edit_comment
+
+    _, uninstall = install_comment_recorder()
+    assert provider_class.publish_comment is not original_publish
+    uninstall()
+
+    assert provider_class.publish_comment is original_publish
+    assert provider_class.edit_comment is original_edit
+
+
+def test_recording_never_breaks_the_write_it_observes(recorder: CommentRecorder) -> None:
+    class NoUrl:
+        pass
+
+    class PullWithoutUrl:
+        def create_issue_comment(self, body: str) -> NoUrl:
+            return NoUrl()
+
+    provider = provider_with_pull()
+    provider.pr = PullWithoutUrl()  # type: ignore[assignment]
+
+    created = provider.publish_comment("hello")
+
+    assert isinstance(created, NoUrl)
+    assert recorder.events == []
+
+
+def record(
+    recorder: CommentRecorder, kind: str, url: str, body: str, temporary: bool = False
+) -> None:
+    recorder.add(kind=kind, url=url, body=body, temporary=temporary)
+
+
+# CR-10-T12 (the URL that goes into the result)
+def test_the_review_comment_is_picked_by_its_marker_and_the_status_comment_is_ignored(
+    recorder: CommentRecorder,
+) -> None:
+    record(recorder, "created", "https://x/review", f"## PR Reviewer Guide 🔍\n\n{REVIEW_MARKER}\n")
+    record(
+        recorder, "created", "https://x/status", "**[Persistent review](https://x/review)** updated"
+    )
+
+    assert recorder.comment_url(Command.REVIEW) == "https://x/review"
+
+
+def test_the_last_edit_of_the_review_wins(recorder: CommentRecorder) -> None:
+    record(recorder, "created", "https://x/first", f"{REVIEW_MARKER}\nold")
+    record(recorder, "edited", "https://x/second", f"{REVIEW_MARKER}\nnew")
+
+    assert recorder.comment_url(Command.REVIEW) == "https://x/second"
+
+
+def test_the_review_is_recognised_by_its_heading_when_the_marker_is_missing(
+    recorder: CommentRecorder,
+) -> None:
+    record(recorder, "created", "https://x/review", "## PR Reviewer Guide 🔍\n\ntext")
+
+    assert recorder.comment_url(Command.REVIEW) == "https://x/review"
+
+
+def test_the_improve_summary_is_picked_by_its_marker(recorder: CommentRecorder) -> None:
+    record(recorder, "created", "https://x/review", f"{REVIEW_MARKER}\n")
+    record(
+        recorder, "created", "https://x/improve", f"## PR Code Suggestions ✨\n\n{IMPROVE_MARKER}\n"
+    )
+
+    assert recorder.comment_url(Command.IMPROVE) == "https://x/improve"
+
+
+def test_the_answer_to_a_question_is_the_last_comment_that_was_not_temporary(
+    recorder: CommentRecorder,
+) -> None:
+    record(recorder, "created", "https://x/progress", "Preparing answer...", temporary=True)
+    record(recorder, "created", "https://x/answer", "### **Ask** ❓\n\nanswer")
+
+    assert recorder.comment_url(Command.ASK) == "https://x/answer"
+
+
+def test_describe_has_no_comment_url_because_it_edits_the_pull_request_itself(
+    recorder: CommentRecorder,
+) -> None:
+    record(recorder, "created", "https://x/other", "some comment")
+
+    assert recorder.comment_url(Command.DESCRIBE) is None
+
+
+def test_no_comment_url_when_nothing_matching_was_posted(recorder: CommentRecorder) -> None:
+    assert recorder.comment_url(Command.REVIEW) is None
+
+    record(recorder, "created", "https://x/other", "unrelated")
+    assert recorder.comment_url(Command.REVIEW) is None
+
+
+def test_a_failure_comment_is_detected_and_never_chosen_as_the_result(
+    recorder: CommentRecorder,
+) -> None:
+    record(recorder, "created", "https://x/failed", "Failed to review PR: boom")
+
+    assert recorder.failure_comment_posted() is True
+    assert recorder.comment_url(Command.REVIEW) is None
+    assert recorder.comment_url(Command.ASK) is None
+
+
+def test_no_failure_comment_in_a_healthy_run(recorder: CommentRecorder) -> None:
+    record(recorder, "created", "https://x/review", f"{REVIEW_MARKER}\nbody")
+
+    assert recorder.failure_comment_posted() is False
