@@ -6,6 +6,7 @@
 // Nothing here logs or puts into an error message a token, the client secret or the authorization
 // code: Better Auth logs the errors thrown from here.
 import type { OAuth2Tokens } from "better-auth/oauth2";
+import { readSignInAccess, type SignInAccess } from "./sign-in-access.ts";
 import type {
   GenericOAuthConfig,
   GenericOAuthUserInfo,
@@ -15,7 +16,9 @@ export const GITHUB_PROVIDER_ID = "github";
 export const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 
 // Only the public profile is read; no email scope (see noreplyEmail).
-const SCOPES = ["read:user"];
+const PROFILE_SCOPES = ["read:user"];
+// Needed to see private memberships of an organization; requested only in organization mode.
+const ORG_SCOPE = "read:org";
 
 export type GithubProviderOptions = {
   clientId: string;
@@ -26,6 +29,18 @@ export type GithubProviderOptions = {
   apiBaseUrl: string;
   /** How long a call to GitHub may take before the sign in fails. */
   requestTimeoutMs?: number;
+  /** Also ask for the `read:org` scope (only when the allow list uses an organization). */
+  requestOrgScope: boolean;
+  /**
+   * Decides, with the profile's login and the token just issued, whether the person may use this
+   * instance. Required: a provider without an access decision would let everybody in. The decision
+   * is attached to the profile; `user.validateUserInfo` in auth.ts refuses the sign in before
+   * anything is written.
+   */
+  signInAccess: (input: {
+    login: string;
+    accessToken: string;
+  }) => Promise<SignInAccess>;
 };
 
 type GithubProfile = {
@@ -48,7 +63,9 @@ export function githubProviderConfig(
     clientSecret: options.clientSecret,
     authorizationUrl: `${options.oauthBaseUrl}/login/oauth/authorize`,
     tokenUrl: `${options.oauthBaseUrl}/login/oauth/access_token`,
-    scopes: SCOPES,
+    scopes: options.requestOrgScope
+      ? [...PROFILE_SCOPES, ORG_SCOPE]
+      : PROFILE_SCOPES,
     pkce: true,
     // The person keeps one user row for the life of the GitHub account: name, avatar and login
     // follow what GitHub says at every sign in.
@@ -58,6 +75,10 @@ export function githubProviderConfig(
     getUserInfo: (tokens) => readProfile(options, timeoutMs, tokens),
     mapProfileToUser: (profile) => ({
       githubLogin: typeof profile.login === "string" ? profile.login : "",
+      // When, and for which organization, the membership was confirmed during this sign in; null
+      // if it was not.
+      orgCheckedAt: readOrgCheck(profile)?.at ?? null,
+      orgCheckedFor: readOrgCheck(profile)?.org ?? null,
     }),
   };
 }
@@ -128,14 +149,25 @@ async function readProfile(
   );
   if (!profile || typeof profile.id !== "number" || !profile.login) return null;
 
+  const access = await options.signInAccess({
+    login: profile.login,
+    accessToken: tokens.accessToken,
+  });
+
   return {
     id: String(profile.id),
     login: profile.login,
+    codeReviewerAccess: access,
     name: profile.name || profile.login,
     email: noreplyEmail(profile.id),
     emailVerified: false,
     image: profile.avatar_url ?? undefined,
   };
+}
+
+function readOrgCheck(profile: Record<string, unknown>) {
+  const access = readSignInAccess(profile);
+  return access.allowed ? access.orgCheck : null;
 }
 
 /**

@@ -1,20 +1,21 @@
 # fakes/github
 
 A fake GitHub for the sign in. One HTTP server speaks the parts of GitHub that Code Reviewer uses to
-log a person in; the app is pointed at it with `GITHUB_OAUTH_BASE_URL` and `GITHUB_API_BASE` (both
+log a person in and to check organization membership; the app is pointed at it with `GITHUB_OAUTH_BASE_URL` and `GITHUB_API_BASE` (both
 set to the fake's address; they default to the real GitHub). The app refuses both unless
 `ALLOW_TEST_GITHUB_ENDPOINTS=true` is set as well, because the token exchange sends the client
 secret to that address. State is in memory. The app does not call `/user/emails` (it stores a noreply
 address); the endpoint is there for tickets that may need it.
 
-| Endpoint                                                         | Behavior                                                                                                                                                                                                                                      |
-| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /login/oauth/authorize`                                     | An HTML page with one "Authorize `<login>`" button per account and a "Cancel" button. Needs the registered `client_id` and a `redirect_uri`.                                                                                                  |
-| `POST /login/oauth/authorize/confirm`                            | What the buttons post. Redirects to `redirect_uri` with `code` and `state`, or with `error=access_denied` after "Cancel".                                                                                                                     |
-| `POST /login/oauth/access_token`                                 | Exchanges the code (single use, bound to `redirect_uri` and to the PKCE challenge) for an access token. Like GitHub, a refused code is answered with status 200 and an `error` field; answers JSON when asked for it, form encoded otherwise. |
-| `GET /user`                                                      | The profile for a bearer token: `id`, `login`, `name`, `email` (may be `null`), `avatar_url`. 401 `Bad credentials` for an unknown token.                                                                                                     |
-| `GET /user/emails`                                               | The email list; needs the `user:email` scope, else 404 as on GitHub.                                                                                                                                                                          |
-| `GET /__fake/health`, `POST /__fake/users`, `POST /__fake/reset` | Control endpoints for tests that run the fake as its own process (Playwright). `POST /__fake/users` takes a JSON `FakeGithubUser`.                                                                                                            |
+| Endpoint                                                                                     | Behavior                                                                                                                                                                                                                                                        |
+| -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /login/oauth/authorize`                                                                 | An HTML page with one "Authorize `<login>`" button per account and a "Cancel" button. Needs the registered `client_id` and a `redirect_uri`.                                                                                                                    |
+| `POST /login/oauth/authorize/confirm`                                                        | What the buttons post. Redirects to `redirect_uri` with `code` and `state`, or with `error=access_denied` after "Cancel".                                                                                                                                       |
+| `POST /login/oauth/access_token`                                                             | Exchanges the code (single use, bound to `redirect_uri` and to the PKCE challenge) for an access token. Like GitHub, a refused code is answered with status 200 and an `error` field; answers JSON when asked for it, form encoded otherwise.                   |
+| `GET /user`                                                                                  | The profile for a bearer token: `id`, `login`, `name`, `email` (may be `null`), `avatar_url`. 401 `Bad credentials` for an unknown token.                                                                                                                       |
+| `GET /user/emails`                                                                           | The email list; needs the `user:email` scope, else 404 as on GitHub.                                                                                                                                                                                            |
+| `GET /user/memberships/orgs/:org`                                                            | The signed in account's own membership in an organization, like GitHub: needs the `read:org` scope (else 403), 401 for an unknown or revoked token, 404 when not a member, otherwise 200 with `state` (`active` or `pending`), `role` and `organization.login`. |
+| `GET /__fake/health`, `POST /__fake/users`, `POST /__fake/org-members`, `POST /__fake/reset` | Control endpoints for tests that run the fake as its own process (Playwright). `POST /__fake/users` takes a JSON `FakeGithubUser`; `POST /__fake/org-members` takes `{ org, login, state? }`.                                                                   |
 
 ## In a Vitest test (same process)
 
@@ -33,6 +34,9 @@ github.addUser({
 // ... point the app at github.baseUrl ...
 const callback = await github.authorize(authorizeUrl, "octocat"); // what the "Authorize" button does
 github.failTokenEndpoint({ kind: "status", status: 500 }); // or { kind: "delay", delayMs: 5000 }
+github.addOrgMember("my-org", "octocat"); // or (…, "pending"); removeOrgMember undoes it
+github.failMembershipEndpoint({ kind: "status", status: 503 }); // or a delay; null is normal again
+github.revokeToken(github.issuedAccessTokens()[0]); // the token stops working (401)
 await github.close();
 ```
 

@@ -24,6 +24,7 @@ async function createGuardedApp() {
   const harness = await createAuthHarness();
   const proxy = createAccessProxy({
     getAuth: () => harness.auth,
+    getPolicy: () => harness.policy,
   });
   function visit(path: string, cookies?: CookieJar, method = "GET") {
     const headers = new Headers();
@@ -143,7 +144,12 @@ describe("a request with a valid session", () => {
     const { cookies } = await app.signIn();
     const refusing = createAccessProxy({
       getAuth: () => app.auth,
-      policy: (user) => user.githubLogin !== "octocat",
+      getPolicy: () => (user) =>
+        Promise.resolve(
+          user.githubLogin === "octocat"
+            ? { allowed: false, reason: "not_allowed" }
+            : { allowed: true },
+        ),
     });
 
     const response = await refusing(
@@ -204,6 +210,7 @@ describe("a check that cannot be made", () => {
       getAuth: () => {
         throw new Error("the database is not initialized");
       },
+      getPolicy: () => () => Promise.resolve({ allowed: true }),
     });
     const error = vi
       .spyOn(console, "error")

@@ -17,5 +17,9 @@ export const e2eEnv = {
   githubUrl: `http://127.0.0.1:${githubPort}`,
   githubClientId: "e2e-client-id",
   githubClientSecret: "e2e-client-secret-value",
+  // ALLOWED_GITHUB_LOGINS of the app under test: the accounts of the journeys that sign in. A new
+  // journey that signs in with an account of its own adds the login here. Accounts that are not
+  // listed are refused (see e2e/auth/allow-list.e2e.ts).
+  allowedLogins: ["login-journey"].join(","),
   authSecret: "e2e-auth-secret-0123456789-0123456789-abcdef",
 };

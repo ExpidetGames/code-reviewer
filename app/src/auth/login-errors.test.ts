@@ -31,6 +31,23 @@ describe("the message for a failed sign in", () => {
     expect(loginErrorMessage("account_not_linked")).not.toMatch(/try again/i);
   });
 
+  // CR-19-T07
+  it("says that the account is not allowed, in the words of the ticket, without naming anybody", () => {
+    expect(loginErrorMessage("not_allowed")).toBe(
+      "Your GitHub account is not allowed to use this Code Reviewer instance.",
+    );
+  });
+
+  // CR-19-T11
+  it("says that the check was not possible, and that waiting may help", () => {
+    expect(loginErrorMessage("check_failed")).toMatch(/could not check/i);
+    expect(loginErrorMessage("check_failed")).toMatch(/try again later/i);
+  });
+
+  it("asks for a new sign in when the stored authorization no longer works", () => {
+    expect(loginErrorMessage("sign_in_again")).toMatch(/sign in again/i);
+  });
+
   it("uses a generic message for a code it does not know and never echoes it", () => {
     const message = loginErrorMessage("<script>alert(1)</script>");
 

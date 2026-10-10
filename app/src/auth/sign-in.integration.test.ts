@@ -43,7 +43,9 @@ describe("signing in with GitHub for the first time", () => {
 describe("signing in again", () => {
   // CR-18-T05
   it("keeps one user and updates name and login when the GitHub account was renamed", async () => {
-    const harness = await createAuthHarness();
+    const harness = await createAuthHarness({
+      allowedLogins: ["octocat", "octocat-renamed"],
+    });
     await harness.signIn("octocat");
     const before = await harness.db
       .selectFrom("users")
