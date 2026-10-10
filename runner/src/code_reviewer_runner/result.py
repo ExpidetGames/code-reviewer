@@ -33,6 +33,13 @@ class ErrorCode(StrEnum):
     GIT_UNAVAILABLE = "git_unavailable"
     GIT_PROVIDER_INIT = "git_provider_init"
     PR_NOT_FOUND = "pr_not_found"
+    # The command did not finish within RUNNER_JOB_TIMEOUT_SECONDS.
+    TIMEOUT = "timeout"
+    # The model answered, but its answer could not be turned into a review.
+    LLM_OUTPUT_INVALID = "llm_output_invalid"
+    # handle_request returned normally, yet no review comment was recorded (for example because
+    # the identity patch no longer matches what GitHub reports).
+    REVIEW_NOT_PUBLISHED = "review_not_published"
     UNKNOWN = "unknown"
 
 

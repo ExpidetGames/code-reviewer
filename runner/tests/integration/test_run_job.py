@@ -39,6 +39,7 @@ def run_double(
     tmp_path: Path,
     stdin: str | dict[str, Any] | None = None,
     extra_env: dict[str, str] | None = None,
+    timeout: int = 50,
 ) -> tuple[subprocess.CompletedProcess[str], dict[str, Any]]:
     workdir = tmp_path / "work"
     workdir.mkdir()
@@ -52,7 +53,7 @@ def run_double(
         text=True,
         cwd=workdir,
         env=environment,
-        timeout=50,
+        timeout=timeout,
         check=False,
     )
     seen: dict[str, Any] = json.loads(report.read_text()) if report.exists() else {}
@@ -216,3 +217,57 @@ def test_the_console_script_refuses_an_invalid_job_without_loading_pr_agent() ->
     assert process.returncode == 1
     assert result["errorCode"] == "invalid_job"
     assert process.stderr == ""
+
+
+# CR-10-T07 (host-only keys stay ours, in the real process with the real environment)
+def test_a_malicious_repository_settings_file_cannot_change_model_endpoints_or_credentials(
+    tmp_path: Path,
+) -> None:
+    llm = {**job()["llm"], "maxTokens": 163840}
+
+    process, seen = run_double("repo", tmp_path, stdin=job(llm=llm))
+
+    assert result_of(process)["ok"] is True
+    after = seen["after_repo_file"]
+    assert after["model"] == "openrouter/deepseek/deepseek-chat"
+    assert after["model_weak"] == "openrouter/deepseek/deepseek-chat"
+    assert after["model_reasoning"] == "openrouter/deepseek/deepseek-chat"
+    assert after["fallback_models"] == []
+    assert after["custom_model_max_tokens"] == "163840"
+    assert after["publish_output"] is True
+    assert after["openrouter_base"] == "https://openrouter.ai/api/v1"
+    assert after["openrouter_key_is_ours"] is True
+    assert after["github_base"] == "https://api.github.com"
+    assert after["github_token_is_ours"] is True
+    assert after["extra_headers"] is None
+    assert not after["callbacks"]
+    assert after["repo_option"] == "a legitimate repository option"
+
+
+# The job timeout, soft (an await) and hard (a call that blocks everything).
+def test_a_command_that_awaits_too_long_is_stopped_with_the_timeout_code(tmp_path: Path) -> None:
+    process, _ = run_double(
+        "slow", tmp_path, extra_env={"RUNNER_JOB_TIMEOUT_SECONDS": "3"}, timeout=40
+    )
+
+    result = result_of(process)
+    assert process.returncode == 1
+    assert result["errorCode"] == "timeout"
+    assert result["ok"] is False
+
+
+def test_a_command_that_blocks_the_whole_process_is_ended_by_the_watchdog(tmp_path: Path) -> None:
+    process, _ = run_double(
+        "hang", tmp_path, extra_env={"RUNNER_JOB_TIMEOUT_SECONDS": "3"}, timeout=40
+    )
+
+    result = result_of(process)
+    assert process.returncode == 1
+    assert result["errorCode"] == "timeout"
+    assert result["durationMs"] < 20_000
+
+
+def test_the_timeout_variable_of_the_parent_is_not_handed_to_pr_agent(tmp_path: Path) -> None:
+    _, seen = run_double("publish", tmp_path, extra_env={"RUNNER_JOB_TIMEOUT_SECONDS": "300"})
+
+    assert "RUNNER_JOB_TIMEOUT_SECONDS" not in seen["environ_names"]

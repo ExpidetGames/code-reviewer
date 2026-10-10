@@ -43,11 +43,15 @@ _LLM_CLASS_NAMES = {
 }
 _GITHUB_STATUS = {
     401: ErrorCode.GIT_AUTH,
+    429: ErrorCode.GIT_RATE_LIMIT,
     403: ErrorCode.GIT_FORBIDDEN,
     404: ErrorCode.PR_NOT_FOUND,
     422: ErrorCode.GIT_UNPROCESSABLE,
 }
 _ATTEMPT_ERROR = re.compile(r"Attempts:.*?\b([A-Za-z]*(?:Error|Timeout|Exception))\b")
+_OUTPUT_INVALID = re.compile(
+    r"Failed to parse|schema validation|invalid YAML|Failed to load YAML", re.I
+)
 _MODEL_UNKNOWN = re.compile(r"Ensure \S+ is defined in MAX_TOKENS")
 
 
@@ -68,29 +72,42 @@ def _chain(error: BaseException) -> list[BaseException]:
     return ordered
 
 
-def _class_names(error: BaseException) -> list[str]:
-    return [cls.__name__ for cls in type(error).__mro__]
+def _classes(error: BaseException) -> list[tuple[str, str]]:
+    """(module root, class name) of the exception's class and all its bases."""
+    return [(cls.__module__.split(".")[0], cls.__name__) for cls in type(error).__mro__]
+
+
+def _github_error(error: BaseException, status: int) -> ErrorCode | None:
+    if status == 403 and "rate limit" in str(getattr(error, "data", "")).lower():
+        return ErrorCode.GIT_RATE_LIMIT
+    if status >= 500:
+        return ErrorCode.GIT_UNAVAILABLE
+    return _GITHUB_STATUS.get(status)
 
 
 def _from_type(error: BaseException) -> ErrorCode | None:
-    names = _class_names(error)
+    classes = _classes(error)
+    names = {name for _, name in classes}
+    modules = {module for module, _ in classes}
     status = getattr(error, "status", None)
     status_code = getattr(error, "status_code", None)
     if "RateLimitExceededException" in names:
         return ErrorCode.GIT_RATE_LIMIT
     if "GithubException" in names and isinstance(status, int):
-        if status == 403 and "rate limit" in str(getattr(error, "data", "")).lower():
-            return ErrorCode.GIT_RATE_LIMIT
-        return _GITHUB_STATUS.get(status)
-    if isinstance(status_code, int) and status_code in _LLM_STATUS:
-        return _LLM_STATUS[status_code]
-    if isinstance(status_code, int) and status_code >= 500:
-        return ErrorCode.LLM_UNAVAILABLE
-    for name in names:
-        if name in _LLM_CLASS_NAMES:
-            return _LLM_CLASS_NAMES[name]
-    if "RequestException" in names:  # requests, used by PyGithub
+        return _github_error(error, status)
+    # requests (used by PyGithub) before the LLM names: requests has a class called Timeout too.
+    if "requests" in modules and "RequestException" in names:
         return ErrorCode.GIT_UNAVAILABLE
+    if modules & {"openai", "litellm"}:
+        if isinstance(status_code, int) and status_code in _LLM_STATUS:
+            return _LLM_STATUS[status_code]
+        if isinstance(status_code, int) and status_code >= 500:
+            return ErrorCode.LLM_UNAVAILABLE
+        for module, name in classes:
+            if module in ("openai", "litellm") and name in _LLM_CLASS_NAMES:
+                return _LLM_CLASS_NAMES[name]
+    if names & {"YAMLError", "JSONDecodeError", "ValidationError"}:
+        return ErrorCode.LLM_OUTPUT_INVALID
     if isinstance(error, TimeoutError):  # also asyncio.TimeoutError
         return ErrorCode.LLM_TIMEOUT
     return None
@@ -102,6 +119,8 @@ def _from_text(text: str) -> ErrorCode | None:
     attempt = _ATTEMPT_ERROR.search(text)
     if attempt is not None:
         return _LLM_CLASS_NAMES.get(attempt.group(1))
+    if _OUTPUT_INVALID.search(text):
+        return ErrorCode.LLM_OUTPUT_INVALID
     if "Failed to get git provider" in text:
         return ErrorCode.GIT_PROVIDER_INIT
     return None

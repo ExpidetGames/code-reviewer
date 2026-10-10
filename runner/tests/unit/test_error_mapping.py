@@ -2,8 +2,12 @@
 exceptions and only logs them, so the runner reads the exception off the log record and walks its
 cause chain; free text never reaches the caller, only the code."""
 
+import json
+
+import pydantic
 import pytest
 import requests
+import yaml
 from github import GithubException, RateLimitExceededException
 from litellm.exceptions import (
     AuthenticationError,
@@ -145,3 +149,50 @@ def test_a_cyclic_cause_chain_does_not_loop_forever() -> None:
     second.__cause__ = first
 
     assert classify_failure([first], []) is ErrorCode.UNKNOWN
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        requests.Timeout("slow"),
+        requests.ConnectTimeout("slow"),
+        requests.ReadTimeout("slow"),
+        requests.ConnectionError("down"),
+    ],
+)
+def test_a_requests_timeout_or_connection_error_is_github_unavailable_not_an_llm_timeout(
+    error: Exception,
+) -> None:
+    assert classify_failure([error], []) is ErrorCode.GIT_UNAVAILABLE
+
+
+@pytest.mark.parametrize("status", [500, 502, 503, 504])
+def test_a_github_server_error_maps_to_unavailable(status: int) -> None:
+    assert classify_failure([GithubException(status, {"message": "x"}, {})], []) is (
+        ErrorCode.GIT_UNAVAILABLE
+    )
+
+
+def test_a_github_429_maps_to_rate_limit() -> None:
+    assert classify_failure([GithubException(429, {"message": "slow down"}, {})], []) is (
+        ErrorCode.GIT_RATE_LIMIT
+    )
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        yaml.YAMLError("bad yaml"),
+        json.JSONDecodeError("bad", "{", 0),
+        pydantic.ValidationError.from_exception_data("Review", []),
+    ],
+)
+def test_malformed_model_output_maps_to_llm_output_invalid(error: Exception) -> None:
+    assert classify_failure([error], []) is ErrorCode.LLM_OUTPUT_INVALID
+
+
+def test_a_failure_comment_text_about_unparsable_output_maps_to_llm_output_invalid() -> None:
+    assert (
+        classify_failure([], ["Failed to review PR: Failed to parse YAML output of the model"])
+        is ErrorCode.LLM_OUTPUT_INVALID
+    )

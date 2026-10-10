@@ -25,6 +25,8 @@ dev = [
     "pytest-timeout",
     "ruff",
     "pyright",
+    "pyjwt>=2.15.1",
+    "cryptography>=50.0.2",
 ]
 
 [tool.pytest.ini_options]

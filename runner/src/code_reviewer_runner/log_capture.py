@@ -21,6 +21,7 @@ _ERROR_LEVEL = 40
 _WARNING_LEVEL = 30
 # Share of the tail kept for warnings and errors so a flood of INFO lines cannot push them out.
 _IMPORTANT_SHARE = 0.5
+_FINAL_FAILURE = "Failed to process the command"
 _NOISE = ("Settings file not found",)
 
 
@@ -33,9 +34,8 @@ class LogCapture:
         self._lines: deque[tuple[int, int, str]] = deque(maxlen=_MAX_LINES)
         self._important: deque[tuple[int, int, str]] = deque(maxlen=_MAX_IMPORTANT_LINES)
         self._sequence = 0
-        self.exceptions: list[BaseException] = []
-        # Raw (unredacted) messages of error records. Only for classification, never printed.
-        self.error_messages: list[str] = []
+        # The newest error records (message, exception); the final failure is what matters most.
+        self._errors: deque[tuple[str, BaseException | None]] = deque(maxlen=_MAX_COLLECTED)
 
     def __call__(self, message: Any) -> None:
         record = message.record
@@ -49,10 +49,7 @@ class LogCapture:
         if any(text.startswith(noise) for noise in _NOISE):
             return
         if level_no >= _ERROR_LEVEL:
-            if exception is not None and len(self.exceptions) < _MAX_COLLECTED:
-                self.exceptions.append(exception)
-            if len(self.error_messages) < _MAX_COLLECTED:
-                self.error_messages.append(text)
+            self._errors.append((text, exception))
         line = f"{level_name} {text}"
         if exception is not None:
             line += f" [{type(exception).__name__}: {exception}]"
@@ -62,6 +59,22 @@ class LogCapture:
         self._lines.append(entry)
         if level_no >= _WARNING_LEVEL:
             self._important.append(entry)
+
+    @property
+    def exceptions(self) -> list[BaseException]:
+        """Exceptions of error records, most relevant first: those of PR-Agent's final "Failed to
+        process the command" record, then the others, newest first. Early errors are often
+        benign (a repository without the optional context file, for example)."""
+        records = [(text, error) for text, error in reversed(self._errors) if error is not None]
+        final = [error for text, error in records if text.startswith(_FINAL_FAILURE)]
+        others = [error for text, error in records if not text.startswith(_FINAL_FAILURE)]
+        return final + others
+
+    @property
+    def error_messages(self) -> list[str]:
+        """Raw (unredacted) messages of error records, oldest first. Only for classification,
+        never printed."""
+        return [text for text, _ in self._errors]
 
     def tail(self) -> str:
         """The newest lines that fit the byte limit; warnings and errors get priority."""

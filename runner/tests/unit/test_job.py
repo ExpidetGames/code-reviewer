@@ -10,6 +10,7 @@ import pytest
 from code_reviewer_runner.job import Command, JobError, parse_job
 from code_reviewer_runner.result import ErrorCode
 
+PR_URL = "https://github.com/octo/repo/pull/7"
 TOKEN = "dummy-installation-token-0123456789"
 API_KEY = "dummy-openrouter-key-0123456789"
 
@@ -225,7 +226,7 @@ def test_a_malformed_git_api_base_url_is_an_invalid_job(base_url: str) -> None:
     assert refusal(json.dumps(job)).code is ErrorCode.INVALID_JOB
 
 
-def test_extra_environment_values_must_be_pr_agent_settings_as_strings() -> None:
+def test_extra_environment_values_are_tool_settings_given_as_strings() -> None:
     job = parse(valid_job(env={"PR_REVIEWER__NUM_MAX_FINDINGS": "3"}))
 
     assert job.env == {"PR_REVIEWER__NUM_MAX_FINDINGS": "3"}
@@ -233,11 +234,99 @@ def test_extra_environment_values_must_be_pr_agent_settings_as_strings() -> None
         assert refusal(json.dumps(valid_job(env=bad))).code is ErrorCode.INVALID_JOB
 
 
-def test_extra_environment_cannot_replace_credentials_or_the_model() -> None:
-    for key in ("GITHUB__USER_TOKEN", "OPENROUTER__KEY", "CONFIG__MODEL", "GITHUB__BASE_URL"):
-        error = refusal(json.dumps(valid_job(env={key: "attacker"})))
+@pytest.mark.parametrize(
+    "key",
+    [
+        "GITHUB__USER_TOKEN",
+        "GITHUB__BASE_URL",
+        "GITHUB__PRIVATE_KEY",
+        "GITHUB__DEPLOYMENT_TYPE",
+        "OPENROUTER__KEY",
+        "OPENROUTER__API_BASE",
+        "OPENAI__KEY",
+        "OPENAI__API_BASE",
+        "ANTHROPIC__KEY",
+        "AZURE__API_BASE",
+        "LITELLM__EXTRA_HEADERS",
+        "LITELLM__SUCCESS_CALLBACK",
+        "CONFIG__MODEL",
+        "CONFIG__MODEL_WEAK",
+        "CONFIG__MODEL_REASONING",
+        "CONFIG__FALLBACK_MODELS",
+        "CONFIG__CUSTOM_MODEL_MAX_TOKENS",
+        "CONFIG__MAX_MODEL_TOKENS",
+        "CONFIG__EXTRA_CONFIG_URL",
+        "CONFIG__GIT_PROVIDER",
+        "CONFIG__PUBLISH_OUTPUT",
+        "CONFIG__USE_REPO_SETTINGS_FILE",
+        "PUSH_OUTPUTS__WEBHOOK_URL",
+    ],
+)
+def test_extra_environment_cannot_touch_credentials_endpoints_models_or_outputs(key: str) -> None:
+    error = refusal(json.dumps(valid_job(env={key: "attacker"})))
 
-        assert error.code is ErrorCode.INVALID_JOB
+    assert error.code is ErrorCode.INVALID_JOB
+
+
+def test_extra_environment_is_limited_to_the_settings_of_the_four_tools() -> None:
+    for key in (
+        "PR_REVIEWER__EXTRA_INSTRUCTIONS",
+        "PR_DESCRIPTION__EXTRA_INSTRUCTIONS",
+        "PR_CODE_SUGGESTIONS__EXTRA_INSTRUCTIONS",
+        "PR_QUESTIONS__ENABLE_HELP_TEXT",
+    ):
+        assert parse(valid_job(env={key: "x"})).env == {key: "x"}
+
+
+def test_extra_environment_values_that_look_like_secrets_are_registered_for_redaction() -> None:
+    job = parse(
+        valid_job(env={"PR_REVIEWER__EXTRA_INSTRUCTIONS": "plain", "PR_REVIEWER__API_KEY": "hush"})
+    )
+
+    assert "hush" in job.secrets
+    assert "plain" not in job.secrets
+    assert job.git.token in job.secrets
+    assert job.llm.api_key in job.secrets
+
+
+def test_the_llm_endpoint_can_only_be_overridden_with_a_loopback_address() -> None:
+    llm = valid_job()["llm"]
+
+    assert parse(
+        valid_job(llm={**llm, "baseUrl": "http://127.0.0.1:4011/api/v1/"})
+    ).llm.base_url == ("http://127.0.0.1:4011/api/v1")
+    assert parse(valid_job()).llm.base_url is None
+    for base_url in (
+        "https://openrouter.ai/api/v1",
+        "https://evil.example.com/v1",
+        "http://evil.example.com/v1",
+        "http://127.0.0.1.evil.example.com/v1",
+        "http://user:pw@127.0.0.1:1/v1",
+        "http://127.0.0.1:1/v1?x=1",
+        "ftp://127.0.0.1/v1",
+        "",
+        7,
+    ):
+        job = valid_job(llm={**llm, "baseUrl": base_url})
+        assert refusal(json.dumps(job)).code is ErrorCode.INVALID_JOB, base_url
+
+
+def test_the_context_window_of_an_unknown_model_is_an_explicit_bounded_number() -> None:
+    llm = valid_job()["llm"]
+
+    assert parse(valid_job(llm={**llm, "maxTokens": 163840})).llm.max_tokens == 163840
+    assert parse(valid_job()).llm.max_tokens is None
+    for value in (0, -1, 999, 10_000_001, 1.5, "1000", True):
+        job = valid_job(llm={**llm, "maxTokens": value})
+        assert refusal(json.dumps(job)).code is ErrorCode.INVALID_JOB, value
+
+
+@pytest.mark.parametrize("suffix", ["\n", "\r", "\t", " ", "\x00", "\u200b", "\x7f"])
+def test_a_pull_request_url_with_whitespace_or_control_characters_is_an_invalid_job(
+    suffix: str,
+) -> None:
+    for pr_url in (PR_URL + suffix, suffix + PR_URL, PR_URL.replace("/pull/", f"/pull{suffix}/")):
+        assert refusal(json.dumps(valid_job(prUrl=pr_url))).code is ErrorCode.INVALID_JOB
 
 
 # CR-10-T07

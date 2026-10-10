@@ -96,7 +96,7 @@ def test_the_script_does_not_print_the_secrets_even_if_the_runner_output_has_the
 
     monkeypatch.setattr(script, "start_runner", start)
 
-    code = script.main([])
+    code = script.main(["--yes"])
 
     printed = capsys.readouterr()
     assert code == 2
@@ -115,3 +115,40 @@ def test_the_job_it_builds_carries_the_token_only_in_the_git_section() -> None:
     assert job["git"]["token"] == TOKEN
     assert job["llm"]["apiKey"] == API_KEY
     assert TOKEN not in str({k: v for k, v in job.items() if k != "git"})
+
+
+def test_nothing_runs_and_no_token_is_minted_without_the_confirmation_flag(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    script = load_script()
+    for name in script.REQUIRED_ENV:
+        monkeypatch.setenv(name, "1")
+
+    def must_not_run(*args: Any) -> None:
+        raise AssertionError("must not be called without --yes")
+
+    monkeypatch.setattr(script, "mint_installation_token", must_not_run)
+    monkeypatch.setattr(script, "start_runner", must_not_run)
+
+    code = script.main([])
+
+    assert code == 2
+    assert "--yes" in capsys.readouterr().out
+
+
+def test_the_installation_token_is_limited_to_the_sandbox_repository_and_review_permissions() -> (
+    None
+):
+    body = load_script().token_request_body()
+
+    assert body["repositories"] == ["code-reviewer-playground"]
+    assert body["permissions"] == {"contents": "read", "pull_requests": "write"}
+
+
+def test_the_context_window_goes_into_the_llm_section_of_the_job() -> None:
+    script = load_script()
+
+    job = script.build_job(script.DEFAULT_PR_URL, "review", TOKEN, "x", API_KEY, "v/m", 1000)
+
+    assert job["llm"]["maxTokens"] == 1000
+    assert "env" not in job

@@ -27,8 +27,6 @@ _IMPROVE_IDENTITIES = (
 )
 # The tools publish these when a command fails but they still return normally.
 _FAILURE_PREFIXES = ("Failed to ",)
-# The small "updated to latest commit" comment next to an edited review; never the result.
-_STATUS_PREFIXES = ("**[Persistent",)
 
 
 @dataclass(frozen=True)
@@ -60,13 +58,20 @@ class CommentRecorder:
             if not event.temporary
         )
 
+    def failure_comment_texts(self) -> list[str]:
+        """The failure comments PR-Agent posted, for classification only (never printed)."""
+        return [
+            event.body_head
+            for event in self.events
+            if not event.temporary and event.body_head.startswith(_FAILURE_PREFIXES)
+        ]
+
     def comment_url(self, command: Command) -> str | None:
         """URL of the comment that holds the result of `command`, or None."""
         candidates = [
             event
             for event in self.events
-            if not event.temporary
-            and not event.body_head.startswith(_FAILURE_PREFIXES + _STATUS_PREFIXES)
+            if not event.temporary and not event.body_head.startswith(_FAILURE_PREFIXES)
         ]
         if command is Command.DESCRIBE:
             return None

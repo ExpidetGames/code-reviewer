@@ -12,7 +12,11 @@ OPENROUTER_API_KEY.
 
     uv run python scripts/manual_review.py [--pr-url URL] [--command review] [--model MODEL]
 
-It only talks to the sandbox repository below, on purpose: it posts a real comment.
+It only talks to the sandbox repository below, on purpose: it posts a real comment and costs real
+money. Nothing runs without `--yes`. The installation token is limited to that one repository and to
+the permissions a review needs (read contents, write pull requests). The cost is not capped by the
+script: a review of a small pull request with a cheap model is a few cents; the spending limit
+of the OpenRouter key is the hard cap.
 """
 
 import argparse
@@ -30,6 +34,8 @@ from typing import Any
 import jwt
 
 ALLOWED_REPOSITORY = "ExpidetGames/code-reviewer-playground"
+# What a review needs; the token gets nothing else (metadata read is always included).
+TOKEN_PERMISSIONS = {"contents": "read", "pull_requests": "write"}
 DEFAULT_PR_URL = f"https://github.com/{ALLOWED_REPOSITORY}/pull/1"
 DEFAULT_MODEL = "deepseek/deepseek-v3.2"
 # Context window of the default model; PR-Agent does not know it and needs it for unknown models.
@@ -51,13 +57,23 @@ def create_app_jwt(app_id: str, private_key_pem: str, now: float | None = None) 
     return jwt.encode(claims, private_key_pem, algorithm="RS256")
 
 
+def token_request_body() -> dict[str, Any]:
+    """Limit the token to the sandbox repository and the permissions of a review."""
+    return {
+        "repositories": [ALLOWED_REPOSITORY.split("/", 1)[1]],
+        "permissions": dict(TOKEN_PERMISSIONS),
+    }
+
+
 def mint_installation_token(app_id: str, installation_id: str, key_path: Path) -> str:
     """Exchange the App JWT for an installation access token. The token is only returned."""
     app_jwt = create_app_jwt(app_id, key_path.read_text())
     request = urllib.request.Request(
         f"{GITHUB_API}/app/installations/{installation_id}/access_tokens",
         method="POST",
+        data=json.dumps(token_request_body()).encode(),
         headers={
+            "Content-Type": "application/json",
             "Authorization": f"Bearer {app_jwt}",
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
@@ -87,8 +103,12 @@ def build_job(
             "token": token,
             "botLogin": bot_login,
         },
-        "llm": {"provider": "openrouter", "model": model, "apiKey": api_key},
-        "env": {"CONFIG__CUSTOM_MODEL_MAX_TOKENS": str(max_tokens)},
+        "llm": {
+            "provider": "openrouter",
+            "model": model,
+            "apiKey": api_key,
+            "maxTokens": max_tokens,
+        },
     }
 
 
@@ -112,9 +132,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--command", default="review")
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--max-tokens", type=int, default=DEFAULT_MAX_TOKENS)
+    parser.add_argument(
+        "--yes", action="store_true", help="really run (posts a comment, costs money)"
+    )
     args = parser.parse_args(argv)
 
     check_repository(args.pr_url)
+    if not args.yes:
+        print(f"Would run `{args.command}` on {args.pr_url} with {args.model}.")
+        print("That posts a real comment and costs real money (a few cents); add --yes to run.")
+        return 2
     missing = [name for name in REQUIRED_ENV if not os.environ.get(name)]
     if missing:
         raise SystemExit(f"missing environment variables: {', '.join(missing)}")

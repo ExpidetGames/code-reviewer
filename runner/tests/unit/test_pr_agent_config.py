@@ -4,6 +4,7 @@ lists are typed settings, and the environment of the parent process never leaks 
 
 import json
 from collections.abc import Mapping
+from typing import Any
 
 from pr_agent.algo.utils import decode_user_text_args
 
@@ -18,8 +19,8 @@ TOKEN = "dummy-installation-token-0123456789"
 API_KEY = "dummy-openrouter-key-0123456789"
 
 
-def make_job(command: str = "review", **extra: object) -> Job:
-    raw = {
+def make_job_dict(command: str = "review", **extra: object) -> dict[str, Any]:
+    return {
         "prUrl": "https://github.com/octo/repo/pull/7",
         "command": command,
         "git": {
@@ -31,7 +32,10 @@ def make_job(command: str = "review", **extra: object) -> Job:
         "llm": {"provider": "openrouter", "model": "deepseek/deepseek-chat", "apiKey": API_KEY},
         **extra,
     }
-    return parse_job(json.dumps(raw))
+
+
+def make_job(command: str = "review", **extra: object) -> Job:
+    return parse_job(json.dumps(make_job_dict(command, **extra)))
 
 
 def environment(job: Job | None = None, base: Mapping[str, str] | None = None) -> dict[str, str]:
@@ -84,21 +88,30 @@ def test_the_fallback_models_are_emptied_so_a_failing_model_never_reaches_anothe
     assert environment()["CONFIG__FALLBACK_MODELS"] == ""
 
 
-def test_the_job_can_point_the_llm_endpoint_at_a_fake_through_its_env() -> None:
-    job = make_job(env={"OPENROUTER__API_BASE": "http://127.0.0.1:4011/api/v1"})
+def test_the_weak_and_the_reasoning_model_are_pinned_to_the_job_model() -> None:
+    env = environment()
+
+    assert env["CONFIG__MODEL_WEAK"] == "openrouter/deepseek/deepseek-chat"
+    assert env["CONFIG__MODEL_REASONING"] == "openrouter/deepseek/deepseek-chat"
+
+
+def test_the_job_can_point_the_llm_endpoint_at_a_fake_through_its_own_field() -> None:
+    job = make_job(llm={**make_job_dict()["llm"], "baseUrl": "http://127.0.0.1:4011/api/v1"})
 
     assert environment(job)["OPENROUTER__API_BASE"] == "http://127.0.0.1:4011/api/v1"
 
 
-def test_extra_pr_agent_settings_from_the_job_are_passed_on_as_strings() -> None:
-    job = make_job(
-        env={"CONFIG__CUSTOM_MODEL_MAX_TOKENS": "64000", "PR_REVIEWER__NUM_MAX_FINDINGS": "3"}
-    )
+def test_the_context_window_comes_from_its_own_field() -> None:
+    sized = make_job(llm={**make_job_dict()["llm"], "maxTokens": 163840})
 
-    env = environment(job)
+    assert environment(sized)["CONFIG__CUSTOM_MODEL_MAX_TOKENS"] == "163840"
+    assert "CONFIG__CUSTOM_MODEL_MAX_TOKENS" not in environment()
 
-    assert env["CONFIG__CUSTOM_MODEL_MAX_TOKENS"] == "64000"
-    assert env["PR_REVIEWER__NUM_MAX_FINDINGS"] == "3"
+
+def test_extra_tool_settings_from_the_job_are_passed_on_as_strings() -> None:
+    job = make_job(env={"PR_REVIEWER__NUM_MAX_FINDINGS": "3"})
+
+    assert environment(job)["PR_REVIEWER__NUM_MAX_FINDINGS"] == "3"
 
 
 def test_litellm_and_tiktoken_are_kept_offline_and_quiet() -> None:

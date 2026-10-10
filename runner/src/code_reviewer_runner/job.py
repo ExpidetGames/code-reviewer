@@ -8,9 +8,15 @@ Shape (basis of the runner contract v1, see the lead decisions for CR-10):
       "args": ["<question>"],                       // ask only
       "git": {"provider": "github", "baseUrl": "https://api.github.com",
               "token": "<installation token>", "botLogin": "<app slug>[bot]"},
-      "llm": {"provider": "openrouter", "model": "<vendor>/<model>", "apiKey": "<key>"},
-      "env": {"SECTION__KEY": "<PR-Agent setting as string>"}   // optional
+      "llm": {"provider": "openrouter", "model": "<vendor>/<model>", "apiKey": "<key>",
+              "baseUrl": "http://127.0.0.1:<port>/api/v1",     // optional, loopback only (fakes)
+              "maxTokens": 163840},                            // optional, context window
+      "env": {"PR_REVIEWER__EXTRA_INSTRUCTIONS": "<string>"}   // optional, tool settings only
     }
+
+Everything that decides where a credential or a request goes (GitHub and LLM endpoints, tokens, the
+model, output switches) has its own validated field above or is pinned by the runner; `env` can only
+carry the settings of the four tools.
 
 Validation never echoes a value from the job into its error detail: the job holds secrets, and the
 detail ends up in the result JSON and in logs. Details name fields, never contents.
@@ -31,25 +37,19 @@ MAX_SECRET_CHARS = 4096
 
 _TOP_LEVEL_FIELDS = {"prUrl", "command", "args", "git", "llm", "env"}
 _GIT_FIELDS = {"provider", "baseUrl", "token", "botLogin"}
-_LLM_FIELDS = {"provider", "model", "apiKey"}
+_LLM_FIELDS = {"provider", "model", "apiKey", "baseUrl", "maxTokens"}
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+MIN_CONTEXT_TOKENS = 1000
+MAX_CONTEXT_TOKENS = 10_000_000
 _FIELD_NAME = re.compile(r"[A-Za-z0-9_.-]{1,40}")
 _PR_PATH = re.compile(r"/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/pull/([1-9][0-9]{0,8})")
 _BOT_LOGIN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}(\[bot\])?")
 _MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,199}")
-_ENV_KEY = re.compile(r"[A-Z][A-Z0-9_]*(__[A-Z0-9_]+)+")
-# Values the runner sets itself; a job cannot replace them through "env".
-RESERVED_ENV_KEYS = frozenset(
-    {
-        "CONFIG__GIT_PROVIDER",
-        "CONFIG__MODEL",
-        "CONFIG__FALLBACK_MODELS",
-        "GITHUB__DEPLOYMENT_TYPE",
-        "GITHUB__USER_TOKEN",
-        "GITHUB__BASE_URL",
-        "OPENROUTER__KEY",
-    }
-)
+# `env` may only set the options of the four tools. An allowlist instead of a list of forbidden
+# keys: PR-Agent has many sections (litellm, openai, azure, push_outputs, ...) that route requests
+# or credentials, and a new PR-Agent version can add more.
+_ENV_KEY = re.compile(r"(PR_REVIEWER|PR_DESCRIPTION|PR_CODE_SUGGESTIONS|PR_QUESTIONS)__[A-Z0-9_]+")
+_SECRET_LOOKING_KEY = re.compile(r"KEY|TOKEN|SECRET|PASSWORD|PRIVATE")
 
 
 class Command(StrEnum):
@@ -79,6 +79,8 @@ class GitAccess:
 class LlmAccess:
     model: str
     api_key: str
+    base_url: str | None = None
+    max_tokens: int | None = None
 
 
 @dataclass(frozen=True)
@@ -93,7 +95,10 @@ class Job:
     @property
     def secrets(self) -> tuple[str, ...]:
         """Every value that must never appear in an output."""
-        return (self.git.token, self.llm.api_key)
+        from_env = tuple(
+            value for key, value in self.env.items() if _SECRET_LOOKING_KEY.search(key)
+        )
+        return (self.git.token, self.llm.api_key, *from_env)
 
 
 def _invalid(detail: str) -> JobError:
@@ -178,7 +183,34 @@ def _llm_access(data: dict[str, Any]) -> LlmAccess:
     model = _string(llm, "model", "llm.")
     if not _MODEL.fullmatch(model):
         raise _invalid("llm.model contains characters that are not allowed in a model name")
-    return LlmAccess(model=model, api_key=_secret(llm, "apiKey", "llm."))
+    return LlmAccess(
+        model=model,
+        api_key=_secret(llm, "apiKey", "llm."),
+        base_url=_llm_base_url(llm),
+        max_tokens=_max_tokens(llm),
+    )
+
+
+def _llm_base_url(llm: dict[str, Any]) -> str | None:
+    if "baseUrl" not in llm:
+        return None
+    base_url = _string(llm, "baseUrl", "llm.").rstrip("/")
+    parts = _checked_url(base_url, "llm.baseUrl")
+    # The shared LLM key goes to this address, so it may only point at a local fake.
+    if (parts.hostname or "") not in _LOOPBACK_HOSTS:
+        raise _invalid("llm.baseUrl is only accepted for loopback addresses")
+    return base_url
+
+
+def _max_tokens(llm: dict[str, Any]) -> int | None:
+    if "maxTokens" not in llm:
+        return None
+    value = llm["maxTokens"]
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise _invalid("llm.maxTokens must be an integer")
+    if not MIN_CONTEXT_TOKENS <= value <= MAX_CONTEXT_TOKENS:
+        raise _invalid("llm.maxTokens is out of range")
+    return value
 
 
 def _web_host(api_base_url: str) -> str:
@@ -189,6 +221,9 @@ def _web_host(api_base_url: str) -> str:
 
 def _pr_url(data: dict[str, Any], git: GitAccess) -> str:
     value = _string(data, "prUrl", "")
+    # urlsplit silently drops tabs and newlines, so the raw text has to be checked here.
+    if any(char.isspace() or not char.isprintable() for char in value):
+        raise _invalid("prUrl must not contain whitespace or control characters")
     parts = _checked_url(value, "prUrl")
     if parts.netloc != _web_host(git.base_url):
         raise _invalid("prUrl must point to the host of git.baseUrl")
@@ -235,9 +270,9 @@ def _env(data: dict[str, Any]) -> dict[str, str]:
     env: dict[str, str] = {}
     for key, value in _object(data["env"], "env").items():
         if not _ENV_KEY.fullmatch(key):
-            raise _invalid("env keys must look like SECTION__KEY (upper case)")
-        if key in RESERVED_ENV_KEYS:
-            raise _invalid("env must not set values the runner controls")
+            raise _invalid(
+                "env may only set options of the review, describe, improve and ask tools"
+            )
         if not isinstance(value, str):
             raise _invalid("env values must be strings")
         env[key] = value
@@ -250,7 +285,7 @@ def parse_job(raw: str) -> Job:
         raise _invalid("the job is larger than 1 MiB")
     try:
         data: Any = json.loads(raw)
-    except ValueError:
+    except (ValueError, RecursionError):  # RecursionError: absurdly deep nesting
         raise _invalid("stdin is not valid JSON") from None
     job = _object(data, "the job")
     command = _command(job)

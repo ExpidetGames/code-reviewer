@@ -3,6 +3,7 @@ the comment URL and the error code, and that the patch and the recorder are undo
 real PR-Agent code is imported, but its `handle_request` is replaced by a test double, so nothing
 reaches a network."""
 
+import asyncio
 import io
 import json
 import subprocess
@@ -145,7 +146,7 @@ def test_the_settings_of_one_job_do_not_leak_into_the_global_settings(
     assert current_settings().config.publish_output_progress == before
 
 
-def test_ok_stays_true_without_a_comment_url_when_nothing_matching_was_posted(
+def test_ok_stays_true_without_a_comment_url_when_a_command_other_than_review_posted_nothing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def double() -> bool:
@@ -153,9 +154,27 @@ def test_ok_stays_true_without_a_comment_url_when_nothing_matching_was_posted(
 
     use_double(monkeypatch, double)
 
+    for command in ("improve", "describe"):
+        result, _ = run(make_job(command=command))
+
+        assert result.ok is True, command
+        assert result.comment_url is None
+
+
+def test_a_review_that_returned_normally_but_posted_no_review_is_not_published(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def double() -> bool:
+        provider_with_pull().publish_comment("some unrelated comment")
+        return True
+
+    use_double(monkeypatch, double)
+
     result, _ = run()
 
-    assert result.ok is True
+    assert result.ok is False
+    assert result.exit_code == 1
+    assert result.error_code is ErrorCode.REVIEW_NOT_PUBLISHED
     assert result.comment_url is None
 
 
@@ -490,7 +509,123 @@ def test_the_result_never_carries_a_secret_even_when_it_slipped_into_the_log_tai
     )
     out = io.StringIO()
 
-    runner._emit(result, out, [TOKEN])  # pyright: ignore[reportPrivateUsage]
+    runner._ResultChannel(out).write(result, [TOKEN])  # pyright: ignore[reportPrivateUsage]
 
     assert TOKEN not in out.getvalue()
     assert json.loads(out.getvalue())["ok"] is False
+
+
+# The command stops by itself when RUNNER_JOB_TIMEOUT_SECONDS passes (best effort).
+def test_a_command_that_awaits_past_the_timeout_is_stopped_with_the_timeout_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def double() -> bool:
+        await asyncio.sleep(30)
+        return True
+
+    use_double(monkeypatch, double)
+    capture = LogCapture(Redactor([TOKEN, API_KEY]))
+
+    result = runner.run_job(make_job(), capture, time.monotonic(), timeout_seconds=0.2)
+
+    assert result.ok is False
+    assert result.error_code is ErrorCode.TIMEOUT
+    assert result.exit_code == 1
+    assert result.duration_ms < 5000
+
+
+def test_a_timeout_error_inside_pr_agent_is_not_mistaken_for_the_job_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def double() -> bool:
+        raise TimeoutError
+
+    use_double(monkeypatch, double)
+    capture = LogCapture(Redactor([]))
+
+    result = runner.run_job(make_job(), capture, time.monotonic(), timeout_seconds=60)
+
+    assert result.error_code is ErrorCode.LLM_TIMEOUT
+
+
+def test_the_timeout_is_read_from_the_environment_of_the_parent() -> None:
+    assert runner._timeout_from({"RUNNER_JOB_TIMEOUT_SECONDS": "90"}) == 90.0  # pyright: ignore[reportPrivateUsage]
+    for bad in (
+        {},
+        {"RUNNER_JOB_TIMEOUT_SECONDS": ""},
+        {"RUNNER_JOB_TIMEOUT_SECONDS": "abc"},
+        {"RUNNER_JOB_TIMEOUT_SECONDS": "0"},
+        {"RUNNER_JOB_TIMEOUT_SECONDS": "-5"},
+        {"RUNNER_JOB_TIMEOUT_SECONDS": "inf"},
+    ):
+        assert runner._timeout_from(bad) is None  # pyright: ignore[reportPrivateUsage]
+
+
+def test_a_system_exit_from_a_library_still_gives_a_failed_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def double() -> bool:
+        raise SystemExit(3)
+
+    use_double(monkeypatch, double)
+
+    result, _ = run()
+
+    assert result.ok is False
+    assert result.error_code is ErrorCode.UNKNOWN
+
+
+def test_main_answers_with_one_redacted_line_even_if_the_run_blows_up_with_a_base_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def explode(*args: Any, **kwargs: Any) -> None:
+        raise SystemExit(f"fatal {TOKEN}")
+
+    monkeypatch.setattr(runner, "run_job", explode)
+    out = io.StringIO()
+
+    code = runner.main([], stdin=io.StringIO(json.dumps(job_json())), stdout=out)
+
+    assert code == 1
+    assert len(out.getvalue().splitlines()) == 1
+    assert json.loads(out.getvalue())["errorCode"] == "runner_error"
+    assert TOKEN not in out.getvalue()
+
+
+def test_a_failure_comment_that_names_unparsable_model_output_gives_llm_output_invalid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def double() -> bool:
+        provider_with_pull().publish_comment(
+            "Failed to review PR: Failed to parse the model answer"
+        )
+        return True
+
+    use_double(monkeypatch, double)
+
+    result, _ = run()
+
+    assert result.error_code is ErrorCode.LLM_OUTPUT_INVALID
+
+
+class UndecodableStdin(io.StringIO):
+    def read(self, size: int | None = -1) -> str:
+        raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+
+
+def test_input_that_is_not_utf8_text_is_an_invalid_job() -> None:
+    out = io.StringIO()
+
+    code = runner.main([], stdin=UndecodableStdin(), stdout=out)
+
+    assert code == 1
+    assert json.loads(out.getvalue())["errorCode"] == "invalid_job"
+
+
+def test_absurdly_deep_json_is_an_invalid_job_not_a_crash() -> None:
+    out = io.StringIO()
+
+    code = runner.main([], stdin=io.StringIO("[" * 200_000), stdout=out)
+
+    assert code == 1
+    assert json.loads(out.getvalue())["errorCode"] == "invalid_job"

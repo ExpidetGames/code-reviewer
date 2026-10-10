@@ -143,3 +143,39 @@ def test_standard_library_loggers_end_up_in_the_tail_when_they_warn(capture: Log
     assert "urllib3 says" in capture.tail()
     assert TOKEN not in capture.tail()
     assert "quiet" not in capture.tail()
+
+
+def test_the_exception_of_the_final_failure_record_comes_before_earlier_benign_errors(
+    capture: LogCapture,
+) -> None:
+    attach(capture)
+    try:
+        raise KeyError("benign: no AGENTS.md")
+    except KeyError:
+        logger.exception("Failed to fetch repo context file")
+    try:
+        raise ValueError("the real one")
+    except ValueError:
+        logger.exception("Failed to process the command.")
+    try:
+        raise OSError("late noise")
+    except OSError:
+        logger.exception("Failed to flush telemetry")
+
+    assert str(capture.exceptions[0]) == "the real one"
+    assert len(capture.exceptions) == 3
+
+
+def test_the_final_failure_survives_a_flood_of_earlier_errors(capture: LogCapture) -> None:
+    attach(capture)
+    for number in range(100):
+        try:
+            raise KeyError(f"noise {number}")
+        except KeyError:
+            logger.exception("Failed to fetch repo context file")
+    try:
+        raise ValueError("the real one")
+    except ValueError:
+        logger.exception("Failed to process the command.")
+
+    assert str(capture.exceptions[0]) == "the real one"

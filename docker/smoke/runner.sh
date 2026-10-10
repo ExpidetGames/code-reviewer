@@ -59,7 +59,7 @@ grep -q '"errorCode":"invalid_job"' <<<"$refused" || fail "expected invalid_job,
 step "a job through the real PR-Agent without network fails cleanly and leaks nothing"
 smoke_token="smoke-installation-token-0123456789"
 smoke_key="smoke-openrouter-key-0123456789"
-job='{"prUrl":"http://127.0.0.1:9/octo/repo/pull/7","command":"review","git":{"provider":"github","baseUrl":"http://127.0.0.1:9/api/v3","token":"'$smoke_token'","botLogin":"code-reviewer"},"llm":{"provider":"openrouter","model":"deepseek/deepseek-chat","apiKey":"'$smoke_key'"},"env":{"OPENROUTER__API_BASE":"http://127.0.0.1:9/api/v1","CONFIG__CUSTOM_MODEL_MAX_TOKENS":"32000"}}'
+job='{"prUrl":"http://127.0.0.1:9/octo/repo/pull/7","command":"review","git":{"provider":"github","baseUrl":"http://127.0.0.1:9/api/v3","token":"'$smoke_token'","botLogin":"code-reviewer"},"llm":{"provider":"openrouter","model":"deepseek/deepseek-chat","apiKey":"'$smoke_key'","baseUrl":"http://127.0.0.1:9/api/v1","maxTokens":32000}}'
 errors=$(mktemp)
 result=$(docker run --rm -i --network none --entrypoint code-reviewer-run-job "$image" <<<"$job" 2>"$errors") && status=0 || status=$?
 [ "$status" = "1" ] || fail "a job without network must exit with 1, got $status: $result"

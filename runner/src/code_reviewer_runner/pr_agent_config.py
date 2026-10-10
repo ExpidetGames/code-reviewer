@@ -45,24 +45,34 @@ _PASSTHROUGH = (
 
 def build_environment(job: Job, parent: Mapping[str, str]) -> dict[str, str]:
     env = {name: parent[name] for name in _PASSTHROUGH if name in parent}
-    # Extra settings from the job first, so the pins below always win.
-    env["OPENROUTER__API_BASE"] = OPENROUTER_API_BASE
+    # The tool options of the job come first and the pins after them. The job validation only
+    # lets option keys of the four tools through, so the two sets cannot collide; the order is
+    # a second line of defence.
     env.update(job.env)
     model = job.llm.model
+    pinned_model = model if model.startswith("openrouter/") else f"openrouter/{model}"
     env.update(
         {
             "CONFIG__GIT_PROVIDER": "github",
             "GITHUB__DEPLOYMENT_TYPE": "user",
             "GITHUB__USER_TOKEN": job.git.token,
             "GITHUB__BASE_URL": job.git.base_url,
-            "CONFIG__MODEL": model if model.startswith("openrouter/") else f"openrouter/{model}",
+            # All three model roles are the job's model: PR-Agent uses the weak model for `ask`
+            # and `describe` and the reasoning model for self-reflection, and would otherwise
+            # fall back to vendor defaults (and send the LLM key to an unintended model).
+            "CONFIG__MODEL": pinned_model,
+            "CONFIG__MODEL_WEAK": pinned_model,
+            "CONFIG__MODEL_REASONING": pinned_model,
             # An empty value replaces the default fallback model, which belongs to another vendor.
             "CONFIG__FALLBACK_MODELS": "",
             "OPENROUTER__KEY": job.llm.api_key,
+            "OPENROUTER__API_BASE": job.llm.base_url or OPENROUTER_API_BASE,
             "LITELLM_LOCAL_MODEL_COST_MAP": "True",
             "LITELLM_LOG": "ERROR",
         }
     )
+    if job.llm.max_tokens is not None:
+        env["CONFIG__CUSTOM_MODEL_MAX_TOKENS"] = str(job.llm.max_tokens)
     return env
 
 
