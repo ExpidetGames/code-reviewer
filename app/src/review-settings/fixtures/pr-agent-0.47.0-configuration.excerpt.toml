@@ -1,0 +1,28 @@
+# Verbatim lines of pr_agent/settings/configuration.toml from PR-Agent 0.47.0 (PyPI release,
+# the version the runner pins), the sections and keys src/review-settings maps to
+# environment variables or reasons about. Only these lines are kept; the section headers are the
+# original ones. runner-settings.test.ts reads this file to check every variable name and the
+# default each switch relies on. When PR-Agent is upgraded, replace the lines from the new
+# release's file (see README.md in this folder) and fix what the test then reports.
+
+[pr_reviewer]
+inline_key_issues=false # Publish each review finding as an inline comment where the provider can verify inline-comment publication (GitHub, Bitbucket Cloud, Azure DevOps, GitLab).
+extra_instructions = ""
+num_max_findings = 3
+enable_large_pr_chunking=false
+max_number_of_calls=3 # maximum number of chunk review calls, used only when enable_large_pr_chunking is true
+
+[pr_description]
+extra_instructions = ""
+
+[pr_code_suggestions]
+extra_instructions = ""
+
+[pr_questions]
+extra_instructions = ""
+
+[config]
+model="gpt-5.6"
+fallback_models=["gpt-5.6-terra"]
+max_model_tokens = 32000 # Limits the maximum number of tokens that can be used by any model, regardless of the model's default capabilities.
+custom_model_max_tokens=-1 # for models not in the default list
