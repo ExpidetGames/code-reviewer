@@ -52,6 +52,8 @@ export const WEBHOOK_READ_FIELDS = {
     { path: "issue.state", type: "string" },
     // Present only when the comment is on a pull request, not on a plain issue.
     { path: "issue.pull_request", type: "object", optional: true },
+    // The id of the comment: a replayed delivery of the same comment must not start a second job.
+    { path: "comment.id", type: "number" },
     { path: "comment.body", type: "string" },
     // Who can write at all: only OWNER, MEMBER and COLLABORATOR can, so others cost no API call.
     { path: "comment.author_association", type: "string" },

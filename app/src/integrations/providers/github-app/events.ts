@@ -2,10 +2,10 @@
 // only the fields listed in `webhook-fields.ts`. A genuine delivery of no interest is `ignored` with a
 // reason for the logs; a payload that lacks fields the app reads is `invalid_payload`; a closed pull
 // request is its own event (`pull_request_closed`).
+import { parseCommentCommand } from "../../comment-command.ts";
 import type {
   InstallationAction,
   IntegrationEvent,
-  ReviewCommand,
   ReviewTrigger,
 } from "../../types.ts";
 import {
@@ -32,11 +32,21 @@ const PULL_REQUEST_TRIGGER_MAP = {
 } as const;
 
 /** Only these can have write access to a repository; every other commenter is ignored at once. */
-const WRITE_CAPABLE_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+const WRITE_CAPABLE_ASSOCIATIONS: ReadonlySet<unknown> = new Set([
+  "OWNER",
+  "MEMBER",
+  "COLLABORATOR",
+]);
 
-// A command counts only if the comment starts with it (leading whitespace allowed), in any case.
-const COMMAND_PATTERN =
-  /^\s*\/(review|improve|describe|ask)(?=\s|$)\s*([\s\S]*)$/i;
+/**
+ * Whether a commenter with this `author_association` can have write access at all. A cheap first
+ * filter that costs no API call: only OWNER, MEMBER and COLLABORATOR pass, anything else (including
+ * a value GitHub adds later, or none) does not. Whether the commenter really has write access is
+ * then asked from GitHub (the collaborator permission API).
+ */
+export function mayHaveWriteAccess(association: unknown): boolean {
+  return WRITE_CAPABLE_ASSOCIATIONS.has(association);
+}
 
 export type ParseContext = {
   integrationId: string;
@@ -158,17 +168,13 @@ export async function parseGithubEvent(
   if (field<string>(payload, "sender.type") === "Bot")
     return ignored("the comment was written by a bot");
 
-  const match = COMMAND_PATTERN.exec(field<string>(payload, "comment.body"));
-  if (match === null) return ignored("the comment is not a command");
+  const parsed = parseCommentCommand(field<string>(payload, "comment.body"));
+  if (parsed === null) return ignored("the comment is not a command");
 
   // Cheapest checks first, so a commenter without write access costs as few GitHub calls as
   // possible: the association from the payload (no call), then the permission (one call), and only
   // then the head commit of the pull request.
-  if (
-    !WRITE_CAPABLE_ASSOCIATIONS.has(
-      field<string>(payload, "comment.author_association"),
-    )
-  )
+  if (!mayHaveWriteAccess(field<string>(payload, "comment.author_association")))
     return ignored("the commenter cannot have write access");
 
   const repo = repoOf(context);
@@ -185,8 +191,9 @@ export async function parseGithubEvent(
       prNumber,
       prUrl: `${repo.url}/pull/${prNumber}`,
       headSha: await context.headShaOf(repo.fullName, prNumber),
-      command: (match[1] as string).toLowerCase() as ReviewCommand,
-      args: (match[2] ?? "").trim(),
+      command: parsed.command,
+      args: parsed.args,
+      commentId: String(field<number>(payload, "comment.id")),
       actor,
     },
   };

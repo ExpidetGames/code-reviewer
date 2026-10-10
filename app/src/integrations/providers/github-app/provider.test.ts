@@ -97,6 +97,7 @@ const commandTrigger: ReviewTrigger = {
   headSha: FAKE_PULL_REQUEST.headSha,
   command: "review",
   args: "",
+  commentId: "99001",
   actor: { login: "bob", externalId: "1002" },
 };
 
@@ -309,6 +310,7 @@ describe("translating comment deliveries", () => {
       prUrl: "https://github.com/acme/widgets/pull/7",
       headSha: FAKE_PULL_REQUEST.headSha,
       actor: { login: "bob", externalId: "1002" },
+      commentId: "99001",
     });
     expect(client.calls).toEqual([
       {
@@ -326,6 +328,50 @@ describe("translating comment deliveries", () => {
       command: "ask",
       args: "what does the cache key contain?\nPlease be brief.",
     });
+  });
+
+  // CR-32-T02
+  it("cuts a long question and passes no text on with a command other than /ask", async () => {
+    const withBody = async (body: string) => {
+      const payload = webhookFixture("issue_comment.created.review");
+      (payload.comment as { body: string }).body = body;
+      return setup().provider.parseEvent(
+        integration,
+        webhookDelivery({
+          event: "issue_comment",
+          payload,
+          secret: TEST_WEBHOOK_SECRET,
+        }),
+      );
+    };
+
+    expect(triggerOf(await withBody("/ask " + "q".repeat(3000)))).toMatchObject(
+      { command: "ask", args: expect.stringContaining("was cut here") },
+    );
+    expect(
+      triggerOf(await withBody("/review --pr_reviewer.num_max_findings=99")),
+    ).toMatchObject({ command: "review", args: "" });
+  });
+
+  // CR-32-T05
+  it("ignores /ask without a question and commands it does not know, and asks GitHub nothing", async () => {
+    const { client, provider } = setup();
+    for (const body of ["/ask", "/deploy now"]) {
+      const payload = webhookFixture("issue_comment.created.review");
+      (payload.comment as { body: string }).body = body;
+
+      const event = await provider.parseEvent(
+        integration,
+        webhookDelivery({
+          event: "issue_comment",
+          payload,
+          secret: TEST_WEBHOOK_SECRET,
+        }),
+      );
+
+      expect(event).toMatchObject({ kind: "ignored" });
+    }
+    expect(client.calls).toEqual([]);
   });
 
   it("ignores comments that are no command, were edited or deleted, or are on an issue", async () => {

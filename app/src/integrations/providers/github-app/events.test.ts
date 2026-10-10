@@ -4,7 +4,7 @@
 // (src/webhooks/automatic-review-policy.ts), so the translation passes the draft flag on.
 import { describe, expect, it } from "vitest";
 import { webhookFixture } from "../../../../../fakes/github/webhooks.ts";
-import { parseGithubEvent } from "./events.ts";
+import { mayHaveWriteAccess, parseGithubEvent } from "./events.ts";
 
 async function eventOfPayload(eventName: string, payload: unknown) {
   return parseGithubEvent({
@@ -157,5 +157,26 @@ describe("a pull request payload that lacks what the app reads", () => {
       kind: "invalid_payload",
       reason: expect.stringContaining("pull_request.draft"),
     });
+  });
+});
+
+describe("which comment authors can have write access", () => {
+  // CR-32-T08
+  it.each([
+    ["OWNER", true],
+    ["MEMBER", true],
+    ["COLLABORATOR", true],
+    ["CONTRIBUTOR", false],
+    ["FIRST_TIME_CONTRIBUTOR", false],
+    ["FIRST_TIMER", false],
+    ["NONE", false],
+    ["SOMETHING_NEW", false],
+    ["owner", false],
+    ["", false],
+    [undefined, false],
+    [null, false],
+    [7, false],
+  ])("answers %s with %s", (association, expected) => {
+    expect(mayHaveWriteAccess(association)).toBe(expected);
   });
 });
