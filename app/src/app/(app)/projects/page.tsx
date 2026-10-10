@@ -1,11 +1,21 @@
 import type { Metadata } from "next";
 import { requireUser } from "@/auth/session";
-import { EmptyState } from "@/ui/empty-state";
+import {
+  getConfigStatus,
+  getGithubAppInstallUrl,
+} from "@/config-status/shared";
+import { getProjectService } from "@/projects/shared";
+import {
+  loadProjectsPage,
+  ProjectsPageContent,
+} from "@/projects/ui/projects-page";
+import { SyncButton } from "@/projects/ui/sync-button";
 import { PageHeader } from "@/ui/page-header";
 
 export const metadata: Metadata = { title: "Projects" };
 
-// A placeholder: the list of connected repositories comes with the projects tickets.
+// The repositories the GitHub App can read, each with a switch: a repository is reviewed only while
+// its project is on. The page asks for the user itself (the second guard behind the proxy).
 export default async function ProjectsPage() {
   await requireUser();
   return (
@@ -13,10 +23,18 @@ export default async function ProjectsPage() {
       <PageHeader
         title="Projects"
         description="The repositories Code Reviewer watches."
+        actions={<SyncButton />}
       />
-      <EmptyState title="No projects yet">
-        Repositories you connect will appear here.
-      </EmptyState>
+      <ProjectsContent />
     </>
   );
+}
+
+async function ProjectsContent() {
+  const data = await loadProjectsPage({
+    projects: getProjectService(),
+    config: getConfigStatus,
+    installUrl: getGithubAppInstallUrl,
+  });
+  return <ProjectsPageContent data={data} />;
 }

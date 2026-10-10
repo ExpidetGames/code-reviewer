@@ -22,7 +22,13 @@ const PUBLIC_ROUTES = [
   // GitHub signs its deliveries; the route checks the signature itself (src/webhooks/README.md).
   "/api/webhooks/github-app",
 ] as const;
-const PROTECTED_ROUTES = ["/", "/projects", "/runs", "/settings"] as const;
+const PROTECTED_ROUTES = [
+  "/",
+  "/projects",
+  "/projects/[repositoryId]",
+  "/runs",
+  "/settings",
+] as const;
 // Data routes: a visitor without a session gets 401 instead of a redirect.
 const PROTECTED_DATA_ROUTES = [
   "/api/repositories/[repositoryId]/project",
