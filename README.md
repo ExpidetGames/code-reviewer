@@ -13,6 +13,7 @@ Code Reviewer wraps PR-Agent: it runs PR-Agent against pull requests and adds a 
 | `app/` | Web app and API: Next.js 16, TypeScript, pnpm |
 | `runner/` | Worker that runs PR-Agent: Python, uv |
 | `compose.yml` | The whole stack on one machine (app and runner), see "Run with Docker Compose" |
+| `docs/` | Guides for operators, for example [`docs/github-app.md`](docs/github-app.md): creating and installing the team's GitHub App |
 | `fakes/` | Fake servers and fixtures used by the tests |
 | `TESTING.md` | Testing strategy |
 | `AGENTS.md` | Rules for agents and contributors |
@@ -78,6 +79,14 @@ One shared LLM account serves the whole instance: set `LLM_PROVIDER=openrouter` 
 them the app still starts and shows a configuration error; every job then fails with
 `llm_not_configured`. The default model is `anthropic/claude-haiku-5.5`. The key is never logged, stored or shown. How it works: `app/src/llm/README.md`.
 
+### GitHub App
+
+Reading pull requests and posting reviews needs a GitHub App of the team (webhook, four repository
+permissions, two events). [`docs/github-app.md`](docs/github-app.md) creates it step by step, says
+which value goes into which variable (`GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_WEBHOOK_SECRET`,
+`GITHUB_APP_PRIVATE_KEY`), how to keep the private key safe and how to install the app on the
+repositories. The production server refuses to start without these four settings; `pnpm dev` does not.
+
 ## Run the runner locally
 
 ```sh
@@ -130,7 +139,7 @@ Open `http://localhost:3000`: it shows the login page. Which values you need and
 | `BETTER_AUTH_SECRET`, `RUNNER_TOKEN` | Random, at least 32 characters: `openssl rand -base64 32` (one each) |
 | `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET` | A GitHub OAuth app of your own; callback URL `<BETTER_AUTH_URL>/api/auth/callback/github` (see "Sign in") |
 | `ALLOWED_GITHUB_LOGINS` and/or `ALLOWED_GITHUB_ORG` | Who may sign in; with neither set nobody can |
-| `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_WEBHOOK_SECRET`, `GITHUB_APP_PRIVATE_KEY` | The GitHub App that reads pull requests and posts reviews (its settings page) |
+| `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_WEBHOOK_SECRET`, `GITHUB_APP_PRIVATE_KEY` | The GitHub App that reads pull requests and posts reviews: create it once with [docs/github-app.md](docs/github-app.md) (permissions, events, webhook URL, key handling, installation) |
 | `LLM_API_KEY` (and `LLM_PROVIDER`) | The LLM access shared by the team. Optional for starting the stack; without it review jobs fail |
 
 A required setting that is empty stops `docker compose up` with a message naming the variable, before
