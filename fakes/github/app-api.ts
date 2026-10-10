@@ -147,6 +147,8 @@ export type FakeGithubApp = {
   seenCredentials(): string[];
   /** Every installation token issued so far. */
   issuedInstallationTokens(): string[];
+  /** Every installation token switched off with `DELETE /installation/token`, in order. */
+  revokedInstallationTokens(): string[];
   close(): Promise<void>;
 };
 
@@ -246,6 +248,7 @@ export async function startGithubAppFake(
   const permissions = new Map<string, FakeCollaboratorPermission>();
   const tokens = new Map<string, IssuedToken>();
   const issuedTokens: string[] = [];
+  const revoked: string[] = [];
   const tokenRequests: FakeTokenRequest[] = [];
   let appPermissions: FakePermissions = { ...DEFAULT_FAKE_APP_PERMISSIONS };
   const omitted = new Map<number, number[]>();
@@ -489,12 +492,28 @@ export async function startGithubAppFake(
         expires_at: new Date(expiresAtMs).toISOString(),
         permissions: granted,
         repository_selection: reach === null ? "all" : "selected",
+        ...(reach === null
+          ? {}
+          : {
+              repositories: known
+                .filter((repo) => reach.includes(repo.id))
+                .map(repositoryJson),
+            }),
         ...tokenAnswerPatch,
       });
     }
 
     // Installation token endpoints
     const issued = bearer === undefined ? undefined : installationToken(bearer);
+
+    if (path === "/installation/token" && method === "DELETE") {
+      if (issued === undefined || bearer === undefined) return unauthorized();
+      tokens.delete(bearer);
+      revoked.push(bearer);
+      response.writeHead(204);
+      response.end();
+      return;
+    }
 
     if (path === "/installation/repositories" && method === "GET") {
       if (issued === undefined) return unauthorized();
@@ -645,6 +664,7 @@ export async function startGithubAppFake(
       rawInstallationRecords.length = 0;
       tokens.clear();
       issuedTokens.length = 0;
+      revoked.length = 0;
       tokenRequests.length = 0;
       log.length = 0;
       credentials.length = 0;
@@ -657,6 +677,7 @@ export async function startGithubAppFake(
     tokenRequests: () => [...tokenRequests],
     seenCredentials: () => [...credentials],
     issuedInstallationTokens: () => [...issuedTokens],
+    revokedInstallationTokens: () => [...revoked],
     close() {
       return new Promise<void>((resolve) => {
         server.closeAllConnections();

@@ -273,6 +273,35 @@ describe("failures", () => {
     });
   });
 
+  it("passes on how long a server error asks to wait, never a negative or empty value", async () => {
+    const { fake, client } = await setup();
+    fake.fail({ status: 503, headers: { "retry-after": "30" }, times: 1 });
+    fake.fail({ status: 503, headers: { "retry-after": "-5" }, times: 1 });
+    fake.fail({ status: 503, headers: { "retry-after": "" }, times: 1 });
+    fake.fail({ status: 503, times: 1 });
+
+    const waits = [];
+    for (let attempt = 0; attempt < 4; attempt += 1)
+      waits.push(
+        (await failureOf(client.listInstallations())).retryAfterSeconds,
+      );
+
+    expect(waits).toEqual([30, 0, null, null]);
+  });
+
+  it("clamps a rate limit that is already over to zero seconds", async () => {
+    const { fake, clock, client } = await setup();
+    fake.fail({
+      status: 429,
+      headers: { "x-ratelimit-reset": String(clock.now() / 1000 - 100) },
+      times: 1,
+    });
+
+    expect(
+      (await failureOf(client.listInstallations())).retryAfterSeconds,
+    ).toBe(0);
+  });
+
   it("maps a plain 403 to forbidden and an unexpected status to a failed request", async () => {
     const { fake, client } = await setup();
     fake.fail({ status: 403, times: 1 });
@@ -477,19 +506,51 @@ describe("minting an installation token", () => {
     ).toBe("GITHUB_APP_FORBIDDEN");
   });
 
-  it("discards a token GitHub reports as broader than the one asked for", async () => {
+  it("discards a token GitHub reports as broader than asked for, or does not describe, and switches it off", async () => {
     const { fake, client } = await setup();
 
-    for (const patch of [
+    const patches: Array<Record<string, unknown>> = [
       { repository_selection: "all" },
       { permissions: { pull_requests: "write", administration: "write" } },
       { permissions: { pull_requests: "write", metadata: "write" } },
+      { permissions: { pull_requests: "owner" } },
       { repositories: [{ id: 7001 }, { id: 7002 }] },
-    ]) {
+      // Fail closed: a description that leaves something out is not accepted either.
+      { repository_selection: undefined },
+      { repositories: undefined },
+      { permissions: undefined },
+    ];
+    for (const patch of patches) {
       fake.answerTokensWith(patch);
       expect(
         await failureOf(client.mintInstallationToken("4242", JOB_SCOPE)),
       ).toMatchObject({ code: "GITHUB_APP_REQUEST_FAILED", status: null });
     }
+
+    expect(fake.revokedInstallationTokens()).toEqual(
+      fake.issuedInstallationTokens(),
+    );
+    expect(fake.revokedInstallationTokens()).toHaveLength(patches.length);
+  });
+
+  it("makes a discarded token useless and still reports the original failure when switching it off fails", async () => {
+    const { fake, client } = await setup();
+    fake.answerTokensWith({ repository_selection: "all" });
+    fake.fail({ pathIncludes: "/installation/token", status: 500, times: 1 });
+
+    const error = await failureOf(
+      client.mintInstallationToken("4242", JOB_SCOPE),
+    );
+
+    expect(error.message).toContain("broader");
+    expect(fake.revokedInstallationTokens()).toEqual([]);
+
+    fake.answerTokensWith({ repository_selection: "all" });
+    await failureOf(client.mintInstallationToken("4242", JOB_SCOPE));
+    const [, second] = fake.issuedInstallationTokens() as [string, string];
+    const status = await fetch(`${fake.baseUrl}/installation/repositories`, {
+      headers: { authorization: `Bearer ${second}` },
+    }).then((response) => response.status);
+    expect(status).toBe(401);
   });
 });

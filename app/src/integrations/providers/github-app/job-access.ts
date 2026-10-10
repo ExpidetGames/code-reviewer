@@ -18,8 +18,9 @@ export const JOB_TOKEN_PERMISSIONS: InstallationPermissions = {
 
 /** The repository ids a job token is limited to: exactly one, and a real GitHub id. */
 export function jobTokenRepositoryIds(repoExternalId: string): number[] | null {
-  if (!/^[1-9]\d{0,15}$/.test(repoExternalId)) return null;
-  return [Number(repoExternalId)];
+  if (!/^[1-9]\d*$/.test(repoExternalId)) return null;
+  const id = Number(repoExternalId);
+  return Number.isSafeInteger(id) ? [id] : null;
 }
 
 const CODE_FOR: Partial<Record<GithubAppError["code"], IntegrationErrorCode>> =
@@ -37,7 +38,9 @@ const CODE_FOR: Partial<Record<GithubAppError["code"], IntegrationErrorCode>> =
  * never a credential or a response body); the original error is kept as `cause`.
  *
  * - 404 on the token call: the installation no longer exists.
- * - 403: the installation is suspended (a rate limit has its own code and is checked first).
+ * - 403 (not a rate limit): GitHub refuses the app access to the installation. It is normally a
+ *   suspended installation, but GitHub does not say why, so a user facing message must stay neutral
+ *   ("access to the installation is refused or it is suspended"). A rate limit is checked first.
  * - 422: GitHub refused the narrow scope (repository not in the installation, or a permission the
  *   app does not hold). It never falls back to a broader token.
  */

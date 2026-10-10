@@ -13,7 +13,10 @@ export const INTEGRATION_ERROR_CODES = [
   // claim) branches on these and never on a platform's own codes. See `isRetryableAccessFailure`.
   /** The connection was removed on the platform (GitHub: the installation was deleted). */
   "INTEGRATION_ACCESS_CONNECTION_GONE",
-  /** The platform has paused the connection (GitHub: the installation is suspended). */
+  /**
+   * The platform refuses the app access to the connection (GitHub: a 403 on the token call, normally
+   * a suspended installation, but GitHub does not say). Show a neutral message.
+   */
   "INTEGRATION_ACCESS_CONNECTION_SUSPENDED",
   /**
    * The platform refused the narrowly scoped credentials: the repository is not (or no longer)
@@ -23,9 +26,12 @@ export const INTEGRATION_ERROR_CODES = [
   "INTEGRATION_ACCESS_SCOPE_REFUSED",
   /** The platform did not accept the app's own identity (GitHub: the App JWT, so key or app id). */
   "INTEGRATION_ACCESS_APP_AUTH_FAILED",
-  /** Retryable. `retryAfterSeconds` says when, if the platform told. */
+  /** Retryable. `retryAfterSeconds` (never negative) says when, or is null if the platform did not say. */
   "INTEGRATION_ACCESS_RATE_LIMITED",
-  /** Retryable: the platform answered 5xx, could not be reached or took too long. */
+  /**
+   * Retryable: the platform answered 5xx, could not be reached or took too long.
+   * `retryAfterSeconds` is set when the platform sent a `Retry-After`.
+   */
   "INTEGRATION_ACCESS_UNAVAILABLE",
   /** Anything else: bad settings, an unusable repository reference, an unexpected answer. */
   "INTEGRATION_ACCESS_FAILED",

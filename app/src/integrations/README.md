@@ -98,10 +98,16 @@ hand. An unknown pull request fails with `INTEGRATION_PULL_REQUEST_NOT_FOUND`.
   plain copy with the token, for the runner API's `claim` response. It throws
   `INTEGRATION_ACCESS_TOKEN_MISSING` when the token is missing or empty. Never log its result. A
   provider that returns a plain object with a visible token fails the conformance suite.
-- **Never spread, clone, cache (`"use cache"`) or return a `GitAccess` from a Server Action.** A copy
-  (`{ ...access }`, `structuredClone`) loses the hidden token or, worse, makes it visible; a cache or
-  a Server Action result would store it or send it to the browser. Only the runner API's claim
-  (CR-28) reveals it, once, in its response.
+- **Never spread, clone, cache (`"use cache"`) or return a `GitAccess` from a Server Action.** A cache
+  or a Server Action result would store the token or send it to the browser, and a copy made by
+  spreading or cloning silently loses the hidden token. Only the runner API's claim (CR-28) reveals
+  it, once, in its response. For CR-28 specifically:
+  - The copy that `revealGitAccess` returns is a plain object with an enumerable `token`. Never give
+    it to a logger, an error, a cache or the database; build it as late as possible and drop it after
+    the response.
+  - The claim response carries `Cache-Control: no-store`.
+  - `retryAfterSeconds` of an access failure is `null` when the platform did not say; the 503 mapping
+    needs its own default `Retry-After` for that case (for example 30 seconds).
 - `credentials` and `webhook_secret` in the table are reserved for token integrations. A GitHub App
   keeps neither there: its private key and webhook secret live in the environment of the app (the
   self-hosted wizard will need its own app-level home for them). `INTEGRATION_SECRET_STORAGE` in
@@ -173,7 +179,11 @@ How the interface is met:
   exactly the permissions `pull_requests: write`, `issues: write`, `contents: read` and
   `metadata: read` (`JOB_TOKEN_PERMISSIONS`); the app must be registered with at least these. The
   client refuses a scope without a repository or permissions before any request, and discards a token
-  GitHub reports as broader than asked for. The result is a `GitAccess` with `expiresAt` (about one
+  GitHub reports as broader than asked for (the check fails closed: the answer must say `selected`,
+  list the repositories and the permissions, with known levels). Such a token is switched off at once
+  with a best-effort `DELETE /installation/token`, whose failure is ignored. A mint that times out
+  after GitHub created the token cannot be undone: that unused token stays valid until it expires
+  (about one hour) and nobody has seen it. The result is a `GitAccess` with `expiresAt` (about one
   hour; jobs end long before, so there is no refresh), the configured API base URL and
   `botLogin` `<GITHUB_APP_SLUG>[bot]`. Nothing is logged or stored; the private key only signs the
   App JWT inside the app.
@@ -207,7 +217,9 @@ How the interface is met:
 | `INTEGRATION_ACCESS_UNAVAILABLE`          | 5xx, a network failure or a timeout                                                                                         | yes         |
 | `INTEGRATION_ACCESS_FAILED`               | anything else (settings missing, an unexpected answer, a token broader than asked for)                                      | no          |
 
-Messages name the call and the status only, never a token, JWT, key or response body.
+`retryAfterSeconds` is never negative and is `null` when the platform did not say (always for a network
+failure or timeout): the caller then uses its own default. Messages name the call and the status only,
+never a token, JWT, key or response body.
 
 ## Synchronization
 

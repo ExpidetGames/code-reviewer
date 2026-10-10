@@ -237,6 +237,7 @@ describe("job access that fails", () => {
       { ...widgets, externalId: "" },
       { ...widgets, externalId: "7001/../1" },
       { ...widgets, externalId: "0" },
+      { ...widgets, externalId: "9007199254740993" },
       { ...widgets, integrationId: "another-integration" },
     ])
       expect(
@@ -304,6 +305,20 @@ describe("job access that fails", () => {
     });
   });
 
+  it("passes on the Retry-After of a server error", async () => {
+    const { fake, provider } = await setup();
+    fake.fail({
+      pathIncludes: "/access_tokens",
+      status: 503,
+      headers: { "retry-after": "17" },
+      times: 1,
+    });
+
+    expect(
+      await failureOf(provider.jobAccess(integration, widgets)),
+    ).toMatchObject({ retryable: true, retryAfterSeconds: 17 });
+  });
+
   it("works again on the next call after a retryable failure", async () => {
     const { fake, provider } = await setup();
     fake.fail({ pathIncludes: "/access_tokens", status: 502, times: 1 });
@@ -321,6 +336,9 @@ describe("job access that fails", () => {
     expect(
       await failureOf(provider.jobAccess(integration, widgets)),
     ).toMatchObject({ code: "INTEGRATION_ACCESS_FAILED", retryable: false });
+    expect(fake.revokedInstallationTokens()).toEqual(
+      fake.issuedInstallationTokens(),
+    );
   });
 });
 
