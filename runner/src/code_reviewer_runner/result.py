@@ -74,6 +74,8 @@ class JobResult:
     comment_url: str | None
     error_code: ErrorCode | None
     log_tail: str
+    # True when the log held more than `log_tail` shows (older lines or characters were cut).
+    log_truncated: bool = False
     usage: Usage | None = None
 
     def to_json(self) -> dict[str, Any]:
@@ -83,6 +85,7 @@ class JobResult:
             "commentUrl": self.comment_url,
             "errorCode": self.error_code.value if self.error_code else None,
             "logTail": self.log_tail,
+            "logTruncated": self.log_truncated,
             "usage": self.usage.to_json() if self.usage else None,
         }
 
