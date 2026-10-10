@@ -2,6 +2,7 @@
 // copies a raw platform object into a RepoRef, ReviewTrigger or GitAccess is caught here instead of
 // leaking the platform's format into jobs, the runner API or the UI. Also home of the helpers that
 // keep a GitAccess token out of logs and accidental serialization.
+import { IntegrationError } from "./errors.ts";
 import {
   GIT_AUTH_TYPES,
   GIT_PLATFORMS,
@@ -180,9 +181,16 @@ export function createGitAccess(fields: GitAccess): GitAccess {
 
 /**
  * A plain copy with the token included, for the one place that must send it on (the runner API's
- * claim response). Calling it is a deliberate act; do not log its result.
+ * claim response). Calling it is a deliberate act; do not log its result. Throws
+ * INTEGRATION_ACCESS_TOKEN_MISSING when the token is missing or empty, so a broken access is never
+ * sent to a runner as if it were usable.
  */
 export function revealGitAccess(access: GitAccess): GitAccess {
+  if (typeof access.token !== "string" || access.token === "")
+    throw new IntegrationError(
+      "INTEGRATION_ACCESS_TOKEN_MISSING",
+      "The git access has no token to hand out.",
+    );
   return {
     provider: access.provider,
     baseUrl: access.baseUrl,
