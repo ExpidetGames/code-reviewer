@@ -42,6 +42,19 @@ type Damageable = {
   installation?: unknown;
 };
 
+/** A recorded comment payload as far as these tests reach into it. */
+type CommentPayload = {
+  action?: string;
+  issue: { number: unknown; state?: string };
+  comment: {
+    id?: number;
+    body: unknown;
+    author_association?: string;
+  };
+  sender: { type?: string };
+  installation?: unknown;
+};
+
 const FIXTURES = join(
   dirname(fileURLToPath(import.meta.url)),
   "../../../../../fakes/fixtures/github-webhooks",
@@ -121,6 +134,71 @@ describe("the recorded GitHub webhook payloads", () => {
       expect(Number.isInteger(payload.installation.id)).toBe(true);
     },
   );
+
+  // CR-32-T15
+  it.each([
+    "issue_comment.created.review",
+    "issue_comment.created.on-issue",
+    "issue_comment.created.bot",
+  ])(
+    "%s has every field the comment commands read, with the right type",
+    (name) => {
+      const payload = webhookFixture(name) as Record<string, unknown> & {
+        action: string;
+        issue: { number: number; state: string; pull_request?: unknown };
+        comment: { id: number; body: string; author_association: string };
+        sender: { type: string };
+        installation: { id: number };
+      };
+
+      const listed = WEBHOOK_READ_FIELDS.issue_comment.map((spec) => spec.path);
+      for (const path of [
+        "action",
+        "issue.number",
+        "issue.state",
+        "issue.pull_request",
+        "comment.id",
+        "comment.body",
+        "comment.author_association",
+        "sender.type",
+        "installation.id",
+      ])
+        expect(listed, path).toContain(path);
+      expect(payloadProblems("issue_comment", payload)).toEqual([]);
+      expect(typeof payload.action).toBe("string");
+      expect(Number.isInteger(payload.issue.number)).toBe(true);
+      expect(typeof payload.comment.id).toBe("number");
+      expect(typeof payload.comment.body).toBe("string");
+      expect(typeof payload.comment.author_association).toBe("string");
+      expect(["User", "Bot"]).toContain(payload.sender.type);
+      expect(Number.isInteger(payload.installation.id)).toBe(true);
+      // Only a comment on a pull request carries `issue.pull_request`.
+      expect("pull_request" in payload.issue).toBe(
+        name !== "issue_comment.created.on-issue",
+      );
+    },
+  );
+
+  // CR-32-T15
+  it.each([
+    ["action", (p: CommentPayload) => delete p.action],
+    ["issue.number", (p: CommentPayload) => (p.issue.number = "7")],
+    ["issue.state", (p: CommentPayload) => delete p.issue.state],
+    ["comment.id", (p: CommentPayload) => delete p.comment.id],
+    ["comment.body", (p: CommentPayload) => (p.comment.body = null)],
+    [
+      "comment.author_association",
+      (p: CommentPayload) => delete p.comment.author_association,
+    ],
+    ["sender.type", (p: CommentPayload) => delete p.sender.type],
+    ["installation.id", (p: CommentPayload) => delete p.installation],
+  ])("reports a comment payload whose %s drifted", (path, damage) => {
+    const payload = webhookFixture("issue_comment.created.review");
+
+    damage(payload as unknown as CommentPayload);
+
+    expect(payloadProblems("issue_comment", payload)).toContain(path);
+  });
 
   it.each([
     [

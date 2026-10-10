@@ -116,6 +116,18 @@ describe("claiming a job", () => {
     expect(body.job.input.args).toStrictEqual(["Why is this lock needed?"]);
   });
 
+  // CR-32-T14
+  it("hands a question with quotes, shell syntax and line breaks over unchanged, as one argument, and the command stays ask", async () => {
+    const h = await startRunnerApiHarness();
+    const question = 'x"; rm -rf / #$(id)\n/review --a=b\r\n`reboot`';
+    await h.enqueueNew({ command: "ask", args: question });
+
+    const body = await h.claimed();
+
+    expect(body.job.input.command).toBe("ask");
+    expect(body.job.input.args).toStrictEqual([question]);
+  });
+
   it("hands no arguments for a command that takes none, even if the comment had text", async () => {
     const h = await startRunnerApiHarness();
     await h.enqueueNew({ command: "improve", args: "please be nice" });
