@@ -17,6 +17,8 @@ export type FakeGithubAppClientData = {
   /** Permissions by "owner/name#login". */
   permissions?: Record<string, CollaboratorPermission>;
   token?: { token: string; expiresAt: string };
+  /** Makes `mintInstallationToken` reject with this error. */
+  mintFailure?: Error;
 };
 
 export type FakeGithubAppClient = GithubAppClient & {
@@ -91,8 +93,9 @@ export function fakeGithubAppClient(
       record("getCollaboratorPermission", installationId, repoFullName, login);
       return data.permissions?.[`${repoFullName}#${login}`] ?? "none";
     },
-    async mintInstallationToken(installationId, options) {
-      record("mintInstallationToken", installationId, options);
+    async mintInstallationToken(installationId, scope) {
+      record("mintInstallationToken", installationId, scope);
+      if (data.mintFailure) throw data.mintFailure;
       return (
         data.token ?? {
           token: "ghs_unit_test_token",

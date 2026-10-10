@@ -469,9 +469,84 @@ describe("job access", () => {
     expect(client.calls).toEqual([
       {
         method: "mintInstallationToken",
-        args: ["4242", { repositoryNames: ["widgets"] }],
+        args: [
+          "4242",
+          {
+            repositoryIds: [7001],
+            permissions: {
+              pull_requests: "write",
+              issues: "write",
+              contents: "read",
+              metadata: "read",
+            },
+          },
+        ],
       },
     ]);
+  });
+
+  // CR-23-T13
+  it.each([
+    ["code-reviewer", undefined, "https://api.github.com"],
+    ["cr-2-bot3", undefined, "https://api.github.com"],
+    ["a1", "http://127.0.0.1:9999/api/v3/", "http://127.0.0.1:9999/api/v3"],
+  ])(
+    "builds the bot login from the slug %s and takes the base URL from the settings (%s)",
+    async (slug, baseUrl, expectedBaseUrl) => {
+      const provider = createGithubAppProvider({
+        config: testGithubAppConfig({
+          GITHUB_APP_SLUG: slug,
+          GITHUB_API_BASE_URL: baseUrl,
+          ALLOW_TEST_GITHUB_ENDPOINTS: "true",
+        }),
+        client: fakeGithubAppClient(),
+      });
+
+      const access = await provider.jobAccess(integration, widgets);
+
+      expect(access.botLogin).toBe(`${slug}[bot]`);
+      expect(access.baseUrl).toBe(expectedBaseUrl);
+    },
+  );
+
+  it("puts the expiry of the token into the access and keeps it out of the token", async () => {
+    const { provider } = setup({
+      token: { token: "ghs_x", expiresAt: "2026-10-10T12:30:00.000Z" },
+    });
+
+    expect((await provider.jobAccess(integration, widgets)).expiresAt).toBe(
+      "2026-10-10T12:30:00.000Z",
+    );
+  });
+
+  it("turns an unexpected failure into a coded error that carries no message of the original", async () => {
+    const { provider } = setup({
+      mintFailure: new Error("boom with ghs_secret inside"),
+    });
+
+    const error = await provider.jobAccess(integration, widgets).then(
+      () => undefined,
+      (reason: unknown) => reason,
+    );
+
+    expect(error).toMatchObject({ code: "INTEGRATION_ACCESS_FAILED" });
+    expect((error as Error).message).not.toContain("ghs_secret");
+  });
+
+  it("passes a configuration error on as a coded access failure that names the variables", async () => {
+    const provider = createGithubAppProvider({
+      config: () => {
+        throw new GithubAppConfigError(["GITHUB_APP_ID"], "missing");
+      },
+      client: fakeGithubAppClient(),
+    });
+
+    await expect(
+      provider.jobAccess(integration, widgets),
+    ).rejects.toMatchObject({
+      code: "INTEGRATION_ACCESS_FAILED",
+      message: expect.stringContaining("GITHUB_APP_ID"),
+    });
   });
 });
 

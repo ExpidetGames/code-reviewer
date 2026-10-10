@@ -35,6 +35,18 @@ export type InstallationToken = {
   expiresAt: string;
 };
 
+/** GitHub's permission names mapped to a level; what a token request asks for and a token holds. */
+export type InstallationPermissions = Readonly<
+  Record<string, "read" | "write">
+>;
+
+/** What a job token is limited to. Both parts are required: a job token is never broader. */
+export type JobTokenScope = {
+  /** The numeric ids of the repositories (at least one) the token may reach. */
+  repositoryIds: readonly number[];
+  permissions: InstallationPermissions;
+};
+
 export type GithubAppClient = {
   /** Every installation of the app (needs the App JWT). */
   listInstallations(): Promise<RemoteInstallation[]>;
@@ -61,12 +73,13 @@ export type GithubAppClient = {
     login: string,
   ): Promise<CollaboratorPermission>;
   /**
-   * Mints a fresh installation access token, never from the cache, optionally narrowed to
-   * repositories (by name, without the owner). The one place a token for a job is created.
+   * Mints a fresh installation access token, never from the cache, limited to the given repositories
+   * and permissions. The one place a token for a job is created. Refuses (without a request) a scope
+   * with no repository or no permission, and a token GitHub reports as broader than asked for.
    */
   mintInstallationToken(
     installationId: string,
-    options?: { repositoryNames?: readonly string[] },
+    scope: JobTokenScope,
   ): Promise<InstallationToken>;
 };
 
@@ -178,6 +191,36 @@ function checkPullRequestNumber(prNumber: number): void {
     );
 }
 
+const PERMISSION_LEVELS = ["read", "write", "admin"];
+
+/**
+ * GitHub echoes what a token really holds, and this check is the last defence behind "never
+ * broader": it fails closed. The answer must say the token is limited to selected repositories, list
+ * only repositories that were asked for, and list permissions with known levels that are none of
+ * them above what was asked for. A missing field, an unknown permission or an unknown level fails.
+ */
+function isNoBroaderThan(
+  json: Record<string, unknown>,
+  scope: JobTokenScope,
+): boolean {
+  if (json.repository_selection !== "selected") return false;
+  if (!Array.isArray(json.repositories)) return false;
+  for (const repo of json.repositories)
+    if (
+      !isRecord(repo) ||
+      !scope.repositoryIds.some((wanted) => wanted === repo.id)
+    )
+      return false;
+  if (!isRecord(json.permissions)) return false;
+  for (const [name, level] of Object.entries(json.permissions)) {
+    const asked = scope.permissions[name];
+    const held = PERMISSION_LEVELS.indexOf(String(level));
+    if (asked === undefined || held === -1) return false;
+    if (held > PERMISSION_LEVELS.indexOf(asked)) return false;
+  }
+  return true;
+}
+
 export function createGithubAppClient(
   options: GithubAppClientOptions,
 ): GithubAppClient {
@@ -203,13 +246,18 @@ export function createGithubAppClient(
     return jwt;
   }
 
+  /** Seconds to wait as the platform said (never negative), or null when it did not say. */
   function retryAfter(headers: Headers): number | null {
-    const direct = Number(headers.get("retry-after"));
-    if (headers.get("retry-after") !== null && Number.isFinite(direct))
-      return direct;
-    const reset = Number(headers.get("x-ratelimit-reset"));
-    if (headers.get("x-ratelimit-reset") !== null && Number.isFinite(reset))
-      return Math.max(0, Math.ceil(reset - now() / 1000));
+    const direct = headers.get("retry-after")?.trim();
+    if (
+      direct !== undefined &&
+      direct !== "" &&
+      Number.isFinite(Number(direct))
+    )
+      return Math.max(0, Number(direct));
+    const reset = headers.get("x-ratelimit-reset")?.trim();
+    if (reset !== undefined && reset !== "" && Number.isFinite(Number(reset)))
+      return Math.max(0, Math.ceil(Number(reset) - now() / 1000));
     return null;
   }
 
@@ -243,6 +291,8 @@ export function createGithubAppClient(
               : "GITHUB_APP_REQUEST_FAILED";
     return new GithubAppError(code, `GitHub answered ${status} for ${call}.`, {
       status,
+      // A 5xx may say when to come back (Retry-After); everything else has nothing to wait for.
+      retryAfterSeconds: status >= 500 ? retryAfter(response.headers) : null,
     });
   }
 
@@ -309,18 +359,48 @@ export function createGithubAppClient(
     );
   }
 
+  /**
+   * Best effort `DELETE /installation/token` for a token that must not be used. Its failure is
+   * ignored (the original failure is what the caller needs to hear about) and the answer is never
+   * read, so nothing of it can reach a message.
+   */
+  async function revokeInstallationToken(token: string): Promise<void> {
+    try {
+      const response = await doFetch(
+        `${config.apiBaseUrl}/installation/token`,
+        {
+          method: "DELETE",
+          headers: {
+            authorization: `Bearer ${token}`,
+            accept: "application/vnd.github+json",
+            "x-github-api-version": GITHUB_API_VERSION,
+            "user-agent": `code-reviewer-${config.slug}`,
+          },
+          signal: AbortSignal.timeout(timeoutMs),
+        },
+      );
+      await response.body?.cancel().catch(() => undefined);
+    } catch {
+      // Ignored on purpose, see above.
+    }
+  }
+
+  /** Read calls: a token with everything the app is granted on the whole installation. */
   async function mint(
     installationId: string,
-    repositoryNames?: readonly string[],
+    scope?: JobTokenScope,
   ): Promise<InstallationToken> {
     checkInstallationId(installationId);
     const json = await request(
       appJwt(),
       "POST",
       `/app/installations/${installationId}/access_tokens`,
-      repositoryNames === undefined
+      scope === undefined
         ? undefined
-        : { repositories: [...repositoryNames] },
+        : {
+            repository_ids: [...scope.repositoryIds],
+            permissions: { ...scope.permissions },
+          },
     );
     if (
       !isRecord(json) ||
@@ -330,6 +410,14 @@ export function createGithubAppClient(
       Number.isNaN(Date.parse(json.expires_at))
     )
       throw shapeError("POST /app/installations/{id}/access_tokens");
+    if (scope !== undefined && !isNoBroaderThan(json, scope)) {
+      // The token exists and works for up to an hour: switch it off before reporting the failure.
+      await revokeInstallationToken(json.token);
+      throw new GithubAppError(
+        "GITHUB_APP_REQUEST_FAILED",
+        "GitHub issued a token broader than the one asked for; it was discarded.",
+      );
+    }
     return {
       token: json.token,
       expiresAt: new Date(Date.parse(json.expires_at)).toISOString(),
@@ -509,8 +597,25 @@ export function createGithubAppClient(
       });
     },
 
-    async mintInstallationToken(installationId, mintOptions = {}) {
-      return mint(installationId, mintOptions.repositoryNames);
+    async mintInstallationToken(installationId, scope) {
+      if (scope.repositoryIds.length === 0)
+        throw new GithubAppError(
+          "GITHUB_APP_REQUEST_FAILED",
+          "A job token needs at least one repository.",
+        );
+      if (
+        !scope.repositoryIds.every((id) => Number.isSafeInteger(id) && id > 0)
+      )
+        throw new GithubAppError(
+          "GITHUB_APP_REQUEST_FAILED",
+          "A repository id is not a positive whole number.",
+        );
+      if (Object.keys(scope.permissions).length === 0)
+        throw new GithubAppError(
+          "GITHUB_APP_REQUEST_FAILED",
+          "A job token needs explicit permissions.",
+        );
+      return mint(installationId, scope);
     },
   };
 }
