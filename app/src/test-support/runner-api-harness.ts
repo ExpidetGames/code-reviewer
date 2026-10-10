@@ -7,7 +7,7 @@ import { createRepositoriesRepository } from "../db/repositories/repositories-re
 import { createDefaultIntegrationRegistry } from "../integrations/registry.ts";
 import type { JobQueueLimits } from "../jobs/job-limits.ts";
 import type { JobQueue } from "../jobs/job-queue.ts";
-import { loadLlmAccess } from "../llm/config.ts";
+import { loadLlmAccess } from "../runner-api/temporary-llm-access.ts";
 import { createRunnerApi } from "../runner-api/api.ts";
 import {
   allowAllClaimGuard,

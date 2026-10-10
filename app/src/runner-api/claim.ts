@@ -30,7 +30,10 @@ import type {
 } from "../integrations/types.ts";
 import type { JobQueue } from "../jobs/job-queue.ts";
 import type { ClaimResult, Job } from "../jobs/job-types.ts";
-import { revealLlmAccess, type LlmAccessResult } from "../llm/config.ts";
+import {
+  revealLlmAccess,
+  type LlmAccessResult,
+} from "./temporary-llm-access.ts";
 import type { ClaimGuard } from "./claim-guard.ts";
 import {
   RUNNER_API_VERSION,

@@ -13,6 +13,7 @@ import {
   webhookDelivery,
   webhookFixture,
 } from "../../../fakes/github/webhooks.ts";
+import { createRepositoriesRepository } from "../../src/db/repositories/repositories-repository.ts";
 import { closeDatabase, getDatabase } from "../../src/db/startup.ts";
 import { initializeDatabaseOnStart } from "../../src/db/startup.ts";
 import {
@@ -21,6 +22,7 @@ import {
   testAppKeys,
   testGithubAppEnv,
 } from "../../src/test-support/github-app.ts";
+import { getProjectService } from "../../src/projects/shared.ts";
 import { createTestDirectory } from "../../src/test-support/test-database.ts";
 
 const RUNNER_TOKEN = "route-file-runner-token-91ac-5d2e8b7f0c14";
@@ -130,7 +132,7 @@ describe("the runner API route files", () => {
     for (const [event, fixture] of [
       ["installation", "installation.created"],
       ["pull_request", "pull_request.opened"],
-    ] as const)
+    ] as const) {
       expect(
         (
           await routes.webhook.POST(
@@ -142,6 +144,13 @@ describe("the runner API route files", () => {
           )
         ).status,
       ).toBe(202);
+      if (event === "installation") {
+        // The repository must be a project before its pull requests are reviewed.
+        const [repository] =
+          await createRepositoriesRepository(getDatabase()).list();
+        await getProjectService().activateProject(repository!.id);
+      }
+    }
 
     const claim = await routes.claim.POST(runnerRequest("claim", undefined));
 
