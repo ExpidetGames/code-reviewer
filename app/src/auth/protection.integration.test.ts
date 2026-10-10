@@ -26,6 +26,8 @@ const PROTECTED_ROUTES = ["/"] as const;
 // Data routes: a visitor without a session gets 401 instead of a redirect.
 const PROTECTED_DATA_ROUTES = [
   "/api/repositories/[repositoryId]/project",
+  "/api/repositories/[repositoryId]/project/settings",
+  "/api/review-settings",
 ] as const;
 // Files the proxy matcher leaves out on purpose (src/proxy.ts), so no session rule applies to them.
 const OUTSIDE_THE_PROXY = ["/favicon.ico"] as const;
