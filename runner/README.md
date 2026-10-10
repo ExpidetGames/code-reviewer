@@ -175,6 +175,9 @@ exact PR-Agent version (`identity_patch.PATCHED_FOR_VERSION`) and refused for an
 
 `scripts/manual_review.py` runs a real review against the sandbox repository; see its docstring.
 It needs `--yes`, posts a real comment and costs a few cents.
+`--no-identity-patch` starts the runner without the identity patch, as a control for the spike
+(CR-11). The report of that spike is `docs/spike/cr-11-second-run.md`; the reports of the
+other spike tickets are added to the same folder.
 With `--record-dir DIR --label NAME` it also saves the result JSON and the text of the review comment
 right after the run (the next run edits the comment in place); nothing is saved if a secret shows up in
 either. The model comparison of CR-44 (`docs/spike/cr-44-model-comparison.md`) was made this way.

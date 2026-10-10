@@ -3,6 +3,7 @@ it on the sandbox repository, and that it never prints the installation token or
 even when the runner's output contains them."""
 
 import importlib.util
+import io
 import json
 import subprocess
 import sys
@@ -31,8 +32,8 @@ def load_script() -> ModuleType:
     return module
 
 
-def fake_runner(stdout: str) -> Callable[[dict[str, Any]], subprocess.CompletedProcess[str]]:
-    def start(job: dict[str, Any]) -> subprocess.CompletedProcess[str]:
+def fake_runner(stdout: str) -> Callable[..., subprocess.CompletedProcess[str]]:
+    def start(job: dict[str, Any], identity_patch: bool = True) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess([], 0, stdout=stdout, stderr="")
 
     return start
@@ -105,7 +106,7 @@ def test_the_script_does_not_print_the_secrets_even_if_the_runner_output_has_the
         args=[], returncode=0, stdout=f'{{"logTail": "{TOKEN}"}}', stderr=f"oops {API_KEY}"
     )
 
-    def start(job: dict[str, Any]) -> subprocess.CompletedProcess[str]:
+    def start(job: dict[str, Any], identity_patch: bool = True) -> subprocess.CompletedProcess[str]:
         return leaking
 
     monkeypatch.setattr(script, "start_runner", start)
@@ -372,3 +373,114 @@ def test_the_result_is_printed_and_recorded_even_if_the_comment_cannot_be_read(
     assert "comment text was not saved" in printed
     assert json.loads((tmp_path / "run-d.json").read_text())["result"]["ok"] is True
     assert not (tmp_path / "run-d.comment.md").exists()
+
+
+# CR-11-T05 (helper): the control run without the identity patch
+def test_the_normal_runner_command_is_the_console_script() -> None:
+    command = load_script().runner_command(identity_patch=True)
+
+    assert Path(command[0]).name == "code-reviewer-run-job"
+    assert len(command) == 1
+
+
+def test_the_control_command_runs_python_in_isolated_mode() -> None:
+    command = load_script().runner_command(identity_patch=False)
+
+    # -I: neither the current directory nor user site packages are put on sys.path
+    assert command[:3] == [sys.executable, "-I", "-c"]
+
+
+# CR-11-T05 (helper): the real job runs, and the identity patch is not applied
+def test_the_control_command_runs_the_real_job_without_the_identity_patch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pr_agent.agent.pr_agent import PRAgent
+    from pr_agent.git_providers.github_provider import GithubProvider
+
+    from code_reviewer_runner import runner
+
+    script = load_script()
+    original = GithubProvider._resolve_user_login  # pyright: ignore[reportPrivateUsage]
+    seen: list[bool] = []
+
+    async def handle_request(
+        self: Any, pr_url: str, request: Any, notify: Any = None, propagate_tool_errors: Any = None
+    ) -> bool:
+        seen.append(
+            GithubProvider._resolve_user_login is original  # pyright: ignore[reportPrivateUsage]
+        )
+        return True
+
+    monkeypatch.setattr(PRAgent, "handle_request", handle_request)
+    # The snippet assigns the module attribute; let monkeypatch put the original back afterwards.
+    monkeypatch.setattr(runner, "apply_identity_patch", runner.apply_identity_patch)
+    job = json.dumps(
+        script.build_job(script.DEFAULT_PR_URL, "review", TOKEN, "bot", API_KEY, "v/m", 1000)
+    )
+
+    def run(code: str | None) -> None:
+        monkeypatch.setattr(sys, "stdin", io.StringIO(job))
+        monkeypatch.setattr(sys, "stdout", io.StringIO())
+        if code is None:
+            runner.main([])
+            return
+        with pytest.raises(SystemExit):
+            exec(code, {})  # the snippet is our own constant
+
+    run(None)  # the normal entry point: the patch is in place while the command runs
+    run(script.CONTROL_SNIPPET)  # the control: the stock method
+
+    assert seen == [False, True]
+
+
+def test_the_flag_for_the_control_run_reaches_the_runner_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    script = load_script()
+    for name in script.REQUIRED_ENV:
+        monkeypatch.setenv(name, "1")
+    monkeypatch.setattr(script, "mint_installation_token", fixed_token)
+    flags: list[bool] = []
+
+    def start(job: dict[str, Any], identity_patch: bool = True) -> subprocess.CompletedProcess[str]:
+        flags.append(identity_patch)
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="{}", stderr="")
+
+    monkeypatch.setattr(script, "start_runner", start)
+
+    script.main(["--yes"])
+    script.main(["--yes", "--no-identity-patch"])
+
+    assert flags == [True, False]
+
+
+# CR-11-T05 together with CR-44: a control run is recorded like any other run
+def test_the_control_flag_reaches_the_runner_start_together_with_the_recording(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    script = load_script()
+    for name in script.REQUIRED_ENV:
+        monkeypatch.setenv(name, API_KEY if name == "OPENROUTER_API_KEY" else "1")
+    monkeypatch.setattr(script, "mint_installation_token", fixed_token)
+    url = f"{script.DEFAULT_PR_URL}#issuecomment-7"
+    stdout = json.dumps({"ok": True, "durationMs": 5, "commentUrl": url, "errorCode": None})
+    flags: list[bool] = []
+
+    def start(job: dict[str, Any], identity_patch: bool = True) -> subprocess.CompletedProcess[str]:
+        flags.append(identity_patch)
+        return subprocess.CompletedProcess([], 0, stdout=stdout, stderr="")
+
+    def fetch(token: str, comment_url: str | None) -> str | None:
+        return "the standalone text"
+
+    monkeypatch.setattr(script, "start_runner", start)
+    monkeypatch.setattr(script, "fetch_comment_body", fetch)
+
+    code = script.main(
+        ["--yes", "--no-identity-patch", "--record-dir", str(tmp_path), "--label", "control-1"]
+    )
+
+    assert code == 0
+    assert flags == [False]
+    assert json.loads((tmp_path / "control-1.json").read_text())["result"]["ok"] is True
+    assert (tmp_path / "control-1.comment.md").read_text() == "the standalone text"

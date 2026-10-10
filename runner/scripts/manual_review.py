@@ -11,7 +11,7 @@ GITHUB_APP_ID, GITHUB_APP_SLUG, GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_K
 OPENROUTER_API_KEY.
 
     uv run python scripts/manual_review.py [--pr-url URL] [--command review] [--model MODEL]
-        [--record-dir DIR --label NAME]
+        [--record-dir DIR --label NAME] [--no-identity-patch]
 
 With `--record-dir`, the run also leaves `DIR/NAME.json` (the result JSON of the runner plus model,
 pull request and wall time) and `DIR/NAME.comment.md` (the text of the review comment as it is right
@@ -20,6 +20,9 @@ either, or if the label is not a plain file name or its record already exists (c
 the run, so a bad label cannot waste a paid run). If the comment cannot be read after the run,
 the result is still printed and recorded without the comment text. This is how model
 comparisons (CR-44) keep every run.
+
+`--no-identity-patch` starts the runner without the identity patch, as a control run (CR-11-T05);
+it can be combined with the recording.
 
 It only talks to the sandbox repository below, on purpose: it posts a real comment and costs real
 money. Nothing runs without `--yes`. The installation token is limited to that one repository and to
@@ -202,11 +205,27 @@ def build_job(
     }
 
 
-def start_runner(job: Mapping[str, Any]) -> subprocess.CompletedProcess[str]:
-    script = Path(sys.executable).parent / "code-reviewer-run-job"
+# Control run for CR-11-T05: the same entry point, but the identity patch is replaced by a no-op, so
+# PR-Agent behaves as it would with the stock login lookup (GET /user, which an installation token
+# cannot do).
+CONTROL_SNIPPET = (
+    "import sys; from code_reviewer_runner import runner; "
+    "runner.apply_identity_patch = lambda login: (lambda: None); sys.exit(runner.main([]))"
+)
+
+
+def runner_command(*, identity_patch: bool) -> list[str]:
+    if identity_patch:
+        return [str(Path(sys.executable).parent / "code-reviewer-run-job")]
+    return [sys.executable, "-I", "-c", CONTROL_SNIPPET]
+
+
+def start_runner(
+    job: Mapping[str, Any], identity_patch: bool = True
+) -> subprocess.CompletedProcess[str]:
     environment = {"PATH": os.environ["PATH"], "HOME": os.environ.get("HOME", "/tmp")}
     return subprocess.run(
-        [str(script)],
+        runner_command(identity_patch=identity_patch),
         input=json.dumps(job),
         capture_output=True,
         text=True,
@@ -224,6 +243,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--max-tokens", type=int, default=DEFAULT_MAX_TOKENS)
     parser.add_argument("--record-dir", type=Path, help="keep result JSON and comment text here")
     parser.add_argument("--label", help="file name stem of the record (needed with --record-dir)")
+    parser.add_argument(
+        "--no-identity-patch",
+        action="store_true",
+        help="control run for the spike: start the runner without the identity patch",
+    )
     parser.add_argument(
         "--yes", action="store_true", help="really run (posts a comment, costs money)"
     )
@@ -258,7 +282,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.max_tokens,
     )
     started = time.monotonic()
-    process = start_runner(job)
+    process = start_runner(job, identity_patch=not args.no_identity_patch)
     wall_seconds = time.monotonic() - started
 
     leaked = [
