@@ -9,6 +9,7 @@ dependencies = [
 
 [project.scripts]
 code-reviewer-runner = "code_reviewer_runner.cli:main"
+code-reviewer-run-job = "code_reviewer_runner.runner:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -42,6 +43,8 @@ addopts = [
 filterwarnings = [
     # pytest-socket warns about every blocked connection; the tests assert the block themselves.
     "ignore:A test tried to use socket.socket.connect\\(\\):UserWarning",
+    # Raised while PR-Agent itself is imported; not ours to fix.
+    "ignore:Support for class-based `config` is deprecated:DeprecationWarning",
 ]
 markers = [
     "unit: pure logic on the host, no real process or network (default level)",
