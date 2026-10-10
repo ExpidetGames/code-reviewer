@@ -2,23 +2,35 @@
 // GitHub that runs as its own process: what it adds is what the app's real client reads back over
 // HTTP, and adding the same number again replaces the pull request.
 import { describe, expect, it } from "vitest";
-import { createGithubAppClient } from "../../src/integrations/providers/github-app/client.ts";
-import { loadGithubAppConfig } from "../../src/integrations/providers/github-app/config.ts";
-import { startGithubAppHarness } from "../../src/test-support/github-app-harness.ts";
+import { startSyncHarness } from "../../src/test-support/integration-sync-harness.ts";
 
 async function setup() {
-  const { fake, clock, env } = await startGithubAppHarness();
-  fake.addInstallation({
+  const h = await startSyncHarness();
+  h.fake.addInstallation({
     id: 4242,
     account: { login: "acme", id: 5001, type: "Organization" },
   });
-  fake.setRepositories(4242, [{ id: 7001, fullName: "acme/widgets" }]);
-  const client = createGithubAppClient({
-    config: loadGithubAppConfig(env),
-    now: clock.now,
-  });
+  h.fake.setRepositories(4242, [{ id: 7001, fullName: "acme/widgets" }]);
+  await h.sync.syncAll();
+  const integration = (await h.integrations.list())[0];
+  const repository = (await h.repositories.list())[0];
+  if (integration === undefined || repository === undefined)
+    throw new Error("seeding failed");
+  const provider = h.registry.resolve("github_app");
+  const repo = {
+    integrationId: integration.id,
+    externalId: repository.externalId,
+    fullName: repository.fullName,
+    url: repository.url,
+  };
+  const client = {
+    getPullRequest: (number: number) =>
+      provider.getPullRequest(integration, repo, number),
+    listOpenPullRequests: () =>
+      provider.listOpenPullRequests(integration, repo),
+  };
   const post = (body: unknown) =>
-    fetch(`${fake.baseUrl}/__fake/pull-requests`, {
+    fetch(`${h.fake.baseUrl}/__fake/pull-requests`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
@@ -51,17 +63,13 @@ describe("the pull requests control endpoint of the fake GitHub", () => {
 
     expect(first.status).toBe(201);
     expect(second.status).toBe(201);
-    expect(
-      await client.getPullRequest("4242", "acme/widgets", 7),
-    ).toMatchObject({
+    expect(await client.getPullRequest(7)).toMatchObject({
       number: 7,
       title: "Second title",
       headSha: "b".repeat(40),
       state: "open",
     });
-    expect(
-      await client.listOpenPullRequests("4242", "acme/widgets"),
-    ).toHaveLength(1);
+    expect(await client.listOpenPullRequests()).toHaveLength(1);
   });
 
   it("refuses a body that is not a repository with a pull request, with 400", async () => {
