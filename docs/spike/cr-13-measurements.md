@@ -157,21 +157,20 @@ same time (`--count 10 --concurrency 3`), container limit 2 GiB, fake LLM, real 
   killed (`SIGKILL`, `oom_kill` = 6), peak 2048 MB. This is why the concurrency has to follow the container
   limit.
 
-## Planted problems found by the real reviews
+## Built-in issues found by the real reviews
 
 Counted from the review comments of the reviews above (GitHub keeps the edit history of a comment).
-A review shows at most two to three findings. Not copied here: what the problems are (see the playground
-notes).
+A review shows at most two to three findings. What the issues are is not described here on purpose (this
+repository is public): they are called issue A, B and C per pull request, only the hit rates are given.
 
-| Pull request | Reviews counted | Planted problem 1 | Problem 2 | Problem 3 |
+| Pull request | Reviews counted | Issue A | Issue B | Issue C |
 |---|---|---|---|---|
-| #1 small (original content) | 3 | found 3 of 3 | found 2 of 3 | n/a (only two) |
-| #2 medium | 3 in the size runs, 10 more in T06 (13 in all) | found 4 of 13 (2 of the first 3) | found 4 of 13 (0 of the first 3); two reviews found a related smaller problem next to it | found 0 of 13 |
+| #1 small (original content) | 3 | found 3 of 3 | found 2 of 3 | n/a (only two issues) |
+| #2 medium | 3 in the size runs, 10 more in T06 (13 in all) | found 4 of 13 (2 of the first 3) | found 4 of 13 (0 of the first 3); two reviews also raised a related remark | found 0 of 13 |
 | #3 large | 3 | found 3 of 3 | found 3 of 3 | n/a (only two) |
 
-So: all four planted problems of the small and large pull requests were found in at least one review and
-the large PR's two were found every time; the medium PR is where the model is unreliable (a missing test
-assertion was never found, the others in about a third of the reviews). The findings also change from run to run
+So: all four issues of the small and large pull requests were found in at least one review and
+the large PR's two were found every time; the medium PR is where the model is unreliable (issue C was never found, A and B in about a third of the reviews). The findings also change from run to run
 (see CR-11). This is a model observation with one model, not a quality benchmark.
 
 PR #1 has the original content again: after CR-11 a revert commit (`b6062f0`) restored the tree of
