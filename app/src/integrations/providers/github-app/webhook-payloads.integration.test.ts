@@ -18,11 +18,18 @@ import {
   payloadProblems,
   WEBHOOK_READ_FIELDS,
 } from "./webhook-fields.ts";
-import { TEST_WEBHOOK_SECRET } from "../../../test-support/github-app.ts";
+import {
+  TEST_WEBHOOK_SECRET,
+  testGithubAppEnv,
+} from "../../../test-support/github-app.ts";
 import { createGithubAppProvider } from "./provider.ts";
 import { fakeGithubAppClient } from "./fake-client.ts";
-import { testGithubAppConfig } from "./test-config.ts";
+import { loadGithubAppConfig } from "./config.ts";
 import { fakeIntegration } from "../../../test-support/fake-integration-provider.ts";
+
+const testGithubAppConfig = (
+  overrides: Record<string, string | undefined> = {},
+) => loadGithubAppConfig(testGithubAppEnv(overrides));
 
 const FIXTURES = join(
   dirname(fileURLToPath(import.meta.url)),

@@ -121,7 +121,7 @@ integration (`external_id` is the installation id).
 | `provider.ts`                                            | `createGithubAppProvider`                                                                                                                                                                    |
 | `events.ts`, `webhook-fields.ts`, `webhook-signature.ts` | Webhook signature, the list of payload fields that are read, and their translation into `IntegrationEvent`s                                                                                  |
 | `errors.ts`                                              | `GithubAppError` and its stable codes (`GITHUB_APP_CONFIG_INVALID`, `_AUTH_FAILED`, `_FORBIDDEN`, `_NOT_FOUND`, `_RATE_LIMITED`, `_UNAVAILABLE`, `_REQUEST_FAILED`)                          |
-| `fake-client.ts`, `test-config.ts`                       | In-memory client and test configuration for the provider's unit tests                                                                                                                        |
+| `fake-client.ts`                                         | In-memory client for the provider's unit tests                                                                                                                                               |
 
 Settings come from the environment (see `.env.example`). Missing or invalid values fail with
 `GITHUB_APP_CONFIG_INVALID` and an error that names the variables, never their values. The provider is

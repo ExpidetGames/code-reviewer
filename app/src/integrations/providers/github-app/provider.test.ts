@@ -8,13 +8,16 @@ import {
 } from "../../../../../fakes/github/webhooks.ts";
 import { describeIntegrationProviderConformance } from "../../../test-support/integration-provider-conformance.ts";
 import { fakeIntegration } from "../../../test-support/fake-integration-provider.ts";
-import { TEST_WEBHOOK_SECRET } from "../../../test-support/github-app.ts";
+import {
+  TEST_WEBHOOK_SECRET,
+  testGithubAppEnv,
+} from "../../../test-support/github-app.ts";
 import {
   FAKE_PULL_REQUEST,
   fakeGithubAppClient,
   type FakeGithubAppClientData,
 } from "./fake-client.ts";
-import { testGithubAppConfig } from "./test-config.ts";
+import { loadGithubAppConfig } from "./config.ts";
 import { isGitAccess } from "../../normalized.ts";
 import type {
   Integration,
@@ -24,6 +27,10 @@ import type {
 } from "../../types.ts";
 import { GithubAppConfigError } from "./errors.ts";
 import { createGithubAppProvider } from "./provider.ts";
+
+const testGithubAppConfig = (
+  overrides: Record<string, string | undefined> = {},
+) => loadGithubAppConfig(testGithubAppEnv(overrides));
 
 const integration: Integration = fakeIntegration({
   id: "integration-1",
