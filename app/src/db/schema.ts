@@ -43,8 +43,20 @@ export interface RepositoriesTable {
   updated_at: string;
 }
 
+export interface WebhookDeliveriesTable {
+  /** The platform's delivery id (GitHub: `X-GitHub-Delivery`). */
+  delivery_id: string;
+  /** The event name of the delivery, for example "pull_request". */
+  event: string;
+  /** A WebhookDeliveryOutcome (src/db/repositories/webhook-deliveries-repository.ts). */
+  outcome: string;
+  /** ISO 8601 text in UTC: when the delivery was first accepted. */
+  received_at: string;
+}
+
 export interface Database {
   app_meta: AppMetaTable;
   integrations: IntegrationsTable;
   repositories: RepositoriesTable;
+  webhook_deliveries: WebhookDeliveriesTable;
 }

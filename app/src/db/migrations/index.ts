@@ -6,11 +6,13 @@ import type { Migration, MigrationProvider } from "kysely/migration";
 import { migration as createAppMeta } from "./0001_create_app_meta.ts";
 import { migration as createIntegrations } from "./20261010120000_create_integrations.ts";
 import { migration as createRepositories } from "./20261010143000_create_repositories.ts";
+import { migration as createWebhookDeliveries } from "./20261010170000_create_webhook_deliveries.ts";
 
 const migrations: Record<string, Migration> = {
   "0001_create_app_meta": createAppMeta,
   "20261010120000_create_integrations": createIntegrations,
   "20261010143000_create_repositories": createRepositories,
+  "20261010170000_create_webhook_deliveries": createWebhookDeliveries,
 };
 
 export const migrationProvider: MigrationProvider = {
