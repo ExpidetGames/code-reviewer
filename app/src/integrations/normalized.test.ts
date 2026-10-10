@@ -203,3 +203,19 @@ describe("git access and its token", () => {
     });
   });
 });
+
+describe("revealing git access without a token", () => {
+  // CR-23 (lead decision): a missing or empty token is a stable error, never an empty string sent on.
+  it("throws a stable code when the token is missing or empty", () => {
+    const withoutToken = { ...accessFields } as Partial<GitAccess>;
+    delete withoutToken.token;
+
+    for (const access of [
+      createGitAccess({ ...accessFields, token: "" }),
+      withoutToken as GitAccess,
+    ])
+      expect(() => revealGitAccess(access)).toThrow(
+        expect.objectContaining({ code: "INTEGRATION_ACCESS_TOKEN_MISSING" }),
+      );
+  });
+});
