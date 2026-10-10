@@ -13,7 +13,7 @@ opens a database or writes SQL.
 | `schema.ts` | Row types of every table (`Database`) |
 | `codecs.ts` | The only code that knows how JSON, booleans and timestamps are stored |
 | `repositories/` | One small module per table (or aggregate); the only code that queries it |
-| `errors.ts` | `DatabaseError` with stable codes (`DATABASE_CONFIG_INVALID`, `DATABASE_DIRECTORY_UNAVAILABLE`, `DATABASE_OPEN_FAILED`, `MIGRATION_FAILED`) |
+| `errors.ts` | `DatabaseError` with stable codes (`DATABASE_CONFIG_INVALID`, `DATABASE_DIRECTORY_UNAVAILABLE`, `DATABASE_OPEN_FAILED`, `DATABASE_LOCKED`, `MIGRATION_FAILED`) |
 
 ## Why better-sqlite3
 
@@ -37,6 +37,16 @@ Switching a brand-new file to WAL while another process does the same fails at o
 `SQLITE_BUSY` (the busy timeout does not apply there), so `openDatabase` retries that one step
 until the busy timeout has passed.
 
+`journal_mode = WAL` is checked: if SQLite answers with another mode (an in-memory database, a file
+system without shared memory), opening fails with `DATABASE_OPEN_FAILED` instead of running in a
+mode the rest of this document does not describe.
+
+**Inside a transaction, always use `trx`, never the outer `db`.** The app has one connection and
+Kysely serializes access to it with a mutex. A query on `db` inside `db.transaction().execute(async
+(trx) => ...)` waits for the transaction to finish while the transaction waits for that query: it
+hangs forever, with no timeout and no error. Repositories take the executor (`Kysely<Database>` or
+the transaction) as a parameter for this reason: pass `trx` to them inside a transaction.
+
 better-sqlite3 is synchronous: while a write waits for a lock held by another connection, the whole
 Node thread waits. That is fine for the short transactions in this app. Keep transactions short and
 never hold one open across an `await` on something slow (network, model, subprocess).
@@ -53,6 +63,13 @@ never hold one open across an `await` on something slow (network, model, subproc
   batch is applied or recorded, and the start ends with exit code 1 and one line naming the
   migration (`MIGRATION_FAILED`). Two instances starting on the same file take turns on the write
   lock; each migration runs exactly once.
+- If another process holds the write lock for longer than the busy timeout (for example a second
+  instance that is still migrating a big file), the start ends with `DATABASE_LOCKED` and a message
+  that says nothing is broken, not with `MIGRATION_FAILED`.
+- Migrations run inside a transaction, where `PRAGMA foreign_keys` is a no-op. The usual SQLite recipe
+  for changing a table (create new table, copy, drop, rename, with `foreign_keys = OFF` around it)
+  therefore does not work as written: either avoid rebuilds (add columns, create new tables) or use
+  `PRAGMA defer_foreign_keys = ON` inside the migration and let the check run at commit.
 - A migration that has run anywhere is never edited. Add a new one instead. There is no automatic
   `down`; write one only if it is useful for a developer.
 - A missing database directory, an unwritable directory or a file that is not a database also stop
@@ -69,7 +86,7 @@ schema.
 |---|---|---|
 | Identifier | `text` | An application generated id (for example a UUID). Never `autoincrement` or a database sequence |
 | Timestamp | `text`, named `*_at` | ISO 8601 in UTC with milliseconds, e.g. `2026-10-10T12:30:15.042Z` (`formatTimestamp`). Time is injected into repositories (`now: () => Date`) |
-| JSON | `text` | `JSON.stringify` output (`encodeJson` / `decodeJson`) |
+| JSON | `text` | `JSON.stringify` output (`encodeJson` / `decodeJson`); `undefined` is refused, use `null` for "no value" |
 | Boolean | `integer` | `1` or `0` (`encodeBoolean` / `decodeBoolean`) |
 | Everything else | `text` or `integer` | Numbers that are not booleans are `integer`; no floating point, no `blob`, no dates or booleans as native types |
 
@@ -79,6 +96,16 @@ repositories where the query builder can express it.
 
 Kysely's own bookkeeping tables (`kysely_migration`, `kysely_migration_lock`) use `varchar` columns
 and are exempt.
+
+## Using the connection
+
+`getDatabase()` (`startup.ts`) returns the connection that the server opened in `register()`. It
+works at request time only: `next build` workers (page data collection, prerendering) never call
+`register`, so a route or component that reads the database while it is being prerendered gets
+"The database is not initialized". Read the database in code that only runs per request (route
+handlers, server actions, dynamic rendering, for example after `await connection()`), never at
+build time. The `src/db` modules import `server-only`, so importing them in a client component
+fails the build.
 
 ## Repositories
 
@@ -94,6 +121,9 @@ tables come with the tickets that need them: add the migration, the row type in 
 repository in the same change.
 
 ## Testing
+
+`server-only` throws when it is imported outside Next.js server code, so Vitest resolves it to an
+empty module (`vitest.config.mts`) and the child process runs with `--conditions=react-server`.
 
 Anything that touches this layer is an `*.integration.test.ts` against a real SQLite file (see
 `TESTING.md`). `src/test-support/db-template.global-setup.ts` migrates one template file per run,

@@ -5,8 +5,10 @@
 //
 //   hold-lock <db> <ms>   take the write lock, print "locked", release after <ms> (or when stdin
 //                         closes if <ms> is 0), print "released"
-//   migrate <db>          print "ready", wait for a line on stdin, then start the database like the
-//                         app does and print one JSON line: {"applied":[...]} or {"error":"CODE"}
+//   migrate <db>          print "ready", wait for a line "go <epoch ms>" on stdin, spin until that
+//                         moment (a start barrier: several processes begin together), then start the
+//                         database like the app does and print one JSON line:
+//                         {"applied":[...]} or {"error":"CODE"}
 import BetterSqlite3 from "better-sqlite3";
 import { createInterface } from "node:readline";
 import { DatabaseError } from "../db/errors.ts";
@@ -31,7 +33,9 @@ if (command === "hold-lock") {
 } else if (command === "migrate") {
   console.log("ready");
   const lines = createInterface({ input: process.stdin });
-  lines.once("line", async () => {
+  lines.once("line", async (line) => {
+    const startAt = Number(line.split(" ")[1]);
+    while (Date.now() < startAt);
     try {
       const { db, migrationsApplied } = await startDatabase({ path: databasePath, busyTimeoutMs: 5000 });
       await db.destroy();

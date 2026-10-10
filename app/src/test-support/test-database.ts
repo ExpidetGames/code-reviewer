@@ -19,10 +19,13 @@ export type TestDatabase = {
 
 const cleanups: Array<() => Promise<void>> = [];
 
-afterEach(async () => {
+/** Runs after every test by itself; exported so that a test can assert what it leaves behind. */
+export async function cleanUpTestResources(): Promise<void> {
   // Newest first: connections are closed before the directory they live in is removed.
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
-});
+}
+
+afterEach(cleanUpTestResources);
 
 /** Closes the connection after the test. Returns it for convenience. */
 export function track<T extends Kysely<Database>>(db: T): T {

@@ -3,6 +3,7 @@ export const DATABASE_ERROR_CODES = [
   "DATABASE_CONFIG_INVALID",
   "DATABASE_DIRECTORY_UNAVAILABLE",
   "DATABASE_OPEN_FAILED",
+  "DATABASE_LOCKED",
   "MIGRATION_FAILED",
 ] as const;
 
@@ -16,4 +17,14 @@ export class DatabaseError extends Error {
     this.name = "DatabaseError";
     this.code = code;
   }
+}
+
+export function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** The `code` of a Node or SQLite error such as "ENOENT" or "SQLITE_BUSY", if it has one. */
+export function errorCode(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null || !("code" in error)) return undefined;
+  return typeof error.code === "string" ? error.code : undefined;
 }

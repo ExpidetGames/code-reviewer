@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { sql, type Kysely } from "kysely";
 import type { Migration, MigrationProvider } from "kysely/migration";
 import { describe, expect, it } from "vitest";
+import { startDbProcess } from "../test-support/db-process.ts";
 import { createTestDatabase, createTestDirectory, track } from "../test-support/test-database.ts";
 import { openDatabase } from "./connection.ts";
 import { DatabaseError } from "./errors.ts";
@@ -104,6 +105,24 @@ describe("a failing migration", () => {
     expect(await userTables(db)).not.toContain("app_meta");
     expect(await userTables(db)).not.toContain("half_built");
     expect(await names(db, "select name from kysely_migration")).toEqual([]);
+  });
+});
+
+describe("migrating while another process holds the write lock", () => {
+  it("reports DATABASE_LOCKED, not a broken migration, when the lock outlasts the busy timeout", async () => {
+    const directory = await createTestDirectory();
+    const path = join(directory, "app.db");
+    const db = track(openDatabase({ path, busyTimeoutMs: 200 }));
+    const holder = startDbProcess(["hold-lock", path, "0"]);
+    expect(await holder.nextLine()).toBe("locked");
+
+    const run = migrateToLatest(db);
+
+    await expect(run).rejects.toBeInstanceOf(DatabaseError);
+    await expect(run).rejects.toMatchObject({ code: "DATABASE_LOCKED" });
+    await expect(run).rejects.not.toThrow(/rolled back/);
+    holder.closeInput();
+    expect(await holder.nextLine()).toBe("released");
   });
 });
 

@@ -4,6 +4,7 @@ import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { sql, type Kysely } from "kysely";
 import { describe, expect, it } from "vitest";
+import { startDbProcess } from "../test-support/db-process.ts";
 import { createTestDatabase, createTestDirectory, track } from "../test-support/test-database.ts";
 import { openDatabase } from "./connection.ts";
 import { DatabaseError } from "./errors.ts";
@@ -68,6 +69,24 @@ describe("openDatabase", () => {
     });
 
     // CR-15-T10
+    it("reports a permission problem instead of a missing directory when a parent cannot be entered", async () => {
+      const directory = await createTestDirectory();
+      const closed = join(directory, "closed");
+      await mkdir(join(closed, "inner"), { recursive: true });
+      await chmod(closed, 0o000);
+
+      try {
+        const open = () => openDatabase({ path: join(closed, "inner", "app.db"), busyTimeoutMs: 100 });
+
+        expect(open).toThrow(expect.objectContaining({ code: "DATABASE_DIRECTORY_UNAVAILABLE" }));
+        expect(open).toThrow(/permission denied/);
+        expect(open).not.toThrow(/does not exist/);
+      } finally {
+        await chmod(closed, 0o700);
+      }
+    });
+
+    // CR-15-T10
     it("refuses a directory the process may not write to", async () => {
       const directory = await createTestDirectory();
       const readOnly = join(directory, "read-only");
@@ -78,7 +97,7 @@ describe("openDatabase", () => {
         const open = () => openDatabase({ path: join(readOnly, "app.db"), busyTimeoutMs: 100 });
 
         expect(open).toThrow(expect.objectContaining({ code: "DATABASE_DIRECTORY_UNAVAILABLE" }));
-        expect(open).toThrow(/is not writable/);
+        expect(open).toThrow(/cannot be written to/);
       } finally {
         await chmod(readOnly, 0o700);
       }
@@ -95,5 +114,29 @@ describe("openDatabase", () => {
 
     expect(open).toThrow(expect.objectContaining({ code: "DATABASE_OPEN_FAILED" }));
     expect(open).toThrow(path);
+  });
+
+  it("refuses a database that cannot use WAL mode instead of running in another journal mode", () => {
+    const open = () => openDatabase({ path: ":memory:", busyTimeoutMs: 100 });
+
+    expect(open).toThrow(expect.objectContaining({ code: "DATABASE_OPEN_FAILED" }));
+    expect(open).toThrow(/WAL mode could not be enabled/);
+  });
+
+  it("gives up with DATABASE_OPEN_FAILED when a new file stays locked for longer than the busy timeout", async () => {
+    const directory = await createTestDirectory();
+    const path = join(directory, "app.db");
+    // Another process creates the file and holds its write lock until told to stop.
+    const holder = startDbProcess(["hold-lock", path, "0"]);
+    expect(await holder.nextLine()).toBe("locked");
+    const started = Date.now();
+
+    const open = () => openDatabase({ path, busyTimeoutMs: 300 });
+
+    expect(open).toThrow(expect.objectContaining({ code: "DATABASE_OPEN_FAILED" }));
+    expect(open).toThrow(/database is locked/);
+    expect(Date.now() - started).toBeLessThan(5000);
+    holder.closeInput();
+    expect(await holder.nextLine()).toBe("released");
   });
 });

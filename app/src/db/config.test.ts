@@ -24,7 +24,7 @@ describe("loadDatabaseConfig", () => {
     expect(loadDatabaseConfig({ DATABASE_PATH: "  " }).path).toBe("/data/app.db");
   });
 
-  it.each(["abc", "-1", "1.5", "0"])("rejects the busy timeout %j with a stable error code", (value) => {
+  it.each(["abc", "-1", "1.5", "0", "1e3", "0x10", "+5", "99999999999"])("rejects the busy timeout %j with a stable error code", (value) => {
     const load = () => loadDatabaseConfig({ DATABASE_BUSY_TIMEOUT_MS: value });
 
     expect(load).toThrow(DatabaseError);

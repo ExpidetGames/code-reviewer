@@ -195,7 +195,8 @@ Inside `runner/`: `uv sync --locked`, `uv run ruff check .`, `uv run ruff format
   `db-child.ts`): better-sqlite3 blocks its own thread while it waits for a lock, so a lock held in
   the test process could never be released while the write waits. Node runs `db-child.ts` directly
   (type stripping), so files it imports from `src/db/` use relative imports with a `.ts` extension
-  and no TypeScript-only runtime syntax (enums, parameter properties).
+  and no TypeScript-only runtime syntax (enums, parameter properties); `erasableSyntaxOnly` in
+  `tsconfig.json` enforces the latter.
 - Tests of file system errors that depend on permissions (a read-only directory) fail when the tests
   run as root, because root may write anywhere. Run the suite as a normal user.
 

@@ -18,12 +18,17 @@ export function loadDatabaseConfig(
   return { path, busyTimeoutMs: parseBusyTimeout(env.DATABASE_BUSY_TIMEOUT_MS) };
 }
 
+// SQLite stores the timeout as a 32 bit integer; a larger value would be rejected later, at open.
+const MAX_BUSY_TIMEOUT_MS = 2_147_483_647;
+
 function parseBusyTimeout(raw: string | undefined): number {
   if (raw === undefined || raw.trim() === "") return DEFAULT_BUSY_TIMEOUT_MS;
-  const value = Number(raw);
-  if (Number.isInteger(value) && value > 0) return value;
+  const text = raw.trim();
+  const value = Number(text);
+  // Plain digits only: Number() would also accept "1e3", "0x10" and "+5".
+  if (/^\d+$/.test(text) && value > 0 && value <= MAX_BUSY_TIMEOUT_MS) return value;
   throw new DatabaseError(
     "DATABASE_CONFIG_INVALID",
-    `DATABASE_BUSY_TIMEOUT_MS must be a positive whole number of milliseconds, got "${raw}".`,
+    `DATABASE_BUSY_TIMEOUT_MS must be a whole number of milliseconds between 1 and ${MAX_BUSY_TIMEOUT_MS}, got "${raw}".`,
   );
 }

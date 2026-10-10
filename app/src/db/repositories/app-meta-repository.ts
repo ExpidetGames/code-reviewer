@@ -1,4 +1,5 @@
 // Access to the app_meta table. The only code that reads or writes it.
+import "server-only";
 import type { Kysely } from "kysely";
 import { formatTimestamp } from "../codecs.ts";
 import type { Database } from "../schema.ts";

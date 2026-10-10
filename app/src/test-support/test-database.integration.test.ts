@@ -3,7 +3,7 @@
 import { existsSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { createAppMetaRepository } from "../db/repositories/app-meta-repository.ts";
-import { createTestDatabase } from "./test-database.ts";
+import { cleanUpTestResources, createTestDatabase } from "./test-database.ts";
 
 describe("createTestDatabase", () => {
   // CR-15-T13
@@ -19,18 +19,12 @@ describe("createTestDatabase", () => {
   });
 
   // CR-15-T13
-  describe("cleanup", () => {
-    let leftover: string;
+  it("removes the file, its directory and the connection when the test is cleaned up", async () => {
+    const { config, directory } = await createTestDatabase();
+    expect(existsSync(config.path)).toBe(true);
 
-    it("creates a database file", async () => {
-      const { config, directory } = await createTestDatabase();
-      leftover = directory;
+    await cleanUpTestResources();
 
-      expect(existsSync(config.path)).toBe(true);
-    });
-
-    it("has removed the file and its directory after the test that created it", () => {
-      expect(existsSync(leftover)).toBe(false);
-    });
+    expect(existsSync(directory)).toBe(false);
   });
 });

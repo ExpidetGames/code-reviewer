@@ -22,7 +22,7 @@ export type DbProcess = {
 };
 
 export function startDbProcess(args: string[]): DbProcess {
-  const child = spawn(process.execPath, ["--no-warnings", childScript, ...args], {
+  const child = spawn(process.execPath, ["--no-warnings", "--conditions=react-server", childScript, ...args], {
     stdio: ["pipe", "pipe", "pipe"],
   });
   running.add(child);
