@@ -1,0 +1,252 @@
+// Everything a test of the runner API needs: a real SQLite file with the job queue and one
+// integration (installation 4242, repositories acme/widgets and acme/gadgets), the fake GitHub behind
+// the real GitHub App provider, and the API itself wired to all of them. `claim`, `heartbeat` and
+// `complete` build requests like the runner does. The clock of the queue is the one in `clock`.
+import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
+import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
+import { createDefaultIntegrationRegistry } from "../integrations/registry.ts";
+import type { JobQueueLimits } from "../jobs/job-limits.ts";
+import { loadLlmAccess } from "../llm/config.ts";
+import { createRunnerApi } from "../runner-api/api.ts";
+import {
+  allowAllClaimGuard,
+  type ClaimGuard,
+} from "../runner-api/claim-guard.ts";
+import type { ClaimResponse, RunnerResult } from "../runner-api/contract.ts";
+import { emptyJobEnvSource, type JobEnvSource } from "../runner-api/job-env.ts";
+import type { RunnerApiLogger } from "../runner-api/logger.ts";
+import { startGithubAppHarness } from "./github-app-harness.ts";
+import { createJobQueueFixture, sha } from "./jobs.ts";
+
+export const TEST_RUNNER_TOKEN = "test-runner-token-4f9c2a7e1b";
+export const TEST_LLM_API_KEY = "test-llm-api-key-8d3b6e0a5c";
+export const TEST_LLM_MODEL = "vendor/test-model";
+
+export type RequestOptions = {
+  /** Sent as `Authorization: Bearer <token>`. Default: the right token. `null` sends no header. */
+  token?: string | null;
+  /** The whole header value, for another scheme or an empty `Bearer`. Wins over `token`. */
+  authorization?: string | null;
+  /** `X-Runner-Id`. Default `runner-a`. `null` leaves the header out. */
+  runnerId?: string | null;
+};
+
+export async function startRunnerApiHarness(
+  options: {
+    guard?: ClaimGuard;
+    jobEnv?: JobEnvSource;
+    limits?: Partial<JobQueueLimits>;
+    /** Replaces or (with undefined) removes variables of the app's environment. */
+    env?: Record<string, string | undefined>;
+  } = {},
+) {
+  const fixture = await createJobQueueFixture(
+    options.limits === undefined ? {} : { limits: options.limits },
+  );
+  const github = await startGithubAppHarness();
+  github.fake.addInstallation({
+    id: 4242,
+    account: { login: "acme", id: 5001, type: "Organization" },
+  });
+  github.fake.setRepositories(4242, [
+    { id: 7001, fullName: "acme/widgets" },
+    { id: 7002, fullName: "acme/gadgets" },
+  ]);
+  const pullRequests = [
+    { number: 7, state: "open", headSha: sha("a") },
+    { number: 8, state: "open", headSha: sha("b") },
+    { number: 9, state: "closed", headSha: sha("c") },
+    { number: 10, state: "closed", merged: true, headSha: sha("d") },
+  ] as const;
+  for (const repository of ["acme/widgets", "acme/gadgets"])
+    for (const pullRequest of pullRequests)
+      github.fake.addPullRequest(repository, {
+        title: `Change ${pullRequest.number}`,
+        headRef: `feature/change-${pullRequest.number}`,
+        baseRef: "main",
+        author: { login: "alice", id: 1001 },
+        ...pullRequest,
+      });
+  const repository = await createRepositoriesRepository(
+    fixture.db,
+    fixture.clock.now,
+  ).get(fixture.repositoryId);
+  if (repository === undefined)
+    throw new Error("The fixture repository is missing.");
+
+  /** The tokens GitHub created for jobs: the requests that named a repository. */
+  function issuedJobTokens(): string[] {
+    const requests = github.fake.tokenRequests();
+    return github.fake
+      .issuedInstallationTokens()
+      .filter((_, index) => requests[index]?.repositoryIds != null);
+  }
+
+  /** The app's environment as the runner API reads it; change it to change the settings. */
+  const env: Record<string, string | undefined> = {
+    RUNNER_TOKEN: TEST_RUNNER_TOKEN,
+    LLM_PROVIDER: "openrouter",
+    LLM_API_KEY: TEST_LLM_API_KEY,
+    LLM_MODEL: TEST_LLM_MODEL,
+    ...options.env,
+  };
+
+  const registry = createDefaultIntegrationRegistry({
+    env: github.env,
+    githubClient: { now: github.clock.now, requestTimeoutMs: 5000 },
+  });
+  const infoLines: string[] = [];
+  const errorLines: string[] = [];
+  const logger: RunnerApiLogger = {
+    info: (line) => infoLines.push(line),
+    error: (line) => errorLines.push(line),
+  };
+  const api = createRunnerApi({
+    queue: fixture.queue,
+    repositories: createRepositoriesRepository(fixture.db, fixture.clock.now),
+    integrations: createIntegrationsRepository(fixture.db, fixture.clock.now),
+    registry,
+    guard: options.guard ?? allowAllClaimGuard,
+    jobEnv: options.jobEnv ?? emptyJobEnvSource,
+    loadLlm: () => loadLlmAccess(env),
+    now: fixture.clock.now,
+    logger,
+    heartbeatIntervalSeconds: 30,
+    runnerToken: () => env.RUNNER_TOKEN,
+    knownSecrets: () =>
+      [env.LLM_API_KEY, env.RUNNER_TOKEN].filter(
+        (value): value is string => value !== undefined,
+      ),
+  });
+
+  function headers(
+    request: RequestOptions,
+    extra: Record<string, string> = {},
+  ): Headers {
+    const result = new Headers(extra);
+    const authorization =
+      request.authorization !== undefined
+        ? request.authorization
+        : request.token === null
+          ? null
+          : `Bearer ${request.token ?? TEST_RUNNER_TOKEN}`;
+    if (authorization !== null) result.set("authorization", authorization);
+    if (request.runnerId !== null)
+      result.set("x-runner-id", request.runnerId ?? "runner-a");
+    return result;
+  }
+
+  const url = "https://app.test/api/runners/v1";
+
+  function claim(request: RequestOptions = {}): Promise<Response> {
+    return api.claim(
+      new Request(`${url}/claim`, {
+        method: "POST",
+        headers: headers(request),
+      }),
+    );
+  }
+
+  /** `body` is sent as JSON, or as it is if it is a string. */
+  function post(
+    action: "heartbeat" | "complete",
+    jobId: string,
+    body: unknown,
+    request: RequestOptions = {},
+  ): Promise<Response> {
+    const call = new Request(`${url}/jobs/${jobId}/${action}`, {
+      method: "POST",
+      headers: headers(request, { "content-type": "application/json" }),
+      body: typeof body === "string" ? body : JSON.stringify(body),
+    });
+    return action === "heartbeat"
+      ? api.heartbeat(call, jobId)
+      : api.complete(call, jobId);
+  }
+
+  const heartbeat = (
+    jobId: string,
+    leaseToken: string,
+    request?: RequestOptions,
+  ) => post("heartbeat", jobId, { leaseToken }, request);
+
+  const complete = (
+    jobId: string,
+    leaseToken: string,
+    result: Partial<RunnerResult> = {},
+    request?: RequestOptions,
+  ) =>
+    post(
+      "complete",
+      jobId,
+      { leaseToken, result: goodResult(result) },
+      request,
+    );
+
+  /** Every row of the jobs table, for "nothing changed" assertions. */
+  const snapshotJobs = () =>
+    fixture.db.selectFrom("jobs").selectAll().orderBy("id").execute();
+
+  /** Claims the next job and returns the parsed answer. */
+  async function claimed(request?: RequestOptions) {
+    const response = await claim(request);
+    if (response.status !== 200)
+      throw new Error(`Expected a job, got ${response.status}.`);
+    return (await response.json()) as ClaimResponse;
+  }
+
+  return {
+    ...fixture,
+    github,
+    fake: github.fake,
+    /** The repository that `enqueue` uses: its name and the platform's id. */
+    repository: {
+      fullName: repository.fullName,
+      externalId: repository.externalId,
+    },
+    githubClock: github.clock,
+    env,
+    registry,
+    api,
+    claim,
+    claimed,
+    heartbeat,
+    complete,
+    post,
+    snapshotJobs,
+    issuedJobTokens,
+    infoLines,
+    errorLines,
+    /** Everything the API logged. */
+    logLines: () => [...infoLines, ...errorLines],
+  };
+}
+
+export type RunnerApiHarness = Awaited<
+  ReturnType<typeof startRunnerApiHarness>
+>;
+
+/** A valid, successful result; any field can be replaced. */
+export function goodResult(
+  overrides: Partial<RunnerResult> = {},
+): RunnerResult {
+  return {
+    ok: true,
+    durationMs: 41250,
+    commentUrl: "https://github.test/acme/widgets/pull/7#issuecomment-1001",
+    errorCode: null,
+    errorMessage: null,
+    logTail: "review published",
+    logTruncated: false,
+    usage: {
+      model: TEST_LLM_MODEL,
+      promptTokens: 12000,
+      completionTokens: 900,
+      totalTokens: 12900,
+      aiCalls: 2,
+      fallbackUsed: false,
+      costUsd: 0.04,
+    },
+    ...overrides,
+  };
+}

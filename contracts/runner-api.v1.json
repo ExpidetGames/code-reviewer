@@ -206,7 +206,8 @@
         "commentUrl": {
           "description": "Link to the comment PR-Agent wrote; null when it could not be found (the run is still ok).",
           "type": ["string", "null"],
-          "maxLength": 2048
+          "maxLength": 2048,
+          "pattern": "^https?://"
         },
         "errorCode": {
           "description": "null if and only if ok is true. See KnownRunnerErrorCode.",
