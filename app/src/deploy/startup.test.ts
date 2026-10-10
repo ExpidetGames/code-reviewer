@@ -29,24 +29,24 @@ const validEnv = {
   GITHUB_APP_PRIVATE_KEY: privateKey,
 };
 
-function run(env: Record<string, string | undefined>) {
+async function run(env: Record<string, string | undefined>) {
   const exit = vi.fn();
   const log = vi.fn();
-  checkDeploymentConfigOnStart({ env, log, exit });
+  await checkDeploymentConfigOnStart({ env, log, exit });
   return { exit, log };
 }
 
 describe("checking the deployment settings when the server starts", () => {
-  it("lets a complete configuration start", () => {
-    const { exit, log } = run(validEnv);
+  it("lets a complete configuration start", async () => {
+    const { exit, log } = await run(validEnv);
 
     expect(exit).not.toHaveBeenCalled();
     expect(log).not.toHaveBeenCalled();
   });
 
   // CR-37-T08
-  it("stops the start with one line naming the missing runner token", () => {
-    const { exit, log } = run({ ...validEnv, RUNNER_TOKEN: undefined });
+  it("stops the start with one line naming the missing runner token", async () => {
+    const { exit, log } = await run({ ...validEnv, RUNNER_TOKEN: undefined });
 
     expect(exit).toHaveBeenCalledWith(1);
     expect(log).toHaveBeenCalledTimes(1);
@@ -56,15 +56,15 @@ describe("checking the deployment settings when the server starts", () => {
     expect(line).not.toContain("\n");
   });
 
-  it("treats an empty or blank value like a missing one", () => {
-    const { exit, log } = run({ ...validEnv, GITHUB_APP_ID: "   " });
+  it("treats an empty or blank value like a missing one", async () => {
+    const { exit, log } = await run({ ...validEnv, GITHUB_APP_ID: "   " });
 
     expect(exit).toHaveBeenCalledWith(1);
     expect(String(log.mock.calls[0]?.[0])).toContain("GITHUB_APP_ID");
   });
 
-  it("names every missing GitHub App setting in the same line", () => {
-    const { exit, log } = run({
+  it("names every missing GitHub App setting in the same line", async () => {
+    const { exit, log } = await run({
       NODE_ENV: "production",
       RUNNER_TOKEN: validEnv.RUNNER_TOKEN,
     });
@@ -82,8 +82,8 @@ describe("checking the deployment settings when the server starts", () => {
     }
   });
 
-  it("accepts the private key as a file path instead of inline", () => {
-    const { exit } = run({
+  it("accepts the private key as a file path instead of inline", async () => {
+    const { exit } = await run({
       ...validEnv,
       GITHUB_APP_PRIVATE_KEY: undefined,
       GITHUB_APP_PRIVATE_KEY_PATH: keyPath,
@@ -92,8 +92,8 @@ describe("checking the deployment settings when the server starts", () => {
     expect(exit).not.toHaveBeenCalled();
   });
 
-  it("rejects a private key that is not a usable PEM and names only the variable", () => {
-    const { exit, log } = run({
+  it("rejects a private key that is not a usable PEM and names only the variable", async () => {
+    const { exit, log } = await run({
       ...validEnv,
       GITHUB_APP_PRIVATE_KEY: "not-a-key-value",
     });
@@ -104,8 +104,8 @@ describe("checking the deployment settings when the server starts", () => {
     expect(line).not.toContain("not-a-key-value");
   });
 
-  it("rejects a private key file that does not exist", () => {
-    const { exit, log } = run({
+  it("rejects a private key file that does not exist", async () => {
+    const { exit, log } = await run({
       ...validEnv,
       GITHUB_APP_PRIVATE_KEY: undefined,
       GITHUB_APP_PRIVATE_KEY_PATH: join(keyDir, "missing.pem"),
@@ -118,8 +118,8 @@ describe("checking the deployment settings when the server starts", () => {
   });
 
   // CR-37-T08
-  it("rejects a runner token that is too short to be a secret", () => {
-    const { exit, log } = run({ ...validEnv, RUNNER_TOKEN: "short" });
+  it("rejects a runner token that is too short to be a secret", async () => {
+    const { exit, log } = await run({ ...validEnv, RUNNER_TOKEN: "short" });
 
     expect(exit).toHaveBeenCalledWith(1);
     const line = String(log.mock.calls[0]?.[0]);
@@ -128,8 +128,8 @@ describe("checking the deployment settings when the server starts", () => {
   });
 
   // CR-37-T09
-  it("never prints a value of any setting", () => {
-    const { log } = run({
+  it("never prints a value of any setting", async () => {
+    const { log } = await run({
       ...validEnv,
       RUNNER_TOKEN: "short-secret-token",
       GITHUB_APP_SLUG: undefined,
@@ -142,8 +142,8 @@ describe("checking the deployment settings when the server starts", () => {
     expect(line).not.toContain(privateKey.slice(40, 80));
   });
 
-  it("does not check anything outside production so that the dev server starts without a GitHub App", () => {
-    const { exit, log } = run({ NODE_ENV: "development" });
+  it("does not check anything outside production so that the dev server starts without a GitHub App", async () => {
+    const { exit, log } = await run({ NODE_ENV: "development" });
 
     expect(exit).not.toHaveBeenCalled();
     expect(log).not.toHaveBeenCalled();

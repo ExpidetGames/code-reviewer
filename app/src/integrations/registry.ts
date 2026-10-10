@@ -58,21 +58,27 @@ export function createIntegrationRegistry(
   };
 }
 
+export type GithubAppConfigProblem = {
+  kind: "missing" | "invalid";
+  /** Names of environment variables, never their values. */
+  variables: readonly string[];
+};
+
 /**
  * Whether the GitHub App settings in `env` are usable, asked of the one loader the provider itself
- * uses. Returns a sentence naming the missing or invalid variables (never their values), or null.
+ * uses. Returns what is wrong (the kind of problem and the variable names, never a value), or null.
  * The production start (src/deploy/startup.ts) calls it, so a bad deployment stops at once instead
  * of at the first webhook.
  */
 export function findGithubAppConfigProblem(
   env: Readonly<Record<string, string | undefined>>,
-): string | null {
+): GithubAppConfigProblem | null {
   try {
     loadGithubAppConfig(env);
     return null;
   } catch (error) {
     if (!(error instanceof GithubAppConfigError)) throw error;
-    return error.message.replace(/\.$/, "");
+    return { kind: error.problem, variables: error.variables };
   }
 }
 

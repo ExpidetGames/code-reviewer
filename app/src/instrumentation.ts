@@ -9,7 +9,7 @@ export async function register(): Promise<void> {
   checkAuthConfigOnStart();
   // Production only: the runner token and the GitHub App credentials (docker compose passes them).
   const { checkDeploymentConfigOnStart } = await import("./deploy/startup.ts");
-  checkDeploymentConfigOnStart();
+  await checkDeploymentConfigOnStart();
   // A missing LLM key only warns: everything but running a review works without it.
   const { checkLlmConfigOnStart } = await import("./llm/startup.ts");
   checkLlmConfigOnStart();
