@@ -13,7 +13,7 @@ export type ProjectService = {
   /**
    * Switches the project of a repository on, creating it the first time. Asking twice is fine: the
    * second answer says `unchanged`. Throws `PROJECT_REPOSITORY_NOT_FOUND`,
-   * `PROJECT_REPOSITORY_UNAVAILABLE` or `PROJECT_REQUEST_INVALID`.
+   * `PROJECT_REPOSITORY_UNAVAILABLE`, `PROJECT_INTEGRATION_UNAVAILABLE` or `PROJECT_REQUEST_INVALID`.
    */
   activateProject(repositoryId: string): Promise<{
     project: StoredProject;
@@ -82,6 +82,11 @@ export function createProjectService(deps: {
           throw new ProjectError(
             "PROJECT_REPOSITORY_UNAVAILABLE",
             "The repository is no longer available on the platform and cannot be activated.",
+          );
+        case "integration_unavailable":
+          throw new ProjectError(
+            "PROJECT_INTEGRATION_UNAVAILABLE",
+            "The installation of the repository is suspended or removed, so the repository cannot be activated.",
           );
       }
     },

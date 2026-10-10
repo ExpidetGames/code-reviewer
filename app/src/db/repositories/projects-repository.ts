@@ -36,7 +36,8 @@ export type StoredProject = {
  * What the list shows for a repository:
  * - `active`: a project exists, is switched on, and the platform still lists the repository;
  * - `inactive`: no project yet, or it was switched off;
- * - `unavailable`: the platform no longer lists the repository (the project row, if any, is kept).
+ * - `unavailable`: the platform no longer lists the repository, or its integration is suspended or
+ *   removed (the project row, if any, is kept).
  */
 export const PROJECT_STATUSES = ["active", "inactive", "unavailable"] as const;
 export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
@@ -48,7 +49,7 @@ export type ProjectListEntry = {
     externalId: string;
     fullName: string;
     url: string;
-    /** False once the platform no longer lists the repository. */
+    /** False once the platform no longer lists the repository or its integration is disabled. */
     available: boolean;
     integration: {
       id: string;
@@ -69,7 +70,9 @@ export type ActivateResult =
       outcome: "created" | "reactivated" | "unchanged";
     }
   | { kind: "repository_not_found" }
-  | { kind: "repository_unavailable" };
+  | { kind: "repository_unavailable" }
+  /** The repository is listed, but its integration is suspended or removed (status `disabled`). */
+  | { kind: "integration_unavailable" };
 
 export type DeactivateResult =
   | {
@@ -157,11 +160,17 @@ export function createProjectsRepository(
     return row === undefined ? undefined : toStored(row);
   }
 
-  // The project columns of a switched-on project whose repository the platform still lists.
+  // The project columns of a switched-on project whose repository the platform still lists and whose
+  // integration is not suspended or removed.
   function baseActiveQuery() {
     return db
       .selectFrom("projects")
       .innerJoin("repositories", "repositories.id", "projects.repository_id")
+      .innerJoin(
+        "integrations",
+        "integrations.id",
+        "repositories.integration_id",
+      )
       .select([
         "projects.id",
         "projects.repository_id",
@@ -171,7 +180,8 @@ export function createProjectsRepository(
         "projects.updated_at",
       ])
       .where("projects.active", "=", encodeBoolean(true))
-      .where("repositories.active", "=", encodeBoolean(true));
+      .where("repositories.active", "=", encodeBoolean(true))
+      .where("integrations.status", "=", "active");
   }
 
   return {
@@ -205,12 +215,23 @@ export function createProjectsRepository(
       return inTransaction(async (trx): Promise<ActivateResult> => {
         const repository = await trx
           .selectFrom("repositories")
-          .select(["id", "active"])
-          .where("id", "=", repositoryId)
+          .innerJoin(
+            "integrations",
+            "integrations.id",
+            "repositories.integration_id",
+          )
+          .select([
+            "repositories.id",
+            "repositories.active",
+            "integrations.status as integration_status",
+          ])
+          .where("repositories.id", "=", repositoryId)
           .executeTakeFirst();
         if (repository === undefined) return { kind: "repository_not_found" };
         if (!decodeBoolean(repository.active))
           return { kind: "repository_unavailable" };
+        if (repository.integration_status !== "active")
+          return { kind: "integration_unavailable" };
 
         const timestamp = formatTimestamp(now());
         const existing = await trx
@@ -333,7 +354,9 @@ export function createProjectsRepository(
         .execute();
 
       return rows.map((row): ProjectListEntry => {
-        const available = decodeBoolean(row.repository_active);
+        const available =
+          decodeBoolean(row.repository_active) &&
+          row.integration_status === "active";
         const project: StoredProject | null =
           row.project_id === null ||
           row.project_active === null ||

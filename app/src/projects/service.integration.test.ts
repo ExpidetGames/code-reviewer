@@ -93,6 +93,20 @@ describe("activating a project", () => {
     ).toBeUndefined();
   });
 
+  // CR-24-T08
+  it("refuses a repository whose installation is suspended with a stable code", async () => {
+    const { service, first, db, integration } = await setup();
+    await createIntegrationsRepository(db).setStatus(
+      integration.id,
+      "disabled",
+    );
+
+    expect(await codeOf(service.activateProject(first.id))).toBe(
+      "PROJECT_INTEGRATION_UNAVAILABLE",
+    );
+    expect(await db.selectFrom("projects").selectAll().execute()).toEqual([]);
+  });
+
   // CR-24-T09
   it("refuses an unknown repository id with a stable code", async () => {
     const { service, projects } = await setup();

@@ -141,6 +141,23 @@ describe("switching a project on and off over HTTP", () => {
     expect(await projectRows()).toEqual([]);
   });
 
+  // CR-24-T08
+  it("refuses a repository of a suspended installation with 409 PROJECT_INTEGRATION_UNAVAILABLE", async () => {
+    const { put, repository, db, integration, projectRows } = await setup();
+    await createIntegrationsRepository(db).setStatus(
+      integration.id,
+      "disabled",
+    );
+
+    const response = await put(repository.id, { active: true });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: "PROJECT_INTEGRATION_UNAVAILABLE",
+    });
+    expect(await projectRows()).toEqual([]);
+  });
+
   // CR-24-T09
   it("answers 404 PROJECT_REPOSITORY_NOT_FOUND for an unknown repository and creates nothing", async () => {
     const { put, projectRows } = await setup();
@@ -180,7 +197,8 @@ describe("a request that is not usable", () => {
     },
   );
 
-  it("is refused without a JSON content type, so a cross-site form cannot switch a project", async () => {
+  // CR-24-T09
+  it("is answered with 415 PROJECT_CONTENT_TYPE_UNSUPPORTED without a JSON content type", async () => {
     const { put, repository, projectRows } = await setup();
 
     for (const headers of [
@@ -190,9 +208,9 @@ describe("a request that is not usable", () => {
     ]) {
       const response = await put(repository.id, '{"active":true}', headers);
 
-      expect(response.status).toBe(400);
+      expect(response.status).toBe(415);
       expect(await response.json()).toEqual({
-        error: "PROJECT_REQUEST_INVALID",
+        error: "PROJECT_CONTENT_TYPE_UNSUPPORTED",
       });
     }
     expect(await projectRows()).toEqual([]);
@@ -204,15 +222,13 @@ describe("a request that is not usable", () => {
     const response = await put(
       repository.id,
       { active: true },
-      {
-        "content-type": "application/json; charset=utf-8",
-      },
+      { "content-type": "application/json; charset=utf-8" },
     );
 
     expect(response.status).toBe(200);
   });
 
-  it("is refused when the body is larger than a small limit", async () => {
+  it("is answered with 413 PROJECT_BODY_TOO_LARGE when the body is larger than the limit", async () => {
     const { put, repository, projectRows } = await setup();
 
     const response = await put(
@@ -220,8 +236,84 @@ describe("a request that is not usable", () => {
       JSON.stringify({ active: true, padding: "x".repeat(10_000) }),
     );
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual({ error: "PROJECT_BODY_TOO_LARGE" });
     expect(await projectRows()).toEqual([]);
+  });
+});
+
+describe("a request that does not come from this site", () => {
+  const JSON_HEADERS = { "content-type": "application/json" };
+
+  it.each([
+    ["Sec-Fetch-Site cross-site", { "sec-fetch-site": "cross-site" }],
+    ["Sec-Fetch-Site same-site", { "sec-fetch-site": "same-site" }],
+    ["a foreign Origin", { origin: "https://evil.test" }],
+    ["an Origin of null", { origin: "null" }],
+    ["a malformed Origin", { origin: "not a url" }],
+    [
+      "a foreign Origin even though the host header matches another one",
+      { origin: "https://evil.test", host: "app.test" },
+    ],
+  ])(
+    "is answered with 403 PROJECT_CROSS_SITE_REQUEST for %s, and changes nothing",
+    async (_name, extra) => {
+      const { put, repository, projectRows } = await setup();
+
+      const response = await put(
+        repository.id,
+        { active: true },
+        { ...JSON_HEADERS, ...extra },
+      );
+
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({
+        error: "PROJECT_CROSS_SITE_REQUEST",
+      });
+      expect(await projectRows()).toEqual([]);
+    },
+  );
+
+  it.each([
+    ["Sec-Fetch-Site same-origin", { "sec-fetch-site": "same-origin" }],
+    ["Sec-Fetch-Site none", { "sec-fetch-site": "none" }],
+    [
+      "an Origin of the address the request went to",
+      { origin: "https://app.test" },
+    ],
+    [
+      "an Origin of the forwarded host",
+      {
+        origin: "https://reviews.example",
+        "x-forwarded-host": "reviews.example",
+      },
+    ],
+    ["neither header (not a browser)", {}],
+  ])("is let through with %s", async (_name, extra) => {
+    const { put, repository } = await setup();
+
+    const response = await put(repository.id, { active: true }, {
+      ...JSON_HEADERS,
+      ...extra,
+    } as Record<string, string>);
+
+    expect(response.status).toBe(200);
+  });
+
+  it("is judged by Sec-Fetch-Site, not by Origin, when the browser sends both", async () => {
+    const { put, repository } = await setup();
+
+    const response = await put(
+      repository.id,
+      { active: true },
+      {
+        ...JSON_HEADERS,
+        "sec-fetch-site": "same-origin",
+        origin: "https://other.internal",
+      },
+    );
+
+    expect(response.status).toBe(200);
   });
 });
 
@@ -237,6 +329,9 @@ describe("the user check", () => {
     await expect(put(repository.id, { active: false })).rejects.toBe(refusal);
     // Not even an invalid request is looked at before the user is known.
     await expect(put(repository.id, "garbage")).rejects.toBe(refusal);
+    await expect(
+      put(repository.id, { active: true }, { "sec-fetch-site": "cross-site" }),
+    ).rejects.toBe(refusal);
 
     expect(await projectRows()).toEqual([]);
   });

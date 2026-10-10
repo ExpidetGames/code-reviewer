@@ -167,6 +167,50 @@ describe("activating a repository", () => {
   });
 });
 
+describe("a repository of a suspended or removed installation", () => {
+  // CR-24-T08
+  it("cannot be activated while its integration is disabled, even if the repository row is still active", async () => {
+    const { projects, first, integrations, integration, rows } = await setup();
+    await integrations.setStatus(integration.id, "disabled");
+
+    const result = await projects.activate(first.id);
+
+    expect(result).toEqual({ kind: "integration_unavailable" });
+    expect(await rows()).toEqual([]);
+  });
+
+  it("can be activated again once the integration is back", async () => {
+    const { projects, first, integrations, integration } = await setup();
+    await integrations.setStatus(integration.id, "disabled");
+    await integrations.setStatus(integration.id, "active");
+
+    expect(await projects.activate(first.id)).toMatchObject({
+      kind: "activated",
+    });
+  });
+
+  it("keeps its project row but counts as unavailable and not as an active project", async () => {
+    const { projects, first, integrations, integration, rows } = await setup();
+    await projects.activate(first.id);
+    const before = await rows();
+
+    await integrations.setStatus(integration.id, "disabled");
+
+    expect(await rows()).toEqual(before);
+    expect(await projects.findActiveForRepository(first.id)).toBeUndefined();
+    expect(
+      await projects.findActiveForExternalRepository(
+        integration.id,
+        first.externalId,
+      ),
+    ).toBeUndefined();
+    expect((await projects.list()).map((entry) => entry.status)).toEqual([
+      "unavailable",
+      "unavailable",
+    ]);
+  });
+});
+
 describe("deactivating a project", () => {
   // CR-24-T02
   it("switches it off and keeps the row and its settings", async () => {
