@@ -50,6 +50,8 @@ export const WEBHOOK_DELIVERY_OUTCOMES = [
   "trigger_not_allowed",
   /** The repository has no active project, so nothing is reviewed. */
   "project_not_active",
+  /** A comment command that the project's settings do not allow. */
+  "command_not_allowed",
   /** A review trigger was handed to the intake. */
   "trigger_enqueued",
   /** A pull request event that starts no review (a draft, a closed pull request, a setting, a stale commit). */
