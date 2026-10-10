@@ -6,7 +6,9 @@
 //
 // It checks what GitHub checks: the App JWT must be signed with the app's key (RS256), name the app
 // as issuer and not be expired; an installation token must have been issued here, not expired, and
-// only reaches the repositories of its installation (narrowed by the `repositories` of the request).
+// only reaches the repositories of its installation (narrowed by the `repositories` or
+// `repository_ids` of the request) and only does what the permissions of the request allow. A token
+// request may not ask for more than the app itself is granted (`setAppPermissions`).
 //
 // The OAuth part (login) is a separate fake in the same folder.
 import { createPublicKey, randomBytes, verify } from "node:crypto";
@@ -44,6 +46,17 @@ export type FakePullRequest = {
   author: { login: string; id: number };
 };
 
+/** GitHub's permission names mapped to the level the app (or a token) holds. */
+export type FakePermissions = Record<string, "read" | "write" | "admin">;
+
+/** What an app registered like ours is granted unless a test narrows it. */
+export const DEFAULT_FAKE_APP_PERMISSIONS: FakePermissions = {
+  metadata: "read",
+  contents: "read",
+  pull_requests: "write",
+  issues: "write",
+};
+
 export type FakeCollaboratorPermission = "admin" | "write" | "read" | "none";
 
 /** Makes matching requests fail before they are looked at. */
@@ -79,6 +92,13 @@ export type FakeGithubAppOptions = {
 
 export type FakeGithubAppRequest = { method: string; path: string };
 
+export type FakeTokenRequest = {
+  installationId: number;
+  repositories: string[] | null;
+  repositoryIds: number[] | null;
+  permissions: Record<string, string> | null;
+};
+
 export type FakeGithubApp = {
   /** For example http://127.0.0.1:41234 */
   baseUrl: string;
@@ -102,6 +122,14 @@ export type FakeGithubApp = {
     login: string,
     permission: FakeCollaboratorPermission,
   ): void;
+  /** The permissions the app itself is granted; token requests may not exceed them (422). */
+  setAppPermissions(permissions: FakePermissions): void;
+  /**
+   * Merges these fields into every access token answer from now on (null stops it): a misbehaving
+   * GitHub that reports a token as broader than it was asked for, for example
+   * `{ repository_selection: "all" }`. The token itself is still limited as requested.
+   */
+  answerTokensWith(patch: Record<string, unknown> | null): void;
   /** Answers 401 to every App JWT, as when the key or app id of the app is wrong. */
   rejectAppJwts(reject: boolean): void;
   fail(failure: FakeFailure): void;
@@ -110,8 +138,11 @@ export type FakeGithubApp = {
   reset(): void;
   /** Every request received, in order (method and path only: no headers, no bodies). */
   requests(): FakeGithubAppRequest[];
-  /** The `repositories` filters of access token requests, in order (null when none was sent). */
-  tokenRequests(): Array<{ installationId: number; repositories: string[] | null }>;
+  /**
+   * The body of every access token request that was accepted for a look, in order: `repositories`
+   * (names), `repository_ids` and `permissions`, each null when the request did not send it.
+   */
+  tokenRequests(): FakeTokenRequest[];
   /** Every credential (JWT or token) any request carried; lets a test search outputs for them. */
   seenCredentials(): string[];
   /** Every installation token issued so far. */
@@ -121,9 +152,15 @@ export type FakeGithubApp = {
 
 type IssuedToken = {
   installationId: number;
-  repositoryNames: string[] | null;
+  /** The repositories the token reaches; null means every repository of the installation. */
+  repositoryIds: number[] | null;
+  permissions: FakePermissions;
   expiresAtMs: number;
 };
+
+const LEVELS = ["read", "write", "admin"] as const;
+const levelOf = (level: unknown): number =>
+  LEVELS.findIndex((candidate) => candidate === level);
 
 const TOKEN_LIFETIME_MS = 60 * 60 * 1000;
 const MAX_PER_PAGE = 100;
@@ -209,16 +246,15 @@ export async function startGithubAppFake(
   const permissions = new Map<string, FakeCollaboratorPermission>();
   const tokens = new Map<string, IssuedToken>();
   const issuedTokens: string[] = [];
-  const tokenRequests: Array<{
-    installationId: number;
-    repositories: string[] | null;
-  }> = [];
+  const tokenRequests: FakeTokenRequest[] = [];
+  let appPermissions: FakePermissions = { ...DEFAULT_FAKE_APP_PERMISSIONS };
   const omitted = new Map<number, number[]>();
   const rawInstallationRecords: Record<string, unknown>[] = [];
   const log: FakeGithubAppRequest[] = [];
   const credentials: string[] = [];
   let failures: Array<FakeFailure & { remaining: number }> = [];
   let jwtsRejected = false;
+  let tokenAnswerPatch: Record<string, unknown> | null = null;
 
   function jwtIsValid(token: string): boolean {
     if (jwtsRejected) return false;
@@ -260,11 +296,18 @@ export async function startGithubAppFake(
 
   function reposVisibleTo(token: IssuedToken): FakeRepository[] {
     const all = repositories.get(token.installationId) ?? [];
-    if (token.repositoryNames === null) return all;
-    const allowed = token.repositoryNames;
-    return all.filter((repo) =>
-      allowed.includes(repo.fullName.split("/")[1] ?? ""),
-    );
+    if (token.repositoryIds === null) return all;
+    const allowed = token.repositoryIds;
+    return all.filter((repo) => allowed.includes(repo.id));
+  }
+
+  /** Does the token hold at least this level of the permission? */
+  function mayDo(
+    token: IssuedToken,
+    permission: string,
+    level: "read" | "write",
+  ): boolean {
+    return levelOf(token.permissions[permission]) >= levelOf(level);
   }
 
   function takeFailure(path: string, query: string): FakeFailure | undefined {
@@ -344,7 +387,9 @@ export async function startGithubAppFake(
       });
     }
 
-    const tokenMatch = /^\/app\/installations\/(\d+)\/access_tokens$/.exec(path);
+    const tokenMatch = /^\/app\/installations\/(\d+)\/access_tokens$/.exec(
+      path,
+    );
     if (tokenMatch && method === "POST") {
       if (bearer === undefined || !jwtIsValid(bearer)) return unauthorized();
       const installationId = Number(tokenMatch[1]);
@@ -355,28 +400,96 @@ export async function startGithubAppFake(
 
       const body = await readBody(request);
       let names: string[] | null = null;
+      let ids: number[] | null = null;
+      let requested: Record<string, string> | null = null;
       if (body !== "") {
-        const parsed = JSON.parse(body) as { repositories?: unknown };
+        const parsed = JSON.parse(body) as {
+          repositories?: unknown;
+          repository_ids?: unknown;
+          permissions?: unknown;
+        };
         if (Array.isArray(parsed.repositories))
           names = parsed.repositories.map(String);
+        if (Array.isArray(parsed.repository_ids))
+          ids = parsed.repository_ids.map(Number);
+        if (
+          typeof parsed.permissions === "object" &&
+          parsed.permissions !== null
+        )
+          requested = Object.fromEntries(
+            Object.entries(parsed.permissions).map(([key, level]) => [
+              key,
+              String(level),
+            ]),
+          );
       }
-      tokenRequests.push({ installationId, repositories: names });
-      const known = (repositories.get(installationId) ?? []).map(
-        (repo) => repo.fullName.split("/")[1] ?? "",
-      );
-      if (names !== null && names.some((name) => !known.includes(name)))
+      tokenRequests.push({
+        installationId,
+        repositories: names,
+        repositoryIds: ids,
+        permissions: requested,
+      });
+
+      // Like GitHub: a repository the installation does not have is refused as a whole (422), and
+      // so is a permission the app does not hold at that level. Nothing broader is issued instead.
+      const known = repositories.get(installationId) ?? [];
+      const unknownName =
+        names !== null &&
+        names.some(
+          (name) => !known.some((repo) => repo.fullName.split("/")[1] === name),
+        );
+      const unknownId =
+        ids !== null &&
+        ids.some(
+          (id) =>
+            !Number.isInteger(id) || !known.some((repo) => repo.id === id),
+        );
+      if (unknownName || unknownId)
         return send(422, {
-          message: "There is at least one repository that does not exist or is not accessible",
+          message:
+            "There is at least one repository that does not exist or is not accessible",
         });
+      if (
+        requested !== null &&
+        Object.entries(requested).some(
+          ([key, level]) =>
+            levelOf(level) < 0 || levelOf(level) > levelOf(appPermissions[key]),
+        )
+      )
+        return send(422, {
+          message:
+            "The permissions requested are not granted to this installation",
+        });
+
+      let reach: number[] | null = null;
+      if (names !== null || ids !== null)
+        reach = known
+          .filter(
+            (repo) =>
+              (names?.includes(repo.fullName.split("/")[1] ?? "") ?? false) ||
+              (ids?.includes(repo.id) ?? false),
+          )
+          .map((repo) => repo.id);
+      const granted: FakePermissions =
+        requested === null
+          ? { ...appPermissions }
+          : (requested as FakePermissions);
 
       const token = `ghs_fake${randomBytes(16).toString("hex")}`;
       const expiresAtMs = now() + TOKEN_LIFETIME_MS;
-      tokens.set(token, { installationId, repositoryNames: names, expiresAtMs });
+      tokens.set(token, {
+        installationId,
+        repositoryIds: reach,
+        permissions: granted,
+        expiresAtMs,
+      });
       issuedTokens.push(token);
       return send(201, {
         token,
         expires_at: new Date(expiresAtMs).toISOString(),
-        repository_selection: names === null ? "all" : "selected",
+        permissions: granted,
+        repository_selection: reach === null ? "all" : "selected",
+        ...tokenAnswerPatch,
       });
     }
 
@@ -405,13 +518,16 @@ export async function startGithubAppFake(
       const rest = repoMatch[3] ?? "";
       const prs = pullRequests.get(fullName) ?? [];
 
+      const forbidden = () =>
+        send(403, { message: "Resource not accessible by integration" });
+
       if (rest === "/pulls" && method === "GET") {
+        if (!mayDo(issued, "pull_requests", "read")) return forbidden();
         const state = url.searchParams.get("state") ?? "open";
         const matching = prs.filter(
           (pr) => state === "all" || pr.state === state,
         );
-        return json(
-          response,
+        return send(
           200,
           pageOf(matching, url.searchParams).map((pr) =>
             pullRequestJson(repository, pr),
@@ -420,12 +536,16 @@ export async function startGithubAppFake(
       }
       const pullMatch = /^\/pulls\/(\d+)$/.exec(rest);
       if (pullMatch && method === "GET") {
+        if (!mayDo(issued, "pull_requests", "read")) return forbidden();
         const pr = prs.find((item) => item.number === Number(pullMatch[1]));
         if (pr === undefined) return notFound();
         return send(200, pullRequestJson(repository, pr));
       }
-      const permissionMatch = /^\/collaborators\/([^/]+)\/permission$/.exec(rest);
+      const permissionMatch = /^\/collaborators\/([^/]+)\/permission$/.exec(
+        rest,
+      );
       if (permissionMatch && method === "GET") {
+        if (!mayDo(issued, "metadata", "read")) return forbidden();
         const login = decodeURIComponent(permissionMatch[1] ?? "");
         const permission =
           permissions.get(`${fullName}#${login.toLowerCase()}`) ?? "none";
@@ -441,7 +561,8 @@ export async function startGithubAppFake(
 
   const server: Server = createServer((request, response) => {
     handle(request, response).catch(() => {
-      if (!response.headersSent) json(response, 500, { message: "Fake failed" });
+      if (!response.headersSent)
+        json(response, 500, { message: "Fake failed" });
       else response.end();
     });
   });
@@ -500,6 +621,12 @@ export async function startGithubAppFake(
     setCollaboratorPermission(repoFullName, login, permission) {
       permissions.set(`${repoFullName}#${login.toLowerCase()}`, permission);
     },
+    setAppPermissions(permissions) {
+      appPermissions = { ...permissions };
+    },
+    answerTokensWith(patch) {
+      tokenAnswerPatch = patch;
+    },
     rejectAppJwts(reject) {
       jwtsRejected = reject;
     },
@@ -523,6 +650,8 @@ export async function startGithubAppFake(
       credentials.length = 0;
       failures = [];
       jwtsRejected = false;
+      tokenAnswerPatch = null;
+      appPermissions = { ...DEFAULT_FAKE_APP_PERMISSIONS };
     },
     requests: () => [...log],
     tokenRequests: () => [...tokenRequests],

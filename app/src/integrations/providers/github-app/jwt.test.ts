@@ -8,6 +8,7 @@ function decode(part: string): unknown {
   return JSON.parse(Buffer.from(part, "base64url").toString("utf8"));
 }
 
+// CR-23-T02 (the claims, the algorithm, the signature and the injected clock)
 describe("the app JWT", () => {
   const { privateKey, publicKey } = testAppKeys();
   const nowMs = Date.UTC(2026, 9, 10, 12, 0, 0);
@@ -23,6 +24,20 @@ describe("the app JWT", () => {
     expect(claims.iat).toBeLessThan(now);
     expect(claims.exp).toBeGreaterThan(now);
     expect(claims.exp - claims.iat).toBeLessThanOrEqual(600);
+  });
+
+  it("takes its times from the injected clock only", () => {
+    const later = createAppJwt({
+      appId: "424242",
+      privateKey,
+      nowMs: nowMs + 3_600_000,
+    });
+    const earlier = createAppJwt({ appId: "424242", privateKey, nowMs });
+    const claimsOf = (jwt: string) =>
+      decode(jwt.split(".")[1] as string) as { iat: number; exp: number };
+
+    expect(claimsOf(later).iat - claimsOf(earlier).iat).toBe(3600);
+    expect(claimsOf(later).exp - claimsOf(earlier).exp).toBe(3600);
   });
 
   it("is signed with the private key so the public key verifies it", () => {

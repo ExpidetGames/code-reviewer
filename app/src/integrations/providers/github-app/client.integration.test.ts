@@ -412,28 +412,51 @@ describe("collaborator permissions", () => {
   });
 });
 
+const JOB_SCOPE = {
+  repositoryIds: [7001],
+  permissions: { pull_requests: "write", metadata: "read" },
+} as const;
+
 describe("minting an installation token", () => {
-  it("narrows the token to the named repositories", async () => {
+  it("narrows the token to the given repository ids and permissions", async () => {
     const { fake, clock, client } = await setup();
 
-    const token = await client.mintInstallationToken("4242", {
-      repositoryNames: ["widgets"],
-    });
+    const token = await client.mintInstallationToken("4242", JOB_SCOPE);
 
     expect(token.token).toMatch(/^ghs_/);
     expect(Date.parse(token.expiresAt)).toBe(clock.now() + 60 * 60 * 1000);
     expect(fake.tokenRequests()).toEqual([
-      { installationId: 4242, repositories: ["widgets"] },
+      {
+        installationId: 4242,
+        repositories: null,
+        repositoryIds: [7001],
+        permissions: { pull_requests: "write", metadata: "read" },
+      },
     ]);
   });
 
   it("never reuses a token from the cache for a job", async () => {
     const { fake, client } = await setup();
 
-    await client.mintInstallationToken("4242");
-    await client.mintInstallationToken("4242");
+    await client.mintInstallationToken("4242", JOB_SCOPE);
+    await client.mintInstallationToken("4242", JOB_SCOPE);
 
     expect(fake.issuedInstallationTokens()).toHaveLength(2);
+  });
+
+  it("refuses a scope without a repository, a usable id or a permission before any request", async () => {
+    const { fake, client } = await setup();
+
+    for (const scope of [
+      { ...JOB_SCOPE, repositoryIds: [] },
+      { ...JOB_SCOPE, repositoryIds: [0] },
+      { ...JOB_SCOPE, repositoryIds: [1.5] },
+      { ...JOB_SCOPE, permissions: {} },
+    ])
+      expect(
+        (await failureOf(client.mintInstallationToken("4242", scope))).code,
+      ).toBe("GITHUB_APP_REQUEST_FAILED");
+    expect(fake.requests()).toEqual([]);
   });
 
   it("fails for a repository the installation cannot access and for a suspended installation", async () => {
@@ -441,13 +464,32 @@ describe("minting an installation token", () => {
 
     expect(
       await failureOf(
-        client.mintInstallationToken("4242", { repositoryNames: ["nope"] }),
+        client.mintInstallationToken("4242", {
+          ...JOB_SCOPE,
+          repositoryIds: [9999],
+        }),
       ),
     ).toMatchObject({ code: "GITHUB_APP_REQUEST_FAILED", status: 422 });
 
     fake.suspendInstallation(4242, true);
-    expect((await failureOf(client.mintInstallationToken("4242"))).code).toBe(
-      "GITHUB_APP_FORBIDDEN",
-    );
+    expect(
+      (await failureOf(client.mintInstallationToken("4242", JOB_SCOPE))).code,
+    ).toBe("GITHUB_APP_FORBIDDEN");
+  });
+
+  it("discards a token GitHub reports as broader than the one asked for", async () => {
+    const { fake, client } = await setup();
+
+    for (const patch of [
+      { repository_selection: "all" },
+      { permissions: { pull_requests: "write", administration: "write" } },
+      { permissions: { pull_requests: "write", metadata: "write" } },
+      { repositories: [{ id: 7001 }, { id: 7002 }] },
+    ]) {
+      fake.answerTokensWith(patch);
+      expect(
+        await failureOf(client.mintInstallationToken("4242", JOB_SCOPE)),
+      ).toMatchObject({ code: "GITHUB_APP_REQUEST_FAILED", status: null });
+    }
   });
 });

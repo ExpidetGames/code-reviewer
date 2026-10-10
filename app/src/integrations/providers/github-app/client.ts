@@ -35,6 +35,18 @@ export type InstallationToken = {
   expiresAt: string;
 };
 
+/** GitHub's permission names mapped to a level; what a token request asks for and a token holds. */
+export type InstallationPermissions = Readonly<
+  Record<string, "read" | "write">
+>;
+
+/** What a job token is limited to. Both parts are required: a job token is never broader. */
+export type JobTokenScope = {
+  /** The numeric ids of the repositories (at least one) the token may reach. */
+  repositoryIds: readonly number[];
+  permissions: InstallationPermissions;
+};
+
 export type GithubAppClient = {
   /** Every installation of the app (needs the App JWT). */
   listInstallations(): Promise<RemoteInstallation[]>;
@@ -61,12 +73,13 @@ export type GithubAppClient = {
     login: string,
   ): Promise<CollaboratorPermission>;
   /**
-   * Mints a fresh installation access token, never from the cache, optionally narrowed to
-   * repositories (by name, without the owner). The one place a token for a job is created.
+   * Mints a fresh installation access token, never from the cache, limited to the given repositories
+   * and permissions. The one place a token for a job is created. Refuses (without a request) a scope
+   * with no repository or no permission, and a token GitHub reports as broader than asked for.
    */
   mintInstallationToken(
     installationId: string,
-    options?: { repositoryNames?: readonly string[] },
+    scope: JobTokenScope,
   ): Promise<InstallationToken>;
 };
 
@@ -176,6 +189,41 @@ function checkPullRequestNumber(prNumber: number): void {
       "GITHUB_APP_REQUEST_FAILED",
       "The pull request number is not a positive whole number.",
     );
+}
+
+const PERMISSION_LEVELS = ["read", "write", "admin"];
+
+/**
+ * GitHub echoes what a token really holds. A token that says it reaches "all" repositories or holds
+ * a permission (or a higher level) that was not asked for is never handed out. A field that is
+ * absent is not held against the answer: the fake and GitHub both send them, a proxy may not.
+ */
+function isNoBroaderThan(json: Record<string, unknown>, scope: JobTokenScope) {
+  if (
+    json.repository_selection !== undefined &&
+    json.repository_selection !== "selected"
+  )
+    return false;
+  if (Array.isArray(json.repositories)) {
+    const reach = json.repositories.map((repo) =>
+      isRecord(repo) ? repo.id : undefined,
+    );
+    if (
+      !reach.every((id) => scope.repositoryIds.some((wanted) => wanted === id))
+    )
+      return false;
+  }
+  if (isRecord(json.permissions))
+    for (const [name, level] of Object.entries(json.permissions)) {
+      const asked = scope.permissions[name];
+      if (asked === undefined) return false;
+      if (
+        PERMISSION_LEVELS.indexOf(String(level)) >
+        PERMISSION_LEVELS.indexOf(asked)
+      )
+        return false;
+    }
+  return true;
 }
 
 export function createGithubAppClient(
@@ -309,18 +357,22 @@ export function createGithubAppClient(
     );
   }
 
+  /** Read calls: a token with everything the app is granted on the whole installation. */
   async function mint(
     installationId: string,
-    repositoryNames?: readonly string[],
+    scope?: JobTokenScope,
   ): Promise<InstallationToken> {
     checkInstallationId(installationId);
     const json = await request(
       appJwt(),
       "POST",
       `/app/installations/${installationId}/access_tokens`,
-      repositoryNames === undefined
+      scope === undefined
         ? undefined
-        : { repositories: [...repositoryNames] },
+        : {
+            repository_ids: [...scope.repositoryIds],
+            permissions: { ...scope.permissions },
+          },
     );
     if (
       !isRecord(json) ||
@@ -330,6 +382,11 @@ export function createGithubAppClient(
       Number.isNaN(Date.parse(json.expires_at))
     )
       throw shapeError("POST /app/installations/{id}/access_tokens");
+    if (scope !== undefined && !isNoBroaderThan(json, scope))
+      throw new GithubAppError(
+        "GITHUB_APP_REQUEST_FAILED",
+        "GitHub issued a token broader than the one asked for; it was discarded.",
+      );
     return {
       token: json.token,
       expiresAt: new Date(Date.parse(json.expires_at)).toISOString(),
@@ -509,8 +566,25 @@ export function createGithubAppClient(
       });
     },
 
-    async mintInstallationToken(installationId, mintOptions = {}) {
-      return mint(installationId, mintOptions.repositoryNames);
+    async mintInstallationToken(installationId, scope) {
+      if (scope.repositoryIds.length === 0)
+        throw new GithubAppError(
+          "GITHUB_APP_REQUEST_FAILED",
+          "A job token needs at least one repository.",
+        );
+      if (
+        !scope.repositoryIds.every((id) => Number.isSafeInteger(id) && id > 0)
+      )
+        throw new GithubAppError(
+          "GITHUB_APP_REQUEST_FAILED",
+          "A repository id is not a positive whole number.",
+        );
+      if (Object.keys(scope.permissions).length === 0)
+        throw new GithubAppError(
+          "GITHUB_APP_REQUEST_FAILED",
+          "A job token needs explicit permissions.",
+        );
+      return mint(installationId, scope);
     },
   };
 }
