@@ -21,7 +21,7 @@ export async function addGithubAccount(
   expect(response.status()).toBe(201);
 }
 
-/** Opens the app, signs in as `account` at the fake GitHub and waits for the signed in page. */
+/** Opens the app, signs in as `account` at the fake GitHub and waits for the signed in app (the user menu with their name). */
 export async function signInThroughTheForm(
   page: Page,
   account: GithubAccount,
@@ -32,5 +32,19 @@ export async function signInThroughTheForm(
   await page
     .getByRole("button", { name: `Authorize ${account.login}` })
     .click();
-  await expect(page.getByText(`Signed in as ${account.name}`)).toBeVisible();
+  await expect(userMenuButton(page, account)).toBeVisible();
+}
+
+/** The button of the user menu in the header, named after the person. */
+export function userMenuButton(page: Page, account: GithubAccount) {
+  return page.getByRole("button", { name: account.name });
+}
+
+/** Opens the user menu and presses "Sign out". */
+export async function signOutThroughTheMenu(
+  page: Page,
+  account: GithubAccount,
+): Promise<void> {
+  await userMenuButton(page, account).click();
+  await page.getByRole("button", { name: "Sign out" }).click();
 }

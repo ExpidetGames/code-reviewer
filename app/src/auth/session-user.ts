@@ -37,6 +37,7 @@ export async function lookupSession(
     name: session.user.name,
     githubLogin: session.user.githubLogin,
     githubId,
+    image: session.user.image ?? null,
     orgCheckedAt: session.user.orgCheckedAt ?? null,
     orgCheckedFor: session.user.orgCheckedFor ?? null,
   };
