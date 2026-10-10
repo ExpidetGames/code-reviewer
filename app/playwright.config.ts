@@ -59,6 +59,11 @@ export default defineConfig({
         GITHUB_OAUTH_BASE_URL: e2eEnv.githubUrl,
         GITHUB_API_BASE: e2eEnv.githubUrl,
         ALLOWED_GITHUB_LOGINS: e2eEnv.allowedLogins,
+        RUNNER_TOKEN: e2eEnv.runnerToken,
+        GITHUB_APP_ID: "1",
+        GITHUB_APP_SLUG: "e2e-app",
+        GITHUB_APP_WEBHOOK_SECRET: "e2e-webhook-secret",
+        GITHUB_APP_PRIVATE_KEY: "e2e-private-key-placeholder",
         // Without this flag the server refuses the two overrides above.
         ALLOW_TEST_GITHUB_ENDPOINTS: "true",
       },
