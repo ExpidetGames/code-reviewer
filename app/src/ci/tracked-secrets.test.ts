@@ -11,9 +11,9 @@ import { describe, expect, it } from "vitest";
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
 
 // A BEGIN line for any kind of private key followed (after optional line breaks, real or written as
-// \n) by at least 40 characters of base64 body.
+// \n) by at least 40 characters of base64 body, or by the header of an encrypted legacy PEM.
 const PRIVATE_KEY_BLOCK =
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----(?:\s|\\n|\\r)*[A-Za-z0-9+/=]{40,}/;
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----(?:\s|\\n|\\r)*(?:[A-Za-z0-9+/=]{40,}|Proc-Type:)/;
 
 const TOKEN_PATTERNS: { name: string; pattern: RegExp }[] = [
   { name: "GitHub token", pattern: /\bgh[pousr]_[A-Za-z0-9]{30,}/ },
@@ -44,7 +44,12 @@ function trackedTextFiles(): { path: string; content: string }[] {
   const files: { path: string; content: string }[] = [];
   for (const path of listing.split("\0")) {
     if (path === "") continue;
-    const buffer = readFileSync(`${repoRoot}${path}`);
+    let buffer: Buffer;
+    try {
+      buffer = readFileSync(`${repoRoot}${path}`);
+    } catch {
+      continue; // listed by git but deleted in the working tree (not staged yet)
+    }
     if (buffer.includes(0)) continue; // binary
     files.push({ path, content: buffer.toString("utf8") });
   }
@@ -75,6 +80,8 @@ describe("files tracked by git", () => {
   // CR-38-T05
   it("would be caught if a key or a token were committed", () => {
     const body = "A".repeat(64);
+    // Joined at run time, so that this file does not contain the header it looks for.
+    const legacyBegin = ["-----BEGIN RSA", "PRIVATE KEY-----"].join(" ");
     const planted = [
       {
         path: "docs/leak.md",
@@ -84,18 +91,35 @@ describe("files tracked by git", () => {
         path: ".env.example",
         content: `GITHUB_APP_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\\n${body}\\n-----END PRIVATE KEY-----"`,
       },
+      {
+        path: "legacy.pem",
+        content: `${legacyBegin}\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-256-CBC,0123456789ABCDEF\n\n${body}\n-----END RSA PRIVATE KEY-----`,
+      },
       { path: "a.ts", content: `const t = "ghs_${"a1".repeat(20)}";` },
       { path: "b.ts", content: `const t = "github_pat_${"a1".repeat(20)}";` },
+      { path: "c.ts", content: `const t = "sk-or-v1-${"a1".repeat(20)}";` },
+      { path: "d.ts", content: `const t = "sk-ant-${"a1".repeat(20)}";` },
+      { path: "e.ts", content: `const t = "sk-${"a1".repeat(24)}";` },
+      {
+        path: "f.ts",
+        content: `const t = "${["eyJ", "a".repeat(12)].join("")}.${["eyJ", "b".repeat(12)].join("")}.${"c".repeat(12)}";`,
+      },
     ];
 
     expect(findHits(planted)).toEqual([
       "docs/leak.md: private key block",
       ".env.example: private key block",
+      "legacy.pem: private key block",
       "a.ts: GitHub token",
       "b.ts: GitHub fine-grained token",
+      "c.ts: OpenRouter key",
+      "d.ts: Anthropic key",
+      "e.ts: OpenAI style key",
+      "f.ts: JSON web token",
     ]);
   });
 
+  // CR-38-T05
   it("may show a key block as a placeholder without a body", () => {
     const placeholder =
       'GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\\n...\\n-----END RSA PRIVATE KEY-----"';

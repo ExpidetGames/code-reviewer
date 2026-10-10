@@ -7,8 +7,11 @@ deployment and installs it on the team's repositories. Plan for about 30 minutes
 code changes.
 
 This is **not** the login of the web UI. People sign in with a separate GitHub *OAuth* app (see
-"Sign in with GitHub" in the [README](../README.md)); do not mix the two, and do not enable user
-authorization on this app.
+"Sign in" in the [README](../README.md)); do not mix the two, and do not enable user authorization on
+this app. Both apps live under the same `<domain>` and are usually created together, so keep this
+in mind for the OAuth app: its *Authorization callback URL* is
+`https://<domain>/api/auth/callback/github`, and the deployment gets `BETTER_AUTH_URL=https://<domain>`
+(the same address, without a path).
 
 What you need before you start:
 
@@ -55,9 +58,9 @@ Checks permission** in the MVP.
 
 | Permission (API name) | Access | What the app uses it for |
 |---|---|---|
-| Pull requests (`pull_requests`) | Read and write | Read the pull request (head commit, state, draft) and post the review and its comments |
-| Issues (`issues`) | Read and write | Pull request conversation comments are issue comments: the persistent review comment and the replies to `/ask` |
-| Contents (`contents`) | Read-only | Read the changed files and the repository's own `AGENTS.md` and `.pr_agent.toml` (the app never pushes) |
+| Pull requests (`pull_requests`) | Read and write | Read the pull request (head commit, state, draft); post the review, inline comments and suggestions; edit the description (`/describe`) |
+| Issues (`issues`) | Read and write | Pull request conversation comments are issue comments: the persistent review comment and the replies to `/ask`; labels and reactions on comments |
+| Contents (`contents`) | Read-only | Read the changed files and the other repository files a review needs, such as `AGENTS.md` (the app never pushes) |
 | Metadata (`metadata`) | Read-only | Mandatory for every app: list the installation's repositories and ask whether a commenter has write access |
 
 The code asks for the same four permissions when it creates the token of a review job, scoped to the
@@ -97,7 +100,7 @@ The *Client ID* and *client secrets* on that page are not used.
 
 ## 3. Hand the credentials to the deployment
 
-The application reads four settings. In production it refuses to start without them (one log line,
+The application reads these settings (four values; the private key is given inline or as a file). In production it refuses to start without them (one log line,
 `DEPLOY_CONFIG_INVALID`, naming the variables, never their values).
 
 | Variable | Value | Notes |
@@ -106,7 +109,7 @@ The application reads four settings. In production it refuses to start without t
 | `GITHUB_APP_SLUG` | The slug | Letters, digits and dashes |
 | `GITHUB_APP_WEBHOOK_SECRET` | The webhook secret | Used byte for byte: no trailing space or line break |
 | `GITHUB_APP_PRIVATE_KEY` | The content of the `.pem` file | Either with real line breaks, or on one line with the breaks written as `\n`. It must be a parseable RSA key, otherwise the start is refused and the log names the variable. |
-| `GITHUB_APP_PRIVATE_KEY_PATH` | Path of the `.pem` file | Alternative to `GITHUB_APP_PRIVATE_KEY` for a setup without Docker Compose. Set one of the two, not both. |
+| `GITHUB_APP_PRIVATE_KEY_PATH` | Path of the `.pem` file | Alternative to `GITHUB_APP_PRIVATE_KEY` for a setup without Docker Compose. Set one of the two; if both are set, the inline key wins and the path is ignored. |
 
 How the values reach the process depends on how it runs:
 
@@ -127,13 +130,15 @@ ticket; this guide only needs the public address and the variables.
 
 Once the application runs on `<domain>`:
 
-1. Open the app's settings page > **Advanced** > *Recent Deliveries*. There is a `ping` delivery from
-   the moment the app was created. Open it and press **Redeliver**.
+1. Open the app's settings page > **Advanced** > *Recent Deliveries*. If there is a `ping` delivery
+   from when the app was created, open it and press **Redeliver**. If there is none, the
+   `installation` delivery of step 5 is the first check.
 2. The delivery must show a green tick and the response **202** (`event_not_used`: a signed `ping` is
    genuine but not an event the app uses).
-3. To see what a wrong secret looks like, change `GITHUB_APP_WEBHOOK_SECRET` in the deployment on
+3. Optional, **only now, before the app is installed anywhere, and never on a running instance**: to
+   see what a wrong secret looks like, change `GITHUB_APP_WEBHOOK_SECRET` in the deployment on
    purpose, redeploy and redeliver: the answer is **401**. Put the right secret back afterwards and
-   redeploy.
+   redeploy. While the secret is wrong, every real delivery is refused with 401.
 
 | Answer | Meaning |
 |---|---|
@@ -190,7 +195,7 @@ the API call `PUT /api/repositories/:repositoryId/project` of a signed-in user (
 - [ ] "Only on this account" selected, user authorization (OAuth) off
 - [ ] App ID, slug, webhook secret and private key in the deployment as runtime variables
 - [ ] The `.pem` file is in the password manager and deleted from the laptop
-- [ ] `ping` redelivered: 202; a wrong secret gives 401
+- [ ] `ping` redelivered: 202 (before installing, optionally also a wrong secret gives 401; never test that on a running instance)
 - [ ] Installed on the team's repositories (selected repositories), `installation` delivery shows 202
 
 ## Troubleshooting

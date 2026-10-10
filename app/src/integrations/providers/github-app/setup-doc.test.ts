@@ -60,6 +60,7 @@ describe("the GitHub App setup guide", () => {
     expect(events).toMatch(/`installation_repositories`[^\n]*always/i);
   });
 
+  // CR-38-T01
   it("gives the webhook path of a route that exists", () => {
     const route = "app/src/app/api/webhooks/github-app/route.ts";
 
@@ -67,6 +68,7 @@ describe("the GitHub App setup guide", () => {
     expect(guide).toContain("/api/webhooks/github-app");
   });
 
+  // CR-38-T01
   it("names every environment variable the loader reads, and no write permission beyond the list", () => {
     for (const name of [
       "GITHUB_APP_ID",

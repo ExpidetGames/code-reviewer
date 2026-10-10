@@ -9,11 +9,12 @@ import { loadGithubAppConfig } from "./config.ts";
 import { GithubAppConfigError } from "./errors.ts";
 import { createAppJwt } from "./jwt.ts";
 
-const { privateKey } = generateKeyPairSync("rsa", {
+const keyPair = generateKeyPairSync("rsa", {
   modulusLength: 2048,
   privateKeyEncoding: { type: "pkcs1", format: "pem" },
   publicKeyEncoding: { type: "spki", format: "pem" },
 });
+const { privateKey } = keyPair;
 const keyBody = privateKey.split("\n")[1]!;
 
 const directory = mkdtempSync(join(tmpdir(), "cr-app-config-"));
@@ -50,6 +51,17 @@ describe("loading the GitHub App configuration", () => {
     expect(config.privateKey).toBe(privateKey.trim());
   });
 
+  // CR-38 review: the guide says the inline key wins when both are set.
+  it("takes the inline key when the path is given too", () => {
+    const config = loadGithubAppConfig({
+      ...complete,
+      GITHUB_APP_PRIVATE_KEY: privateKey,
+      GITHUB_APP_PRIVATE_KEY_PATH: join(directory, "does-not-exist.pem"),
+    });
+
+    expect(config.privateKey).toBe(privateKey.trim());
+  });
+
   it("reads the private key from a file when only its path is given", () => {
     const config = loadGithubAppConfig({
       ...complete,
@@ -62,12 +74,7 @@ describe("loading the GitHub App configuration", () => {
 
   // CR-38-T02
   it("turns real line breaks and escaped backslash n into the same key, and a JWT signed with it verifies", () => {
-    const publicKey = generateKeyPairSync("rsa", {
-      modulusLength: 2048,
-      privateKeyEncoding: { type: "pkcs1", format: "pem" },
-      publicKeyEncoding: { type: "spki", format: "pem" },
-    });
-    const withBreaks = publicKey.privateKey.trim();
+    const withBreaks = privateKey.trim();
     const escaped = withBreaks.replace(/\n/g, "\\n");
 
     const fromBreaks = loadGithubAppConfig({
@@ -93,7 +100,7 @@ describe("loading the GitHub App configuration", () => {
     expect(
       createVerify("RSA-SHA256")
         .update(`${header}.${payload}`)
-        .verify(publicKey.publicKey, Buffer.from(signature, "base64url")),
+        .verify(keyPair.publicKey, Buffer.from(signature, "base64url")),
     ).toBe(true);
   });
 
