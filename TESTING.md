@@ -122,6 +122,7 @@ production client code runs unchanged. Test stack values are fixed dummies; no e
 | Dependency | Unit | Integration, e2e |
 |---|---|---|
 | GitHub REST API and App installation tokens | In-memory implementation of our `GitHubClient` interface | `fakes/github` HTTP server; base URL from `GITHUB_API_BASE`; verifies the App JWT; seeded repos, PRs and diffs; assertions read what was posted |
+| Git platform behind `IntegrationProvider` (jobs, runner API, UI) | `fakeIntegrationProvider()` in `app/src/test-support/fake-integration-provider.ts`; every provider also runs the shared conformance suite (`integration-provider-conformance.ts`) | Same fake, registered through `createIntegrationRegistry`; see `app/src/integrations/README.md` |
 | GitHub webhooks (inbound) | Signature verification as a pure function (HMAC-SHA256) | The fake signs and delivers payloads exactly like GitHub (`X-Hub-Signature-256`, `X-GitHub-Delivery`, `X-GitHub-Event`); fixtures are real payloads reduced to the fields we read |
 | GitHub login (OAuth) | n/a | `fakes/github` also serves the OAuth authorize, token and user endpoints. Exactly one e2e file signs in through the form; all other journeys use an API shortcut proven equivalent by its own test |
 | LLM providers | Not reachable: runner unit tests never start PR-Agent | `fakes/llm`: OpenAI-compatible `chat/completions` with scripted answers, malformed output, 429, 500 and slow responses; dummy API key |

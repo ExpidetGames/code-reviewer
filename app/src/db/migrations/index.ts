@@ -3,9 +3,11 @@
 // a new one instead. Registered statically (not read from the disk) so it works in a Next.js bundle.
 import type { Migration, MigrationProvider } from "kysely/migration";
 import { migration as createAppMeta } from "./0001_create_app_meta.ts";
+import { migration as createIntegrations } from "./0002_create_integrations.ts";
 
 const migrations: Record<string, Migration> = {
   "0001_create_app_meta": createAppMeta,
+  "0002_create_integrations": createIntegrations,
 };
 
 export const migrationProvider: MigrationProvider = {

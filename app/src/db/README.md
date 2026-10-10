@@ -116,6 +116,10 @@ string or a timestamp string format. Route handlers and server code get the conn
 `getDatabase()` (`startup.ts`) and pass it in; tests pass in a database from
 `src/test-support/test-database.ts`.
 
+`integrations` (migration `0002`, repository `integrations-repository.ts`) holds the connections to
+git platforms; see `src/integrations/README.md`. It keeps no secret of a GitHub App, and the
+repository refuses secret-looking keys in `config`.
+
 `app_meta` (a key/value table for facts about the installation) exists to prove the setup. Product
 tables come with the tickets that need them: add the migration, the row type in `schema.ts` and the
 repository in the same change.
