@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { signInWithGithub } from "@/auth/actions";
 import { loginErrorMessage } from "@/auth/login-errors";
+import { Button } from "@/ui/button";
 
 export default function LoginPage({ searchParams }: PageProps<"/login">) {
   return (
@@ -13,9 +14,9 @@ export default function LoginPage({ searchParams }: PageProps<"/login">) {
           <LoginError searchParams={searchParams} />
         </Suspense>
         <form action={signInWithGithub}>
-          <button type="submit" className="btn btn-primary btn-block">
+          <Button type="submit" className="btn-block">
             Sign in with GitHub
-          </button>
+          </Button>
         </form>
       </div>
     </main>

@@ -3,6 +3,7 @@
 // works from the keyboard. The name and avatar come from the GitHub profile, so they are shown as
 // plain text and a missing or unusable avatar never leaves a broken image.
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -86,7 +87,7 @@ describe("opening the user menu", () => {
     expect(document.activeElement).toBe(button);
   });
 
-  it("closes when the focus leaves the menu or a click lands outside it", async () => {
+  it("closes when the keyboard focus moves past the last control", async () => {
     const user = userEvent.setup();
     render(
       <>
@@ -95,13 +96,49 @@ describe("opening the user menu", () => {
       </>,
     );
     const button = screen.getByRole("button", { name: /Ada Lovelace/ });
+    await user.tab();
+    await user.keyboard("{Enter}");
+    screen.getByRole("button", { name: "Sign out" }).focus();
+    expect(button.getAttribute("aria-expanded")).toBe("true");
 
-    await user.click(button);
-    await user.click(screen.getByRole("button", { name: "elsewhere" }));
+    await user.tab();
+
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "elsewhere" }),
+    );
     expect(button.getAttribute("aria-expanded")).toBe("false");
+  });
 
+  it("closes when the focus moves back before the button, and stays open while it moves inside", async () => {
+    const user = userEvent.setup();
+    render(
+      <>
+        <button type="button">before</button>
+        <UserMenu user={ada} signOutAction={async () => {}} />
+      </>,
+    );
+    const button = screen.getByRole("button", { name: /Ada Lovelace/ });
     await user.click(button);
+
+    await user.tab();
+    expect(button.getAttribute("aria-expanded")).toBe("true");
+    await user.tab({ shift: true });
+    await user.tab({ shift: true });
+
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "before" }),
+    );
+    expect(button.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("closes on a click outside it", async () => {
+    const user = userEvent.setup();
+    renderMenu(ada);
+    const button = screen.getByRole("button", { name: /Ada Lovelace/ });
+    await user.click(button);
+
     fireEvent.pointerDown(document.body);
+
     expect(button.getAttribute("aria-expanded")).toBe("false");
   });
 
@@ -114,6 +151,26 @@ describe("opening the user menu", () => {
     await user.click(screen.getByRole("button", { name: "Sign out" }));
 
     expect(signOut).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables the sign out button while the action runs, so a double click cannot post it twice", async () => {
+    const user = userEvent.setup();
+    let finish: () => void = () => {};
+    const signOut = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    renderMenu(ada, signOut);
+    await user.click(screen.getByRole("button", { name: /Ada Lovelace/ }));
+    const entry = screen.getByRole("button", { name: "Sign out" });
+
+    await user.dblClick(entry);
+
+    expect(signOut).toHaveBeenCalledTimes(1);
+    expect(entry.hasAttribute("disabled")).toBe(true);
+    await act(async () => finish());
   });
 
   it("offers the color theme choice with the current one pressed", async () => {

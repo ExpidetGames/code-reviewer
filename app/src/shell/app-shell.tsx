@@ -5,7 +5,15 @@
 // chosen and with Escape. The user menu arrives as a slot: it needs the session, so the layout
 // renders it on the server and the frame itself stays static.
 import Link from "next/link";
-import { Suspense, useId, useRef, useState, type ReactNode } from "react";
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { CurrentNavLinks, NavLinks } from "./nav-links.tsx";
 
 export function AppShell({
@@ -19,7 +27,22 @@ export function AppShell({
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const navId = useId();
   const mainId = useId();
-  const closeMenu = () => setMenuOpen(false);
+  const navRef = useRef<HTMLElement>(null);
+  const closeMenu = useCallback(() => setMenuOpen(false), []);
+
+  // A press anywhere but on the navigation and its button closes the open menu (also on the user
+  // menu next to it, so the two panels never overlap on a phone).
+  useEffect(() => {
+    if (!menuOpen) return;
+    function onPointerDown(event: PointerEvent) {
+      const target = event.target as Node;
+      if (navRef.current?.contains(target)) return;
+      if (menuButtonRef.current?.contains(target)) return;
+      setMenuOpen(false);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [menuOpen]);
 
   return (
     <div className="app-shell">
@@ -46,10 +69,11 @@ export function AppShell({
             <span className="menu-icon" aria-hidden="true" />
             Menu
           </button>
-          <Link href="/projects" className="brand">
+          <Link href="/projects" className="brand" onClick={closeMenu}>
             Code Reviewer
           </Link>
           <nav
+            ref={navRef}
             id={navId}
             className="main-nav"
             aria-label="Main"

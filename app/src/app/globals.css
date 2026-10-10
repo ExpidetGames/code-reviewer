@@ -108,8 +108,9 @@ button {
   color: var(--muted-foreground);
 }
 
-/* Text for screen readers only. */
-.sr-only {
+/* Text for screen readers only. The user menu name is one on narrow screens (see below). */
+.sr-only,
+.user-menu-name {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -378,9 +379,14 @@ button {
   color: var(--foreground);
 }
 
+/* The current place is shown by more than color (an underline), so it also survives forced colors
+   (Windows high contrast), which drop backgrounds and shadows. */
 .nav-link[aria-current="page"] {
   background: var(--accent);
   color: var(--accent-foreground);
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.3em;
 }
 
 .app-main {
@@ -419,14 +425,6 @@ button {
 .user-menu-button:hover,
 .user-menu-button[aria-expanded="true"] {
   background: var(--muted);
-}
-
-.user-menu-name {
-  overflow: hidden;
-  max-width: 14rem;
-  font-weight: 500;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .avatar {
@@ -517,10 +515,15 @@ button {
   cursor: pointer;
 }
 
+/* The chosen option has a check mark besides its background, for the same reason as above. */
 .theme-toggle button[aria-pressed="true"] {
   background: var(--card);
   box-shadow: 0 0 0 1px var(--border);
   font-weight: 600;
+}
+
+.theme-toggle button[aria-pressed="true"]::before {
+  content: "\2713\00a0";
 }
 
 /* Narrow screens: the navigation folds into the "Menu" button. */
@@ -552,19 +555,24 @@ button {
     padding: 0.75rem;
   }
 
-  /* The name stays available to screen readers, the avatar is enough to see. */
-  .user-menu-name {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    margin: -1px;
-    padding: 0;
-    overflow: hidden;
-    clip-path: inset(50%);
-  }
-
   .user-menu-button {
     padding: 0.25rem;
+  }
+}
+
+/* Wide screens: the name next to the avatar is visible (on narrow screens it is for screen readers
+   only, the avatar is enough to see). */
+@media (min-width: 48rem) {
+  .user-menu-name {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    overflow: hidden;
+    clip-path: none;
+    max-width: 14rem;
+    font-weight: 500;
+    text-overflow: ellipsis;
   }
 }
 

@@ -173,7 +173,7 @@ server runs, that `/data/app.db` exists, belongs to the unprivileged user and ho
 migration, and that the log reports no database error. `runner.sh <image>` checks `--version` against
 `runner/pyproject.toml`, the user, a writable `/tmp` and home directory. Both run the secrets scan of
 `lib.sh` (no `.env*`, `.git`, key or database files, no private key material, no secret-looking
-variable in the image configuration or build history). The scans run as root in a throwaway container and the script stops if a scan itself fails (docker, `find` or `grep` error), so a broken scan can never pass as a clean one; the key content scan covers project-owned paths only, not third-party packages. Containers and volumes are removed on exit,
+variable in the image configuration or build history). The private key scan is proven first on files made for it (`docker/smoke/test-key-scan.sh`, also run at the start of every scan): a PEM file, a JSON embedded key, a split, joined or URL encoded key are caught, the harmless `indexOf("-----BEGIN ...")` comparison of a bundled library is not. The scans run as root in a throwaway container and the script stops if a scan itself fails (docker, `find` or `grep` error), so a broken scan can never pass as a clean one; the key content scan covers project-owned paths only, not third-party packages. Containers and volumes are removed on exit,
 also after a failure. What is not covered: the real push to GHCR and pulling from the deployment
 server (manual, see the PR of the image ticket), and PR-Agent in the runner image (planned with the
 PR-Agent ticket: installed version equals the pinned one, a job through the fake PR-Agent).

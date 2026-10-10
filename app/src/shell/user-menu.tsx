@@ -4,6 +4,8 @@
 // panel), so it works with plain Tab and Enter: Escape closes it and puts the focus back on the
 // button, and so does a click or the focus moving outside.
 import { useEffect, useId, useRef, useState } from "react";
+import { useFormStatus } from "react-dom";
+import { Button } from "../ui/button.tsx";
 import { ThemeToggle } from "../theme/theme-toggle.tsx";
 import { UserAvatar } from "./user-avatar.tsx";
 import { displayName, type ShellUser } from "./user-display.ts";
@@ -69,12 +71,25 @@ export function UserMenu({
             <ThemeToggle />
           </div>
           <form action={signOutAction}>
-            <button type="submit" className="btn btn-secondary btn-block">
-              Sign out
-            </button>
+            <SignOutButton />
           </form>
         </div>
       )}
     </div>
+  );
+}
+
+// Disabled while the action runs: a second press would end an already ended session.
+function SignOutButton() {
+  const { pending } = useFormStatus();
+  return (
+    <Button
+      type="submit"
+      variant="secondary"
+      className="btn-block"
+      disabled={pending}
+    >
+      Sign out
+    </Button>
   );
 }

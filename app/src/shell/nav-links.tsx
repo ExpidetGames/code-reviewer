@@ -5,6 +5,7 @@
 // `NavLinks` without a current page meanwhile.
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useRef } from "react";
 import { NAV_ITEMS, isCurrentPage } from "./nav-items.ts";
 
 export function NavLinks({
@@ -36,5 +37,16 @@ export function NavLinks({
 }
 
 export function CurrentNavLinks({ onNavigate }: { onNavigate?: () => void }) {
-  return <NavLinks pathname={usePathname()} onNavigate={onNavigate} />;
+  const pathname = usePathname();
+  const shownPath = useRef(pathname);
+
+  // The page changed, by whatever means (a link anywhere, back and forward): the narrow menu has
+  // done its job. A click on a nav link closes it sooner through `onNavigate` on the link.
+  useEffect(() => {
+    if (shownPath.current === pathname) return;
+    shownPath.current = pathname;
+    onNavigate?.();
+  }, [pathname, onNavigate]);
+
+  return <NavLinks pathname={pathname} onNavigate={onNavigate} />;
 }

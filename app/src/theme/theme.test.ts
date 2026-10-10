@@ -1,8 +1,11 @@
 // @vitest-environment jsdom
-// Pins down the color mode logic: the system setting applies until the person makes a choice, a
-// valid stored choice wins over the system, an unusable stored value is ignored, and a browser
-// without usable storage never causes an error. The inline script that applies the choice before
+// Pins down the color mode: the system setting applies until the person makes a choice (nothing
+// stored, or something unusable, means no attribute on the page and the stylesheet follows the
+// system), a valid stored choice is applied and wins over the system (the stylesheet pins
+// color-scheme for it), and a browser without usable storage never causes an error. The inline script that applies the choice before
 // the first paint is held to the same rules, so a reload shows the same mode the toggle showed.
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   THEME_ATTRIBUTE,
@@ -10,7 +13,6 @@ import {
   applyThemeChoice,
   initialThemeScript,
   loadThemeChoice,
-  resolveColorMode,
   saveThemeChoice,
   type ThemeStorage,
 } from "./theme.ts";
@@ -38,28 +40,6 @@ const brokenStorage: ThemeStorage = {
     throw new Error("storage is blocked");
   },
 };
-
-describe("resolving the color mode", () => {
-  // CR-36-T08
-  it.each([
-    { systemDark: false, expected: "light" },
-    { systemDark: true, expected: "dark" },
-  ])(
-    "follows the system when nothing is stored (system dark: $systemDark)",
-    ({ systemDark, expected }) => {
-      expect(resolveColorMode("system", systemDark)).toBe(expected);
-    },
-  );
-
-  // CR-36-T08
-  it.each([true, false])(
-    "lets a stored choice win over the system (system dark: %s)",
-    (systemDark) => {
-      expect(resolveColorMode("dark", systemDark)).toBe("dark");
-      expect(resolveColorMode("light", systemDark)).toBe("light");
-    },
-  );
-});
 
 describe("loading the stored choice", () => {
   // CR-36-T08
@@ -170,5 +150,29 @@ describe("the script that runs before the first paint", () => {
     expect(() => run("throws on access")).not.toThrow();
     expect(() => run(brokenStorage)).not.toThrow();
     expect(run(brokenStorage).hasAttribute(THEME_ATTRIBUTE)).toBe(false);
+  });
+});
+
+describe("the stylesheet", () => {
+  const css = readFileSync(
+    join(import.meta.dirname, "..", "app", "globals.css"),
+    "utf8",
+  );
+
+  // CR-36-T08
+  it("follows the system by default and pins the mode for a stored choice", () => {
+    expect(css).toMatch(/:root\s*{[^}]*color-scheme:\s*light dark;/);
+    expect(css).toMatch(
+      /:root\[data-theme="light"\]\s*{\s*color-scheme:\s*light;\s*}/,
+    );
+    expect(css).toMatch(
+      /:root\[data-theme="dark"\]\s*{\s*color-scheme:\s*dark;\s*}/,
+    );
+  });
+
+  it("writes colors only in the token block", () => {
+    const afterTokens = css.slice(css.indexOf(":root[data-theme"));
+
+    expect(afterTokens).not.toMatch(/#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(/);
   });
 });

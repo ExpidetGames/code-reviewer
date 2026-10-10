@@ -18,7 +18,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <script dangerouslySetInnerHTML={{ __html: initialThemeScript() }} />
       </head>
       <body>
-        <ThemeSync />
+        {/* Only for the Strict Mode remount of `next dev`, see theme-sync.tsx. */}
+        {process.env.NODE_ENV !== "production" && <ThemeSync />}
         {children}
       </body>
     </html>

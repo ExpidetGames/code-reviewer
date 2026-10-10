@@ -3,7 +3,13 @@
 // current one marked, and on a narrow screen the menu button that opens and closes it. Whether it
 // looks right is checked by eye (see the ticket); here only what a screen reader or keyboard can
 // observe is checked.
-import { cleanup, render, screen, within } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -150,5 +156,64 @@ describe("the menu on a narrow screen", () => {
 
     expect(button.getAttribute("aria-expanded")).toBe("false");
     expect(document.activeElement).toBe(button);
+  });
+
+  // CR-36-T07
+  it("closes the navigation when the page changes by any other way than a nav link, such as the brand link or back and forward", async () => {
+    const user = userEvent.setup();
+    const { rerender } = renderShell();
+    const button = screen.getByRole("button", { name: "Menu" });
+    await user.click(button);
+    expect(button.getAttribute("aria-expanded")).toBe("true");
+
+    navigation.pathname = "/projects";
+    rerender(
+      <AppShell userMenu={<span>user menu</span>}>
+        <h1>Page content</h1>
+      </AppShell>,
+    );
+
+    expect(button.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  // CR-36-T07
+  it("closes the navigation when the brand link is chosen on the page it points to", async () => {
+    const user = userEvent.setup();
+    navigation.pathname = "/projects";
+    renderShell();
+    const button = screen.getByRole("button", { name: "Menu" });
+    await user.click(button);
+
+    await user.click(screen.getByRole("link", { name: "Code Reviewer" }));
+
+    expect(button.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  // CR-36-T07
+  it("closes the navigation on a click outside it, also on the user menu", async () => {
+    const user = userEvent.setup();
+    renderShell();
+    const button = screen.getByRole("button", { name: "Menu" });
+
+    await user.click(button);
+    fireEvent.pointerDown(
+      screen.getByRole("heading", { name: "Page content" }),
+    );
+    expect(button.getAttribute("aria-expanded")).toBe("false");
+
+    await user.click(button);
+    fireEvent.pointerDown(screen.getByText("user menu"));
+    expect(button.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("stays open when the press lands on the navigation itself", async () => {
+    const user = userEvent.setup();
+    renderShell();
+    const button = screen.getByRole("button", { name: "Menu" });
+    await user.click(button);
+
+    fireEvent.pointerDown(screen.getByRole("navigation", { name: "Main" }));
+
+    expect(button.getAttribute("aria-expanded")).toBe("true");
   });
 });

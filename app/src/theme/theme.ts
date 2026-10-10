@@ -9,22 +9,12 @@ export const THEME_ATTRIBUTE = "data-theme";
 
 export const THEME_CHOICES = ["system", "light", "dark"] as const;
 export type ThemeChoice = (typeof THEME_CHOICES)[number];
-export type ColorMode = "light" | "dark";
 
 /** The part of `Storage` this module uses; the real localStorage and a test double both fit. */
 export type ThemeStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
-function isStoredChoice(value: unknown): value is ColorMode {
+function isStoredChoice(value: unknown): value is "light" | "dark" {
   return value === "light" || value === "dark";
-}
-
-/** The mode that is shown for a choice: the system setting unless the person chose one. */
-export function resolveColorMode(
-  choice: ThemeChoice,
-  systemPrefersDark: boolean,
-): ColorMode {
-  if (choice === "system") return systemPrefersDark ? "dark" : "light";
-  return choice;
 }
 
 /**

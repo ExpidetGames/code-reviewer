@@ -8,13 +8,13 @@ Code Reviewer wraps PR-Agent: it runs PR-Agent against pull requests and adds a 
 
 ## Repository layout
 
-| Path | Content |
-|---|---|
-| `app/` | Web app and API: Next.js 16, TypeScript, pnpm |
-| `runner/` | Worker that runs PR-Agent: Python, uv |
-| `fakes/` | Fake servers and fixtures used by the tests |
-| `TESTING.md` | Testing strategy |
-| `AGENTS.md` | Rules for agents and contributors |
+| Path         | Content                                       |
+| ------------ | --------------------------------------------- |
+| `app/`       | Web app and API: Next.js 16, TypeScript, pnpm |
+| `runner/`    | Worker that runs PR-Agent: Python, uv         |
+| `fakes/`     | Fake servers and fixtures used by the tests   |
+| `TESTING.md` | Testing strategy                              |
+| `AGENTS.md`  | Rules for agents and contributors             |
 
 ## Prerequisites
 
@@ -70,6 +70,14 @@ removed from the list loses access on the next request (after a restart with the
 organization membership is checked at sign in and again every 24 hours.
 How it works: `app/src/auth/README.md`.
 
+## Supported browsers
+
+The web UI is built for current Chrome and Edge (123 or newer), Firefox (120 or newer) and Safari
+17.5 or newer. The color tokens use `light-dark()` and `color-mix()` without a fallback, so an older
+browser shows the page without its colors; there is no polyfill on purpose (a team tool, always
+up to date browsers). The navigation menu on narrow screens and the user menu need JavaScript; the
+sign in, the sign out and the three places themselves are plain links and forms.
+
 ## Run the runner locally
 
 ```sh
@@ -81,10 +89,10 @@ uv run code-reviewer-runner --version
 
 Two images are built from the repository, each with its own Dockerfile and `.dockerignore`:
 
-| Image | Build | Notes |
-|---|---|---|
-| `ghcr.io/expidetgames/code-reviewer-app` | `docker build -t code-reviewer-app app` | Next.js standalone server on port 3000, runs as uid 10001. The database lives in the volume `/data` (`DATABASE_PATH=/data/app.db`); it is created and migrated on start. |
-| `ghcr.io/expidetgames/code-reviewer-runner` | `docker build -t code-reviewer-runner runner` | Python (version of `runner/.python-version`) with the runner installed by uv from `uv.lock`, runs as uid 10001. PR-Agent is added with its own ticket. |
+| Image                                       | Build                                         | Notes                                                                                                                                                                    |
+| ------------------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ghcr.io/expidetgames/code-reviewer-app`    | `docker build -t code-reviewer-app app`       | Next.js standalone server on port 3000, runs as uid 10001. The database lives in the volume `/data` (`DATABASE_PATH=/data/app.db`); it is created and migrated on start. |
+| `ghcr.io/expidetgames/code-reviewer-runner` | `docker build -t code-reviewer-runner runner` | Python (version of `runner/.python-version`) with the runner installed by uv from `uv.lock`, runs as uid 10001. PR-Agent is added with its own ticket.                   |
 
 ```sh
 docker run --rm -p 3000:3000 -v code-reviewer-data:/data \
@@ -117,12 +125,12 @@ make verify            # all of the above, run before every pull request
 
 Or per part:
 
-| | App (`cd app`) | Runner (`cd runner`) |
-|---|---|---|
-| Lint | `pnpm lint` and `pnpm format:check` (`pnpm format` fixes) | `uv run ruff check .` and `uv run ruff format --check .` |
-| Typecheck | `pnpm typecheck` | `uv run pyright` |
-| Unit tests | `pnpm test` | `uv run pytest -m unit` |
-| Integration | `pnpm test:int` | `uv run pytest -m "integration or contract"` |
+|             | App (`cd app`)                                            | Runner (`cd runner`)                                     |
+| ----------- | --------------------------------------------------------- | -------------------------------------------------------- |
+| Lint        | `pnpm lint` and `pnpm format:check` (`pnpm format` fixes) | `uv run ruff check .` and `uv run ruff format --check .` |
+| Typecheck   | `pnpm typecheck`                                          | `uv run pyright`                                         |
+| Unit tests  | `pnpm test`                                               | `uv run pytest -m unit`                                  |
+| Integration | `pnpm test:int`                                           | `uv run pytest -m "integration or contract"`             |
 
 End-to-end tests run against a production build on port 3417 (`E2E_PORT`), next to a fake GitHub on
 a fake GitHub on a random port (`fakes/github`):

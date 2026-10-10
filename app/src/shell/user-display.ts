@@ -16,6 +16,13 @@ export function displayName(user: ShellUser): string {
   return name === "" ? user.login : name;
 }
 
+// One capital letter per letter: some capitals are longer than the letter (ß becomes SS), which
+// would overflow the avatar circle, so those stay as they are.
+function capital(char: string): string {
+  const upper = char.toUpperCase();
+  return upper.length === char.length ? upper : char;
+}
+
 const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u;
 
 /** Up to two capital letters for the avatar circle, from the display name (or the login). */
@@ -24,8 +31,9 @@ export function initials(user: ShellUser): string {
     .split(/[\s\-_.]+/)
     .map((word) => Array.from(word).find((char) => LETTER_OR_DIGIT.test(char)))
     .filter((char): char is string => char !== undefined)
-    .slice(0, 2);
-  return letters.length === 0 ? "?" : letters.join("").toUpperCase();
+    .slice(0, 2)
+    .map(capital);
+  return letters.length === 0 ? "?" : letters.join("");
 }
 
 /** The avatar address if it is safe to load as an image (https only), otherwise null. */
