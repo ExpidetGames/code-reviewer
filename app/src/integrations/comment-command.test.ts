@@ -1,10 +1,13 @@
 // Pins down how a comment is read as a command: only a comment that starts with one of the four
 // commands counts, only /ask carries text, and that text is cut to a fixed length.
 import { describe, expect, it } from "vitest";
+import askQuestionImages from "../../../fakes/fixtures/ask-question-images.json" with { type: "json" };
 import {
   ASK_QUESTION_MAX_CHARS,
   ASK_QUESTION_TRUNCATION_NOTE,
+  IMAGE_LINK_PLACEHOLDER,
   parseCommentCommand,
+  removeImageLinks,
 } from "./comment-command.ts";
 
 describe("reading a comment as a command", () => {
@@ -110,14 +113,70 @@ describe("reading a comment as a command", () => {
     );
   });
 
-  it("does not split a character when it cuts", () => {
+  it("cuts by UTF-16 length and never inside a surrogate pair, so the job always fits the runner's limit", () => {
     const emoji = "\u{1F600}";
     const result = parseCommentCommand(
-      `/ask ${emoji.repeat(ASK_QUESTION_MAX_CHARS + 1)}`,
+      `/ask ${emoji.repeat(ASK_QUESTION_MAX_CHARS)}`,
     );
 
     const cut = result?.args.split("\n\n")[0] ?? "";
-    expect(Array.from(cut)).toHaveLength(ASK_QUESTION_MAX_CHARS);
-    expect(cut).toBe(emoji.repeat(ASK_QUESTION_MAX_CHARS));
+    expect(cut.length).toBeLessThanOrEqual(ASK_QUESTION_MAX_CHARS);
+    expect(cut.length % 2).toBe(0);
+    expect(cut).toBe(emoji.repeat(ASK_QUESTION_MAX_CHARS / 2));
+    // The claim refuses a question of more than 4000 UTF-16 units.
+    expect(result?.args.length).toBeLessThanOrEqual(4000);
+    expect(result?.args).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])/);
+  });
+
+  it("keeps a lone high surrogate at the cut out of the question", () => {
+    const text = `${"a".repeat(ASK_QUESTION_MAX_CHARS - 1)}\u{1F600}more`;
+
+    const cut = (parseCommentCommand(`/ask ${text}`)?.args ?? "").split(
+      "\n\n",
+    )[0];
+
+    expect(cut).toBe("a".repeat(ASK_QUESTION_MAX_CHARS - 1));
+  });
+});
+
+describe("removing image links from a question", () => {
+  // PR-Agent downloads the first image of an /ask question from the runner, so a user could make the
+  // runner request an address of their choice. The links never reach a job.
+  it("uses the placeholder the runner uses", () => {
+    expect(askQuestionImages.placeholder).toBe(IMAGE_LINK_PLACEHOLDER);
+  });
+
+  it.each(askQuestionImages.cases)("$name", ({ input, expected }) => {
+    expect(removeImageLinks(input)).toBe(expected);
+  });
+
+  it("is applied to the question of /ask before it becomes the job's arguments", () => {
+    expect(
+      parseCommentCommand("/ask what is ![image](https://evil.test/a.png) ?"),
+    ).toEqual({ command: "ask", args: "what is [image link removed] ?" });
+  });
+
+  it("leaves a question that is only an image without a question", () => {
+    expect(parseCommentCommand("/ask https://evil.test/a.png")).toEqual({
+      command: "ask",
+      args: "[image link removed]",
+    });
+  });
+
+  it("leaves nothing that PR-Agent would fetch, whatever the question holds", () => {
+    const nasty = [
+      "!!![image](https://a.test/x.png)",
+      "!https://a.test/x.png",
+      "ht![x](y)tps://a.test/x.png",
+      "https://a.test/x.pn![x](y)g",
+      "![![image](a)](https://a.test/x.png)",
+    ];
+    for (const input of nasty) {
+      const cleaned = removeImageLinks(input);
+      expect(cleaned, input).not.toContain("![image]");
+      expect(cleaned, input).not.toMatch(
+        /https?:\/\/\S*\.(png|jpe?g|gif|webp)/i,
+      );
+    }
   });
 });

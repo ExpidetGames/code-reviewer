@@ -31,6 +31,7 @@ from enum import StrEnum
 from typing import Any, NoReturn
 from urllib.parse import SplitResult, urlsplit
 
+from code_reviewer_runner.question_images import remove_image_links
 from code_reviewer_runner.result import ErrorCode
 
 MAX_JOB_BYTES = 1024 * 1024
@@ -308,7 +309,9 @@ def _args(data: dict[str, Any], command: Command) -> tuple[str, ...]:
     question: Any = raw[0]  # pyright: ignore[reportUnknownVariableType]
     if not isinstance(question, str) or not question.strip() or len(question) > MAX_QUESTION_CHARS:
         raise _invalid("the question must be a non-empty string of at most 4000 characters")
-    return (question,)
+    # The question is a comment of somebody else: PR-Agent would download an image it links to from
+    # here, so none reaches it (the app removes them too, this is the second line).
+    return (remove_image_links(question),)
 
 
 def _env(data: dict[str, Any]) -> dict[str, str]:
