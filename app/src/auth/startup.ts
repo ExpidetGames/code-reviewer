@@ -75,7 +75,8 @@ type SyncPinsOptions = {
 
 /**
  * Brings the pins of the allow list (`allowed_login_pins`) in line with the configuration. Called
- * once when the server starts, after the migrations: the pins of logins that are no longer on the
+ * once when the server starts, after the migrations. Does nothing at all when no logins list is
+ * configured (organization mode only): then the table is neither read nor written. Otherwise the pins of logins that are no longer on the
  * list are deleted (so removing a login and adding it again resets its pin), and an id given as
  * `login:id` is set, replacing a different pin. A login without an id is bound at its first sign in.
  * Nothing printed names a login or an id. A failure ends the start with exit code 1: a stale pin
@@ -88,6 +89,9 @@ export async function syncLoginPinsOnStart({
   log = console.error,
   exit = (code) => process.exit(code),
 }: SyncPinsOptions): Promise<void> {
+  // Without a logins list (organization mode only, or nothing configured) the pins are not this
+  // run's business: nothing is read, written or deleted.
+  if (config.logins.size === 0) return;
   const pins = createAllowedLoginPinsRepository(db);
   try {
     await pins.deleteUnlisted(config.logins);

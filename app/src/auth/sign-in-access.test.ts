@@ -129,11 +129,25 @@ describe("the sign in decision for a listed login that is bound to a GitHub id",
   });
 
   it("keeps everybody out when the pin cannot be read or written", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
     for (const pinned of [null, "throws"] as const) {
       const { result } = decide(list, "octocat", "member", pinned);
 
       expect(await result).toEqual({ allowed: false, reason: "check_failed" });
     }
+  });
+
+  it("does not ask the organization when the pin cannot be read, even if one is configured", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { result, checkMembership } = decide(
+      { ALLOWED_GITHUB_LOGINS: "octocat", ALLOWED_GITHUB_ORG: "my-org" },
+      "octocat",
+      "member",
+      "throws",
+    );
+
+    expect(await result).toEqual({ allowed: false, reason: "check_failed" });
+    expect(checkMembership).not.toHaveBeenCalled();
   });
 
   // CR-42-T10

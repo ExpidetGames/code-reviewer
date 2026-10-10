@@ -55,6 +55,25 @@ describe("pinning a login to a GitHub id", () => {
     expect((await pins.list()).map((pin) => pin.login)).toEqual(["octocat"]);
   });
 
+  it("only reads when the login is bound already, so a request takes no write lock", async () => {
+    const { db, pins } = await setup();
+    await pins.pin("octocat", "1001");
+    const statements: string[] = [];
+    const watched = createAllowedLoginPinsRepository(
+      db.withPlugin({
+        transformQuery: ({ node }) => {
+          statements.push(node.kind);
+          return node;
+        },
+        transformResult: ({ result }) => Promise.resolve(result),
+      }),
+    );
+
+    expect(await watched.pin("OctoCat", "2002")).toBe("1001");
+
+    expect(statements).toEqual(["SelectQueryNode"]);
+  });
+
   it("finds nothing for a login without a pin", async () => {
     const { pins } = await setup();
 
@@ -112,7 +131,6 @@ describe("removing pins of logins that are no longer listed", () => {
     expect(await pins.list()).toEqual([hubot]);
   });
 
-  // CR-42-T12
   it("deletes every pin when nothing is listed", async () => {
     const { pins } = await setup();
     await pins.pin("octocat", "1001");

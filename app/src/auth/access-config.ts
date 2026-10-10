@@ -94,10 +94,11 @@ type Presets = {
 };
 
 // Reads the entries of the form `login:id`. An entry that is not valid is counted and ignored (it
-// admits nobody), never reported with its text: it contains an id.
+// admits nobody), never reported with its text: it contains an id. A login that is given two
+// different ids is ambiguous: every entry of it is counted as invalid and the login gets no id, so
+// the result does not depend on the order of the entries.
 function parsePresets(value: string): Presets {
-  const ids = new Map<string, string>();
-  const conflicting = new Set<string>();
+  const idsByLogin = new Map<string, string[]>();
   let invalid = 0;
   for (const entry of value.split(",")) {
     const trimmed = entry.trim();
@@ -113,15 +114,17 @@ function parsePresets(value: string): Presets {
       invalid += 1;
       continue;
     }
-    const earlier = ids.get(login);
-    if (earlier !== undefined && earlier !== id) {
-      conflicting.add(login);
-      invalid += 1;
-    }
-    ids.set(login, id);
+    idsByLogin.set(login, [...(idsByLogin.get(login) ?? []), id]);
   }
-  // The first entry of a contradiction was counted by neither branch above.
-  invalid += conflicting.size;
-  for (const login of conflicting) ids.delete(login);
+  const ids = new Map<string, string>();
+  const conflicting = new Set<string>();
+  for (const [login, given] of idsByLogin) {
+    const first = given[0] ?? "";
+    if (given.every((id) => id === first)) ids.set(login, first);
+    else {
+      conflicting.add(login);
+      invalid += given.length;
+    }
+  }
   return { ids, invalid, conflicting };
 }

@@ -294,13 +294,15 @@ describe("restarting the server with a changed list", () => {
     expect(await pinsOf(added).find("octocat")).toBe("2002");
   });
 
-  it("deletes every binding when the list is empty", async () => {
+  // CR-42-T12
+  it("leaves the bindings alone when no logins list is configured at all (organization mode)", async () => {
     const first = await bothBound();
-    const second = first.restart({ allowedLogins: [] });
+    const before = await pinsOf(first).list();
+    const second = first.restart({ allowedLogins: [], allowedOrg: "my-org" });
 
     await second.start();
 
-    expect(await pinsOf(second).list()).toEqual([]);
+    expect(await pinsOf(second).list()).toEqual(before);
   });
 });
 
@@ -466,6 +468,8 @@ describe("organization mode", () => {
     });
     harness.github.addOrgMember("my-org", "octocat");
     await sql`drop table allowed_login_pins`.execute(harness.db);
+    // The server's start does not touch the table either.
+    await harness.start();
     vi.useFakeTimers({ toFake: ["Date"], now: new Date() });
 
     const member = await harness.signIn(1001);

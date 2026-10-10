@@ -54,8 +54,9 @@ export async function decideSignIn({
     // listed. With an organization configured, membership alone can still admit the account.
     const pin = await checkLoginPin(pins, login, githubId);
     if (pin === "match") return { allowed: true, orgCheck: null };
-    if (config.org === null)
-      return deny(pin === "mismatch" ? "not_allowed" : "check_failed");
+    // The binding could not be read: no answer is a no, also when an organization is set.
+    if (pin === "unavailable") return deny("check_failed");
+    if (config.org === null) return deny("not_allowed");
   }
   if (config.org === null) return deny("not_allowed");
 

@@ -408,6 +408,22 @@ describe("a listed login that is bound to a GitHub id", () => {
     );
   });
 
+  it("is denied with check_failed, without asking the organization or ending sessions, when the pin cannot be read and an organization is set", async () => {
+    const { policy, loginPins, org } = setup(
+      { ...list, ALLOWED_GITHUB_ORG: "my-org" },
+      "member",
+    );
+    loginPins.pin.mockRejectedValue(new Error("locked"));
+
+    expect(await policy(user())).toEqual({
+      allowed: false,
+      reason: "check_failed",
+    });
+    expect(org.checkMembership).not.toHaveBeenCalled();
+    expect(org.revokeSessions).not.toHaveBeenCalled();
+    expect(loginPins.revokeSessions).not.toHaveBeenCalled();
+  });
+
   // CR-42-T10
   it("is not looked up for a login that is not listed", async () => {
     const { policy, loginPins } = setup(list);

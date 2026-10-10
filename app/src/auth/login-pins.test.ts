@@ -31,15 +31,43 @@ describe("comparing an account with the pin of its login", () => {
   });
 
   it("is unavailable, never a match, when the store has no answer", async () => {
-    expect(await checkLoginPin(pinsReturning(null), "octocat", "1001")).toBe(
-      "unavailable",
-    );
+    expect(
+      await checkLoginPin(pinsReturning(null), "octocat", "1001", vi.fn()),
+    ).toBe("unavailable");
   });
 
   it("is unavailable, never a match, when the store fails", async () => {
     const pins: LoginPins = { pin: () => Promise.reject(new Error("locked")) };
 
-    expect(await checkLoginPin(pins, "octocat", "1001")).toBe("unavailable");
+    expect(await checkLoginPin(pins, "octocat", "1001", vi.fn())).toBe(
+      "unavailable",
+    );
+  });
+
+  it("logs one line without the login, the id or the error when the store has no answer or fails", async () => {
+    const failing: LoginPins = {
+      pin: () => Promise.reject(new Error("locked octocat 1001")),
+    };
+    for (const pins of [pinsReturning(null), failing]) {
+      const logError = vi.fn<(message: string) => void>();
+
+      await checkLoginPin(pins, "octocat", "1001", logError);
+
+      expect(logError).toHaveBeenCalledTimes(1);
+      const line = String(logError.mock.calls[0]?.[0]);
+      expect(line).toContain("LOGIN_PIN_UNAVAILABLE");
+      expect(line).not.toMatch(/octocat|1001|locked/);
+      expect(line).not.toContain("\n");
+    }
+  });
+
+  it("logs nothing for a match or a mismatch", async () => {
+    const logError = vi.fn<(message: string) => void>();
+
+    await checkLoginPin(pinsReturning("1001"), "octocat", "1001", logError);
+    await checkLoginPin(pinsReturning("1001"), "octocat", "2002", logError);
+
+    expect(logError).not.toHaveBeenCalled();
   });
 
   it("is a mismatch for an empty id, which no account has", async () => {

@@ -24,14 +24,19 @@ export async function checkLoginPin(
   pins: LoginPins,
   login: string,
   githubId: string,
+  logError: (message: string) => void = console.error,
 ): Promise<PinCheck> {
   // An account without an id cannot be bound to anything.
   if (githubId === "") return "mismatch";
   try {
     const pinned = await pins.pin(login, githubId);
-    if (pinned === null) return "unavailable";
-    return pinned === githubId ? "match" : "mismatch";
+    if (pinned !== null) return pinned === githubId ? "match" : "mismatch";
   } catch {
-    return "unavailable";
+    // Reported below, the same way as a missing answer.
   }
+  // One line, no login, no id, no error text: nothing that identifies a person.
+  logError(
+    "[auth] LOGIN_PIN_UNAVAILABLE: could not read or write the stored GitHub id of a listed login (table allowed_login_pins); the person is turned away.",
+  );
+  return "unavailable";
 }

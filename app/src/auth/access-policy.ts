@@ -149,19 +149,22 @@ export function createAccessPolicy({
   }
 
   return async function accessPolicy(user): Promise<AccessDecision> {
-    let listed: "none" | "mismatch" | "unavailable" = "none";
+    let listed: "none" | "mismatch" = "none";
     if (isLoginListed(config, user.githubLogin)) {
       // The first request of an account that has no pin yet binds the login to it.
       const pin = await checkLoginPin(
         loginPins,
         user.githubLogin,
         user.githubId,
+        logError,
       );
       if (pin === "match") return ALLOWED;
+      // The binding could not be read: no answer is a no, also when an organization is set (the
+      // store is broken, so nothing is decided and nobody's session is ended).
+      if (pin === "unavailable") return deny("check_failed");
       listed = pin;
     }
     if (config.org === null || org === undefined) {
-      if (listed === "unavailable") return deny("check_failed");
       // The login is listed but belongs to another account: this one is not who the list means,
       // and must not keep a session.
       if (listed === "mismatch")

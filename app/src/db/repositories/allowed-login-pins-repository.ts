@@ -10,7 +10,8 @@ export type LoginPin = { login: string; githubId: string; pinnedAt: string };
 
 export type AllowedLoginPinsRepository = {
   /**
-   * Binds the login to the id unless it is bound already (`INSERT ... ON CONFLICT DO NOTHING`), then
+   * Binds the login to the id unless it is bound already (a read first, then `INSERT ... ON CONFLICT
+   * DO NOTHING` when there is none, so two callers at once cannot both win), then
    * returns the id the login is bound to now: the given one if this call (or an earlier one for the
    * same id) bound it, another one if somebody else was first. Null if the row is gone again.
    */
@@ -44,6 +45,9 @@ export function createAllowedLoginPinsRepository(
     find,
 
     async pin(login, githubId) {
+      // Look first: nearly every call finds the pin, and a plain read takes no write lock.
+      const existing = await find(login);
+      if (existing !== null) return existing;
       await db
         .insertInto("allowed_login_pins")
         .values({
@@ -80,19 +84,21 @@ export function createAllowedLoginPinsRepository(
     },
 
     async deleteUnlisted(keep) {
-      const rows = await db
-        .selectFrom("allowed_login_pins")
-        .select("login")
-        .execute();
-      const stale = rows
-        .map((row) => row.login)
-        .filter((login) => !keep.has(login));
-      for (const login of stale)
-        await db
-          .deleteFrom("allowed_login_pins")
-          .where("login", "=", login)
+      return db.transaction().execute(async (trx) => {
+        const rows = await trx
+          .selectFrom("allowed_login_pins")
+          .select("login")
           .execute();
-      return stale.length;
+        const stale = rows
+          .map((row) => row.login)
+          .filter((login) => !keep.has(login));
+        for (const login of stale)
+          await trx
+            .deleteFrom("allowed_login_pins")
+            .where("login", "=", login)
+            .execute();
+        return stale.length;
+      });
     },
 
     async list() {

@@ -79,12 +79,17 @@ NOTHING`, then the stored id is compared with the id of the account. The first a
   account on its next request. A mismatch ends all sessions of that user and answers `not_allowed`
   (page: redirect to `/login?error=not_allowed`, data route: 403); the requests after that carry no
   valid session any more and get the plain 401 / redirect. If the binding cannot be read or written
-  the request is refused with `check_failed` and no session is ended.
+  the request is refused with `check_failed` (also when an organization is configured: the
+  organization is not asked instead), no session is ended, and one `LOGIN_PIN_UNAVAILABLE` line is
+  logged without any login or id.
 - **At start** (`syncLoginPinsOnStart`, after the migrations): bindings of logins that are no longer
   on the list are deleted, so removing a login and adding it again resets its binding. An id given as
   `login:id` is written then, before anybody signs in, and replaces a different stored id (one info
   line `LOGIN_PIN_PRESET_APPLIED`, without values). That closes the gap of an impostor who signs in
   first; a login without an id is bound at its first sign in (trust on first use).
+  With no logins list at all (organization mode only) the start does not touch the table: bindings
+  that are still there stay until a list is configured again, which then deletes those of logins
+  that are not on it.
 - `login:id`: the id is 1 to 20 digits without a leading zero; whitespace around an entry is
   ignored. Anything else is ignored with the `ACCESS_LIST_ENTRY_INVALID` warning and admits nobody;
   so is a login given two different ids (both entries and any plain entry of it are dropped).

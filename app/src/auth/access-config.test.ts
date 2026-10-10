@@ -243,6 +243,28 @@ describe("entries of the form login:id in ALLOWED_GITHUB_LOGINS", () => {
     expect(isLoginListed(config, "hubot")).toBe(true);
   });
 
+  it("count a contradiction the same way whatever the order of the entries", () => {
+    const entries = ["octocat:1001", "OctoCat:2002", "octocat:1001"];
+    const orders = [
+      [0, 1, 2],
+      [0, 2, 1],
+      [1, 0, 2],
+      [1, 2, 0],
+      [2, 0, 1],
+      [2, 1, 0],
+    ];
+
+    for (const order of orders) {
+      const { config } = parse({
+        ALLOWED_GITHUB_LOGINS: order.map((i) => entries[i]).join(","),
+      });
+
+      expect(config.invalidPresetEntries).toBe(3);
+      expect(config.presetIds.size).toBe(0);
+      expect(isLoginListed(config, "octocat")).toBe(false);
+    }
+  });
+
   it("accept the same id given twice", () => {
     const { config } = parse({
       ALLOWED_GITHUB_LOGINS: "octocat:1001,OctoCat:1001",

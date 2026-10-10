@@ -1,7 +1,10 @@
 // Pins down that the server refuses to start with an incomplete sign in configuration: one readable
 // line with the code and the variable names, exit code 1, and never a secret in that line.
 import { describe, expect, it, vi } from "vitest";
-import { checkAuthConfigOnStart } from "./startup.ts";
+import type { Kysely } from "kysely";
+import type { Database } from "../db/schema.ts";
+import { parseAccessConfig } from "./access-config.ts";
+import { checkAuthConfigOnStart, syncLoginPinsOnStart } from "./startup.ts";
 
 const validEnv = {
   BETTER_AUTH_SECRET: "x".repeat(40),
@@ -168,4 +171,71 @@ describe("checking the sign in configuration when the server starts", () => {
     expect(line).not.toContain("7x7");
     expect(line).not.toContain("mallory");
   });
+});
+
+describe("bringing the login bindings in line with the list when the server starts", () => {
+  // A database that fails on first contact, and says so with a message full of values.
+  const brokenDb = {
+    selectFrom: () => {
+      throw new Error("database is locked (octocat, 1001)");
+    },
+    transaction: () => {
+      throw new Error("database is locked (octocat, 1001)");
+    },
+    insertInto: () => {
+      throw new Error("database is locked (octocat, 1001)");
+    },
+    deleteFrom: () => {
+      throw new Error("database is locked (octocat, 1001)");
+    },
+  } as unknown as Kysely<Database>;
+
+  // CR-42 (failure path)
+  it("ends the start with exit code 1 and one line that names no login and no id when the bindings cannot be updated", async () => {
+    const log = vi.fn<(message: string) => void>();
+    const exit = vi.fn<(code: number) => void>();
+    const info = vi.fn<(message: string) => void>();
+
+    await syncLoginPinsOnStart({
+      db: brokenDb,
+      config: parseAccessConfig(
+        { ALLOWED_GITHUB_LOGINS: "octocat:1001,hubot" },
+        [],
+      ),
+      info,
+      log,
+      exit,
+    });
+
+    expect(exit).toHaveBeenCalledWith(1);
+    expect(log).toHaveBeenCalledTimes(1);
+    const line = String(log.mock.calls[0]?.[0]);
+    expect(line).toContain("LOGIN_PINS_SYNC_FAILED");
+    expect(line).not.toMatch(/octocat|hubot|1001|locked/);
+    expect(line).not.toContain("\n");
+    expect(info).not.toHaveBeenCalled();
+  });
+
+  // CR-42-T12
+  it.each([
+    ["only an organization", { ALLOWED_GITHUB_ORG: "my-org" }],
+    ["nothing", {}],
+    ["only invalid entries", { ALLOWED_GITHUB_LOGINS: "octocat:abc" }],
+  ])(
+    "does not touch the database at all with %s configured",
+    async (_case, env) => {
+      const log = vi.fn<(message: string) => void>();
+      const exit = vi.fn<(code: number) => void>();
+
+      await syncLoginPinsOnStart({
+        db: brokenDb,
+        config: parseAccessConfig(env, []),
+        log,
+        exit,
+      });
+
+      expect(exit).not.toHaveBeenCalled();
+      expect(log).not.toHaveBeenCalled();
+    },
+  );
 });
