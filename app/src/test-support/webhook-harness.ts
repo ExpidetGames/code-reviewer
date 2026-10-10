@@ -2,6 +2,7 @@
 // GitHub API, the real GitHub App provider behind a registry), the delivery record, a recording
 // intake and the route's handler wired to all of them. `deliver*` builds signed requests like GitHub.
 import { vi } from "vitest";
+import type { FakePullRequest } from "../../../fakes/github/server.ts";
 import {
   signWebhookBody,
   webhookDelivery,
@@ -29,6 +30,22 @@ import { createRecordingReviewTriggerIntake } from "./recording-review-trigger-i
 
 /** The head commit of pull request 7 in the recorded payloads. */
 export const FIXTURE_HEAD_SHA = "1f3a5c7e9b2d4f60a8c1e3b5d7f90a2c4e6b8d01";
+
+/** Pull request 7 as the recorded payloads describe it; GitHub knows it when the head is checked. */
+export function fixturePullRequest(
+  overrides: Partial<FakePullRequest> = {},
+): FakePullRequest {
+  return {
+    number: 7,
+    title: "Add widget caching",
+    state: "open",
+    headSha: FIXTURE_HEAD_SHA,
+    headRef: "feature/caching",
+    baseRef: "main",
+    author: { login: "alice", id: 1001 },
+    ...overrides,
+  };
+}
 
 export async function startWebhookHarness(
   options: {
@@ -108,15 +125,7 @@ export async function startWebhookHarness(
     // Pull request 7, as the recorded payloads describe it: an open pull request whose head commit
     // is the one in the fixtures. A push is judged against it, so a test that wants another head
     // commit changes it with `fake.updatePullRequest`.
-    base.fake.addPullRequest("acme/widgets", {
-      number: 7,
-      title: "Add widget caching",
-      state: "open",
-      headSha: FIXTURE_HEAD_SHA,
-      headRef: "feature/caching",
-      baseRef: "main",
-      author: { login: "alice", id: 1001 },
-    });
+    base.fake.addPullRequest("acme/widgets", fixturePullRequest());
     if (options.activateProject !== false) {
       const [repository] = await base.repositories.list({
         integrationId: integration.id,

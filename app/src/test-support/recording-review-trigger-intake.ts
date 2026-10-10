@@ -22,6 +22,8 @@ export type RecordingReviewTriggerIntake = ReviewTriggerIntake & {
   readonly options: EnqueueOptions[];
   /** The pull requests whose waiting jobs were asked to be discarded, in order. */
   readonly discarded: { repo: RepoRef; prNumber: number }[];
+  /** The pull requests whose waiting automatic jobs were asked to be discarded (drafts). */
+  readonly discardedAutomatic: { repo: RepoRef; prNumber: number }[];
   /** Every call, including the ones that failed. */
   readonly calls: number;
   /** Makes the next calls reject with this error, until `recover`. */
@@ -37,6 +39,7 @@ export function createRecordingReviewTriggerIntake(): RecordingReviewTriggerInta
   const sources: ReviewTriggerSource[] = [];
   const options: EnqueueOptions[] = [];
   const discarded: { repo: RepoRef; prNumber: number }[] = [];
+  const discardedAutomatic: { repo: RepoRef; prNumber: number }[] = [];
   let calls = 0;
   let failure: Error | undefined;
   let delayMs = 0;
@@ -47,6 +50,7 @@ export function createRecordingReviewTriggerIntake(): RecordingReviewTriggerInta
     sources,
     options,
     discarded,
+    discardedAutomatic,
     get calls() {
       return calls;
     },
@@ -73,6 +77,12 @@ export function createRecordingReviewTriggerIntake(): RecordingReviewTriggerInta
       calls++;
       if (failure !== undefined) throw failure;
       discarded.push({ repo, prNumber });
+      return 0;
+    },
+    async discardWaitingAutomaticJobs(repo, _integration, prNumber) {
+      calls++;
+      if (failure !== undefined) throw failure;
+      discardedAutomatic.push({ repo, prNumber });
       return 0;
     },
   };

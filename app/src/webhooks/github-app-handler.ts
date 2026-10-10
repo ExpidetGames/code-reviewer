@@ -13,8 +13,8 @@
 //   6. identify  `identifyWebhook` names the installation; the integration is loaded
 //   7. translate `parseEvent`: a review trigger, an installation change or "ignored"
 //   8. act       trigger -> the repository must have an active project, then the trigger
-//                policy (automatic-review-policy.ts: drafts, settings, the debounce of a push,
-//                the commit still being the head), then `canTrigger`, then the intake;
+//                policy (automatic-review-policy.ts: drafts, settings, the debounce of a push;
+//                then the commit still being the head, checked against GitHub, failing open), then `canTrigger`, then the intake;
 //                closed pull request -> its waiting jobs are dropped;
 //                change -> the shared sync; an unusable payload                     202, 400
 //
@@ -29,10 +29,12 @@ import type { IntegrationsRepository } from "../db/repositories/integrations-rep
 import { hasSafeMessage } from "../integrations/errors.ts";
 import type { IntegrationRegistry } from "../integrations/registry.ts";
 import type { IntegrationSyncService } from "../integrations/sync/service.ts";
+import type { IntegrationProvider } from "../integrations/provider.ts";
 import type {
   Integration,
   IntegrationEvent,
   IntegrationType,
+  PullRequestRef,
 } from "../integrations/types.ts";
 import {
   WebhookPayloadError,
@@ -46,6 +48,7 @@ import type { ProjectService } from "../projects/service.ts";
 import type { ReviewSettings } from "../review-settings/settings.ts";
 import {
   type AutomaticSkipReason,
+  type PullRequestTrigger,
   checkAgainstCurrentPullRequest,
   decideAutomaticTrigger,
 } from "./automatic-review-policy.ts";
@@ -88,6 +91,8 @@ export type AutomaticReviewDeps = {
   ): Promise<ReviewSettings | undefined>;
   /** How long a push waits before its review may start. */
   debounceMs: number;
+  /** How long the check against GitHub's current head may take (default 5 seconds). */
+  headCheckTimeoutMs?: number;
   now(): Date;
 };
 
@@ -112,6 +117,28 @@ function fail(status: number, error: WebhookErrorCode): Response {
 
 function accepted(outcome: WebhookAcceptedOutcome): Response {
   return Response.json({ status: "accepted", outcome }, { status: 202 });
+}
+
+/** How long the head check may take: well inside the 10 seconds GitHub waits for the answer. */
+export const HEAD_CHECK_TIMEOUT_MS = 5000;
+
+class HeadCheckTimeout extends Error {
+  readonly code = "HEAD_CHECK_TIMEOUT";
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new HeadCheckTimeout()), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+/** The stable code of an error, or its class name: never its message, which may name a response. */
+function errorCodeOf(error: unknown): string {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (typeof code === "string") return code;
+  return error instanceof Error ? error.name : "unknown error";
 }
 
 /** Lines about an error never carry more than its safe message. */
@@ -181,6 +208,38 @@ export function createGithubAppWebhookHandler(
       `[webhook] delivery=${deliveryId} pr=${prNumber} starts no review reason=${reason}`,
     );
     return "trigger_skipped";
+  }
+
+  /**
+   * The pull request as GitHub reports it now, for the head check. A pull request GitHub does not
+   * know is `not_found`; any other failure, and a call that takes longer than the timeout (GitHub
+   * waits 10 seconds for our answer), is `unknown` and logged with its code only.
+   */
+  async function lookUpCurrentPullRequest(
+    provider: IntegrationProvider,
+    integration: Integration,
+    trigger: PullRequestTrigger,
+    deliveryId: string,
+  ): Promise<
+    | { kind: "found"; pullRequest: PullRequestRef }
+    | { kind: "not_found" }
+    | { kind: "unknown" }
+  > {
+    try {
+      const pullRequest = await withTimeout(
+        provider.getPullRequest(integration, trigger.repo, trigger.prNumber),
+        automatic.headCheckTimeoutMs ?? HEAD_CHECK_TIMEOUT_MS,
+      );
+      return { kind: "found", pullRequest };
+    } catch (error) {
+      const code = errorCodeOf(error);
+      if (code === "INTEGRATION_PULL_REQUEST_NOT_FOUND")
+        return { kind: "not_found" };
+      logger.error(
+        `[webhook] warning: delivery=${deliveryId} pr=${trigger.prNumber} the head commit could not be checked (${code}), the trigger is enqueued with the head of the payload`,
+      );
+      return { kind: "unknown" };
+    }
   }
 
   /** Steps 6 to 8: everything after the delivery was claimed. */
@@ -255,6 +314,24 @@ export function createGithubAppWebhookHandler(
       return "waiting_jobs_discarded";
     }
 
+    // A pull request turned into a draft is not reviewed automatically any more, so the automatic
+    // jobs that wait for it are dropped (a review a person asked for stays).
+    if (event.kind === "pull_request_drafted") {
+      if (
+        !(await projects.hasActiveProject(
+          integration.id,
+          event.repo.externalId,
+        ))
+      )
+        return "project_not_active";
+      await intake.discardWaitingAutomaticJobs(
+        event.repo,
+        integration,
+        event.prNumber,
+      );
+      return "waiting_jobs_discarded";
+    }
+
     // Only repositories with an active project are reviewed. Asked before `canTrigger` (one more
     // GitHub call for a command); `parseEvent` has already read the payload, and for a comment it
     // may have asked GitHub, because only it knows which repository the delivery is about.
@@ -285,17 +362,24 @@ export function createGithubAppWebhookHandler(
         return skipped(deliveryId, trigger.prNumber, decision.reason);
       runAfter = decision.runAfter;
 
-      // Deliveries arrive late and out of order. Before a push replaces the waiting job, ask GitHub
-      // whether this commit is still the head (one call per push), so a late delivery for an older
-      // commit cannot take the place of the newest one. A failure of the call fails the delivery
-      // (500, released), so the redelivery is judged again.
-      if (trigger.kind === "updated") {
-        const current = await provider.getPullRequest(
-          integration,
-          trigger.repo,
-          trigger.prNumber,
+      // Deliveries arrive late and out of order. Before the trigger takes the place of a waiting
+      // job, ask GitHub whether its commit is still the head (one call), so a late delivery for an
+      // older commit cannot replace the job of the newest one. The check fails open: the job queue
+      // is durable, so when GitHub cannot answer in time the trigger is enqueued with the head of
+      // the payload instead of losing the review.
+      const current = await lookUpCurrentPullRequest(
+        provider,
+        integration,
+        trigger,
+        deliveryId,
+      );
+      if (current.kind === "not_found")
+        return skipped(deliveryId, trigger.prNumber, "pull_request_not_found");
+      if (current.kind === "found") {
+        const stale = checkAgainstCurrentPullRequest(
+          trigger,
+          current.pullRequest,
         );
-        const stale = checkAgainstCurrentPullRequest(trigger, current);
         if (stale !== null)
           return skipped(deliveryId, trigger.prNumber, stale.reason);
       }

@@ -38,7 +38,7 @@ Answers carry only an error code or `{ "status": "accepted", "outcome": ... }`, 
 signature or a secret. Log lines name the delivery id, the event and the outcome, and nothing else.
 
 The outcomes of step 6 to 8 are `trigger_enqueued`, `trigger_skipped` (a pull request event the policy
-turned down, with the reason in the log), `waiting_jobs_discarded` (a pull request was closed),
+turned down, with the reason in the log), `waiting_jobs_discarded` (a pull request was closed or turned into a draft),
 `installation_changed`, `ignored` (a genuine event that starts nothing, such as a `labeled` pull
 request, or a command from a user without write access),
 `trigger_not_allowed` (`canTrigger` said no), `project_not_active` (the repository has no active project: never
@@ -58,6 +58,17 @@ with a stand-in integration and hands the `installation_changed` event to
 exists and only then creates the row. The route never creates an integration itself and never starts a
 second sync service. For every other event an unknown installation is `unknown_installation`, and
 GitHub is not asked.
+
+### Known limits of the automatic reviews
+
+- **Closed while a push is being handled.** A `closed` delivery handled between the head check and
+  the enqueue of a concurrent `synchronize` finds nothing to cancel, so that job waits out its
+  debounce and reviews a closed pull request. The window is a few milliseconds; the review is wasted,
+  not harmful.
+- **Frequent pushes postpone the review.** The debounce is trailing and has no maximum wait in the
+  MVP: every push replaces the waiting job and restarts the wait, so a pull request that gets a push
+  less than every 90 seconds is not reviewed until the pushes stop.
+- **The head check is best effort** (it fails open, see above).
 
 ### Failures and redelivery
 
@@ -112,18 +123,25 @@ A `pull_request` delivery with an active project goes through `decideAutomaticTr
 repository's project (`createAutomaticReviewSettingsSource`: project over global over built-in, see
 `src/review-settings/README.md`), the clock and the debounce. In this order:
 
-| Rule                                                                                                                                       | Outcome                                                                                                                        |
-| ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| The delivery says the pull request is `closed` (a late `synchronize` or `reopened`)                                                        | `trigger_skipped`, reason `pull_request_closed`                                                                                |
-| The pull request is a draft                                                                                                                | `trigger_skipped`, reason `draft`; `ready_for_review` arrives as an `opened` trigger and starts the review                     |
-| The project switched this kind off: `autoReviewOnOpen` covers opened, reopened and ready for review, `autoReviewOnPush` covers new commits | `trigger_skipped`, reason `automatic_review_disabled`                                                                          |
-| Otherwise                                                                                                                                  | a job; `opened`, `reopened` and `ready_for_review` are due at once, only `synchronize` waits (`runAfter` = now + the debounce) |
+| Rule                                                                                                                                       | Outcome                                                                                                                                                     |
+| ------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The delivery says the pull request is `closed` (a late `synchronize` or `reopened`)                                                        | `trigger_skipped`, reason `pull_request_closed`                                                                                                             |
+| The pull request is a draft                                                                                                                | `trigger_skipped`, reason `draft`; `ready_for_review` arrives as an `opened` trigger and starts the review                                                  |
+| The project switched this kind off: `autoReviewOnOpen` covers opened, reopened and ready for review, `autoReviewOnPush` covers new commits | `trigger_skipped`, reason `automatic_review_disabled`                                                                                                       |
+| Otherwise                                                                                                                                  | a job (after the head check below); `opened`, `reopened` and `ready_for_review` are due at once, only `synchronize` waits (`runAfter` = now + the debounce) |
 
-A push that passed these rules is then compared with GitHub (`getPullRequest`, one call per push):
-a commit that is no longer the head is `stale_head`, a pull request that is closed or a draft by now
-is skipped with that reason. Deliveries arrive late and out of order, and without this a late push
-for an older commit would replace the waiting job of the newest. If the call fails the delivery fails
-(`500`, claim released) and the redelivery is judged again.
+A trigger that passed these rules is then compared with GitHub (`getPullRequest`, one call per
+pull request trigger; the trigger kind cannot tell `opened` from `reopened` and `ready_for_review`, so
+all of them are checked): a commit that is no longer the head is `stale_head`, a pull request that is
+closed or a draft by now is skipped with that reason, and a pull request GitHub does not know is
+`pull_request_not_found`. Deliveries arrive late and out of order, and without this a late delivery
+for an older commit would replace the waiting job of the newest.
+
+**The check fails open.** It has a timeout of 5 seconds (GitHub waits 10 for our answer). If the call
+fails or times out, a warning with the error code only is logged and the trigger is enqueued with
+the head of the payload: the job queue is durable and the runner already copes with a GitHub outage,
+so a blip must not cost the review of a push (GitHub never redelivers a failed delivery by itself).
+The only price is that during such a blip a late delivery for an older commit is not recognised.
 
 The wait is `REVIEW_DEBOUNCE_SECONDS` (default 90, whole seconds from 0 to 600; anything else is
 ignored and the default is used). The queue supersedes the waiting job of the older commit, so
@@ -131,8 +149,11 @@ several pushes in a row produce one review that starts one wait after the last p
 already is never touched, the new one waits behind it.
 
 A pull request that is closed or merged (`pull_request_closed`) calls
-`intake.discardWaitingJobs`: its waiting jobs are cancelled with `pull_request_closed`, a running job
-finishes. Pull requests from forks and pull requests opened by bots are reviewed like any other. A
+`intake.discardWaitingJobs`: **all** its waiting jobs are cancelled with `pull_request_closed`, the
+automatic ones and the ones a person started with a comment or the start button (a closed pull request
+takes no commands); a running job finishes. A pull request that is turned into a draft
+(`pull_request_drafted`) cancels only its waiting _automatic_ jobs (error code `pull_request_draft`):
+a draft is not reviewed automatically, but a review someone asked for stays. Pull requests from forks and pull requests opened by bots are reviewed like any other. A
 comment command is not subject to this policy (CR-32 decides about commands).
 
 ## The review trigger intake
@@ -145,7 +166,7 @@ and knows nothing about jobs. The intake of the running app is `createJobQueueRe
 - `opened` and `updated` become an automatic `webhook` job for the command `review` (due at
   `options.runAfter` when the policy set one: the debounce of a push); a `command` trigger becomes a
   `comment` job with its command and arguments.
-- `discardWaitingJobs(repo, integration, prNumber)` cancels the waiting jobs of a closed pull request.
+- `discardWaitingJobs(repo, integration, prNumber)` cancels every waiting job of a closed pull request (also comment and manual ones); `discardWaitingAutomaticJobs` cancels only the automatic ones (a pull request turned into a draft).
 - It is a thin mapping on purpose. It adds **no trigger policy**: drafts, the settings and the
   debounce of `synchronize` are decided before it, by the handler with `automatic-review-policy.ts`.
   Whether a repository has an active project is decided before the intake too, by the route

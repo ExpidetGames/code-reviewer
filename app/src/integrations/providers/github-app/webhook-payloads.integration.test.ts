@@ -234,27 +234,24 @@ describe("the recorded GitHub webhook payloads", () => {
   );
 
   // CR-22-T15
-  it.each([
-    "pull_request.edited",
-    "pull_request.labeled",
-    "pull_request.converted_to_draft",
-    "push",
-    "ping",
-  ])("%s is deliberately translated into no trigger", async (name) => {
-    const provider = createGithubAppProvider({
-      config: testGithubAppConfig(),
-      client: fakeGithubAppClient(),
-    });
+  it.each(["pull_request.edited", "pull_request.labeled", "push", "ping"])(
+    "%s is deliberately translated into no trigger",
+    async (name) => {
+      const provider = createGithubAppProvider({
+        config: testGithubAppConfig(),
+        client: fakeGithubAppClient(),
+      });
 
-    const event = await provider.parseEvent(
-      integration,
-      webhookDelivery({
-        event: name.split(".")[0] as string,
-        payload: webhookFixture(name),
-        secret: TEST_WEBHOOK_SECRET,
-      }),
-    );
+      const event = await provider.parseEvent(
+        integration,
+        webhookDelivery({
+          event: name.split(".")[0] as string,
+          payload: webhookFixture(name),
+          secret: TEST_WEBHOOK_SECRET,
+        }),
+      );
 
-    expect(event.kind).toBe("ignored");
-  });
+      expect(event.kind).toBe("ignored");
+    },
+  );
 });

@@ -152,6 +152,13 @@ export function isIntegrationEvent(value: unknown): value is IntegrationEvent {
       (value.prNumber as number) >= 1 &&
       typeof value.merged === "boolean"
     );
+  if (value.kind === "pull_request_drafted")
+    return (
+      hasExactKeys(value, ["kind", "repo", "prNumber"]) &&
+      isRepoRef(value.repo) &&
+      Number.isInteger(value.prNumber) &&
+      (value.prNumber as number) >= 1
+    );
   if (value.kind === "ignored" || value.kind === "invalid_payload")
     return (
       hasExactKeys(value, ["kind", "reason"]) && isNonEmptyString(value.reason)

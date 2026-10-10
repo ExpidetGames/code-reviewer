@@ -66,6 +66,8 @@ The route (`POST /api/webhooks/github-app`, see `src/webhooks/README.md`) never 
      `closed`), a command trigger does not,
    - `pull_request_closed` with the repository, the pull request number and whether it was merged:
      it starts nothing, the app drops the pull request's waiting jobs,
+   - `pull_request_drafted` with the repository and the number: a pull request was turned into a draft,
+     the app drops its waiting automatic jobs,
    - `invalid_payload` with a `reason` (field names only) for an event the app uses whose payload lacks
      fields it reads; the route answers 400,
    - `installation_changed` with the connection's `externalId` and an action (`created`, `deleted`,

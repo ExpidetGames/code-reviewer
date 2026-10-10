@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { AUTOMATIC_REVIEW_DEBOUNCE_MS } from "./automatic-review-policy.ts";
-import { configuredDebounceMs } from "./debounce-config.ts";
+import {
+  configuredDebounceMs,
+  debounceWarning,
+  warnAboutDebounce,
+} from "./debounce-config.ts";
 
 describe("the wait of a push before its review starts", () => {
   it("is 90 seconds when nothing is configured", () => {
@@ -29,4 +33,30 @@ describe("the wait of a push before its review starts", () => {
       );
     },
   );
+});
+
+describe("the warning about an unusable wait", () => {
+  it("is silent for an unset, empty or valid value", () => {
+    for (const value of [undefined, "", "0", "90", "600"])
+      expect(debounceWarning({ REVIEW_DEBOUNCE_SECONDS: value })).toBeNull();
+  });
+
+  it("names the variable and the default, and never repeats the value", () => {
+    const line = debounceWarning({ REVIEW_DEBOUNCE_SECONDS: "900" });
+
+    expect(line).toContain("REVIEW_DEBOUNCE_SECONDS");
+    expect(line).toContain("90 seconds");
+    expect(line).not.toContain("900");
+  });
+
+  it("is logged once through the given function", () => {
+    const lines: string[] = [];
+
+    warnAboutDebounce({ REVIEW_DEBOUNCE_SECONDS: "soon" }, (l) =>
+      lines.push(l),
+    );
+    warnAboutDebounce({}, (l) => lines.push(l));
+
+    expect(lines).toHaveLength(1);
+  });
 });

@@ -217,6 +217,11 @@ export type IntegrationEvent =
       merged: boolean;
     }
   /**
+   * A pull request was turned into a draft. It starts nothing; the app drops the pull request's
+   * waiting automatic jobs, because a draft is not reviewed automatically.
+   */
+  | { kind: "pull_request_drafted"; repo: RepoRef; prNumber: number }
+  /**
    * A delivery of an event the app uses whose payload lacks fields the app reads (or has them with
    * the wrong type). Nothing can be done with it and a redelivery would not change that; `reason`
    * names the fields for the logs, never their values.

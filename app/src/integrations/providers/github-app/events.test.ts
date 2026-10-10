@@ -77,9 +77,11 @@ describe("which pull request actions start a review", () => {
     },
   );
 
-  it("does not review a pull request that was converted to a draft", async () => {
+  it("reports a pull request that was converted to a draft as drafted, not as a trigger", async () => {
     expect(await eventOf("pull_request.converted_to_draft")).toMatchObject({
-      kind: "ignored",
+      kind: "pull_request_drafted",
+      repo: { externalId: "7001", fullName: "acme/widgets" },
+      prNumber: 7,
     });
   });
 

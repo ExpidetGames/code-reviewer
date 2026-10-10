@@ -117,6 +117,13 @@ export async function parseGithubEvent(
         prNumber: field<number>(payload, "number"),
         merged: field<boolean>(payload, "pull_request.merged"),
       };
+    // A draft is not reviewed automatically; what already waits for it is dropped.
+    if (action === "converted_to_draft")
+      return {
+        kind: "pull_request_drafted",
+        repo: repoOf(context),
+        prNumber: field<number>(payload, "number"),
+      };
     if (!Object.hasOwn(PULL_REQUEST_TRIGGER_MAP, action))
       return ignored(
         `the pull request action "${action}" does not start a review`,

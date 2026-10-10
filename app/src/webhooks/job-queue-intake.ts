@@ -3,7 +3,11 @@
 // active project, drafts wait, `synchronize` is debounced) is trigger policy, which the webhook
 // handler applies before it calls the intake (automatic-review-policy.ts), not inside the queue.
 import type { RepositoriesRepository } from "../db/repositories/repositories-repository.ts";
-import type { Integration, ReviewTrigger } from "../integrations/types.ts";
+import type {
+  Integration,
+  RepoRef,
+  ReviewTrigger,
+} from "../integrations/types.ts";
 import { JobQueueError } from "../jobs/errors.ts";
 import type { JobQueue } from "../jobs/job-queue.ts";
 import type { EnqueueJobInput } from "../jobs/job-types.ts";
@@ -15,7 +19,10 @@ import type {
 } from "./review-trigger-intake.ts";
 
 export type JobQueueIntakeDeps = {
-  queue: Pick<JobQueue, "enqueue" | "discardWaitingForPr">;
+  queue: Pick<
+    JobQueue,
+    "enqueue" | "discardWaitingForPr" | "discardWaitingAutomaticForPr"
+  >;
   repositories: Pick<RepositoriesRepository, "findByExternalId">;
   logger: WebhookLogger;
 };
@@ -53,6 +60,31 @@ export function jobInputForTrigger(
 export function createJobQueueReviewTriggerIntake(
   deps: JobQueueIntakeDeps,
 ): ReviewTriggerIntake {
+  async function discard(
+    repo: RepoRef,
+    integration: Integration,
+    prNumber: number,
+    scope: "all" | "automatic",
+  ): Promise<number> {
+    const repository = await deps.repositories.findByExternalId(
+      integration.id,
+      repo.externalId,
+    );
+    // No row, no jobs: nothing can wait for a repository the app has never heard of.
+    if (repository === undefined) return 0;
+    const discarded =
+      scope === "all"
+        ? await deps.queue.discardWaitingForPr(repository.id, prNumber)
+        : await deps.queue.discardWaitingAutomaticForPr(
+            repository.id,
+            prNumber,
+          );
+    deps.logger.info(
+      `[webhook] waiting jobs discarded scope=${scope} count=${discarded} repo=${repo.fullName} pr=${prNumber}`,
+    );
+    return discarded;
+  }
+
   return {
     async enqueueReviewTrigger(
       trigger,
@@ -101,20 +133,10 @@ export function createJobQueueReviewTriggerIntake(
       );
     },
     async discardWaitingJobs(repo, integration, prNumber) {
-      const repository = await deps.repositories.findByExternalId(
-        integration.id,
-        repo.externalId,
-      );
-      // No row, no jobs: nothing can wait for a repository the app has never heard of.
-      if (repository === undefined) return 0;
-      const discarded = await deps.queue.discardWaitingForPr(
-        repository.id,
-        prNumber,
-      );
-      deps.logger.info(
-        `[webhook] waiting jobs discarded count=${discarded} repo=${repo.fullName} pr=${prNumber}`,
-      );
-      return discarded;
+      return discard(repo, integration, prNumber, "all");
+    },
+    async discardWaitingAutomaticJobs(repo, integration, prNumber) {
+      return discard(repo, integration, prNumber, "automatic");
     },
   };
 }

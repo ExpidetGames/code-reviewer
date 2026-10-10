@@ -53,11 +53,22 @@ export type ReviewTriggerIntake = {
   ): Promise<void>;
 
   /**
-   * A pull request was closed or merged: drops the jobs that still wait for it (a job that already
-   * runs is left to finish). Resolves with the number of dropped jobs, which is zero when nothing
-   * waited, and when the repository is unknown. Idempotent.
+   * A pull request was closed or merged: drops every job that still waits for it, the automatic
+   * ones and the ones a person started with a comment or the start button (a closed pull request
+   * takes no commands). A job that already runs is left to finish. Resolves with the number of
+   * dropped jobs, which is zero when nothing waited, and when the repository is unknown. Idempotent.
    */
   discardWaitingJobs(
+    repo: RepoRef,
+    integration: Integration,
+    prNumber: number,
+  ): Promise<number>;
+
+  /**
+   * A pull request was turned into a draft: drops the waiting automatic jobs only. A job a person
+   * started stays, because a draft can be reviewed on request. Same result as `discardWaitingJobs`.
+   */
+  discardWaitingAutomaticJobs(
     repo: RepoRef,
     integration: Integration,
     prNumber: number,

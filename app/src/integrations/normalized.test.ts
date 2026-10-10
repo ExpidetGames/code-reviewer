@@ -185,6 +185,12 @@ describe("the normalized type guards", () => {
     expect(
       isIntegrationEvent({ kind: "invalid_payload", reason: "no head" }),
     ).toBe(true);
+    expect(
+      isIntegrationEvent({ kind: "pull_request_drafted", repo, prNumber: 7 }),
+    ).toBe(true);
+    expect(
+      isIntegrationEvent({ kind: "pull_request_drafted", repo, prNumber: 0 }),
+    ).toBe(false);
 
     expect(
       isIntegrationEvent({

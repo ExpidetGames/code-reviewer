@@ -13,6 +13,8 @@ import {
 import { createAppSettingsRepository } from "../../src/db/repositories/app-settings-repository.ts";
 import { createProjectsRepository } from "../../src/db/repositories/projects-repository.ts";
 import { createRepositoriesRepository } from "../../src/db/repositories/repositories-repository.ts";
+import type { IntegrationProvider } from "../../src/integrations/provider.ts";
+import { IntegrationError } from "../../src/integrations/errors.ts";
 import { createIntegrationRegistry } from "../../src/integrations/registry.ts";
 import { createJobQueue } from "../../src/jobs/job-queue.ts";
 import { createReviewSettingsService } from "../../src/review-settings/service.ts";
@@ -63,9 +65,18 @@ function payload(fixture: string, changes: PullRequestChanges = {}) {
 }
 
 async function startHarness(
-  options: { activateProject?: boolean; debounceMs?: number } = {},
+  options: {
+    activateProject?: boolean;
+    debounceMs?: number;
+    headCheckTimeoutMs?: number;
+    wrapProvider?: (provider: IntegrationProvider) => IntegrationProvider;
+  } = {},
 ) {
-  const h = await startWebhookHarness();
+  const h = await startWebhookHarness(
+    options.wrapProvider === undefined
+      ? {}
+      : { wrapProvider: options.wrapProvider },
+  );
   const clock = { now: new Date(START) };
   const now = () => new Date(clock.now);
   const queue = createJobQueue(h.db, { now });
@@ -97,6 +108,9 @@ async function startHarness(
         settings,
       }),
       debounceMs: options.debounceMs ?? AUTOMATIC_REVIEW_DEBOUNCE_MS,
+      ...(options.headCheckTimeoutMs === undefined
+        ? {}
+        : { headCheckTimeoutMs: options.headCheckTimeoutMs }),
       now,
     },
     intake,
@@ -184,6 +198,9 @@ describe("a pull request that is opened", () => {
 
   it("reviews a pull request from a fork like any other", async () => {
     const t = await startHarness();
+    t.h.fake.updatePullRequest("acme/widgets", 7, {
+      headSha: "9e8d7c6b5a4938271605f4e3d2c1b0a998877665",
+    });
 
     await t.send("pull_request.opened.fork");
 
@@ -320,28 +337,95 @@ describe("a pull request that is pushed to", () => {
     expect(jobs).toHaveLength(2);
   });
 
-  it("answers 500 and forgets the delivery when GitHub cannot say what the head is, so the redelivery is judged again", async () => {
+  it("skips the push and logs it when GitHub does not know the pull request", async () => {
     const t = await startHarness();
-    // GitHub does not know pull request 99, so asking for its head fails.
     const unknownPull = payload("pull_request.synchronize") as unknown as {
       number: number;
     };
     unknownPull.number = 99;
 
     const response = await t.send("pull_request.synchronize", {
-      deliveryId: "d-fail",
       payload: unknownPull,
     });
 
-    expect(response.status).toBe(500);
-    expect(await body(response)).toEqual({
-      error: "WEBHOOK_PROCESSING_FAILED",
-    });
+    expect(response.status).toBe(202);
+    expect(await body(response)).toMatchObject({ outcome: "trigger_skipped" });
     expect(await t.jobs()).toEqual([]);
-    expect(await t.h.deliveries.claim("d-fail", "pull_request")).toMatchObject({
-      status: "claimed",
-    });
+    expect(t.routeLog.join("\n")).toContain("reason=pull_request_not_found");
   });
+
+  it("enqueues the push with the head of the payload when the head check fails, and logs a warning with the code only", async () => {
+    const t = await startHarness({
+      wrapProvider: (provider) => ({
+        ...provider,
+        getPullRequest: async () => {
+          throw new IntegrationError(
+            "INTEGRATION_ACCESS_UNAVAILABLE",
+            "GitHub said: secret-looking-detail",
+          );
+        },
+      }),
+    });
+
+    const response = await t.send("pull_request.synchronize");
+
+    expect(response.status).toBe(202);
+    expect(await body(response)).toMatchObject({ outcome: "trigger_enqueued" });
+    expect(await t.jobs()).toMatchObject([
+      {
+        headSha: HEAD_1,
+        status: "queued",
+        runAfter: new Date(
+          START.getTime() + AUTOMATIC_REVIEW_DEBOUNCE_MS,
+        ).toISOString(),
+      },
+    ]);
+    const log = t.routeLog.join("\n");
+    expect(log).toContain("warning");
+    expect(log).toContain("INTEGRATION_ACCESS_UNAVAILABLE");
+    expect(log).not.toContain("secret-looking-detail");
+  });
+
+  it("enqueues the push with the head of the payload when GitHub does not answer within the timeout", async () => {
+    const t = await startHarness({
+      headCheckTimeoutMs: 20,
+      wrapProvider: (provider) => ({
+        ...provider,
+        // Never answers.
+        getPullRequest: () => new Promise(() => undefined),
+      }),
+    });
+
+    const response = await t.send("pull_request.synchronize");
+
+    expect(await body(response)).toMatchObject({ outcome: "trigger_enqueued" });
+    expect(await t.jobs()).toMatchObject([
+      { headSha: HEAD_1, status: "queued" },
+    ]);
+    expect(t.routeLog.join("\n")).toContain("HEAD_CHECK_TIMEOUT");
+  });
+
+  it.each(["pull_request.reopened", "pull_request.ready_for_review"])(
+    "does not let a late %s for an older commit replace the waiting job of the newest",
+    async (fixture) => {
+      const t = await startHarness();
+      t.h.fake.updatePullRequest("acme/widgets", 7, { headSha: HEAD_2 });
+      await t.send("pull_request.synchronize", {
+        payload: payload("pull_request.synchronize", { headSha: HEAD_2 }),
+      });
+
+      // Delayed: its payload still names the commit before the push.
+      const late = await t.send(fixture, {
+        payload: payload(fixture, { headSha: HEAD_1 }),
+      });
+
+      expect(await body(late)).toMatchObject({ outcome: "trigger_skipped" });
+      expect(await t.jobs()).toMatchObject([
+        { headSha: HEAD_2, status: "queued" },
+      ]);
+      expect(t.routeLog.join("\n")).toContain("reason=stale_head");
+    },
+  );
 });
 
 describe("a pull request that is closed", () => {
@@ -488,13 +572,48 @@ describe("a draft pull request", () => {
     ]);
   });
 
-  it("is not reviewed when it is turned into a draft again", async () => {
+  it("drops the waiting automatic job when it is turned into a draft, and keeps a review a person asked for", async () => {
     const t = await startHarness();
+    t.h.fake.setCollaboratorPermission("acme/widgets", "bob", "write");
+    await t.send("pull_request.synchronize");
+    await t.send("issue_comment.created.ask");
+    expect(await t.jobs()).toHaveLength(2);
 
     const response = await t.send("pull_request.converted_to_draft");
 
-    expect(await body(response)).toMatchObject({ outcome: "ignored" });
-    expect(await t.jobs()).toEqual([]);
+    expect(await body(response)).toEqual({
+      status: "accepted",
+      outcome: "waiting_jobs_discarded",
+    });
+    const jobs = await t.jobs();
+    expect(jobs.find((job) => job.command === "review")).toMatchObject({
+      status: "cancelled",
+      errorCode: "pull_request_draft",
+    });
+    expect(jobs.find((job) => job.command === "ask")?.status).toBe("queued");
+    t.advance(AUTOMATIC_REVIEW_DEBOUNCE_MS * 2);
+    expect((await t.queue.claimNext("runner-1"))?.job.command).toBe("ask");
+    expect(await t.queue.claimNext("runner-1")).toBeNull();
+  });
+
+  it("lets a job that already runs finish when it is turned into a draft", async () => {
+    const t = await startHarness();
+    await t.send("pull_request.opened");
+    await t.queue.claimNext("runner-1");
+
+    await t.send("pull_request.converted_to_draft");
+
+    expect(await t.jobs()).toMatchObject([{ status: "running" }]);
+  });
+
+  it("does nothing for a draft conversion in a repository that is no active project", async () => {
+    const t = await startHarness({ activateProject: false });
+
+    const response = await t.send("pull_request.converted_to_draft");
+
+    expect(await body(response)).toMatchObject({
+      outcome: "project_not_active",
+    });
   });
 
   it("can be redelivered as ready: a skipped delivery is not kept as a duplicate", async () => {

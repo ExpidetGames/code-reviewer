@@ -35,6 +35,8 @@ export const AUTOMATIC_SKIP_REASONS = [
   "automatic_review_disabled",
   /** The trigger is about a commit that is no longer the head of the pull request. */
   "stale_head",
+  /** GitHub does not know the pull request (any more). */
+  "pull_request_not_found",
 ] as const;
 export type AutomaticSkipReason = (typeof AUTOMATIC_SKIP_REASONS)[number];
 
