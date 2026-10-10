@@ -39,6 +39,8 @@ export type GithubProviderOptions = {
    */
   signInAccess: (input: {
     login: string;
+    /** The numeric GitHub id of the account, as text. */
+    githubId: string;
     accessToken: string;
   }) => Promise<SignInAccess>;
 };
@@ -151,6 +153,7 @@ async function readProfile(
 
   const access = await options.signInAccess({
     login: profile.login,
+    githubId: String(profile.id),
     accessToken: tokens.accessToken,
   });
 

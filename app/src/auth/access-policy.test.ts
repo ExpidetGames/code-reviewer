@@ -7,6 +7,7 @@ import {
   ORG_RECHECK_INTERVAL_MS,
   ORG_UNAVAILABLE_BACKOFF_MS,
   createAccessPolicy,
+  type LoginPinDependencies,
   type OrgAccessDependencies,
   type SessionUser,
 } from "./access-policy.ts";
@@ -19,6 +20,7 @@ function user(overrides: Partial<SessionUser> = {}): SessionUser {
     id: "user-1",
     name: "The Octocat",
     githubLogin: "octocat",
+    githubId: "1001",
     orgCheckedAt: null,
     orgCheckedFor: null,
     ...overrides,
@@ -51,13 +53,26 @@ function setup(
   };
   const clock = { now: NOW };
   const logError = vi.fn<(message: string) => void>();
+  // The pins: the first id that is offered for a login is the one bound to it.
+  const bound = new Map<string, string>();
+  const loginPins = {
+    pin: vi.fn<LoginPinDependencies["pin"]>((login, githubId) => {
+      const key = login.toLowerCase();
+      if (!bound.has(key)) bound.set(key, githubId);
+      return Promise.resolve(bound.get(key) ?? null);
+    }),
+    revokeSessions: vi.fn<LoginPinDependencies["revokeSessions"]>(() =>
+      Promise.resolve(),
+    ),
+  };
   const policy = createAccessPolicy({
     config,
     org,
+    loginPins,
     now: () => clock.now,
     logError,
   });
-  return { policy, org, clock, logError };
+  return { policy, org, clock, logError, loginPins, bound };
 }
 
 describe("the logins list as the access rule of a request", () => {
@@ -322,5 +337,140 @@ describe("the organization as the access rule of a request", () => {
 
     expect(decision).toEqual({ allowed: false, reason: "not_allowed" });
     expect(org.checkMembership).not.toHaveBeenCalled();
+  });
+});
+
+describe("a listed login that is bound to a GitHub id", () => {
+  const list = { ALLOWED_GITHUB_LOGINS: "octocat" };
+
+  // CR-42-T02
+  it("is allowed for the account it is bound to, however the login is spelled", async () => {
+    const { policy, bound } = setup(list);
+    bound.set("octocat", "1001");
+
+    expect(await policy(user({ githubLogin: "OctoCat" }))).toEqual({
+      allowed: true,
+    });
+  });
+
+  // CR-42-T04
+  it("is denied for another account with the same login, every time, and its sessions are ended", async () => {
+    const { policy, bound, loginPins, org } = setup(list);
+    bound.set("octocat", "1001");
+
+    for (let i = 0; i < 3; i += 1)
+      expect(await policy(user({ id: "user-2", githubId: "2002" }))).toEqual({
+        allowed: false,
+        reason: "not_allowed",
+      });
+
+    expect(loginPins.revokeSessions).toHaveBeenCalledWith("user-2");
+    expect(loginPins.revokeSessions).not.toHaveBeenCalledWith("user-1");
+    expect(org.checkMembership).not.toHaveBeenCalled();
+    expect(bound.get("octocat")).toBe("1001");
+  });
+
+  // CR-42 decision 2
+  it("binds the login to the account of a session that has no pin yet, and keeps that binding", async () => {
+    const { policy, bound } = setup(list);
+
+    expect(await policy(user({ githubId: "1001" }))).toEqual({ allowed: true });
+
+    expect(bound.get("octocat")).toBe("1001");
+    expect(
+      await policy(user({ id: "user-2", githubId: "2002" })),
+    ).toMatchObject({ allowed: false });
+  });
+
+  it("is denied, and nobody is signed out, when the pin cannot be read", async () => {
+    const { policy, loginPins } = setup(list);
+    loginPins.pin.mockRejectedValue(new Error("locked"));
+
+    expect(await policy(user())).toEqual({
+      allowed: false,
+      reason: "check_failed",
+    });
+    expect(loginPins.revokeSessions).not.toHaveBeenCalled();
+  });
+
+  it("is denied with not allowed even when ending the sessions fails, and logs it without values", async () => {
+    const { policy, bound, loginPins, logError } = setup(list);
+    bound.set("octocat", "1001");
+    loginPins.revokeSessions.mockRejectedValue(new Error("locked 2002"));
+
+    expect(await policy(user({ githubId: "2002" }))).toEqual({
+      allowed: false,
+      reason: "not_allowed",
+    });
+    expect(logError).toHaveBeenCalledTimes(1);
+    expect(String(logError.mock.calls[0]?.[0])).not.toMatch(
+      /2002|1001|octocat/,
+    );
+  });
+
+  it("is denied with check_failed, without asking the organization or ending sessions, when the pin cannot be read and an organization is set", async () => {
+    const { policy, loginPins, org } = setup(
+      { ...list, ALLOWED_GITHUB_ORG: "my-org" },
+      "member",
+    );
+    loginPins.pin.mockRejectedValue(new Error("locked"));
+
+    expect(await policy(user())).toEqual({
+      allowed: false,
+      reason: "check_failed",
+    });
+    expect(org.checkMembership).not.toHaveBeenCalled();
+    expect(org.revokeSessions).not.toHaveBeenCalled();
+    expect(loginPins.revokeSessions).not.toHaveBeenCalled();
+  });
+
+  // CR-42-T10
+  it("is not looked up for a login that is not listed", async () => {
+    const { policy, loginPins } = setup(list);
+
+    expect(
+      await policy(user({ githubLogin: "mallory", githubId: "666" })),
+    ).toEqual({
+      allowed: false,
+      reason: "not_allowed",
+    });
+    expect(loginPins.pin).not.toHaveBeenCalled();
+  });
+
+  // CR-42-T12
+  it("is not looked up in organization mode without a list", async () => {
+    const { policy, loginPins } = setup({ ALLOWED_GITHUB_ORG: "my-org" });
+
+    expect(await policy(user())).toEqual({ allowed: true });
+    expect(loginPins.pin).not.toHaveBeenCalled();
+    expect(loginPins.revokeSessions).not.toHaveBeenCalled();
+  });
+
+  // CR-42 decision 5
+  it("does not stop an organization member whose id does not match the pin", async () => {
+    const { policy, bound, org, loginPins } = setup(
+      { ...list, ALLOWED_GITHUB_ORG: "my-org" },
+      "member",
+    );
+    bound.set("octocat", "1001");
+
+    expect(await policy(user({ githubId: "2002" }))).toEqual({ allowed: true });
+    expect(org.checkMembership).toHaveBeenCalledTimes(1);
+    expect(loginPins.revokeSessions).not.toHaveBeenCalled();
+  });
+
+  // CR-42 decision 5
+  it("ends the sessions of a wrong-id account that the organization does not know either", async () => {
+    const { policy, bound, org } = setup(
+      { ...list, ALLOWED_GITHUB_ORG: "my-org" },
+      "not_member",
+    );
+    bound.set("octocat", "1001");
+
+    expect(await policy(user({ githubId: "2002" }))).toEqual({
+      allowed: false,
+      reason: "not_allowed",
+    });
+    expect(org.revokeSessions).toHaveBeenCalledWith("user-1");
   });
 });

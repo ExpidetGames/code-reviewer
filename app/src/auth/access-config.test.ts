@@ -163,3 +163,114 @@ describe("both variables set", () => {
     expect(config.org).toBe("my-org");
   });
 });
+
+describe("entries of the form login:id in ALLOWED_GITHUB_LOGINS", () => {
+  // CR-42-T07
+  it("list the login and pre-set the GitHub id it is bound to, next to plain entries", () => {
+    const { config, problems } = parse({
+      ALLOWED_GITHUB_LOGINS: "octocat:1001,hubot",
+    });
+
+    expect(problems).toEqual([]);
+    expect(isLoginListed(config, "octocat")).toBe(true);
+    expect(isLoginListed(config, "hubot")).toBe(true);
+    expect([...config.presetIds]).toEqual([["octocat", "1001"]]);
+    expect(config.invalidLoginEntries).toEqual([]);
+    expect(config.invalidPresetEntries).toBe(0);
+  });
+
+  // CR-42-T09
+  it.each([
+    ["OctoCat:1001", "octocat", "1001"],
+    ["  octocat:1001  ", "octocat", "1001"],
+    ["octocat:9", "octocat", "9"],
+    ["octocat:12345678901234567890", "octocat", "12345678901234567890"],
+  ])("accept %j", (entry, login, id) => {
+    const { config } = parse({ ALLOWED_GITHUB_LOGINS: `hubot,${entry}` });
+
+    expect(config.invalidPresetEntries).toBe(0);
+    expect(config.presetIds.get(login)).toBe(id);
+    expect(isLoginListed(config, login)).toBe(true);
+  });
+
+  // CR-42-T09
+  it.each([
+    "octocat:",
+    ":1001",
+    "octocat:abc",
+    "octocat:10:20",
+    "octocat:-5",
+    "octocat:0",
+    "octocat:01001",
+    "octocat:+5",
+    "octocat:1.5",
+    "octocat: 1001",
+    "octocat :1001",
+    "octocat:123456789012345678901",
+    "@octocat:1001",
+    "two words:1001",
+  ])(
+    "ignore the invalid entry %j, count it, and admit nobody through it",
+    (entry) => {
+      const { config, problems } = parse({
+        ALLOWED_GITHUB_LOGINS: `hubot,${entry}`,
+      });
+
+      expect(problems).toEqual([]);
+      expect(config.invalidPresetEntries).toBe(1);
+      expect(config.presetIds.size).toBe(0);
+      expect(isLoginListed(config, "hubot")).toBe(true);
+      expect(isLoginListed(config, entry.split(":")[0] ?? "")).toBe(false);
+      expect([...config.logins]).toEqual(["hubot"]);
+    },
+  );
+
+  it("do not count as plain entries that cannot be logins", () => {
+    const { config } = parse({ ALLOWED_GITHUB_LOGINS: "octocat:abc,@hubot" });
+
+    expect(config.invalidLoginEntries).toEqual(["@hubot"]);
+    expect(config.invalidPresetEntries).toBe(1);
+  });
+
+  it("take no entry at all for a login that is given two different ids", () => {
+    const { config } = parse({
+      ALLOWED_GITHUB_LOGINS: "octocat:1001,OctoCat:2002,octocat,hubot",
+    });
+
+    expect(config.invalidPresetEntries).toBe(2);
+    expect(isLoginListed(config, "octocat")).toBe(false);
+    expect(config.presetIds.size).toBe(0);
+    expect(isLoginListed(config, "hubot")).toBe(true);
+  });
+
+  it("count a contradiction the same way whatever the order of the entries", () => {
+    const entries = ["octocat:1001", "OctoCat:2002", "octocat:1001"];
+    const orders = [
+      [0, 1, 2],
+      [0, 2, 1],
+      [1, 0, 2],
+      [1, 2, 0],
+      [2, 0, 1],
+      [2, 1, 0],
+    ];
+
+    for (const order of orders) {
+      const { config } = parse({
+        ALLOWED_GITHUB_LOGINS: order.map((i) => entries[i]).join(","),
+      });
+
+      expect(config.invalidPresetEntries).toBe(3);
+      expect(config.presetIds.size).toBe(0);
+      expect(isLoginListed(config, "octocat")).toBe(false);
+    }
+  });
+
+  it("accept the same id given twice", () => {
+    const { config } = parse({
+      ALLOWED_GITHUB_LOGINS: "octocat:1001,OctoCat:1001",
+    });
+
+    expect(config.invalidPresetEntries).toBe(0);
+    expect([...config.presetIds]).toEqual([["octocat", "1001"]]);
+  });
+});

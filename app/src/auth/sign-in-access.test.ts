@@ -3,6 +3,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { parseAccessConfig } from "./access-config.ts";
 import type { OrgMembership } from "./github-org.ts";
+import type { LoginPins } from "./login-pins.ts";
 import { decideSignIn, readSignInAccess } from "./sign-in-access.ts";
 
 const NOW = new Date("2026-10-10T12:00:00.000Z");
@@ -11,8 +12,17 @@ function decide(
   env: Record<string, string | undefined>,
   login: string,
   membership: OrgMembership | "throws" = "member",
+  pinned: string | null | "throws" = "1001",
+  githubId = "1001",
 ) {
   const config = parseAccessConfig(env, []);
+  const pins: LoginPins = {
+    pin: vi.fn(() =>
+      pinned === "throws"
+        ? Promise.reject(new Error("locked"))
+        : Promise.resolve(pinned),
+    ),
+  };
   const checkMembership = vi.fn(() =>
     membership === "throws"
       ? Promise.reject(new Error("boom"))
@@ -21,10 +31,12 @@ function decide(
   const result = decideSignIn({
     config,
     login,
+    githubId,
+    pins,
     checkMembership,
     now: () => NOW,
   });
-  return { result, checkMembership };
+  return { result, checkMembership, pins };
 }
 
 describe("the sign in decision", () => {
@@ -96,6 +108,99 @@ describe("the sign in decision", () => {
       expect(await result).toEqual({ allowed: false, reason: "check_failed" });
     },
   );
+});
+
+describe("the sign in decision for a listed login that is bound to a GitHub id", () => {
+  const list = { ALLOWED_GITHUB_LOGINS: "octocat" };
+
+  // CR-42-T01
+  it("lets the bound account in", async () => {
+    const { result, pins } = decide(list, "octocat", "member", "1001", "1001");
+
+    expect(await result).toEqual({ allowed: true, orgCheck: null });
+    expect(pins.pin).toHaveBeenCalledWith("octocat", "1001");
+  });
+
+  // CR-42-T03
+  it("keeps out another account with the same login, with the plain message", async () => {
+    const { result } = decide(list, "octocat", "member", "1001", "2002");
+
+    expect(await result).toEqual({ allowed: false, reason: "not_allowed" });
+  });
+
+  it("keeps everybody out when the pin cannot be read or written", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    for (const pinned of [null, "throws"] as const) {
+      const { result } = decide(list, "octocat", "member", pinned);
+
+      expect(await result).toEqual({ allowed: false, reason: "check_failed" });
+    }
+  });
+
+  it("does not ask the organization when the pin cannot be read, even if one is configured", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { result, checkMembership } = decide(
+      { ALLOWED_GITHUB_LOGINS: "octocat", ALLOWED_GITHUB_ORG: "my-org" },
+      "octocat",
+      "member",
+      "throws",
+    );
+
+    expect(await result).toEqual({ allowed: false, reason: "check_failed" });
+    expect(checkMembership).not.toHaveBeenCalled();
+  });
+
+  // CR-42-T10
+  it("does not touch the pins for a login that is not listed", async () => {
+    const { result, pins } = decide(list, "mallory", "member", "1001", "666");
+
+    expect(await result).toEqual({ allowed: false, reason: "not_allowed" });
+    expect(pins.pin).not.toHaveBeenCalled();
+  });
+
+  // CR-42-T12
+  it("does not touch the pins in organization mode without a list", async () => {
+    const { result, pins } = decide(
+      { ALLOWED_GITHUB_ORG: "my-org" },
+      "octocat",
+    );
+
+    expect(await result).toEqual({
+      allowed: true,
+      orgCheck: { at: NOW.toISOString(), org: "my-org" },
+    });
+    expect(pins.pin).not.toHaveBeenCalled();
+  });
+
+  // CR-42 decision 5
+  it("still lets an organization member in whose id does not match the pin", async () => {
+    const { result, checkMembership } = decide(
+      { ALLOWED_GITHUB_LOGINS: "octocat", ALLOWED_GITHUB_ORG: "my-org" },
+      "octocat",
+      "member",
+      "1001",
+      "2002",
+    );
+
+    expect(await result).toEqual({
+      allowed: true,
+      orgCheck: { at: NOW.toISOString(), org: "my-org" },
+    });
+    expect(checkMembership).toHaveBeenCalledTimes(1);
+  });
+
+  // CR-42 decision 5
+  it("keeps out an account with the wrong id who is not in the organization either", async () => {
+    const { result } = decide(
+      { ALLOWED_GITHUB_LOGINS: "octocat", ALLOWED_GITHUB_ORG: "my-org" },
+      "octocat",
+      "not_member",
+      "1001",
+      "2002",
+    );
+
+    expect(await result).toEqual({ allowed: false, reason: "not_allowed" });
+  });
 });
 
 describe("reading the decision back from the profile", () => {
