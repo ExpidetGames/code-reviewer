@@ -116,6 +116,42 @@ describe("CI workflow triggers and jobs", () => {
     }
   });
 
+  // CR-41-T15
+  it("runs the engine suite with the real PR-Agent in its own job, with the tiktoken cache primed first", () => {
+    const job = jobNamed("engine");
+    const lines = commandLines(job);
+
+    expect(job.needs).toBe("changes");
+    expect(job.defaults?.run?.["working-directory"]).toBe("runner");
+    expect(lines).toContain("uv run pytest -m engine");
+    expect(lines).toContain("uv run python scripts/prime_tiktoken_cache.py");
+    expect(
+      lines.indexOf("uv run python scripts/prime_tiktoken_cache.py"),
+    ).toBeLessThan(lines.indexOf("uv run pytest -m engine"));
+  });
+
+  // CR-41-T15
+  it("runs the engine job for pull requests that change the runner and for pull requests into main, never for pushes or app-only changes", () => {
+    const condition = String(jobNamed("engine").if);
+
+    expect(condition).toContain("github.event_name == 'pull_request'");
+    expect(condition).toContain("github.base_ref == 'main'");
+    expect(condition).toContain("needs.changes.outputs.runner == 'true'");
+    expect(condition).not.toContain("needs.changes.outputs.app");
+    expect(condition).not.toContain("github.event_name == 'push'");
+  });
+
+  // CR-41-T15
+  it("keeps the engine job read-only, without secrets and with a time limit", () => {
+    const job = jobNamed("engine");
+
+    expect(job.permissions).toBeUndefined(); // the workflow level grants contents: read only
+    expect(workflow.permissions).toEqual({ contents: "read" });
+    expect(JSON.stringify(job)).not.toContain("secrets.");
+    expect(job["timeout-minutes"]).toBeGreaterThan(0);
+    expect(job["timeout-minutes"]).toBeLessThanOrEqual(30);
+  });
+
   // CR-16-T01
   it("runs the browser smoke tests against the production build with the system libraries installed", () => {
     const lines = commandLines(jobNamed("e2e"));
@@ -171,9 +207,27 @@ describe("CI workflow aggregate check", () => {
     expect(failStep?.if).not.toContain("skipped");
   });
 
+  // CR-41-T15
+  it("waits for the engine job, blocks on its failure and accepts it skipped", () => {
+    const aggregate = jobNamed("ci-passed");
+    const failStep = steps(aggregate).find((step) =>
+      step.run?.includes("exit 1"),
+    );
+
+    expect(aggregate.needs).toContain("engine");
+    expect(failStep?.if).toContain("contains(needs.*.result, 'failure')");
+    expect(failStep?.if).not.toContain("skipped");
+  });
+
   // CR-16-T04
   it("runs the app, runner, browser and workflow jobs independently so one red job stops no other", () => {
-    for (const id of ["app-fast", "runner-fast", "e2e", "actionlint"]) {
+    for (const id of [
+      "app-fast",
+      "runner-fast",
+      "engine",
+      "e2e",
+      "actionlint",
+    ]) {
       expect(jobNamed(id).needs, id).toBe("changes");
     }
   });

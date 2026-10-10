@@ -5,7 +5,7 @@ APP := pnpm --dir app
 RUNNER := uv --directory runner
 
 .PHONY: help install lint lint-app lint-runner typecheck typecheck-app typecheck-runner \
-	test-unit test-unit-app test-unit-runner test-integration test-e2e test-images verify
+	test-unit test-unit-app test-unit-runner test-integration test-engine test-e2e test-images verify
 
 help:
 	@echo "make install           install app and runner dependencies from the lockfiles"
@@ -13,6 +13,7 @@ help:
 	@echo "make typecheck         typecheck both parts"
 	@echo "make test-unit         unit tests of both parts"
 	@echo "make test-integration  integration tests that run on the host (app and runner)"
+	@echo "make test-engine       the real PR-Agent against the fake GitHub and LLM (about 4 minutes, not part of verify)"
 	@echo "make test-e2e          Playwright journeys against a production build (ARGS=... to filter)"
 	@echo "make test-images       build both container images and run their smoke tests (needs Docker)"
 	@echo "make verify            lint, typecheck, unit and host integration tests; run before every PR"
@@ -46,6 +47,12 @@ test-unit-runner:
 test-integration:
 	$(APP) test:int
 	$(RUNNER) run pytest -m "integration or contract"
+
+# The real PR-Agent through the job entry point against the fakes (runner/tests/engine). The first
+# step needs the internet once (tiktoken encoding); the tests themselves never leave loopback.
+test-engine:
+	$(RUNNER) run python scripts/prime_tiktoken_cache.py
+	$(RUNNER) run pytest -m engine
 
 # Needs a browser. Without a downloaded Chromium, use an installed Chrome:
 #   make test-e2e PLAYWRIGHT_CHANNEL=chrome

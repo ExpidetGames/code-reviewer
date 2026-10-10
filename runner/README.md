@@ -192,6 +192,17 @@ protect it:
   image); on another minor version they differ, so the fingerprint tests first assert the
   interpreter and say so instead of reporting a PR-Agent change that does not exist.
 
+## Engine tests
+
+`tests/engine/` runs the real, pinned PR-Agent through `code-reviewer-run-job` (one process per job)
+against a fake GitHub and a fake OpenAI-compatible LLM on loopback ports, with no real network and no
+real model: `uv run python scripts/prime_tiktoken_cache.py` once (the only step that needs the
+internet), then `uv run pytest -m engine` (about 4 minutes; CI runs it for pull requests that change
+the runner and nightly). The suite pins down the four commands, the second review that edits the
+first comment, the error codes for a rate limited, silent, wrong or unreachable model or GitHub, that
+no credential is found in any output, what a hostile `.pr_agent.toml` cannot do, and what happens with
+a comment at GitHub's length limit. See TESTING.md for the design.
+
 ## Measuring memory and duration
 
 `scripts/measure_runs.py` starts one or several runner processes against the sandbox pull requests

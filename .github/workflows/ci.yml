@@ -127,6 +127,36 @@ jobs:
       - name: Integration and contract tests on the host
         run: uv run pytest -m "integration or contract"
 
+  # The real, pinned PR-Agent through the job entry point, against a fake GitHub and a fake LLM
+  # (runner/tests/engine). No Docker stack: the fakes are loopback servers the tests start
+  # themselves. Runs for pull requests that change the runner and for pull requests into main; the
+  # nightly workflow runs the same suite on development. A skipped job never blocks a merge, a
+  # failed one does (ci-passed).
+  engine:
+    name: "Runner: engine tests (real PR-Agent, fake GitHub and LLM)"
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && (github.base_ref == 'main' || needs.changes.outputs.runner == 'true') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: runner
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.0"
+          enable-cache: true
+          cache-dependency-glob: runner/uv.lock
+      - name: Install dependencies
+        run: uv sync --locked
+      # The one step that needs the internet: PR-Agent counts tokens with a tiktoken encoding that
+      # it would download on first use. The tests run without any outside connection.
+      - name: Cache the tiktoken encoding
+        run: uv run python scripts/prime_tiktoken_cache.py
+      - name: Engine tests
+        run: uv run pytest -m engine
+
   e2e:
     name: "E2E: browser journeys"
     needs: changes
@@ -237,7 +267,7 @@ jobs:
   # fails on any failed or cancelled job and accepts skipped jobs (path filter).
   ci-passed:
     name: All checks passed?
-    needs: [changes, app-fast, runner-fast, e2e, image-app, image-runner, actionlint]
+    needs: [changes, app-fast, runner-fast, engine, e2e, image-app, image-runner, actionlint]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
