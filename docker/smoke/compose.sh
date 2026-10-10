@@ -135,9 +135,13 @@ services:
       retries: 2
       start_period: 0s
 YAML
-if dc --file "$workdir/never-healthy.yml" up --detach >/dev/null 2>&1; then
+if unhealthy_output=$(dc --file "$workdir/never-healthy.yml" up --detach 2>&1); then
   fail "docker compose up succeeded although the app never became healthy"
 fi
+# Any other failure of `up` (a typo in the override above, a port clash) must not pass for this one.
+grep -qi 'unhealthy' <<<"$unhealthy_output" ||
+  fail "the output of up does not name the unhealthy app: $unhealthy_output"
+printf '    up said: %s\n' "$(grep -i -m1 'unhealthy' <<<"$unhealthy_output")"
 runner_state=$(state_of runner)
 case "$runner_state" in
   "" | created) printf '    runner state: %s\n' "${runner_state:-not created}" ;;
@@ -158,7 +162,9 @@ health=$(curl --silent --fail --max-time 5 "http://127.0.0.1:$port/api/health") 
 [ "$health" = '{"status":"ok"}' ] || fail "unexpected health answer: $health"
 
 # CR-37-T02
-step "the runner publishes no port and the app keeps /data in a named volume"
+step "the app is published on loopback only, the runner publishes no port, /data is a named volume"
+binding=$(docker inspect --format '{{range (index .NetworkSettings.Ports "3000/tcp")}}{{.HostIp}} {{end}}' "$(container_of app)")
+[ "$binding" = "127.0.0.1 " ] || fail "the app is published on '$binding', expected only 127.0.0.1"
 published=$(docker inspect --format '{{json .NetworkSettings.Ports}}' "$(container_of runner)")
 [ "$published" = "{}" ] || [ "$published" = "null" ] || fail "the runner publishes ports: $published"
 mount=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Type}} {{.Name}}{{end}}{{end}}' "$(container_of app)")
@@ -195,7 +201,9 @@ kept=$(dc exec -T app node --no-warnings -e '
 
 # CR-37-T07: an app process that dies on its own (a crash, the out-of-memory killer) comes back
 # through the restart policy; the runner stays up and finds the app again without anybody touching
-# it. `docker kill` and `docker stop` are not used: with `unless-stopped` Docker treats them as a
+# it. (This only shows that the runner is connected again, not that it noticed the outage: the
+# placeholder polls every 5 s and logs on change. CR-29 replaces the placeholder with the real loop
+# and should check its real reconnect here.) `docker kill` and `docker stop` are not used: with `unless-stopped` Docker treats them as a
 # deliberate stop and leaves the container stopped (that is the point of the policy). Instead the
 # server is told to terminate from inside the container; its own exit is what the policy sees.
 step "an app process that exits by itself restarts, becomes healthy again, and the runner reaches it"

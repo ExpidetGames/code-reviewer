@@ -43,7 +43,9 @@ services:
       LLM_API_KEY: ${LLM_API_KEY:-}
       DATABASE_BUSY_TIMEOUT_MS: ${DATABASE_BUSY_TIMEOUT_MS:-}
     healthcheck:
-      # Node is in the image, curl is not. /api/health is public and reads the database.
+      # Node is in the image, curl is not. /api/health is public and reads the database. Declared
+      # here so the timings are visible and tunable; keep the command in sync with the HEALTHCHECK
+      # in app/Dockerfile.
       test:
         - CMD
         - node

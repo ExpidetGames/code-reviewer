@@ -101,8 +101,8 @@ writable for uid 10001. `make test-images` builds both images and runs their smo
 
 CI builds and smoke tests both images on pull requests. A push to `development` or `main`
 (`.github/workflows/publish-images.yml`) pushes them to GHCR with the tags `sha-<short commit>` and
-`development` or `latest`. The packages must be public (set once in the GitHub package settings,
-see the pull request of the image ticket); pulling needs no login then.
+`development` or `latest`. The packages stay private: pulling needs `docker login ghcr.io` with a token
+that may read packages. How the deployment server gets access is decided with the deployment ticket.
 
 ## Run with Docker Compose
 
@@ -132,6 +132,12 @@ naming the variables, never their values): the sign in settings, `RUNNER_TOKEN` 
 characters) and the GitHub App credentials. The development server (`pnpm dev`) does not require the
 last two, so the sign in can be tried without a GitHub App.
 
+Compose only catches *empty* values. A value that is set but invalid passes compose and is rejected by
+the app, which exits with one `[auth]` or `[deploy]` line (for example a `RUNNER_TOKEN` shorter than 32
+characters, or a `BETTER_AUTH_URL` that is plain http on anything but localhost: https is mandatory
+beyond localhost). Because of `restart: unless-stopped` that looks like a restart loop and the runner
+never starts: run `docker compose logs app` and read the last lines.
+
 **Images.** By default compose pulls `ghcr.io/expidetgames/code-reviewer-app:development` and
 `...-runner:development` (change them with `APP_IMAGE` and `RUNNER_IMAGE`, for example to a
 `sha-<short commit>` tag). The packages are private, so run `docker login ghcr.io` first with a token
@@ -142,10 +148,16 @@ docker compose -f compose.yml -f compose.build.yml up -d --build --wait
 ```
 
 **Data.** The database survives `docker compose down` and image updates (`docker compose pull && docker
-compose up -d`). Only `docker compose down -v` deletes it. Back it up by copying `/data/app.db` out of
-the volume while the app is stopped, until the backup ticket lands. The app is published on
-`127.0.0.1` only; set `APP_BIND_ADDRESS=0.0.0.0` (and `APP_PORT`, `BETTER_AUTH_URL`) to reach it from
-elsewhere, preferably behind a reverse proxy with https.
+compose up -d`). Only `docker compose down -v` deletes it. The database runs in WAL mode, so
+never copy only `app.db` from a running stack: committed data can still sit in `app.db-wal`. Back it
+up with SQLite's online backup (`VACUUM INTO` or the `.backup` command of the `sqlite3` shell), or
+stop the stack with `docker compose stop` and copy `app.db`, `app.db-wal` and `app.db-shm` together.
+CR-40 automates the backup.
+
+**Network.** The app is published on `127.0.0.1` only. Set `APP_BIND_ADDRESS=0.0.0.0` (and
+`APP_PORT`, and `BETTER_AUTH_URL` to the address people use) to reach it from elsewhere. That address
+must be https, so put a reverse proxy with TLS in front. An IPv6 address needs brackets, for example
+`APP_BIND_ADDRESS=[::1]`.
 
 **Restarts.** `restart: unless-stopped` brings a crashed container back. A container you stop yourself
 (`docker stop`, `docker kill`, `docker compose stop`) stays stopped until the next `up`: that is what
@@ -157,7 +169,7 @@ the app is down); `docker compose logs runner` shows it.
 
 `make test-compose` builds both images and runs `docker/smoke/compose.sh` against them with dummy
 settings: validation of the settings, no runner before a healthy app, the stack comes up, the data
-survives `down` and `up`, a killed app container restarts. CI runs the same script for pull requests.
+survives `down` and `up`, an app process that exits by itself is restarted. CI runs the same script for pull requests.
 
 ## Lint, typecheck, test
 

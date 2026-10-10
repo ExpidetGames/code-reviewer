@@ -62,7 +62,7 @@ export function checkDeploymentConfigOnStart({
   const problems = findDeploymentConfigProblems(env);
   if (problems.length === 0) return;
   log(
-    `[deploy] DEPLOY_CONFIG_INVALID: The deployment configuration is incomplete or invalid: ${problems.join("; ")}.`,
+    `[deploy] ${DEPLOY_ERROR_CODES[0]}: The deployment configuration is incomplete or invalid: ${problems.join("; ")}.`,
   );
   exit(1);
 }

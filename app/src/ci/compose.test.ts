@@ -65,6 +65,14 @@ describe("compose services", () => {
   });
 
   // CR-37-T02
+  it("publishes the app on loopback unless an address is chosen on purpose", () => {
+    const ports = service("app").ports ?? [];
+
+    expect(ports).toHaveLength(1);
+    expect(ports[0]?.startsWith("${APP_BIND_ADDRESS:-127.0.0.1}:")).toBe(true);
+  });
+
+  // CR-37-T02
   it("gives the runner no published port and points it at the app over the compose network", () => {
     const runner = service("runner");
 
