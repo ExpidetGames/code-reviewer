@@ -64,7 +64,7 @@ uv run code-reviewer-runner --version
 One command per task from the repository root, covering both parts:
 
 ```sh
-make lint              # app: eslint; runner: ruff check and ruff format --check
+make lint              # app: eslint and prettier --check; runner: ruff check and ruff format --check
 make typecheck         # app: next typegen and tsc --noEmit (strict); runner: pyright (strict)
 make test-unit         # app: vitest unit project; runner: pytest -m unit
 make test-integration  # integration tests that need no Docker stack
@@ -75,7 +75,7 @@ Or per part:
 
 | | App (`cd app`) | Runner (`cd runner`) |
 |---|---|---|
-| Lint | `pnpm lint` | `uv run ruff check .` and `uv run ruff format --check .` |
+| Lint | `pnpm lint` and `pnpm format:check` (`pnpm format` fixes) | `uv run ruff check .` and `uv run ruff format --check .` |
 | Typecheck | `pnpm typecheck` | `uv run pyright` |
 | Unit tests | `pnpm test` | `uv run pytest -m unit` |
 | Integration | `pnpm test:int` | `uv run pytest -m "integration or contract"` |
