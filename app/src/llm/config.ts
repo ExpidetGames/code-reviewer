@@ -98,6 +98,16 @@ export function loadLlmConfig(env: Env): LlmConfigState {
   };
 }
 
+/**
+ * The model the instance uses unless the review settings choose another: `LLM_MODEL` when it is set
+ * and valid, otherwise the default model. Read on its own so the review settings still have a model
+ * while some other variable is wrong.
+ */
+export function configuredLlmModel(env: Env): string {
+  const value = env.LLM_MODEL?.trim();
+  return value && MODEL_NAME_PATTERN.test(value) ? value : DEFAULT_LLM_MODEL;
+}
+
 function readProvider(
   raw: string | undefined,
   issues: LlmConfigIssue[],

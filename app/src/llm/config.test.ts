@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_LLM_MODEL,
   LLM_CONFIG_ISSUE_CODES,
+  configuredLlmModel,
   loadLlmConfig,
   type LlmConfigIssue,
 } from "./config.ts";
@@ -191,5 +192,21 @@ describe("loading the LLM configuration", () => {
     const state = loadLlmConfig({ LLM_PROVIDER: KEY, LLM_API_KEY: KEY });
 
     expect(JSON.stringify(state)).not.toContain(KEY);
+  });
+});
+
+describe("the model of the instance", () => {
+  it("is LLM_MODEL when it is set and valid, even while another variable is wrong", () => {
+    expect(configuredLlmModel({ LLM_MODEL: " qwen/qwen3-coder " })).toBe(
+      "qwen/qwen3-coder",
+    );
+    expect(
+      configuredLlmModel({ LLM_MODEL: "qwen/qwen3-coder", LLM_API_KEY: "" }),
+    ).toBe("qwen/qwen3-coder");
+  });
+
+  it("is the default model when LLM_MODEL is missing, blank or invalid", () => {
+    for (const value of [undefined, "", "  ", "bad model"])
+      expect(configuredLlmModel({ LLM_MODEL: value })).toBe(DEFAULT_LLM_MODEL);
   });
 });
