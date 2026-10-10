@@ -7,15 +7,27 @@ import { createRepositoriesRepository } from "../db/repositories/repositories-re
 import { getDatabase } from "../db/startup.ts";
 import { integrationRegistry } from "../integrations/registry.ts";
 import { getJobQueue } from "../jobs/shared.ts";
-import { loadLlmAccess } from "./temporary-llm-access.ts";
+import { getLlmAccess } from "../llm/shared.ts";
+import { getProjectService } from "../projects/shared.ts";
+import { getReviewSettingsService } from "../review-settings/shared.ts";
 import { createRunnerApi, type RunnerApi } from "./api.ts";
-import { allowAllClaimGuard } from "./claim-guard.ts";
+import { createClaimedKeys, type ClaimedKeys } from "./claimed-keys.ts";
+import { createProjectClaimGuard } from "./project-claim-guard.ts";
 import { HEARTBEAT_INTERVAL_SECONDS } from "./contract.ts";
-import { emptyJobOptionsSource } from "./job-options.ts";
+import { createReviewSettingsJobOptionsSource } from "./review-settings-job-options.ts";
 import { consoleRunnerApiLogger, describeError } from "./logger.ts";
 import { knownSecretsFromEnv } from "./redact.ts";
 import { errorResponse } from "./responses.ts";
 import { configuredRunnerToken } from "./token-auth.ts";
+
+// One list for the whole process, kept on globalThis because the route files may be bundled apart.
+const CLAIMED_KEYS = Symbol.for("code-reviewer.runner-api.claimed-keys");
+
+function getClaimedKeys(): ClaimedKeys {
+  const holder = globalThis as { [CLAIMED_KEYS]?: ClaimedKeys };
+  holder[CLAIMED_KEYS] ??= createClaimedKeys();
+  return holder[CLAIMED_KEYS];
+}
 
 /** The runner API of the running server. */
 export function getRunnerApi(): RunnerApi {
@@ -25,11 +37,15 @@ export function getRunnerApi(): RunnerApi {
     repositories: createRepositoriesRepository(db),
     integrations: createIntegrationsRepository(db),
     registry: integrationRegistry,
-    // Until the projects exist on this branch, every job may run; see claim-guard.ts.
-    guard: allowAllClaimGuard,
-    // Until the project settings exist on this branch, a job has no extra options; see job-options.ts.
-    jobOptions: emptyJobOptionsSource,
-    loadLlm: () => loadLlmAccess(process.env),
+    // A job runs only while its repository has an active project; see claim-guard.ts.
+    guard: createProjectClaimGuard({ projects: getProjectService() }),
+    // The review settings of the project over the global defaults; see job-options.ts.
+    jobOptions: createReviewSettingsJobOptionsSource({
+      settings: getReviewSettingsService(),
+    }),
+    // The shared LLM configuration, read from the environment on every claim (src/llm).
+    loadLlm: () => getLlmAccess(),
+    claimedKeys: getClaimedKeys(),
     now: () => new Date(),
     logger: consoleRunnerApiLogger,
     heartbeatIntervalSeconds: HEARTBEAT_INTERVAL_SECONDS,

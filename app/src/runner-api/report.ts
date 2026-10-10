@@ -13,6 +13,7 @@ import {
   type CompleteResponse,
   type HeartbeatResponse,
 } from "./contract.ts";
+import type { ClaimedKeys } from "./claimed-keys.ts";
 import { redactResult } from "./redact.ts";
 import type { RunnerApiLogger } from "./logger.ts";
 import {
@@ -25,8 +26,10 @@ import { errorResponse, jsonResponse } from "./responses.ts";
 export type ReportDeps = {
   queue: Pick<JobQueue, "get" | "heartbeat" | "complete" | "release">;
   logger: RunnerApiLogger;
-  /** Exact values (the LLM key, the runner token) that must never end up in a stored result. */
+  /** Exact values (the current LLM key, the runner token) that must never end up in a stored result. */
   knownSecrets: () => readonly string[];
+  /** The LLM key each job was handed with its claim; it may differ from the current one. */
+  claimedKeys: Pick<ClaimedKeys, "keysOf">;
 };
 
 /**
@@ -92,7 +95,11 @@ export async function handleComplete(
 
   // What is stored: the checked result with everything that looks like a credential removed. The
   // same report always gives the same stored value, which is what makes a repetition recognisable.
-  const stored = redactResult(parsed.value.result, deps.knownSecrets());
+  // The key of the claim and the current one: the key may have been rotated while the job ran.
+  const stored = redactResult(parsed.value.result, [
+    ...deps.knownSecrets(),
+    ...deps.claimedKeys.keysOf(jobId),
+  ]);
   const outcome: JobOutcome =
     stored.errorCode === null
       ? { ok: true, result: stored }

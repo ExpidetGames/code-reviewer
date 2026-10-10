@@ -7,14 +7,14 @@ from it through the runner API (CR-28), webhooks and the UI put jobs in. Everyth
 (`src/db/repositories/jobs-repository.ts`, the only code that touches the table). The running server
 gets its queue from `getJobQueue()` (`shared.ts`).
 
-| File            | Role                                                                                                                                                                             |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `job-queue.ts`  | `createJobQueue(db, options)`: `enqueue`, `claimNext`, `heartbeat`, `complete`, `release`, `cancelWaitingForRepository`, `discardWaitingForPr`, `expireStaleJobs`, `get`, `list` |
-| `job-status.ts` | The statuses and the table of allowed transitions; the repository builds its update conditions from it                                                                           |
-| `job-input.ts`  | `validateEnqueueInput`: field level checks before anything is written                                                                                                            |
-| `job-types.ts`  | `Job`, the inputs and results, the trigger kinds and the error codes the queue itself writes                                                                                     |
-| `job-limits.ts` | Lease, maximum runtime and maximum attempts, with their defaults                                                                                                                 |
-| `errors.ts`     | `JobQueueError` with the stable codes `JOB_INPUT_INVALID` (with `fieldErrors`) and `JOB_REPOSITORY_UNKNOWN`                                                                      |
+| File            | Role                                                                                                                                                                                              |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `job-queue.ts`  | `createJobQueue(db, options)`: `enqueue`, `claimNext`, `heartbeat`, `complete`, `release`, `cancelClaimed`, `cancelWaitingForRepository`, `discardWaitingForPr`, `expireStaleJobs`, `get`, `list` |
+| `job-status.ts` | The statuses and the table of allowed transitions; the repository builds its update conditions from it                                                                                            |
+| `job-input.ts`  | `validateEnqueueInput`: field level checks before anything is written                                                                                                                             |
+| `job-types.ts`  | `Job`, the inputs and results, the trigger kinds and the error codes the queue itself writes                                                                                                      |
+| `job-limits.ts` | Lease, maximum runtime and maximum attempts, with their defaults                                                                                                                                  |
+| `errors.ts`     | `JobQueueError` with the stable codes `JOB_INPUT_INVALID` (with `fieldErrors`) and `JOB_REPOSITORY_UNKNOWN`                                                                                       |
 
 Jobs refer to `repositories`, not to projects. Whether a repository has an active project is checked
 by the code that enqueues (the trigger policy, CR-31), not here.
@@ -108,6 +108,12 @@ for the repository). It is a lost attempt with the same rule as a lapsed lease: 
 `discardWaitingForPr(repositoryId, prNumber)` (pull request closed) set waiting jobs to `cancelled`;
 running jobs finish. Nothing is deleted.
 
+`cancelClaimed(jobId, leaseToken, errorCode)` is the one exception for a _running_ job: the claim of the
+runner API uses it when it finds the project of a just claimed job switched off. One statement keyed on
+the job id and the lease token (running to cancelled), no attempt counted, never queued in between. It
+is deliberately not a transition of the shared table (`canTransition`): `cancelWaiting...` derives its
+statuses from that table and must never cancel a running job.
+
 ## Tests
 
 `job-status.test.ts` and `job-input.test.ts` are unit tests of the pure rules. The queue itself is
@@ -124,12 +130,12 @@ checked in code review.
   out of order, and a late `synchronize` for an older commit would otherwise supersede the waiting job
   for the newer one. Also check that the repository has an active project, skip drafts, debounce through
   `runAfter`, and call `discardWaitingForPr` when a pull request closes.
-- **CR-24 (projects).** Call `cancelWaitingForRepository` when a project is deactivated.
+- **CR-24 (projects).** Done (CR-46): `createJobProjectHooks` (`project-hooks.ts`) calls `cancelWaitingForRepository` in the transaction of the deactivation; `src/projects/shared.ts` plugs it in.
 - **CR-28/CR-29 (runner).** The runner API exists (`src/runner-api/README.md`); it uses `release` for
-  "token creation failed". Until CR-31 and CR-24 are in, the intake enqueues for every repository and
-  closed pull requests keep their waiting jobs. The runner API must not be enabled (or shipped) before
-  they are, or old jobs would run with paid model calls; its claim guard is the hook that skips jobs of
-  repositories without an active project once the projects are there. The runner (CR-29) reports its
+  "token creation failed". Until CR-31 is in, closed
+  pull requests keep their waiting jobs. The runner API must not be enabled (or shipped) before it is, or
+  old jobs would run with paid model calls. Its claim guard skips and cancels jobs of repositories
+  without an active project (`project-claim-guard.ts`, wired in CR-46). The runner (CR-29) reports its
   shutdown through `complete` with the error code `runner_shutdown`; the runner API turns that into
   `release`, so the job is requeued with the attempt cap (the runner never calls `release` itself).
 - **CR-32 (comments).** The provider does not cut `args`; the queue refuses more than 10 000 characters

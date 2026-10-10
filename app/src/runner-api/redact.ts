@@ -2,6 +2,7 @@
 // output (that is the first line of defense); this is the second one, for a runner that got it
 // wrong: strings that look like credentials, and the secrets the app itself holds.
 import "server-only";
+import { maskSecretInText } from "../llm/access.ts";
 import type { RunnerResult } from "./contract.ts";
 
 export const REDACTED = "[redacted]";
@@ -32,18 +33,15 @@ export function knownSecretsFromEnv(
 }
 
 /**
- * `secrets` are the exact values the app knows (see `knownSecretsFromEnv`). Each is removed as it is
- * and in its URL-encoded form, which is how it appears in a request line or an error text.
+ * `secrets` are the exact values the app knows (see `knownSecretsFromEnv`, and the key of the claim of
+ * the job). Each is removed as it is and in its URL-encoded, JSON-escaped and base64 form, which is how
+ * it appears in a request line, a logged body or an `Authorization: Basic` header (`maskSecretInText`).
  */
 export function redactText(text: string, secrets: readonly string[]): string {
-  let cleaned = text;
-  for (const raw of secrets) {
-    const secret = raw.trim();
-    if (secret.length < MIN_SECRET_LENGTH) continue;
-    cleaned = cleaned.split(secret).join(REDACTED);
-    const encoded = encodeURIComponent(secret);
-    if (encoded !== secret) cleaned = cleaned.split(encoded).join(REDACTED);
-  }
+  const usable = secrets
+    .map((secret) => secret.trim())
+    .filter((secret) => secret.length >= MIN_SECRET_LENGTH);
+  let cleaned = maskSecretInText(text, ...usable);
   for (const shape of SECRET_SHAPES) cleaned = cleaned.replace(shape, REDACTED);
   return cleaned;
 }

@@ -60,7 +60,7 @@
       "description": "Extra options of the four PR-Agent tools, as strings. Nothing else is allowed here (credentials, endpoints and the model have their own fields).",
       "type": "object",
       "propertyNames": {
-        "pattern": "^(PR_REVIEWER|PR_DESCRIPTION|PR_CODE_SUGGESTIONS|PR_QUESTIONS)__[A-Z0-9_]+$"
+        "pattern": "^(PR_REVIEWER|PR_DESCRIPTION|PR_CODE_SUGGESTIONS|PR_QUESTIONS)__[A-Z0-9]+(_[A-Z0-9]+)*$"
       },
       "additionalProperties": { "type": "string", "maxLength": 4096 },
       "maxProperties": 64
@@ -101,9 +101,16 @@
             "apiKey": { "type": "string", "minLength": 1, "maxLength": 4096 },
             "baseUrl": { "type": "string", "minLength": 1, "maxLength": 2048 },
             "maxTokens": {
+              "description": "The token budget of a review (it also bounds the fallback models, so it must fit the smallest window of the chain).",
               "type": "integer",
               "minimum": 1000,
               "maximum": 10000000
+            },
+            "fallbackModels": {
+              "description": "Models to try, in order, when the main model fails. Optional; the app does not send it in the MVP (no fallback chain is decided), the runner accepts it.",
+              "type": "array",
+              "items": { "type": "string", "minLength": 1, "maxLength": 200 },
+              "maxItems": 5
             }
           }
         },

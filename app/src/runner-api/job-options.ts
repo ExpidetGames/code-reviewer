@@ -1,7 +1,7 @@
-// Where the per-repository options of a job come from: the project settings (CR-25). The claim asks
-// once per job, so the options can differ per repository: the extra options of the four PR-Agent tools
-// (`env`) and, if the project chose them, the model and the context size of the job. Until the
-// settings exist on this branch the source is empty and the job gets the LLM access as it is.
+// Where the per-repository options of a job come from: the review settings of its project (CR-25,
+// `review-settings-job-options.ts`). The claim asks once per job, so the options can differ per
+// repository: the extra options of the four PR-Agent tools (`env`) and the model and the token budget
+// of the job.
 import type { Job } from "../jobs/job-types.ts";
 
 export type JobOptions = {
@@ -16,8 +16,8 @@ export type JobOptions = {
     /** `llm.maxTokens` of the job (a whole number of 1000 to 10 000 000). Null or left out: not sent. */
     maxTokens?: number | null;
     /**
-     * The fallback models, in order. The job has no field for them yet (the runner pins an empty
-     * list), so they are accepted here and not handed on.
+     * The fallback models, in order. Accepted here and not handed on: the MVP has no fallback chain
+     * (the contract has the field, `llm.fallbackModels`, for when one is decided).
      */
     fallbackModels?: readonly string[];
   };
@@ -27,7 +27,7 @@ export type JobOptionsSource = {
   optionsFor(job: Job): Promise<JobOptions>;
 };
 
-/** The source of this branch: no project settings yet, so no extra options. */
+/** For tests that are not about settings: no extra options, the job gets the LLM access as it is. */
 export const emptyJobOptionsSource: JobOptionsSource = {
   optionsFor: async () => ({ env: {} }),
 };
