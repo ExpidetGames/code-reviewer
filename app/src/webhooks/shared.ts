@@ -14,6 +14,7 @@ import {
 } from "./github-app-handler.ts";
 import { getProjectService } from "../projects/shared.ts";
 import { getReviewSettingsService } from "../review-settings/shared.ts";
+import { createAutomaticReviewSettingsSource } from "./automatic-review-settings.ts";
 import { configuredDebounceMs } from "./debounce-config.ts";
 import { consoleWebhookLogger } from "./logger.ts";
 import { createJobQueueReviewTriggerIntake } from "./job-queue-intake.ts";
@@ -41,16 +42,10 @@ export function getGithubAppWebhookHandler(): WebhookHandler {
     sync: getIntegrationSync(),
     projects: getProjectService(),
     automatic: {
-      // The settings of the repository's project: project over global over built-in.
-      async settingsFor(integrationId, repositoryExternalId) {
-        const repository = await createRepositoriesRepository(
-          db,
-        ).findByExternalId(integrationId, repositoryExternalId);
-        if (repository === undefined) return undefined;
-        return (
-          await getReviewSettingsService().resolveForRepository(repository.id)
-        )?.settings;
-      },
+      settingsFor: createAutomaticReviewSettingsSource({
+        repositories: createRepositoriesRepository(db),
+        settings: getReviewSettingsService(),
+      }),
       debounceMs: configuredDebounceMs(process.env),
       now: () => new Date(),
     },

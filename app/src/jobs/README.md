@@ -17,7 +17,7 @@ gets its queue from `getJobQueue()` (`shared.ts`).
 | `errors.ts`     | `JobQueueError` with the stable codes `JOB_INPUT_INVALID` (with `fieldErrors`) and `JOB_REPOSITORY_UNKNOWN`                                                                                       |
 
 Jobs refer to `repositories`, not to projects. Whether a repository has an active project is checked
-by the code that enqueues (the trigger policy, CR-31), not here.
+by the code that enqueues (the trigger policy of the webhook handler, CR-31), not here.
 
 ## Statuses
 
@@ -52,7 +52,7 @@ reported).
    only one job per pull request runs at a time.
 
 `run_after` is `now` unless the caller passes a later time (the debounce of `synchronize` is policy and
-belongs to the intake, CR-31). A manual job is due at once.
+is decided by the webhook handler's trigger policy, CR-31). A manual job is due at once.
 
 Three partial unique indexes enforce the promises even if the code were wrong: one job per delivery id,
 one automatic job per head commit and command in the slot-holding statuses, one running job per pull
@@ -125,16 +125,15 @@ checked in code review.
 
 ## For the tickets that build on it
 
-- **CR-31 (triggers).** Compare the head commit of a `synchronize` with the pull request's current head
-  (`headShaOf`, or drop events older than the newest known job) _before_ enqueueing: events can arrive
-  out of order, and a late `synchronize` for an older commit would otherwise supersede the waiting job
-  for the newer one. Also check that the repository has an active project, skip drafts, debounce through
-  `runAfter`, and call `discardWaitingForPr` when a pull request closes.
+- **CR-31 (triggers).** Done: the webhook handler applies the trigger policy before the intake
+  (`src/webhooks/README.md`, "The trigger policy for automatic reviews"). It checks the active
+  project, skips drafts and switched-off settings, compares a push with the pull request's current
+  head commit (`getPullRequest`) _before_ enqueueing, debounces `synchronize` through `runAfter`
+  (default 90 seconds, `REVIEW_DEBOUNCE_SECONDS`) and calls `discardWaitingForPr` when a pull request
+  closes.
 - **CR-24 (projects).** Done (CR-46): `createJobProjectHooks` (`project-hooks.ts`) calls `cancelWaitingForRepository` in the transaction of the deactivation; `src/projects/shared.ts` plugs it in.
 - **CR-28/CR-29 (runner).** The runner API exists (`src/runner-api/README.md`); it uses `release` for
-  "token creation failed". Until CR-31 is in, closed
-  pull requests keep their waiting jobs. The runner API must not be enabled (or shipped) before it is, or
-  old jobs would run with paid model calls. Its claim guard skips and cancels jobs of repositories
+  "token creation failed". Its claim guard skips and cancels jobs of repositories
   without an active project (`project-claim-guard.ts`, wired in CR-46). The runner (CR-29) reports its
   shutdown through `complete` with the error code `runner_shutdown`; the runner API turns that into
   `release`, so the job is requeued with the attempt cap (the runner never calls `release` itself).

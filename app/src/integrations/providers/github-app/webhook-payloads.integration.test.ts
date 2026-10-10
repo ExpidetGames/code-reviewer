@@ -31,6 +31,17 @@ const testGithubAppConfig = (
   overrides: Record<string, string | undefined> = {},
 ) => loadGithubAppConfig(testGithubAppEnv(overrides));
 
+/** A recorded payload as far as these tests reach into it. */
+type Damageable = {
+  pull_request: {
+    head: { sha?: string };
+    draft: unknown;
+    state: unknown;
+    merged?: boolean;
+  };
+  installation?: unknown;
+};
+
 const FIXTURES = join(
   dirname(fileURLToPath(import.meta.url)),
   "../../../../../fakes/fixtures/github-webhooks",
@@ -61,6 +72,71 @@ describe("the recorded GitHub webhook payloads", () => {
     const event = name.split(".")[0] as keyof typeof WEBHOOK_READ_FIELDS;
 
     expect(payloadProblems(event, webhookFixture(name))).toEqual([]);
+  });
+
+  // CR-31-T18
+  it.each([
+    "pull_request.opened",
+    "pull_request.synchronize",
+    "pull_request.closed",
+  ])(
+    "%s has every field the automatic reviews read, with the right type",
+    (name) => {
+      const payload = webhookFixture(name) as Record<string, unknown> & {
+        action: string;
+        number: number;
+        pull_request: {
+          draft: boolean;
+          state: string;
+          merged: boolean;
+          head: { sha: string };
+        };
+        repository: { id: number; full_name: string };
+        installation: { id: number };
+      };
+
+      // The parser is held to the same list: a field it reads must be listed, so a payload without
+      // one of these is invalid, and so is a fixture whose schema drifted.
+      const listed = WEBHOOK_READ_FIELDS.pull_request.map((spec) => spec.path);
+      for (const path of [
+        "action",
+        "number",
+        "pull_request.draft",
+        "pull_request.state",
+        "pull_request.merged",
+        "pull_request.head.sha",
+        "repository.id",
+        "installation.id",
+      ])
+        expect(listed, path).toContain(path);
+      expect(payloadProblems("pull_request", payload)).toEqual([]);
+      expect(typeof payload.action).toBe("string");
+      expect(Number.isInteger(payload.number)).toBe(true);
+      expect(typeof payload.pull_request.draft).toBe("boolean");
+      expect(["open", "closed"]).toContain(payload.pull_request.state);
+      expect(typeof payload.pull_request.merged).toBe("boolean");
+      expect(payload.pull_request.head.sha).toMatch(/^[0-9a-f]{40}$/);
+      expect(typeof payload.repository.id).toBe("number");
+      expect(typeof payload.repository.full_name).toBe("string");
+      expect(Number.isInteger(payload.installation.id)).toBe(true);
+    },
+  );
+
+  it.each([
+    [
+      "pull_request.head.sha",
+      (p: Damageable) => delete p.pull_request.head.sha,
+    ],
+    ["pull_request.draft", (p: Damageable) => (p.pull_request.draft = "false")],
+    ["pull_request.merged", (p: Damageable) => delete p.pull_request.merged],
+    ["pull_request.state", (p: Damageable) => (p.pull_request.state = 1)],
+    ["installation.id", (p: Damageable) => delete p.installation],
+  ])("reports a payload whose %s drifted", (path, damage) => {
+    const payload = webhookFixture("pull_request.opened");
+
+    damage(payload as unknown as Damageable);
+
+    expect(payloadProblems("pull_request", payload)).toContain(path);
   });
 
   // CR-21-T14

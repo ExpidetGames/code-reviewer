@@ -38,7 +38,15 @@ const opened: ReviewTrigger = {
 };
 
 /** A command trigger: it knows nothing about drafts or the state of the pull request. */
-const { draft: _draft, state: _state, ...openedFields } = opened;
+const openedFields = {
+  repo,
+  prNumber: 7,
+  prUrl: "https://example.test/acme/widgets/pull/7",
+  headSha: "abc123",
+  command: null,
+  args: null,
+  actor: { login: "alice", externalId: "1" },
+};
 const commandTrigger: ReviewTrigger = {
   ...openedFields,
   kind: "command",
