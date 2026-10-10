@@ -4,6 +4,9 @@
 import "server-only";
 import { IntegrationError } from "./errors.ts";
 import type { IntegrationProvider } from "./provider.ts";
+import { loadGithubAppConfig } from "./providers/github-app/config.ts";
+import { createGithubAppProvider } from "./providers/github-app/provider.ts";
+import type { GithubAppClientOptions } from "./providers/github-app/client.ts";
 import {
   INTEGRATION_TYPES,
   isIntegrationType,
@@ -54,6 +57,31 @@ export function createIntegrationRegistry(
   };
 }
 
-// The MVP has exactly one provider, the GitHub App, which arrives with its own ticket: it adds its
-// entry here and nowhere else.
-export const integrationRegistry = createIntegrationRegistry({});
+export type DefaultRegistryOptions = {
+  /** Where the GitHub App settings are read from, on first use. Default: the process environment. */
+  env?: Readonly<Record<string, string | undefined>>;
+  /** For tests: a different fetch, clock or request timeout for the GitHub client. */
+  githubClient?: Omit<GithubAppClientOptions, "config">;
+};
+
+/**
+ * The registry of this app: the GitHub App provider, configured from the environment. The settings
+ * are read when GitHub is first needed, not when the app loads, so a missing variable fails that
+ * call with GITHUB_APP_CONFIG_INVALID and breaks nothing else.
+ */
+export function createDefaultIntegrationRegistry(
+  options: DefaultRegistryOptions = {},
+): IntegrationRegistry {
+  return createIntegrationRegistry({
+    github_app: createGithubAppProvider({
+      config: () => loadGithubAppConfig(options.env ?? process.env),
+      ...(options.githubClient === undefined
+        ? {}
+        : { clientOptions: options.githubClient }),
+    }),
+  });
+}
+
+// The MVP has exactly one provider, the GitHub App. A new provider adds its entry above and nowhere
+// else.
+export const integrationRegistry = createDefaultIntegrationRegistry();

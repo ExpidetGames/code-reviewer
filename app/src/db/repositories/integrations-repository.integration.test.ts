@@ -101,6 +101,43 @@ describe("the integrations repository", () => {
     });
   });
 
+  it("updates the display name and the configuration and moves the update time", async () => {
+    const { db } = await createTestDatabase();
+    let now = new Date("2026-10-10T08:00:00.000Z");
+    const repository = createIntegrationsRepository(db, () => now);
+    const saved = await repository.create(gitHubApp);
+
+    now = new Date("2026-10-10T09:00:00.000Z");
+    await repository.updateDetails(saved.id, {
+      displayName: "Acme Inc",
+      config: { accountLogin: "acme-inc", accountId: 5 },
+    });
+
+    expect(await repository.get(saved.id)).toMatchObject({
+      displayName: "Acme Inc",
+      config: { accountLogin: "acme-inc", accountId: 5 },
+      status: "active",
+      updatedAt: "2026-10-10T09:00:00.000Z",
+    });
+  });
+
+  it("refuses new details that carry a secret and keeps the old ones", async () => {
+    const { db } = await createTestDatabase();
+    const repository = createIntegrationsRepository(db);
+    const saved = await repository.create(gitHubApp);
+
+    await expect(
+      repository.updateDetails(saved.id, {
+        displayName: "x",
+        config: { privateKey: "-----BEGIN-----" },
+      }),
+    ).rejects.toMatchObject({ code: "INTEGRATION_SECRET_NOT_ALLOWED" });
+    await expect(
+      repository.updateDetails("missing", { displayName: "x", config: {} }),
+    ).rejects.toMatchObject({ code: "INTEGRATION_NOT_FOUND" });
+    expect(await repository.get(saved.id)).toEqual(saved);
+  });
+
   it("refuses a second integration with the same type and platform id", async () => {
     const { db } = await createTestDatabase();
     const repository = createIntegrationsRepository(db);

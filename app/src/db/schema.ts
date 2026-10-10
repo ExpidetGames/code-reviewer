@@ -27,7 +27,24 @@ export interface IntegrationsTable {
   updated_at: string;
 }
 
+export interface RepositoriesTable {
+  id: string;
+  /** The integration (for a GitHub App: the installation) that gives access to the repository. */
+  integration_id: string;
+  /** The platform's id of the repository. */
+  external_id: string;
+  /** "owner/name". */
+  full_name: string;
+  url: string;
+  /** 1 while the platform still lists the repository for the integration, 0 once it does not. */
+  active: number;
+  /** ISO 8601 text in UTC. */
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Database {
   app_meta: AppMetaTable;
   integrations: IntegrationsTable;
+  repositories: RepositoriesTable;
 }

@@ -54,8 +54,13 @@ never hold one open across an `await` on something slow (network, model, subproc
 ## Migrations
 
 - Written in TypeScript with Kysely's schema builder, one file per migration in `migrations/`,
-  named `NNNN_what_it_does.ts` and registered in `migrations/index.ts`. Kysely runs them in the
-  alphabetical order of the keys there.
+  named `YYYYMMDDHHMMSS_what_it_does.ts` (the UTC time you create it, for example
+  `20261010120000_create_integrations.ts`) and registered in `migrations/index.ts`. Kysely runs them in
+  the alphabetical order of the keys there. `0001_create_app_meta` is the only exception and sorts
+  first. A timestamp instead of a running number keeps two branches from picking the same number;
+  `migrate.integration.test.ts` checks the name pattern. When an epic merges after another epic added
+  migrations, check the order: a migration must never sort before one that is already merged to
+  `development`, because Kysely refuses to run migrations out of order.
 - They run automatically when the server starts: `src/instrumentation.ts` (`register`, which Next.js
   calls once before the server accepts requests) calls `initializeDatabaseOnStart`. It is not run by
   `next build`.
@@ -116,9 +121,14 @@ string or a timestamp string format. Route handlers and server code get the conn
 `getDatabase()` (`startup.ts`) and pass it in; tests pass in a database from
 `src/test-support/test-database.ts`.
 
-`integrations` (migration `0002`, repository `integrations-repository.ts`) holds the connections to
+`integrations` (migration `20261010120000_create_integrations`, repository `integrations-repository.ts`) holds the connections to
 git platforms; see `src/integrations/README.md`. It keeps no secret of a GitHub App, and the
 repository refuses secret-looking keys in `config`.
+
+`repositories` (migration `20261010143000_create_repositories`, repository `repositories-repository.ts`)
+holds the repositories each integration can see. A repository the platform stops listing becomes
+inactive (`active = 0`), never deleted; `reconcile` makes the rows of one integration match a
+complete list in one transaction.
 
 `app_meta` (a key/value table for facts about the installation) exists to prove the setup. Product
 tables come with the tickets that need them: add the migration, the row type in `schema.ts` and the

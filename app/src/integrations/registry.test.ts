@@ -3,7 +3,12 @@
 import { describe, expect, it } from "vitest";
 import { fakeIntegrationProvider } from "../test-support/fake-integration-provider.ts";
 import { IntegrationError } from "./errors.ts";
-import { createIntegrationRegistry } from "./registry.ts";
+import {
+  createDefaultIntegrationRegistry,
+  createIntegrationRegistry,
+  integrationRegistry,
+} from "./registry.ts";
+import { fakeIntegration } from "../test-support/fake-integration-provider.ts";
 
 function errorCodeOf(action: () => unknown): string | undefined {
   try {
@@ -77,5 +82,29 @@ describe("the integration registry", () => {
     });
 
     expect(registry.registeredTypes()).toEqual(["github_app"]);
+  });
+});
+
+describe("the default registry", () => {
+  it("registers the GitHub App provider and loads without any GitHub App settings", () => {
+    expect(integrationRegistry.registeredTypes()).toEqual(["github_app"]);
+    expect(integrationRegistry.resolve("github_app").type).toBe("github_app");
+  });
+
+  it("fails the first call that needs GitHub with a config error that names the variables", async () => {
+    const registry = createDefaultIntegrationRegistry({ env: {} });
+
+    const failure = await registry
+      .resolve("github_app")
+      .listRepositories(fakeIntegration())
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+    expect(failure).toMatchObject({
+      code: "GITHUB_APP_CONFIG_INVALID",
+      variables: expect.arrayContaining(["GITHUB_APP_ID", "GITHUB_APP_SLUG"]),
+    });
   });
 });
