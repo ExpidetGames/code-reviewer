@@ -334,6 +334,76 @@ describe("the detail of a run", () => {
     expect(view.problem).toBe(UNKNOWN_ERROR_COPY);
   });
 
+  // CR-53-T01
+  it.each([
+    [
+      "review_state_truncated",
+      "The review was posted, but it grew past GitHub's comment size limit, so earlier findings are no longer tracked.",
+    ],
+    [
+      "review_text_truncated",
+      "The review was posted, but part of it was cut off because the comment reached GitHub's size limit.",
+    ],
+  ])(
+    "explains %s in words and keeps the link to the review that was posted",
+    (errorCode, sentence) => {
+      const commentUrl =
+        "https://github.com/acme/widgets/pull/7#issuecomment-9";
+      const view = toRunDetailView(
+        job({
+          status: "failed",
+          errorCode,
+          result: { ok: false, errorCode, commentUrl, logTail: "" },
+        }),
+        "p",
+        NOW,
+      );
+
+      expect(view.status).toBe("failed");
+      expect(view.problem).toBe(sentence);
+      expect(view.errorCode).toBe(errorCode);
+      expect(view.errorCodeKnown).toBe(true);
+      expect(view.commentUrl).toBe(commentUrl);
+      expect(view.commentMissing).toBe(false);
+    },
+  );
+
+  // CR-53-T03
+  it("shows no comment link for other failed runs, even if the stored result has one", () => {
+    const view = toRunDetailView(
+      job({
+        status: "failed",
+        errorCode: "llm_auth",
+        result: {
+          ok: false,
+          errorCode: "llm_auth",
+          commentUrl: "https://github.com/acme/widgets/pull/7#issuecomment-9",
+          logTail: "",
+        },
+      }),
+      "p",
+      NOW,
+    );
+
+    expect(view.commentUrl).toBeNull();
+  });
+
+  // CR-53-T03
+  it("gives a truncated review whose link is not usable no link and no claim that it is missing", () => {
+    const view = toRunDetailView(
+      job({
+        status: "failed",
+        errorCode: "review_state_truncated",
+        result: { ok: false, commentUrl: null, logTail: "" },
+      }),
+      "p",
+      NOW,
+    );
+
+    expect(view.commentUrl).toBeNull();
+    expect(view.commentMissing).toBe(false);
+  });
+
   it("keeps a question and a replaced run's successor", () => {
     const view = toRunDetailView(
       job({
