@@ -120,7 +120,7 @@ describe("addHeader", () => {
     expect(
       addHeader("# syntax=docker/dockerfile:1\n#\n# Image.\nFROM x\n", "hash"),
     ).toBe(
-      `# syntax=docker/dockerfile:1\n# ${SPDX_HEADER_TEXT}\n\n#\n# Image.\nFROM x\n`,
+      `# syntax=docker/dockerfile:1\n# ${SPDX_HEADER_TEXT}\n#\n# Image.\nFROM x\n`,
     );
   });
 

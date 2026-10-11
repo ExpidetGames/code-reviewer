@@ -107,7 +107,9 @@ export function addHeader(content: string, style: CommentStyle): string {
   const keep = keepsFirstLine(lines[0] ?? "") ? 1 : 0;
   const before = lines.slice(0, keep);
   const after = lines.slice(keep);
-  // One blank line between the header and what follows, unless the file brings its own.
-  const separator = after[0] === "" ? [] : [""];
+  // One blank line between the header and what follows, unless the file brings its own. In a hash
+  // style file a bare `#` line (the empty line of a comment block) already separates.
+  const separated = after[0] === "" || (style === "hash" && after[0] === "#");
+  const separator = separated ? [] : [""];
   return [...before, header, ...separator, ...after].join(eol);
 }
