@@ -9,6 +9,23 @@ import {
 } from "../../ui/json-request.ts";
 import type { AdminSettingsView } from "../service.ts";
 
+/** What the mail form sends. An empty or missing `password` keeps the stored one. */
+export type SmtpChange = {
+  host: string;
+  port: number;
+  security: "starttls" | "tls" | "none";
+  user: string;
+  password?: string;
+  clearPassword?: boolean;
+  senderAddress: string;
+  senderName: string;
+  allowSelfSigned: boolean;
+};
+
+/** The result of the test mail: it worked, or a class of failure with a safe detail. */
+export type TestMailAnswer =
+  { ok: true } | { ok: false; error: string; detail: string | null };
+
 export type SettingChange =
   | { tenancy: "single" | "multi" }
   | {
@@ -17,18 +34,23 @@ export type SettingChange =
         | { kind: "emails" | "domains"; entries: string[] };
     }
   | { signInMethods: { emailPassword: boolean; github: boolean } }
-  | { limits: { maxWorkspacesPerUser: number } };
+  | { limits: { maxWorkspacesPerUser: number } }
+  /** `null` removes the mail server. */
+  | { smtp: SmtpChange | null };
 
 export type AdminApi = {
   change(
     change: SettingChange,
   ): Promise<RequestResult<{ ok: true; settings: AdminSettingsView }>>;
+  /** Sends a test mail to the admin's own address with the saved settings. */
+  testMail(): Promise<RequestResult<TestMailAnswer>>;
 };
 
 export function createAdminApi(fetchImpl: FetchLike): AdminApi {
   return {
     change: (change) =>
       requestJson(fetchImpl, "PUT", "/api/admin/settings", change),
+    testMail: () => requestJson(fetchImpl, "POST", "/api/admin/mail/test", {}),
   };
 }
 
