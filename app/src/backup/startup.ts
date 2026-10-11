@@ -5,7 +5,11 @@
 // An invalid setting ends the start with one readable line, like the other settings of a deployment:
 // a typo must not turn into "no backups" without anybody noticing.
 import "server-only";
-import { formatBackupTime, loadBackupConfig } from "./config.ts";
+import {
+  formatBackupTime,
+  loadBackupConfig,
+  type BackupConfig,
+} from "./config.ts";
 import { assertBackupTargetUsable } from "./create-backup.ts";
 import { BackupError } from "./errors.ts";
 import { runBackupJob } from "./run-backup.ts";
@@ -25,19 +29,29 @@ type StartOptions = {
  * opened and before the repositories are synchronized in the background. The scheduler below reads
  * the same settings again and never sees an invalid value after this check.
  */
+// The settings, or null after an invalid one was reported and the process was told to exit.
+function loadConfigOrExit(
+  env: NonNullable<StartOptions["env"]>,
+  log: NonNullable<StartOptions["log"]>,
+  exit: NonNullable<StartOptions["exit"]>,
+): BackupConfig | null {
+  try {
+    return loadBackupConfig(env);
+  } catch (error) {
+    if (!(error instanceof BackupError)) throw error;
+    log.error(`[backup] ${error.code}: ${error.message}`);
+    exit(1);
+    return null;
+  }
+}
+
 export function checkBackupConfigOnStart({
   env = process.env,
   log = console,
   exit = (code) => process.exit(code),
 }: Pick<StartOptions, "env" | "log" | "exit"> = {}): void {
   if (env.NODE_ENV !== "production") return;
-  try {
-    loadBackupConfig(env);
-  } catch (error) {
-    if (!(error instanceof BackupError)) throw error;
-    log.error(`[backup] ${error.code}: ${error.message}`);
-    exit(1);
-  }
+  loadConfigOrExit(env, log, exit);
 }
 
 export function startBackupSchedulerOnStart({
@@ -48,15 +62,8 @@ export function startBackupSchedulerOnStart({
 }: StartOptions = {}): BackupScheduler | null {
   if (env.NODE_ENV !== "production") return null;
 
-  let config;
-  try {
-    config = loadBackupConfig(env);
-  } catch (error) {
-    if (!(error instanceof BackupError)) throw error;
-    log.error(`[backup] ${error.code}: ${error.message}`);
-    exit(1);
-    return null;
-  }
+  const config = loadConfigOrExit(env, log, exit);
+  if (config === null) return null;
   if (config.time === null) {
     log.warn(
       "[backup] BACKUP_TIME=off: no daily backup is scheduled. Make sure something else backs up the database.",

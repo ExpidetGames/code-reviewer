@@ -3,15 +3,17 @@
 // old database (with its write-ahead log) is kept aside, and the app can start on the result.
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
+  openSync,
   readFileSync,
   statSync,
   truncateSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { startDatabase } from "../db/startup.ts";
 import {
   holdDatabaseOpen,
@@ -30,6 +32,13 @@ import {
 import { createBackup } from "./create-backup.ts";
 import { BackupError } from "./errors.ts";
 import { moveAside, restoreBackup, undoMoves, type Move } from "./restore.ts";
+
+// A pass-through spy on openSync: the creation of the temporary copy is a call whose flags and mode
+// matter, and a mode set afterwards (chmod) must not pass for a file created private.
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return { ...actual, openSync: vi.fn(actual.openSync) };
+});
 
 const NOW = new Date("2026-10-11T08:00:00Z");
 
@@ -296,7 +305,7 @@ describe("restoring a backup", () => {
   });
 
   // CR-76-T01
-  it("keeps a journal that sits next to an old database aside under the name of that database", async () => {
+  it("keeps a journal that sits next to an old WAL-mode database aside under the name of that database", async () => {
     const { backup, expected } = await aBackup();
     const current = await createTestDatabase();
     await seedInstance(current.db);
@@ -322,29 +331,80 @@ describe("restoring a backup", () => {
     expect(tableCounts(current.config.path)).toEqual(expected);
   });
 
-  // CR-76-T02
-  it("creates the temporary copy readable by its owner only, whatever the backup's mode and the umask", async () => {
-    const { backup } = await aBackup();
-    chmodSync(backup.path, 0o644);
-    const databasePath = join(await createTestDirectory(), "app.db");
-    const modes: number[] = [];
-    const previousUmask = process.umask(0o000);
-    try {
-      restoreBackup({
-        backupPath: backup.path,
-        databasePath,
-        hooks: {
-          afterTemporaryCopyCreated: (path) => {
-            modes.push(statSync(path).mode & 0o777);
-          },
-        },
-      });
-    } finally {
-      process.umask(previousUmask);
-    }
+  // CR-76-T01
+  it("recovers an old rollback-mode database from its hot journal when checking that it is unused, so the journal never reaches the restored one", async () => {
+    const { backup, expected } = await aBackup();
+    // A database in rollback mode, as a backup file is (the app would have switched it to WAL).
+    const current = join(await createTestDirectory(), "app.db");
+    copyFileSync(backup.path, current);
+    writeFileSync(`${current}-journal`, aHotJournalFor(backup.path));
 
-    expect(modes).toEqual([0o600]);
-    expect(statSync(databasePath).mode & 0o777).toBe(0o600);
+    restoreBackup({
+      backupPath: backup.path,
+      databasePath: current,
+      now: () => NOW,
+    });
+
+    // SQLite consumed the journal when the in-use check opened the old database; nothing is left
+    // next to the restored one, and the restored one is the backup.
+    expect(existsSync(`${current}-journal`)).toBe(false);
+    expect(integrityOf(current)).toBe("ok");
+    expect(tableCounts(current)).toEqual(expected);
+  });
+
+  // CR-76-T02
+  it.each([0o000, 0o277])(
+    "creates the temporary copy readable by its owner only from the start, whatever the backup's mode and the umask (%o)",
+    async (umask) => {
+      const { backup } = await aBackup();
+      chmodSync(backup.path, 0o644);
+      const databasePath = join(await createTestDirectory(), "app.db");
+      const modes: number[] = [];
+      vi.mocked(openSync).mockClear();
+      const previousUmask = process.umask(umask);
+      try {
+        restoreBackup({
+          backupPath: backup.path,
+          databasePath,
+          hooks: {
+            afterTemporaryCopyCreated: (path) => {
+              modes.push(statSync(path).mode & 0o777);
+            },
+          },
+        });
+      } finally {
+        process.umask(previousUmask);
+      }
+
+      // The copy is created (flag "wx": never over an existing file) with the private mode in the
+      // same call, before any data is written; a chmod afterwards would not change this.
+      const creations = vi
+        .mocked(openSync)
+        .mock.calls.filter(([, flags]) => flags === "wx");
+      expect(creations).toHaveLength(1);
+      expect(creations[0]?.[2]).toBe(0o600);
+      expect(String(creations[0]?.[0])).toContain(".tmp");
+      expect(modes).toEqual([0o600]);
+      expect(statSync(databasePath).mode & 0o777).toBe(0o600);
+    },
+  );
+
+  // CR-76-T01
+  it("keeps leftover side files aside and reports them when there is no database at all", async () => {
+    const { backup } = await aBackup();
+    const databasePath = join(await createTestDirectory(), "app.db");
+    writeFileSync(`${databasePath}-wal`, "log");
+
+    const result = restoreBackup({
+      backupPath: backup.path,
+      databasePath,
+      now: () => NOW,
+    });
+
+    expect(result.previousKeptAs).toBeNull();
+    expect(result.keptAside).toEqual([
+      `${databasePath}-wal.before-restore-20261011T080000Z`,
+    ]);
   });
 
   it("refuses a data directory that does not exist", async () => {

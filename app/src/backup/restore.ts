@@ -58,6 +58,11 @@ export type RestoreResult = {
   databasePath: string;
   /** Where the replaced database now lives, or null when there was none. */
   previousKeptAs: string | null;
+  /**
+   * Every file moved aside: the old database and its side files, or only the side files (a leftover
+   * -journal or -wal next to no database). Empty when there was nothing to move.
+   */
+  keptAside: string[];
 };
 
 // How long the in-use check waits for a lock before it decides the database is in use.
@@ -107,6 +112,7 @@ export function restoreBackup(options: RestoreOptions): RestoreResult {
       databasePath,
       previousKeptAs:
         moved.find((entry) => entry.from === databasePath)?.to ?? null,
+      keptAside: moved.map((entry) => entry.to),
     };
   } catch (error) {
     const notUndone = undoMoves(moved);
