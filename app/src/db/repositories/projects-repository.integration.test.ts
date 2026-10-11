@@ -501,14 +501,51 @@ describe("updating the settings of a project", () => {
     expect((await projects.get(second.id))?.settings).toEqual({});
   });
 
-  it("returns undefined and writes nothing for a repository without a project", async () => {
+  // #80
+  it("creates an inactive project for a repository that has none, so settings can be saved before activation", async () => {
     const { projects, first, rows } = await setup();
 
-    expect(
-      await projects.updateSettings(first.id, { maxFindings: 2 }),
-    ).toBeUndefined();
+    const saved = await projects.updateSettings(first.id, { maxFindings: 2 });
+
+    expect(saved).toMatchObject({
+      repositoryId: first.id,
+      active: false,
+      settings: { maxFindings: 2 },
+    });
+    expect(await rows()).toHaveLength(1);
+    expect(await projects.findActiveForRepository(first.id)).toBeUndefined();
+    const listed = (await projects.list()).find(
+      (entry) => entry.repository.id === first.id,
+    );
+    expect(listed?.status).toBe("inactive");
+  });
+
+  // #80
+  it("keeps settings saved before the first activation when the project is activated", async () => {
+    const { projects, first, rows } = await setup();
+    await projects.updateSettings(first.id, { maxFindings: 2 });
+
+    const result = await projects.activate(first.id);
+
+    expect(result).toMatchObject({
+      kind: "activated",
+      outcome: "reactivated",
+      project: { active: true, settings: { maxFindings: 2 } },
+    });
+    expect(await rows()).toHaveLength(1);
+  });
+
+  // #80
+  it("writes nothing for an unknown repository or one the platform no longer lists and that has no project", async () => {
+    const { projects, first, rows, repositories, integration, remote } =
+      await setup();
+    await repositories.reconcile(integration.id, [remote(2)]);
+
     expect(
       await projects.updateSettings("no-such-repository", {}),
+    ).toBeUndefined();
+    expect(
+      await projects.updateSettings(first.id, { maxFindings: 2 }),
     ).toBeUndefined();
     expect(await rows()).toEqual([]);
   });

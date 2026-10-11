@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// Pins down the settings page of a project with real data: a repository that is not a project yet,
+// Pins down the settings page of a project with real data: a repository that was never activated,
 // a project that follows the defaults, the effect of changing the global defaults, a value saved on
 // the project, and text from GitHub rendered as text. Real SQLite, the real services and routes'
 // handlers; the rendering is the real component tree.
@@ -88,12 +88,12 @@ async function openProject(options: { activate?: boolean } = {}) {
   return { ...s, projects, api, load };
 }
 
-describe("the settings page of a repository that is not a project yet", () => {
-  // CR-34-T04
-  it("says to switch it on first and offers no form", async () => {
+describe("the settings page of a repository that was never activated", () => {
+  // #80
+  it("shows the form with the default settings and says that no reviews run until it is activated", async () => {
     const app = await openProject({ activate: false });
     const data = await app.load();
-    if (data.kind === "not_found") throw new Error("expected the repository");
+    if (data.kind !== "ready") throw new Error("expected the form");
 
     render(
       <ProjectSettingsPageContent
@@ -103,11 +103,52 @@ describe("the settings page of a repository that is not a project yet", () => {
       />,
     );
 
-    expect(data.kind).toBe("no_project");
     expect(
-      screen.getByText("This repository is not a project yet"),
+      screen.getByText(
+        /Inactive: no reviews run until the project is activated/,
+      ),
     ).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /Save/ })).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Save project settings" }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Review now" })).toBeNull();
+    expect(await app.projectRows()).toEqual([]);
+  });
+
+  // #80
+  it("saves a setting without activating the repository, and the saved value is there after activation", async () => {
+    const user = userEvent.setup();
+    const app = await openProject({ activate: false });
+    const data = await app.load();
+    if (data.kind !== "ready") throw new Error("expected the form");
+    render(
+      <ProjectSettingsPageContent
+        data={data}
+        api={app.api}
+        manualReviewApi={quietManualReviews}
+      />,
+    );
+
+    const findings = screen.getByLabelText("Most findings per review");
+    await user.clear(findings);
+    await user.type(findings, "11");
+    await user.click(
+      screen.getByRole("button", { name: "Save project settings" }),
+    );
+
+    expect((await screen.findByRole("status")).textContent).toMatch(/Saved\./);
+    expect(await app.projectRows()).toMatchObject([
+      { active: 0, settings: expect.stringContaining('"maxFindings":11') },
+    ]);
+    expect(
+      await app.projects.getActiveProjectForRepository(app.first.id),
+    ).toBeUndefined();
+
+    await app.projects.activateProject(app.first.id);
+    const after = await app.load();
+    if (after.kind !== "ready") throw new Error("expected the form");
+    expect(after.row.status).toBe("active");
+    expect(after.model.effective.maxFindings).toBe(11);
   });
 
   it("is not found for a repository id nobody knows", async () => {
