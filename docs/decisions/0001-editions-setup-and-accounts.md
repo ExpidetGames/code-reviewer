@@ -85,13 +85,25 @@ tokens stay valid (section 2.11).
 
 ### 2.2 First-run setup
 
-An instance has a state "set up" or "not set up", stored in the database (a row in `instance_settings`).
-Two cases are told apart at start:
+The state of the instance is kept in two explicit markers in `instance_settings`, never inferred from
+whether a row exists:
 
-- **Fresh installation:** the database has no users and no instance settings.
-- **Existing installation:** the database has users but **no instance settings row**. This is an
-  installation from before this milestone. It gets the same setup, shortened by the automatic data
-  import of section 2.11.
+- `setup_completed_at`: null until the wizard has finished, then the time of completion. "Set up" means
+  this marker is set.
+- `import_state`: `none` (no import ran or was needed), `pending` (the import of section 2.11 started and
+  has not finished) or `done`.
+
+Two cases are told apart at start. A database from before this milestone has neither marker, which reads
+as `setup_completed_at` null and `import_state` `none`.
+
+- **Fresh installation:** the database has no users and `import_state` is `none`.
+- **Existing installation:** the database has users, `setup_completed_at` is null and `import_state` is
+  not `done`. It gets the same setup, shortened by the automatic data import of section 2.11, which
+  runs once (it is guarded by `import_state` inside its transaction) and can be resumed after an
+  interruption.
+
+A restart before the wizard has finished prints a new code and shows the wizard again; nothing that
+was imported is imported twice.
 
 While the instance is not set up:
 
@@ -125,7 +137,9 @@ While the instance is not set up:
    instance as set up and invalidates the code. Two people finishing at the same moment cannot both
    win. The admin lands in the admin portal at `/admin`. In single-tenant mode the same transaction
    creates the one workspace (or, for an existing installation, uses the imported one) and makes the
-   admin its Owner (section 2.6).
+   admin its Owner (section 2.6). In multi-tenant mode the admin becomes Owner of an imported
+   workspace only if the import left it without an Owner; a fresh multi-tenant instance has no
+   workspace until somebody creates one.
 
 **Trade-offs, stated openly.** A 6-digit code is a deliberate project decision for convenience. Its
 protection is the lock after 10 failures and the fact that the code is only in the process memory and
@@ -174,6 +188,11 @@ The integration is configured at instance level by the instance admin, in two wa
   manifest (name, public URL, webhook URL `<public URL>/api/webhooks/github-app`, the repository
   permissions and events from `docs/github-app.md`, the account permission to read email addresses,
   the callback URL for sign-in (user authorization), and the setup URL for the installation binding).
+  The manifest requests, besides the repository permissions of `docs/github-app.md`, the account
+  permission **Email addresses: read-only** (so the verified primary email of a GitHub sign-in can be
+  read and replaces the placeholder noreply address of an imported user) and the organization
+  permission **Members: read-only** (so a user's organization role can be read with the GitHub App user
+  token, section 2.9).
   The manifest says whether the app is public (multi-tenant) or private (single-tenant); the portal
   records that choice as the "private app" flag. GitHub redirects back with a short-lived code; the app
   exchanges it for the app id, slug, private key, webhook secret, client id and client secret, and
@@ -187,7 +206,9 @@ The **one GitHub App provides both** "Sign in with GitHub" (its user authorizati
 separate OAuth app and `GITHUB_OAUTH_*`) and pull request reviews (installation tokens, webhooks). The
 GitHub App's **user access token** is also what proves a person's rights on an installation (section
 2.9), which the old OAuth app could not do. The environment variables `GITHUB_APP_*` are imported once
-(section 2.11); `GITHUB_OAUTH_*` are never imported.
+(section 2.11); `GITHUB_OAUTH_*` are never imported. An App that was imported or created by hand may
+lack the two permissions above; the portal lists what to add in the App's settings (installations have
+to accept the changed permissions on GitHub).
 
 ### 2.5 Verified emails and what a sign-up rule may be
 
@@ -229,6 +250,17 @@ created.
 own settings while signed in, or automatically when GitHub reports the **same verified email** and the
 existing account's email is verified too. An unverified match never links (no account takeover through
 an unverified address). Identities from the old OAuth sign-in are matched by their numeric GitHub id.
+Imported users have a placeholder (noreply) email; it is **replaced by GitHub's verified primary email
+at their next GitHub sign-in**.
+
+**Merging the instance admin with an imported operator.** In an existing installation the person who
+runs the instance usually exists twice after the short setup: as an imported user (GitHub identity, no
+password) and as the instance admin (email and password). When the signed-in instance admin links a
+GitHub identity that belongs to an imported user **without any other credential** (no password), the two
+accounts are **merged**: the imported user's memberships and history move to the admin account, the
+higher role wins where both are members, and the imported user row is retired. If that GitHub identity
+belongs to a user who has **other credentials**, linking is refused with a clear message. The merge is
+what lets the admin meet the "GitHub only" guard of section 2.3.
 
 ### 2.6 Accounts, workspaces, roles and invitations
 
@@ -302,9 +334,10 @@ a hosted operator therefore can read workspace keys, and this must be said in th
 key is "never stored" (`app/src/llm/README.md`), which held while there was exactly one key in the
 environment. The documentation of the `llm` module must be updated with the change.
 
-**Tokens.** Verification, password reset, invitation and setup-session tokens are random with 256 bits,
-stored only as hashes, single use, and expire: verification 24 hours, password reset 30 minutes,
-invitation 7 days.
+**Tokens.** Verification, password reset and invitation tokens are random with 256 bits, stored only as
+hashes, single use, and expire: verification 24 hours, password reset 30 minutes, invitation 7 days. The
+**setup code** is single use and kept only as a hash in process memory. The **setup session** that
+follows a correct code is a signed cookie valid for 30 minutes, not a stored token.
 
 **Data model sketch.** The exact schema belongs to the implementation issues; the shape is:
 
@@ -354,12 +387,15 @@ another. The binding is **fail-closed**: when a condition cannot be established,
 5. The app verifies, **with the user's own GitHub App user token**, two things: the user **can access
    the installation** (it appears in the installations the user may use), **and** the user is an
    **owner or admin of the installation's account**: the personal account itself, or an owner of the
-   organization. A user who signed in without GitHub is asked to connect their GitHub account first
+   organization. The organization role is readable because the manifest requests the organization
+   permission **Members: read-only**. A user who signed in without GitHub is asked to connect their GitHub account first
    (GitHub's user authorization, no new account is created).
-   **If the user's role in the organization cannot be read** with the token, the request is not
-   linked; it becomes an `installation_link_request` that the **instance admin approves or denies** in
-   the admin portal. There is no weaker fallback: access to the installation, or admin rights on a
-   single repository, never suffice.
+   **If the user's role in the organization still cannot be read** with the token (for example the App
+   lacks the permission), the request is not linked; it becomes an `installation_link_request` that the
+   **instance admin approves or denies** in the admin portal. The approval page shows the requester, the
+   installation's account and the **evidence**: whether the user's token can access the installation
+   (yes or no) and the result of the role read. There is no weaker fallback: access to the installation,
+   or admin rights on a single repository, never suffice.
 6. Only then the app links the installation to the workspace, and the repository sync starts for it.
    An installation can be linked to **one** workspace only; a second attempt fails with a clear error.
 
@@ -422,23 +458,28 @@ new version:
      email list is built from existing users.
 4. After the import the variables are ignored and the log says so once, listing names only.
    `BETTER_AUTH_SECRET` is used as `APP_SECRET` when `APP_SECRET` is not set.
-5. The instance is **not yet set up**: the **short setup** of section 2.2 runs (code in the log, the
-   wizard with tenancy, sign-up rule and the instance admin account). Webhooks and the runner API keep
+5. The instance is **not yet set up** (`import_state` `done`, `setup_completed_at` null): the **short
+   setup** of section 2.2 runs (code in the log, the wizard with tenancy, sign-up rule and the instance
+   admin account). A restart before the wizard finishes prints a new code and shows the wizard again. Webhooks and the runner API keep
    serving the imported settings meanwhile. In single-tenant mode the wizard's admin becomes an Owner of
    the default workspace as well.
 6. **After setup, sign-in is by email and password only** (the admin) until the admin enables sign-in
    through the GitHub App: the portal prompts for it (client id and secret of the App's user
    authorization, and the callback URL to register in the App's settings). Existing users then sign in
-   with GitHub and are recognised by their numeric GitHub id. Until then, "Connect GitHub" is
-   unavailable in multi-tenant mode, which the portal states. The "private app" flag is not known for
+   with GitHub and are recognised by their numeric GitHub id; their placeholder emails are replaced by
+   GitHub's verified primary email at that sign-in (the permission "Email addresses: read-only" is
+   needed). The operator who exists both as an imported user and as the new admin links their GitHub
+   identity from the admin account, which merges the two accounts (section 2.5). Until then,
+   "Connect GitHub" is unavailable in multi-tenant mode, which the portal states. The "private app" flag is not known for
    an imported App; the portal asks the admin to confirm it, and until then new installations need the
    explicit Connect flow.
 7. A one-time portal notice lists what could not be migrated: allowed logins that never signed in
    (invite them by email), users whose check failed, and an allowed GitHub organization (see
    consequences).
 
-The import is idempotent (a second start does nothing) and runs in one transaction. A failure stops the
-start with a readable line and changes nothing.
+The import is guarded by `import_state` (`none` to `pending` to `done`), runs in one transaction and is
+idempotent: a second start does nothing, an interrupted import is resumed or rolled back as a whole. A
+failure stops the start with a readable line and changes nothing.
 
 ## 3. Alternatives considered
 
