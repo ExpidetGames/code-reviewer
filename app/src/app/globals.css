@@ -1196,3 +1196,44 @@ button {
 .pr-title {
   min-width: 0;
 }
+
+/* Admin portal: the navigation between its sections and the checklist of the overview */
+
+.admin-nav {
+  margin-bottom: 1.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+
+.admin-nav-list {
+  flex-wrap: wrap;
+}
+
+.checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.checklist-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.checklist-item .badge {
+  flex: none;
+  min-width: 4.5rem;
+  text-align: center;
+}
+
+.checklist-item p {
+  margin: 0.125rem 0 0;
+}

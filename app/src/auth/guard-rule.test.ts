@@ -17,8 +17,14 @@ const SRC = join(APP_DIRECTORY, "..");
 // Server Functions that need no user: they start the sign in and end a session.
 const PUBLIC_SERVER_FUNCTION_FILES = ["auth/actions.ts"];
 
+// `requireUser()` is the guard of a route handler or a Server Function. The admin data routes hand
+// `lookupAdmin` to `createAdminRouteHandlers`, which checks it before anything else (a 401 for nobody,
+// a 404 for somebody who is not an instance admin; src/admin/guard.integration.test.ts), and the admin
+// pages call `requireAdmin()`.
 function callsRequireUser(source: string): boolean {
-  return /\brequireUser\(\)/.test(source);
+  return /\brequireUser\(\)|\brequireAdmin\(\)|\baccess:\s*lookupAdmin\b/.test(
+    source,
+  );
 }
 
 function isServerFunctionFile(source: string): boolean {

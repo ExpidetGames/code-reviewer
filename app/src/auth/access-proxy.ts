@@ -3,6 +3,7 @@
 // looked up in the database on each request, so a signed out or expired session stops working at
 // once. Anything that goes wrong while checking denies the request.
 import { NextResponse, type NextRequest } from "next/server";
+import { isAdminPath } from "../admin/paths.ts";
 import { decideAccess, isPublicPath } from "./access.ts";
 import type { AccessPolicy } from "./access-policy.ts";
 import type { Auth } from "./auth.ts";
@@ -11,6 +12,13 @@ import {
   loginPath,
   type SessionLookup,
 } from "./session-user.ts";
+
+/**
+ * Where a signed in person who is not an instance admin is sent (rewritten, not redirected: the
+ * address stays) when they ask for the admin portal. The path is no route, so the answer is the
+ * 404 of a path that does not exist, with nothing that says the portal is there.
+ */
+export const ADMIN_HIDDEN_PATH = "/_not-found";
 
 export type AccessProxyDependencies = {
   getAuth: () => Pick<Auth, "api" | "$context">;
@@ -50,6 +58,18 @@ export function createAccessProxy({
     });
     switch (decision.kind) {
       case "allow":
+        // The admin portal is for the instance admin only. Anybody else who is signed in gets the 404
+        // of a path that does not exist (the pages and the data routes below `/admin` and
+        // `/api/admin`, any method, so a Server Function posted to a portal page is turned away too).
+        // The pages and routes check again themselves (src/admin/session.ts).
+        if (
+          lookup.kind === "user" &&
+          !lookup.user.isInstanceAdmin &&
+          isAdminPath(pathname)
+        )
+          return NextResponse.rewrite(new URL(ADMIN_HIDDEN_PATH, request.url), {
+            headers: { "cache-control": "no-store" },
+          });
         return NextResponse.next();
       case "unauthorized":
         // A user the policy turned away is known, so the answer is "forbidden", with the reason.

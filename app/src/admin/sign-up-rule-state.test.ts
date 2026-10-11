@@ -2,6 +2,7 @@
 // section 2.5): a rule that names emails or domains needs verifiable addresses, that is a mail server
 // or GitHub as the only way to sign in.
 import { describe, expect, it } from "vitest";
+import type { InstanceSettingValues } from "../db/repositories/instance-settings-repository.ts";
 import { signUpRuleState } from "./sign-up-rule-state.ts";
 
 const EMAIL_PASSWORD_ONLY = { emailPassword: true, github: false };
@@ -10,10 +11,10 @@ const BOTH = { emailPassword: true, github: true };
 
 describe("the state of the sign-up rule", () => {
   // #97-SU-19
-  it.each([
+  it.each<InstanceSettingValues["sign_up_rule"]>([
     { kind: "emails", entries: ["a@example.com"] },
     { kind: "domains", entries: ["example.com"] },
-  ] as const)(
+  ])(
     "is fail-closed for a $kind rule while there is no mail server and sign-in is not GitHub only",
     (rule) => {
       expect(

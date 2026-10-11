@@ -3,7 +3,6 @@
 // interleave, the instance never ends up single-tenant with two workspaces; one of the two is refused
 // because it saw the result of the other. (A lock held in the test's own process could not be
 // released while a write waits for it, so the two sides are processes, see TESTING.md.)
-import { join } from "node:path";
 import { sql } from "kysely";
 import { describe, expect, it } from "vitest";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";

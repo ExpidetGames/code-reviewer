@@ -34,6 +34,7 @@ async function CurrentUserMenu() {
         name: user.name,
         login: actorName(user),
         avatarUrl: user.image ?? null,
+        isInstanceAdmin: user.isInstanceAdmin,
       }}
       signOutAction={signOut}
     />
