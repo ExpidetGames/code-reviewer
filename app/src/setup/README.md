@@ -73,8 +73,9 @@ in (Better Auth's `signInEmail`); the response says `redirectTo: "/admin"`.
 
 All three rules can be chosen (`everyone`, a list of emails, allowed domains). An email or domain rule is
 fail-closed while no verification path exists (no mail server and sign in is not GitHub only,
-ADR section 2.5); the wizard says so next to the choice. Nothing signs anybody up yet: the sign-up
-endpoint of Better Auth is switched off, the rule is only stored.
+ADR section 2.5); the wizard says so next to the choice. The rule is enforced by the sign-up
+(`src/signup/README.md`): `POST /api/sign-up` creates the account, Better Auth's own sign-up endpoint stays
+switched off.
 
 ## After the setup
 

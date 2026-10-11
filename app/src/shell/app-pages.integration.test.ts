@@ -47,6 +47,7 @@ import RunsPage from "../app/(app)/runs/page.tsx";
 import RunDetailPage from "../app/(app)/runs/[id]/page.tsx";
 import SettingsPage from "../app/(app)/settings/page.tsx";
 import ProjectSettingsPage from "../app/(app)/projects/[repositoryId]/page.tsx";
+import { openGates } from "../test-support/open-gates.ts";
 
 const APP_PAGES = [
   { path: "/projects", render: ProjectsPage },
@@ -80,6 +81,7 @@ async function startApp(existing?: AuthHarness) {
   const proxy = createAccessProxy({
     getAuth: () => harness.auth,
     getPolicy: () => harness.policy,
+    getGates: () => openGates,
   });
   function visit(path: string, cookies?: CookieJar) {
     const headers = new Headers();

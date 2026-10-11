@@ -106,6 +106,13 @@ export async function completePasswordReset(
         .where("user_id", "=", known.user_id)
         .where("used_at", "is", null)
         .execute();
+      // A verification link is bound to the password the account had when it was made, and using it would
+      // put that password back: none stays pending (a new link is asked for on the verification page).
+      await trx
+        .deleteFrom("email_verification_tokens")
+        .where("user_id", "=", known.user_id)
+        .where("used_at", "is", null)
+        .execute();
     });
   } catch (error) {
     if (error instanceof Rollback) return { ok: false, error: "invalid_token" };

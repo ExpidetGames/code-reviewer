@@ -28,6 +28,9 @@ const MESSAGES: Readonly<Record<string, string>> = {
   invalid_credentials: "The email address or the password is not correct.",
   rate_limited:
     "Too many sign-in attempts. Wait up to 15 minutes and try again.",
+  // The password was right, and the address has to be verified first (src/signup/).
+  email_not_verified:
+    "Verify your email address first: open the link in the email we sent you, or ask for a new one.",
   // The server could not decide (this is not a wrong password).
   unavailable: "Sign in is not available right now. Please try again later.",
   // The admin switched this way of signing in off (Setup, Ways to sign in).

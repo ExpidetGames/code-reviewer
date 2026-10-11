@@ -74,6 +74,7 @@ describe("the migrations of both epics", () => {
       "20261011170200_add_instance_admin_flag_to_users",
       "20261011200000_create_secrets",
       "20261011200100_create_password_reset_tokens",
+      "20261011210000_create_email_verification_tokens",
     ]);
   });
 
@@ -115,6 +116,7 @@ describe("starting the database", () => {
       "allowed_login_pins",
       "app_meta",
       "app_settings",
+      "email_verification_tokens",
       "instance_settings",
       "integrations",
       "job_comments",

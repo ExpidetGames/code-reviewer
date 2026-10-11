@@ -146,6 +146,46 @@ check_admin_portal() {
   [ "$status" = 200 ] || fail "/admin as the admin did not answer 200 (got: $status)"
 }
 
+# #99-SR-08, #99-SR-14, #99-SR-21: the sign-up of a set up instance (the wizard chose "everyone", and no
+# mail server exists in the image), in the built image. The page is public, a sign-up creates an account
+# that signs in at once, and the answer for an address that has an account is the same as for a new one.
+# The new account belongs to no workspace: the start page sends it to /no-access and the data routes
+# answer 403 no_workspace_access. The password is random and never on a command line: it is sent from a
+# file.
+# Usage: check_sign_up <base url>
+check_sign_up() {
+  local base=$1 status first again admin body jar password output
+  status=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 "$base/sign-up")
+  [ "$status" = 200 ] || fail "/sign-up without a session did not answer 200 (got: $status)"
+  status=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 "$base/no-access")
+  [ "$status" = 200 ] || fail "/no-access without a session did not answer 200 (got: $status)"
+
+  password=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24 || true)
+  [ "${#password}" = 24 ] || fail "could not generate a password for the sign-up"
+  body=$(mktemp)
+  jar=$(mktemp)
+  printf '{"email":"smoke-visitor@example.test","password":"%s"}' "$password" >"$body"
+  first=$(curl --silent --max-time 20 --write-out ' %{http_code}' --header 'Content-Type: application/json'     --data "@$body" "$base/api/sign-up")
+  [ "$first" = '{"ok":true,"next":"sign_in"} 200' ] || { rm -f "$body" "$jar"; fail "the sign-up was not accepted (got: $first)"; }
+  again=$(curl --silent --max-time 20 --write-out ' %{http_code}' --header 'Content-Type: application/json'     --data "@$body" "$base/api/sign-up")
+  [ "$again" = "$first" ] || { rm -f "$body" "$jar"; fail "a second sign-up for the same address was answered differently (got: $again)"; }
+  printf '{"email":"smoke-admin@example.test","password":"%s"}' "$password" >"$body"
+  admin=$(curl --silent --max-time 20 --write-out ' %{http_code}' --header 'Content-Type: application/json'     --data "@$body" "$base/api/sign-up")
+  [ "$admin" = "$first" ] || { rm -f "$body" "$jar"; fail "a sign-up for the admin's address was answered differently (got: $admin)"; }
+
+  printf '{"email":"smoke-visitor@example.test","password":"%s"}' "$password" >"$body"
+  status=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 20 --cookie-jar "$jar" \
+    --header 'Content-Type: application/json' --data "@$body" "$base/api/auth/sign-in/email")
+  rm -f "$body"
+  [ "$status" = 200 ] || { rm -f "$jar"; fail "the new account did not sign in (status $status)"; }
+  status=$(curl --silent --output /dev/null --write-out '%{http_code} %{redirect_url}' --max-time 10 --cookie "$jar" "$base/")
+  [[ "$status" == "307 "*"/no-access" ]] || { rm -f "$jar"; fail "the start page did not send the new account to /no-access (got: $status)"; }
+  output=$(curl --silent --max-time 10 --write-out ' %{http_code}' --cookie "$jar" "$base/api/runs") ||
+    { rm -f "$jar"; fail "GET /api/runs failed as the new account"; }
+  rm -f "$jar"
+  [ "$output" = '{"error":"no_workspace_access"} 403' ] || fail "the data route did not refuse the new account (got: $output)"
+}
+
 require_image() {
   docker image inspect "$1" >/dev/null 2>&1 || fail "image $1 does not exist locally (build it first)"
 }

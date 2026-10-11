@@ -17,6 +17,7 @@ import {
   createAuthHarness,
   type CookieJar,
 } from "../../src/test-support/auth-harness.ts";
+import { openGates } from "../../src/test-support/open-gates.ts";
 
 type Harness = Awaited<ReturnType<typeof createAuthHarness>>;
 
@@ -38,6 +39,7 @@ async function startApp() {
     const proxy = createAccessProxy({
       getAuth: () => auth.auth,
       getPolicy: () => auth.policy,
+      getGates: () => openGates,
     });
     return async function send(
       target: "global" | "project",
@@ -61,7 +63,12 @@ async function startApp() {
       const handlers = createReviewSettingsRouteHandlers({
         // The same lookup `requireUser()` makes, without Next.js's request scope.
         requireUser: async () => {
-          const lookup = await lookupSession(auth.auth, headers, auth.policy);
+          const lookup = await lookupSession(
+            auth.auth,
+            headers,
+            auth.policy,
+            openGates,
+          );
           if (lookup.kind !== "user") throw new Error("NEXT_REDIRECT");
           return lookup.user;
         },

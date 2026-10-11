@@ -16,6 +16,7 @@ import {
   type AuthHarness,
   type CookieJar,
 } from "../test-support/auth-harness.ts";
+import { openGates } from "../test-support/open-gates.ts";
 
 const HOUR = 60 * 60 * 1000;
 
@@ -23,6 +24,7 @@ function visitor(harness: AuthHarness) {
   const proxy = createAccessProxy({
     getAuth: () => harness.auth,
     getPolicy: () => harness.policy,
+    getGates: () => openGates,
   });
   return (path: string, cookies: CookieJar) =>
     proxy(

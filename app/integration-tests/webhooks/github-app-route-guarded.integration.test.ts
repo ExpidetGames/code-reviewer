@@ -23,6 +23,7 @@ import {
   testGithubAppEnv,
 } from "../../src/test-support/github-app.ts";
 import { createTestDirectory } from "../../src/test-support/test-database.ts";
+import { openGates } from "../../src/test-support/open-gates.ts";
 
 type Route = typeof import("../../src/app/api/webhooks/github-app/route.ts");
 
@@ -33,6 +34,7 @@ async function startGuardedRoute() {
   const proxy = createAccessProxy({
     getAuth: () => harness.auth,
     getPolicy: () => harness.policy,
+    getGates: () => openGates,
   });
   for (const [name, value] of Object.entries(testGithubAppEnv()))
     if (value !== undefined) vi.stubEnv(name, value);

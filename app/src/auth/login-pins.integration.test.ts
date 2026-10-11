@@ -21,6 +21,7 @@ import {
   type AuthHarness,
   type CookieJar,
 } from "../test-support/auth-harness.ts";
+import { openGates } from "../test-support/open-gates.ts";
 
 const NOT_ALLOWED =
   "Your GitHub account is not allowed to use this Code Reviewer instance.";
@@ -66,6 +67,7 @@ function visitor(harness: AuthHarness) {
   const proxy = createAccessProxy({
     getAuth: () => harness.auth,
     getPolicy: () => harness.policy,
+    getGates: () => openGates,
   });
   return (path: string, cookies: CookieJar) =>
     proxy(

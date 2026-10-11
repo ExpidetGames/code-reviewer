@@ -5,15 +5,16 @@
 // an admin the 404 page; and every page of the portal asks it before it reads anything.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionUser } from "../auth/access-policy.ts";
+import type { SessionLookup } from "../auth/session-user.ts";
 import { discoverRoutes, concretePath } from "../test-support/routes.ts";
 import { isInternalPortalPath } from "./paths.ts";
 
 const session = vi.hoisted(() => ({
-  requireUser: vi.fn<() => Promise<SessionUser>>(),
+  currentLookup: vi.fn<() => Promise<SessionLookup>>(),
   getAdminService: vi.fn(),
 }));
-vi.mock("../auth/session.ts", () => ({ requireUser: session.requireUser }));
-vi.mock("@/auth/session", () => ({ requireUser: session.requireUser }));
+vi.mock("../auth/session.ts", () => ({ currentLookup: session.currentLookup }));
+vi.mock("@/auth/session", () => ({ currentLookup: session.currentLookup }));
 vi.mock("./shared.ts", () => ({ getAdminService: session.getAdminService }));
 vi.mock("@/admin/shared", () => ({ getAdminService: session.getAdminService }));
 
@@ -32,13 +33,38 @@ afterEach(() => {
 
 describe("requireAdmin", () => {
   it("returns the instance admin", async () => {
-    session.requireUser.mockResolvedValue(ADMIN);
+    session.currentLookup.mockResolvedValue({ kind: "user", user: ADMIN });
 
     await expect(requireAdmin()).resolves.toBe(ADMIN);
   });
 
+  // #99-SR-24
+  it("returns the instance admin whose address is not verified yet, to repair the mail server", async () => {
+    session.currentLookup.mockResolvedValue({
+      kind: "unverified",
+      user: ADMIN,
+    });
+
+    await expect(requireAdmin()).resolves.toBe(ADMIN);
+  });
+
+  // #99-SR-24
+  it.each(["unverified", "no_workspace"] as const)(
+    "gives a person who is not an admin and is %s the 404 page too",
+    async (kind) => {
+      session.currentLookup.mockResolvedValue({ kind, user: MEMBER });
+
+      const error = await requireAdmin().then(
+        () => null,
+        (thrown: unknown) => thrown,
+      );
+
+      expect(digestOf(error)).toBe("NEXT_HTTP_ERROR_FALLBACK;404");
+    },
+  );
+
   it("gives a signed in person who is not an admin the 404 page", async () => {
-    session.requireUser.mockResolvedValue(MEMBER);
+    session.currentLookup.mockResolvedValue({ kind: "user", user: MEMBER });
 
     const error = await requireAdmin().then(
       () => null,
@@ -49,11 +75,7 @@ describe("requireAdmin", () => {
   });
 
   it("lets the sign-in redirect of a person without a session through", async () => {
-    session.requireUser.mockRejectedValue(
-      Object.assign(new Error("NEXT_REDIRECT"), {
-        digest: "NEXT_REDIRECT;replace;/login;307;",
-      }),
-    );
+    session.currentLookup.mockResolvedValue({ kind: "none" });
 
     const error = await requireAdmin().then(
       () => null,
@@ -78,7 +100,7 @@ describe("every page of the portal", () => {
   it.each(pages.map(({ route, file }) => ({ route, file })))(
     "answers the 404 page to a person who is not an admin before it reads anything: $route",
     async ({ file }) => {
-      session.requireUser.mockResolvedValue(MEMBER);
+      session.currentLookup.mockResolvedValue({ kind: "user", user: MEMBER });
       const page = (await import(/* @vite-ignore */ file)) as {
         default: () => Promise<unknown>;
       };

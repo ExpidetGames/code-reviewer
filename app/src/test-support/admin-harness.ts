@@ -6,6 +6,7 @@
 // service and secret store over a real SQLite file. Requests are real `Request` objects with cookies, the
 // way a browser sends them; nothing listens on a port.
 import { sql } from "kysely";
+import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
 import { NextRequest } from "next/server";
 import { adminAccessOf } from "../admin/access.ts";
 import {
@@ -60,9 +61,16 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
   if (completed.status !== 200)
     throw new Error(`The setup did not complete: ${completed.status}`);
 
+  setup.gateState.mail = options.mailConfigured ?? false;
   const flags = {
     github: options.githubConfigured ?? false,
-    mail: options.mailConfigured ?? false,
+    /** Whether the instance can send mail; the access gates in front of the app read the same flag. */
+    get mail(): boolean {
+      return setup.gateState.mail;
+    },
+    set mail(value: boolean) {
+      setup.gateState.mail = value;
+    },
     /** What the access policy answers for a GitHub identity. */
     githubAllowed: true,
   };
@@ -91,7 +99,12 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
   const current = { headers: new Headers() };
   const handlers = createAdminRouteHandlers({
     access: async () => {
-      const lookup = await lookupSession(auth, current.headers, policy);
+      const lookup = await lookupSession(
+        auth,
+        current.headers,
+        policy,
+        setup.gates,
+      );
       return adminAccessOf(lookup);
     },
     notFound: () => {
@@ -107,6 +120,12 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
     password: string;
     isInstanceAdmin?: boolean;
     emailVerified?: boolean;
+    /**
+     * Whether the user is a Member of the instance's workspace. Default: yes, so a test about the portal's
+     * guard meets the person who is not an admin and has access to the app. Pass `false` for an account
+     * that has none, like a new sign-up.
+     */
+    member?: boolean;
   }): Promise<void> {
     const context = await auth.$context;
     const hash = await context.password.hash(user.password);
@@ -146,6 +165,16 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
         updated_at: at,
       })
       .execute();
+    if (user.member !== false && user.isInstanceAdmin !== true) {
+      const workspace = await createWorkspacesRepository(db).findDefault();
+      if (workspace === undefined)
+        throw new Error("The set-up instance has no workspace to join.");
+      await createWorkspacesRepository(db).addMember(
+        workspace.id,
+        user.id,
+        "member",
+      );
+    }
   }
 
   /** Signs in with email and password the way the login form does; returns the cookies. */

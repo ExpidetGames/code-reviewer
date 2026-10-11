@@ -5,29 +5,39 @@
 // data, because the proxy alone must not be the only one (a changed matcher would silently remove it).
 import "server-only";
 import { headers } from "next/headers";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { cache } from "react";
+import { getAccessGates } from "../auth/access-gates-runtime.ts";
 import type { SessionUser } from "../auth/access-policy.ts";
 import { getAccessPolicy } from "../auth/access-runtime.ts";
 import { getAuth } from "../auth/auth.ts";
-import { requireUser } from "../auth/session.ts";
-import { lookupSession } from "../auth/session-user.ts";
+import { currentLookup } from "../auth/session.ts";
+import { loginPath, lookupSession } from "../auth/session-user.ts";
 import { adminAccessOf, type AdminAccess } from "./access.ts";
 
 /** What the current request is: the admin, nobody, or somebody who is not an admin. Never throws for that. */
 export async function lookupAdmin(): Promise<AdminAccess> {
   const requestHeaders = await headers();
   return adminAccessOf(
-    await lookupSession(getAuth(), requestHeaders, getAccessPolicy()),
+    await lookupSession(
+      getAuth(),
+      requestHeaders,
+      getAccessPolicy(),
+      getAccessGates(),
+    ),
   );
 }
 
 /**
  * The instance admin of the current request, for a page or a layout. Without a session the person is
- * sent to the sign-in; a signed in person who is not an admin gets the 404 page.
+ * sent to the sign-in; a signed in person who is not an instance admin gets the 404 page. The admin
+ * whose address is not verified yet is still the admin: the portal is where the mail server is
+ * repaired (docs/decisions/0001-editions-setup-and-accounts.md, section 2.3).
  */
 export const requireAdmin = cache(async (): Promise<SessionUser> => {
-  const user = await requireUser();
-  if (!user.isInstanceAdmin) notFound();
-  return user;
+  const lookup = await currentLookup();
+  const access = adminAccessOf(lookup);
+  if (access.kind === "anonymous") redirect(loginPath(lookup));
+  if (access.kind === "not_admin") notFound();
+  return access.user;
 });

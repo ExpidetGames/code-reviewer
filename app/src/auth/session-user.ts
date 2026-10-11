@@ -9,6 +9,7 @@ import type {
   GithubSessionUser,
   SessionUser,
 } from "./access-policy.ts";
+import type { AccessGates } from "./access-gates.ts";
 import type { Auth } from "./auth.ts";
 import { GITHUB_PROVIDER_ID } from "./github-provider.ts";
 
@@ -17,12 +18,18 @@ export const CREDENTIAL_PROVIDER_ID = "credential";
 
 /**
  * - `user`: a valid session of a user who may use the app.
+ * - `unverified`: a valid session of an email and password account whose address must be verified
+ *   first (a mail server is configured). Only the instance admin may still use `/admin`.
+ * - `no_workspace`: a valid session of an email and password account that belongs to no workspace, so
+ *   it has no access to customer data (access-gates.ts).
  * - `none`: no valid session.
  * - `denied`: a valid session of a user who may not (any more) use the app; the reason is shown on
  *   the login page.
  */
 export type SessionLookup =
   | { kind: "user"; user: SessionUser }
+  | { kind: "unverified"; user: SessionUser }
+  | { kind: "no_workspace"; user: SessionUser }
   | { kind: "none" }
   | { kind: "denied"; reason: AccessDenialReason };
 
@@ -30,6 +37,7 @@ export async function lookupSession(
   auth: Pick<Auth, "api" | "$context">,
   requestHeaders: Headers,
   policy: AccessPolicy,
+  gates: AccessGates,
 ): Promise<SessionLookup> {
   const session = await auth.api.getSession({ headers: requestHeaders });
   if (!session) return { kind: "none" };
@@ -51,9 +59,21 @@ export async function lookupSession(
     orgCheckedFor: session.user.orgCheckedFor ?? null,
   };
   // An account with a password is admitted: such an account only exists because the first-run setup
-  // made it, or because the sign-up rule let it be created (a later issue evaluates that rule when
-  // the account is created, not on every request). The GitHub allow list is about GitHub identities.
-  if (identities.password) return { kind: "user", user };
+  // made it, or because the sign-up rule let it be created (src/signup/sign-up.ts evaluates that rule
+  // when the account is created, not on every request, so a stricter rule never locks anybody out). The
+  // GitHub allow list is about GitHub identities. Two gates stand in front of the app, though: a
+  // verified address, and a workspace (access-gates.ts).
+  if (identities.password) {
+    const blocked = await gateOf(
+      {
+        id: user.id,
+        emailVerified: session.user.emailVerified,
+        isInstanceAdmin: user.isInstanceAdmin,
+      },
+      gates,
+    );
+    return blocked === null ? { kind: "user", user } : { kind: blocked, user };
+  }
   if (githubLogin === null || identities.githubId === null)
     return { kind: "none" };
   const decision = await policy({
@@ -64,6 +84,22 @@ export async function lookupSession(
   return decision.allowed
     ? { kind: "user", user }
     : { kind: "denied", reason: decision.reason };
+}
+
+/**
+ * Which gate (access-gates.ts) an email and password account is stopped by, or null when it passes both:
+ * its address has to be verified while the instance can send mail, and (unless it is the instance admin)
+ * it has to belong to a workspace. The verification is asked first.
+ */
+export async function gateOf(
+  account: { id: string; emailVerified: boolean; isInstanceAdmin: boolean },
+  gates: AccessGates,
+): Promise<"unverified" | "no_workspace" | null> {
+  if (!account.emailVerified && (await gates.verificationRequired()))
+    return "unverified";
+  if (!account.isInstanceAdmin && !(await gates.hasWorkspace(account.id)))
+    return "no_workspace";
+  return null;
 }
 
 async function findIdentities(
@@ -85,7 +121,20 @@ async function findIdentities(
   };
 }
 
-/** The login page address for a request that has no usable session. */
+/** The address of the page that explains why a signed in person cannot use the app yet. */
+export const VERIFY_EMAIL_PAGE = "/verify-email";
+export const NO_ACCESS_PAGE = "/no-access";
+
+/** Where a request that cannot be served goes: the login page, or the page that says what is missing. */
 export function loginPath(lookup: SessionLookup): string {
-  return lookup.kind === "denied" ? `/login?error=${lookup.reason}` : "/login";
+  switch (lookup.kind) {
+    case "denied":
+      return `/login?error=${lookup.reason}`;
+    case "unverified":
+      return VERIFY_EMAIL_PAGE;
+    case "no_workspace":
+      return NO_ACCESS_PAGE;
+    default:
+      return "/login";
+  }
 }

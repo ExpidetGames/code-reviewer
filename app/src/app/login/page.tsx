@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { connection } from "next/server";
+import Link from "next/link";
 import { Suspense } from "react";
 import { signInWithGithub, signInWithPassword } from "@/auth/actions";
 import { loginErrorMessage } from "@/auth/login-errors";
 import { getSignInMethods } from "@/auth/sign-in-runtime";
+import { getSignUpAvailability } from "@/signup/shared";
 import { Button } from "@/ui/button";
 
 export default function LoginPage({ searchParams }: PageProps<"/login">) {
@@ -31,6 +33,10 @@ async function SignInForms() {
   // Reads the database and the environment at request time (not when the page is built).
   await connection();
   const methods = await getSignInMethods();
+  // The link to the sign-up is offered while the sign-up is open (the state of the instance).
+  const signUp = methods.emailPassword
+    ? await getSignUpAvailability()
+    : { open: false as const };
   return (
     <>
       {methods.emailPassword ? (
@@ -63,6 +69,11 @@ async function SignInForms() {
             Sign in
           </Button>
         </form>
+      ) : null}
+      {signUp.open ? (
+        <p className="muted small">
+          No account yet? <Link href="/sign-up">Create one</Link>.
+        </p>
       ) : null}
       {methods.github ? (
         <form action={signInWithGithub}>

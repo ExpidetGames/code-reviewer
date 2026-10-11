@@ -171,6 +171,7 @@ describe("changing the sign-up rule", () => {
   });
 
   // #97-SU-19
+  // #99-SR-22
   it("reports the rule as fail-closed while there is no mail server and sign-in is not GitHub only", async () => {
     const { service, flags } = await startService();
     await service.changeSignUpRule("admin-1", {
