@@ -5,11 +5,11 @@
 // section 2.5). The instance admin is the exception: the admin signs in and keeps `/admin`, so a problem
 // with the mail server can always be repaired (access-gates.ts, access-proxy.ts).
 //
-// The refusal comes only after the password was right. A wrong password, and an address nobody has, are
-// answered by Better Auth exactly as before, so the answer never says whether an account exists or waits
-// for verification to somebody who does not know the password. The password is checked a second time here
-// (Better Auth checks it again when this lets the request through); that costs one more hash, and only for
-// an account that is unverified.
+// The refusal comes only after the password was right. A wrong password never goes on to Better Auth for a
+// second check: for an account that waits for verification the check made here is the only one, and its
+// answer is Better Auth's own (401 INVALID_EMAIL_OR_PASSWORD), so every wrong password costs exactly one hash
+// whether the address is unknown, verified or waiting, and a measurement of the time says nothing about
+// the account. (The right password is answered here too, with 403, so it costs one hash as well.)
 /** The `code` of the error Better Auth answers (403) for an unverified address. */
 export const EMAIL_NOT_VERIFIED_CODE = "EMAIL_NOT_VERIFIED";
 
@@ -28,7 +28,15 @@ export type UnverifiedSignInDependencies = {
   verificationRequired: () => Promise<boolean>;
 };
 
-export async function refusesUnverifiedSignIn(
+export type UnverifiedSignInVerdict =
+  /** Not this module's business: Better Auth goes on (and checks the password itself, once). */
+  | "go_on"
+  /** The password is right and the address is not verified: 403 EMAIL_NOT_VERIFIED. */
+  | "not_verified"
+  /** The account waits for verification and the password is wrong: Better Auth's own 401, no second hash. */
+  | "wrong_password";
+
+export async function judgeUnverifiedSignIn(
   {
     findUser,
     verifyPassword,
@@ -36,10 +44,12 @@ export async function refusesUnverifiedSignIn(
   }: UnverifiedSignInDependencies,
   email: string,
   password: string,
-): Promise<boolean> {
+): Promise<UnverifiedSignInVerdict> {
   const user = await findUser(email.toLowerCase());
-  if (user === null || user.passwordHash === null) return false;
-  if (user.emailVerified || user.isInstanceAdmin) return false;
-  if (!(await verificationRequired())) return false;
-  return verifyPassword({ hash: user.passwordHash, password });
+  if (user === null || user.passwordHash === null) return "go_on";
+  if (user.emailVerified || user.isInstanceAdmin) return "go_on";
+  if (!(await verificationRequired())) return "go_on";
+  return (await verifyPassword({ hash: user.passwordHash, password }))
+    ? "not_verified"
+    : "wrong_password";
 }

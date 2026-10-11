@@ -599,6 +599,31 @@ describe("the limit on signing up", () => {
   });
 
   // #99-SR-13
+  it("does not use up the mail limit when the sign-up limit refuses", async () => {
+    const harness = await createSignUpHarness({ mail: true });
+    // Ten attempts with a weak password are form errors and are not counted; ten valid ones are.
+    for (let i = 0; i < 10; i += 1)
+      await harness.signUp({ email: ADDRESS, password: SIGNUP_TEST_PASSWORD });
+    const mailCounters = async () =>
+      (
+        await harness.db
+          .selectFrom("rate_limits")
+          .select(["key", "count"])
+          .where("key", "like", "verification-mail:%")
+          .execute()
+      ).map((row) => row.count);
+    const before = await mailCounters();
+
+    const refused = await harness.signUp({
+      email: ADDRESS,
+      password: SIGNUP_TEST_PASSWORD,
+    });
+
+    expect(refused.status).toBe(429);
+    expect(await mailCounters()).toEqual(before);
+  });
+
+  // #99-SR-13
   it("counts the mails of an address across the sign-up and the resend", async () => {
     const harness = await createSignUpHarness({ mail: true });
     await harness.signUp({ email: ADDRESS, password: SIGNUP_TEST_PASSWORD });

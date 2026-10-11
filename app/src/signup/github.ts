@@ -69,8 +69,8 @@ export type GithubLinkDecision =
   | { action: "refuse"; error: "email_exists_unverified" };
 
 /**
- * What to do with a GitHub identity whose verified primary email is `githubEmail`, given the account that
- * has this address (null when there is none).
+ * What to do with a GitHub identity whose verified primary email is the address of `existing`, given the
+ * account that has this address (null when no account has it).
  */
 export function decideGithubLink(
   existing: {

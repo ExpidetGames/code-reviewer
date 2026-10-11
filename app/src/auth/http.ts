@@ -9,6 +9,7 @@ import type { SignInMethods } from "../admin/sign-in-methods.ts";
 import { readLimitedBody } from "../webhooks/limited-body.ts";
 import type { Auth } from "./auth.ts";
 import type { SignInLimiter, SignInPermission } from "./sign-in-limit.ts";
+import { EMAIL_NOT_VERIFIED_CODE } from "./unverified-sign-in.ts";
 
 const AUTH_BASE_PATH = "/api/auth";
 
@@ -69,6 +70,17 @@ function typedEmail(text: string): string {
 }
 
 const NO_STORE = { "cache-control": "no-store" };
+
+/** Whether Better Auth's answer is the 403 for a right password and an address that is not verified. */
+async function isNotVerifiedAnswer(response: Response): Promise<boolean> {
+  if (response.status !== 403) return false;
+  try {
+    const body = (await response.clone().json()) as { code?: unknown };
+    return body.code === EMAIL_NOT_VERIFIED_CODE;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Passes a request on to Better Auth when it is one of the allowed calls. The sign in with email and
@@ -179,7 +191,9 @@ export async function handleAuthRequest(
     );
 
   const response = await auth.handler(counted);
-  if (response.ok) {
+  // The password was right in two cases: the sign in worked, and the account has to verify its address first
+  // (403 EMAIL_NOT_VERIFIED, after the right password). Neither is a failed attempt, so neither counts.
+  if (response.ok || (await isNotVerifiedAnswer(response))) {
     try {
       await limiter.succeeded(email);
     } catch {

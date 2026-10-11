@@ -227,6 +227,26 @@ GitHub reports; the old OAuth sign-in did not provide one).
 - Without SMTP no email can be verified; email and password accounts are usable unverified under the
   rule "everyone".
 
+**A verification link is bound to the password of the sign-up that made it.** Someone can sign up with
+another person's address before that person does (an account pre-hijack): the owner then gets a mail, and a
+link that merely marks the address as verified would hand the account, with the password the attacker chose, to
+the attacker as soon as the owner clicks it. Therefore:
+
+- every link is stored with the password hash of the sign-up that made it, and is used on the verification page
+  **with that password**, in the same request; the link is only used up when the password matches the hash bound
+  to it. A wrong link and a wrong password are one answer and count against the link's attempts;
+- a repeat sign-up for an address whose account waits for verification **never replaces the account's
+  password**: it mails one more link, bound to the new password, and gives the same answer as a new account.
+  Several links can be pending at once, so signing up again cannot keep the owner's link from working;
+- when a link is used, its hash becomes the account's password (the sessions of the account end if the password
+  changed), the address is verified, and every other pending link of the account is deleted. A password reset
+  also deletes the pending links, because using one would put the old password back;
+- the effect: someone who clicks a link from another person's sign-up cannot complete it, because they do not
+  know that person's password, and the link of their own sign-up works with their own password.
+
+Without SMTP there is no verification and so no such protection: an address can be claimed by whoever signs up
+first, and a sign-in after a sign-up shows whether the address was taken. That mode is accepted (see above).
+
 **Rules that name emails or domains** are only meaningful for verified addresses. They are
 **fail-closed** while no verification path exists, that is, when there is no SMTP **and** sign-in is not
 GitHub only:
@@ -344,7 +364,9 @@ key is "never stored" (`app/src/llm/README.md`), which held while there was exac
 environment. The documentation of the `llm` module must be updated with the change.
 
 **Tokens.** Verification, password reset and invitation tokens are random with 256 bits, stored only as
-hashes, single use, and expire: verification 24 hours, password reset 30 minutes, invitation 7 days. The
+hashes, single use, and expire: verification 24 hours, password reset 30 minutes, invitation 7 days. A verification token is also bound to the address it was made for and to the password hash of the sign-up that
+made it (section 2.5), and several can be pending for one account; expired and used verification tokens and
+spent rate-limit counters are removed by a periodic cleanup. The
 **setup code** is single use and kept only as a hash in process memory. The **setup session** that
 follows a correct code is a signed cookie valid for 30 minutes, not a stored token.
 

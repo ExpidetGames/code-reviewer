@@ -5,7 +5,7 @@
 // instance can send mail.
 import { describe, expect, it, vi } from "vitest";
 import {
-  refusesUnverifiedSignIn,
+  judgeUnverifiedSignIn,
   type UnverifiedSignInDependencies,
 } from "./unverified-sign-in.ts";
 
@@ -33,43 +33,46 @@ describe("refusing an unverified email and password sign in", () => {
   // #99-SR-10
   it("refuses an unverified account whose password is right while the instance can send mail", async () => {
     expect(
-      await refusesUnverifiedSignIn(dependencies(UNVERIFIED), "A@B.com", "pw"),
-    ).toBe(true);
+      await judgeUnverifiedSignIn(dependencies(UNVERIFIED), "A@B.com", "pw"),
+    ).toBe("not_verified");
   });
 
   // #99-SR-14
-  it("does not refuse a wrong password, so Better Auth answers it like any other", async () => {
+  it("answers a wrong password as a wrong password, after exactly one check of it", async () => {
     const deps = dependencies(UNVERIFIED, { passwordRight: false });
 
-    expect(await refusesUnverifiedSignIn(deps, "a@b.com", "wrong")).toBe(false);
+    expect(await judgeUnverifiedSignIn(deps, "a@b.com", "wrong")).toBe(
+      "wrong_password",
+    );
+    expect(deps.verifyPassword).toHaveBeenCalledTimes(1);
   });
 
   // #99-SR-14
-  it("does not refuse an address nobody has, or an account without a password", async () => {
+  it("leaves an address nobody has, or an account without a password", async () => {
     expect(
-      await refusesUnverifiedSignIn(dependencies(null), "a@b.com", "pw"),
-    ).toBe(false);
+      await judgeUnverifiedSignIn(dependencies(null), "a@b.com", "pw"),
+    ).toBe("go_on");
     expect(
-      await refusesUnverifiedSignIn(
+      await judgeUnverifiedSignIn(
         dependencies({ ...UNVERIFIED, passwordHash: null }),
         "a@b.com",
         "pw",
       ),
-    ).toBe(false);
+    ).toBe("go_on");
   });
 
   // #99-SR-24
   it("never refuses the instance admin", async () => {
     const deps = dependencies({ ...UNVERIFIED, isInstanceAdmin: true });
 
-    expect(await refusesUnverifiedSignIn(deps, "a@b.com", "pw")).toBe(false);
+    expect(await judgeUnverifiedSignIn(deps, "a@b.com", "pw")).toBe("go_on");
     expect(deps.verifyPassword).not.toHaveBeenCalled();
   });
 
   it("does not refuse a verified account, and does not even hash the password", async () => {
     const deps = dependencies({ ...UNVERIFIED, emailVerified: true });
 
-    expect(await refusesUnverifiedSignIn(deps, "a@b.com", "pw")).toBe(false);
+    expect(await judgeUnverifiedSignIn(deps, "a@b.com", "pw")).toBe("go_on");
     expect(deps.verifyPassword).not.toHaveBeenCalled();
     expect(deps.verificationRequired).not.toHaveBeenCalled();
   });
@@ -78,14 +81,14 @@ describe("refusing an unverified email and password sign in", () => {
   it("does not refuse when the instance cannot send mail", async () => {
     const deps = dependencies(UNVERIFIED, { required: false });
 
-    expect(await refusesUnverifiedSignIn(deps, "a@b.com", "pw")).toBe(false);
+    expect(await judgeUnverifiedSignIn(deps, "a@b.com", "pw")).toBe("go_on");
     expect(deps.verifyPassword).not.toHaveBeenCalled();
   });
 
   it("looks the address up in lower case, like Better Auth", async () => {
     const deps = dependencies(UNVERIFIED);
 
-    await refusesUnverifiedSignIn(deps, "MiXed@Example.COM", "pw");
+    await judgeUnverifiedSignIn(deps, "MiXed@Example.COM", "pw");
 
     expect(deps.findUser).toHaveBeenCalledWith("mixed@example.com");
   });

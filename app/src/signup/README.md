@@ -19,7 +19,7 @@ domains is only ever applied to addresses that can be verified. The decision is 
 
 ## What a visitor can learn
 
-Nothing about an address. `POST /api/sign-up` answers the same (status, body, headers) for an address that is
+With a mail server, nothing about an address. `POST /api/sign-up` answers the same (status, body, headers) for an address that is
 new, that already has an account and that the rule refuses, and does the same amount of work: the password is
 hashed in every case, and the mail goes out after the answer (to a new address, and to an address whose account
 waits for verification; an address with a verified account gets none). The request for a new link answers the same for
@@ -30,13 +30,20 @@ no mail server for a new link (`not_available`), or that the caller is going too
 "if this address may sign up". The price is that a person the rule refuses is told nothing; the admin sees who
 the rule is for.
 
+**Without a mail server** (the rule `everyone`, the only one that works then) this does not hold, and the decision
+record accepts that mode (section 2.5, "Without SMTP no email can be verified"): accounts are usable at once,
+unverified, so (1) a sign-up followed by a sign-in with the same password shows whether the address already had an
+account (the existing account has another password), and (2) anybody can claim an address nobody has used yet,
+because nothing proves they own it. Both are the nature of a sign-up that verifies nothing. Add a mail server in
+the admin portal, or close the sign-up, to get rid of them.
+
 ## With and without a mail server
 
-|                                        | Under `everyone`                                                                                       | Under a list of emails or of domains                                                                          |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
-| No mail server, email with password on | The account is usable at once, the address stays marked unverified                                     | Closed (`signup_closed`): nobody signs up, not even a listed address. The admin signs in as always            |
-| Mail server                            | The account is unverified; a link goes to the address; it cannot sign in or act until the link is used | The same, for an address the rule lets in                                                                     |
-| GitHub the only way to sign in         | The email sign-up is off (`sign_up_disabled`)                                                          | The same; the rule works for GitHub accounts, through the verified primary email (`github.ts`, a later issue) |
+|                                        | Under `everyone`                                                                                                                                                | Under a list of emails or of domains                                                                          |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| No mail server, email with password on | The account is usable at once, the address stays marked unverified; the address is not proven to be theirs, and a sign-in afterwards shows whether it was taken | Closed (`signup_closed`): nobody signs up, not even a listed address. The admin signs in as always            |
+| Mail server                            | The account is unverified; a link goes to the address; it cannot sign in or act until the link is used                                                          | The same, for an address the rule lets in                                                                     |
+| GitHub the only way to sign in         | The email sign-up is off (`sign_up_disabled`)                                                                                                                   | The same; the rule works for GitHub accounts, through the verified primary email (`github.ts`, a later issue) |
 
 The state is looked at when it matters: removing the mail server closes a list rule again at once and lets
 unverified accounts in again (nothing can be verified any more), adding one asks every unverified email

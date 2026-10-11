@@ -108,6 +108,7 @@ describe("the checklist", () => {
 
 describe("the notices", () => {
   // #97-SU-19
+  // #99-SR-22
   it("warns that the sign-up rule cannot work yet exactly when the state says so", () => {
     const closed = render(
       <Overview settings={view({ signUpRuleState: { failClosed: true } })} />,

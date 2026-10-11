@@ -16,6 +16,7 @@ const BOTH = { emailPassword: true, github: true };
 
 describe("the state of the sign-up rule", () => {
   // #97-SU-19
+  // #99-SR-22
   it.each<InstanceSettingValues["sign_up_rule"]>([
     { kind: "emails", entries: ["a@example.com"] },
     { kind: "domains", entries: ["example.com"] },

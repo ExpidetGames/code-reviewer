@@ -166,16 +166,21 @@ export async function signUp(
   if (!strength.ok) issues.push({ field: "password", code: strength.code });
   if (email === null || issues.length > 0) return { kind: "invalid", issues };
 
-  // Counted before anything is looked up, so a refusal by the limit is the same for every address.
-  for (const permission of [
-    await limits.signUp(email),
-    ...(availability.verifyByMail ? [await limits.mail(email)] : []),
-  ])
+  // Counted before anything is looked up, so a refusal by the limit is the same for every address. One
+  // counter after the other: the first refusal ends it, so a sign-up that the sign-up limit refuses does not
+  // use up the mail limit of the address or of the instance.
+  const counters = [
+    () => limits.signUp(email),
+    ...(availability.verifyByMail ? [() => limits.mail(email)] : []),
+  ];
+  for (const count of counters) {
+    const permission = await count();
     if (!permission.allowed)
       return {
         kind: "rate_limited",
         retryAfterSeconds: permission.retryAfterSeconds,
       };
+  }
 
   // Always hashed, whether or not an account is made: the work of an answer does not show it.
   const passwordHash = await hashPassword(password);

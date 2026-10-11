@@ -18,8 +18,12 @@
 // not cancel the others, or somebody could keep a person's link from working by signing up again. Using
 // one is a single guarded statement, so of two requests with one link only one verifies, and an address
 // that changed since the link was made is not verified by it. A refusal changes nothing.
-import { createHash, randomBytes } from "node:crypto";
 import type { Kysely } from "kysely";
+import {
+  hashLinkToken,
+  isWellFormedLinkToken,
+  newLinkToken,
+} from "../admin-cli/token.ts";
 import { CREDENTIAL_PROVIDER_ID } from "../auth/session-user.ts";
 import { formatTimestamp } from "../db/codecs.ts";
 import type { Database } from "../db/schema.ts";
@@ -27,23 +31,9 @@ import type { Database } from "../db/schema.ts";
 /** How long a link works. */
 export const VERIFICATION_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 
-const TOKEN_BYTES = 32;
-// 32 bytes in base64url, without padding.
-const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
-
-export function newVerificationToken(
-  random: (size: number) => Uint8Array = randomBytes,
-): string {
-  return Buffer.from(random(TOKEN_BYTES)).toString("base64url");
-}
-
-export function isWellFormedVerificationToken(value: unknown): value is string {
-  return typeof value === "string" && TOKEN_PATTERN.test(value);
-}
-
-export function hashVerificationToken(token: string): string {
-  return createHash("sha256").update(token, "utf8").digest("hex");
-}
+export const newVerificationToken = newLinkToken;
+export const isWellFormedVerificationToken = isWellFormedLinkToken;
+export const hashVerificationToken = hashLinkToken;
 
 export type TokenClock = { now?: () => Date };
 

@@ -47,6 +47,20 @@ export type PasswordSignInDependencies = {
   log?: (message: string) => void;
 };
 
+async function resetCounter(
+  limiter: SignInLimiter,
+  email: string,
+  log: (message: string) => void,
+): Promise<void> {
+  try {
+    await limiter.succeeded(email);
+  } catch {
+    log(
+      "[auth] SIGN_IN_LIMIT_UNAVAILABLE: the sign in attempts could not be reset.",
+    );
+  }
+}
+
 export async function signInWithPasswordChecked(
   { limiter, signIn, log = console.error }: PasswordSignInDependencies,
   email: string,
@@ -72,8 +86,11 @@ export async function signInWithPasswordChecked(
   } catch (error) {
     const status = apiErrorStatus(error);
     if (status === 429) return { kind: "rate_limited", retryAfterSeconds: 60 };
-    if (status === 403 && apiErrorCode(error) === EMAIL_NOT_VERIFIED_CODE)
+    if (status === 403 && apiErrorCode(error) === EMAIL_NOT_VERIFIED_CODE) {
+      // The password was right: not a failed attempt, so the counter of the account starts again.
+      await resetCounter(limiter, email, log);
       return { kind: "email_not_verified" };
+    }
     if (status !== null && status >= 400 && status < 500)
       return { kind: "invalid_credentials" };
     log(
@@ -82,12 +99,6 @@ export async function signInWithPasswordChecked(
     return { kind: "unavailable" };
   }
 
-  try {
-    await limiter.succeeded(email);
-  } catch {
-    log(
-      "[auth] SIGN_IN_LIMIT_UNAVAILABLE: the sign in attempts could not be reset.",
-    );
-  }
+  await resetCounter(limiter, email, log);
   return { kind: "ok" };
 }

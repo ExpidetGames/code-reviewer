@@ -16,16 +16,27 @@ const TOKEN_BYTES = 32;
 // 32 bytes in base64url, without padding.
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 
-export function newResetToken(
+// The three functions below make, recognize and hash a 256 bit link token of any kind. The reset links
+// (here) and the verification links of an email address (src/signup/verification-tokens.ts) are made the
+// same way, so they share this code.
+
+/** 256 random bits, spelled base64url. */
+export function newLinkToken(
   random: (size: number) => Uint8Array = randomBytes,
 ): string {
   return Buffer.from(random(TOKEN_BYTES)).toString("base64url");
 }
 
-export function isWellFormedResetToken(value: unknown): value is string {
+/** Whether a value is shaped like a link token (the shape only; it says nothing about whether it exists). */
+export function isWellFormedLinkToken(value: unknown): value is string {
   return typeof value === "string" && TOKEN_PATTERN.test(value);
 }
 
-export function hashResetToken(token: string): string {
+/** The SHA-256 hash (hex) that is stored instead of the token. */
+export function hashLinkToken(token: string): string {
   return createHash("sha256").update(token, "utf8").digest("hex");
 }
+
+export const newResetToken = newLinkToken;
+export const isWellFormedResetToken = isWellFormedLinkToken;
+export const hashResetToken = hashLinkToken;

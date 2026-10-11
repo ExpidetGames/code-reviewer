@@ -14,7 +14,7 @@ function fixture(
 ) {
   let fire: () => void = () => undefined;
   const stopped = vi.fn();
-  const setTimer = vi.fn((callback: () => void, _interval: number) => {
+  const setTimer = vi.fn((callback: () => void) => {
     fire = callback;
     return stopped;
   });

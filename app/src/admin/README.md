@@ -41,7 +41,7 @@ The command line for a lost admin password is `src/admin-cli/` (below).
   `x-nextjs-rewritten-path` to the RSC answer of any rewrite, so the same rewrite also catches every other
   path that is no route (`fallback`, Next.js's own files left out); then the marked request and a missing
   path are answered by the same code, and the e2e journey compares every header, with its name as written.
-- The admin keeps access with an unverified email address, so that a mail problem can always be fixed. While a mail server is configured and the admin's address is not verified, the admin reaches `/admin` and nothing else of the app (`src/auth/access-gates.ts`, the proxy, `requireAdmin`); a person who is not an admin gets the 404 whether or not their own address is verified or they belong to a workspace.
+- The admin keeps access with an unverified email address, so that a mail problem can always be fixed. While a mail server is configured and the admin's address is not verified, the admin reaches `/admin` and nothing else of the app (`src/auth/access-gates.ts`, the proxy, `requireAdmin`); a person who is not an admin gets the same answer for a portal path as for any other path that does not exist: the 404 if they may use the app, and, while they are still waiting to verify their address or for a workspace, the redirect or 403 that every other path gets from them. Nothing says that the portal is there.
 - Taking the admin flag away takes effect on the next request (the session lookup reads it every time).
 
 The proxy is not the only guard. Every page and the layout call `requireAdmin()` (a person who is not an

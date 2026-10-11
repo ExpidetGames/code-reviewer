@@ -198,6 +198,7 @@ describe("the sign-up rule form", () => {
   });
 
   // #97-SU-19
+  // #99-SR-22
   it("shows the notice while the rule cannot work yet, and not otherwise", () => {
     const rule: AdminSettingsView["signUpRule"] = {
       value: { kind: "domains", entries: ["example.com"] },

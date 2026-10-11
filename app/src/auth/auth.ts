@@ -28,7 +28,7 @@ import { decideSignIn, readSignInAccess } from "./sign-in-access.ts";
 import { CREDENTIAL_PROVIDER_ID } from "./session-user.ts";
 import {
   EMAIL_NOT_VERIFIED_CODE,
-  refusesUnverifiedSignIn,
+  judgeUnverifiedSignIn,
 } from "./unverified-sign-in.ts";
 
 export const SESSION_LIFETIME_SECONDS = 60 * 60 * 24 * 30;
@@ -188,47 +188,54 @@ export function createAuth({
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
         // An unverified address does not sign in while the instance can send mail. Only after the
-        // password was right (unverified-sign-in.ts), so the answer to a wrong one is unchanged.
+        // password was right (unverified-sign-in.ts); a wrong one gets Better Auth's own answer from
+        // here, so that it is hashed exactly once whatever the address.
         if (
           ctx.path === "/sign-in/email" &&
           verificationRequired !== undefined
         ) {
           const body = ctx.body as Record<string, unknown> | undefined;
-          if (
-            typeof body?.email === "string" &&
-            typeof body.password === "string" &&
-            (await refusesUnverifiedSignIn(
-              {
-                async findUser(email) {
-                  const found =
-                    await ctx.context.internalAdapter.findUserByEmail(email, {
-                      includeAccounts: true,
-                    });
-                  if (found === null) return null;
-                  const credential = found.accounts.find(
-                    (account) =>
-                      account.providerId === CREDENTIAL_PROVIDER_ID &&
-                      account.accountId === found.user.id,
-                  );
-                  return {
-                    emailVerified: found.user.emailVerified,
-                    // The adapter's type does not list our additional fields; the value is there.
-                    isInstanceAdmin:
-                      (found.user as { isInstanceAdmin?: unknown })
-                        .isInstanceAdmin === true,
-                    passwordHash: credential?.password ?? null,
-                  };
-                },
-                verifyPassword: ctx.context.password.verify,
-                verificationRequired,
-              },
-              body.email,
-              body.password,
-            ))
-          )
+          const verdict =
+            typeof body?.email === "string" && typeof body.password === "string"
+              ? await judgeUnverifiedSignIn(
+                  {
+                    async findUser(email) {
+                      const found =
+                        await ctx.context.internalAdapter.findUserByEmail(
+                          email,
+                          { includeAccounts: true },
+                        );
+                      if (found === null) return null;
+                      const credential = found.accounts.find(
+                        (account) =>
+                          account.providerId === CREDENTIAL_PROVIDER_ID &&
+                          account.accountId === found.user.id,
+                      );
+                      return {
+                        emailVerified: found.user.emailVerified,
+                        // The adapter's type does not list our additional fields; the value is there.
+                        isInstanceAdmin:
+                          (found.user as { isInstanceAdmin?: unknown })
+                            .isInstanceAdmin === true,
+                        passwordHash: credential?.password ?? null,
+                      };
+                    },
+                    verifyPassword: ctx.context.password.verify,
+                    verificationRequired,
+                  },
+                  body.email,
+                  body.password,
+                )
+              : "go_on";
+          if (verdict === "not_verified")
             throw new APIError("FORBIDDEN", {
               code: EMAIL_NOT_VERIFIED_CODE,
               message: "Verify your email address to sign in.",
+            });
+          if (verdict === "wrong_password")
+            throw new APIError("UNAUTHORIZED", {
+              code: "INVALID_EMAIL_OR_PASSWORD",
+              message: "Invalid email or password",
             });
         }
 
