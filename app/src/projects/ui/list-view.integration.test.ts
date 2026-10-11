@@ -161,14 +161,12 @@ describe("the project list", () => {
     expect(await statusOf()).toMatchObject({
       status: "active",
       switchedOn: true,
-      hasProject: true,
     });
 
     expect((await app.put(gadgets, false)).status).toBe(200);
     expect(await statusOf()).toMatchObject({
       status: "inactive",
       switchedOn: false,
-      hasProject: true,
     });
   });
 
@@ -183,7 +181,6 @@ describe("the project list", () => {
 
     expect(view.rows.find((row) => row.repositoryId === hello)).toMatchObject({
       status: "unavailable",
-      hasProject: true,
       switchedOn: true,
     });
   });

@@ -1,5 +1,5 @@
-// The list of repositories on the Projects page: name (a link to the settings once the repository
-// has a project), installation, state, the status of the last run and the switch. Everything that
+// The list of repositories on the Projects page: name (a link to the settings, also while the
+// repository is inactive), installation, state, the status of the last run and the switch. Everything that
 // comes from GitHub (names, addresses) is untrusted and rendered as text.
 import Link from "next/link";
 import { formatUtc } from "../../ui/format-time.ts";
@@ -63,16 +63,12 @@ export function ProjectList({
       {view.rows.map((row) => (
         <li key={row.repositoryId} className="project-row">
           <div className="project-main">
-            {row.hasProject ? (
-              <Link
-                href={`/projects/${encodeURIComponent(row.repositoryId)}`}
-                className="project-name"
-              >
-                {row.fullName}
-              </Link>
-            ) : (
-              <span className="project-name">{row.fullName}</span>
-            )}
+            <Link
+              href={`/projects/${encodeURIComponent(row.repositoryId)}`}
+              className="project-name"
+            >
+              {row.fullName}
+            </Link>
             <span className="muted small">
               Installation: {row.installation}
               {row.url !== null ? (

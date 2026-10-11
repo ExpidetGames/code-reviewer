@@ -26,6 +26,7 @@ export const e2eEnv = {
     "login-journey",
     "nav-journey",
     "projects-journey",
+    "inactive-journey",
     "runs-journey",
     "manual-journey",
   ].join(","),

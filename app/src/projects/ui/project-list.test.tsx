@@ -21,7 +21,6 @@ function row(overrides: Partial<ProjectRowView> = {}): ProjectRowView {
     url: "https://github.com/acme/widgets",
     installation: "acme",
     status: "inactive",
-    hasProject: false,
     switchedOn: false,
     lastRun: null,
     ...overrides,
@@ -78,7 +77,7 @@ describe("the project list without repositories", () => {
 describe("the project list with repositories", () => {
   // CR-34-T03
   it("says that a project without a run has no run yet, not an empty field", () => {
-    renderList([row({ hasProject: true, switchedOn: true, status: "active" })]);
+    renderList([row({ switchedOn: true, status: "active" })]);
 
     expect(screen.getByText("No run yet")).toBeTruthy();
   });
@@ -87,7 +86,6 @@ describe("the project list with repositories", () => {
   it("shows the status and the time of the last run next to the switch that is on", () => {
     renderList([
       row({
-        hasProject: true,
         switchedOn: true,
         status: "active",
         lastRun: { status: "succeeded", at: "2026-10-10T12:34:56Z" },
@@ -128,7 +126,6 @@ describe("the project list with repositories", () => {
     renderList([
       row({
         repositoryId: "repo with space",
-        hasProject: true,
         switchedOn: true,
         status: "active",
         lastRun: { status: "failed", at: "2026-10-10T12:34:56Z" },
@@ -147,7 +144,6 @@ describe("the project list with repositories", () => {
       row({
         repositoryId: "b",
         fullName: "acme/b",
-        hasProject: true,
         switchedOn: true,
         status: "active",
       }),
@@ -172,21 +168,28 @@ describe("the project list with repositories", () => {
     ]);
   });
 
-  it("links the name to the settings only once the repository has a project", () => {
+  // #80
+  it("links the name of every repository to its settings, also one that was never activated", () => {
     renderList([
-      row({ repositoryId: "a", fullName: "acme/a" }),
+      row({ repositoryId: "a", fullName: "acme/a", status: "inactive" }),
       row({
         repositoryId: "b",
         fullName: "acme/b",
-        hasProject: true,
-        status: "inactive",
+        switchedOn: true,
+        status: "active",
+      }),
+      row({
+        repositoryId: "c",
+        fullName: "acme/c",
+        switchedOn: true,
+        status: "unavailable",
       }),
     ]);
 
-    expect(screen.queryByRole("link", { name: "acme/a" })).toBeNull();
-    expect(
-      screen.getByRole("link", { name: "acme/b" }).getAttribute("href"),
-    ).toBe("/projects/b");
+    for (const id of ["a", "b", "c"])
+      expect(
+        screen.getByRole("link", { name: `acme/${id}` }).getAttribute("href"),
+      ).toBe(`/projects/${id}`);
   });
 
   // CR-34-T10
@@ -202,10 +205,9 @@ describe("the project list with repositories", () => {
 
   // CR-34-T10
   it("lets a project that is on be switched off even while the GitHub App is not configured", () => {
-    renderList(
-      [row({ hasProject: true, switchedOn: true, status: "active" })],
-      { activationBlocked: "Configure the GitHub App first." },
-    );
+    renderList([row({ switchedOn: true, status: "active" })], {
+      activationBlocked: "Configure the GitHub App first.",
+    });
 
     expect((screen.getByRole("switch") as HTMLButtonElement).disabled).toBe(
       false,
@@ -214,7 +216,7 @@ describe("the project list with repositories", () => {
 
   it("does not offer to switch on a repository the app can no longer read, and says what happens if it comes back", () => {
     renderList([
-      row({ status: "unavailable", hasProject: true, switchedOn: true }),
+      row({ status: "unavailable", switchedOn: true }),
       row({ repositoryId: "x", fullName: "acme/x", status: "unavailable" }),
     ]);
 
