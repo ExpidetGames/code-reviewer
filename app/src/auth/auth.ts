@@ -1,8 +1,11 @@
-// The one Better Auth instance of the app: GitHub is the only way in, sessions live in our SQLite
-// database for 30 days, and the four tables are the ones created by migration 20261010123800_create_auth_tables.
+// The one Better Auth instance of the app: email with password (the instance admin the first-run
+// setup creates, and the accounts of the later sign-up) and, when the GitHub OAuth app is configured,
+// GitHub. Sessions live in our SQLite database for 30 days, and the four tables are the ones created
+// by migration 20261010123800_create_auth_tables.
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { betterAuth } from "better-auth";
+import { APIError, createAuthMiddleware } from "better-auth/api";
 import { nextCookies } from "better-auth/next-js";
 import { genericOAuth } from "better-auth/plugins/generic-oauth";
 import type { Kysely } from "kysely";
@@ -12,9 +15,23 @@ import { createAllowedLoginPinsRepository } from "../db/repositories/allowed-log
 import { loadAuthConfig, type AuthConfig } from "./config.ts";
 import { membershipChecker } from "./github-org.ts";
 import { githubProviderConfig } from "./github-provider.ts";
+import {
+  checkPassword,
+  PASSWORD_ERROR_COPY,
+  PASSWORD_MAX_LENGTH,
+  PASSWORD_MIN_LENGTH,
+} from "./password-policy.ts";
 import { decideSignIn, readSignInAccess } from "./sign-in-access.ts";
 
 export const SESSION_LIFETIME_SECONDS = 60 * 60 * 24 * 30;
+
+/** The body field that carries the new password on each Better Auth endpoint that sets one. */
+const PASSWORD_FIELD_BY_PATH: Readonly<Record<string, string>> = {
+  "/sign-up/email": "password",
+  "/change-password": "newPassword",
+  "/set-password": "newPassword",
+  "/reset-password": "newPassword",
+};
 
 export type CreateAuthOptions = {
   db: Kysely<Database>;
@@ -29,6 +46,7 @@ export function createAuth({
   githubRequestTimeoutMs,
 }: CreateAuthOptions) {
   const org = config.access.org;
+  const githubOAuth = config.github.oauth;
   const loginPins = createAllowedLoginPinsRepository(db);
   const checkMembership =
     org === null
@@ -53,11 +71,20 @@ export function createAuth({
         updatedAt: "updated_at",
       },
       additionalFields: {
-        // The current GitHub login. It comes from the provider profile and nowhere else.
+        // The current GitHub login. It comes from the provider profile and nowhere else. Empty for
+        // an account without a GitHub identity (email and password).
         githubLogin: {
           type: "string",
-          required: true,
+          required: false,
           fieldName: "github_login",
+        },
+        // The instance admin flag. Set by the first-run setup, never by a request.
+        isInstanceAdmin: {
+          type: "boolean",
+          required: false,
+          input: false,
+          defaultValue: false,
+          fieldName: "is_instance_admin",
         },
         // When the membership in the allowed organization was last confirmed (ISO 8601). Written
         // at sign in and by the 24 hour re-check (access-runtime.ts); read by the access policy.
@@ -132,38 +159,82 @@ export function createAuth({
       },
     },
 
-    plugins: [
-      genericOAuth({
-        config: [
-          githubProviderConfig({
-            clientId: config.github.clientId,
-            clientSecret: config.github.clientSecret,
-            oauthBaseUrl: config.github.oauthBaseUrl,
-            apiBaseUrl: config.github.apiBaseUrl,
-            requestTimeoutMs: githubRequestTimeoutMs,
-            requestOrgScope: org !== null,
-            signInAccess: ({ login, githubId, accessToken }) =>
-              decideSignIn({
-                config: config.access,
-                login,
-                githubId,
-                pins: loginPins,
-                checkMembership: () =>
-                  checkMembership === undefined
-                    ? Promise.resolve("unavailable")
-                    : checkMembership(accessToken),
-              }),
-          }),
-        ],
+    // Email with password. Nobody signs up through Better Auth: the instance admin is made by the
+    // first-run setup (src/setup/), and the sign-up endpoints are not reachable (http.ts) nor
+    // enabled. The password rule is the app's own (password-policy.ts); the lengths below are the
+    // same bounds, there as a second line in case a path that sets a password is ever switched on.
+    emailAndPassword: {
+      enabled: true,
+      disableSignUp: true,
+      minPasswordLength: PASSWORD_MIN_LENGTH,
+      maxPasswordLength: PASSWORD_MAX_LENGTH,
+    },
+    hooks: {
+      // The password rule on every endpoint that sets a password, with a stable code.
+      before: createAuthMiddleware(async (ctx) => {
+        const field = PASSWORD_FIELD_BY_PATH[ctx.path];
+        if (field === undefined) return;
+        const body = ctx.body as Record<string, unknown> | undefined;
+        const password = body?.[field];
+        const result = checkPassword(
+          typeof password === "string" ? password : "",
+        );
+        if (result.ok) return;
+        throw new APIError("BAD_REQUEST", {
+          code: result.code,
+          message: PASSWORD_ERROR_COPY[result.code],
+        });
       }),
+    },
+
+    plugins: [
+      // GitHub sign in exists only while the GitHub OAuth app is configured.
+      ...(githubOAuth === null
+        ? []
+        : [
+            genericOAuth({
+              config: [
+                githubProviderConfig({
+                  clientId: githubOAuth.clientId,
+                  clientSecret: githubOAuth.clientSecret,
+                  oauthBaseUrl: config.github.oauthBaseUrl,
+                  apiBaseUrl: config.github.apiBaseUrl,
+                  requestTimeoutMs: githubRequestTimeoutMs,
+                  requestOrgScope: org !== null,
+                  signInAccess: ({ login, githubId, accessToken }) =>
+                    decideSignIn({
+                      config: config.access,
+                      login,
+                      githubId,
+                      pins: loginPins,
+                      checkMembership: () =>
+                        checkMembership === undefined
+                          ? Promise.resolve("unavailable")
+                          : checkMembership(accessToken),
+                    }),
+                }),
+              ],
+            }),
+          ]),
       // Must stay the last plugin: it copies the cookies Better Auth sets into Next.js's cookie
       // store when a server action calls `auth.api`.
       nextCookies(),
     ],
 
-    // Only the GitHub sign in exists. Whatever could change who a user is, or add another way in,
-    // is switched off: `update-user` would let a user write their own `githubLogin`.
+    // Better Auth's own limiter is off. It counts per client address, and an address is only as
+    // trustworthy as the proxy in front of the app: a spoofable header lets a guesser start again with
+    // every request, and without one every client shares a single bucket. The one endpoint where
+    // guessing matters, the sign in with email and password, is limited by the app itself in the
+    // shared `rate_limits` table, per email address and for the whole instance, on both the login form
+    // and the HTTP endpoint (sign-in-limit.ts, http.ts). The other allowed endpoints (starting the
+    // GitHub sign in, its callback, sign out) hold nothing that can be guessed.
+    rateLimit: { enabled: false },
+
+    // Only the sign in exists. Whatever could change who a user is, or add another way in, is
+    // switched off: `update-user` would let a user write their own `githubLogin`, and nobody signs
+    // up through Better Auth.
     disabledPaths: [
+      "/sign-up/email",
       "/update-user",
       "/change-email",
       "/change-password",

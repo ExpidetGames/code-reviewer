@@ -10,7 +10,10 @@
 #     goes into Coolify's "Domains" field of the service app with the port, https://<domain>:3000.
 #     A published host port would bypass the proxy (and its TLS).
 #   - BETTER_AUTH_URL has no default: it must be the public https address, and Coolify refuses to
-#     deploy while a required variable (written with :? after its name) is empty.
+#     deploy while a required variable (written with :? after its name) is empty. The same holds for
+#     RUNNER_TOKEN. The app itself requires APP_SECRET (or its deprecated name BETTER_AUTH_SECRET).
+#     Nothing else is required: GitHub is optional, and the rest of the setup is done in the browser
+#     with the setup code from the log of the app.
 #   - Every value is a reference to a variable. Coolify turns each reference into a variable under
 #     "Environment Variables"; no value is written in this file.
 #
@@ -30,16 +33,20 @@ services:
       # off the server see docs/deployment-coolify.md.
       - backups:/backups
     environment:
-      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?}
+      # The master key: required, but checked by the app (it refuses to start and names the variable)
+      # rather than by Coolify, because BETTER_AUTH_SECRET, its deprecated name, is still accepted when
+      # APP_SECRET is empty: an existing deployment keeps deploying with the values it has.
+      APP_SECRET: ${APP_SECRET:-}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-}
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:?}
-      GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:?}
-      GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET:?}
+      GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:-}
+      GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET:-}
       ALLOWED_GITHUB_LOGINS: ${ALLOWED_GITHUB_LOGINS:-}
       ALLOWED_GITHUB_ORG: ${ALLOWED_GITHUB_ORG:-}
-      GITHUB_APP_ID: ${GITHUB_APP_ID:?}
-      GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:?}
-      GITHUB_APP_WEBHOOK_SECRET: ${GITHUB_APP_WEBHOOK_SECRET:?}
-      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:?}
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
+      GITHUB_APP_WEBHOOK_SECRET: ${GITHUB_APP_WEBHOOK_SECRET:-}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
       # The runner presents the same token; both services read the one variable.
       RUNNER_TOKEN: ${RUNNER_TOKEN:?}
       # One shared LLM access for the team. Not needed for the stack to start: without a key the app

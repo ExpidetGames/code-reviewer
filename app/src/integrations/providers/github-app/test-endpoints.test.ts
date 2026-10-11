@@ -10,7 +10,7 @@ import { testGithubAppEnv } from "../../../test-support/github-app.ts";
 import { loadGithubAppConfig } from "./config.ts";
 
 const signInEnv = {
-  BETTER_AUTH_SECRET: "x".repeat(40),
+  APP_SECRET: "x".repeat(40),
   BETTER_AUTH_URL: "http://localhost:3000",
   GITHUB_OAUTH_CLIENT_ID: "id",
   GITHUB_OAUTH_CLIENT_SECRET: "secret-value",

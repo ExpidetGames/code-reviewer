@@ -48,6 +48,13 @@ describe("the message for a failed sign in", () => {
     expect(loginErrorMessage("sign_in_again")).toMatch(/sign in again/i);
   });
 
+  // #97-SU-14
+  it("says that the email address or the password is wrong without saying which", () => {
+    expect(loginErrorMessage("invalid_credentials")).toBe(
+      "The email address or the password is not correct.",
+    );
+  });
+
   it("uses a generic message for a code it does not know and never echoes it", () => {
     const message = loginErrorMessage("<script>alert(1)</script>");
 

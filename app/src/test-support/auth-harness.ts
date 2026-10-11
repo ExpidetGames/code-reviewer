@@ -76,7 +76,7 @@ function assembleHarness(
   // fake GitHub's address. `secureCookies` is what an https BETTER_AUTH_URL yields; the harness
   // keeps its address on http (nothing here listens on it) and forces the flag.
   const loaded = loadAuthConfig({
-    BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
+    APP_SECRET: TEST_AUTH_SECRET,
     BETTER_AUTH_URL: TEST_BASE_URL,
     GITHUB_OAUTH_CLIENT_ID: TEST_CLIENT_ID,
     GITHUB_OAUTH_CLIENT_SECRET: TEST_CLIENT_SECRET,

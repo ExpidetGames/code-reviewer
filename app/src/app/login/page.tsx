@@ -1,6 +1,8 @@
+import { connection } from "next/server";
 import { Suspense } from "react";
-import { signInWithGithub } from "@/auth/actions";
+import { signInWithGithub, signInWithPassword } from "@/auth/actions";
 import { loginErrorMessage } from "@/auth/login-errors";
+import { githubSignInConfigured } from "@/auth/sign-in-methods";
 import { Button } from "@/ui/button";
 
 export default function LoginPage({ searchParams }: PageProps<"/login">) {
@@ -13,13 +15,55 @@ export default function LoginPage({ searchParams }: PageProps<"/login">) {
         <Suspense fallback={null}>
           <LoginError searchParams={searchParams} />
         </Suspense>
-        <form action={signInWithGithub}>
+        <form action={signInWithPassword} className="login-form">
+          <div className="field">
+            <label htmlFor="login-email" className="field-label">
+              Email address
+            </label>
+            <input
+              id="login-email"
+              name="email"
+              type="email"
+              autoComplete="username"
+              required
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="login-password" className="field-label">
+              Password
+            </label>
+            <input
+              id="login-password"
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              required
+            />
+          </div>
           <Button type="submit" className="btn-block">
-            Sign in with GitHub
+            Sign in
           </Button>
         </form>
+        {/* GitHub sign in exists while the GitHub OAuth app is configured; the setting is read from
+            the environment at request time, behind a boundary. */}
+        <Suspense fallback={null}>
+          <GithubSignIn />
+        </Suspense>
       </div>
     </main>
+  );
+}
+
+async function GithubSignIn() {
+  // Reads the environment at request time (not when the page is built).
+  await connection();
+  if (!githubSignInConfigured(process.env)) return null;
+  return (
+    <form action={signInWithGithub}>
+      <Button type="submit" variant="secondary" className="btn-block">
+        Sign in with GitHub
+      </Button>
+    </form>
   );
 }
 

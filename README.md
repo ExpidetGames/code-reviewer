@@ -59,17 +59,31 @@ created and migrated when the server starts; a missing directory stops the start
 message. Settings and the database layer are described in `app/.env.example` and
 `app/src/db/README.md`.
 
-### Sign in
+### First start and sign in
 
-Every page except the login page needs a session, and GitHub is the only way to get one. The server
-refuses to start until the four sign in settings in `app/.env.example` are set: a random
-`BETTER_AUTH_SECRET`, the address of the app in `BETTER_AUTH_URL`, and the client id and secret of
-a GitHub OAuth app of your own (GitHub > Settings > Developer settings > OAuth Apps). Register
-`<BETTER_AUTH_URL>/api/auth/callback/github` as its "Authorization callback URL".
+Every page except the login page needs a session. The server refuses to start until two settings in
+`app/.env.example` are set: a random `APP_SECRET` (the master key of the instance, at least 32
+characters, `openssl rand -base64 32`; its deprecated name `BETTER_AUTH_SECRET` is still accepted) and
+the address of the app in `BETTER_AUTH_URL`. No GitHub setting is needed to start.
 
-Signing in is limited to people you name: set `ALLOWED_GITHUB_LOGINS` (comma separated GitHub
-logins) and/or `ALLOWED_GITHUB_ORG` (members of one GitHub organization). If both are set, either
-is enough. If neither is set, nobody can sign in; the server starts and logs one warning. A login
+A new instance is set up in the browser. While it is not set up, every start of the app prints a fresh
+6-digit **setup code** in its log (`[setup] Setup code: ...`); everything but `/api/health` waits for the
+setup. Open the app, enter the code, and answer three questions: single-tenant or multi-tenant, who may
+sign up (everyone, a list of emails, or allowed email domains), and the email and password of the
+instance admin (12 to 128 characters, not a common password). You land in `/admin`, signed in; the
+setup page is gone afterwards. The code is valid for 60 minutes, works once, and after 10 wrong codes
+the setup locks until the app is restarted (which prints a new code); the code lives in the memory of
+one process, so do the setup with one app instance. An installation from before the setup existed keeps
+its data: only the web UI waits, webhooks and the runner API keep working. How it works:
+`app/src/setup/README.md`.
+
+Signing in with email and password always exists (the admin). "Sign in with GitHub" exists while a
+GitHub OAuth app of your own is configured (`GITHUB_OAUTH_CLIENT_ID` and `GITHUB_OAUTH_CLIENT_SECRET`;
+GitHub > Settings > Developer settings > OAuth Apps; register
+`<BETTER_AUTH_URL>/api/auth/callback/github` as its "Authorization callback URL"). GitHub sign in is
+limited to people you name: set `ALLOWED_GITHUB_LOGINS` (comma separated GitHub logins) and/or
+`ALLOWED_GITHUB_ORG` (members of one GitHub organization). If both are set, either is enough. If
+neither is set, nobody can sign in with GitHub; the server starts and logs one warning. A login
 removed from the list loses access on the next request (after a restart with the new value);
 organization membership is checked at sign in and again every 24 hours.
 How it works: `app/src/auth/README.md`.
@@ -87,7 +101,8 @@ Reading pull requests and posting reviews needs a GitHub App of the team (webhoo
 permissions, two events). [`docs/github-app.md`](docs/github-app.md) creates it step by step, says
 which value goes into which variable (`GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_WEBHOOK_SECRET`,
 `GITHUB_APP_PRIVATE_KEY`), how to keep the private key safe and how to install the app on the
-repositories. The production server refuses to start without these four settings; `pnpm dev` does not.
+repositories. The four settings are optional for starting the instance: without them GitHub is "not
+configured" and no review can run (an incomplete set is reported in the log at start).
 
 ## Supported browsers
 
@@ -137,9 +152,8 @@ Two images are built from the repository, each with its own Dockerfile and `.doc
 
 ```sh
 docker run --rm -p 3000:3000 -v code-reviewer-data:/data \
-  -e BETTER_AUTH_SECRET=... -e BETTER_AUTH_URL=http://localhost:3000 \
-  -e GITHUB_OAUTH_CLIENT_ID=... -e GITHUB_OAUTH_CLIENT_SECRET=... \
-  -e ALLOWED_GITHUB_LOGINS=octocat,hubot code-reviewer-app
+  -e APP_SECRET=... -e BETTER_AUTH_URL=http://localhost:3000 \
+  -e RUNNER_TOKEN=... code-reviewer-app
 docker run --rm code-reviewer-runner --version
 ```
 
@@ -165,26 +179,27 @@ docker compose up -d --wait
 docker compose ps         # app: healthy, runner: running
 ```
 
-Open `http://localhost:3000`: it shows the login page. Which values you need and where to get them:
+Open `http://localhost:3000`: a new instance asks for the **setup code**, which the app printed in its log
+(`docker compose logs app`); see "First start and sign in". Which values you need and where to get them:
 
 | Setting | Where it comes from |
 |---|---|
-| `BETTER_AUTH_SECRET` | Random, at least 32 characters: `openssl rand -base64 32` |
-| `RUNNER_TOKEN` | Random, at least 32 characters: `openssl rand -hex 32` (the app and the runner share it) |
-| `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET` | A GitHub OAuth app of your own; callback URL `<BETTER_AUTH_URL>/api/auth/callback/github` (see "Sign in") |
-| `ALLOWED_GITHUB_LOGINS` and/or `ALLOWED_GITHUB_ORG` | Who may sign in; with neither set nobody can |
-| `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_WEBHOOK_SECRET`, `GITHUB_APP_PRIVATE_KEY` | The GitHub App that reads pull requests and posts reviews: create it once with [docs/github-app.md](docs/github-app.md) (permissions, events, webhook URL, key handling, installation) |
+| `APP_SECRET` | Required. Random, at least 32 characters: `openssl rand -base64 32`. Keep a copy apart from the database backups: a database restored without it loses every stored credential. An existing `BETTER_AUTH_SECRET` is accepted in its place |
+| `RUNNER_TOKEN` | Required. Random, at least 32 characters: `openssl rand -hex 32` (the app and the runner share it) |
+| `BETTER_AUTH_URL` | The address people use, https beyond localhost (a local try-out needs nothing) |
+| `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_WEBHOOK_SECRET`, `GITHUB_APP_PRIVATE_KEY` | Optional for starting; needed for reviews. The GitHub App that reads pull requests and posts reviews: create it once with [docs/github-app.md](docs/github-app.md) (permissions, events, webhook URL, key handling, installation) |
+| `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, `ALLOWED_GITHUB_LOGINS` and/or `ALLOWED_GITHUB_ORG` | Optional: "Sign in with GitHub" and who may use it (see "First start and sign in") |
 | `LLM_API_KEY` (and `LLM_PROVIDER`) | The LLM access shared by the team. Optional for starting the stack; without it review jobs fail |
 
-A required setting that is empty stops `docker compose up` with a message naming the variable, before
-any container is created. The production app also refuses to start without them (one line in the log
-naming the variables, never their values): the sign in settings, `RUNNER_TOKEN` (at least 32
-characters) and the GitHub App credentials. The development server (`pnpm dev`) does not require the
-last two, so the sign in can be tried without a GitHub App.
+`RUNNER_TOKEN` empty stops `docker compose up` with a message naming the variable, before any container
+is created. The production app refuses to start without `APP_SECRET` (or `BETTER_AUTH_SECRET`) and
+without `RUNNER_TOKEN` (at least 32 characters): one line in the log naming the variables, never their
+values. No `GITHUB_*` variable is required. An incomplete or unusable GitHub App configuration is only
+reported in the log, and GitHub stays "not configured".
 
 Compose only catches *empty* values. A value that is set but invalid passes compose and is rejected by
-the app, which exits with one `[auth]` or `[deploy]` line (for example a `RUNNER_TOKEN` shorter than 32
-characters, or a `BETTER_AUTH_URL` that is plain http on anything but localhost: https is mandatory
+the app, which exits with one `[auth]` or `[deploy]` line (for example a missing `APP_SECRET`, a
+`RUNNER_TOKEN` shorter than 32 characters, or a `BETTER_AUTH_URL` that is plain http on anything but localhost: https is mandatory
 beyond localhost). Because of `restart: unless-stopped` that looks like a restart loop and the runner
 never starts: run `docker compose logs app` and read the last lines.
 
@@ -232,7 +247,7 @@ survives `down` and `up`, an app process that exits by itself is restarted, a ba
 
 [`docs/deployment-coolify.md`](docs/deployment-coolify.md) is the step by step guide for the team's
 server: the Coolify resource type, the domain and TLS, every environment variable and where its value
-comes from, storage and backups ([`app/src/backup/README.md`](app/src/backup/README.md)), runner sizing,
+comes from, the first-run setup with the setup code, storage and backups ([`app/src/backup/README.md`](app/src/backup/README.md)), runner sizing,
 updates and rollback, and a first-run checklist. Coolify builds the images from this repository with the
 Compose file `compose.coolify.yml`. `docker/smoke/instance.sh <base-url>` checks a running instance (health,
 login page, webhook and runner API refuse what they must).

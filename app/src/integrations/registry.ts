@@ -70,6 +70,9 @@ export function createIntegrationRegistry(
 // What the UI may know about the GitHub App: the rest of the app reaches the provider folder through
 // this file only.
 export { githubAppInstallUrl };
+// Whether any GitHub App variable is set at all (none is the normal state of an instance that is not
+// connected to GitHub).
+export { anyGithubAppVariableSet } from "./providers/github-app/configured.ts";
 export type { GithubAppConfigProblemKind };
 
 export type GithubAppConfigProblem = {

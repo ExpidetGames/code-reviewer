@@ -234,19 +234,9 @@ describe("compose.coolify.yml settings", () => {
       .map(([key]) => key)
       .sort();
 
-    expect(required).toEqual(
-      [
-        "BETTER_AUTH_SECRET",
-        "BETTER_AUTH_URL",
-        "GITHUB_APP_ID",
-        "GITHUB_APP_PRIVATE_KEY",
-        "GITHUB_APP_SLUG",
-        "GITHUB_APP_WEBHOOK_SECRET",
-        "GITHUB_OAUTH_CLIENT_ID",
-        "GITHUB_OAUTH_CLIENT_SECRET",
-        "RUNNER_TOKEN",
-      ].sort(),
-    );
+    // Only what Coolify must refuse to deploy without. The master key is checked by the app (it
+    // accepts the deprecated BETTER_AUTH_SECRET in its place), and GitHub is optional.
+    expect(required).toEqual(["BETTER_AUTH_URL", "RUNNER_TOKEN"].sort());
     for (const key of required)
       expect(service(coolify, "app").environment?.[key]).toBe(`\${${key}:?}`);
     expect(service(coolify, "runner").environment?.RUNNER_TOKEN).toBe(

@@ -1,7 +1,8 @@
 // Pins down that a production server refuses to start without the settings a deployment needs
-// besides sign in (runner token and GitHub App credentials): one readable line with the code and
-// the variable names, exit code 1, and never a value in that line. Development servers are left
-// alone so that the sign in can be tried without a GitHub App.
+// besides sign in (the runner token): one readable line with the code and the variable names, exit
+// code 1, and never a value in that line. The GitHub App is not required: the instance starts
+// without any GITHUB_ variable, and settings that are there but unusable only warn. Development
+// servers are left alone.
 import { generateKeyPairSync } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -39,8 +40,9 @@ const validEnv = {
 async function run(env: Record<string, string | undefined>) {
   const exit = vi.fn();
   const log = vi.fn();
-  await checkDeploymentConfigOnStart({ env, log, exit });
-  return { exit, log };
+  const warn = vi.fn();
+  await checkDeploymentConfigOnStart({ env, log, warn, exit });
+  return { exit, log, warn };
 }
 
 describe("checking the deployment settings when the server starts", () => {
@@ -63,63 +65,74 @@ describe("checking the deployment settings when the server starts", () => {
     expect(line).not.toContain("\n");
   });
 
-  it("treats an empty or blank value like a missing one", async () => {
-    const { exit, log } = await run({ ...validEnv, GITHUB_APP_ID: "   " });
-
-    expect(exit).toHaveBeenCalledWith(1);
-    expect(String(log.mock.calls[0]?.[0])).toContain("GITHUB_APP_ID");
-  });
-
-  it("names every missing GitHub App setting in the same line", async () => {
-    const { exit, log } = await run({
+  // #97-SU-17
+  it("starts without any GitHub App variable and says nothing about it", async () => {
+    const { exit, log, warn } = await run({
       NODE_ENV: "production",
       RUNNER_TOKEN: validEnv.RUNNER_TOKEN,
     });
 
-    expect(exit).toHaveBeenCalledTimes(1);
-    expect(log).toHaveBeenCalledTimes(1);
-    const line = String(log.mock.calls[0]?.[0]);
+    expect(exit).not.toHaveBeenCalled();
+    expect(log).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  // #97-SU-17
+  it("starts with incomplete GitHub App settings and warns once, naming the variables", async () => {
+    const { exit, log, warn } = await run({
+      NODE_ENV: "production",
+      RUNNER_TOKEN: validEnv.RUNNER_TOKEN,
+      GITHUB_APP_ID: "123456",
+      GITHUB_APP_SLUG: "  ",
+    });
+
+    expect(exit).not.toHaveBeenCalled();
+    expect(log).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledTimes(1);
+    const line = String(warn.mock.calls[0]?.[0]);
+    expect(line).toContain("GITHUB_APP_CONFIG_INVALID");
     for (const name of [
-      "GITHUB_APP_ID",
       "GITHUB_APP_SLUG",
       "GITHUB_APP_WEBHOOK_SECRET",
       "GITHUB_APP_PRIVATE_KEY",
-    ]) {
+    ])
       expect(line).toContain(name);
-    }
+    expect(line).not.toContain("123456");
+    expect(line).not.toContain("\n");
   });
 
   it("accepts the private key as a file path instead of inline", async () => {
-    const { exit } = await run({
+    const { exit, warn } = await run({
       ...validEnv,
       GITHUB_APP_PRIVATE_KEY: undefined,
       GITHUB_APP_PRIVATE_KEY_PATH: keyPath,
     });
 
     expect(exit).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
   });
 
-  it("rejects a private key that is not a usable PEM and names only the variable", async () => {
-    const { exit, log } = await run({
+  it("warns about a private key that is not a usable PEM and names only the variable", async () => {
+    const { exit, warn } = await run({
       ...validEnv,
       GITHUB_APP_PRIVATE_KEY: "not-a-key-value",
     });
 
-    expect(exit).toHaveBeenCalledWith(1);
-    const line = String(log.mock.calls[0]?.[0]);
+    expect(exit).not.toHaveBeenCalled();
+    const line = String(warn.mock.calls[0]?.[0]);
     expect(line).toContain("GITHUB_APP_PRIVATE_KEY");
     expect(line).not.toContain("not-a-key-value");
   });
 
-  it("rejects a private key file that does not exist", async () => {
-    const { exit, log } = await run({
+  it("warns about a private key file that does not exist", async () => {
+    const { exit, warn } = await run({
       ...validEnv,
       GITHUB_APP_PRIVATE_KEY: undefined,
       GITHUB_APP_PRIVATE_KEY_PATH: join(keyDir, "missing.pem"),
     });
 
-    expect(exit).toHaveBeenCalledWith(1);
-    expect(String(log.mock.calls[0]?.[0])).toContain(
+    expect(exit).not.toHaveBeenCalled();
+    expect(String(warn.mock.calls[0]?.[0])).toContain(
       "GITHUB_APP_PRIVATE_KEY_PATH",
     );
   });
@@ -153,7 +166,7 @@ describe("checking the deployment settings when the server starts", () => {
         configuredRunnerToken({ RUNNER_TOKEN: token }),
         token.trim(),
       );
-      const problems = await findDeploymentConfigProblems({
+      const problems = findDeploymentConfigProblems({
         ...validEnv,
         RUNNER_TOKEN: token,
       });
@@ -167,17 +180,26 @@ describe("checking the deployment settings when the server starts", () => {
 
   // CR-37-T09
   it("never prints a value of any setting", async () => {
-    const { log } = await run({
+    const { log, warn } = await run({
       ...validEnv,
       RUNNER_TOKEN: "short-secret-token",
       GITHUB_APP_SLUG: undefined,
     });
+    const { warn: githubWarn } = await run({
+      ...validEnv,
+      GITHUB_APP_SLUG: undefined,
+    });
 
-    const line = String(log.mock.calls[0]?.[0]);
-    expect(line).not.toContain("short-secret-token");
-    expect(line).not.toContain(validEnv.GITHUB_APP_ID);
-    expect(line).not.toContain(validEnv.GITHUB_APP_WEBHOOK_SECRET);
-    expect(line).not.toContain(privateKey.slice(40, 80));
+    for (const line of [
+      String(log.mock.calls[0]?.[0]),
+      String(githubWarn.mock.calls[0]?.[0]),
+    ]) {
+      expect(line).not.toContain("short-secret-token");
+      expect(line).not.toContain(validEnv.GITHUB_APP_ID);
+      expect(line).not.toContain(validEnv.GITHUB_APP_WEBHOOK_SECRET);
+      expect(line).not.toContain(privateKey.slice(40, 80));
+    }
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it("does not check anything outside production so that the dev server starts without a GitHub App", async () => {

@@ -18,6 +18,11 @@ import { createAccessProxy } from "./access-proxy.ts";
 const PUBLIC_ROUTES = [
   "/login",
   "/api/health",
+  // The first-run setup: protected by the setup code and the setup session, and gone (404) once the
+  // instance is set up (src/setup/gate.ts).
+  "/setup",
+  "/api/setup/code",
+  "/api/setup/complete",
   "/api/auth/[...all]",
   // GitHub signs its deliveries; the route checks the signature itself (src/webhooks/README.md).
   "/api/webhooks/github-app",
@@ -28,6 +33,7 @@ const PUBLIC_ROUTES = [
 ] as const;
 const PROTECTED_ROUTES = [
   "/",
+  "/admin",
   "/projects",
   "/projects/[repositoryId]",
   "/runs",

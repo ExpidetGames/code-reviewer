@@ -1,6 +1,10 @@
 // What the server checks about sign in when it starts: the settings must be complete, otherwise
 // every page would fail later with a less helpful message. Called from `src/instrumentation.ts`.
 import type { Kysely } from "kysely";
+import {
+  conflictingAppSecretWarning,
+  legacyAppSecretWarning,
+} from "../crypto/app-secret.ts";
 import { createAllowedLoginPinsRepository } from "../db/repositories/allowed-login-pins-repository.ts";
 import type { Database } from "../db/schema.ts";
 import { isAccessConfigured, type AccessConfig } from "./access-config.ts";
@@ -42,8 +46,10 @@ function invalidEntriesWarning(
 
 /**
  * An invalid configuration ends the process with exit code 1 and one readable line (the error code
- * and the variable names), not a stack trace. Anything unexpected is rethrown unchanged. An empty
- * allow list is not an error (the server is safe: nobody gets in) but is worth one warning.
+ * and the variable names), not a stack trace. Anything unexpected is rethrown unchanged. The master
+ * key (`APP_SECRET`, or its deprecated name) and the public address are required; GitHub sign in is
+ * optional. An empty allow list is not an error (the server is safe: nobody gets in) but is worth
+ * one warning while GitHub sign in is configured.
  */
 export function checkAuthConfigOnStart({
   env = process.env,
@@ -53,11 +59,19 @@ export function checkAuthConfigOnStart({
 }: StartOptions = {}): void {
   try {
     const config = loadAuthConfig(env);
-    if (!isAccessConfigured(config.access)) warn(NOBODY_ALLOWED_WARNING);
-    const odd = config.access.invalidLoginEntries;
-    const oddPresets = config.access.invalidPresetEntries;
-    if (odd.length > 0 || oddPresets > 0)
-      warn(invalidEntriesWarning(odd, oddPresets));
+    // The old name of the master key still works; say once that it is on its way out.
+    const deprecated = legacyAppSecretWarning(env);
+    if (deprecated !== null) warn(deprecated);
+    const conflict = conflictingAppSecretWarning(env);
+    if (conflict !== null) warn(conflict);
+    // The allow list is about GitHub identities: it only matters while GitHub sign in is configured.
+    if (config.github.oauth !== null) {
+      if (!isAccessConfigured(config.access)) warn(NOBODY_ALLOWED_WARNING);
+      const odd = config.access.invalidLoginEntries;
+      const oddPresets = config.access.invalidPresetEntries;
+      if (odd.length > 0 || oddPresets > 0)
+        warn(invalidEntriesWarning(odd, oddPresets));
+    }
   } catch (error) {
     if (!(error instanceof AuthConfigError)) throw error;
     log(`[auth] ${error.code}: ${error.message}`);

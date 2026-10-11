@@ -23,7 +23,10 @@ import {
   testGithubAppEnv,
 } from "../../src/test-support/github-app.ts";
 import { createTestDirectory } from "../../src/test-support/test-database.ts";
-import { defaultWorkspaceId } from "../../src/test-support/workspaces.ts";
+import {
+  defaultWorkspaceId,
+  markInstanceSetUp,
+} from "../../src/test-support/workspaces.ts";
 
 type Route = typeof import("../../src/app/api/webhooks/github-app/route.ts");
 
@@ -52,6 +55,8 @@ async function startRoute(
   await initializeDatabaseOnStart({
     env: { DATABASE_PATH: join(directory, "app.db") },
   });
+  // A deployment that is in use has been set up (the first-run setup decides about workspaces).
+  await markInstanceSetUp(getDatabase());
   // The registry reads the environment on first use, so every test loads the route anew.
   vi.resetModules();
   return {
@@ -211,6 +216,35 @@ describe("the webhook route file", () => {
       .filter((line) => line.includes("deliveries cannot be verified"));
     expect(logged).toHaveLength(1);
     expect(logged[0]).toContain("GITHUB_APP_WEBHOOK_SECRET");
+  });
+
+  // #97-NOT-CONFIGURED
+  it("refuses deliveries and logs no error when no GitHub App variable is set at all, which is the normal state of an instance that is not connected", async () => {
+    const { route } = await startRoute({
+      GITHUB_APP_ID: undefined,
+      GITHUB_APP_SLUG: undefined,
+      GITHUB_APP_WEBHOOK_SECRET: undefined,
+      GITHUB_APP_PRIVATE_KEY: undefined,
+      GITHUB_APP_PRIVATE_KEY_PATH: undefined,
+    });
+    const error = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+
+    const response = await route.POST(
+      webhookDelivery({
+        event: "pull_request",
+        payload: webhookFixture("pull_request.opened"),
+        secret: TEST_WEBHOOK_SECRET,
+      }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(
+      error.mock.calls.filter((call) =>
+        String(call[0]).includes("cannot be verified"),
+      ),
+    ).toEqual([]);
   });
 
   it("exports only the POST method", async () => {
