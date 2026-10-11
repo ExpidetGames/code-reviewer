@@ -33,6 +33,8 @@ export const RUNNER_ERROR_CODES = [
   "runner_error",
   "command_failed",
   "review_not_published",
+  "review_state_truncated",
+  "review_text_truncated",
   "pr_not_found",
   "git_auth",
   "git_forbidden",
