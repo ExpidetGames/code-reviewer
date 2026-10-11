@@ -184,6 +184,26 @@ describe("Dockerfile app runtime", () => {
     expect(prepare).toContain("better-sqlite3");
   });
 
+  // #98-AD-17
+  it("ships the operator's command line and puts the short name admin on the PATH", () => {
+    const lines = instructions(appDockerfile);
+
+    expect(lines).toContain(
+      "COPY --from=builder --chown=root:root /build/src/admin-cli ./admin-cli",
+    );
+    const prepare = lines.find((line) =>
+      line.includes("admin-cli/package.json"),
+    );
+    expect(prepare).toContain('{"type":"module"}');
+    expect(prepare).toContain("/usr/local/bin/admin");
+    expect(prepare).toContain("chmod 755 /usr/local/bin/admin");
+    expect(prepare).toContain("exec node /srv/app/admin-cli/cli.ts");
+    // The wrapper is made before the switch to the unprivileged user, so it belongs to root.
+    expect(lines.indexOf(prepare ?? "")).toBeLessThan(
+      lines.findIndex((line) => line.startsWith("USER ")),
+    );
+  });
+
   // CR-17-T04
   it("gives the unprivileged user a writable Next.js cache directory below the otherwise root-owned application", () => {
     const lines = instructions(appDockerfile);

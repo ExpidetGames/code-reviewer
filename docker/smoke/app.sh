@@ -90,6 +90,10 @@ health=$(curl --silent --fail --max-time 5 "http://127.0.0.1:$port/api/health") 
 step "the setup can be finished, and afterwards the start page is guarded"
 complete_setup "http://127.0.0.1:$port" "$code"
 
+# #98-AD-01, #98-AD-17: the admin portal and the operator's command, in the built image.
+step "the admin portal is guarded, and admin reset-password gives the admin a way back in"
+check_admin_portal "http://127.0.0.1:$port" "$container"
+
 step "waiting for the container to report healthy"
 until [ "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$container")" = "healthy" ]; do
   if [ "$SECONDS" -ge "$deadline" ]; then
