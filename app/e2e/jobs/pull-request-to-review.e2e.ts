@@ -38,20 +38,32 @@ const REVIEW_MARKER = "<!-- pr-agent:review:full -->";
 // A review through the real PR-Agent takes a few seconds; the first one also loads PR-Agent.
 const RUN_TIMEOUT = { timeout: 120_000 };
 
-const sha = (digit: string) => digit.repeat(40);
+// A retry of a failed journey starts the whole serial group again on the same app, fake GitHub and
+// database: the account, the installation, the switched on project, the pull requests, the comments
+// and the runs of the failed attempt are all still there. So every attempt works on pull requests
+// of its own (the number moves by 100 per retry), and the setup in `beforeAll` accepts what an
+// earlier attempt already did.
+const prNumber = (base: number) => base + 100 * test.info().retry;
+/** A head commit that is different for every pull request and every push (`variant`). */
+const headSha = (variant: string, number: number) =>
+  variant + String(number).padStart(39, "0");
 
 // The tests share one runner, one fake LLM and the runs of the app, one after the other.
 test.describe.configure({ mode: "serial" });
 
 test.describe("a pull request on its way to a review comment", () => {
-  let llm: FakeLlm;
-  let runner: RunnerProcess;
+  // Undefined when `beforeAll` failed before it got that far; `afterAll` still runs.
+  let llm: FakeLlm | undefined;
+  let runner: RunnerProcess | undefined;
 
   test.beforeAll(async ({ browser, baseURL }) => {
     if (baseURL === undefined)
       throw new Error("The jobs project has no baseURL.");
     llm = await startLlmFake();
-    runner = await startRunner({ appUrl: baseURL, llmBaseUrl: llm.baseUrl });
+    runner = await startRunner({
+      appUrl: baseURL,
+      llmBaseUrl: llm.baseUrl,
+    });
 
     // The setup a person does once: install the app for the account, sign in, sync and switch the
     // first repository on. The other one stays off.
@@ -71,9 +83,12 @@ test.describe("a pull request on its way to a review comment", () => {
     const row = page
       .getByRole("listitem")
       .filter({ hasText: WIDGETS.fullName });
-    await row
-      .getByRole("switch", { name: `Review ${WIDGETS.fullName}` })
-      .click();
+    await expect(row).toBeVisible();
+    // A retry finds the project switched on already: clicking the switch again would turn it off.
+    if ((await row.getByText("Active", { exact: true }).count()) === 0)
+      await row
+        .getByRole("switch", { name: `Review ${WIDGETS.fullName}` })
+        .click();
     await expect(row.getByText("Active", { exact: true })).toBeVisible();
     await expect(
       page
@@ -85,13 +100,23 @@ test.describe("a pull request on its way to a review comment", () => {
   });
 
   test.beforeEach(() => {
-    llm.reset();
+    fakeLlm().reset();
   });
 
   test.afterAll(async () => {
-    await runner.stop();
-    await llm.close();
+    await runner?.stop();
+    await llm?.close();
   });
+
+  function fakeLlm(): FakeLlm {
+    if (llm === undefined) throw new Error("The fake LLM was not started.");
+    return llm;
+  }
+
+  function runnerOutput(): string {
+    if (runner === undefined) throw new Error("The runner was not started.");
+    return runner.output();
+  }
 
   /** The rows of the Runs page that belong to a pull request. */
   function runsOf(page: Page, repository: string, number: number) {
@@ -114,10 +139,12 @@ test.describe("a pull request on its way to a review comment", () => {
     request,
   }) => {
     test.setTimeout(180_000);
+    const number = prNumber(7);
+    const head = headSha("1", number);
     await addGithubPullRequest(request, WIDGETS.fullName, {
-      number: 7,
+      number,
       title: "Add a greeting helper",
-      headSha: sha("1"),
+      headSha: head,
     });
     await openRuns(page);
 
@@ -125,13 +152,13 @@ test.describe("a pull request on its way to a review comment", () => {
       action: "opened",
       installationId: INSTALLATION_ID,
       repository: { ...WIDGETS, owner: OWNER },
-      number: 7,
+      number,
       title: "Add a greeting helper",
-      headSha: sha("1"),
+      headSha: head,
     });
     expect(answer).toEqual({ status: "accepted", outcome: "trigger_enqueued" });
 
-    const run = runsOf(page, WIDGETS.fullName, 7);
+    const run = runsOf(page, WIDGETS.fullName, number);
     await expect(run.locator(".badge-run")).toContainText(
       "Succeeded",
       RUN_TIMEOUT,
@@ -139,7 +166,11 @@ test.describe("a pull request on its way to a review comment", () => {
     await expect(run).toContainText("Automatic");
 
     // Exactly one comment, written by the bot of the app, holding the review of the model.
-    const comments = await getPullRequestComments(request, WIDGETS.fullName, 7);
+    const comments = await getPullRequestComments(
+      request,
+      WIDGETS.fullName,
+      number,
+    );
     expect(comments).toHaveLength(1);
     expect(comments[0]?.login).toBe(e2eEnv.githubBotLogin);
     expect(comments[0]?.body).toContain(REVIEW_MARKER);
@@ -147,14 +178,14 @@ test.describe("a pull request on its way to a review comment", () => {
     expect(comments[0]?.revision).toBe(1);
 
     // The model was asked once, with the key of the instance, about the diff of the fake GitHub.
-    const asked = llm.requests();
+    const asked = fakeLlm().requests();
     expect(asked).toHaveLength(1);
     expect(asked[0]?.authorization).toBe(`Bearer ${llmEnv.apiKey}`);
     expect(asked[0]?.model).toContain(llmEnv.model);
     expect(asked[0]?.prompt).toContain("greeting.py");
 
     // Neither key nor token is in the runner's output or on the run's page.
-    await expectNoCredentials(page, request, runner.output());
+    await expectNoCredentials(page, request, runnerOutput());
   });
 
   // CR-47-T02
@@ -163,13 +194,19 @@ test.describe("a pull request on its way to a review comment", () => {
     request,
   }) => {
     test.setTimeout(180_000);
-    llm.setReply("review", review("second run"));
+    const number = prNumber(7);
+    const head = headSha("2", number);
+    fakeLlm().setReply("review", review("second run"));
     await addGithubPullRequest(request, WIDGETS.fullName, {
-      number: 7,
+      number,
       title: "Add a greeting helper",
-      headSha: sha("2"),
+      headSha: head,
     });
-    const [first] = await getPullRequestComments(request, WIDGETS.fullName, 7);
+    const [first] = await getPullRequestComments(
+      request,
+      WIDGETS.fullName,
+      number,
+    );
     expect(first?.revision).toBe(1);
     await openRuns(page);
 
@@ -177,14 +214,14 @@ test.describe("a pull request on its way to a review comment", () => {
       action: "synchronize",
       installationId: INSTALLATION_ID,
       repository: { ...WIDGETS, owner: OWNER },
-      number: 7,
+      number,
       title: "Add a greeting helper",
-      headSha: sha("2"),
+      headSha: head,
     });
     expect(answer).toEqual({ status: "accepted", outcome: "trigger_enqueued" });
 
     // The push is a second run of the same pull request; both are done when the comment was edited.
-    const runs = runsOf(page, WIDGETS.fullName, 7);
+    const runs = runsOf(page, WIDGETS.fullName, number);
     await expect(runs).toHaveCount(2, RUN_TIMEOUT);
     await expect(runs.nth(0).locator(".badge-run")).toContainText(
       "Succeeded",
@@ -195,12 +232,16 @@ test.describe("a pull request on its way to a review comment", () => {
       RUN_TIMEOUT,
     );
 
-    const comments = await getPullRequestComments(request, WIDGETS.fullName, 7);
+    const comments = await getPullRequestComments(
+      request,
+      WIDGETS.fullName,
+      number,
+    );
     expect(comments).toHaveLength(1);
     expect(comments[0]?.id).toBe(first?.id);
     expect(comments[0]?.revision).toBe(2);
     expect(comments[0]?.body).toContain("second run");
-    expect(llm.requests()).toHaveLength(1);
+    expect(fakeLlm().requests()).toHaveLength(1);
   });
 
   // CR-47-T03
@@ -208,10 +249,12 @@ test.describe("a pull request on its way to a review comment", () => {
     page,
     request,
   }) => {
+    const number = prNumber(3);
+    const head = headSha("3", number);
     await addGithubPullRequest(request, DORMANT.fullName, {
-      number: 3,
+      number,
       title: "Rename a variable",
-      headSha: sha("3"),
+      headSha: head,
     });
     await openRuns(page);
 
@@ -219,9 +262,9 @@ test.describe("a pull request on its way to a review comment", () => {
       action: "opened",
       installationId: INSTALLATION_ID,
       repository: { ...DORMANT, owner: OWNER },
-      number: 3,
+      number,
       title: "Rename a variable",
-      headSha: sha("3"),
+      headSha: head,
     });
 
     // The app decided at the door: no job, so nothing for a runner to pick up.
@@ -230,11 +273,11 @@ test.describe("a pull request on its way to a review comment", () => {
       outcome: "project_not_active",
     });
     await page.reload();
-    await expect(runsOf(page, DORMANT.fullName, 3)).toHaveCount(0);
-    expect(await getPullRequestComments(request, DORMANT.fullName, 3)).toEqual(
-      [],
-    );
-    expect(llm.requests()).toHaveLength(0);
+    await expect(runsOf(page, DORMANT.fullName, number)).toHaveCount(0);
+    expect(
+      await getPullRequestComments(request, DORMANT.fullName, number),
+    ).toEqual([]);
+    expect(fakeLlm().requests()).toHaveLength(0);
   });
 
   // CR-47-T04
@@ -243,12 +286,14 @@ test.describe("a pull request on its way to a review comment", () => {
     request,
   }) => {
     test.setTimeout(180_000);
-    llm.failWith({ status: 429, message: "slow down" });
-    llm.quoteKeyInErrors(true);
+    const number = prNumber(8);
+    const head = headSha("4", number);
+    fakeLlm().failWith({ status: 429, message: "slow down" });
+    fakeLlm().quoteKeyInErrors(true);
     await addGithubPullRequest(request, WIDGETS.fullName, {
-      number: 8,
+      number,
       title: "Add a farewell helper",
-      headSha: sha("4"),
+      headSha: head,
     });
     await openRuns(page);
 
@@ -256,17 +301,19 @@ test.describe("a pull request on its way to a review comment", () => {
       action: "opened",
       installationId: INSTALLATION_ID,
       repository: { ...WIDGETS, owner: OWNER },
-      number: 8,
+      number,
       title: "Add a farewell helper",
-      headSha: sha("4"),
+      headSha: head,
     });
 
-    const run = runsOf(page, WIDGETS.fullName, 8);
+    const run = runsOf(page, WIDGETS.fullName, number);
     await expect(run.locator(".badge-run")).toContainText(
       "Failed",
       RUN_TIMEOUT,
     );
-    await run.getByRole("link", { name: `${WIDGETS.fullName} #8` }).click();
+    await run
+      .getByRole("link", { name: `${WIDGETS.fullName} #${String(number)}` })
+      .click();
     await expect(
       page.getByText("llm_rate_limit").filter({ visible: true }),
     ).toBeVisible();
@@ -276,18 +323,30 @@ test.describe("a pull request on its way to a review comment", () => {
         .filter({ visible: true }),
     ).toBeVisible();
 
+    // The log of the run shows the error text of the model with the key blanked out, so the check
+    // for the key further down looks at text that really held it.
+    await expect(
+      page
+        .getByText("Incorrect API key provided: [REDACTED]")
+        .filter({ visible: true }),
+    ).toBeVisible();
+
     // The model really was asked with the key (so the error text did quote it) ...
-    const asked = llm.requests();
+    const asked = fakeLlm().requests();
     expect(asked.length).toBeGreaterThan(0);
     expect(
       asked.every((item) => item.authorization === `Bearer ${llmEnv.apiKey}`),
     ).toBe(true);
     // ... and no review reached the pull request.
-    const comments = await getPullRequestComments(request, WIDGETS.fullName, 8);
+    const comments = await getPullRequestComments(
+      request,
+      WIDGETS.fullName,
+      number,
+    );
     expect(
       comments.filter((item) => item.body.includes(REVIEW_MARKER)),
     ).toEqual([]);
-    await expectNoCredentials(page, request, runner.output());
+    await expectNoCredentials(page, request, runnerOutput());
   });
 });
 
@@ -297,11 +356,9 @@ async function expectNoCredentials(
   request: import("@playwright/test").APIRequestContext,
   runnerOutput: string,
 ): Promise<void> {
-  const secrets = [
-    llmEnv.apiKey,
-    ...(await getIssuedInstallationTokens(request)),
-  ];
-  expect(secrets.length).toBeGreaterThan(1);
+  const tokens = await getIssuedInstallationTokens(request);
+  expect(tokens.length).toBeGreaterThan(0);
+  const secrets = [llmEnv.apiKey, e2eEnv.runnerToken, ...tokens];
   const runs = await page.request.get("/api/runs");
   expect(runs.status()).toBe(200);
   const texts = {

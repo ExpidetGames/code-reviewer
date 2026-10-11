@@ -72,7 +72,10 @@ Links (`html_url`) point to `https://github.test` unless the fake is started wit
 (`GITHUB_FAKE_SELF_LINKS=true` as its own process): then they point to the fake itself, which is what
 the runner needs, because it demands that the pull request and the API address of a job are on one
 host. Routes that name a commit or a ref (`commits`, `compare`, `contents`) serve the pull request
-with that head and otherwise the newest one. Not modelled: inline review comments, reviews, labels,
+with that head. A ref that is no head (the default branch, the base commit) is answered only when it
+is unambiguous: with one pull request in the repository it is that one's, with several a file is
+served when all pull requests that have it agree on its text; everything else is a 404, the fake never
+guesses. Not modelled: inline review comments, reviews, labels,
 check runs and paging (the engine suite's own fake, `runner/tests/engine/fake_github.py`, has the same
 limits and stays: it serves the job entry point on its own, with `/api/v3` in its address).
 

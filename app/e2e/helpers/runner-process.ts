@@ -103,11 +103,41 @@ export async function startRunner(options: {
     });
   });
 
+  const isRunning = () => child.exitCode === null && child.signalCode === null;
+
+  // A worker that ends without `stop()` (a crash, process.exit, Ctrl+C) must not leave a runner
+  // polling the app: SIGTERM lets it end its job within its own grace period (5 s) and exit. A
+  // SIGKILL of the worker itself cannot be handled; the runner then ends when its job is done or
+  // the app is gone, but it keeps polling until then.
+  const onExit = () => {
+    if (isRunning()) child.kill("SIGTERM");
+    rmSync(home, { recursive: true, force: true });
+  };
+  const signals = ["SIGINT", "SIGTERM"] as const;
+  const onSignal = (signal: NodeJS.Signals) => {
+    detach();
+    onExit();
+    // The default behavior was replaced by listening; restore it.
+    process.kill(process.pid, signal);
+  };
+  const signalListeners = signals.map(
+    (signal) => [signal, () => onSignal(signal)] as const,
+  );
+  process.on("exit", onExit);
+  for (const [signal, listener] of signalListeners)
+    process.on(signal, listener);
+  function detach() {
+    process.removeListener("exit", onExit);
+    for (const [signal, listener] of signalListeners)
+      process.removeListener(signal, listener);
+  }
+
   return {
     output: () => output,
     async stop() {
+      detach();
       try {
-        if (child.exitCode === null && child.signalCode === null) {
+        if (isRunning()) {
           child.kill("SIGTERM");
           const killer = setTimeout(() => child.kill("SIGKILL"), 15_000);
           await exited;

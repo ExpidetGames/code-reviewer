@@ -11,8 +11,10 @@
 //
 // Routes that name a pull request (`/pulls/7`, `/issues/7/comments`) serve that one. The routes
 // that name a commit or a ref (`/commits/<sha>`, `/compare/...`, `/contents/...?ref=`) serve the
-// pull request that has this head and otherwise the one added last, so a repository with several
-// pull requests works as long as a test does not review two of them at the same time.
+// pull request that has this head. A ref that is no head (the default branch, the base commit) is
+// answered only when it is unambiguous: with one pull request in the repository it is that one's,
+// with several a file is served when all of them that have it agree on its text, and everything
+// else is a 404. A fake that guessed would let a test pass on the wrong pull request.
 //
 // Not modelled on purpose, as in the engine suite's own fake (runner/tests/engine/fake_github.py):
 // inline review comments, reviews, labels, check runs and paging (every list comes whole).
@@ -278,14 +280,17 @@ export function createReviewApi(options: ReviewApiOptions): ReviewApi {
     };
   }
 
-  /** The pull request a commit or ref belongs to: the one with this head, else the newest. */
+  /**
+   * The pull request a commit or ref belongs to: the one with this head, else the only pull request
+   * of the repository, else none (ambiguous).
+   */
   function pullRequestFor(
     pullRequests: ReviewedPullRequest[],
     hint: string,
   ): ReviewedPullRequest | undefined {
     return (
       pullRequests.find((pr) => pr.headSha === hint || pr.headRef === hint) ??
-      pullRequests.at(-1)
+      (pullRequests.length === 1 ? pullRequests[0] : undefined)
     );
   }
 
@@ -412,10 +417,18 @@ export function createReviewApi(options: ReviewApiOptions): ReviewApi {
       if (!mayDo(["contents"], "read")) return forbidden;
       const path = decodeURIComponent(contentsMatch[1] ?? "");
       const ref = request.query.get("ref") ?? "";
-      const pr = pullRequestFor(pullRequests, ref);
-      const text =
-        pr === undefined ? undefined : fileText(repository, pr, path, ref);
-      if (pr === undefined || text === undefined) return notFound;
+      const named = pullRequestFor(pullRequests, ref);
+      // A ref that names no pull request (the default branch): every pull request that has the file
+      // must agree on its text.
+      const candidates = named === undefined ? pullRequests : [named];
+      const found = candidates.flatMap((candidate) => {
+        const value = fileText(repository, candidate, path, ref);
+        return value === undefined ? [] : [{ pr: candidate, text: value }];
+      });
+      const [first] = found;
+      if (first === undefined || found.some((item) => item.text !== first.text))
+        return notFound;
+      const { pr, text } = first;
       return {
         status: 200,
         body: {

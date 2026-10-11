@@ -168,6 +168,70 @@ describe("the pull request as a reviewer reads it", () => {
   });
 });
 
+describe("a repository with several pull requests", () => {
+  const SECOND: FakePullRequest = {
+    ...PULL,
+    number: 8,
+    headSha: "2".repeat(40),
+    headRef: "feature/farewell",
+  };
+
+  it("serves the pull request that has the head a commit or ref names, and refuses a ref that is none", async () => {
+    const { fake, client } = await setup();
+    fake.addPullRequest(WIDGETS.fullName, SECOND);
+    const token = await tokenWith(client, REVIEWER);
+
+    const named = await call(
+      fake,
+      token,
+      "GET",
+      `/repos/acme/widgets/commits/${SECOND.headSha}`,
+    );
+    const unknown = await call(
+      fake,
+      token,
+      "GET",
+      `/repos/acme/widgets/commits/${"3".repeat(40)}`,
+    );
+
+    expect((named.json as Json).sha).toBe(SECOND.headSha);
+    expect(unknown.status).toBe(404);
+  });
+
+  it("serves a file at the base only when every pull request that has it agrees on its text", async () => {
+    const { fake, client } = await setup();
+    const token = await tokenWith(client, REVIEWER);
+    fake.addPullRequest(WIDGETS.fullName, SECOND);
+
+    const agreed = await call(
+      fake,
+      token,
+      "GET",
+      "/repos/acme/widgets/contents/greeting.py",
+    );
+    fake.addPullRequest(WIDGETS.fullName, {
+      ...SECOND,
+      files: [
+        {
+          filename: "greeting.py",
+          baseContent: "something else\n",
+          headContent: "changed\n",
+          patch: "@@ -1 +1 @@\n-something else\n+changed\n",
+        },
+      ],
+    });
+    const disagreed = await call(
+      fake,
+      token,
+      "GET",
+      "/repos/acme/widgets/contents/greeting.py",
+    );
+
+    expect(agreed.status).toBe(200);
+    expect(disagreed.status).toBe(404);
+  });
+});
+
 describe("comments below a pull request", () => {
   it("writes a comment as the bot of the app and edits it in place instead of adding another", async () => {
     const { fake, client } = await setup({ selfLinks: true });

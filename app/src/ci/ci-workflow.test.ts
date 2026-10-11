@@ -172,10 +172,20 @@ describe("CI workflow triggers and jobs", () => {
 
     expect(install?.["working-directory"]).toBe("runner");
     expect(prime?.["working-directory"]).toBe("runner");
-    expect(names.indexOf("Install the runner")).toBeLessThan(firstJourney);
-    expect(names.indexOf("Prime the tiktoken cache")).toBeLessThan(
-      firstJourney,
+    const position = (prefix: string) =>
+      names.findIndex((name) => name.startsWith(prefix));
+    // uv before it is used, the cache restored before the script that fills it, both before the
+    // journeys.
+    expect(position("astral-sh/setup-uv@")).toBeGreaterThanOrEqual(0);
+    expect(position("astral-sh/setup-uv@")).toBeLessThan(
+      position("Install the runner"),
     );
+    expect(position("Restore the tiktoken encoding")).toBeGreaterThanOrEqual(0);
+    expect(position("Restore the tiktoken encoding")).toBeLessThan(
+      position("Prime the tiktoken cache"),
+    );
+    expect(position("Install the runner")).toBeLessThan(firstJourney);
+    expect(position("Prime the tiktoken cache")).toBeLessThan(firstJourney);
     expect(
       steps(job).some(
         (step) =>
