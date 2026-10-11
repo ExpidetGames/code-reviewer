@@ -43,7 +43,8 @@ RUN mkdir -p "$DATA_GYM_CACHE_DIR" \
 FROM ${PYTHON_IMAGE} AS runtime
 LABEL org.opencontainers.image.title="Code Reviewer runner" \
       org.opencontainers.image.description="Worker that runs PR-Agent for Code Reviewer" \
-      org.opencontainers.image.source="https://github.com/ExpidetGames/code-reviewer"
+      org.opencontainers.image.source="https://github.com/ExpidetGames/code-reviewer" \
+      org.opencontainers.image.licenses="Apache-2.0"
 # LITELLM_LOCAL_MODEL_COST_MAP makes LiteLLM use its bundled price list instead of fetching it from
 # GitHub when it is imported (the runner sets it for every job as well).
 ENV PATH="/opt/venv/bin:${PATH}" \
