@@ -178,8 +178,10 @@ describe("admin reset-password", () => {
       process.execPath,
       ["--no-warnings", cli, "reset-password", "admin@example.test"],
       {
+        // Only what the command needs: nothing of the test runner's environment leaks in.
         env: {
-          PATH: process.env.PATH,
+          NODE_ENV: "test",
+          PATH: process.env.PATH ?? "",
           DATABASE_PATH: config.path,
           BETTER_AUTH_URL: PUBLIC_URL,
         },

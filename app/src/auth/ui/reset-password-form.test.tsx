@@ -86,7 +86,7 @@ describe("the form of a reset link", () => {
 
     await waitFor(() =>
       expect(screen.getByRole("alert").textContent).toMatch(
-        /not valid any more.*admin reset-password/s,
+        /not valid any more[\s\S]*admin reset-password/,
       ),
     );
   });

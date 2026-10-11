@@ -197,11 +197,11 @@ describe("the sign-up rule form", () => {
 
   // #97-SU-19
   it("shows the notice while the rule cannot work yet, and not otherwise", () => {
-    const rule = {
+    const rule: AdminSettingsView["signUpRule"] = {
       value: { kind: "domains", entries: ["example.com"] },
       updatedBy: null,
       updatedAt: null,
-    } as const;
+    };
     const closed = render(
       <SignUpRuleForm
         settings={view({

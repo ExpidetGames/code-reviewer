@@ -3,6 +3,7 @@
 // wants reachable: some would reveal the session token or let a user rewrite their own profile.
 // Only the calls of the sign in are passed on (email with password, and the three of the GitHub sign
 // in while that is configured), everything else is a 404.
+import type { SignInMethods } from "../admin/sign-in-methods.ts";
 import { readLimitedBody } from "../webhooks/limited-body.ts";
 import type { Auth } from "./auth.ts";
 import type { SignInLimiter, SignInPermission } from "./sign-in-limit.ts";
@@ -33,6 +34,10 @@ export function isAuthEndpointAllowed(
 }
 
 const SIGN_IN_EMAIL_PATH = `${AUTH_BASE_PATH}/sign-in/email`;
+const GITHUB_PATHS = [
+  `${AUTH_BASE_PATH}/sign-in/social`,
+  `${AUTH_BASE_PATH}/callback/github`,
+];
 const SIGN_IN_BODY_MAX_BYTES = 8 * 1024;
 
 /**
@@ -79,11 +84,47 @@ export async function handleAuthRequest(
   auth: Pick<Auth, "handler">,
   request: Request,
   limiter: SignInLimiter,
+  /**
+   * Which ways to sign in are on (the admin portal's setting). A way that is off is refused before it
+   * is counted or reaches Better Auth; if the setting cannot be read, no sign in goes through. Left out
+   * (tests of other things), both ways are on.
+   */
+  signInMethods?: () => Promise<SignInMethods>,
 ): Promise<Response> {
   const { pathname } = new URL(request.url);
   if (!isAuthEndpointAllowed(request.method, pathname))
     return Response.json({ error: "NOT_FOUND" }, { status: 404 });
-  if (pathname !== SIGN_IN_EMAIL_PATH) return auth.handler(request);
+
+  const isEmail = pathname === SIGN_IN_EMAIL_PATH;
+  const isGithub = GITHUB_PATHS.includes(pathname);
+  if (signInMethods !== undefined && (isEmail || isGithub)) {
+    let methods: SignInMethods;
+    try {
+      methods = await signInMethods();
+    } catch {
+      console.error(
+        "[auth] SIGN_IN_METHODS_UNAVAILABLE: the setting of the ways to sign in could not be read.",
+      );
+      return Response.json(
+        { error: "sign_in_unavailable" },
+        { status: 503, headers: NO_STORE },
+      );
+    }
+    if (isEmail ? !methods.emailPassword : !methods.github) {
+      // Somebody coming back from GitHub is in a browser: tell them on the login page. The rest are calls.
+      if (pathname.endsWith("/callback/github"))
+        return Response.redirect(
+          new URL("/login?error=sign_in_method_disabled", request.url),
+          302,
+        );
+      return Response.json(
+        { error: "sign_in_method_disabled" },
+        { status: 403, headers: NO_STORE },
+      );
+    }
+  }
+
+  if (!isEmail) return auth.handler(request);
 
   if (!isJsonSignIn(request))
     return Response.json(
