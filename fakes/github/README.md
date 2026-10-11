@@ -7,14 +7,15 @@ default to the real GitHub). The app refuses both unless `ALLOW_TEST_GITHUB_ENDP
 well, because the client secret, the App JWT and the tokens are sent to that address. State is in
 memory. Dummy values only.
 
-| File          | Part                                                                                        |
-| ------------- | ------------------------------------------------------------------------------------------- |
-| `server.ts`   | The server (`startGithubFake`), the request log, failure injection, the control endpoints.  |
-| `oauth.ts`    | Sign in: OAuth authorize and token endpoints, the user, e-mail and organization membership. |
-| `app-api.ts`  | The REST API as the GitHub App uses it: installations, tokens, repositories, pull requests. |
-| `webhooks.ts` | Signed webhook deliveries, `webhookFixture(name)` loads a payload from `../fixtures`.       |
-| `http.ts`     | Small helpers for answering and reading HTTP messages.                                      |
-| `main.ts`     | Starts the sign in part as its own process (Playwright).                                    |
+| File            | Part                                                                                           |
+| --------------- | ---------------------------------------------------------------------------------------------- |
+| `server.ts`     | The server (`startGithubFake`), the request log, failure injection, the control endpoints.     |
+| `oauth.ts`      | Sign in: OAuth authorize and token endpoints, the user, e-mail and organization membership.    |
+| `app-api.ts`    | The REST API as the GitHub App uses it: installations, tokens, repositories, pull requests.    |
+| `review-api.ts` | What a reviewer reads and writes: diff, commits, file contents and comments of a pull request. |
+| `webhooks.ts`   | Signed webhook deliveries, `webhookFixture(name)` loads a payload from `../fixtures`.          |
+| `http.ts`       | Small helpers for answering and reading HTTP messages.                                         |
+| `main.ts`       | Starts the sign in part as its own process (Playwright).                                       |
 
 A part is switched on by its options. `clientId` and `clientSecret` give the sign in; `appId` and
 `publicKeyPem` give the GitHub App API (give both options of a part or neither). A part that is not
@@ -48,6 +49,32 @@ that may need it.
 | `GET /repos/:owner/:repo/collaborators/:login/permission` | Installation token with metadata read. `{ permission }`, `none` for a user without an entry.                                                                                                                                                                                                                                                                                                                                     |
 | `POST /__fake/pull-requests`                              | Control endpoint for the fake as its own process: body `{ repository: "owner/name", pullRequest }` (a `FakePullRequest`: `number`, `title`, `state`, `headSha`, `headRef`, `baseRef`, `author`) adds the pull request, replacing one with the same number. 400 for a body that is not one.                                                                                                                                       |
 | `POST /__fake/installations`                              | Control endpoint for the fake as its own process: body `{ installation, repositories }` installs the app for the account (or replaces the repositories of an installation that exists). Needs the GitHub App part (`GITHUB_FAKE_APP_ID`, `GITHUB_FAKE_APP_PUBLIC_KEY`).                                                                                                                                                          |
+
+## What a reviewer reads and writes
+
+The calls the GitHub provider of PR-Agent makes (through PyGithub, with the `token` scheme of the
+`Authorization` header), so the runner's real PR-Agent can review a pull request here. They need an
+installation token with the permission GitHub asks for (`pull_requests`, `issues`, `contents`,
+`metadata`) and a repository the token reaches.
+
+| Endpoint                                                                                  | Behavior                                                                                                                                                                                                      |
+| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /repos/:o/:r`, `.../languages`, `.../branches/:b`                                    | The repository, a language list, a branch.                                                                                                                                                                    |
+| `GET/PATCH /repos/:o/:r/pulls/:n`                                                         | The pull request (head, base, changed files); `PATCH` changes title and body.                                                                                                                                 |
+| `GET .../pulls/:n/files`, `.../pulls/:n/commits`, `.../commits/:sha`, `.../compare/:spec` | The diff (`patch`, `additions`, `deletions`) and the commit of the pull request. A `FakePullRequest` carries `files` (`filename`, `baseContent`, `headContent`, `patch`); a small Python change when omitted. |
+| `GET .../contents/:path?ref=`                                                             | The file at the head of the pull request (by sha or branch) or at the base (default branch); 404 for anything else, like `AGENTS.md`.                                                                         |
+| `GET/POST .../issues/:n/comments`, `PATCH/DELETE .../issues/comments/:id`                 | Comments below a pull request, written as `<slug>[bot]` (`appSlug`, default `fake-app`), refused above 65,536 characters with a 422. `revision` counts the writes of a comment, so an edit in place shows.    |
+| `GET /rate_limit`, `POST /graphql`                                                        | An answer that lets PR-Agent go on (no review threads).                                                                                                                                                       |
+| `GET /__fake/comments?repository=owner/name&number=7`                                     | Control endpoint: the comments below a pull request (`id`, `body`, `login`, `htmlUrl`, `revision`).                                                                                                           |
+| `GET /__fake/installation-tokens`                                                         | Control endpoint: every installation token issued so far, to search outputs for them.                                                                                                                         |
+
+Links (`html_url`) point to `https://github.test` unless the fake is started with `selfLinks`
+(`GITHUB_FAKE_SELF_LINKS=true` as its own process): then they point to the fake itself, which is what
+the runner needs, because it demands that the pull request and the API address of a job are on one
+host. Routes that name a commit or a ref (`commits`, `compare`, `contents`) serve the pull request
+with that head and otherwise the newest one. Not modelled: inline review comments, reviews, labels,
+check runs and paging (the engine suite's own fake, `runner/tests/engine/fake_github.py`, has the same
+limits and stays: it serves the job entry point on its own, with `/api/v3` in its address).
 
 ## In a Vitest test (same process)
 
@@ -87,6 +114,8 @@ github.omitFromListings(4242, [7002]); // a page boundary that skipped a reposit
 github.rejectAppJwts(true); // every JWT answered with 401
 github.setAppPermissions({ metadata: "read", pull_requests: "read" }); // token requests above this get 422
 github.answerTokensWith({ repository_selection: "all" }); // a token answer that claims to be broader than asked
+github.pullRequestComments("acme/widgets", 7); // the comments below a pull request: id, body, login, htmlUrl, revision
+github.addPullRequestComment("acme/widgets", 7, "text"); // written as <slug>[bot] unless a login is given
 github.tokenRequests(); // per access token request: repositories, repositoryIds, permissions (null when not sent)
 github.revokedInstallationTokens(); // tokens switched off with DELETE /installation/token
 
@@ -134,5 +163,5 @@ other spec files run at the same time.
 
 ## Not covered yet
 
-Posting comments and reviews, diffs and file contents (for the runner and the engine tests), and
-delivering webhooks over HTTP to a running app.
+Inline review comments and reviews, and delivering webhooks over HTTP to a running app (the
+journeys sign and send them themselves, `app/e2e/helpers/webhooks.ts`).

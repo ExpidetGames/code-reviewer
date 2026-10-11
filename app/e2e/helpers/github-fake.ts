@@ -76,6 +76,8 @@ export type GithubPullRequest = {
   title: string;
   state?: "open" | "closed";
   draft?: boolean;
+  /** The head commit. Derived from the number when omitted, so every pull request has its own. */
+  headSha?: string;
   author?: { login: string; id: number };
 };
 
@@ -105,4 +107,37 @@ export async function addGithubPullRequest(
     },
   );
   expect(response.status()).toBe(201);
+}
+
+export type GithubComment = {
+  id: number;
+  body: string;
+  login: string;
+  htmlUrl: string;
+  /** 1 when written, plus one for every edit. */
+  revision: number;
+};
+
+/** The comments below a pull request at the fake GitHub, oldest first. */
+export async function getPullRequestComments(
+  request: APIRequestContext,
+  repositoryFullName: string,
+  number: number,
+): Promise<GithubComment[]> {
+  const response = await request.get(`${e2eEnv.githubUrl}/__fake/comments`, {
+    params: { repository: repositoryFullName, number },
+  });
+  expect(response.status()).toBe(200);
+  return (await response.json()) as GithubComment[];
+}
+
+/** Every installation token the fake GitHub has issued so far (to search outputs for them). */
+export async function getIssuedInstallationTokens(
+  request: APIRequestContext,
+): Promise<string[]> {
+  const response = await request.get(
+    `${e2eEnv.githubUrl}/__fake/installation-tokens`,
+  );
+  expect(response.status()).toBe(200);
+  return (await response.json()) as string[];
 }

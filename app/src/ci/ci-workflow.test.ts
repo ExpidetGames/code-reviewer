@@ -158,6 +158,41 @@ describe("CI workflow triggers and jobs", () => {
     expect(lines).toContain("pnpm test:e2e --grep-invert @flaky");
   });
 
+  // CR-47 (the journey with the real runner)
+  it("installs the runner and the tiktoken encoding before the browser journeys, from the lockfile and the cache", () => {
+    const job = jobNamed("e2e");
+    const names = steps(job).map((step) => step.name ?? step.uses ?? "");
+    const install = steps(job).find((step) => step.run === "uv sync --locked");
+    const prime = steps(job).find((step) =>
+      step.run?.includes("scripts/prime_tiktoken_cache.py"),
+    );
+    const firstJourney = names.findIndex((name) =>
+      name.startsWith("Run the smoke journeys"),
+    );
+
+    expect(install?.["working-directory"]).toBe("runner");
+    expect(prime?.["working-directory"]).toBe("runner");
+    expect(names.indexOf("Install the runner")).toBeLessThan(firstJourney);
+    expect(names.indexOf("Prime the tiktoken cache")).toBeLessThan(
+      firstJourney,
+    );
+    expect(
+      steps(job).some(
+        (step) =>
+          step.uses?.startsWith("actions/cache@") &&
+          step.with?.path === "/tmp/data-gym-cache",
+      ),
+    ).toBe(true);
+  });
+
+  // CR-47 (the journey with the real runner)
+  it("runs the browser journeys for runner changes too, because one of them runs the real runner", () => {
+    const condition = String(jobNamed("e2e").if);
+
+    expect(condition).toContain("needs.changes.outputs.app == 'true'");
+    expect(condition).toContain("needs.changes.outputs.runner == 'true'");
+  });
+
   // CR-16-T01
   it("lints the workflow files with actionlint", () => {
     const commands = runCommands(jobNamed("actionlint")).join("\n");

@@ -52,6 +52,18 @@ export type FakeGithubOptions = {
   publicKeyPem?: string;
   /** The fake's clock in milliseconds since the epoch, for tokens and JWTs. Default Date.now. */
   now?: () => number;
+  /**
+   * The slug of the GitHub App: the comments it writes are authored as `<slug>[bot]` (GitHub App
+   * API only). Default "fake-app".
+   */
+  appSlug?: string;
+  /**
+   * Makes the links in answers (`html_url` of repositories, pull requests, comments) point to the
+   * fake itself instead of the unreachable `https://github.test`. Needed where something reads a
+   * pull request through the fake and checks its address: the runner demands that the pull request
+   * and the API address of a job are on the same host. Default false.
+   */
+  selfLinks?: boolean;
   /** Default 127.0.0.1. */
   host?: string;
   /** Default 0: a free port. */
@@ -122,6 +134,12 @@ export async function startGithubFake(
           appId,
           publicKeyPem,
           ...(options.now === undefined ? {} : { now: options.now }),
+          ...(options.appSlug === undefined
+            ? {}
+            : { appSlug: options.appSlug }),
+          ...(options.selfLinks === true
+            ? { webBase: () => baseUrl, apiBase: () => baseUrl }
+            : {}),
         })
       : undefined;
 
@@ -168,10 +186,13 @@ export async function startGithubFake(
       const method = request.method ?? "GET";
       log.push({ method, path });
 
+      // GitHub takes both schemes; PyGithub (PR-Agent) sends `token <value>`, the app `Bearer <value>`.
       const header = request.headers.authorization;
       const bearer = header?.startsWith("Bearer ")
         ? header.slice(7)
-        : undefined;
+        : header?.startsWith("token ")
+          ? header.slice(6)
+          : undefined;
       if (bearer !== undefined) credentials.push(bearer);
 
       // The control endpoints of the test itself are not GitHub and never fail on purpose.
