@@ -21,6 +21,7 @@ from code_reviewer_runner.job import BOT_LOGIN_PATTERN
 from code_reviewer_runner.result import ErrorCode
 
 PATCHED_FOR_VERSION = "0.47.0"
+BOT_SUFFIX = "[bot]"
 _METHOD = "_resolve_user_login"
 _EXPECTED_SIGNATURE = ["self"]
 # Set on the replacement, so a second application finds the real method instead of wrapping it.
@@ -80,6 +81,13 @@ def apply_identity_patch(
         # parse_job guarantees this already; the patch does not rely on its caller.
         raise IdentityPatchError(
             ErrorCode.IDENTITY_PATCH_FAILED, "the bot login of the job is empty or not an app login"
+        )
+    if not bot_login.endswith(BOT_SUFFIX):
+        # GitHub reports an app's comments as `<slug>[bot]`. parse_job appends the suffix, so a bare
+        # slug here would make PR-Agent miss its own comments; refuse it instead of normalizing.
+        raise IdentityPatchError(
+            ErrorCode.IDENTITY_PATCH_FAILED,
+            f"the bot login must end with {BOT_SUFFIX}, the login GitHub reports for an app",
         )
     if provider_class is None:
         from pr_agent.git_providers.github_provider import GithubProvider

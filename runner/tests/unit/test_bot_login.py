@@ -98,3 +98,23 @@ def test_the_identity_patch_refuses_the_same_logins_as_the_job_parser(login: str
         apply_identity_patch(login)
 
     assert caught.value.code is ErrorCode.IDENTITY_PATCH_FAILED
+
+
+# #121
+@pytest.mark.parametrize("login", [login for login in ACCEPTED if not login.endswith("[bot]")])
+def test_the_identity_patch_refuses_a_valid_slug_without_the_bot_suffix(login: str) -> None:
+    # parse_job always appends the suffix; the patch must not install a login GitHub never reports.
+    with pytest.raises(IdentityPatchError) as caught:
+        apply_identity_patch(login)
+
+    assert caught.value.code is ErrorCode.IDENTITY_PATCH_FAILED
+    assert "[bot]" in caught.value.detail
+
+
+# #121
+@pytest.mark.parametrize("login", [login for login in ACCEPTED if login.endswith("[bot]")])
+def test_the_identity_patch_accepts_what_the_job_parser_produces(login: str) -> None:
+    parsed = parse_job(job_with_bot_login(login)).git.bot_login
+
+    undo = apply_identity_patch(parsed)
+    undo()
