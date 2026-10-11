@@ -11,6 +11,11 @@ type PublicPath = {
 export const PUBLIC_PATHS: readonly PublicPath[] = [
   { path: "/login", match: "exact" },
   { path: "/api/health", match: "exact" },
+  // The first-run setup. It has its own protection (the setup code and the setup session, see
+  // src/setup/), and it exists only while the instance is not set up: the setup gate in front of this
+  // check (src/setup/gate.ts) answers 404 for these paths once it is.
+  { path: "/setup", match: "exact" },
+  { path: "/api/setup", match: "prefix" },
   // Better Auth: sign in, the OAuth callback, sign out.
   { path: "/api/auth", match: "prefix" },
   // The runner authenticates with its own shared token, not with a session.

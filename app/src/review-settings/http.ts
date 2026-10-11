@@ -11,7 +11,7 @@
 // where the request comes from, its content type and its body, then the service. Every refusal is
 // `{ "error": <code> }` with a stable code from `errors.ts`; an invalid setting adds
 // `"issues": [{ "field", "code" }]`. Every answer is `Cache-Control: no-store`.
-import type { SessionUser } from "../auth/access-policy.ts";
+import { actorName, type SessionUser } from "../auth/access-policy.ts";
 import { isCrossSite, isJsonRequest } from "../http/request-checks.ts";
 import { readLimitedBody } from "../webhooks/limited-body.ts";
 import { REVIEW_SETTINGS_ERROR_STATUS, ReviewSettingsError } from "./errors.ts";
@@ -128,7 +128,7 @@ export function createReviewSettingsRouteHandlers({
         checkSite(request);
         const settings = await readSettings(request);
         return ok(
-          await service.updateGlobalSettings(settings, user.githubLogin),
+          await service.updateGlobalSettings(settings, actorName(user)),
         );
       }),
 

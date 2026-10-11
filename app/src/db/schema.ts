@@ -1,3 +1,5 @@
+import type { ColumnType } from "kysely";
+
 // Row types of every table, the single place Kysely learns the schema from. Add a table here in the
 // same change as the migration that creates it. Column conventions: see README.md in this folder.
 
@@ -24,8 +26,11 @@ export interface UsersTable {
    * null. Set by the import only; only imported users qualify for the merge with the instance admin.
    */
   imported_at: string | null;
-  /** 1 for the instance admin (the account the first-run setup creates), otherwise 0. */
-  is_instance_admin: number;
+  /**
+   * 1 for the instance admin (the account the first-run setup creates), otherwise 0. The database
+   * fills in 0, so an insert (Better Auth's, a test's) may leave it out.
+   */
+  is_instance_admin: ColumnType<number, number | undefined, number>;
   /** When the membership in the allowed GitHub organization was last confirmed (ISO 8601, UTC), or null. */
   org_checked_at: string | null;
   /** The GitHub organization that check was made for, or null. */

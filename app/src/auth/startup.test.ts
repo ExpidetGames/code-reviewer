@@ -7,7 +7,7 @@ import { parseAccessConfig } from "./access-config.ts";
 import { checkAuthConfigOnStart, syncLoginPinsOnStart } from "./startup.ts";
 
 const validEnv = {
-  BETTER_AUTH_SECRET: "x".repeat(40),
+  APP_SECRET: "x".repeat(40),
   BETTER_AUTH_URL: "http://localhost:3000",
   GITHUB_OAUTH_CLIENT_ID: "id",
   GITHUB_OAUTH_CLIENT_SECRET: "secret-value",
@@ -25,6 +25,7 @@ describe("checking the sign in configuration when the server starts", () => {
     expect(log).not.toHaveBeenCalled();
   });
 
+  // #97-SU-17
   it("stops the start with one line that names what is missing", () => {
     const exit = vi.fn();
     const log = vi.fn();
@@ -32,8 +33,8 @@ describe("checking the sign in configuration when the server starts", () => {
     checkAuthConfigOnStart({
       env: {
         ...validEnv,
-        BETTER_AUTH_SECRET: undefined,
-        GITHUB_OAUTH_CLIENT_SECRET: "",
+        APP_SECRET: undefined,
+        BETTER_AUTH_URL: "",
       },
       log,
       exit,
@@ -43,9 +44,55 @@ describe("checking the sign in configuration when the server starts", () => {
     expect(log).toHaveBeenCalledTimes(1);
     const line = String(log.mock.calls[0]?.[0]);
     expect(line).toContain("AUTH_CONFIG_INVALID");
-    expect(line).toContain("BETTER_AUTH_SECRET");
-    expect(line).toContain("GITHUB_OAUTH_CLIENT_SECRET");
+    expect(line).toContain("APP_SECRET");
+    expect(line).toContain("BETTER_AUTH_URL");
     expect(line).not.toContain("\n");
+  });
+
+  // #97-SU-17
+  it("starts without any GITHUB_ variable and without an allow list warning", () => {
+    const exit = vi.fn();
+    const log = vi.fn();
+    const warn = vi.fn();
+
+    checkAuthConfigOnStart({
+      env: {
+        APP_SECRET: "x".repeat(40),
+        BETTER_AUTH_URL: "https://reviews.example.com",
+        NODE_ENV: "production",
+      },
+      log,
+      warn,
+      exit,
+    });
+
+    expect(exit).not.toHaveBeenCalled();
+    expect(log).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  // #97-SU-17
+  it("starts with only BETTER_AUTH_SECRET and logs the deprecation once, without the value", () => {
+    const exit = vi.fn();
+    const warn = vi.fn();
+    const secret = "legacy-".padEnd(40, "l");
+
+    checkAuthConfigOnStart({
+      env: {
+        BETTER_AUTH_SECRET: secret,
+        BETTER_AUTH_URL: "http://localhost:3000",
+      },
+      log: vi.fn(),
+      warn,
+      exit,
+    });
+
+    expect(exit).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledTimes(1);
+    const line = String(warn.mock.calls[0]?.[0]);
+    expect(line).toContain("BETTER_AUTH_SECRET");
+    expect(line).toContain("deprecated");
+    expect(line).not.toContain(secret);
   });
 
   // CR-19-T03

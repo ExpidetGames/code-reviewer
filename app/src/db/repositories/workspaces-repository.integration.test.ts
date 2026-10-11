@@ -64,3 +64,56 @@ describe("the workspaces repository", () => {
     expect((await repository.ensureDefault()).id).toBe(older.id);
   });
 });
+
+describe("the members of a workspace", () => {
+  async function withUsers() {
+    const { db } = await createTestDatabase();
+    for (const id of ["u1", "u2"])
+      await db
+        .insertInto("users")
+        .values({
+          id,
+          name: id,
+          email: `${id}@example.test`,
+          email_verified: 0,
+          image: null,
+          github_login: null,
+          imported_at: null,
+          is_instance_admin: 0,
+          org_checked_at: null,
+          org_checked_for: null,
+          created_at: "2026-10-11T00:00:00.000Z",
+          updated_at: "2026-10-11T00:00:00.000Z",
+        })
+        .execute();
+    return { db, repository: createWorkspacesRepository(db) };
+  }
+
+  it("adds a member with a role and reports whether the workspace has an owner", async () => {
+    const { repository } = await withUsers();
+    const workspace = await repository.ensureDefault();
+    expect(await repository.hasOwner(workspace.id)).toBe(false);
+
+    await repository.addMember(workspace.id, "u1", "member");
+    expect(await repository.hasOwner(workspace.id)).toBe(false);
+
+    await repository.addMember(workspace.id, "u2", "owner");
+    expect(await repository.hasOwner(workspace.id)).toBe(true);
+  });
+
+  it("keeps the role of a user who is a member already", async () => {
+    const { db, repository } = await withUsers();
+    const workspace = await repository.ensureDefault();
+    await repository.addMember(workspace.id, "u1", "owner");
+
+    await repository.addMember(workspace.id, "u1", "member");
+
+    expect(
+      await db
+        .selectFrom("workspace_members")
+        .select("role")
+        .where("user_id", "=", "u1")
+        .execute(),
+    ).toEqual([{ role: "owner" }]);
+  });
+});

@@ -1,7 +1,8 @@
 // What the public HTTP interface of Better Auth is allowed to do. Better Auth ships many endpoints
 // (list and revoke sessions, update the user, link accounts, ...) that this app neither needs nor
 // wants reachable: some would reveal the session token or let a user rewrite their own profile.
-// Only the three calls of the GitHub sign in are passed on, everything else is a 404.
+// Only the calls of the sign in are passed on (email with password, and the three of the GitHub sign
+// in while that is configured), everything else is a 404.
 import type { Auth } from "./auth.ts";
 
 const AUTH_BASE_PATH = "/api/auth";
@@ -9,6 +10,8 @@ const AUTH_BASE_PATH = "/api/auth";
 type Endpoint = { method: string; path: string };
 
 export const ALLOWED_AUTH_ENDPOINTS: readonly Endpoint[] = [
+  // Email and password. The sign-up endpoint is deliberately not here.
+  { method: "POST", path: "/sign-in/email" },
   // Starts the sign in and returns the GitHub address to go to.
   { method: "POST", path: "/sign-in/social" },
   // Where GitHub sends the person back to.

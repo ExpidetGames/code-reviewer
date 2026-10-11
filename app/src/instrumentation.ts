@@ -1,13 +1,14 @@
 // Runs once when the Next.js server starts and must finish before the server accepts requests.
 // The sign in, deployment and backup settings are checked and the database is opened and migrated here, so a missing
 // setting or a broken migration stops the start; then the pins of the allow list are brought in line
-// with the settings. Last, the repositories are synchronized with GitHub in the background: that
-// never delays or stops the start. The LLM settings are only reported, never a reason to stop.
+// with the settings, and, while the instance is not set up, the setup code is printed. Last, the
+// repositories are synchronized with GitHub in the background: that never delays or stops the
+// start. The LLM settings are only reported, never a reason to stop.
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
   const { checkAuthConfigOnStart } = await import("./auth/startup.ts");
   checkAuthConfigOnStart();
-  // Production only: the runner token and the GitHub App credentials (docker compose passes them).
+  // Production only: the runner token (docker compose passes it). GitHub is optional.
   const { checkDeploymentConfigOnStart } = await import("./deploy/startup.ts");
   await checkDeploymentConfigOnStart();
   // An invalid BACKUP_TIME ends the start here, before the database is opened and before the sync
@@ -28,6 +29,11 @@ export async function register(): Promise<void> {
     db: getDatabase(),
     config: loadAuthConfig(process.env).access,
   });
+  // While the instance is not set up: a fresh setup code, printed once to this log and kept (as a
+  // hash) in the memory of this process. Nothing is printed once it is set up.
+  const { startSetupOnStart } = await import("./setup/start.ts");
+  const { getSetupCodeStore } = await import("./setup/shared.ts");
+  await startSetupOnStart({ db: getDatabase(), store: getSetupCodeStore() });
   const { warnAboutRunnerToken } = await import("./runner-api/startup.ts");
   warnAboutRunnerToken(process.env);
   const { warnAboutDebounce } = await import("./webhooks/debounce-config.ts");

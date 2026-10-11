@@ -4,10 +4,14 @@
 import type {
   AccessDenialReason,
   AccessPolicy,
+  GithubSessionUser,
   SessionUser,
 } from "./access-policy.ts";
 import type { Auth } from "./auth.ts";
 import { GITHUB_PROVIDER_ID } from "./github-provider.ts";
+
+/** The `accounts.provider_id` Better Auth gives an email and password identity. */
+export const CREDENTIAL_PROVIDER_ID = "credential";
 
 /**
  * - `user`: a valid session of a user who may use the app.
@@ -27,36 +31,56 @@ export async function lookupSession(
 ): Promise<SessionLookup> {
   const session = await auth.api.getSession({ headers: requestHeaders });
   if (!session) return { kind: "none" };
-  // The stable identity of the account: the id GitHub gave it, kept in `accounts.account_id`. The
-  // login can change; this cannot. A user without a GitHub account cannot exist (GitHub is the only
-  // way in), so such a session is treated as no session at all.
-  const githubId = await findGithubId(auth, session.user.id);
-  if (githubId === null) return { kind: "none" };
+  const identities = await findIdentities(auth, session.user.id);
+  // The stable identity of a GitHub account is the id GitHub gave it, kept in `accounts.account_id`.
+  // The login can change; this cannot. A user with no identity at all cannot sign in.
+  if (!identities.password && identities.githubId === null)
+    return { kind: "none" };
+  const githubLogin = session.user.githubLogin || null;
   const user: SessionUser = {
     id: session.user.id,
     name: session.user.name,
-    githubLogin: session.user.githubLogin,
-    githubId,
+    email: session.user.email,
+    isInstanceAdmin: session.user.isInstanceAdmin === true,
+    githubLogin,
+    githubId: identities.githubId,
     image: session.user.image ?? null,
     orgCheckedAt: session.user.orgCheckedAt ?? null,
     orgCheckedFor: session.user.orgCheckedFor ?? null,
   };
-  const decision = await policy(user);
+  // An account with a password is admitted: such an account only exists because the first-run setup
+  // made it, or because the sign-up rule let it be created (a later issue evaluates that rule when
+  // the account is created, not on every request). The GitHub allow list is about GitHub identities.
+  if (identities.password) return { kind: "user", user };
+  if (githubLogin === null || identities.githubId === null)
+    return { kind: "none" };
+  const decision = await policy({
+    ...user,
+    githubLogin,
+    githubId: identities.githubId,
+  } satisfies GithubSessionUser);
   return decision.allowed
     ? { kind: "user", user }
     : { kind: "denied", reason: decision.reason };
 }
 
-async function findGithubId(
+async function findIdentities(
   auth: Pick<Auth, "$context">,
   userId: string,
-): Promise<string | null> {
+): Promise<{ password: boolean; githubId: string | null }> {
   const context = await auth.$context;
   const accounts = await context.internalAdapter.findAccounts(userId);
-  const account = accounts.find(
+  const github = accounts.find(
     (candidate) => candidate.providerId === GITHUB_PROVIDER_ID,
   );
-  return account?.accountId ? account.accountId : null;
+  return {
+    password: accounts.some(
+      (candidate) =>
+        candidate.providerId === CREDENTIAL_PROVIDER_ID &&
+        Boolean(candidate.password),
+    ),
+    githubId: github?.accountId ? github.accountId : null,
+  };
 }
 
 /** The login page address for a request that has no usable session. */
