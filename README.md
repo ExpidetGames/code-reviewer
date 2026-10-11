@@ -143,12 +143,14 @@ uv run python scripts/manual_review.py
 
 ## Container images
 
-Two images are built from the repository, each with its own Dockerfile and `.dockerignore`:
+Two images are built from the repository, each with its own Dockerfile and `Dockerfile.dockerignore`.
+The build context is the repository root (the images also carry `LICENSE`, `NOTICE` and
+`THIRD_PARTY_LICENSES.md` from there, in `/licenses`), so the Dockerfile is named with `--file`:
 
 | Image | Build | Notes |
 |---|---|---|
-| `ghcr.io/expidetgames/code-reviewer-app` | `docker build -t code-reviewer-app app` | Next.js standalone server on port 3000, runs as uid 10001. The database lives in the volume `/data` (`DATABASE_PATH=/data/app.db`); it is created and migrated on start. |
-| `ghcr.io/expidetgames/code-reviewer-runner` | `docker build -t code-reviewer-runner runner` | Python (version of `runner/.python-version`) with the runner installed by uv from `uv.lock`, runs as uid 10001. Holds PR-Agent (pinned, from `uv.lock`) and its tiktoken encodings, so a job needs no download besides GitHub and the LLM. |
+| `ghcr.io/expidetgames/code-reviewer-app` | `docker build -f app/Dockerfile -t code-reviewer-app .` | Next.js standalone server on port 3000, runs as uid 10001. The database lives in the volume `/data` (`DATABASE_PATH=/data/app.db`); it is created and migrated on start. |
+| `ghcr.io/expidetgames/code-reviewer-runner` | `docker build -f runner/Dockerfile -t code-reviewer-runner .` | Python (version of `runner/.python-version`) with the runner installed by uv from `uv.lock`, runs as uid 10001. Holds PR-Agent (pinned, from `uv.lock`) and its tiktoken encodings, so a job needs no download besides GitHub and the LLM. |
 
 ```sh
 docker run --rm -p 3000:3000 -v code-reviewer-data:/data \

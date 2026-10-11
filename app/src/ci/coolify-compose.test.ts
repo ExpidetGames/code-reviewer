@@ -16,7 +16,7 @@ function read(path: string): string {
 
 type Service = {
   image?: string;
-  build?: { context?: string };
+  build?: { context?: string; dockerfile?: string };
   container_name?: string;
   restart?: string;
   ports?: string[];
@@ -73,16 +73,15 @@ describe("compose.coolify.yml services", () => {
   });
 
   // CR-39-T02
-  it("builds both images from their folders of the checkout instead of pulling them", () => {
-    for (const [name, context] of [
-      ["app", "app"],
-      ["runner", "runner"],
-    ] as const) {
+  // #118-T03 (the context is the repository root, so the images carry the license files)
+  it("builds both images from the checkout instead of pulling them, with the Dockerfile of each folder", () => {
+    for (const name of ["app", "runner"] as const) {
       const definition = service(coolify, name);
 
-      expect(definition.build?.context, name).toBe(context);
+      expect(definition.build?.context, name).toBe(".");
+      expect(definition.build?.dockerfile, name).toBe(`${name}/Dockerfile`);
       expect(definition.image, name).toBeUndefined();
-      expect(statSync(`${repoRoot}${context}/Dockerfile`).isFile()).toBe(true);
+      expect(statSync(`${repoRoot}${name}/Dockerfile`).isFile()).toBe(true);
     }
     expect(JSON.stringify(coolify)).not.toContain("ghcr.io");
   });

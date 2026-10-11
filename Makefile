@@ -70,8 +70,8 @@ test-e2e:
 # Needs a running Docker daemon and fails without one. Not part of `make verify` (CI runs it for
 # pull requests that touch the images).
 test-images:
-	docker build --tag code-reviewer-app:local app
-	docker build --tag code-reviewer-runner:local runner
+	docker build --file app/Dockerfile --tag code-reviewer-app:local .
+	docker build --file runner/Dockerfile --tag code-reviewer-runner:local .
 	docker/smoke/app.sh code-reviewer-app:local
 	docker/smoke/runner.sh code-reviewer-runner:local
 
@@ -80,8 +80,8 @@ test-images:
 # healthy app, the data survives down and up, a killed app restarts. Needs a running Docker daemon.
 # Not part of `make verify`; CI runs it for pull requests that touch app, runner or the compose files.
 test-compose:
-	docker build --tag code-reviewer-app:compose app
-	docker build --tag code-reviewer-runner:compose runner
+	docker build --file app/Dockerfile --tag code-reviewer-app:compose .
+	docker build --file runner/Dockerfile --tag code-reviewer-runner:compose .
 	docker/smoke/compose.sh code-reviewer-app:compose code-reviewer-runner:compose
 
 verify: lint typecheck test-unit test-integration check-licenses

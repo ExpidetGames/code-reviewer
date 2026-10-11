@@ -8,6 +8,9 @@ None of this software is copied into the repository. The app installs its packag
 the runner installs its packages with uv, both from the lockfiles, and both container images are
 built from the same lockfiles.
 
+Both container images (app and runner) carry `LICENSE`, `NOTICE` and this file in `/licenses`; the
+image smoke tests check that they are there and identical to the files of the repository.
+
 ## PR-Agent
 
 - Package: pr-agent 0.47.0 (pinned in `runner/pyproject.toml`)

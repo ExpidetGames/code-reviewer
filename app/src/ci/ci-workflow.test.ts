@@ -235,11 +235,12 @@ describe("CI compose job", () => {
       step.uses?.startsWith("docker/build-push-action@"),
     );
 
-    expect(builds.map((step) => step.with?.context).sort()).toEqual([
-      "app",
-      "runner",
+    expect(builds.map((step) => step.with?.file).sort()).toEqual([
+      "app/Dockerfile",
+      "runner/Dockerfile",
     ]);
     for (const build of builds) {
+      expect(build.with?.context).toBe(".");
       expect(build.with?.load).toBe(true);
       expect(build.with?.push).toBe(false);
     }

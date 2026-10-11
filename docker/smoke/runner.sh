@@ -106,6 +106,10 @@ printf '    %s\n' "$result"
 step "the image sets a numeric non-root user"
 assert_image_user_is_numeric_non_root "$image"
 
+# #118-T03
+step "the image ships the license files and carries the license label"
+assert_image_ships_license_files "$image"
+
 step "the process of the entry point runs as a non-root user"
 # The entry point exits at once, so the same image user is asked from inside a container.
 uid=$(in_image "$image" id -u)

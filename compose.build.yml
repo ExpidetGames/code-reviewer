@@ -5,8 +5,10 @@ services:
   app:
     image: code-reviewer-app:local
     build:
-      context: app
+      context: .
+      dockerfile: app/Dockerfile
   runner:
     image: code-reviewer-runner:local
     build:
-      context: runner
+      context: .
+      dockerfile: runner/Dockerfile

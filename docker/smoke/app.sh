@@ -25,6 +25,10 @@ CLEANUP_VOLUMES+=("$volume")
 step "the image sets a numeric non-root user"
 assert_image_user_is_numeric_non_root "$image"
 
+# #118-T03
+step "the image ships the license files and carries the license label"
+assert_image_ships_license_files "$image"
+
 # CR-17-T09
 step "the image holds no environment files, git data, keys or secrets"
 assert_image_has_no_secrets "$image" "/srv/app /data /home /root /tmp"

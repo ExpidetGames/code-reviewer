@@ -1,0 +1,66 @@
+# The ignore file of app/Dockerfile (BuildKit reads <Dockerfile>.dockerignore next to the Dockerfile).
+# The build context is the repository root: the image needs the app/ folder and the three license
+# files, nothing else. This keeps the context small and keeps secrets, tests and local data out of
+# the image. Anything not excluded below can end up in the "builder" stage, but only the standalone
+# output and the license files are copied into the final image.
+
+# Default deny: only these parts of the repository are part of the build context. Everything below
+# is relative to the repository root.
+*
+!app
+!LICENSE
+!NOTICE
+!THIRD_PARTY_LICENSES.md
+
+# Never in an image: environment files, keys, certificates, local databases. These match at any
+# depth (a pattern without a leading **/ only matches in the root of the context).
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/*.sqlite
+**/*.sqlite3
+**/*.sqlite-shm
+**/*.sqlite-wal
+
+# Version control and editor files
+**/.git
+app/.gitignore
+app/.github
+app/.vscode
+app/.idea
+**/.DS_Store
+
+# Host build output and dependencies (the image installs and builds its own)
+**/node_modules
+app/.next
+app/out
+app/build
+app/dist
+app/coverage
+**/*.tsbuildinfo
+app/next-env.d.ts
+app/.pnpm-store
+
+# Tests and test tooling
+app/e2e
+app/playwright-report
+app/test-results
+**/*.test.ts
+**/*.test.tsx
+**/*.integration.test.ts
+**/*.integration.test.tsx
+**/*.e2e.ts
+app/src/test-support
+app/src/ci
+app/vitest.config.mts
+app/playwright.config.ts
+
+# Docker files themselves
+app/Dockerfile
+app/Dockerfile.dockerignore

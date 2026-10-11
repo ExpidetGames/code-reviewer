@@ -262,7 +262,7 @@ no process identifiers in titles), `verify:server-only-canary`, the Docker test 
 | Integration tests (host) | `make test-integration` | `pnpm test:int`; `pytest -m "integration or contract"` |
 | Dependency licenses | `make check-licenses` | `pnpm licenses:check`: every installed package of the app (`pnpm licenses list`) and the runner (`scripts/list_licenses.py`, from the installed metadata) and every package of `pnpm-lock.yaml` and `uv.lock`, against `license-policy.json`. Needs `make install`, no network (see "Dependency license check" below) |
 | E2E | `make test-e2e` | `pnpm test:e2e` (`ARGS="--grep @smoke"` filters); needs the runner installed and the tiktoken cache primed for the journey with the real runner (see section 6) |
-| Image smoke tests | `make test-images` | builds both images with `docker build`, then runs `docker/smoke/app.sh` and `docker/smoke/runner.sh` (needs a Docker daemon; not part of `make verify`) |
+| Image smoke tests | `make test-images` | builds both images with `docker build` (context: the repository root), then runs `docker/smoke/app.sh` and `docker/smoke/runner.sh`, which also check that `/licenses` holds `LICENSE`, `NOTICE` and `THIRD_PARTY_LICENSES.md` byte for byte and that the image has the license label (needs a Docker daemon; not part of `make verify`) |
 | Compose smoke test | `make test-compose` | builds both images under the tags `code-reviewer-*:compose`, then runs `docker/smoke/compose.sh` (needs a Docker daemon; not part of `make verify`) |
 
 Inside `app/`: `pnpm dev | build | start | lint | typecheck | test | test:watch | test:int | test:e2e`.
@@ -331,7 +331,7 @@ references) and pushes `ghcr.io/expidetgames/code-reviewer-app` and `-runner` wi
 It pushes the commit tags of both images first and the floating tags last, so no floating tag points at a half published release. It is the only workflow with `packages: write`, granted to that job alone. A failing build or smoke
 test stops the job before the login, so no tag moves. The structure of both files is pinned by
 `app/src/ci/images-workflow.test.ts`; `app/src/ci/dockerfiles.test.ts` pins the runtime versions,
-digests, user and `.dockerignore` rules of the Dockerfiles.
+digests, user, license files and ignore rules (`Dockerfile.dockerignore`) of the Dockerfiles.
 
 `.github/workflows/nightly.yml` (workflow "Nightly") calls the same `engine.yml` every night on the default branch and on demand (`workflow_dispatch`). The structure is pinned by `app/src/ci/engine-workflow.test.ts` (the shared job), `nightly-workflow.test.ts` and `ci-workflow.test.ts` (the callers).
 

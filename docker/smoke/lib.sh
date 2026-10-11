@@ -122,6 +122,27 @@ assert_image_user_is_numeric_non_root() {
   printf '    image user: %s\n' "$user"
 }
 
+# #118-T03: LICENSE, NOTICE and THIRD_PARTY_LICENSES.md of the repository are inside the image under
+# /licenses, byte for byte the files of this checkout, readable by the image's own (unprivileged)
+# user, and nothing else is in that folder. The image also carries the OCI license label.
+# Usage: assert_image_ships_license_files <image>
+assert_image_ships_license_files() {
+  local image=$1 repo_root file listing label
+  repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+  for file in LICENSE NOTICE THIRD_PARTY_LICENSES.md; do
+    [ -s "$repo_root/$file" ] || fail "$file is missing or empty in the repository"
+    in_image "$image" cat "/licenses/$file" 2>/dev/null | cmp -s - "$repo_root/$file" ||
+      fail "/licenses/$file is missing in $image, unreadable for its user, or differs from $file of the repository"
+  done
+  listing=$(in_image "$image" ls /licenses | tr '\n' ' ')
+  [ "$listing" = "LICENSE NOTICE THIRD_PARTY_LICENSES.md " ] ||
+    fail "/licenses in $image holds '$listing', expected exactly LICENSE, NOTICE and THIRD_PARTY_LICENSES.md"
+  label=$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.licenses"}}' "$image")
+  [ "$label" = "Apache-2.0" ] ||
+    fail "$image has the label org.opencontainers.image.licenses='$label', expected Apache-2.0"
+  printf '    /licenses: LICENSE, NOTICE, THIRD_PARTY_LICENSES.md; label licenses=%s\n' "$label"
+}
+
 # Runs a scan command in a throwaway root container of the image (root, so that no file is hidden
 # by a permission error) and puts its standard output into SCAN_OUTPUT. The scan itself must
 # succeed: the smoke test stops unless the exit status is one of the allowed ones (a space
