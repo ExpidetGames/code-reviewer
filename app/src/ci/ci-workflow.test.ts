@@ -138,6 +138,38 @@ describe("CI workflow triggers and jobs", () => {
   });
 });
 
+describe("CI compose job", () => {
+  // CR-37 (compose smoke test)
+  it("builds both images without pushing and smoke tests the stack against them", () => {
+    const job = jobNamed("compose");
+    const builds = steps(job).filter((step) =>
+      step.uses?.startsWith("docker/build-push-action@"),
+    );
+
+    expect(builds.map((step) => step.with?.context).sort()).toEqual([
+      "app",
+      "runner",
+    ]);
+    for (const build of builds) {
+      expect(build.with?.load).toBe(true);
+      expect(build.with?.push).toBe(false);
+    }
+    expect(commandLines(job)).toContain(
+      "docker/smoke/compose.sh code-reviewer-app:ci code-reviewer-runner:ci",
+    );
+  });
+
+  // CR-37 (compose smoke test)
+  it("runs on pull requests that touch the app or the runner, and on every pull request into main", () => {
+    const condition = jobNamed("compose").if ?? "";
+
+    expect(condition).toContain("github.event_name == 'pull_request'");
+    expect(condition).toContain("github.base_ref == 'main'");
+    expect(condition).toContain("needs.changes.outputs.app == 'true'");
+    expect(condition).toContain("needs.changes.outputs.runner == 'true'");
+  });
+});
+
 describe("CI workflow aggregate check", () => {
   // CR-16-T02
   it("provides one final job that waits for every other job and always runs", () => {
@@ -173,7 +205,13 @@ describe("CI workflow aggregate check", () => {
 
   // CR-16-T04
   it("runs the app, runner, browser and workflow jobs independently so one red job stops no other", () => {
-    for (const id of ["app-fast", "runner-fast", "e2e", "actionlint"]) {
+    for (const id of [
+      "app-fast",
+      "runner-fast",
+      "e2e",
+      "compose",
+      "actionlint",
+    ]) {
       expect(jobNamed(id).needs, id).toBe("changes");
     }
   });
