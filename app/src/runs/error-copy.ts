@@ -58,6 +58,10 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
   command_failed: "The review engine reported an error.",
   review_not_published:
     "The review engine finished, but no review was posted on the pull request.",
+  review_state_truncated:
+    "The review was posted, but it grew past GitHub's comment size limit, so earlier findings are no longer tracked.",
+  review_text_truncated:
+    "The review was posted, but part of it was cut off because the comment reached GitHub's size limit.",
   git_auth: "GitHub refused the access token of this run.",
   git_forbidden: "GitHub does not allow the app to do this on the repository.",
   git_rate_limit: "GitHub is limiting requests right now. Try again later.",

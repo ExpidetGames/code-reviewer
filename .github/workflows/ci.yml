@@ -127,6 +127,19 @@ jobs:
       - name: Integration and contract tests on the host
         run: uv run pytest -m "integration or contract"
 
+  # The engine suite: the real, pinned PR-Agent against a fake GitHub and a fake LLM
+  # (runner/tests/engine), defined once in engine.yml. No Docker stack: the fakes are loopback
+  # servers the tests start themselves. Runs for pull requests that change the runner and for pull
+  # requests into main; nightly.yml runs the same suite on development. A skipped job never blocks
+  # a merge, a failed one does (ci-passed).
+  engine:
+    name: "Runner: engine tests"
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && (github.base_ref == 'main' || needs.changes.outputs.runner == 'true') }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/engine.yml
+
   e2e:
     name: "E2E: browser journeys"
     needs: changes
@@ -271,7 +284,7 @@ jobs:
   # fails on any failed or cancelled job and accepts skipped jobs (path filter).
   ci-passed:
     name: All checks passed?
-    needs: [changes, app-fast, runner-fast, e2e, image-app, image-runner, compose, actionlint]
+    needs: [changes, app-fast, runner-fast, engine, e2e, image-app, image-runner, compose, actionlint]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5

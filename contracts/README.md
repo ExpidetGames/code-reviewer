@@ -43,8 +43,8 @@ The meaning of the calls (status codes, the lease, what happens on failure) is i
   `RUNNER_ENV_KEY_PATTERN` (a test compares the app's pattern with this file). Values are text of the
   type of the PR-Agent option (`"5"`, `"true"`); the runner refuses a value that does not fit.
 - The runner reserves some options for itself and refuses a job that sets them:
-  `PR_REVIEWER__FINAL_UPDATE_MESSAGE`, `PR_REVIEWER__ENABLE_REVIEW_LABELS_SECURITY` and
-  `PR_REVIEWER__ENABLE_REVIEW_LABELS_EFFORT`. The app never sends them (a test over the options of the
+  `PR_REVIEWER__FINAL_UPDATE_MESSAGE`, `PR_DESCRIPTION__FINAL_UPDATE_MESSAGE`,
+  `PR_REVIEWER__ENABLE_REVIEW_LABELS_SECURITY` and `PR_REVIEWER__ENABLE_REVIEW_LABELS_EFFORT`. The app never sends them (a test over the options of the
   review settings checks it).
 - `llm.maxTokens` is the token budget of a review. `llm.fallbackModels` (at most five names) is accepted
   by the runner; the app does not send it until a chain is decided, and then `maxTokens` must fit the

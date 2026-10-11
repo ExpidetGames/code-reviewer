@@ -35,19 +35,24 @@ class CommentEvent:
     url: str
     body_head: str
     temporary: bool
+    # The body was longer than the provider accepts, so the provider cut it when it wrote it.
+    over_limit: bool = False
 
 
 @dataclass
 class CommentRecorder:
     events: list[CommentEvent] = field(default_factory=lambda: [])
 
-    def add(self, *, kind: str, url: str, body: str, temporary: bool) -> None:
+    def add(
+        self, *, kind: str, url: str, body: str, temporary: bool, limit: int | None = None
+    ) -> None:
         self.events.append(
             CommentEvent(
                 kind="edited" if kind == "edited" else "created",
                 url=url,
                 body_head=body[:BODY_HEAD_CHARS],
                 temporary=temporary,
+                over_limit=limit is not None and len(body) > limit,
             )
         )
 
@@ -65,6 +70,14 @@ class CommentRecorder:
             for event in self.events
             if not event.temporary and event.body_head.startswith(_FAILURE_PREFIXES)
         ]
+
+    def cut_comment_posted(self) -> bool:
+        """A comment (not a failure notice) was longer than the provider takes and was cut."""
+        return any(
+            event.over_limit
+            for event in self.events
+            if not event.temporary and not event.body_head.startswith(_FAILURE_PREFIXES)
+        )
 
     def comment_url(self, command: Command) -> str | None:
         """URL of the comment that holds the result of `command`, or None."""
@@ -97,12 +110,24 @@ def _url_of(comment: Any) -> str | None:
     return url if isinstance(url, str) and url else None
 
 
-def _record(recorder: CommentRecorder, kind: str, comment: Any, body: Any, temporary: bool) -> None:
+def _limit_of(provider: Any) -> int | None:
+    limit = getattr(provider, "max_comment_chars", None)
+    return limit if isinstance(limit, int) and not isinstance(limit, bool) and limit > 0 else None
+
+
+def _record(
+    recorder: CommentRecorder,
+    kind: str,
+    comment: Any,
+    body: Any,
+    temporary: bool,
+    limit: int | None = None,
+) -> None:
     """Record one write. Observing must never break the write itself, so errors are swallowed."""
     try:
         url = _url_of(comment)
         if url is not None:
-            recorder.add(kind=kind, url=url, body=str(body), temporary=bool(temporary))
+            recorder.add(kind=kind, url=url, body=str(body), temporary=bool(temporary), limit=limit)
     except Exception:
         return
 
@@ -121,7 +146,7 @@ def install_comment_recorder(
 
     def publish_comment(self: Any, pr_comment: str, is_temporary: bool = False) -> Any:
         result = original_publish(self, pr_comment, is_temporary)
-        _record(recorder, "created", result, pr_comment, is_temporary)
+        _record(recorder, "created", result, pr_comment, is_temporary, _limit_of(self))
         return result
 
     def edit_comment(self: Any, comment: Any, body: str) -> Any:
@@ -129,7 +154,12 @@ def install_comment_recorder(
         # edit_comment returns None on success and False on failure.
         if result is not False:
             _record(
-                recorder, "edited", comment, body, bool(getattr(comment, "is_temporary", False))
+                recorder,
+                "edited",
+                comment,
+                body,
+                bool(getattr(comment, "is_temporary", False)),
+                _limit_of(self),
             )
         return result
 
