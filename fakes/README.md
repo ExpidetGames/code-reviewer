@@ -5,12 +5,12 @@ ever needs the internet, a real GitHub or a real model. The same fakes are share
 (Vitest), the runner tests (pytest) and the end-to-end journeys (Playwright). They speak the real
 protocol, so the production client code runs unchanged against them.
 
-| Directory                   | Purpose                                                                                                                                                                               | Status                         |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
-| `github/`                   | The one fake GitHub: OAuth login and user endpoints, the GitHub App REST API (installations, tokens, repositories, pull requests) and a signed webhook sender. Later: comments, diffs | exists, see `github/README.md` |
-| `llm/`                      | OpenAI-compatible `chat/completions` server with scripted answers, errors and slow responses                                                                                          | planned                        |
-| `pr-agent/`                 | `fake_pr_agent.py`, a stand-in executable for PR-Agent used by runner tests and e2e                                                                                                   | planned                        |
-| `fixtures/github-webhooks/` | Webhook payloads reduced to the fields the app reads (public data only)                                                                                                               | exists                         |
+| Directory                   | Purpose                                                                                                                                                                                                                                           | Status                               |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| `github/`                   | The one fake GitHub: OAuth login and user endpoints, the GitHub App REST API (installations, tokens, repositories, pull requests), the calls PR-Agent makes (diffs, commits, file contents, comments) and a signed webhook sender                 | exists, see `github/README.md`       |
+| `llm/`                      | OpenAI-compatible `chat/completions` server with a canned answer per PR-Agent tool and errors of a test's choice (`server.ts`, `canned.ts`). Malformed output and slow responses are planned                                                      | exists                               |
+| `pr-agent/`                 | `run_job_against_fake_llm.py`, the real job entry point with the address of the fake LLM added to the job (`PR_AGENT_COMMAND` of the e2e runner). `fake_pr_agent.py`, a stand-in executable for PR-Agent used by runner tests and e2e, is planned | `run_job_against_fake_llm.py` exists |
+| `fixtures/github-webhooks/` | Webhook payloads reduced to the fields the app reads (public data only)                                                                                                                                                                           | exists                               |
 
 Rules:
 

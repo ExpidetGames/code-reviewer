@@ -40,10 +40,14 @@ require_image "$runner_image"
 command -v openssl >/dev/null || fail "openssl is required (it generates the dummy GitHub App key)"
 cp "$repo_root/compose.yml" "$workdir/compose.yml"
 
-# The settings of the stack: dummies that point nowhere. Everything the compose file reads is set
-# or unset here, so values from the caller's shell cannot leak in.
-unset APP_BIND_ADDRESS ALLOWED_GITHUB_ORG DATABASE_BUSY_TIMEOUT_MS LLM_PROVIDER LLM_API_KEY
-unset RUNNER_CONCURRENCY RUNNER_JOB_TIMEOUT_SECONDS RUNNER_POLL_INTERVAL_SECONDS RUNNER_ID PR_AGENT_COMMAND
+# The settings of the stack: dummies that point nowhere. Every variable the compose files read is
+# unset first (the list comes from the files themselves, see lib.sh), and the ones the stack needs
+# are exported below, so values from the caller's shell cannot leak in. Docker Compose's own switches
+# that could change which files or services it uses are unset as well. Not touched, on purpose: the
+# settings that tell the docker client which daemon to talk to (DOCKER_HOST, DOCKER_CONTEXT,
+# DOCKER_CONFIG, DOCKER_TLS_VERIFY, DOCKER_CERT_PATH); without them the script could not reach Docker.
+unset COMPOSE_FILE COMPOSE_PROFILES COMPOSE_ENV_FILES
+unset_compose_variables "$workdir/compose.yml" "$here/compose.fake-job.yml" "$repo_root/compose.coolify.yml"
 export APP_IMAGE=$app_image
 export RUNNER_IMAGE=$runner_image
 export APP_PORT=0 # Docker picks a free port on the host

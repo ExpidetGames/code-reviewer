@@ -142,10 +142,25 @@ describe("issue template config", () => {
     expect(config.blank_issues_enabled).toBe(false);
   });
 
-  it("sends security reports to the private advisory form", () => {
+  it("adds no security link of its own, because GitHub shows one for private vulnerability reporting", () => {
     const urls = config.contact_links.map((link) => link.url);
+    const names = config.contact_links.map((link) => link.name);
 
-    expect(urls).toContain(
+    expect(urls.join(" ")).not.toContain("/security/advisories");
+    expect(names.join(" ")).not.toMatch(/security|vulnerabilit/i);
+  });
+
+  it("keeps the documentation link as the only contact link", () => {
+    expect(config.contact_links.map((link) => link.name)).toEqual([
+      "Documentation",
+    ]);
+  });
+
+  it("keeps the pointer to the private advisory form at the top of the bug form", () => {
+    const [intro] = form("bug_report.yml").body;
+
+    expect(intro?.type).toBe("markdown");
+    expect(intro?.attributes.value).toContain(
       "https://github.com/ExpidetGames/code-reviewer/security/advisories/new",
     );
   });
