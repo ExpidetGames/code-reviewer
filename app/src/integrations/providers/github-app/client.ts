@@ -311,6 +311,11 @@ export function createGithubAppClient(
     signal?: AbortSignal,
   ): Promise<unknown> {
     let response: Response;
+    // The client's own timeout always applies; the caller's signal can only end the request sooner.
+    const requestSignal =
+      signal === undefined
+        ? AbortSignal.timeout(timeoutMs)
+        : AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]);
     try {
       response = await doFetch(`${config.apiBaseUrl}${path}`, {
         method,
@@ -322,11 +327,7 @@ export function createGithubAppClient(
           ...(body === undefined ? {} : { "content-type": "application/json" }),
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-        // The client's own timeout always applies; the caller's signal can only end the request sooner.
-        signal:
-          signal === undefined
-            ? AbortSignal.timeout(timeoutMs)
-            : AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]),
+        signal: requestSignal,
       });
     } catch {
       // The cause is dropped on purpose: it can quote the request.
@@ -343,6 +344,13 @@ export function createGithubAppClient(
     try {
       return await response.json();
     } catch {
+      // Cut off while the body was read (the caller's signal or the timeout): the answer is missing,
+      // not malformed.
+      if (requestSignal.aborted)
+        throw new GithubAppError(
+          "GITHUB_APP_UNAVAILABLE",
+          `GitHub could not be reached for ${method} ${path.split("?")[0]}.`,
+        );
       throw shapeError(`${method} ${path.split("?")[0]}`);
     }
   }

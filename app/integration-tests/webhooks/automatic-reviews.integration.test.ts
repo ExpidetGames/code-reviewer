@@ -69,14 +69,19 @@ async function startHarness(
     activateProject?: boolean;
     debounceMs?: number;
     headCheckTimeoutMs?: number;
+    /** How long one request to the fake GitHub may take (the harness default: 5 seconds). */
+    requestTimeoutMs?: number;
     wrapProvider?: (provider: IntegrationProvider) => IntegrationProvider;
   } = {},
 ) {
-  const h = await startWebhookHarness(
-    options.wrapProvider === undefined
+  const h = await startWebhookHarness({
+    ...(options.wrapProvider === undefined
       ? {}
-      : { wrapProvider: options.wrapProvider },
-  );
+      : { wrapProvider: options.wrapProvider }),
+    ...(options.requestTimeoutMs === undefined
+      ? {}
+      : { requestTimeoutMs: options.requestTimeoutMs }),
+  });
   const clock = { now: new Date(START) };
   const now = () => new Date(clock.now);
   const queue = createJobQueue(h.db, { now });
@@ -437,7 +442,12 @@ describe("a pull request that is pushed to", () => {
   });
 
   it("closes the connection to GitHub when the head check times out, and still enqueues the push", async () => {
-    const t = await startHarness({ headCheckTimeoutMs: 100 });
+    // The client's own timeout is far longer than the head check's: only the head check's signal can
+    // close the connection within the wait below.
+    const t = await startHarness({
+      headCheckTimeoutMs: 100,
+      requestTimeoutMs: 60_000,
+    });
     // The pull request read never gets an answer.
     t.h.fake.fail({ pathIncludes: "/pulls/", hang: true });
 

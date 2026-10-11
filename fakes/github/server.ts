@@ -79,6 +79,11 @@ export type FakeFailure = {
   responseDelayMs?: number;
   /** Never answers: the request stays open until the client gives up (see `abortedRequests`). */
   hang?: boolean;
+  /**
+   * Sends the status line, the headers and the first bytes of the body of the GitHub App API answer,
+   * then stalls: the client has its response but cannot finish reading it.
+   */
+  hangBody?: boolean;
   /** How many requests it applies to; forever when omitted. */
   times?: number;
 };
@@ -228,6 +233,16 @@ export async function startGithubFake(
               await new Promise((resolve) =>
                 setTimeout(resolve, failure.responseDelayMs),
               );
+            if (failure?.hangBody === true) {
+              response.writeHead(status, {
+                "content-type": "application/json",
+              });
+              response.write(JSON.stringify(body).slice(0, 1));
+              await new Promise<void>((resolve) =>
+                response.once("close", resolve),
+              );
+              return;
+            }
             sendJson(response, status, body);
           },
         }))
