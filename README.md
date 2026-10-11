@@ -289,3 +289,9 @@ Pull requests flow upwards:
 3. `development` -> PR into `main` for releases.
 
 Direct pushes to `main` and `development` are not allowed; all changes go through pull requests.
+
+## License
+
+code-review.com is licensed under the [Apache License, Version 2.0](LICENSE). [`NOTICE`](NOTICE)
+and [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md) carry the attribution for third party
+software, including the MIT licensed PR-Agent.
