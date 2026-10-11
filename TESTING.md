@@ -294,8 +294,8 @@ Inside `runner/`: `uv sync --locked`, `uv run ruff check .`, `uv run ruff format
 
 ## 8. CI
 
-`.github/workflows/ci.yml` (workflow "CI") runs on pull requests into `development`, `main` and branches named
-`CR-*` (a pattern the workflow still matches, no new work uses it), and on pushes to `development` and `main`. A new push to a pull request cancels its
+`.github/workflows/ci.yml` (workflow "CI") runs on pull requests into `development` and `main`, and on pushes to
+`development` and `main`. A new push to a pull request cancels its
 superseded run. A run for a push is never cancelled or replaced: the concurrency group of a push
 contains the commit hash, so every pushed commit gets its own run. No repository secrets in test jobs, the token is
 limited to `contents: read` (the `changes` job also reads pull requests for the path filter), every job has a
@@ -309,14 +309,14 @@ file is pinned by `app/src/ci/ci-workflow.test.ts`.
 | `app-fast` | app changed | `pnpm format:check`, `lint`, `typecheck`, `test` (unit), `test:int` (host), `build` with placeholder env. |
 | `runner-fast` | runner changed | `ruff check`, `ruff format --check`, `pyright`, `pytest -m unit`, `pytest -m "integration or contract"`. |
 | `engine` | pull requests that change the runner, and every pull request into `main` (never pushes, never app-only changes) | Calls `engine.yml` (the one definition, also used by the nightly workflow): `uv sync --locked`, the tiktoken encoding from the cache (`scripts/prime_tiktoken_cache.py` fills it, with retries, the one step with internet), then `pytest -m engine` in a network namespace without network. No Docker stack, no secrets, `contents: read`, 20 minutes. |
-| `e2e` ("E2E: browser journeys") | app or runner changed | `playwright install --with-deps chromium`, the runner (`uv sync --locked` in `runner/`) and the tiktoken encoding (restored from the cache, primed with `scripts/prime_tiktoken_cache.py`) for the journey with the real runner, then the journeys against the production build: `@smoke` only on pull requests into `development` and `CR-*`, all (without `@flaky`) on pull requests into `main` and on pushes. |
+| `e2e` ("E2E: browser journeys") | app or runner changed | `playwright install --with-deps chromium`, the runner (`uv sync --locked` in `runner/`) and the tiktoken encoding (restored from the cache, primed with `scripts/prime_tiktoken_cache.py`) for the journey with the real runner, then the journeys against the production build: `@smoke` only on pull requests into `development`, all (without `@flaky`) on pull requests into `main` and on pushes. |
 | `compose` ("Compose: stack smoke test") | pull requests: app or runner changed, or any pull request into `main` | Builds both images (`load`, no push, GHA layer cache), then runs `docker/smoke/compose.sh` against them. Same rights as the image jobs. |
 | `image-app`, `image-runner` | pull requests: app (runner) changed, or any pull request into `main` | Builds the image with `docker/build-push-action` (`load`, no push, GHA layer cache), then runs its smoke test. No registry login, read-only token. Pushes do not run these jobs because the publish workflow builds the same images. |
 | `actionlint` | workflows changed | actionlint with `.github/actionlint.yaml`. |
 | `ci-passed` ("All checks passed?") | always | Fails on any failed or cancelled job, accepts skipped jobs. |
 
 Pushes and pull requests into `main` run every job. `ci-passed` is the only check that branch
-protection requires (on `development`, `main` and the `CR-*` pattern), so a job skipped by the path
+protection requires (on `development` and `main`), so a job skipped by the path
 filter never blocks a merge. Branch protection is a GitHub setting and is not stored in the repository.
 
 `.github/workflows/publish-images.yml` (workflow "Publish images") runs on pushes to `development` and

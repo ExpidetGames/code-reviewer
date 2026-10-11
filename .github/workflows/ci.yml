@@ -1,11 +1,11 @@
 name: CI
 
-# Pull requests into development, main and epic branches (CR-*), and pushes to development and
-# main. No repository secrets are used. The single required status check is "ci-passed" (see
-# TESTING.md, section CI): path-skipped jobs never block a merge because it accepts skipped jobs.
+# Pull requests into development and main, and pushes to development and main. No repository
+# secrets are used. The single required status check is "ci-passed" (see TESTING.md, section CI):
+# path-skipped jobs never block a merge because it accepts skipped jobs.
 on:
   pull_request:
-    branches: [development, main, "CR-*"]
+    branches: [development, main]
   push:
     branches: [development, main]
 
@@ -185,7 +185,7 @@ jobs:
         working-directory: runner
         run: uv run python scripts/prime_tiktoken_cache.py
       # Playwright builds the app and serves the production build itself (playwright.config.ts).
-      # Pull requests into development and epic branches run the smoke journeys, everything else
+      # Pull requests into development run the smoke journeys, everything else
       # (release pull requests into main, pushes) runs all journeys. Journeys tagged @flaky are
       # quarantined and only run in the nightly workflow.
       - name: Run the smoke journeys
