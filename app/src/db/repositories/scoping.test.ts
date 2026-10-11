@@ -30,7 +30,7 @@ const SCOPED = [
 /**
  * Not scoped, each for a reason that has to hold:
  * - the tables are not customer data (app_meta, allowed_login_pins, webhook_deliveries, workspaces,
- *   instance_settings, rate_limits);
+ *   instance_settings, rate_limits, secrets);
  * - integration-directory: webhooks and the synchronization find a connection before the workspace is
  *   known; it only reads and the answer names the workspace;
  * - runner-jobs: runners serve the whole instance, every statement is fenced by the lease token;
@@ -44,6 +44,7 @@ const INSTANCE_LEVEL = [
   "jobs-claim.ts",
   "rate-limits-repository.ts",
   "runner-jobs-repository.ts",
+  "secrets-repository.ts",
   "webhook-deliveries-repository.ts",
   "workspaces-repository.ts",
 ] as const;

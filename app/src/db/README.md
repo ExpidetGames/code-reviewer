@@ -139,6 +139,19 @@ sections 2.2, 2.3 and 2.10):
 None of these is customer data, so none is workspace scoped (`scoping.test.ts` lists them as instance
 level).
 
+### Secrets and password reset tokens
+
+Migrations `20261011200000_create_secrets` and `20261011200100_create_password_reset_tokens` (sections 2.3
+and 2.7):
+
+- `secrets` (name, ciphertext, nonce, `key_version`, `last_four`, `updated_by`, `updated_at`): the encrypted
+  credentials of the instance, one row per name (`secrets-repository.ts`, used through `src/secrets/`). The
+  name is the row id that is bound into the ciphertext.
+- `password_reset_tokens` (`token_hash`, `user_id`, `created_at`, `expires_at`, `used_at`): single-use reset
+  links; only the SHA-256 hash of the token is kept (`src/auth/password-reset.ts`). A row goes with its user.
+- `instance_settings` gained two keys: `sign_in_methods` and `max_workspaces_per_user` (typed in
+  `instance-settings-repository.ts`, which also reads a value with who saved it and when).
+
 ## Workspace scoping
 
 Every repository that reads or writes customer data is created for one workspace:

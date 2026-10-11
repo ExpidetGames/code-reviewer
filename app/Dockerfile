@@ -76,11 +76,18 @@ COPY --from=builder --chown=root:root /build/public ./public
 # The folder is copied as it is: Node runs the TypeScript files directly, they import nothing of the
 # app but better-sqlite3 (resolved from ./node_modules). app/Dockerfile.dockerignore keeps the tests out.
 COPY --from=builder --chown=root:root /build/src/backup ./backup
-# Two things the command line needs that the standalone server does not provide: a package.json
+# The operator's command line (`admin reset-password <email>`, see src/admin-cli/): the same kind of
+# folder, with the same two needs.
+COPY --from=builder --chown=root:root /build/src/admin-cli ./admin-cli
+# Two things the command lines need that the standalone server does not provide: a package.json
 # that marks the folder as ES modules (otherwise Node warns about re-parsing every file on every
 # run), and better-sqlite3 under its own name (the standalone output keeps it under a hashed name in
 # .next/node_modules, for the server only). The ls fails the build if the package is not found.
+# `admin` is the short name of the operator's command, on the PATH for `docker compose exec app admin ...`.
 RUN echo '{"type":"module"}' > backup/package.json \
+    && echo '{"type":"module"}' > admin-cli/package.json \
+    && printf '#!/bin/sh\nexec node /srv/app/admin-cli/cli.ts "$@"\n' > /usr/local/bin/admin \
+    && chmod 755 /usr/local/bin/admin \
     && cd node_modules \
     && ln -s "$(ls -d .pnpm/better-sqlite3@*/node_modules/better-sqlite3)" better-sqlite3
 # The sources stay root-owned and read-only for the app; only the runtime cache (ISR, image

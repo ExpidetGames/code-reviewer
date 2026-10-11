@@ -10,6 +10,8 @@ export type ShellUser = {
   login: string;
   /** The avatar address from the GitHub profile, if there is one. */
   avatarUrl?: string | null;
+  /** Whether the person is the instance admin: the menu then links to the admin portal. */
+  isInstanceAdmin?: boolean;
 };
 
 /** The name to show: the display name, or the login when the profile has none. */

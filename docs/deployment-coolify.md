@@ -274,6 +274,11 @@ Every start of the app prints a fresh 6-digit **setup code** in its log while th
 
 What to know:
 
+- **A lost admin password** (no mail server yet): run `admin reset-password <email>` inside the `app`
+  container (Coolify: the **Terminal** of the service `app`; plain Docker: `docker compose exec app admin
+  reset-password <email>`). It prints a link that sets a new password once, within 30 minutes, and signs the
+  account out everywhere. Whoever can open a shell in the container can do this; that is the proof of
+  operator rights.
 - The code is valid for **60 minutes**, works once, and the setup session that follows it lasts **30
   minutes**. If either runs out, **restart the app**: it prints a new code. A restart before the wizard is
   finished shows the wizard again from the start.
@@ -539,6 +544,7 @@ Do this once with the whole team in the room; it is the acceptance test of the d
 | Coolify refuses to deploy and highlights a variable | A required variable ([section 6](#6-environment-variables)) is empty. Enter it. |
 | The page asks for a setup code | The instance is not set up yet ([section 7](#the-first-run-setup)). Read the code in the `app` log. |
 | Sign in says "Too many sign-in attempts" | The email and password sign in allows about 5 attempts per 15 minutes per email address (and 100 per minute for the whole instance). Wait; a correct sign in starts the count again. Someone guessing against the admin address can keep it locked, which only costs them requests. |
+| Nobody can sign in as the admin | Run `admin reset-password <email>` in the `app` container ([section 7](#the-first-run-setup)) and open the link it prints. |
 | The setup says it is locked, or the code expired | Restart the app in Coolify: it prints a new code ([section 7](#the-first-run-setup)). |
 | `app` restarts in a loop, the log has one `[deploy]` or `[auth]` line | A setting is missing or invalid; the line names the variable. Typical: `APP_SECRET` (or `BETTER_AUTH_SECRET`) missing or shorter than 32 characters, `RUNNER_TOKEN` shorter than 32 characters, `BETTER_AUTH_URL` with `http://`. An unusable `GITHUB_APP_PRIVATE_KEY` does not stop the start; the log has a `GITHUB_APP_CONFIG_INVALID` line. |
 | The domain shows "No Available Server" or a 404 from the proxy | `app` is not healthy yet, or the domain lacks `:3000` or is attached to the wrong service ([Coolify: troubleshooting](https://coolify.io/docs/applications/builds/docker-compose#troubleshoot-an-unavailable-domain)). |

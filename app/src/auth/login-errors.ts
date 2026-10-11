@@ -30,6 +30,9 @@ const MESSAGES: Readonly<Record<string, string>> = {
     "Too many sign-in attempts. Wait up to 15 minutes and try again.",
   // The server could not decide (this is not a wrong password).
   unavailable: "Sign in is not available right now. Please try again later.",
+  // The admin switched this way of signing in off (Setup, Ways to sign in).
+  sign_in_method_disabled:
+    "This way of signing in is switched off on this instance. Use another one.",
   account_not_linked:
     "This GitHub account could not be matched to an existing user. Ask an administrator for help.",
 };

@@ -7,9 +7,13 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getAuth } from "./auth.ts";
 import { signInWithPasswordChecked } from "./password-sign-in.ts";
-import { getSignInLimiter } from "./sign-in-runtime.ts";
+import { getSignInLimiter, getSignInMethods } from "./sign-in-runtime.ts";
 
 export async function signInWithGithub(): Promise<void> {
+  // A way the admin switched off is off here too, not only on the login page. (redirect() works by
+  // throwing, so it stays outside the try block.)
+  if (!(await getSignInMethods()).github)
+    redirect("/login?error=sign_in_method_disabled");
   let githubUrl: string | undefined;
   try {
     const result = await getAuth().api.signInSocial({
@@ -37,6 +41,8 @@ export async function signOut(): Promise<void> {
  * answer, so the page does not tell which email addresses have an account.
  */
 export async function signInWithPassword(formData: FormData): Promise<void> {
+  if (!(await getSignInMethods()).emailPassword)
+    redirect("/login?error=sign_in_method_disabled");
   const email = formData.get("email");
   const password = formData.get("password");
   let error: string | null = "invalid_credentials";
