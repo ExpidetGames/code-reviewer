@@ -77,7 +77,14 @@ function parseEntries(
   return entries;
 }
 
-function parseSignUp(raw: unknown, issues: SetupIssue[]): SignUpRule | null {
+/**
+ * The sign-up rule of a request body (`{ kind, entries? }`), normalized, or null with the problems added
+ * to `issues` (fields `signUp` and `signUp.entries`). The wizard and the admin portal use the same one.
+ */
+export function parseSignUpRule(
+  raw: unknown,
+  issues: SetupIssue[],
+): SignUpRule | null {
   if (!isObject(raw)) {
     issues.push({ field: "signUp", code: "sign_up_rule_invalid" });
     return null;
@@ -122,7 +129,7 @@ export function parseSetupInput(body: unknown): ParsedSetupInput {
   if (tenancy !== "single" && tenancy !== "multi")
     issues.push({ field: "tenancy", code: "tenancy_invalid" });
 
-  const signUp = parseSignUp(body.signUp, issues);
+  const signUp = parseSignUpRule(body.signUp, issues);
 
   let email = "";
   let password = "";

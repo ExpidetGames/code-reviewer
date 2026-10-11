@@ -257,6 +257,37 @@ export interface RateLimitsTable {
   count: number;
 }
 
+/** An encrypted credential of the instance (src/db/repositories/secrets-repository.ts, src/secrets/). */
+export interface SecretsTable {
+  /** The secret's name; the row id that is bound into the ciphertext. */
+  name: string;
+  /** The encrypted value followed by the authentication tag, base64. */
+  ciphertext: string;
+  /** The random 96-bit nonce, base64. */
+  nonce: string;
+  /** The version of the derived key that encrypted it. */
+  key_version: number;
+  /** The last four characters of the value when the caller asked for the hint (not a secret), or null. */
+  last_four: string | null;
+  /** The id of the user who saved it last, or null. */
+  updated_by: string | null;
+  /** ISO 8601 text in UTC. */
+  updated_at: string;
+}
+
+/** A single-use link to set a new password; only the hash of the token is kept (src/auth/password-reset.ts). */
+export interface PasswordResetTokensTable {
+  /** SHA-256 of the token, hex. */
+  token_hash: string;
+  user_id: string;
+  /** ISO 8601 text in UTC. */
+  created_at: string;
+  /** ISO 8601 text in UTC. */
+  expires_at: string;
+  /** ISO 8601 text in UTC, or null while the token is unused. */
+  used_at: string | null;
+}
+
 export interface Database {
   app_meta: AppMetaTable;
   users: UsersTable;
@@ -275,4 +306,6 @@ export interface Database {
   app_settings: AppSettingsTable;
   instance_settings: InstanceSettingsTable;
   rate_limits: RateLimitsTable;
+  secrets: SecretsTable;
+  password_reset_tokens: PasswordResetTokensTable;
 }

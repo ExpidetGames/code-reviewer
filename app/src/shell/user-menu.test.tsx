@@ -32,6 +32,23 @@ function renderMenu(
   return render(<UserMenu user={user} signOutAction={signOut} />);
 }
 
+describe("the way to the admin portal", () => {
+  // #98-AD-03
+  it("is offered to the instance admin and to nobody else", async () => {
+    const user = userEvent.setup();
+    const admin = renderMenu({ ...ada, isInstanceAdmin: true });
+    await user.click(screen.getByRole("button", { name: /Ada Lovelace/ }));
+    const link = screen.getByRole("link", { name: "Admin" });
+    expect(link.getAttribute("href")).toBe("/admin");
+    admin.unmount();
+
+    renderMenu(ada);
+    await user.click(screen.getByRole("button", { name: /Ada Lovelace/ }));
+
+    expect(screen.queryByRole("link", { name: "Admin" })).toBeNull();
+  });
+});
+
 describe("opening the user menu", () => {
   // CR-36-T02
   it("shows the name and the sign out entry after the button is pressed", async () => {

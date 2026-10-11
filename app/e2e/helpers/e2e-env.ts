@@ -60,6 +60,7 @@ export const e2eEnv = {
     "inactive-journey",
     "runs-journey",
     "manual-journey",
+    "portal-journey",
   ].join(","),
   appSecret: "e2e-app-secret-0123456789-0123456789-abcdef",
   // The production server refuses to start without the runner token. A dummy: only the journey of

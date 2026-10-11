@@ -13,6 +13,9 @@ other small building blocks are in `src/ui/` and `src/app/globals.css`; the colo
 | `user-avatar.tsx` | The GitHub avatar (https only, no referrer) or the initials; never a broken image.                                                                                                                                                                                                                         |
 | `user-display.ts` | Display name (the login when the profile has no name), initials, `safeAvatarUrl`.                                                                                                                                                                                                                          |
 
+The user menu links to the admin portal (`/admin`, `src/admin/README.md`) for the instance admin only
+(`ShellUser.isInstanceAdmin`).
+
 The pages live in `src/app/(app)/` (route group, no effect on the URLs): `layout.tsx` wraps them in
 `AppShell`, `projects` (the list and, below
 it, `[repositoryId]` for the settings of one project), `runs` (the list and, below it, `[id]` for one

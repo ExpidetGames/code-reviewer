@@ -76,6 +76,11 @@ fail-closed while no verification path exists (no mail server and sign in is not
 ADR section 2.5); the wizard says so next to the choice. Nothing signs anybody up yet: the sign-up
 endpoint of Better Auth is switched off, the rule is only stored.
 
+## After the setup
+
+The admin lands in the admin portal (`src/admin/README.md`): it changes the tenancy, the sign-up rule and the
+ways to sign in there, and `admin reset-password` recovers a lost admin password.
+
 ## Tests
 
 `setup.integration.test.ts` drives the real proxy gate, the real routes' handlers and the real Better Auth

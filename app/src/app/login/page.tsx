@@ -4,7 +4,7 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import { signInWithGithub, signInWithPassword } from "@/auth/actions";
 import { loginErrorMessage } from "@/auth/login-errors";
-import { githubSignInConfigured } from "@/auth/sign-in-methods";
+import { getSignInMethods } from "@/auth/sign-in-runtime";
 import { Button } from "@/ui/button";
 
 export default function LoginPage({ searchParams }: PageProps<"/login">) {
@@ -17,6 +17,23 @@ export default function LoginPage({ searchParams }: PageProps<"/login">) {
         <Suspense fallback={null}>
           <LoginError searchParams={searchParams} />
         </Suspense>
+        {/* The ways to sign in are the admin's setting (Setup, Ways to sign in) and GitHub exists while
+            it is configured: both are read at request time, behind a boundary. */}
+        <Suspense fallback={null}>
+          <SignInForms />
+        </Suspense>
+      </div>
+    </main>
+  );
+}
+
+async function SignInForms() {
+  // Reads the database and the environment at request time (not when the page is built).
+  await connection();
+  const methods = await getSignInMethods();
+  return (
+    <>
+      {methods.emailPassword ? (
         <form action={signInWithPassword} className="login-form">
           <div className="field">
             <label htmlFor="login-email" className="field-label">
@@ -46,26 +63,15 @@ export default function LoginPage({ searchParams }: PageProps<"/login">) {
             Sign in
           </Button>
         </form>
-        {/* GitHub sign in exists while the GitHub OAuth app is configured; the setting is read from
-            the environment at request time, behind a boundary. */}
-        <Suspense fallback={null}>
-          <GithubSignIn />
-        </Suspense>
-      </div>
-    </main>
-  );
-}
-
-async function GithubSignIn() {
-  // Reads the environment at request time (not when the page is built).
-  await connection();
-  if (!githubSignInConfigured(process.env)) return null;
-  return (
-    <form action={signInWithGithub}>
-      <Button type="submit" variant="secondary" className="btn-block">
-        Sign in with GitHub
-      </Button>
-    </form>
+      ) : null}
+      {methods.github ? (
+        <form action={signInWithGithub}>
+          <Button type="submit" variant="secondary" className="btn-block">
+            Sign in with GitHub
+          </Button>
+        </form>
+      ) : null}
+    </>
   );
 }
 

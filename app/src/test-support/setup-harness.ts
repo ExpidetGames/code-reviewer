@@ -186,6 +186,9 @@ function assemble(
     /** How many times the follow-up step after a completed setup ran. */
     afterCompletedCount: () => afterCompletedCalls,
     visit,
+    /** The two proxies in front of every route, for harnesses that route requests themselves. */
+    gate,
+    access,
     /** What the server does at start: reads the state and prints the code (to `logs`). */
     async start() {
       const printed: string[] = [];

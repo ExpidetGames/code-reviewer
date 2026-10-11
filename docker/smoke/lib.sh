@@ -103,6 +103,49 @@ complete_setup() {
   [[ "$status" == "307 "*"/login" ]] || fail "after the setup the start page did not redirect to /login (got: $status)"
 }
 
+# #98-AD-01, #98-AD-17: the admin portal of a set up instance, in the built image. A visitor without a
+# session is sent to the login (a page) or gets 401 (the data route). The operator's command
+# `admin reset-password` prints a link; the link sets a new password once, ends the sessions, and the new
+# password signs in and reaches the portal. The same link a second time is refused. The new password is
+# random and never on a command line: it is sent from a file.
+# Usage: check_admin_portal <base url> <container>
+check_admin_portal() {
+  local base=$1 container=$2 status output link token password body jar
+  status=$(curl --silent --output /dev/null --write-out '%{http_code} %{redirect_url}' --max-time 10 "$base/admin")
+  [[ "$status" == "307 "*"/login" ]] || fail "/admin without a session did not redirect to /login (got: $status)"
+  status=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 "$base/api/admin/settings")
+  [ "$status" = 401 ] || fail "/api/admin/settings without a session did not answer 401 (got: $status)"
+
+  output=$(docker exec "$container" admin reset-password smoke-admin@example.test) ||
+    fail "admin reset-password failed: $output"
+  link=$(grep -m 1 '^http' <<<"$output") || fail "admin reset-password printed no link"
+  token=${link##*token=}
+  [[ "$token" =~ ^[A-Za-z0-9_-]{43}$ ]] || fail "the link has no well formed token"
+  password=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24 || true)
+  [ "${#password}" = 24 ] || fail "could not generate a password for the reset"
+  body=$(mktemp)
+  jar=$(mktemp)
+  printf '{"token":"%s","password":"%s"}' "$token" "$password" >"$body"
+  status=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 20 \
+    --header 'Content-Type: application/json' --data "@$body" "$base/api/password-reset")
+  [ "$status" = 200 ] || { rm -f "$body" "$jar"; fail "the reset link was not accepted (status $status)"; }
+  status=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 20 \
+    --header 'Content-Type: application/json' --data "@$body" "$base/api/password-reset")
+  [ "$status" = 400 ] || { rm -f "$body" "$jar"; fail "the reset link worked a second time (status $status)"; }
+
+  printf '{"email":"smoke-admin@example.test","password":"%s"}' "$password" >"$body"
+  status=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 20 --cookie-jar "$jar" \
+    --header 'Content-Type: application/json' --data "@$body" "$base/api/auth/sign-in/email")
+  rm -f "$body"
+  [ "$status" = 200 ] || { rm -f "$jar"; fail "the new password did not sign in (status $status)"; }
+  output=$(curl --silent --max-time 10 --cookie "$jar" "$base/api/admin/settings") ||
+    { rm -f "$jar"; fail "GET /api/admin/settings failed as the admin"; }
+  grep -q '"tenancy"' <<<"$output" || { rm -f "$jar"; fail "the admin settings are not what the portal answers"; }
+  status=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 --cookie "$jar" "$base/admin")
+  rm -f "$jar"
+  [ "$status" = 200 ] || fail "/admin as the admin did not answer 200 (got: $status)"
+}
+
 require_image() {
   docker image inspect "$1" >/dev/null 2>&1 || fail "image $1 does not exist locally (build it first)"
 }

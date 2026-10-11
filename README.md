@@ -77,6 +77,12 @@ one process, so do the setup with one app instance. An installation from before 
 its data: only the web UI waits, webhooks and the runner API keep working. How it works:
 `app/src/setup/README.md`.
 
+The admin portal at `/admin` (instance admin only; everybody else gets a 404) holds the settings of the
+instance: tenancy, sign-up rule, the ways to sign in and the limits, with who changed what and when.
+Credentials will be stored encrypted with a key derived from `APP_SECRET`. **A lost admin password** without
+a mail server: `docker compose exec app admin reset-password <email>` prints a single-use link valid for 30
+minutes. Details: `app/src/admin/README.md`.
+
 Signing in with email and password always exists (the admin). "Sign in with GitHub" exists while a
 GitHub OAuth app of your own is configured (`GITHUB_OAUTH_CLIENT_ID` and `GITHUB_OAUTH_CLIENT_SECRET`;
 GitHub > Settings > Developer settings > OAuth Apps; register
