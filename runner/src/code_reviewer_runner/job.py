@@ -49,7 +49,11 @@ MAX_CONTEXT_TOKENS = 10_000_000
 MAX_FALLBACK_MODELS = 5
 _FIELD_NAME = re.compile(r"[A-Za-z0-9_.-]{1,40}")
 _PR_PATH = re.compile(r"/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/pull/([1-9][0-9]{0,8})")
-_BOT_LOGIN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}(\[bot\])?")
+# The login the review app posts as: its slug (letters, digits and hyphens, not starting with a
+# hyphen, at most 39 characters) with the optional `[bot]` suffix that GitHub adds. Use `fullmatch`,
+# so that nothing may precede or follow it, not even a newline. The only definition: `parse_job` and
+# the identity patch (identity_patch.py) both validate with it.
+BOT_LOGIN_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}(\[bot\])?")
 _MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,199}")
 # `env` may only set the options of the four tools. An allowlist instead of a list of forbidden
 # keys: PR-Agent has many sections (litellm, openai, azure, push_outputs, ...) that route requests
@@ -198,7 +202,7 @@ def _git_access(data: dict[str, Any]) -> GitAccess:
     _checked_url(base_url, "git.baseUrl")
     token = _secret(git, "token", "git.")
     bot_login = _string(git, "botLogin", "git.")
-    if not _BOT_LOGIN.fullmatch(bot_login):
+    if not BOT_LOGIN_PATTERN.fullmatch(bot_login):
         raise _invalid("git.botLogin must be an app slug, optionally with the [bot] suffix")
     return GitAccess(
         provider=provider,
