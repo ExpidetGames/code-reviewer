@@ -101,6 +101,8 @@ github.fail({
   responseDelayMs: 300,
   times: 1,
 }); // a slow answer that reflects the state when the request arrived (GitHub App API answers)
+github.fail({ pathIncludes: "/pulls/", hang: true }); // never answers; stays open until the client gives up
+github.abortedRequests(); // requests the client closed before an answer was complete (an aborted request, not one merely no longer waited for)
 github.requests(); // method and path of every request, no credentials
 github.seenCredentials(); // every JWT or token received, to search outputs for leaks
 github.reset(); // all state, the request log and the injected failures (not failTokenEndpoint / failMembershipEndpoint)

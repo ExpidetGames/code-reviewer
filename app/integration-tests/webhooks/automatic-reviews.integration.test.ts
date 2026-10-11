@@ -405,6 +405,74 @@ describe("a pull request that is pushed to", () => {
     expect(t.routeLog.join("\n")).toContain("HEAD_CHECK_TIMEOUT");
   });
 
+  it("aborts the head check request when the timeout fires, and still enqueues the push", async () => {
+    let received: AbortSignal | undefined;
+    let abortedWhenFired = false;
+    const t = await startHarness({
+      headCheckTimeoutMs: 20,
+      wrapProvider: (provider) => ({
+        ...provider,
+        // Like a real client: stays open until the signal aborts it.
+        getPullRequest: (_integration, _repo, _prNumber, signal) => {
+          received = signal;
+          return new Promise((_resolve, reject) => {
+            signal?.addEventListener("abort", () => {
+              abortedWhenFired = true;
+              reject(new Error("aborted"));
+            });
+          });
+        },
+      }),
+    });
+
+    const response = await t.send("pull_request.synchronize");
+
+    expect(await body(response)).toMatchObject({ outcome: "trigger_enqueued" });
+    expect(received).toBeDefined();
+    expect(abortedWhenFired).toBe(true);
+    expect(await t.jobs()).toMatchObject([
+      { headSha: HEAD_1, status: "queued" },
+    ]);
+    expect(t.routeLog.join("\n")).toContain("HEAD_CHECK_TIMEOUT");
+  });
+
+  it("closes the connection to GitHub when the head check times out, and still enqueues the push", async () => {
+    const t = await startHarness({ headCheckTimeoutMs: 100 });
+    // The pull request read never gets an answer.
+    t.h.fake.fail({ pathIncludes: "/pulls/", hang: true });
+
+    const response = await t.send("pull_request.synchronize");
+
+    expect(await body(response)).toMatchObject({ outcome: "trigger_enqueued" });
+    const deadline = Date.now() + 5000;
+    while (t.h.fake.abortedRequests().length === 0 && Date.now() < deadline)
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(t.h.fake.abortedRequests()).toEqual([
+      { method: "GET", path: "/repos/acme/widgets/pulls/7" },
+    ]);
+    expect(await t.jobs()).toMatchObject([
+      { headSha: HEAD_1, status: "queued" },
+    ]);
+  });
+
+  it("does not abort the head check request when GitHub answers in time", async () => {
+    let received: AbortSignal | undefined;
+    const t = await startHarness({
+      wrapProvider: (provider) => ({
+        ...provider,
+        getPullRequest: (integration, repo, prNumber, signal) => {
+          received = signal;
+          return provider.getPullRequest(integration, repo, prNumber, signal);
+        },
+      }),
+    });
+
+    const response = await t.send("pull_request.synchronize");
+
+    expect(await body(response)).toMatchObject({ outcome: "trigger_enqueued" });
+    expect(received?.aborted).toBe(false);
+  });
+
   it.each(["pull_request.reopened", "pull_request.ready_for_review"])(
     "does not let a late %s for an older commit replace the waiting job of the newest",
     async (fixture) => {

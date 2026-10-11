@@ -623,6 +623,31 @@ describe("pull requests", () => {
       FAKE_PULL_REQUEST,
     ]);
   });
+
+  it("hands the abort signal of the caller to the client when reading one pull request", async () => {
+    const { provider, client } = setup();
+    const signal = new AbortController().signal;
+
+    await provider.getPullRequest(integration, widgets, 7, signal);
+
+    expect(client.calls).toEqual([
+      { method: "getPullRequest", args: ["4242", "acme/widgets", 7, signal] },
+    ]);
+  });
+
+  it("hands the abort signal of the caller to the client when listing the open pull requests", async () => {
+    const { provider, client } = setup();
+    const signal = new AbortController().signal;
+
+    await provider.listOpenPullRequests(integration, widgets, signal);
+
+    expect(client.calls).toEqual([
+      {
+        method: "listOpenPullRequests",
+        args: ["4242", "acme/widgets", signal],
+      },
+    ]);
+  });
 });
 
 describe("listing the open pull requests when GitHub refuses", () => {
