@@ -22,4 +22,4 @@ only. Nothing here logs, and no error message contains a secret, a key or a ciph
   without it loses every stored credential. The operator can decrypt every secret by design.
 - Rotating `APP_SECRET` (a re-encryption command) is not part of this milestone; the stored key version is
   what a rotation will build on.
-- The secret store (table `secrets`) that uses `secret-box.ts` comes with the admin portal issue.
+- The secret store (table `secrets`) that uses `secret-box.ts` is `src/secrets/` (see `src/admin/README.md`).
