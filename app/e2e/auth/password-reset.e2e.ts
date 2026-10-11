@@ -69,7 +69,7 @@ test.describe("resetting a password by mail", () => {
   });
 
   // #100-SM-10, #100-SM-13
-  test("@smoke a person who forgot the password asks for a link, chooses a new password from the mail and signs in with it", async ({
+  test("a person who forgot the password asks for a link, chooses a new password from the mail and signs in with it", async ({
     page,
   }) => {
     await askForALink(page, ADDRESS);
