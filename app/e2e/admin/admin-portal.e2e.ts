@@ -7,6 +7,7 @@
 // and sees who changed it. The rules behind are proven as integration tests (src/admin/).
 import { expect, test, type Page } from "@playwright/test";
 import { e2eEnv } from "../helpers/e2e-env";
+import { rawRequest } from "../helpers/raw-request";
 import {
   addGithubAccount,
   signInThroughTheForm,
@@ -19,6 +20,106 @@ const member: GithubAccount = {
   name: "Portal Journey",
   email: "portal-journey@example.test",
 };
+
+const MISSING = "/there-is-no-such-page";
+
+// The files of the portal by their own address (src/admin/paths.ts): nobody asks for them, so they
+// have to answer as a path that is not there, including spellings the router reads the same way.
+const INTERNAL_PATHS = [
+  "/instance-portal",
+  "/instance-portal/setup",
+  "/instance-portal/mail",
+  "/%69nstance-portal",
+  "/instance-portal/./setup",
+  "/api/instance-portal/settings",
+];
+
+// Everything an observer sees of an answer (status, every header with its name exactly as written,
+// the body), apart from what differs for every request.
+function observe(
+  page: Page,
+  path: string,
+  init: {
+    method?: string;
+    headers?: Record<string, string>;
+    data?: unknown;
+  } = {},
+) {
+  const body =
+    init.data === undefined
+      ? undefined
+      : typeof init.data === "string"
+        ? init.data
+        : JSON.stringify(init.data);
+  return rawRequest(page, e2eEnv.appUrl, path, {
+    ...(init.method === undefined ? {} : { method: init.method }),
+    headers: {
+      ...(body !== undefined && typeof init.data !== "string"
+        ? { "content-type": "application/json" }
+        : {}),
+      ...init.headers,
+    },
+    ...(body === undefined ? {} : { body }),
+  });
+}
+
+/**
+ * Asks for each path the way a browser, a client navigation, a prefetch, a script and a write do, and
+ * expects the answer of `MISSING` to the same request: the status, the headers (their names as written
+ * and their values, `Cache-Control` included), the body, and nothing that says a proxy or a rewrite
+ * was involved.
+ */
+async function expectTheAnswerOfAMissingPath(
+  page: Page,
+  paths: string[],
+): Promise<void> {
+  const reads: Array<[string, string, Record<string, string>]> = [
+    ["a page request", "GET", {}],
+    ["an RSC request (client navigation)", "GET", { RSC: "1" }],
+    ["an RSC prefetch", "GET", { RSC: "1", "Next-Router-Prefetch": "1" }],
+    ["a request for JSON", "GET", { Accept: "application/json" }],
+    ["a HEAD request", "HEAD", {}],
+    ["an OPTIONS request", "OPTIONS", {}],
+  ];
+  for (const [label, method, headers] of reads) {
+    const expected = await observe(page, MISSING, { method, headers });
+    expect(expected.status, label).toBe(404);
+    for (const path of paths) {
+      const answer = await observe(page, path, { method, headers });
+      expect(answer.status, `${label} ${path}`).toBe(expected.status);
+      expect(answer.lines, `${label} ${path}`).toEqual(expected.lines);
+      expect(answer.body, `${label} ${path}`).toBe(expected.body);
+      // The answer of a rewrite made by the proxy would carry this. (`x-nextjs-rewritten-path` is on an
+      // RSC answer of every missing path, see next.config.ts, so the comparison above covers it.)
+      expect(answer.headers["x-middleware-rewrite"]).toBeUndefined();
+      // Depends on who asks, so no shared cache may keep it.
+      expect(answer.headers["cache-control"]).toContain("no-store");
+    }
+  }
+
+  // Writes, and a Server Function posted to the path, get what a missing path gives them.
+  const writes: Array<{
+    method: string;
+    headers?: Record<string, string>;
+    data: unknown;
+  }> = [
+    { method: "PUT", data: { tenancy: "multi" } },
+    { method: "POST", data: {} },
+    { method: "DELETE", data: "" },
+    {
+      method: "POST",
+      headers: { "Next-Action": "00abc", "Content-Type": "text/plain" },
+      data: "[]",
+    },
+  ];
+  for (const init of writes) {
+    const expected = await observe(page, MISSING, init);
+    for (const path of paths) {
+      const answer = await observe(page, path, init);
+      expect(answer, `${init.method} ${path}`).toEqual(expected);
+    }
+  }
+}
 
 async function signInAsAdmin(page: Page): Promise<void> {
   await page.goto("/login");
@@ -107,87 +208,21 @@ test.describe("the admin portal", () => {
     page,
   }) => {
     await signInThroughTheForm(page, member);
-    // Everything an observer sees of an answer, apart from what differs for every request.
-    const seen = async (
-      path: string,
-      init: {
-        method?: string;
-        headers?: Record<string, string>;
-        data?: unknown;
-      } = {},
-    ) => {
-      const response = await page.request.fetch(path, {
-        maxRedirects: 0,
-        ...init,
-      });
-      const headers = Object.fromEntries(
-        Object.entries(response.headers()).filter(
-          ([name]) => !["date", "content-length", "etag"].includes(name),
-        ),
-      );
-      return {
-        status: response.status(),
-        headers,
-        body: await response.text(),
-      };
-    };
-    const missing = "/there-is-no-such-page";
-    const variants: Array<[string, Record<string, string>]> = [
-      ["a page request", {}],
-      ["an RSC request (client navigation)", { RSC: "1" }],
-      ["an RSC prefetch", { RSC: "1", "Next-Router-Prefetch": "1" }],
-      ["a request for JSON", { Accept: "application/json" }],
-    ];
 
-    for (const [label, headers] of variants) {
-      const expected = await seen(missing, { headers });
-      expect(expected.status, label).toBe(404);
-      for (const path of [
-        "/admin",
-        "/admin/setup",
-        "/admin/mail",
-        "/%61dmin",
-        "/api/admin/settings",
-      ]) {
-        const answer = await seen(path, { headers });
-        expect(answer.status, `${label} ${path}`).toBe(expected.status);
-        expect(answer.headers, `${label} ${path}`).toEqual(expected.headers);
-        expect(answer.body, `${label} ${path}`).toBe(expected.body);
-        expect(answer.headers["x-middleware-rewrite"]).toBeUndefined();
-        expect(answer.headers["x-nextjs-rewritten-path"]).toBeUndefined();
-        // Depends on who asks, so no shared cache may keep it.
-        expect(answer.headers["cache-control"]).toContain("no-store");
-      }
-    }
+    await expectTheAnswerOfAMissingPath(page, [
+      "/admin",
+      "/admin/setup",
+      "/admin/mail",
+      "/%61dmin",
+      "/api/admin/settings",
+    ]);
 
     // A trailing slash is redirected to the path without it, as for any other path.
-    const slash = await seen("/admin/", { headers: {} });
-    const slashMissing = await seen(`${missing}/`, { headers: {} });
+    const slash = await observe(page, "/admin/", {});
+    const slashMissing = await observe(page, `${MISSING}/`, {});
     expect(slash.status).toBe(slashMissing.status);
     expect(slash.headers.location).toBe("/admin");
-    expect(slashMissing.headers.location).toBe(missing);
-
-    // Writes, and a Server Function posted to a portal page, get what a missing path gives them.
-    for (const init of [
-      { method: "PUT", data: { tenancy: "multi" } },
-      { method: "POST", data: {} },
-      {
-        method: "POST",
-        headers: { "Next-Action": "00abc", "Content-Type": "text/plain" },
-        data: "[]",
-      },
-    ]) {
-      const expected = await seen(missing, init);
-      for (const path of ["/admin/setup", "/api/admin/settings"]) {
-        const answer = await seen(path, init);
-        expect(answer, `${init.method} ${path}`).toEqual(expected);
-      }
-    }
-
-    // The files of the portal by their own address are no way in either (nobody uses it, so only the
-    // status is compared).
-    for (const path of ["/instance-portal", "/api/instance-portal/settings"])
-      expect((await seen(path)).status, path).toBe(404);
+    expect(slashMissing.headers.location).toBe(MISSING);
 
     // And in the browser: the 404 page, no portal, no way to it in the menu.
     const visit = await page.goto("/admin");
@@ -198,6 +233,68 @@ test.describe("the admin portal", () => {
     await page.goto("/projects");
     await page.getByRole("button", { name: member.name }).click();
     await expect(page.getByRole("link", { name: "Admin" })).toHaveCount(0);
+  });
+
+  // #138
+  test("the files of the portal by their own address are a missing path to a person who is not an admin, in every detail", async ({
+    page,
+  }) => {
+    await signInThroughTheForm(page, member);
+
+    await expectTheAnswerOfAMissingPath(page, INTERNAL_PATHS);
+
+    // A trailing slash is redirected to the path without it, as for any other path.
+    const slash = await observe(page, "/instance-portal/", {});
+    expect(slash.status).toBe((await observe(page, `${MISSING}/`, {})).status);
+    expect(slash.headers.location).toBe("/instance-portal");
+
+    // Next.js's own files keep their own answer (the rewrite of missing paths leaves them out).
+    const asset = await observe(page, "/_next/static/chunks/no-such-file.js");
+    expect(asset.status).toBe(404);
+    expect(asset.headers["x-nextjs-rewritten-path"]).toBeUndefined();
+  });
+
+  // #138
+  test("the header that marks a request as one for a missing path does nothing on the paths the proxy does not see", async ({
+    page,
+    request,
+  }) => {
+    await signInThroughTheForm(page, member);
+    // Found in the page of the app, so the files exist whatever the build is called.
+    const html = await (await request.get("/login")).text();
+    const script = /\/_next\/static\/[^"']+\.js/.exec(html)?.[0];
+    expect(script).toBeDefined();
+    const image = `/_next/image?url=${encodeURIComponent("/favicon.ico")}&w=32&q=75`;
+
+    for (const path of [script ?? "", image, "/favicon.ico"]) {
+      const marked = await observe(page, path, {
+        headers: { "x-portal-denied": "1" },
+      });
+      expect((await observe(page, path)).status, path).toBe(200);
+      expect(marked.status, path).toBe(200);
+    }
+    // The marker makes a page that is seen by the proxy a missing one for the requester alone: the proxy
+    // takes it off first.
+    expect(
+      (
+        await observe(page, "/projects", {
+          headers: { "x-portal-denied": "1" },
+        })
+      ).status,
+    ).toBe(200);
+  });
+
+  // #138
+  test("the files of the portal by their own address are a missing path to the instance admin too, in every detail", async ({
+    page,
+  }) => {
+    await signInAsAdmin(page);
+
+    await expectTheAnswerOfAMissingPath(page, INTERNAL_PATHS);
+
+    // The address the admin uses still works.
+    const portal = await page.goto("/admin");
+    expect(portal?.status()).toBe(200);
   });
 
   // #98-AD-17
