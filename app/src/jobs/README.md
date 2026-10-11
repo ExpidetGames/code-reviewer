@@ -60,7 +60,9 @@ reported).
    only one job per pull request runs at a time.
 
 `run_after` is `now` unless the caller passes a later time (the debounce of `synchronize` is policy and
-is decided by the webhook handler's trigger policy, CR-31). A manual job is due at once.
+is decided by the webhook handler's trigger policy, CR-31). A manual job is due at once. The start button
+(CR-33, `src/manual-reviews/README.md`) is the producer of `manual` jobs; it passes the head commit and the
+pull request address it got from the platform and the login of the signed in person.
 
 Unique indexes enforce the promises even if the code were wrong: one job per delivery id, one answer
 per comment of a repository (the primary key of `job_comments`, migration `20261011090000_create_job_comments`),

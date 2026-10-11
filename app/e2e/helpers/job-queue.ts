@@ -61,6 +61,22 @@ export async function claimNextRun(runnerId = "e2e-runner"): Promise<{
   return { id: claim.job.id, leaseToken: claim.leaseToken };
 }
 
+/**
+ * What a runner does for one run it knows: takes jobs from the queue, oldest first, until it holds
+ * the job with this id (jobs of other journeys that wait in front of it are taken on the way and left
+ * running; those journeys do not run at the same time, see playwright.config.ts).
+ */
+export async function claimRun(
+  jobId: string,
+  runnerId = "e2e-runner",
+): Promise<{ id: string; leaseToken: string }> {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const claim = await claimNextRun(runnerId);
+    if (claim.id === jobId) return claim;
+  }
+  throw new Error(`The job ${jobId} was never handed out.`);
+}
+
 /** What a runner reports at the end. */
 export async function completeRun(
   claim: { id: string; leaseToken: string },

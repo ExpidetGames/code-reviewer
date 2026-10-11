@@ -50,6 +50,8 @@ export function fixturePullRequest(
 export async function startWebhookHarness(
   options: {
     maxBodyBytes?: number;
+    /** How long one request to the fake GitHub may take (default: 5 seconds). */
+    requestTimeoutMs?: number;
     env?: Record<string, string | undefined>;
     /** Changes the real provider, for example to make `canTrigger` refuse. */
     wrapProvider?: (provider: IntegrationProvider) => IntegrationProvider;
@@ -61,9 +63,12 @@ export async function startWebhookHarness(
     now?: () => Date;
   } = {},
 ) {
-  const base = await startSyncHarness(
-    options.env === undefined ? {} : { env: options.env },
-  );
+  const base = await startSyncHarness({
+    ...(options.env === undefined ? {} : { env: options.env }),
+    ...(options.requestTimeoutMs === undefined
+      ? {}
+      : { requestTimeoutMs: options.requestTimeoutMs }),
+  });
   const github = base.registry.resolve("github_app");
   const provider = options.wrapProvider?.(github) ?? github;
   // Spies on the calls that matter for the order of the route's steps.

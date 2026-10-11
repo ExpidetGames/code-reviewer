@@ -27,6 +27,7 @@ export const e2eEnv = {
     "nav-journey",
     "projects-journey",
     "runs-journey",
+    "manual-journey",
   ].join(","),
   authSecret: "e2e-auth-secret-0123456789-0123456789-abcdef",
   // The GitHub App of the app under test. Only the webhook secret matters to the journeys (they

@@ -38,6 +38,8 @@ const PROTECTED_ROUTES = [
 const PROTECTED_DATA_ROUTES = [
   "/api/repositories/[repositoryId]/project",
   "/api/repositories/[repositoryId]/project/settings",
+  "/api/repositories/[repositoryId]/pull-requests",
+  "/api/repositories/[repositoryId]/reviews",
   "/api/review-settings",
   "/api/integrations/sync",
   "/api/runs",

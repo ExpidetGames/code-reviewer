@@ -14,6 +14,7 @@ vi.mock("next/navigation", () => ({
 import type { SessionUser } from "../../auth/access-policy.ts";
 import { describeConfigStatus } from "../../config-status/status.ts";
 import { createProjectsRepository } from "../../db/repositories/projects-repository.ts";
+import type { ManualReviewApi } from "../../manual-reviews/ui/api.ts";
 import { createReviewSettingsRouteHandlers } from "../../review-settings/http.ts";
 import { createProjectSettingsApi } from "../../review-settings/ui/api.ts";
 import { setupReviewSettings } from "../../test-support/review-settings-harness.ts";
@@ -25,6 +26,26 @@ import {
 } from "./project-settings-page.tsx";
 
 afterEach(cleanup);
+
+// The "Review now" panel loads pull requests when it is shown; these tests are about the settings,
+// so it gets a repository without any.
+const quietManualReviews: ManualReviewApi = {
+  listPullRequests: async () => ({
+    ok: true,
+    data: {
+      repositoryId: "repo",
+      fullName: "acme/widgets",
+      allowedCommands: ["review", "improve", "describe", "ask"],
+      pullRequests: [],
+    },
+  }),
+  startReview: async () => ({
+    ok: false,
+    status: 500,
+    code: "UNEXPECTED_RESPONSE",
+    issues: [],
+  }),
+};
 
 const WORKING_ENV = {
   ...testGithubAppEnv(),
@@ -74,7 +95,13 @@ describe("the settings page of a repository that is not a project yet", () => {
     const data = await app.load();
     if (data.kind === "not_found") throw new Error("expected the repository");
 
-    render(<ProjectSettingsPageContent data={data} api={app.api} />);
+    render(
+      <ProjectSettingsPageContent
+        data={data}
+        api={app.api}
+        manualReviewApi={quietManualReviews}
+      />,
+    );
 
     expect(data.kind).toBe("no_project");
     expect(
@@ -118,7 +145,13 @@ describe("the settings page of a project", () => {
 
     expect(data.model.effective.maxFindings).toBe(3);
     expect(data.model.effective.maxTokens).toBe(50_000);
-    render(<ProjectSettingsPageContent data={data} api={app.api} />);
+    render(
+      <ProjectSettingsPageContent
+        data={data}
+        api={app.api}
+        manualReviewApi={quietManualReviews}
+      />,
+    );
     const own = screen
       .getByLabelText("Most findings per review")
       .closest(".field") as HTMLElement;
@@ -135,7 +168,11 @@ describe("the settings page of a project", () => {
     const before = await app.load();
     if (before.kind !== "ready") throw new Error("expected a project");
     const view = render(
-      <ProjectSettingsPageContent data={before} api={app.api} />,
+      <ProjectSettingsPageContent
+        data={before}
+        api={app.api}
+        manualReviewApi={quietManualReviews}
+      />,
     );
     expect(
       (screen.getByLabelText("Token budget") as HTMLInputElement).value,
@@ -144,7 +181,13 @@ describe("the settings page of a project", () => {
     await app.service.updateGlobalSettings({ maxTokens: 70_000 }, "octocat");
     const after = await app.load();
     if (after.kind !== "ready") throw new Error("expected a project");
-    view.rerender(<ProjectSettingsPageContent data={after} api={app.api} />);
+    view.rerender(
+      <ProjectSettingsPageContent
+        data={after}
+        api={app.api}
+        manualReviewApi={quietManualReviews}
+      />,
+    );
 
     const field = screen
       .getByLabelText("Token budget")
@@ -162,7 +205,13 @@ describe("the settings page of a project", () => {
     const running = await app.service.resolveForRepository(app.first.id);
     const data = await app.load();
     if (data.kind !== "ready") throw new Error("expected a project");
-    render(<ProjectSettingsPageContent data={data} api={app.api} />);
+    render(
+      <ProjectSettingsPageContent
+        data={data}
+        api={app.api}
+        manualReviewApi={quietManualReviews}
+      />,
+    );
 
     const findings = screen.getByLabelText("Most findings per review");
     await user.clear(findings);
@@ -188,7 +237,13 @@ describe("the settings page of a project", () => {
     const data = await app.load();
     if (data.kind !== "ready") throw new Error("expected a project");
     // A budget the model cannot hold: the client check passes, the service refuses.
-    render(<ProjectSettingsPageContent data={data} api={app.api} />);
+    render(
+      <ProjectSettingsPageContent
+        data={data}
+        api={app.api}
+        manualReviewApi={quietManualReviews}
+      />,
+    );
 
     const model = screen.getByLabelText("Model");
     await user.clear(model);
@@ -207,6 +262,51 @@ describe("the settings page of a project", () => {
     expect(await app.projectRows()).toEqual(before);
   });
 
+  it("offers the Review now panel for the repository of an active project", async () => {
+    const app = await openProject();
+    const data = await app.load();
+    if (data.kind !== "ready") throw new Error("expected a project");
+    const asked: string[] = [];
+
+    render(
+      <ProjectSettingsPageContent
+        data={data}
+        api={app.api}
+        manualReviewApi={{
+          ...quietManualReviews,
+          listPullRequests: async (repositoryId) => {
+            asked.push(repositoryId);
+            return quietManualReviews.listPullRequests(repositoryId);
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Review now" })).toBeTruthy();
+    await screen.findByText(/There are no open pull requests/);
+    expect(asked).toEqual([app.first.id]);
+  });
+
+  it("offers no Review now panel while the project is switched off, and says why", async () => {
+    const app = await openProject();
+    await app.projects.deactivateProject(app.first.id);
+    const data = await app.load();
+    if (data.kind !== "ready") throw new Error("expected a project");
+
+    render(
+      <ProjectSettingsPageContent
+        data={data}
+        api={app.api}
+        manualReviewApi={quietManualReviews}
+      />,
+    );
+
+    expect(screen.queryByRole("heading", { name: "Review now" })).toBeNull();
+    expect(
+      screen.getByText(/started by hand only while the project is active/),
+    ).toBeTruthy();
+  });
+
   // CR-34-T13
   it("renders a repository name with HTML as text", async () => {
     const app = await openProject();
@@ -219,7 +319,11 @@ describe("the settings page of a project", () => {
     if (data.kind === "not_found") throw new Error("expected the repository");
 
     const { container } = render(
-      <ProjectSettingsPageContent data={data} api={app.api} />,
+      <ProjectSettingsPageContent
+        data={data}
+        api={app.api}
+        manualReviewApi={quietManualReviews}
+      />,
     );
 
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
