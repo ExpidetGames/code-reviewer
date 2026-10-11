@@ -63,10 +63,12 @@ trap cleanup EXIT
 # restart prints a new one, so pass only the log of the start in question).
 # Usage: setup_code_from_log <log text>
 setup_code_from_log() {
-  local log=$1 count
-  count=$(grep -cE 'Setup code: [0-9]{6}\b' <<<"$log" || true)
+  local log=$1 count code
+  count=$(grep -cE 'Setup code: [0-9]{6}( |$)' <<<"$log" || true)
   [ "$count" = 1 ] || fail "expected exactly one setup code line in the log, found $count"
-  sed -nE 's/.*Setup code: ([0-9]{6})\b.*/\1/p' <<<"$log"
+  code=$(sed -nE 's/.*Setup code: ([0-9]{6})( .*|$)/\1/p' <<<"$log")
+  [[ "$code" =~ ^[0-9]{6}$ ]] || fail "could not read the setup code from the log"
+  printf '%s' "$code"
 }
 
 # Enters the code and finishes the wizard (single-tenant, everyone may sign up, an admin with a
@@ -80,7 +82,9 @@ complete_setup() {
   jar=$(mktemp)
   body=$(mktemp)
   # A throwaway password, 24 random letters and digits: far from any list of common passwords.
-  password=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24)
+  # (`|| true`: with pipefail, tr dies of SIGPIPE when head has its 24 characters.)
+  password=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24 || true)
+  [ "${#password}" = 24 ] || fail "could not generate a password for the admin"
   printf '{"code":"%s"}' "$code" >"$body"
   status=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 \
     --cookie-jar "$jar" --header 'Content-Type: application/json' --data "@$body" "$base/api/setup/code")

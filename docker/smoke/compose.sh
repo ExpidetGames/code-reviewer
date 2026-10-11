@@ -185,7 +185,7 @@ health=$(curl --silent --fail --max-time 5 "http://127.0.0.1:$port/api/health") 
 # smoke script of an instance says that the instance is not set up yet.
 step "the fresh stack prints one setup code and waits for the setup"
 base="http://127.0.0.1:$port"
-code=$(setup_code_from_log "$(dc logs --no-color app 2>&1)")
+code=$(setup_code_from_log "$(dc logs --no-color app 2>&1)") || exit 1
 curl --silent --max-time 5 "$base/" | grep -q 'Set up Code Reviewer' || fail "the start page does not show the setup"
 for path in /api/projects /api/webhooks/github-app /api/runners/v1/claim; do
   answer=$(curl --silent --max-time 5 --write-out ' %{http_code}' --request POST "$base$path")
@@ -199,6 +199,10 @@ grep -q 'not set up yet' <<<"$not_set_up" || fail "instance.sh does not say that
 # #97-SU-11, #97-SU-14: finish the setup the way a person does (through the API here).
 step "the setup can be finished"
 complete_setup "$base" "$code"
+# The runner started while the instance was waiting for the setup and was refused with 503 until now
+# ("trying again"): that is right, and it is not what the next check is about. It looks at what the
+# runner logs from here on.
+runner_lines_before_setup_ended=$(dc logs --no-color runner 2>&1 | wc -l)
 
 # CR-39-T01, CR-51-T01: the smoke test of a running instance, here against the stack on its published
 # port, including the check that the runner API refuses a request without a token.
@@ -221,7 +225,7 @@ mount=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/data"}}
 step "the runner starts its job loop and polls the app without a failure"
 wait_until "the runner to log that it started" 30 runner_has_started
 sleep 12
-runner_log=$(dc logs --no-color runner 2>&1)
+runner_log=$(dc logs --no-color runner 2>&1 | tail -n "+$((runner_lines_before_setup_ended + 1))")
 if log_has_trouble "$runner_log"; then
   printf '%s\n' "$runner_log" >&2
   fail "the runner log reports a failing connection to the app"

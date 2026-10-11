@@ -231,7 +231,8 @@ After changing a variable, save and **Restart** (only runtime values changed) or
    runner starts only after the app reports healthy.
 2. In Coolify, `app` must show **healthy** and `runner` **running**. The log of the `runner` has a line like
    `runner runner-3f2a started: 3 slots` and, after that, no `trying again in ...` warning: those mean that
-   the app cannot be reached or refuses the runner's token. The app's health check is
+   the app cannot be reached or refuses the runner's token. (On a new instance the warning says `HTTP 503`
+   until the first-run setup below is finished: the runner API waits for it, and the runner keeps trying.) The app's health check is
    `GET /api/health` inside the container; it reads the database. If the app never becomes healthy,
    open its logs and read the last lines first: a missing or invalid setting stops the start with one
    line that names the variable (for example `[deploy] DEPLOY_CONFIG_INVALID` or an `[auth]` line),

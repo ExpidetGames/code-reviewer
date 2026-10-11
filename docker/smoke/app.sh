@@ -73,7 +73,7 @@ grep -qi '<html' <<<"$body" || fail "the start page did not return HTML"
 # setup_required, the health route reads the database.
 step "a fresh instance prints one setup code, shows the setup and gates the rest"
 logs=$(docker logs "$container" 2>&1)
-code=$(setup_code_from_log "$logs")
+code=$(setup_code_from_log "$logs") || exit 1
 start_page=$(curl --silent --max-time 5 "http://127.0.0.1:$port/")
 grep -q 'Set up Code Reviewer' <<<"$start_page" || fail "the start page does not show the setup"
 grep -qF "$code" <<<"$start_page" && fail "the setup code is in the start page"

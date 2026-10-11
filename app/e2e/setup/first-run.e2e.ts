@@ -28,7 +28,9 @@ test.describe("the first-run setup", () => {
     // A wrong code is refused with a sentence, and nothing about it.
     await page.getByLabel("Setup code").fill("000000");
     await page.getByRole("button", { name: "Continue" }).click();
-    await expect(page.getByRole("alert")).toContainText("not correct");
+    await expect(
+      page.getByRole("alert").filter({ hasText: "not correct" }),
+    ).toBeVisible();
 
     // The right one opens the wizard.
     await page.getByLabel("Setup code").fill(code);
@@ -43,7 +45,7 @@ test.describe("the first-run setup", () => {
     ).toBeVisible();
     await page.getByRole("radio", { name: /Allowed email domains/ }).check();
     await expect(page.getByText(/nobody except you can sign up/)).toBeVisible();
-    await page.getByLabel("Domains").fill("e2e.test");
+    await page.getByLabel("Domains", { exact: true }).fill("e2e.test");
     await page.getByRole("button", { name: "Next" }).click();
 
     await expect(
@@ -54,7 +56,9 @@ test.describe("the first-run setup", () => {
     await page.getByLabel("Password", { exact: true }).fill("password1234");
     await page.getByLabel("Repeat the password").fill("password1234");
     await page.getByRole("button", { name: "Finish setup" }).click();
-    await expect(page.getByRole("alert")).toContainText("too common");
+    await expect(
+      page.getByRole("alert").filter({ hasText: "too common" }),
+    ).toBeVisible();
 
     await page
       .getByLabel("Password", { exact: true })
@@ -87,7 +91,9 @@ test.describe("the first-run setup", () => {
     await page.getByLabel("Email address").fill(e2eEnv.adminEmail);
     await page.getByLabel("Password").fill("not-the-right-password-1");
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
-    await expect(page.getByRole("alert")).toContainText("not correct");
+    await expect(
+      page.getByRole("alert").filter({ hasText: "not correct" }),
+    ).toBeVisible();
 
     await page.getByLabel("Email address").fill(e2eEnv.adminEmail);
     await page.getByLabel("Password").fill(e2eEnv.adminPassword);

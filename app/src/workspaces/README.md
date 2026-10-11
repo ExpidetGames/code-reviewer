@@ -33,11 +33,16 @@ members, invitations, the switcher and any UI come with the workspaces feature.
 ## The current workspace (temporary)
 
 Until workspace switching exists, every signed-in user works in **the default workspace**: the oldest
-workspace, which the migration made for an installation that had data. **A database that has no
-workspace yet (a fresh installation) gets one the first time something needs it**
-(`WorkspacesRepository.ensureDefault`, safe against two requests at once), so that today's flow
-(sign in, sync from GitHub, activate a repository) keeps working until the first-run setup creates the
-workspace itself. Who may sign in is still decided by the existing access policy, so nobody gains
-access. The workspaces feature replaces `resolveCurrentWorkspaceId` with the lookup of the user's
-membership and removes `ensureDefault` from the request path; nothing else has to change, because
+workspace, which the migration made for an installation that had data, or which the first-run setup made
+(single-tenant: "Default workspace", with the admin as Owner, `src/setup/complete.ts`). Who may sign in is
+still decided by the existing access policy, so nobody gains access. The workspaces feature replaces
+`resolveCurrentWorkspaceId` with the lookup of the user's membership; nothing else has to change, because
 everything below already asks for a workspace id.
+
+**The resolver does not create a workspace while the instance is not set up** (`resolveDefaultWorkspaceId`
+in `current-workspace.ts`): the setup decides whether an instance has one, so it throws
+`WorkspaceUnavailableError` (`WORKSPACE_NOT_AVAILABLE`) instead. An existing installation is not affected:
+its workspace exists from the migration, and webhooks and the runner API keep working in it while the
+setup is open. Once the instance is set up and still has no workspace (multi-tenant, where nobody can create
+one yet), the default workspace is made on first use (`WorkspacesRepository.ensureDefault`, safe against two
+requests at once); that last path goes away together with this file.
