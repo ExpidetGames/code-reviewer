@@ -54,8 +54,7 @@ export type ResolvedSmtp = {
 };
 
 export type SaveSmtpResult =
-  | { ok: true }
-  | { ok: false; error: "invalid_input"; issues: SetupIssue[] };
+  { ok: true } | { ok: false; error: "invalid_input"; issues: SetupIssue[] };
 
 export type SmtpConfigStore = {
   /** Whether the instance has a mail server. One cheap read. */

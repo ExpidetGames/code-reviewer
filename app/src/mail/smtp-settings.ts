@@ -159,10 +159,12 @@ export function parseSmtpInput(raw: unknown): ParseSmtpResult {
 
   let password: SmtpPasswordChange = { kind: "keep" };
   if (raw.password !== undefined && raw.password !== null) {
-    if (typeof raw.password !== "string") refuse("password", "password_invalid");
+    if (typeof raw.password !== "string")
+      refuse("password", "password_invalid");
     else if (raw.password.length > SMTP_PASSWORD_MAX_LENGTH)
       refuse("password", "password_too_long");
-    else if (/[\r\n\0]/.test(raw.password)) refuse("password", "password_invalid");
+    else if (/[\r\n\0]/.test(raw.password))
+      refuse("password", "password_invalid");
     else if (raw.password !== "") {
       if (clear === true) refuse("password", "password_conflict");
       password = { kind: "set", value: raw.password };

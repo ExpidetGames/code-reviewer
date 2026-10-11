@@ -153,7 +153,11 @@ describe("the cleanup of old rows", () => {
   it("removes reset links that expired or were used a week ago, and keeps the rest", async () => {
     const { db, now } = await setup();
     const keep = PASSWORD_RESET_TOKEN_KEEP_MS;
-    const link = (hash: string, expiresAt: number, usedAt: number | null = null) =>
+    const link = (
+      hash: string,
+      expiresAt: number,
+      usedAt: number | null = null,
+    ) =>
       db
         .insertInto("password_reset_tokens")
         .values({

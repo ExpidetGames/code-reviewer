@@ -19,9 +19,15 @@ export type InboxMessage = {
 
 /** Every message the fake SMTP server accepted, oldest first (only those to `address` when given). */
 export async function readInbox(address?: string): Promise<InboxMessage[]> {
-  const query = address === undefined ? "" : `?to=${encodeURIComponent(address)}`;
-  const response = await fetch(`${e2eEnv.smtp.controlUrl}/__fake/messages${query}`);
-  if (!response.ok) throw new Error(`The fake SMTP server answered ${String(response.status)}.`);
+  const query =
+    address === undefined ? "" : `?to=${encodeURIComponent(address)}`;
+  const response = await fetch(
+    `${e2eEnv.smtp.controlUrl}/__fake/messages${query}`,
+  );
+  if (!response.ok)
+    throw new Error(
+      `The fake SMTP server answered ${String(response.status)}.`,
+    );
   return (await response.json()) as InboxMessage[];
 }
 
@@ -73,7 +79,9 @@ export async function messageTo(
   await expect
     .poll(
       async () => {
-        found = (await readInbox(address)).filter((message) => message.subject === subject).at(-1);
+        found = (await readInbox(address))
+          .filter((message) => message.subject === subject)
+          .at(-1);
         return found !== undefined;
       },
       { message: `a mail "${subject}" to ${address}` },

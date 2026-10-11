@@ -168,8 +168,7 @@ export function createAdminService({
         methods?.updatedBy,
         maxWorkspaces?.updatedBy,
         mailServer.updatedBy,
-      ]
-        .filter((id): id is string => typeof id === "string");
+      ].filter((id): id is string => typeof id === "string");
       const emails = await emailsOf([...new Set(ids)]);
       const view = <T>(
         meta: { updatedBy: string | null; updatedAt: string } | undefined,

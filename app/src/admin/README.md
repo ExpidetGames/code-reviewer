@@ -8,12 +8,12 @@ the first-run setup that creates the admin is `src/setup/`.
 | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `paths.ts`                          | `isAdminPath`: which request paths belong to the portal (any spelling Next.js would route there)                                                                                                                                     |
 | `access.ts`, `session.ts`           | Who may enter: `adminAccessOf` (admin, anonymous, not an admin), `lookupAdmin` and `requireAdmin` for the code that runs inside a request                                                                                            |
-| `service.ts`                        | The typed settings service: `readSettings` (every setting with who and when, the secret statuses, the facts of the overview) and the four changes (tenancy, sign-up rule, ways to sign in, limits)                                   |
+| `service.ts`                        | The typed settings service: `readSettings` (every setting with who and when, the secret statuses, the facts of the overview) and the changes (tenancy, sign-up rule, ways to sign in, limits, the mail server) and the test mail     |
 | `tenancy.ts`                        | The change of the tenancy, one transaction (the rules below)                                                                                                                                                                         |
 | `sign-in-methods.ts`                | The rules for the ways to sign in, and what is actually on (`effectiveSignInMethods`)                                                                                                                                                |
 | `sign-up-rule-state.ts`             | Whether an email or domain rule is fail-closed right now (no mail server, and sign-in is not GitHub only), and whether the instance can verify addresses at all; the sign-up reads the same functions (`src/signup/availability.ts`) |
-| `http.ts`, `errors.ts`, `shared.ts` | The handlers of `GET\|PUT /api/admin/settings`, their stable error codes, and the wiring of the running server                                                                                                                       |
-| `ui/`                               | The pages' building blocks: navigation, overview, the four forms, the copy for the error codes. Pages: `src/app/(app)/admin/`                                                                                                        |
+| `http.ts`, `errors.ts`, `shared.ts` | The handlers of `GET\|PUT /api/admin/settings` and `POST /api/admin/mail/test`, their stable error codes, and the wiring of the running server                                                                                       |
+| `ui/`                               | The pages' building blocks: navigation, overview, the forms (tenancy, sign-up rule, ways to sign in, limits, mail server with the test mail button), the copy for the error codes. Pages: `src/app/(app)/instance-portal/`           |
 
 The command line for a lost admin password is `src/admin-cli/` (below).
 
@@ -56,12 +56,13 @@ forms call the data route, which is also where the cross-site check lives).
 Stored in `instance_settings` (JSON values; `updated_by` and `updated_at` on every row, shown under each
 setting). Nothing saved reads as the default.
 
-| Setting                   | Values                                        | Rules                                                                                                                                                                                                                                                                            |
-| ------------------------- | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `tenancy`                 | `single`, `multi`                             | single to multi always; multi to single only while at most one workspace exists (none: the default workspace is created and the acting admin is its Owner), otherwise `too_many_workspaces` with the count. The count and the write are one transaction.                         |
-| `sign_up_rule`            | `everyone`, a list of emails, allowed domains | Always changeable; same validation as the wizard. Affects new accounts and invitations only. A rule that names emails or domains shows a notice while it is fail-closed.                                                                                                         |
-| `sign_in_methods`         | `{ emailPassword, github }`                   | At least one stays on (`at_least_one_method`); GitHub only while configured (`github_not_configured`); GitHub only needs a linked GitHub identity of the acting admin (`admin_needs_github_identity`). Enforced at the sign-in (`src/auth/http.ts`, the login page and actions). |
-| `max_workspaces_per_user` | integer 1 to 1000, default 10                 | Stored here, enforced by the workspaces issue.                                                                                                                                                                                                                                   |
+| Setting                   | Values                                          | Rules                                                                                                                                                                                                                                                                                                                  |
+| ------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tenancy`                 | `single`, `multi`                               | single to multi always; multi to single only while at most one workspace exists (none: the default workspace is created and the acting admin is its Owner), otherwise `too_many_workspaces` with the count. The count and the write are one transaction.                                                               |
+| `sign_up_rule`            | `everyone`, a list of emails, allowed domains   | Always changeable; same validation as the wizard. Affects new accounts and invitations only. A rule that names emails or domains shows a notice while it is fail-closed.                                                                                                                                               |
+| `sign_in_methods`         | `{ emailPassword, github }`                     | At least one stays on (`at_least_one_method`); GitHub only while configured (`github_not_configured`); GitHub only needs a linked GitHub identity of the acting admin (`admin_needs_github_identity`). Enforced at the sign-in (`src/auth/http.ts`, the login page and actions).                                       |
+| `max_workspaces_per_user` | integer 1 to 1000, default 10                   | Stored here, enforced by the workspaces issue.                                                                                                                                                                                                                                                                         |
+| `smtp`                    | host, port, security, user, sender, self-signed | The mail server; the password is the secret `smtp_password`. Rules, the security modes and the test mail are in `src/mail/README.md`. Removing it (`{ "smtp": null }`) is allowed at any time; the sign-up rules that depend on it become fail-closed again (`sign-up-rule-state.ts`) and the portal shows the notice. |
 
 Two admins saving the same setting at once end with one complete write (one statement per setting): the
 value and the admin belong together.
@@ -99,7 +100,7 @@ GitHub issue of the portal moves it into the database and changes only `getAdmin
 - A secret that cannot be decrypted (a changed row, another `APP_SECRET`, an unknown key version) is the
   state `undecryptable` with the code `secret_undecryptable` or `secret_key_version_unknown`. Nothing throws
   and nothing logs; the overview tells the admin to enter it again.
-- There is no HTTP route that saves a secret yet; the mail and GitHub forms of the next issues use the store.
+- The mail form saves the SMTP password through `PUT /api/admin/settings` (`{ "smtp": { ..., "password": "..." } }`); an empty or missing password keeps the stored one, `clearPassword` removes it, and the answer, the settings read back and every log line say only that one is set (`configured`), cannot be read (`unreadable`) or is missing (`none`). The GitHub form of the next issue uses the store the same way.
 
 ## A lost admin password
 
@@ -113,7 +114,7 @@ unknown, used, expired or changed token gets one answer, `invalid_token`. The ro
 the credential). It is rate limited per link, not for the instance: attempts against a token that exists
 are counted in `rate_limits` (key `password-reset:<hash>`, 10 in the 30 minutes a link lives); a token that
 does not exist gets the same generic answer and touches no counter, so junk requests cannot lock the
-operator out of the recovery path. With a mail server the reset mail of the SMTP issue ends in the same function.
+operator out of the recovery path. With a mail server the reset mail (`POST /api/password-reset/request`, `src/auth/password-reset-request.ts`) ends in the same function.
 
 If the admin had switched email with password sign-in off, the command switches it back on, prints one line
 saying so, and records the system (`updated_by` null) as the one who changed it: a new password is of no

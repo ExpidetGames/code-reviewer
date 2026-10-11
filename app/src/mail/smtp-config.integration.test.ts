@@ -33,7 +33,10 @@ async function start(appSecret: string = APP_SECRET) {
   const secrets = createSecretStore({ db, appSecret });
   const store = createSmtpConfigStore({ db, secrets });
   const reopened = (secret: string) =>
-    createSmtpConfigStore({ db, secrets: createSecretStore({ db, appSecret: secret }) });
+    createSmtpConfigStore({
+      db,
+      secrets: createSecretStore({ db, appSecret: secret }),
+    });
   return { db, secrets, store, reopened };
 }
 
@@ -105,7 +108,11 @@ describe("the stored mail server settings", () => {
     const { secrets, store } = await start();
     await store.save("admin-1", INPUT);
 
-    const kept = await store.save("admin-1", { ...INPUT, password: "", port: 2525 });
+    const kept = await store.save("admin-1", {
+      ...INPUT,
+      password: "",
+      port: 2525,
+    });
     const afterKeep = await secrets.use("smtp_password");
     const portAfterKeep = (await store.view()).settings?.port;
     const cleared = await store.save("admin-1", {
@@ -118,7 +125,9 @@ describe("the stored mail server settings", () => {
     expect(afterKeep.ok && afterKeep.value.reveal()).toBe(PASSWORD);
     expect(portAfterKeep).toBe(2525);
     expect(cleared).toEqual({ ok: true });
-    expect(await secrets.status("smtp_password")).toMatchObject({ state: "not_configured" });
+    expect(await secrets.status("smtp_password")).toMatchObject({
+      state: "not_configured",
+    });
     expect((await store.view()).password).toBe("none");
     expect((await store.resolve())?.password.state).toBe("none");
   });
@@ -127,7 +136,10 @@ describe("the stored mail server settings", () => {
     const { secrets, store } = await start();
     await store.save("admin-1", INPUT);
 
-    await store.save("admin-1", { ...INPUT, password: "another-password-value" });
+    await store.save("admin-1", {
+      ...INPUT,
+      password: "another-password-value",
+    });
 
     const used = await secrets.use("smtp_password");
     expect(used.ok && used.value.reveal()).toBe("another-password-value");
@@ -136,7 +148,10 @@ describe("the stored mail server settings", () => {
   it("asks for the password when a login is set and there is none, and saves nothing", async () => {
     const { store } = await start();
 
-    const result = await store.save("admin-1", { ...INPUT, password: undefined });
+    const result = await store.save("admin-1", {
+      ...INPUT,
+      password: undefined,
+    });
 
     expect(result).toEqual({
       ok: false,
@@ -151,7 +166,11 @@ describe("the stored mail server settings", () => {
     const refused = await store.save("admin-1", { ...INPUT, user: undefined });
     await store.save("admin-1", INPUT);
 
-    const saved = await store.save("admin-1", { ...INPUT, user: "", password: undefined });
+    const saved = await store.save("admin-1", {
+      ...INPUT,
+      user: "",
+      password: undefined,
+    });
 
     expect(refused).toEqual({
       ok: false,
@@ -159,7 +178,9 @@ describe("the stored mail server settings", () => {
       issues: [{ field: "password", code: "user_required" }],
     });
     expect(saved).toEqual({ ok: true });
-    expect(await secrets.status("smtp_password")).toMatchObject({ state: "not_configured" });
+    expect(await secrets.status("smtp_password")).toMatchObject({
+      state: "not_configured",
+    });
     expect((await store.resolve())?.password.state).toBe("none");
   });
 
@@ -190,7 +211,10 @@ describe("the stored mail server settings", () => {
       issues: [{ field: "password", code: "password_required" }],
     });
     // Entering it again repairs it.
-    const entered = await other.save("admin-1", { ...INPUT, password: "entered-again-value" });
+    const entered = await other.save("admin-1", {
+      ...INPUT,
+      password: "entered-again-value",
+    });
     expect(entered).toEqual({ ok: true });
     expect((await other.view()).password).toBe("configured");
   });
@@ -204,7 +228,13 @@ describe("the stored mail server settings", () => {
 
     expect(await store.isConfigured()).toBe(false);
     expect(await db.selectFrom("secrets").selectAll().execute()).toEqual([]);
-    expect(await db.selectFrom("instance_settings").selectAll().where("key", "=", "smtp").execute()).toEqual([]);
+    expect(
+      await db
+        .selectFrom("instance_settings")
+        .selectAll()
+        .where("key", "=", "smtp")
+        .execute(),
+    ).toEqual([]);
   });
 
   it("treats stored settings that no longer pass the rules as no mail server", async () => {
@@ -228,7 +258,12 @@ describe("the stored mail server settings", () => {
 
     // The user name is a setting and is shown; the password has no field at all.
     expect(view.settings?.user).toBe("mailer");
-    expect(Object.keys(view).sort()).toEqual(["password", "settings", "updatedAt", "updatedBy"]);
+    expect(Object.keys(view).sort()).toEqual([
+      "password",
+      "settings",
+      "updatedAt",
+      "updatedBy",
+    ]);
     expect(Object.keys(view.settings ?? {})).not.toContain("password");
   });
 });

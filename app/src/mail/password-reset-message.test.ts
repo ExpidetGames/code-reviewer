@@ -4,13 +4,16 @@
 // in the query, the message says what the link does and for how long, and it holds nothing else that is
 // secret (never a password, never the old one).
 import { describe, expect, it } from "vitest";
-import { passwordResetLink, passwordResetMessage } from "./password-reset-message.ts";
+import {
+  passwordResetLink,
+  passwordResetMessage,
+} from "./password-reset-message.ts";
 
 describe("the password reset link", () => {
   it("is built from the configured address of the app with the token in the query", () => {
-    expect(passwordResetLink("https://reviews.example.com", "abc_DEF-123")).toBe(
-      "https://reviews.example.com/reset-password?token=abc_DEF-123",
-    );
+    expect(
+      passwordResetLink("https://reviews.example.com", "abc_DEF-123"),
+    ).toBe("https://reviews.example.com/reset-password?token=abc_DEF-123");
   });
 
   it("keeps a path in the configured address out of the way of the page", () => {
@@ -24,7 +27,11 @@ describe("the password reset message", () => {
   const LINK = "https://reviews.example.com/reset-password?token=t";
 
   it("is addressed to one recipient and holds the link, the time and the advice to ignore it in both bodies", () => {
-    const message = passwordResetMessage({ to: "a@example.com", link: LINK, validForMinutes: 30 });
+    const message = passwordResetMessage({
+      to: "a@example.com",
+      link: LINK,
+      validForMinutes: 30,
+    });
 
     expect(message.to).toBe("a@example.com");
     expect(message.subject).toBe("Reset your password");
@@ -47,7 +54,11 @@ describe("the password reset message", () => {
   });
 
   it("carries no address of the recipient in the subject, so nothing about the account is in a header line", () => {
-    const message = passwordResetMessage({ to: "a@example.com", link: LINK, validForMinutes: 30 });
+    const message = passwordResetMessage({
+      to: "a@example.com",
+      link: LINK,
+      validForMinutes: 30,
+    });
 
     expect(message.subject).not.toContain("a@example.com");
   });

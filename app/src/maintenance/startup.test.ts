@@ -10,7 +10,11 @@ import {
 } from "./startup.ts";
 
 function fixture(
-  run: () => Promise<{ rateLimits: number; verificationTokens: number; passwordResetTokens: number }>,
+  run: () => Promise<{
+    rateLimits: number;
+    verificationTokens: number;
+    passwordResetTokens: number;
+  }>,
 ) {
   let fire: () => void = () => undefined;
   const stopped = vi.fn();
@@ -25,7 +29,11 @@ function fixture(
 describe("the cleanup timer", () => {
   it("runs once at the start and then at every tick, every hour", async () => {
     const f = fixture(() =>
-      Promise.resolve({ rateLimits: 0, verificationTokens: 0, passwordResetTokens: 0 }),
+      Promise.resolve({
+        rateLimits: 0,
+        verificationTokens: 0,
+        passwordResetTokens: 0,
+      }),
     );
 
     startCleanup(f);
@@ -42,10 +50,18 @@ describe("the cleanup timer", () => {
 
   it("says how many rows it removed, and says nothing when there were none", async () => {
     const some = fixture(() =>
-      Promise.resolve({ rateLimits: 3, verificationTokens: 1, passwordResetTokens: 0 }),
+      Promise.resolve({
+        rateLimits: 3,
+        verificationTokens: 1,
+        passwordResetTokens: 0,
+      }),
     );
     const none = fixture(() =>
-      Promise.resolve({ rateLimits: 0, verificationTokens: 0, passwordResetTokens: 0 }),
+      Promise.resolve({
+        rateLimits: 0,
+        verificationTokens: 0,
+        passwordResetTokens: 0,
+      }),
     );
 
     startCleanup(some);
@@ -64,7 +80,11 @@ describe("the cleanup timer", () => {
       calls += 1;
       return calls === 1
         ? Promise.reject(new Error("secret detail"))
-        : Promise.resolve({ rateLimits: 0, verificationTokens: 0, passwordResetTokens: 0 });
+        : Promise.resolve({
+            rateLimits: 0,
+            verificationTokens: 0,
+            passwordResetTokens: 0,
+          });
     });
 
     startCleanup(f);
@@ -80,7 +100,11 @@ describe("the cleanup timer", () => {
 
   it("stops the timer", () => {
     const f = fixture(() =>
-      Promise.resolve({ rateLimits: 0, verificationTokens: 0, passwordResetTokens: 0 }),
+      Promise.resolve({
+        rateLimits: 0,
+        verificationTokens: 0,
+        passwordResetTokens: 0,
+      }),
     );
 
     startCleanup(f).stop();
@@ -90,7 +114,11 @@ describe("the cleanup timer", () => {
 
   it("runs only in production", () => {
     const f = fixture(() =>
-      Promise.resolve({ rateLimits: 0, verificationTokens: 0, passwordResetTokens: 0 }),
+      Promise.resolve({
+        rateLimits: 0,
+        verificationTokens: 0,
+        passwordResetTokens: 0,
+      }),
     );
 
     expect(

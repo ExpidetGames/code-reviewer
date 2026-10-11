@@ -38,7 +38,7 @@ function oid(dotted: string): Buffer {
   const bytes: number[] = [first * 40 + second];
   for (const arc of rest) {
     const chunk = [arc % 128];
-    for (let value = Math.floor(arc / 128); value > 0; )
+    for (let value = Math.floor(arc / 128); value > 0;)
       (chunk.unshift((value % 128) | 0x80), (value = Math.floor(value / 128)));
     bytes.push(...chunk);
   }
@@ -47,7 +47,8 @@ function oid(dotted: string): Buffer {
 
 function integer(value: Buffer): Buffer {
   // A leading zero keeps a number with the high bit set from reading as negative.
-  const body = (value[0] ?? 0) & 0x80 ? Buffer.concat([Buffer.alloc(1), value]) : value;
+  const body =
+    (value[0] ?? 0) & 0x80 ? Buffer.concat([Buffer.alloc(1), value]) : value;
   return der(INTEGER, body);
 }
 
@@ -130,9 +131,7 @@ export function createSelfSignedCertificate(
     der(BIT_STRING, Buffer.concat([Buffer.alloc(1), signature])),
   );
   return {
-    key: privateKey
-      .export({ type: "pkcs8", format: "pem" })
-      .toString(),
+    key: privateKey.export({ type: "pkcs8", format: "pem" }).toString(),
     cert: pem("CERTIFICATE", certificate),
   };
 }

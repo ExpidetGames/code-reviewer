@@ -37,12 +37,16 @@ describe("the form that asks for a reset link", () => {
     await ask(fetchImpl);
 
     await waitFor(() =>
-      expect(screen.getByRole("status").textContent).toContain("Check your inbox"),
+      expect(screen.getByRole("status").textContent).toContain(
+        "Check your inbox",
+      ),
     );
     expect(screen.getByRole("status").textContent).toContain("If this address");
     const call = vi.mocked(fetchImpl).mock.calls[0];
     expect(call?.[0]).toBe("/api/password-reset/request");
-    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ email: "person@example.com" });
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+      email: "person@example.com",
+    });
   });
 
   // #100-SM-11

@@ -94,7 +94,11 @@ const DEFAULT_BEHAVIOR: SmtpFakeBehavior = {
   authFailure: "Authentication credentials invalid",
 };
 
-function listen(server: net.Server, host: string, port: number): Promise<number> {
+function listen(
+  server: net.Server,
+  host: string,
+  port: number,
+): Promise<number> {
   return new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(port, host, () => {
@@ -192,9 +196,16 @@ export async function startSmtpFake(
             reply("250 fake.smtp.test");
             return;
           }
-          const lines = ["250-fake.smtp.test", "250-8BITMIME", "250-SIZE 10485760"];
+          const lines = [
+            "250-fake.smtp.test",
+            "250-8BITMIME",
+            "250-SIZE 10485760",
+          ];
           if (offerStartTls && !session.secure) lines.push("250-STARTTLS");
-          if (auth !== null && (session.secure || options.authRequiresTls !== true))
+          if (
+            auth !== null &&
+            (session.secure || options.authRequiresTls !== true)
+          )
             lines.push("250-AUTH PLAIN LOGIN");
           // Every line but the last has a dash after the code.
           for (const entry of lines) reply(entry);
@@ -221,7 +232,10 @@ export async function startSmtpFake(
           return;
         }
         case "AUTH": {
-          if (auth === null || (options.authRequiresTls === true && !session.secure)) {
+          if (
+            auth === null ||
+            (options.authRequiresTls === true && !session.secure)
+          ) {
             reply("504 5.5.4 Authentication not available");
             return;
           }
@@ -362,7 +376,9 @@ export async function startSmtpFake(
   let secureServer: tls.Server | null = null;
   let tlsPort: number | null = null;
   if (options.tlsPort !== null) {
-    secureServer = tls.createServer(certificate, (socket) => serve(socket, true));
+    secureServer = tls.createServer(certificate, (socket) =>
+      serve(socket, true),
+    );
     tlsPort = await listen(secureServer, host, options.tlsPort ?? 0);
   }
 

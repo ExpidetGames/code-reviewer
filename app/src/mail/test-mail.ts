@@ -55,7 +55,10 @@ export function testMessage(to: string, baseUrl: string): MailMessage {
       .replaceAll("&", "&amp;")
       .replaceAll("<", "&lt;")
       .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")} to check the mail server settings. If you can read it, the settings work. Nobody needs to answer.</p>`,
+      .replaceAll(
+        '"',
+        "&quot;",
+      )} to check the mail server settings. If you can read it, the settings work. Nobody needs to answer.</p>`,
   ].join("\n");
   return { to, subject: "Test mail from Code Reviewer", text, html };
 }
@@ -107,7 +110,11 @@ export function createTestMailService({
       );
       if (result.ok) return { ok: true };
       log(`[mail] TEST_MAIL_FAILED: ${result.failure.code}`);
-      return { ok: false, error: result.failure.code, detail: result.failure.detail };
+      return {
+        ok: false,
+        error: result.failure.code,
+        detail: result.failure.detail,
+      };
     },
   };
 }

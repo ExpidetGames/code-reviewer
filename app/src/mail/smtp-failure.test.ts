@@ -11,25 +11,98 @@ import {
 } from "./smtp-failure.ts";
 
 function error(properties: Record<string, unknown>): Error {
-  return Object.assign(new Error(String(properties.message ?? "boom")), properties);
+  return Object.assign(
+    new Error(String(properties.message ?? "boom")),
+    properties,
+  );
 }
 
 describe("the classes of failure of a mail server", () => {
   // #100-SM-05
   it.each([
-    [{ code: "EDNS", message: "getaddrinfo ENOTFOUND mail.example.com" }, "dns_failure"],
-    [{ code: "ESOCKET", message: "getaddrinfo EAI_AGAIN mail.example.com" }, "dns_failure"],
-    [{ code: "ESOCKET", message: "connect ECONNREFUSED 127.0.0.1:1", errno: -61 }, "connection_refused"],
-    [{ code: "ECONNECTION", message: "connect ECONNREFUSED 10.0.0.5:25" }, "connection_refused"],
-    [{ code: "ESOCKET", message: "self-signed certificate; if the root CA is installed locally" }, "tls_error"],
+    [
+      { code: "EDNS", message: "getaddrinfo ENOTFOUND mail.example.com" },
+      "dns_failure",
+    ],
+    [
+      { code: "ESOCKET", message: "getaddrinfo EAI_AGAIN mail.example.com" },
+      "dns_failure",
+    ],
+    [
+      {
+        code: "ESOCKET",
+        message: "connect ECONNREFUSED 127.0.0.1:1",
+        errno: -61,
+      },
+      "connection_refused",
+    ],
+    [
+      { code: "ECONNECTION", message: "connect ECONNREFUSED 10.0.0.5:25" },
+      "connection_refused",
+    ],
+    [
+      {
+        code: "ESOCKET",
+        message: "self-signed certificate; if the root CA is installed locally",
+      },
+      "tls_error",
+    ],
     [{ code: "ESOCKET", message: "certificate has expired" }, "tls_error"],
-    [{ code: "ESOCKET", message: "Hostname/IP does not match certificate's altnames" }, "tls_error"],
-    [{ code: "ESOCKET", message: "0A00010B:SSL routines:tls_validate_record_header:wrong version number" }, "tls_error"],
-    [{ code: "ETLS", command: "STARTTLS", response: "502 5.5.1 STARTTLS not available" }, "tls_error"],
-    [{ code: "EAUTH", command: "AUTH PLAIN", response: "535 5.7.8 Authentication credentials invalid" }, "auth_failed"],
-    [{ code: "EENVELOPE", command: "MAIL FROM", response: "550 5.7.1 Sender denied" }, "sender_rejected"],
-    [{ code: "EENVELOPE", command: "RCPT TO", response: "550 5.1.1 no such user" }, "recipient_rejected"],
-    [{ code: "ETIMEDOUT", command: "CONN", message: "Greeting never received" }, "timeout"],
+    [
+      {
+        code: "ESOCKET",
+        message: "Hostname/IP does not match certificate's altnames",
+      },
+      "tls_error",
+    ],
+    [
+      {
+        code: "ESOCKET",
+        message:
+          "0A00010B:SSL routines:tls_validate_record_header:wrong version number",
+      },
+      "tls_error",
+    ],
+    [
+      {
+        code: "ETLS",
+        command: "STARTTLS",
+        response: "502 5.5.1 STARTTLS not available",
+      },
+      "tls_error",
+    ],
+    [
+      {
+        code: "EAUTH",
+        command: "AUTH PLAIN",
+        response: "535 5.7.8 Authentication credentials invalid",
+      },
+      "auth_failed",
+    ],
+    [
+      {
+        code: "EENVELOPE",
+        command: "MAIL FROM",
+        response: "550 5.7.1 Sender denied",
+      },
+      "sender_rejected",
+    ],
+    [
+      {
+        code: "EENVELOPE",
+        command: "RCPT TO",
+        response: "550 5.1.1 no such user",
+      },
+      "recipient_rejected",
+    ],
+    [
+      {
+        code: "ETIMEDOUT",
+        command: "CONN",
+        message: "Greeting never received",
+      },
+      "timeout",
+    ],
     [{ code: "ESOCKET", message: "Socket timed out" }, "timeout"],
     [{ code: "ETIMEOUT", message: "Connection timeout" }, "timeout"],
     [{ code: "ECONNRESET", message: "read ECONNRESET" }, "unknown"],
@@ -46,7 +119,14 @@ describe("the classes of failure of a mail server", () => {
 
   it("only ever produces a code of the stable set", () => {
     const codes = [
-      "EDNS", "ESOCKET", "ECONNECTION", "ETLS", "EAUTH", "EENVELOPE", "ETIMEDOUT", "EWHATEVER",
+      "EDNS",
+      "ESOCKET",
+      "ECONNECTION",
+      "ETLS",
+      "EAUTH",
+      "EENVELOPE",
+      "ETIMEDOUT",
+      "EWHATEVER",
     ].map((code) => classifySmtpError(error({ code }), []).code);
 
     for (const code of codes) expect(SMTP_FAILURE_CODES).toContain(code);
@@ -54,7 +134,11 @@ describe("the classes of failure of a mail server", () => {
 
   it("explains a certificate problem in its own words and not in the library's", () => {
     const failure = classifySmtpError(
-      error({ code: "ESOCKET", message: "self-signed certificate; if the root CA is installed locally, try running Node.js with --use-system-ca" }),
+      error({
+        code: "ESOCKET",
+        message:
+          "self-signed certificate; if the root CA is installed locally, try running Node.js with --use-system-ca",
+      }),
       [],
     );
 
@@ -64,7 +148,10 @@ describe("the classes of failure of a mail server", () => {
 
   it("quotes the server's own answer for a refusal, cleaned", () => {
     const failure = classifySmtpError(
-      error({ code: "EAUTH", response: "535 5.7.8 Authentication credentials invalid" }),
+      error({
+        code: "EAUTH",
+        response: "535 5.7.8 Authentication credentials invalid",
+      }),
       [],
     );
 
@@ -100,14 +187,19 @@ describe("the classes of failure of a mail server", () => {
 
 describe("the cleaning of a server's answer", () => {
   it("keeps the first line, as printable text, at most 200 characters", () => {
-    expect(sanitizeServerMessage("550 first line\r\n550 second line", [])).toBe("550 first line");
+    expect(sanitizeServerMessage("550 first line\r\n550 second line", [])).toBe(
+      "550 first line",
+    );
     expect(sanitizeServerMessage("word ".repeat(100), [])).toHaveLength(200);
     expect(sanitizeServerMessage("café\u0007 ‮ bidi", [])).toBe("caf? ? bidi");
   });
 
   it("replaces long opaque tokens, which can be an encoded credential", () => {
     expect(
-      sanitizeServerMessage("334 AHVzZXJAZXhhbXBsZS5jb20AaHVudGVyMmh1bnRlcjI=", []),
+      sanitizeServerMessage(
+        "334 AHVzZXJAZXhhbXBsZS5jb20AaHVudGVyMmh1bnRlcjI=",
+        [],
+      ),
     ).toBe("334 [redacted]");
   });
 

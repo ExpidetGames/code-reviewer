@@ -84,7 +84,7 @@ a mail server: `docker compose exec app admin reset-password <email>` prints a s
 minutes. Details: `app/src/admin/README.md`.
 
 **Signing up.** `/sign-up` creates an account with an email address and a password when the sign-up rule
-lets the address in. With a mail server (the SMTP settings come with a later issue) every email and
+lets the address in. With a mail server (set up in the admin portal under Mail: SMTP host, port, STARTTLS or TLS, login, sender; the password is stored encrypted and never shown; a test mail button tells why it fails) every email and
 password account has to confirm its address with a link before it can sign in or act (the admin keeps
 `/admin` meanwhile); without one nothing can be confirmed, and the rule "everyone" works at once. A rule
 that names emails or domains stays closed until addresses can be verified. A new account belongs to no

@@ -82,7 +82,14 @@ export async function issueResetToken(
 
 // The part that depends on the account. Never throws and says nothing to anyone.
 async function mailResetLink(
-  { db, mail, limits, baseUrl, now, log = console.error }: ResetRequestDependencies,
+  {
+    db,
+    mail,
+    limits,
+    baseUrl,
+    now,
+    log = console.error,
+  }: ResetRequestDependencies,
   email: string,
 ): Promise<void> {
   try {
@@ -115,7 +122,9 @@ async function mailResetLink(
         `[auth] PASSWORD_RESET_MAIL_FAILED: a reset mail was not sent (${result.error}).`,
       );
   } catch {
-    log("[auth] PASSWORD_RESET_MAIL_FAILED: a reset mail was not sent (error).");
+    log(
+      "[auth] PASSWORD_RESET_MAIL_FAILED: a reset mail was not sent (error).",
+    );
   }
 }
 

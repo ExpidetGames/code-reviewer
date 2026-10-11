@@ -90,8 +90,7 @@ const TEST_MAIL_COPY: Record<string, string> = {
     "The host name could not be found. Check the host name of the mail server.",
   connection_refused:
     "Nothing answered on that host and port. Check the host, the port and any firewall in between.",
-  tls_error:
-    "The secure connection to the mail server could not be set up.",
+  tls_error: "The secure connection to the mail server could not be set up.",
   auth_failed:
     "The mail server refused the login. Check the user name and the password.",
   sender_rejected: "The mail server does not accept the sender address.",
@@ -109,7 +108,9 @@ const TEST_MAIL_COPY: Record<string, string> = {
 
 export function describeTestMailFailure(error: string): string {
   return (
-    (Object.hasOwn(TEST_MAIL_COPY, error) ? TEST_MAIL_COPY[error] : undefined) ??
+    (Object.hasOwn(TEST_MAIL_COPY, error)
+      ? TEST_MAIL_COPY[error]
+      : undefined) ??
     TEST_MAIL_COPY.unknown ??
     GENERIC_FAILURE
   );

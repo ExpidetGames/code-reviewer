@@ -10,7 +10,11 @@ import tls from "node:tls";
 import { describe, expect, it } from "vitest";
 import { createSelfSignedCertificate } from "../../../fakes/smtp/cert.ts";
 import { parseMessage } from "../../../fakes/smtp/mime.ts";
-import { startTestSmtp, TEST_SMTP_PASSWORD, TEST_SMTP_USER } from "./smtp-fake.ts";
+import {
+  startTestSmtp,
+  TEST_SMTP_PASSWORD,
+  TEST_SMTP_USER,
+} from "./smtp-fake.ts";
 
 /** A client that sends lines and reads the replies, one line at a time. */
 async function connect(port: number, secure = false) {
@@ -166,7 +170,9 @@ describe("the fake SMTP server", () => {
     await client.reply();
     client.send("EHLO test");
     await client.reply();
-    client.send(`AUTH PLAIN ${Buffer.from(`\0${TEST_SMTP_USER}\0${TEST_SMTP_PASSWORD}`).toString("base64")}`);
+    client.send(
+      `AUTH PLAIN ${Buffer.from(`\0${TEST_SMTP_USER}\0${TEST_SMTP_PASSWORD}`).toString("base64")}`,
+    );
     await client.reply();
     client.end();
 
@@ -214,7 +220,7 @@ describe("the fake SMTP server", () => {
     const parsed = parseMessage(
       [
         "Subject: Hi",
-        "Content-Type: multipart/alternative; boundary=\"b1\"",
+        'Content-Type: multipart/alternative; boundary="b1"',
         "",
         "--b1",
         "Content-Type: text/plain; charset=utf-8",

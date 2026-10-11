@@ -28,7 +28,9 @@ describe("the mail sender of the running server", () => {
     const sender = mailSenderOn(db, APP_SECRET);
 
     expect(await sender.isConfigured()).toBe(false);
-    expect(await sender.send({ to: "a@example.com", subject: "s", text: "t" })).toEqual({
+    expect(
+      await sender.send({ to: "a@example.com", subject: "s", text: "t" }),
+    ).toEqual({
       ok: false,
       error: "not_configured",
     });

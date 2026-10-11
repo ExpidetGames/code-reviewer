@@ -22,17 +22,32 @@ import {
 } from "./test-mail.ts";
 
 const APP_SECRET = "test-mail-test-secret-0123456789-0123456789";
-const QUICK = { connectionMs: 1_500, greetingMs: 400, socketMs: 1_500, totalMs: 3_000 };
+const QUICK = {
+  connectionMs: 1_500,
+  greetingMs: 400,
+  socketMs: 1_500,
+  totalMs: 3_000,
+};
 const ADMIN = { id: "admin-1", email: "admin@example.test" };
 
 async function start(options: { auth?: boolean; configure?: boolean } = {}) {
   const smtp = await startTestSmtp(
     options.auth === false
       ? {}
-      : { auth: { user: TEST_SMTP_USER, password: TEST_SMTP_PASSWORD }, authRequiresTls: true },
+      : {
+          auth: { user: TEST_SMTP_USER, password: TEST_SMTP_PASSWORD },
+          authRequiresTls: true,
+        },
   );
   const { db } = await createTestDatabase();
-  for (const id of ["admin-1", "admin-2", "admin-3", "admin-4", "admin-5", "admin-6"])
+  for (const id of [
+    "admin-1",
+    "admin-2",
+    "admin-3",
+    "admin-4",
+    "admin-5",
+    "admin-6",
+  ])
     await sql`insert into users (id, name, email, email_verified, created_at, updated_at)
       values (${id}, ${id}, ${`${id}@example.test`}, 0, '2026-10-12T00:00:00.000Z', '2026-10-12T00:00:00.000Z')`.execute(
       db,
@@ -102,7 +117,9 @@ describe("the test mail", () => {
     const down = await service.send(ADMIN);
 
     expect(down).toMatchObject({ ok: false, error: "connection_refused" });
-    expect(JSON.stringify(down) + logs.join("\n")).not.toContain(TEST_SMTP_PASSWORD);
+    expect(JSON.stringify(down) + logs.join("\n")).not.toContain(
+      TEST_SMTP_PASSWORD,
+    );
   });
 
   // #100-SM-05
@@ -117,7 +134,8 @@ describe("the test mail", () => {
       user: TEST_SMTP_USER,
       password: "typed-wrong-password-4711",
     });
-    smtp.behavior.authFailure = "Login refused for password typed-wrong-password-4711";
+    smtp.behavior.authFailure =
+      "Login refused for password typed-wrong-password-4711";
 
     const result = await service.send(ADMIN);
 
@@ -132,7 +150,10 @@ describe("the test mail", () => {
     const service = createTestMailService({
       config: createSmtpConfigStore({
         db,
-        secrets: createSecretStore({ db, appSecret: "another-app-secret-0123456789-0123456789-xyz" }),
+        secrets: createSecretStore({
+          db,
+          appSecret: "another-app-secret-0123456789-0123456789-xyz",
+        }),
       }),
       rateLimits: createRateLimitsRepository(db),
       baseUrl: "https://code-reviewer.example.com",
@@ -151,7 +172,10 @@ describe("the test mail", () => {
   it("refuses to send to an address that is not deliverable, and says what it is", async () => {
     const { smtp, service } = await start();
 
-    const result = await service.send({ id: "admin-1", email: "not an address\r\nBcc: x@y.z" });
+    const result = await service.send({
+      id: "admin-1",
+      email: "not an address\r\nBcc: x@y.z",
+    });
 
     expect(result).toMatchObject({ ok: false, error: "invalid_message" });
     expect(smtp.sessions).toEqual([]);
@@ -181,14 +205,27 @@ describe("the limit of the test mail", () => {
     const { smtp, service } = await start();
     smtp.behavior.rejectSender = "no";
     for (let index = 0; index < TEST_MAIL_ADMIN_MAX; index += 1)
-      expect(await service.send(ADMIN)).toMatchObject({ ok: false, error: "sender_rejected" });
+      expect(await service.send(ADMIN)).toMatchObject({
+        ok: false,
+        error: "sender_rejected",
+      });
 
-    expect(await service.send(ADMIN)).toMatchObject({ ok: false, error: "rate_limited" });
+    expect(await service.send(ADMIN)).toMatchObject({
+      ok: false,
+      error: "rate_limited",
+    });
   });
 
   it("limits the instance as a whole, whoever asks", async () => {
     const { smtp, service } = await start();
-    const admins = ["admin-1", "admin-2", "admin-3", "admin-4", "admin-5", "admin-6"];
+    const admins = [
+      "admin-1",
+      "admin-2",
+      "admin-3",
+      "admin-4",
+      "admin-5",
+      "admin-6",
+    ];
     let sent = 0;
     for (let round = 0; round < TEST_MAIL_ADMIN_MAX; round += 1)
       for (const id of admins) {
@@ -198,7 +235,9 @@ describe("the limit of the test mail", () => {
 
     expect(sent).toBe(TEST_MAIL_GLOBAL_MAX);
     expect(smtp.messages).toHaveLength(TEST_MAIL_GLOBAL_MAX);
-    expect(await service.send({ id: "admin-6", email: "admin-6@example.test" })).toMatchObject({
+    expect(
+      await service.send({ id: "admin-6", email: "admin-6@example.test" }),
+    ).toMatchObject({
       ok: false,
       error: "rate_limited",
     });
@@ -207,6 +246,8 @@ describe("the limit of the test mail", () => {
   it("does not count an attempt that finds no mail server against anyone", async () => {
     const { service } = await start({ configure: false });
     for (let index = 0; index < TEST_MAIL_ADMIN_MAX + 3; index += 1)
-      expect(await service.send(ADMIN)).toMatchObject({ error: "not_configured" });
+      expect(await service.send(ADMIN)).toMatchObject({
+        error: "not_configured",
+      });
   });
 });

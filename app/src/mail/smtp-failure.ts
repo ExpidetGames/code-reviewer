@@ -86,7 +86,11 @@ function certificateHint(message: string): string {
     return "The server's certificate is not valid for this host name.";
   if (/unable to (verify|get)|issuer|untrusted|not trusted/i.test(message))
     return "The server's certificate was not issued by an authority this server trusts.";
-  if (/wrong version number|record_header|ssl routines|packet length/i.test(message))
+  if (
+    /wrong version number|record_header|ssl routines|packet length/i.test(
+      message,
+    )
+  )
     return "The server did not answer with TLS on this port. Check the port and the security mode (usually port 465 is TLS and port 587 is STARTTLS).";
   return "The secure connection could not be set up.";
 }

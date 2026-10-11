@@ -49,8 +49,7 @@ export type SmtpConnection = {
   password: string | null;
 };
 
-export type DeliveryResult =
-  { ok: true } | { ok: false; failure: SmtpFailure };
+export type DeliveryResult = { ok: true } | { ok: false; failure: SmtpFailure };
 
 // One address, nothing else: no white space, no control character, none of the characters that would make a
 // header parser read a name, a comment, a group or a second address.
@@ -66,10 +65,15 @@ export function isDeliverableAddress(address: string): boolean {
 
 /** The subject with every control character (CR and LF above all) replaced by a space. */
 export function safeSubject(subject: string): string {
-  return subject.replaceAll(CONTROL_CHARACTERS, " ").trim().slice(0, MAX_SUBJECT_LENGTH);
+  return subject
+    .replaceAll(CONTROL_CHARACTERS, " ")
+    .trim()
+    .slice(0, MAX_SUBJECT_LENGTH);
 }
 
-function fromHeader(settings: SmtpSettings): string | { name: string; address: string } {
+function fromHeader(
+  settings: SmtpSettings,
+): string | { name: string; address: string } {
   if (settings.senderName === null) return settings.senderAddress;
   return {
     name: settings.senderName.replaceAll(CONTROL_CHARACTERS, " ").trim(),
@@ -85,7 +89,10 @@ export async function deliverOverSmtp(
   if (!isDeliverableAddress(message.to))
     return {
       ok: false,
-      failure: { code: "invalid_message", detail: "The recipient address is not valid." },
+      failure: {
+        code: "invalid_message",
+        detail: "The recipient address is not valid.",
+      },
     };
   if (settings.user !== null && password === null)
     return { ok: false, failure: { code: "password_missing", detail: null } };
@@ -100,7 +107,10 @@ export async function deliverOverSmtp(
     ...(settings.user === null || password === null
       ? {}
       : { auth: { user: settings.user, pass: password } }),
-    tls: { rejectUnauthorized: !settings.allowSelfSigned, minVersion: "TLSv1.2" },
+    tls: {
+      rejectUnauthorized: !settings.allowSelfSigned,
+      minVersion: "TLSv1.2",
+    },
     connectionTimeout: timeouts.connectionMs,
     greetingTimeout: timeouts.greetingMs,
     socketTimeout: timeouts.socketMs,
@@ -130,7 +140,10 @@ export async function deliverOverSmtp(
         headers: { "Auto-Submitted": "auto-generated" },
       });
       if (info.accepted.length !== 1)
-        return { ok: false, failure: { code: "recipient_rejected", detail: null } };
+        return {
+          ok: false,
+          failure: { code: "recipient_rejected", detail: null },
+        };
       return { ok: true };
     } catch (error) {
       return { ok: false, failure: classifySmtpError(error, secrets) };

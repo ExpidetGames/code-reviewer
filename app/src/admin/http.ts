@@ -196,7 +196,9 @@ export function createAdminRouteHandlers({
         result = await service.sendTestMail({ id: who.id, email: who.email });
       } catch {
         // The counters (or the database) could not be read: no mail is sent without a limit.
-        console.error("[admin] TEST_MAIL_UNAVAILABLE: the request was not served.");
+        console.error(
+          "[admin] TEST_MAIL_UNAVAILABLE: the request was not served.",
+        );
         return refusal("unavailable");
       }
       if (result.ok) return Response.json({ ok: true }, { headers: NO_STORE });

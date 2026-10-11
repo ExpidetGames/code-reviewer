@@ -16,11 +16,18 @@ import { createSmtpConfigStore } from "./smtp-config.ts";
 import { createSmtpMailSender } from "./smtp-sender.ts";
 
 const APP_SECRET = "smtp-sender-test-secret-0123456789-0123456789";
-const QUICK = { connectionMs: 1_500, greetingMs: 400, socketMs: 1_500, totalMs: 3_000 };
+const QUICK = {
+  connectionMs: 1_500,
+  greetingMs: 400,
+  socketMs: 1_500,
+  totalMs: 3_000,
+};
 
 async function start(auth = true) {
   const smtp = await startTestSmtp(
-    auth ? { auth: { user: TEST_SMTP_USER, password: TEST_SMTP_PASSWORD } } : {},
+    auth
+      ? { auth: { user: TEST_SMTP_USER, password: TEST_SMTP_PASSWORD } }
+      : {},
   );
   const { db } = await createTestDatabase();
   await sql`insert into users (id, name, email, email_verified, created_at, updated_at)
@@ -32,7 +39,11 @@ async function start(auth = true) {
     secrets: createSecretStore({ db, appSecret: APP_SECRET }),
   });
   const logs: string[] = [];
-  const sender = createSmtpMailSender({ config, timeouts: QUICK, log: (line) => logs.push(line) });
+  const sender = createSmtpMailSender({
+    config,
+    timeouts: QUICK,
+    log: (line) => logs.push(line),
+  });
   const configure = (overrides: Record<string, unknown> = {}) =>
     config.save("admin-1", {
       host: smtp.host,
@@ -58,7 +69,10 @@ describe("the SMTP mail sender", () => {
     const { sender, smtp } = await start();
 
     expect(await sender.isConfigured()).toBe(false);
-    expect(await sender.send(MESSAGE)).toEqual({ ok: false, error: "not_configured" });
+    expect(await sender.send(MESSAGE)).toEqual({
+      ok: false,
+      error: "not_configured",
+    });
     expect(smtp.sessions).toEqual([]);
   });
 
@@ -86,7 +100,10 @@ describe("the SMTP mail sender", () => {
     await config.remove();
 
     expect(await sender.isConfigured()).toBe(false);
-    expect(await sender.send(MESSAGE)).toEqual({ ok: false, error: "not_configured" });
+    expect(await sender.send(MESSAGE)).toEqual({
+      ok: false,
+      error: "not_configured",
+    });
     expect(smtp.messages).toHaveLength(1);
   });
 
@@ -126,14 +143,20 @@ describe("the SMTP mail sender", () => {
     const other = createSmtpMailSender({
       config: createSmtpConfigStore({
         db,
-        secrets: createSecretStore({ db, appSecret: "another-app-secret-0123456789-0123456789-xyz" }),
+        secrets: createSecretStore({
+          db,
+          appSecret: "another-app-secret-0123456789-0123456789-xyz",
+        }),
       }),
       timeouts: QUICK,
       log: (line) => logs.push(line),
     });
 
     expect(await other.isConfigured()).toBe(true);
-    expect(await other.send(MESSAGE)).toEqual({ ok: false, error: "mail_failed" });
+    expect(await other.send(MESSAGE)).toEqual({
+      ok: false,
+      error: "mail_failed",
+    });
     expect(logs).toEqual(["[mail] MAIL_SEND_FAILED: password_unreadable"]);
     expect(smtp.sessions).toEqual([]);
   });
@@ -143,7 +166,10 @@ describe("the SMTP mail sender", () => {
     await configure({ port: smtp.port });
     await smtp.close();
 
-    expect(await sender.send(MESSAGE)).toEqual({ ok: false, error: "mail_failed" });
+    expect(await sender.send(MESSAGE)).toEqual({
+      ok: false,
+      error: "mail_failed",
+    });
   });
 
   it("reports mail_failed when the database cannot be read", async () => {
@@ -151,7 +177,10 @@ describe("the SMTP mail sender", () => {
     await configure();
     await sql`drop table instance_settings`.execute(db).catch(() => undefined);
 
-    expect(await sender.send(MESSAGE)).toEqual({ ok: false, error: "mail_failed" });
+    expect(await sender.send(MESSAGE)).toEqual({
+      ok: false,
+      error: "mail_failed",
+    });
     expect(logs).toEqual(["[mail] MAIL_SEND_FAILED: error"]);
   });
 });

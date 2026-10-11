@@ -59,7 +59,9 @@ function decodeBody(body: string, encoding: string | undefined): string {
     case "quoted-printable":
       return decodeQuotedPrintable(body).toString("utf8");
     case "base64":
-      return Buffer.from(body.replaceAll(/\s+/g, ""), "base64").toString("utf8");
+      return Buffer.from(body.replaceAll(/\s+/g, ""), "base64").toString(
+        "utf8",
+      );
     default:
       return body;
   }
@@ -92,7 +94,9 @@ function collect(
 ): void {
   const { head, body } = splitHeadBody(raw);
   const headers = parseHeaders(head);
-  const contentType = (headers["content-type"]?.[0] ?? "text/plain").toLowerCase();
+  const contentType = (
+    headers["content-type"]?.[0] ?? "text/plain"
+  ).toLowerCase();
   const boundary = boundaryOf(headers["content-type"]?.[0] ?? "");
   if (contentType.startsWith("multipart/") && boundary !== null && depth < 4) {
     for (const part of body.split(`--${boundary}`).slice(1)) {

@@ -70,11 +70,15 @@ function api(
   },
   testMail: RequestResult<TestMailAnswer> = { ok: true, data: { ok: true } },
 ) {
-  const changeMock = vi.fn<(change: SettingChange) => Promise<typeof changeResult>>(
-    () => Promise.resolve(changeResult),
-  );
+  const changeMock = vi.fn<
+    (change: SettingChange) => Promise<typeof changeResult>
+  >(() => Promise.resolve(changeResult));
   const testMock = vi.fn<AdminApi["testMail"]>(() => Promise.resolve(testMail));
-  return { api: { change: changeMock, testMail: testMock } satisfies AdminApi, changeMock, testMock };
+  return {
+    api: { change: changeMock, testMail: testMock } satisfies AdminApi,
+    changeMock,
+    testMock,
+  };
 }
 
 describe("the mail form", () => {
@@ -99,7 +103,9 @@ describe("the mail form", () => {
         allowSelfSigned: false,
       },
     });
-    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Saved."));
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toBe("Saved."),
+    );
     expect(navigation.refresh).toHaveBeenCalled();
   });
 
@@ -116,7 +122,9 @@ describe("the mail form", () => {
       smtp: { password: "new-password-value" },
     });
     await waitFor(() =>
-      expect((screen.getByLabelText("Password") as HTMLInputElement).value).toBe(""),
+      expect(
+        (screen.getByLabelText("Password") as HTMLInputElement).value,
+      ).toBe(""),
     );
   });
 
@@ -126,12 +134,18 @@ describe("the mail form", () => {
     const user = userEvent.setup();
     render(<MailForm settings={configured()} api={mock} />);
 
-    await user.click(screen.getByRole("checkbox", { name: "Remove the saved password" }));
+    await user.click(
+      screen.getByRole("checkbox", { name: "Remove the saved password" }),
+    );
     await user.click(screen.getByRole("button", { name: "Save mail server" }));
 
     await waitFor(() => expect(changeMock).toHaveBeenCalled());
-    expect(changeMock.mock.calls[0]?.[0]).toMatchObject({ smtp: { clearPassword: true } });
-    expect(JSON.stringify(changeMock.mock.calls[0]?.[0])).not.toContain('"password"');
+    expect(changeMock.mock.calls[0]?.[0]).toMatchObject({
+      smtp: { clearPassword: true },
+    });
+    expect(JSON.stringify(changeMock.mock.calls[0]?.[0])).not.toContain(
+      '"password"',
+    );
   });
 
   // #100-SM-01
@@ -139,22 +153,33 @@ describe("the mail form", () => {
     render(<MailForm settings={configured()} api={api().api} />);
 
     expect(screen.getByText(/A password is saved/)).toBeTruthy();
-    expect((screen.getByLabelText("Password") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("Password") as HTMLInputElement).value).toBe(
+      "",
+    );
   });
 
   it("says that none is saved when there is none, and offers no clear", () => {
     render(<MailForm settings={view()} api={api().api} />);
 
     expect(screen.getByText(/No password is saved/)).toBeTruthy();
-    expect(screen.queryByRole("checkbox", { name: "Remove the saved password" })).toBeNull();
+    expect(
+      screen.queryByRole("checkbox", { name: "Remove the saved password" }),
+    ).toBeNull();
   });
 
   // #100-SM-15
   it("tells the admin to enter a password that cannot be read again", () => {
-    render(<MailForm settings={configured({ password: "unreadable" })} api={api().api} />);
+    render(
+      <MailForm
+        settings={configured({ password: "unreadable" })}
+        api={api().api}
+      />,
+    );
 
     expect(screen.getByRole("alert").textContent).toContain("cannot be read");
-    expect(screen.getByRole("alert").textContent).toContain("Enter the password again");
+    expect(screen.getByRole("alert").textContent).toContain(
+      "Enter the password again",
+    );
   });
 
   // #100-SM-03
@@ -176,12 +201,18 @@ describe("the mail form", () => {
 
     await user.click(screen.getByRole("button", { name: "Save mail server" }));
 
-    await waitFor(() => expect(screen.getByText(/not a host name or an IP address/)).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByText(/not a host name or an IP address/)).toBeTruthy(),
+    );
     expect(screen.getByText(/Below 1024 only the ports of mail/)).toBeTruthy();
     expect(screen.getByText(/not a valid sender address/)).toBeTruthy();
-    expect(screen.getByText(/longer than 100 characters or contains a line break/)).toBeTruthy();
+    expect(
+      screen.getByText(/longer than 100 characters or contains a line break/),
+    ).toBeTruthy();
     expect(screen.getByText(/Enter the password of this login/)).toBeTruthy();
-    expect(screen.getByLabelText("Host").getAttribute("aria-invalid")).toBe("true");
+    expect(screen.getByLabelText("Host").getAttribute("aria-invalid")).toBe(
+      "true",
+    );
   });
 
   it("follows the usual port when the security changes, and a port that was typed stays", async () => {
@@ -189,11 +220,15 @@ describe("the mail form", () => {
     render(<MailForm settings={view()} api={api().api} />);
 
     await user.click(screen.getByRole("radio", { name: /^TLS/ }));
-    expect((screen.getByLabelText("Port") as HTMLInputElement).value).toBe("465");
+    expect((screen.getByLabelText("Port") as HTMLInputElement).value).toBe(
+      "465",
+    );
     await user.clear(screen.getByLabelText("Port"));
     await user.type(screen.getByLabelText("Port"), "2525");
     await user.click(screen.getByRole("radio", { name: /^STARTTLS/ }));
-    expect((screen.getByLabelText("Port") as HTMLInputElement).value).toBe("2525");
+    expect((screen.getByLabelText("Port") as HTMLInputElement).value).toBe(
+      "2525",
+    );
   });
 
   it("warns about a connection that is not encrypted, and has no self-signed option for it", async () => {
@@ -203,7 +238,11 @@ describe("the mail form", () => {
     await user.click(screen.getByRole("radio", { name: /None/ }));
 
     expect(screen.getByRole("note").textContent).toContain("not encrypted");
-    expect(screen.queryByRole("checkbox", { name: "Accept a self-signed certificate" })).toBeNull();
+    expect(
+      screen.queryByRole("checkbox", {
+        name: "Accept a self-signed certificate",
+      }),
+    ).toBeNull();
   });
 
   it("warns when the certificate check is switched off", async () => {
@@ -212,14 +251,22 @@ describe("the mail form", () => {
     render(<MailForm settings={view()} api={mock} />);
     expect(screen.queryByRole("note")).toBeNull();
 
-    await user.click(screen.getByRole("checkbox", { name: "Accept a self-signed certificate" }));
+    await user.click(
+      screen.getByRole("checkbox", {
+        name: "Accept a self-signed certificate",
+      }),
+    );
 
-    expect(screen.getByRole("note").textContent).toContain("not checked at all");
+    expect(screen.getByRole("note").textContent).toContain(
+      "not checked at all",
+    );
     await user.type(screen.getByLabelText("Host"), "mail.internal");
     await user.type(screen.getByLabelText("Sender address"), "a@example.com");
     await user.click(screen.getByRole("button", { name: "Save mail server" }));
     await waitFor(() => expect(changeMock).toHaveBeenCalled());
-    expect(changeMock.mock.calls[0]?.[0]).toMatchObject({ smtp: { allowSelfSigned: true } });
+    expect(changeMock.mock.calls[0]?.[0]).toMatchObject({
+      smtp: { allowSelfSigned: true },
+    });
   });
 
   // #100-SM-07
@@ -228,14 +275,20 @@ describe("the mail form", () => {
     const user = userEvent.setup();
     render(<MailForm settings={configured()} api={mock} />);
 
-    await user.click(screen.getByRole("button", { name: "Remove the mail server" }));
+    await user.click(
+      screen.getByRole("button", { name: "Remove the mail server" }),
+    );
     expect(changeMock).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Yes, remove it" }));
 
-    await waitFor(() => expect(changeMock).toHaveBeenCalledWith({ smtp: null }));
+    await waitFor(() =>
+      expect(changeMock).toHaveBeenCalledWith({ smtp: null }),
+    );
     // The form starts empty again.
     await waitFor(() =>
-      expect((screen.getByLabelText("Host") as HTMLInputElement).value).toBe(""),
+      expect((screen.getByLabelText("Host") as HTMLInputElement).value).toBe(
+        "",
+      ),
     );
     expect((screen.getByLabelText("User") as HTMLInputElement).value).toBe("");
   });
@@ -243,7 +296,9 @@ describe("the mail form", () => {
   it("offers no removal when there is no mail server", () => {
     render(<MailForm settings={view()} api={api().api} />);
 
-    expect(screen.queryByRole("button", { name: "Remove the mail server" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Remove the mail server" }),
+    ).toBeNull();
   });
 });
 
@@ -252,19 +307,37 @@ describe("the test mail button", () => {
   it("sends the test mail and says where to look", async () => {
     const { api: mock, testMock } = api();
     const user = userEvent.setup();
-    render(<TestMailPanel configured adminEmail="admin@example.com" api={mock} />);
+    render(
+      <TestMailPanel configured adminEmail="admin@example.com" api={mock} />,
+    );
 
     await user.click(screen.getByRole("button", { name: "Send test mail" }));
 
-    await waitFor(() => expect(screen.getByText(/handed to the mail server/)).toBeTruthy());
-    expect(screen.getByRole("status").textContent).toContain("admin@example.com");
+    await waitFor(() =>
+      expect(screen.getByText(/handed to the mail server/)).toBeTruthy(),
+    );
+    expect(screen.getByRole("status").textContent).toContain(
+      "admin@example.com",
+    );
     expect(testMock).toHaveBeenCalledTimes(1);
   });
 
   it("is off until a mail server is saved", () => {
-    render(<TestMailPanel configured={false} adminEmail="admin@example.com" api={api().api} />);
+    render(
+      <TestMailPanel
+        configured={false}
+        adminEmail="admin@example.com"
+        api={api().api}
+      />,
+    );
 
-    expect((screen.getByRole("button", { name: "Send test mail" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Send test mail",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true);
   });
 
   // #100-SM-05
@@ -280,24 +353,45 @@ describe("the test mail button", () => {
   ])("says what a %s means", async (error, sentence) => {
     const { api: mock } = api(undefined, {
       ok: true,
-      data: { ok: false, error, detail: "535 5.7.8 Authentication credentials invalid" },
+      data: {
+        ok: false,
+        error,
+        detail: "535 5.7.8 Authentication credentials invalid",
+      },
     });
     const user = userEvent.setup();
-    render(<TestMailPanel configured adminEmail="admin@example.com" api={mock} />);
+    render(
+      <TestMailPanel configured adminEmail="admin@example.com" api={mock} />,
+    );
 
     await user.click(screen.getByRole("button", { name: "Send test mail" }));
 
-    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain(sentence));
-    expect(screen.getByRole("alert").textContent).toContain("535 5.7.8 Authentication credentials invalid");
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain(sentence),
+    );
+    expect(screen.getByRole("alert").textContent).toContain(
+      "535 5.7.8 Authentication credentials invalid",
+    );
   });
 
   it("says that it was asked for too often", async () => {
-    const { api: mock } = api(undefined, { ok: false, status: 429, code: "rate_limited", issues: [] });
+    const { api: mock } = api(undefined, {
+      ok: false,
+      status: 429,
+      code: "rate_limited",
+      issues: [],
+    });
     const user = userEvent.setup();
-    render(<TestMailPanel configured adminEmail="admin@example.com" api={mock} />);
+    render(
+      <TestMailPanel configured adminEmail="admin@example.com" api={mock} />,
+    );
 
     await user.click(screen.getByRole("button", { name: "Send test mail" }));
 
-    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("Too many test mails"));
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain(
+        "Too many test mails",
+      ),
+    );
   });
 });

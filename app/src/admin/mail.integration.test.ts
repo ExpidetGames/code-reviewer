@@ -40,7 +40,9 @@ async function start() {
   });
   const settings = async () =>
     (await (
-      await portal.visit("/api/admin/settings", { cookies: portal.adminCookies })
+      await portal.visit("/api/admin/settings", {
+        cookies: portal.adminCookies,
+      })
     ).json()) as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any -- the shape is asserted field by field
   const testMail = (cookies = portal.adminCookies) =>
     portal.visit("/api/admin/mail/test", { method: "POST", body: {}, cookies });
@@ -61,10 +63,15 @@ describe("saving the mail server", () => {
     expect(response.status).toBe(200);
     const answer = await response.text();
     expect(answer).not.toContain(TEST_SMTP_PASSWORD);
-    const read = await portal.visit("/api/admin/settings", { cookies: portal.adminCookies });
+    const read = await portal.visit("/api/admin/settings", {
+      cookies: portal.adminCookies,
+    });
     const text = await read.text();
     expect(text).not.toContain(TEST_SMTP_PASSWORD);
-    const body = (await settings()) as { smtp: Record<string, unknown>; mailConfigured: boolean };
+    const body = (await settings()) as {
+      smtp: Record<string, unknown>;
+      mailConfigured: boolean;
+    };
     expect(body.smtp).toMatchObject({
       value: {
         host: "127.0.0.1",
@@ -94,7 +101,9 @@ describe("saving the mail server", () => {
     const kept = await putSmtp(valid({ password: "", senderName: "Reviewer" }));
     const afterKeep = await settings();
     const used = await portal.secrets.use("smtp_password");
-    const cleared = await putSmtp(valid({ password: undefined, clearPassword: true }));
+    const cleared = await putSmtp(
+      valid({ password: undefined, clearPassword: true }),
+    );
     const afterClear = await settings();
 
     expect(kept.status).toBe(200);
@@ -110,11 +119,19 @@ describe("saving the mail server", () => {
     const { putSmtp, valid, settings } = await start();
 
     const response = await putSmtp(
-      valid({ port: 0, host: "", senderAddress: "a@example.com\r\nBcc: x@y.z", senderName: "x\ny" }),
+      valid({
+        port: 0,
+        host: "",
+        senderAddress: "a@example.com\r\nBcc: x@y.z",
+        senderName: "x\ny",
+      }),
     );
 
     expect(response.status).toBe(422);
-    const body = (await response.json()) as { error: string; issues: Array<{ field: string; code: string }> };
+    const body = (await response.json()) as {
+      error: string;
+      issues: Array<{ field: string; code: string }>;
+    };
     expect(body.error).toBe("invalid_input");
     expect(body.issues).toEqual(
       expect.arrayContaining([
@@ -147,14 +164,19 @@ describe("saving the mail server", () => {
     expect(after.smtp.value).toBeNull();
     expect(after.mailConfigured).toBe(false);
     expect(after.signUpRuleState).toEqual({ failClosed: true });
-    expect(await portal.db.selectFrom("secrets").selectAll().execute()).toEqual([]);
+    expect(await portal.db.selectFrom("secrets").selectAll().execute()).toEqual(
+      [],
+    );
   });
 
   // #100-SM-15
   it("shows a password that cannot be decrypted as unreadable and asks for it again, without failing", async () => {
     const { portal, putSmtp, valid, settings } = await start();
     await putSmtp(valid());
-    await portal.db.updateTable("secrets").set({ ciphertext: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" }).execute();
+    await portal.db
+      .updateTable("secrets")
+      .set({ ciphertext: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" })
+      .execute();
 
     const read = await settings();
     const kept = await putSmtp(valid({ password: "" }));
@@ -163,7 +185,9 @@ describe("saving the mail server", () => {
     expect(read.smtp.password).toBe("unreadable");
     expect(read.mailConfigured).toBe(true);
     expect(kept.status).toBe(422);
-    expect(await kept.json()).toMatchObject({ issues: [{ field: "password", code: "password_required" }] });
+    expect(await kept.json()).toMatchObject({
+      issues: [{ field: "password", code: "password_required" }],
+    });
     expect(entered.status).toBe(200);
     expect((await settings()).smtp.password).toBe("configured");
   });
@@ -226,7 +250,11 @@ describe("the test mail", () => {
 
     const response = await testMail();
 
-    expect(await response.json()).toEqual({ ok: false, error: "not_configured", detail: null });
+    expect(await response.json()).toEqual({
+      ok: false,
+      error: "not_configured",
+      detail: null,
+    });
   });
 
   // #100-SM-05
@@ -258,8 +286,14 @@ describe("the test mail", () => {
 
     expect(answers.auth).toMatchObject({ ok: false, error: "auth_failed" });
     expect(answers.tls).toMatchObject({ ok: false, error: "tls_error" });
-    expect(answers.sender).toMatchObject({ ok: false, error: "sender_rejected" });
-    expect(answers.refused).toMatchObject({ ok: false, error: "connection_refused" });
+    expect(answers.sender).toMatchObject({
+      ok: false,
+      error: "sender_rejected",
+    });
+    expect(answers.refused).toMatchObject({
+      ok: false,
+      error: "connection_refused",
+    });
     expect(answers.timeout).toMatchObject({ ok: false, error: "timeout" });
     const everything = JSON.stringify(answers);
     expect(everything).not.toContain("typed-wrong-password-4711");
@@ -322,9 +356,14 @@ describe("a person who is not the admin", () => {
     await putSmtp(valid());
     await portal.createUser({ id: "member-1", ...MEMBER });
     const memberCookies = await portal.signIn(MEMBER.email, MEMBER.password);
-    const before = await portal.db.selectFrom("instance_settings").selectAll().execute();
+    const before = await portal.db
+      .selectFrom("instance_settings")
+      .selectAll()
+      .execute();
 
-    const read = await portal.visit("/api/admin/settings", { cookies: memberCookies });
+    const read = await portal.visit("/api/admin/settings", {
+      cookies: memberCookies,
+    });
     const write = await portal.visit("/api/admin/settings", {
       method: "PUT",
       body: { smtp: null },
@@ -341,7 +380,9 @@ describe("a person who is not the admin", () => {
       expect(response.status).toBe(404);
     for (const response of [read, write, test])
       expect(await response.text()).not.toContain("127.0.0.1");
-    expect(await portal.db.selectFrom("instance_settings").selectAll().execute()).toEqual(before);
+    expect(
+      await portal.db.selectFrom("instance_settings").selectAll().execute(),
+    ).toEqual(before);
     expect(smtp.messages).toEqual([]);
     expect(smtp.sessions).toEqual([]);
   });
@@ -349,7 +390,10 @@ describe("a person who is not the admin", () => {
   it("reaches nothing without a session either", async () => {
     const { smtp, portal } = await start();
 
-    const test = await portal.visit("/api/admin/mail/test", { method: "POST", body: {} });
+    const test = await portal.visit("/api/admin/mail/test", {
+      method: "POST",
+      body: {},
+    });
 
     expect(test.status).toBe(401);
     expect(smtp.sessions).toEqual([]);
@@ -367,8 +411,12 @@ describe("the admin whose address is not verified", () => {
       .where("id", "=", portal.adminId)
       .executeTakeFirstOrThrow();
 
-    const page = await portal.visit("/admin/mail", { cookies: portal.adminCookies });
-    const data = await portal.visit("/api/admin/settings", { cookies: portal.adminCookies });
+    const page = await portal.visit("/admin/mail", {
+      cookies: portal.adminCookies,
+    });
+    const data = await portal.visit("/api/admin/settings", {
+      cookies: portal.adminCookies,
+    });
     const test = await testMail();
 
     expect(verified.email_verified).toBe(0);

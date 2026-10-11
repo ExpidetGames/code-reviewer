@@ -54,7 +54,8 @@ async function closedPort(): Promise<number> {
   const server = net.createServer();
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
-  const port = typeof address === "object" && address !== null ? address.port : 0;
+  const port =
+    typeof address === "object" && address !== null ? address.port : 0;
   await new Promise<void>((resolve) => server.close(() => resolve()));
   return port;
 }
@@ -87,7 +88,9 @@ describe("a delivery over SMTP", () => {
     expect(message?.text.trim()).toBe("It works.");
     expect(message?.html.trim()).toBe("<p>It works.</p>");
     expect(message?.headers["auto-submitted"]).toEqual(["auto-generated"]);
-    expect(message?.headers.from).toEqual(["Code Reviewer <reviewer@example.com>"]);
+    expect(message?.headers.from).toEqual([
+      "Code Reviewer <reviewer@example.com>",
+    ]);
   });
 
   it("sends through implicit TLS", async () => {
@@ -95,7 +98,10 @@ describe("a delivery over SMTP", () => {
 
     const result = await deliverOverSmtp(
       {
-        settings: settingsFor(smtp, { port: smtp.tlsPort ?? 0, security: "tls" }),
+        settings: settingsFor(smtp, {
+          port: smtp.tlsPort ?? 0,
+          security: "tls",
+        }),
         password: null,
       },
       MESSAGE,
@@ -110,7 +116,13 @@ describe("a delivery over SMTP", () => {
     const smtp = await startTestSmtp();
 
     const result = await deliverOverSmtp(
-      { settings: settingsFor(smtp, { security: "none", allowSelfSigned: false }), password: null },
+      {
+        settings: settingsFor(smtp, {
+          security: "none",
+          allowSelfSigned: false,
+        }),
+        password: null,
+      },
       MESSAGE,
       QUICK,
     );
@@ -145,7 +157,10 @@ describe("a delivery over SMTP", () => {
         QUICK,
       );
 
-      expect(result).toMatchObject({ ok: false, failure: { code: "tls_error" } });
+      expect(result).toMatchObject({
+        ok: false,
+        failure: { code: "tls_error" },
+      });
       expect(smtp.messages).toEqual([]);
       for (const session of smtp.sessions)
         expect(session.commands).not.toContain("AUTH");
@@ -194,12 +209,18 @@ describe("a delivery over SMTP", () => {
     const smtp = await startTestSmtp();
 
     const result = await deliverOverSmtp(
-      { settings: settingsFor(smtp, { port: await closedPort() }), password: null },
+      {
+        settings: settingsFor(smtp, { port: await closedPort() }),
+        password: null,
+      },
       MESSAGE,
       QUICK,
     );
 
-    expect(result).toMatchObject({ ok: false, failure: { code: "connection_refused" } });
+    expect(result).toMatchObject({
+      ok: false,
+      failure: { code: "connection_refused" },
+    });
   });
 
   // #100-SM-05
@@ -212,12 +233,18 @@ describe("a delivery over SMTP", () => {
     smtp.behavior.authFailure = `Authentication failed for password ${wrong}`;
 
     const result = await deliverOverSmtp(
-      { settings: settingsFor(smtp, { user: TEST_SMTP_USER }), password: wrong },
+      {
+        settings: settingsFor(smtp, { user: TEST_SMTP_USER }),
+        password: wrong,
+      },
       MESSAGE,
       QUICK,
     );
 
-    expect(result).toMatchObject({ ok: false, failure: { code: "auth_failed" } });
+    expect(result).toMatchObject({
+      ok: false,
+      failure: { code: "auth_failed" },
+    });
     const shown = JSON.stringify(result);
     expect(shown).not.toContain(wrong);
     expect(shown).toContain("535");
@@ -235,7 +262,10 @@ describe("a delivery over SMTP", () => {
       QUICK,
     );
 
-    expect(result).toEqual({ ok: false, failure: { code: "password_missing", detail: null } });
+    expect(result).toEqual({
+      ok: false,
+      failure: { code: "password_missing", detail: null },
+    });
     expect(smtp.sessions).toEqual([]);
   });
 
@@ -259,11 +289,17 @@ describe("a delivery over SMTP", () => {
 
     expect(sender).toEqual({
       ok: false,
-      failure: { code: "sender_rejected", detail: "550 5.7.1 Sender address not allowed" },
+      failure: {
+        code: "sender_rejected",
+        detail: "550 5.7.1 Sender address not allowed",
+      },
     });
     expect(recipient).toEqual({
       ok: false,
-      failure: { code: "recipient_rejected", detail: "550 5.1.1 No such mailbox" },
+      failure: {
+        code: "recipient_rejected",
+        detail: "550 5.1.1 No such mailbox",
+      },
     });
   });
 
@@ -291,7 +327,12 @@ describe("a delivery over SMTP", () => {
     const result = await deliverOverSmtp(
       { settings: settingsFor(smtp), password: null },
       MESSAGE,
-      { connectionMs: 60_000, greetingMs: 60_000, socketMs: 60_000, totalMs: 300 },
+      {
+        connectionMs: 60_000,
+        greetingMs: 60_000,
+        socketMs: 60_000,
+        totalMs: 300,
+      },
     );
 
     expect(result).toMatchObject({ ok: false, failure: { code: "timeout" } });
@@ -320,7 +361,10 @@ describe("what reaches the server", () => {
 
     const result = await deliverOverSmtp(
       { settings: settingsFor(smtp), password: null },
-      { ...MESSAGE, subject: "Invitation\r\nBcc: attacker@example.com\nX-Evil: 1" },
+      {
+        ...MESSAGE,
+        subject: "Invitation\r\nBcc: attacker@example.com\nX-Evil: 1",
+      },
       QUICK,
     );
 
@@ -328,7 +372,9 @@ describe("what reaches the server", () => {
     const [message] = smtp.messages;
     expect(message?.headers.bcc).toBeUndefined();
     expect(message?.headers["x-evil"]).toBeUndefined();
-    expect(message?.subject).toBe("Invitation Bcc: attacker@example.com X-Evil: 1");
+    expect(message?.subject).toBe(
+      "Invitation Bcc: attacker@example.com X-Evil: 1",
+    );
     expect(message?.rawHeaderBlock).not.toMatch(/^bcc:/im);
   });
 
@@ -338,7 +384,8 @@ describe("what reaches the server", () => {
     const result = await deliverOverSmtp(
       {
         settings: settingsFor(smtp, {
-          senderName: 'Reviewer\r\nBcc: attacker@example.com "<evil@example.com>"',
+          senderName:
+            'Reviewer\r\nBcc: attacker@example.com "<evil@example.com>"',
         }),
         password: null,
       },
@@ -376,7 +423,10 @@ describe("what reaches the server", () => {
       QUICK,
     );
 
-    expect(result).toMatchObject({ ok: false, failure: { code: "invalid_message" } });
+    expect(result).toMatchObject({
+      ok: false,
+      failure: { code: "invalid_message" },
+    });
     expect(smtp.sessions).toEqual([]);
   });
 
@@ -386,7 +436,11 @@ describe("what reaches the server", () => {
 
     const result = await deliverOverSmtp(
       { settings: settingsFor(smtp), password: null },
-      { ...MESSAGE, text: `Open this link:\r\n\r\n${link}\r\n.\r\nafter the dot`, html: `<p><a href="${link}">${link}</a></p>` },
+      {
+        ...MESSAGE,
+        text: `Open this link:\r\n\r\n${link}\r\n.\r\nafter the dot`,
+        html: `<p><a href="${link}">${link}</a></p>`,
+      },
       QUICK,
     );
 
@@ -404,7 +458,10 @@ describe("what reaches the server", () => {
     });
 
     await deliverOverSmtp(
-      { settings: settingsFor(smtp, { user: TEST_SMTP_USER }), password: TEST_SMTP_PASSWORD },
+      {
+        settings: settingsFor(smtp, { user: TEST_SMTP_USER }),
+        password: TEST_SMTP_PASSWORD,
+      },
       MESSAGE,
       QUICK,
     );

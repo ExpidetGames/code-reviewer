@@ -26,11 +26,22 @@ import { createPasswordResetHandler } from "./password-reset-http.ts";
 import { requestPasswordReset } from "./password-reset-request.ts";
 import { createPasswordResetRequestHandler } from "./password-reset-request-http.ts";
 
-const QUICK = { connectionMs: 1_500, greetingMs: 400, socketMs: 1_500, totalMs: 3_000 };
-const PERSON = { id: "person-1", email: "person@example.com", password: "k9Pq-v3Xm7Rt-first" };
+const QUICK = {
+  connectionMs: 1_500,
+  greetingMs: 400,
+  socketMs: 1_500,
+  totalMs: 3_000,
+};
+const PERSON = {
+  id: "person-1",
+  email: "person@example.com",
+  password: "k9Pq-v3Xm7Rt-first",
+};
 const NEW_PASSWORD = "n3w-Passphrase-orbit-lantern";
 
-async function start(options: { smtp?: boolean; emailPassword?: boolean } = {}) {
+async function start(
+  options: { smtp?: boolean; emailPassword?: boolean } = {},
+) {
   const portal = await createAdminHarness();
   const smtp = await startTestSmtp({ tlsPort: null });
   let time = Date.parse("2026-10-12T08:00:00.000Z");
@@ -62,7 +73,8 @@ async function start(options: { smtp?: boolean; emailPassword?: boolean } = {}) 
           db: portal.db,
           mail,
           limits: createSignUpLimits(rateLimits, now),
-          emailPasswordOn: () => Promise.resolve(options.emailPassword !== false),
+          emailPasswordOn: () =>
+            Promise.resolve(options.emailPassword !== false),
           baseUrl: ADMIN_TEST_BASE_URL,
           defer: (work) => {
             pending.push(work);
@@ -79,13 +91,21 @@ async function start(options: { smtp?: boolean; emailPassword?: boolean } = {}) 
     isKnownToken: (token) => isKnownResetToken(portal.db, token),
     complete: async (input) =>
       completePasswordReset(
-        { db: portal.db, hashPassword: (await portal.auth.$context).password.hash, now },
+        {
+          db: portal.db,
+          hashPassword: (await portal.auth.$context).password.hash,
+          now,
+        },
         input,
       ),
     now,
   });
 
-  const post = (path: string, body: unknown, headers: Record<string, string> = {}) =>
+  const post = (
+    path: string,
+    body: unknown,
+    headers: Record<string, string> = {},
+  ) =>
     new Request(`${ADMIN_TEST_BASE_URL}${path}`, {
       method: "POST",
       headers: { "content-type": "application/json", ...headers },
@@ -109,7 +129,9 @@ async function start(options: { smtp?: boolean; emailPassword?: boolean } = {}) 
     },
     tokenOf(message: { text: string } | undefined): string {
       const link = /https?:\/\/\S+/.exec(message?.text ?? "")?.[0];
-      return link === undefined ? "" : (new URL(link).searchParams.get("token") ?? "");
+      return link === undefined
+        ? ""
+        : (new URL(link).searchParams.get("token") ?? "");
     },
     async canSignIn(email: string, password: string) {
       try {
@@ -137,23 +159,34 @@ describe("asking for a reset link by mail", () => {
     const [message] = smtp.messages;
     expect(message?.to).toEqual([PERSON.email]);
     expect(message?.subject).toBe("Reset your password");
-    expect(message?.text).toContain(`${ADMIN_TEST_BASE_URL}/reset-password?token=`);
+    expect(message?.text).toContain(
+      `${ADMIN_TEST_BASE_URL}/reset-password?token=`,
+    );
     expect(message?.text).toContain("30 minutes");
     // The database holds the hash of the token and not the token; 256 bits; 30 minutes.
     const token = tokenOf(message);
     expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
-    const rows = await portal.db.selectFrom("password_reset_tokens").selectAll().execute();
+    const rows = await portal.db
+      .selectFrom("password_reset_tokens")
+      .selectAll()
+      .execute();
     expect(rows).toHaveLength(1);
     expect(rows[0]?.token_hash).toBe(hashResetToken(token));
     expect(JSON.stringify(rows)).not.toContain(token);
     expect(rows[0]?.user_id).toBe(PERSON.id);
-    expect(Date.parse(rows[0]?.expires_at ?? "") - Date.parse(rows[0]?.created_at ?? "")).toBe(30 * 60 * 1000);
+    expect(
+      Date.parse(rows[0]?.expires_at ?? "") -
+        Date.parse(rows[0]?.created_at ?? ""),
+    ).toBe(30 * 60 * 1000);
   });
 
   // #100-SM-11
   it("answers an unknown address, an address with no password and a known one exactly alike, and sends nothing for the first two", async () => {
     const { ask, flush, smtp, portal } = await start();
-    await portal.db.deleteFrom("accounts").where("user_id", "=", "person-1").execute();
+    await portal.db
+      .deleteFrom("accounts")
+      .where("user_id", "=", "person-1")
+      .execute();
     await portal.db
       .insertInto("accounts")
       .values({
@@ -178,7 +211,9 @@ describe("asking for a reset link by mail", () => {
     await flush();
 
     expect(smtp.messages).toEqual([]);
-    expect(await portal.db.selectFrom("password_reset_tokens").selectAll().execute()).toEqual([]);
+    expect(
+      await portal.db.selectFrom("password_reset_tokens").selectAll().execute(),
+    ).toEqual([]);
     expect(githubOnly.status).toBe(unknown.status);
     expect(await githubOnly.text()).toBe(await unknown.text());
     expect([...githubOnly.headers].sort()).toEqual([...unknown.headers].sort());
@@ -219,7 +254,9 @@ describe("asking for a reset link by mail", () => {
     expect(await known.json()).toEqual({ error: "not_available" });
     expect(unknown.status).toBe(404);
     expect(smtp.sessions).toEqual([]);
-    expect(await portal.db.selectFrom("password_reset_tokens").selectAll().execute()).toEqual([]);
+    expect(
+      await portal.db.selectFrom("password_reset_tokens").selectAll().execute(),
+    ).toEqual([]);
   });
 
   it("does not exist while signing in with email and password is switched off", async () => {
@@ -245,7 +282,9 @@ describe("asking for a reset link by mail", () => {
     const { ask, flush, smtp } = await start();
 
     const bad = await ask("not-an-address");
-    const injection = await ask("person@example.com\r\nBcc: attacker@example.com");
+    const injection = await ask(
+      "person@example.com\r\nBcc: attacker@example.com",
+    );
     const missing = await ask(undefined);
     await flush();
 
@@ -262,8 +301,12 @@ describe("asking for a reset link by mail", () => {
   it("refuses a request from another site and one that is not JSON", async () => {
     const { ask, portal, smtp, flush } = await start();
 
-    const crossSite = await ask(PERSON.email, { "sec-fetch-site": "cross-site" });
-    const form = await ask("a=b", { "content-type": "application/x-www-form-urlencoded" });
+    const crossSite = await ask(PERSON.email, {
+      "sec-fetch-site": "cross-site",
+    });
+    const form = await ask("a=b", {
+      "content-type": "application/x-www-form-urlencoded",
+    });
     await flush();
 
     expect(crossSite.status).toBe(403);
@@ -286,7 +329,9 @@ describe("asking for a reset link by mail", () => {
     expect(done.status).toBe(200);
     expect(await canSignIn(PERSON.email, NEW_PASSWORD)).toBe(true);
     // Using one ends the other.
-    expect((await reset(tokenOf(second), "an0ther-Passphrase-orbit-77")).status).toBe(400);
+    expect(
+      (await reset(tokenOf(second), "an0ther-Passphrase-orbit-77")).status,
+    ).toBe(400);
   });
 });
 
@@ -322,20 +367,33 @@ describe("the limits of the reset mail", () => {
 
     expect(response.status).toBe(200);
     expect(smtp.messages).toHaveLength(1);
-    expect((await rateLimits.hit(PASSWORD_RESET_MAIL_GLOBAL_KEY, PASSWORD_RESET_MAIL_GLOBAL_WINDOW_MS)).count).toBe(2);
+    expect(
+      (
+        await rateLimits.hit(
+          PASSWORD_RESET_MAIL_GLOBAL_KEY,
+          PASSWORD_RESET_MAIL_GLOBAL_WINDOW_MS,
+        )
+      ).count,
+    ).toBe(2);
   });
 
   it("stops the instance from sending more reset mails than it allows, without telling anyone apart", async () => {
-    const { ask, flush, smtp, rateLimits, logs, portal, advance } = await start();
+    const { ask, flush, smtp, rateLimits, logs, portal, advance } =
+      await start();
     for (let i = 0; i < PASSWORD_RESET_MAIL_GLOBAL_MAX; i += 1)
-      await rateLimits.hit(PASSWORD_RESET_MAIL_GLOBAL_KEY, PASSWORD_RESET_MAIL_GLOBAL_WINDOW_MS);
+      await rateLimits.hit(
+        PASSWORD_RESET_MAIL_GLOBAL_KEY,
+        PASSWORD_RESET_MAIL_GLOBAL_WINDOW_MS,
+      );
 
     const response = await ask(PERSON.email);
     await flush();
 
     expect(response.status).toBe(200);
     expect(smtp.messages).toEqual([]);
-    expect(await portal.db.selectFrom("password_reset_tokens").selectAll().execute()).toEqual([]);
+    expect(
+      await portal.db.selectFrom("password_reset_tokens").selectAll().execute(),
+    ).toEqual([]);
     expect(logs.join("\n")).toContain("PASSWORD_RESET_MAIL_LIMITED");
     // After the window the mail goes out again.
     advance(PASSWORD_RESET_MAIL_GLOBAL_WINDOW_MS);
@@ -351,20 +409,34 @@ describe("using the link from the mail", () => {
     const session = await fixture.portal.signIn(PERSON.email, PERSON.password);
     await fixture.ask(PERSON.email);
     await fixture.flush();
-    return { ...fixture, session, token: fixture.tokenOf(fixture.smtp.messages[0]) };
+    return {
+      ...fixture,
+      session,
+      token: fixture.tokenOf(fixture.smtp.messages[0]),
+    };
   }
 
   // #100-SM-13
   it("sets the new password, ends the old one and every session of the account", async () => {
     const { reset, token, canSignIn, portal, session } = await mailed();
-    const before = await portal.db.selectFrom("sessions").select("id").where("user_id", "=", PERSON.id).execute();
+    const before = await portal.db
+      .selectFrom("sessions")
+      .select("id")
+      .where("user_id", "=", PERSON.id)
+      .execute();
 
     const response = await reset(token);
 
     expect(session.size).toBeGreaterThan(0);
     expect(before.length).toBeGreaterThan(0);
     expect(response.status).toBe(200);
-    expect(await portal.db.selectFrom("sessions").select("id").where("user_id", "=", PERSON.id).execute()).toEqual([]);
+    expect(
+      await portal.db
+        .selectFrom("sessions")
+        .select("id")
+        .where("user_id", "=", PERSON.id)
+        .execute(),
+    ).toEqual([]);
     expect(await canSignIn(PERSON.email, NEW_PASSWORD)).toBe(true);
     expect(await canSignIn(PERSON.email, PERSON.password)).toBe(false);
   });
@@ -382,14 +454,17 @@ describe("using the link from the mail", () => {
 
   // #100-SM-12
   it("refuses a link that was used, one that expired and one that was changed, with one code", async () => {
-    const { reset, token, canSignIn, ask, flush, smtp, advance, tokenOf } = await mailed();
+    const { reset, token, canSignIn, ask, flush, smtp, advance, tokenOf } =
+      await mailed();
     await reset(token);
 
     const reused = await reset(token);
     await ask(PERSON.email);
     await flush();
     const fresh = tokenOf(smtp.messages[1]);
-    const tampered = await reset(`${fresh.slice(0, -1)}${fresh.endsWith("A") ? "B" : "A"}`);
+    const tampered = await reset(
+      `${fresh.slice(0, -1)}${fresh.endsWith("A") ? "B" : "A"}`,
+    );
     advance(30 * 60 * 1000);
     const expired = await reset(fresh);
 
@@ -398,7 +473,9 @@ describe("using the link from the mail", () => {
       expect(await response.json()).toEqual({ error: "invalid_token" });
     }
     expect(await canSignIn(PERSON.email, NEW_PASSWORD)).toBe(true);
-    expect(await canSignIn(PERSON.email, "an0ther-Passphrase-orbit-77")).toBe(false);
+    expect(await canSignIn(PERSON.email, "an0ther-Passphrase-orbit-77")).toBe(
+      false,
+    );
   });
 
   it("works just before the 30 minutes are over", async () => {
@@ -423,8 +500,12 @@ describe("when the mail cannot be sent", () => {
     expect(smtp.messages).toEqual([]);
     expect(logs.join("\n")).toContain("PASSWORD_RESET_MAIL_FAILED");
     expect(logs.join("\n")).not.toContain(PERSON.email);
-    const rows = await portal.db.selectFrom("password_reset_tokens").selectAll().execute();
-    for (const row of rows) expect(logs.join("\n")).not.toContain(row.token_hash);
+    const rows = await portal.db
+      .selectFrom("password_reset_tokens")
+      .selectAll()
+      .execute();
+    for (const row of rows)
+      expect(logs.join("\n")).not.toContain(row.token_hash);
     expect(logs.join("\n")).not.toContain("reset-password?token");
   });
 

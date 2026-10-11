@@ -28,7 +28,10 @@ export function getMailSender(): MailSender {
 }
 
 /** The same sender over a given database and master key (tests, tools). */
-export function mailSenderOn(db: Kysely<Database>, appSecret: string): MailSender {
+export function mailSenderOn(
+  db: Kysely<Database>,
+  appSecret: string,
+): MailSender {
   return createSmtpMailSender({
     config: createSmtpConfigStore({
       db,

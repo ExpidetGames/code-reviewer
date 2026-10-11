@@ -33,7 +33,10 @@ const NO_STORE = { "cache-control": "no-store" };
 
 function refusal(
   code: PasswordResetRequestErrorCode,
-  extra: { issues?: Array<{ field: string; code: string }>; retryAfter?: number } = {},
+  extra: {
+    issues?: Array<{ field: string; code: string }>;
+    retryAfter?: number;
+  } = {},
 ): Response {
   return Response.json(
     { error: code, ...(extra.issues ? { issues: extra.issues } : {}) },
@@ -57,13 +60,18 @@ export function createPasswordResetRequestHandler({
   log?: (message: string) => void;
 }) {
   return async function post(request: Request): Promise<Response> {
-    const body = await readJsonObject(request, PASSWORD_RESET_REQUEST_MAX_BYTES);
+    const body = await readJsonObject(
+      request,
+      PASSWORD_RESET_REQUEST_MAX_BYTES,
+    );
     if (!body.ok) return refusal(body.error);
     let outcome: ResetRequestOutcome;
     try {
       outcome = await ask(body.value.email);
     } catch {
-      log("[auth] PASSWORD_RESET_REQUEST_UNAVAILABLE: the request could not be served.");
+      log(
+        "[auth] PASSWORD_RESET_REQUEST_UNAVAILABLE: the request could not be served.",
+      );
       return refusal("unavailable");
     }
     switch (outcome.kind) {
@@ -76,7 +84,9 @@ export function createPasswordResetRequestHandler({
           issues: [{ field: "email", code: "invalid_email" }],
         });
       case "rate_limited":
-        return refusal("rate_limited", { retryAfter: outcome.retryAfterSeconds });
+        return refusal("rate_limited", {
+          retryAfter: outcome.retryAfterSeconds,
+        });
     }
   };
 }

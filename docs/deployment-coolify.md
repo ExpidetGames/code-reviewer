@@ -274,11 +274,24 @@ Every start of the app prints a fresh 6-digit **setup code** in its log while th
 
 What to know:
 
-- **A lost admin password** (no mail server yet): run `admin reset-password <email>` inside the `app`
+- **A lost admin password** (with a mail server, "Forgot your password?" on the sign-in page mails a link;
+  without one): run `admin reset-password <email>` inside the `app`
   container (Coolify: the **Terminal** of the service `app`; plain Docker: `docker compose exec app admin
   reset-password <email>`). It prints a link that sets a new password once, within 30 minutes, and signs the
   account out everywhere. Whoever can open a shell in the container can do this; that is the proof of
   operator rights.
+- **Mail** is set up in the admin portal (**Mail**), never through environment variables: SMTP host, port, how
+  the connection is secured (STARTTLS on port 587, TLS on 465, or none, which the page warns about), the login
+  and the sender address. The password is stored encrypted with a key derived from `APP_SECRET`, shown nowhere
+  and never returned; leave the field empty to keep it. **Send test mail** sends one message to your own
+  address and, when it fails, says why in words (host not found, nothing listening, certificate, login
+  refused, sender refused, timeout). Certificates are checked; "Accept a self-signed certificate" turns the
+  check off for a mail server on a network you control. The app connects to the host you enter **from its own
+  network**, so the mail server must be reachable from the `app` container and you should only enter one you
+  trust. Ports below 1024 other than 25, 465 and 587 are refused. With a mail server people confirm their
+  address by link, and can reset a forgotten password; removing it later is allowed and the sign-up rules that
+  need verification close again. If the stored password cannot be read (another `APP_SECRET`), the page says
+  so: enter it again.
 - The code is valid for **60 minutes**, works once, and the setup session that follows it lasts **30
   minutes**. If either runs out, **restart the app**: it prints a new code. A restart before the wizard is
   finished shows the wizard again from the start.

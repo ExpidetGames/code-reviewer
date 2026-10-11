@@ -22,7 +22,11 @@ const DEFAULT_PORT: Record<Security, number> = {
   none: 25,
 };
 
-const SECURITY_OPTIONS: Array<{ value: Security; title: string; text: string }> = [
+const SECURITY_OPTIONS: Array<{
+  value: Security;
+  title: string;
+  text: string;
+}> = [
   {
     value: "starttls",
     title: "STARTTLS",
@@ -52,13 +56,19 @@ export function MailForm({
   const saved = settings.smtp.value;
   const [host, setHost] = useState(saved?.host ?? "");
   const [portText, setPortText] = useState(String(saved?.port ?? 587));
-  const [security, setSecurity] = useState<Security>(saved?.security ?? "starttls");
+  const [security, setSecurity] = useState<Security>(
+    saved?.security ?? "starttls",
+  );
   const [user, setUser] = useState(saved?.user ?? "");
   const [password, setPassword] = useState("");
   const [clearPassword, setClearPassword] = useState(false);
-  const [senderAddress, setSenderAddress] = useState(saved?.senderAddress ?? "");
+  const [senderAddress, setSenderAddress] = useState(
+    saved?.senderAddress ?? "",
+  );
   const [senderName, setSenderName] = useState(saved?.senderName ?? "");
-  const [allowSelfSigned, setAllowSelfSigned] = useState(saved?.allowSelfSigned ?? false);
+  const [allowSelfSigned, setAllowSelfSigned] = useState(
+    saved?.allowSelfSigned ?? false,
+  );
   const [confirmRemove, setConfirmRemove] = useState(false);
   const { pending, status, save } = useSave(api);
 
@@ -112,7 +122,8 @@ export function MailForm({
   }
 
   const issues = status?.kind === "failed" ? status.issues : [];
-  const issueFor = (field: string) => issues.find((entry) => entry.field === field);
+  const issueFor = (field: string) =>
+    issues.find((entry) => entry.field === field);
   const error = (field: string) => {
     const issue = issueFor(field);
     return issue ? (
@@ -139,8 +150,8 @@ export function MailForm({
       {passwordState === "unreadable" ? (
         <p role="alert" className="alert alert-error">
           <strong>The saved password cannot be read.</strong> It was saved with
-          another APP_SECRET, or the stored value was changed. Enter the password
-          again and save. Until then no mail can be sent.
+          another APP_SECRET, or the stored value was changed. Enter the
+          password again and save. Until then no mail can be sent.
         </p>
       ) : null}
 
@@ -339,7 +350,11 @@ export function MailForm({
       {saved !== null ? (
         <div className="field">
           {confirmRemove ? (
-            <p className="check-line" role="group" aria-label="Confirm removing the mail server">
+            <p
+              className="check-line"
+              role="group"
+              aria-label="Confirm removing the mail server"
+            >
               <span>
                 Remove the mail server? Sign-up rules that need to verify
                 addresses stop working until there is one again.

@@ -33,14 +33,22 @@ async function fillServer(
 ): Promise<void> {
   const mail = form(page);
   await mail.getByLabel("Host", { exact: true }).fill(e2eEnv.smtp.host);
-  await mail.getByLabel("Port", { exact: true }).fill(String(values.port ?? e2eEnv.smtp.port));
+  await mail
+    .getByLabel("Port", { exact: true })
+    .fill(String(values.port ?? e2eEnv.smtp.port));
   await mail.getByRole("radio", { name: /^STARTTLS/ }).check();
-  await mail.getByRole("checkbox", { name: "Accept a self-signed certificate" }).check();
+  await mail
+    .getByRole("checkbox", { name: "Accept a self-signed certificate" })
+    .check();
   await mail.getByLabel("User", { exact: true }).fill(e2eEnv.smtp.user);
   if (values.password !== undefined)
     await mail.getByLabel("Password", { exact: true }).fill(values.password);
-  await mail.getByLabel("Sender address", { exact: true }).fill("code-reviewer@e2e.test");
-  await mail.getByLabel("Sender name (optional)", { exact: true }).fill("Code Reviewer");
+  await mail
+    .getByLabel("Sender address", { exact: true })
+    .fill("code-reviewer@e2e.test");
+  await mail
+    .getByLabel("Sender name (optional)", { exact: true })
+    .fill("Code Reviewer");
 }
 
 async function save(page: Page): Promise<void> {
@@ -70,8 +78,12 @@ test.describe("the mail page", () => {
     page,
   }) => {
     await page.goto("/login");
-    await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Forgot your password?" })).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "Sign in", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "Forgot your password?" }),
+    ).toHaveCount(0);
 
     const route = await page.request.post("/api/password-reset/request", {
       data: { email: "someone@e2e.test" },
@@ -82,7 +94,9 @@ test.describe("the mail page", () => {
     // The page decides at request time, behind a boundary, so it shows the page that is not found (the
     // status of the answer is already 200 by then); there is no form.
     await expect(page.getByText("This page could not be found.")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Send me a link" })).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "Send me a link" }),
+    ).toHaveCount(0);
   });
 
   // #100-SM-16
@@ -91,8 +105,12 @@ test.describe("the mail page", () => {
   }) => {
     await signInAsAdmin(page);
     await page.goto("/admin/mail");
-    await expect(page.getByRole("heading", { level: 1, name: "Mail" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Send test mail" })).toBeDisabled();
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Mail" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Send test mail" }),
+    ).toBeDisabled();
 
     await fillServer(page, { password: e2eEnv.smtp.password });
     await save(page);
@@ -100,14 +118,21 @@ test.describe("the mail page", () => {
     // The password is saved and never shown again; the form says so and the field is empty.
     await page.reload();
     await expect(form(page).getByText(/A password is saved/)).toBeVisible();
-    await expect(form(page).getByLabel("Password", { exact: true })).toHaveValue("");
-    await expect(form(page).getByLabel("Host", { exact: true })).toHaveValue(e2eEnv.smtp.host);
+    await expect(
+      form(page).getByLabel("Password", { exact: true }),
+    ).toHaveValue("");
+    await expect(form(page).getByLabel("Host", { exact: true })).toHaveValue(
+      e2eEnv.smtp.host,
+    );
     expect(await page.content()).not.toContain(e2eEnv.smtp.password);
 
     await sendTestMail(page);
     await expect(page.getByText(/handed to the mail server/)).toBeVisible();
 
-    const message = await messageTo(e2eEnv.adminEmail, "Test mail from Code Reviewer");
+    const message = await messageTo(
+      e2eEnv.adminEmail,
+      "Test mail from Code Reviewer",
+    );
     expect(message.from).toBe("code-reviewer@e2e.test");
     expect(message.secure).toBe(true);
     expect(message.authenticatedAs).toBe(e2eEnv.smtp.user);
@@ -126,15 +151,24 @@ test.describe("the mail page", () => {
     await form(page).getByLabel("Password", { exact: true }).fill(wrong);
     await save(page);
     await sendTestMail(page);
-    await expect(page.getByRole("alert").filter({ hasText: "refused the login" })).toBeVisible();
-    await expect(page.getByRole("alert").filter({ hasText: "535" })).toBeVisible();
+    await expect(
+      page.getByRole("alert").filter({ hasText: "refused the login" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("alert").filter({ hasText: "535" }),
+    ).toBeVisible();
     expect(await page.content()).not.toContain(wrong);
 
-    await fillServer(page, { port: e2eEnv.smtp.controlPort + 1, password: e2eEnv.smtp.password });
+    await fillServer(page, {
+      port: e2eEnv.smtp.controlPort + 1,
+      password: e2eEnv.smtp.password,
+    });
     await save(page);
     await sendTestMail(page);
     await expect(
-      page.getByRole("alert").filter({ hasText: "Nothing answered on that host and port" }),
+      page
+        .getByRole("alert")
+        .filter({ hasText: "Nothing answered on that host and port" }),
     ).toBeVisible();
 
     // Back to a working server: the test mail arrives again.
@@ -142,7 +176,9 @@ test.describe("the mail page", () => {
     await save(page);
     await sendTestMail(page);
     await expect(page.getByText(/handed to the mail server/)).toBeVisible();
-    expect((await readInbox(e2eEnv.adminEmail)).length).toBeGreaterThanOrEqual(2);
+    expect((await readInbox(e2eEnv.adminEmail)).length).toBeGreaterThanOrEqual(
+      2,
+    );
   });
 
   // #100-SM-01
@@ -157,8 +193,12 @@ test.describe("the mail page", () => {
 
     expect(settings.status()).toBe(200);
     expect(body).not.toContain(e2eEnv.smtp.password);
-    expect(JSON.parse(body)).toMatchObject({ smtp: { password: "configured" } });
+    expect(JSON.parse(body)).toMatchObject({
+      smtp: { password: "configured" },
+    });
     expect((await request.get("/api/admin/settings")).status()).toBe(401);
-    expect((await request.post("/api/admin/mail/test", { data: {} })).status()).toBe(401);
+    expect(
+      (await request.post("/api/admin/mail/test", { data: {} })).status(),
+    ).toBe(401);
   });
 });

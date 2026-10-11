@@ -13,7 +13,8 @@ import {
 
 const FAILURE_COPY: Record<string, string> = {
   invalid_input: "Enter a valid email address.",
-  rate_limited: "Too many requests for this address. Wait a while and try again.",
+  rate_limited:
+    "Too many requests for this address. Wait a while and try again.",
   not_available:
     "Resetting a password by mail is not available on this instance. Ask the operator.",
   unavailable: "This is not available right now. Please try again later.",

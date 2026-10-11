@@ -20,12 +20,18 @@ export async function deliverWithStoredSettings(
   config: Pick<SmtpConfigStore, "resolve">,
   message: MailMessage,
   timeouts: SmtpTimeouts = DEFAULT_SMTP_TIMEOUTS,
-): Promise<DeliveryResult | { ok: false; failure: { code: "not_configured"; detail: null } }> {
+): Promise<
+  | DeliveryResult
+  | { ok: false; failure: { code: "not_configured"; detail: null } }
+> {
   const resolved = await config.resolve();
   if (resolved === null)
     return { ok: false, failure: { code: "not_configured", detail: null } };
   if (resolved.password.state === "unreadable")
-    return { ok: false, failure: { code: "password_unreadable", detail: null } };
+    return {
+      ok: false,
+      failure: { code: "password_unreadable", detail: null },
+    };
   return deliverOverSmtp(
     {
       settings: resolved.settings,
@@ -55,7 +61,11 @@ export function createSmtpMailSender({
 
     async send(message) {
       try {
-        const result = await deliverWithStoredSettings(config, message, timeouts);
+        const result = await deliverWithStoredSettings(
+          config,
+          message,
+          timeouts,
+        );
         if (result.ok) return { ok: true };
         if (result.failure.code === "not_configured")
           return { ok: false, error: "not_configured" };
