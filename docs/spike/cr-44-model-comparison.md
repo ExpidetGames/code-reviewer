@@ -5,6 +5,10 @@ command `review`, installation token, models through OpenRouter. Everything belo
 `runner/scripts/manual_review.py` (extended in this ticket with `--record-dir` and `--label`, see
 "Method"). The customer limit is at most 0.10 USD per review on average.
 
+Addendum (CR-48, 2026-10-10): the same comparison for `anthropic/claude-opus-5.5` and
+`deepseek/deepseek-v4.1-flash` is in [`cr-48-model-addendum.md`](cr-48-model-addendum.md). The default below does
+not change.
+
 ## Decision
 
 Decided by the project lead on 2026-10-10 on the basis of this report: the default review model is
