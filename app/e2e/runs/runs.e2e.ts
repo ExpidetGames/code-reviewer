@@ -285,11 +285,19 @@ test.describe("the runs pages", () => {
     await expect(runs.getByRole("listitem")).toHaveCount(3);
 
     await runs.getByRole("link", { name: `${GADGETS.fullName} #21` }).click();
+    // Wait for the run page first. Right after the click the URL is already the run's, but the old
+    // list is still in the document, and its row carries the same sentence as the page, so a text
+    // query made in that moment finds two elements. The sentence of the page sits in its details
+    // list, which the rows do not have.
     await expect(
-      page.getByText("The AI provider says the credit or quota is used up."),
+      page.getByRole("heading", { level: 1, name: `${GADGETS.fullName} #21` }),
+    ).toBeVisible();
+    await expect(
+      page
+        .locator("dd")
+        .getByText("The AI provider says the credit or quota is used up."),
     ).toBeVisible();
     await expect(page.getByText("llm_quota")).toBeVisible();
-    // The list left behind stays in the document, hidden, with a line of the same words.
     await expect(
       page.getByText("Started by runs-journey", { exact: true }),
     ).toBeVisible();
