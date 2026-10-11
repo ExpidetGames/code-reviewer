@@ -168,7 +168,9 @@ Runner (`runner/`, Python version pinned in `.python-version`, uv, `uv.lock` com
   `engine` is deselected by default, run it with `-m engine`. `pytest-timeout` per level, set in
   `tests/conftest.py` from the test's directory: unit 10 s, integration and contract 60 s, engine
   180 s. `pytest-socket` as described above.
-- `ruff check` and `ruff format --check`, `pyright` in strict mode.
+- `ruff check` and `ruff format --check`, `pyright` in strict mode. They cover the runner and the
+  Python under `fakes/` (the e2e wrapper `fakes/pr-agent/run_job_against_fake_llm.py`): ruff gets
+  `. ../fakes` as paths, pyright has `../fakes` in its `include` in `runner/pyproject.toml`.
 
 Engine suite (`runner/tests/engine/`, `uv run pytest -m engine`, about 4 minutes, `make test-engine`):
 
@@ -254,7 +256,7 @@ no process identifiers in titles), `verify:server-only-canary`, the Docker test 
 |---|---|---|
 | Install | `make install` | `pnpm --dir app install --frozen-lockfile`, `uv --directory runner sync --locked` |
 | Everything before a PR | `make verify` | lint, typecheck, unit and host integration tests of both parts |
-| Lint | `make lint` | `pnpm lint`, `pnpm format:check`; `ruff check`, `ruff format --check` |
+| Lint | `make lint` | `pnpm lint`, `pnpm format:check`; `ruff check . ../fakes`, `ruff format --check . ../fakes` |
 | Typecheck | `make typecheck` | `pnpm typecheck`; `pyright` |
 | Unit tests | `make test-unit` | `pnpm test`; `pytest -m unit` |
 | Integration tests (host) | `make test-integration` | `pnpm test:int`; `pytest -m "integration or contract"` |
@@ -263,7 +265,7 @@ no process identifiers in titles), `verify:server-only-canary`, the Docker test 
 | Compose smoke test | `make test-compose` | builds both images under the tags `code-reviewer-*:compose`, then runs `docker/smoke/compose.sh` (needs a Docker daemon; not part of `make verify`) |
 
 Inside `app/`: `pnpm dev | build | start | lint | typecheck | test | test:watch | test:int | test:e2e`.
-Inside `runner/`: `uv sync --locked`, `uv run ruff check .`, `uv run ruff format --check .`,
+Inside `runner/`: `uv sync --locked`, `uv run ruff check . ../fakes`, `uv run ruff format --check . ../fakes`,
 `uv run pyright`, `uv run pytest` (default: everything except `engine`), `uv run pytest -m unit`,
 `uv run pytest -m "integration or contract"`, `uv run pytest -m engine`.
 
@@ -307,7 +309,7 @@ file is pinned by `app/src/ci/ci-workflow.test.ts`.
 |---|---|---|
 | `changes` | pull requests | Path filter: `app` (anything except `runner/**`, top-level Markdown and `fakes/**` Markdown; Markdown inside `app/` stays because Prettier checks it), `runner` (anything except `app/**` and Markdown), `workflows` (`.github/**`). |
 | `app-fast` | app changed | `pnpm format:check`, `lint`, `typecheck`, `test` (unit), `test:int` (host), `build` with placeholder env. |
-| `runner-fast` | runner changed | `ruff check`, `ruff format --check`, `pyright`, `pytest -m unit`, `pytest -m "integration or contract"`. |
+| `runner-fast` | runner changed | `ruff check . ../fakes`, `ruff format --check . ../fakes`, `pyright`, `pytest -m unit`, `pytest -m "integration or contract"`. |
 | `engine` | pull requests that change the runner, and every pull request into `main` (never pushes, never app-only changes) | Calls `engine.yml` (the one definition, also used by the nightly workflow): `uv sync --locked`, the tiktoken encoding from the cache (`scripts/prime_tiktoken_cache.py` fills it, with retries, the one step with internet), then `pytest -m engine` in a network namespace without network. No Docker stack, no secrets, `contents: read`, 20 minutes. |
 | `e2e` ("E2E: browser journeys") | app or runner changed | `playwright install --with-deps chromium`, the runner (`uv sync --locked` in `runner/`) and the tiktoken encoding (restored from the cache, primed with `scripts/prime_tiktoken_cache.py`) for the journey with the real runner, then the journeys against the production build: `@smoke` only on pull requests into `development`, all (without `@flaky`) on pull requests into `main` and on pushes. |
 | `compose` ("Compose: stack smoke test") | pull requests: app or runner changed, or any pull request into `main` | Builds both images (`load`, no push, GHA layer cache), then runs `docker/smoke/compose.sh` against them. Same rights as the image jobs. |

@@ -46,7 +46,7 @@ Run from the repository root.
 |---|---|
 | Install (from lockfiles) | `make install` |
 | Everything before a PR | `make verify` |
-| Lint, both parts | `make lint` (app: `pnpm --dir app lint` and `pnpm --dir app format:check`; runner: `uv --directory runner run ruff check .` and `ruff format --check .`) |
+| Lint, both parts | `make lint` (app: `pnpm --dir app lint` and `pnpm --dir app format:check`; runner: `uv --directory runner run ruff check . ../fakes` and `ruff format --check . ../fakes`) |
 | Typecheck, both parts | `make typecheck` (app: `pnpm --dir app typecheck`; runner: `uv --directory runner run pyright`) |
 | Unit tests, both parts | `make test-unit` (app: `pnpm --dir app test`; runner: `uv --directory runner run pytest -m unit`) |
 | Integration tests on the host | `make test-integration` |
