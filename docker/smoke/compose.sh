@@ -186,7 +186,11 @@ health=$(curl --silent --fail --max-time 5 "http://127.0.0.1:$port/api/health") 
 step "the fresh stack prints one setup code and waits for the setup"
 base="http://127.0.0.1:$port"
 code=$(setup_code_from_log "$(dc logs --no-color app 2>&1)") || exit 1
-curl --silent --max-time 5 "$base/" | grep -q 'Set up Code Reviewer' || fail "the start page does not show the setup"
+# (Captured first: `grep -q` ends at its first match, and under pipefail the curl it leaves behind
+# would fail the pipeline with SIGPIPE.)
+start_page=$(curl --silent --max-time 5 "$base/")
+grep -q 'Set up Code Reviewer' <<<"$start_page" || fail "the start page does not show the setup"
+grep -qF "$code" <<<"$start_page" && fail "the setup code is in the start page"
 for path in /api/projects /api/webhooks/github-app /api/runners/v1/claim; do
   answer=$(curl --silent --max-time 5 --write-out ' %{http_code}' --request POST "$base$path")
   [ "$answer" = '{"error":"setup_required"} 503' ] || fail "POST $path did not answer 503 setup_required (got: $answer)"
@@ -285,7 +289,8 @@ backup_file=$(dc exec -T app sh -c 'ls /backups' | head -n 1 | tr -d '\r')
 [[ "$backup_file" =~ ^code-reviewer-[0-9]{8}T[0-9]{6}Z\.db$ ]] || fail "unexpected backup file name: '$backup_file'"
 grep -q "created /backups/$backup_file " <<<"$backup_output" || fail "the backup output does not name the file: $backup_output"
 [ "$(dc exec -T app sh -c "stat -c %a /backups/$backup_file" | tr -d '\r')" = "600" ] || fail "the backup is not readable by its owner only"
-dc exec -T app sh -c 'ls /data' | grep -q 'code-reviewer-' && fail "a backup was written into /data"
+data_listing=$(dc exec -T app sh -c 'ls /data')
+grep -q 'code-reviewer-' <<<"$data_listing" && fail "a backup was written into /data"
 backups_mount=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/backups"}}{{.Type}}{{end}}{{end}}' "$(container_of app)")
 [ "$backups_mount" = "volume" ] || fail "/backups is not a volume of the app: '$backups_mount'"
 
