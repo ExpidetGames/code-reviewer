@@ -15,6 +15,7 @@ const NOW = new Date("2026-10-10T12:10:00.000Z");
 function job(overrides: Partial<Job> = {}): Job {
   return {
     id: "6b1f0a52-5f43-4a53-9d0e-8d4a0f1c2e11",
+    workspaceId: "workspace-1",
     repositoryId: "repo-1",
     prNumber: 7,
     prUrl: "https://github.com/acme/widgets/pull/7",

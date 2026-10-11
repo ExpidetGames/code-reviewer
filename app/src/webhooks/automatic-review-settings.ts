@@ -3,12 +3,12 @@
 // so a test can wire the same lookup to a real database.
 import type { RepositoriesRepository } from "../db/repositories/repositories-repository.ts";
 import type { ReviewSettingsService } from "../review-settings/service.ts";
-import type { AutomaticReviewDeps } from "./github-app-handler.ts";
+import type { WorkspaceCollaborators } from "./github-app-handler.ts";
 
 export function createAutomaticReviewSettingsSource(deps: {
   repositories: Pick<RepositoriesRepository, "findByExternalId">;
   settings: Pick<ReviewSettingsService, "resolveForRepository">;
-}): AutomaticReviewDeps["settingsFor"] {
+}): WorkspaceCollaborators["settingsFor"] {
   return async (integrationId, repositoryExternalId) => {
     const repository = await deps.repositories.findByExternalId(
       integrationId,

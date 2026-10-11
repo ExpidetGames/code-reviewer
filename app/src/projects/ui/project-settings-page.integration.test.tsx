@@ -24,6 +24,7 @@ import {
   loadProjectSettingsPage,
   ProjectSettingsPageContent,
 } from "./project-settings-page.tsx";
+import { defaultWorkspaceId } from "../../test-support/workspaces.ts";
 
 afterEach(cleanup);
 
@@ -56,7 +57,7 @@ const WORKING_ENV = {
 async function openProject(options: { activate?: boolean } = {}) {
   const s = await setupReviewSettings();
   const projects = createProjectService({
-    projects: createProjectsRepository(s.db),
+    projects: createProjectsRepository(s.db, await defaultWorkspaceId(s.db)),
   });
   if (options.activate !== false) await projects.activateProject(s.first.id);
   const handlers = createReviewSettingsRouteHandlers({

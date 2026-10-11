@@ -30,6 +30,7 @@ describe("enqueueing a job", () => {
     const stored = await fixture.queue.get(result.job.id);
     expect(stored).toEqual({
       id: result.job.id,
+      workspaceId: fixture.workspaceId,
       repositoryId: fixture.repositoryId,
       prNumber: 7,
       prUrl: "https://github.test/acme/widgets/pull/7",

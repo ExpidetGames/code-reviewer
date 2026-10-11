@@ -10,16 +10,23 @@ import { createTestDatabase } from "../test-support/test-database.ts";
 import { ProjectError } from "./errors.ts";
 import { noopProjectHooks, type ProjectHooks } from "./hooks.ts";
 import { createProjectService } from "./service.ts";
+import { defaultWorkspaceId } from "../test-support/workspaces.ts";
 
 async function setup(hooks?: ProjectHooks) {
   const { db } = await createTestDatabase();
-  const integration = await createIntegrationsRepository(db).create({
+  const integration = await createIntegrationsRepository(
+    db,
+    await defaultWorkspaceId(db),
+  ).create({
     type: "github_app",
     displayName: "acme",
     externalId: "4242",
     config: {},
   });
-  const repositories = createRepositoriesRepository(db);
+  const repositories = createRepositoriesRepository(
+    db,
+    await defaultWorkspaceId(db),
+  );
   const remote = (id: number): RepoRef => ({
     integrationId: integration.id,
     externalId: String(id),
@@ -30,7 +37,7 @@ async function setup(hooks?: ProjectHooks) {
   const [first, second] = await repositories.list();
   if (first === undefined || second === undefined)
     throw new Error("seeding failed");
-  const projects = createProjectsRepository(db);
+  const projects = createProjectsRepository(db, await defaultWorkspaceId(db));
   return {
     db,
     integration,
@@ -96,10 +103,10 @@ describe("activating a project", () => {
   // CR-24-T08
   it("refuses a repository whose installation is suspended with a stable code", async () => {
     const { service, first, db, integration } = await setup();
-    await createIntegrationsRepository(db).setStatus(
-      integration.id,
-      "disabled",
-    );
+    await createIntegrationsRepository(
+      db,
+      await defaultWorkspaceId(db),
+    ).setStatus(integration.id, "disabled");
 
     expect(await codeOf(service.activateProject(first.id))).toBe(
       "PROJECT_INTEGRATION_UNAVAILABLE",

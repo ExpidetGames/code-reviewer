@@ -5,7 +5,7 @@
 import type { FakePullRequest } from "../../../fakes/github/server.ts";
 import { createAppSettingsRepository } from "../db/repositories/app-settings-repository.ts";
 import { createProjectsRepository } from "../db/repositories/projects-repository.ts";
-import { createJobQueue } from "../jobs/job-queue.ts";
+import { createTestQueue } from "./jobs.ts";
 import { createManualReviewService } from "../manual-reviews/service.ts";
 import { createReviewSettingsService } from "../review-settings/service.ts";
 import { builtInReviewSettings } from "../review-settings/settings.ts";
@@ -49,11 +49,11 @@ export async function startManualReviewHarness(
   h.fake.setRepositories(4242, [{ id: 7001, fullName: "acme/widgets" }]);
 
   const settings = createReviewSettingsService({
-    appSettings: createAppSettingsRepository(h.db),
-    projects: createProjectsRepository(h.db),
+    appSettings: createAppSettingsRepository(h.db, h.workspaceId),
+    projects: createProjectsRepository(h.db, h.workspaceId),
     builtIn: () => builtInReviewSettings("test/model"),
   });
-  const queue = createJobQueue(h.db);
+  const queue = createTestQueue(h.db, h.workspaceId);
   const lines: string[] = [];
   const service = createManualReviewService({
     repositories: h.repositories,

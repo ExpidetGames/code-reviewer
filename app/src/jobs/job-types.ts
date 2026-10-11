@@ -15,6 +15,8 @@ export type JobTriggerKind = (typeof JOB_TRIGGER_KINDS)[number];
 /** A job as the rest of the app sees it. Timestamps are ISO 8601 text in UTC. */
 export type Job = {
   id: string;
+  /** The workspace of the job's repository; the runner API scopes everything it looks up with it. */
+  workspaceId: string;
   repositoryId: string;
   prNumber: number;
   prUrl: string;

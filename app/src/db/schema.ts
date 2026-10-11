@@ -17,8 +17,13 @@ export interface UsersTable {
   /** 1 or 0. */
   email_verified: number;
   image: string | null;
-  /** The current GitHub login, refreshed on every sign in. */
-  github_login: string;
+  /** The current GitHub login, refreshed on every sign in. Null for a user without a GitHub account. */
+  github_login: string | null;
+  /**
+   * When the user was imported from an installation that existed before accounts (ISO 8601, UTC), or
+   * null. Set by the import only; only imported users qualify for the merge with the instance admin.
+   */
+  imported_at: string | null;
   /** When the membership in the allowed GitHub organization was last confirmed (ISO 8601, UTC), or null. */
   org_checked_at: string | null;
   /** The GitHub organization that check was made for, or null. */
@@ -74,8 +79,31 @@ export interface AllowedLoginPinsTable {
   pinned_at: string;
 }
 
+/** The owner of customer data (src/workspaces/README.md). */
+export interface WorkspacesTable {
+  id: string;
+  name: string;
+  /** Unique. */
+  slug: string;
+  /** The user who created it, or null (made by a migration or the setup). */
+  created_by: string | null;
+  /** ISO 8601 text in UTC. */
+  created_at: string;
+}
+
+/** A user's membership of a workspace, with a role (a WorkspaceRole, src/workspaces/roles.ts). */
+export interface WorkspaceMembersTable {
+  workspace_id: string;
+  user_id: string;
+  role: string;
+  /** ISO 8601 text in UTC. */
+  created_at: string;
+}
+
 export interface IntegrationsTable {
   id: string;
+  /** The workspace the connection belongs to; one installation is linked to one workspace only. */
+  workspace_id: string;
   /** An IntegrationType (src/integrations/types.ts). */
   type: string;
   display_name: string;
@@ -95,6 +123,8 @@ export interface IntegrationsTable {
 
 export interface RepositoriesTable {
   id: string;
+  /** The workspace of the integration, repeated here so queries need no join. */
+  workspace_id: string;
   /** The integration (for a GitHub App: the installation) that gives access to the repository. */
   integration_id: string;
   /** The platform's id of the repository. */
@@ -122,8 +152,9 @@ export interface ProjectsTable {
   updated_at: string;
 }
 
-/** One setting of the whole instance (src/db/repositories/app-settings-repository.ts). */
+/** One setting of a workspace (src/db/repositories/app-settings-repository.ts). */
 export interface AppSettingsTable {
+  workspace_id: string;
   /** The name of the setting, for example "review_defaults". */
   key: string;
   /** JSON text. */
@@ -149,6 +180,8 @@ export interface WebhookDeliveriesTable {
 
 export interface JobsTable {
   id: string;
+  /** The workspace of the repository, repeated here so queries need no join. */
+  workspace_id: string;
   repository_id: string;
   pr_number: number;
   pr_url: string;
@@ -203,6 +236,8 @@ export interface Database {
   accounts: AccountsTable;
   verifications: VerificationsTable;
   allowed_login_pins: AllowedLoginPinsTable;
+  workspaces: WorkspacesTable;
+  workspace_members: WorkspaceMembersTable;
   integrations: IntegrationsTable;
   repositories: RepositoriesTable;
   projects: ProjectsTable;

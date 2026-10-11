@@ -9,13 +9,14 @@ import { createProjectService } from "../../projects/service.ts";
 import { createRunsFixture } from "../../test-support/runs.ts";
 import { loadRunDetailPage, RunDetailPageContent } from "./run-detail-page.tsx";
 import { loadRunsPage, RunsPageContent } from "./runs-page.tsx";
+import { defaultWorkspaceId } from "../../test-support/workspaces.ts";
 
 afterEach(cleanup);
 
 async function openRuns() {
   const f = await createRunsFixture();
   const projects = createProjectService({
-    projects: createProjectsRepository(f.db),
+    projects: createProjectsRepository(f.db, await defaultWorkspaceId(f.db)),
   });
   await projects.activateProject(f.repositoryId);
   await projects.activateProject(f.otherRepositoryId);
@@ -125,7 +126,7 @@ describe("the Runs page", () => {
       loadRunsPage(searchParams, {
         runs: app.f.runs,
         projects: createProjectService({
-          projects: createProjectsRepository(app.f.db),
+          projects: createProjectsRepository(app.f.db, app.f.workspaceId),
         }),
       });
     const { rerender } = render(
@@ -169,7 +170,7 @@ describe("the Runs page", () => {
   it("says there are no runs yet before the first one", async () => {
     const f = await createRunsFixture();
     const projects = createProjectService({
-      projects: createProjectsRepository(f.db),
+      projects: createProjectsRepository(f.db, await defaultWorkspaceId(f.db)),
     });
     const data = await loadRunsPage({}, { runs: f.runs, projects });
 

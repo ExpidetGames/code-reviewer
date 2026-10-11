@@ -16,7 +16,7 @@ import { createRepositoriesRepository } from "../../src/db/repositories/reposito
 import type { IntegrationProvider } from "../../src/integrations/provider.ts";
 import { IntegrationError } from "../../src/integrations/errors.ts";
 import { createIntegrationRegistry } from "../../src/integrations/registry.ts";
-import { createJobQueue } from "../../src/jobs/job-queue.ts";
+import { createTestQueue } from "../../src/test-support/jobs.ts";
 import { createReviewSettingsService } from "../../src/review-settings/service.ts";
 import { builtInReviewSettings } from "../../src/review-settings/settings.ts";
 import { TEST_WEBHOOK_SECRET } from "../../src/test-support/github-app.ts";
@@ -28,6 +28,7 @@ import { createAutomaticReviewSettingsSource } from "../../src/webhooks/automati
 import { AUTOMATIC_REVIEW_DEBOUNCE_MS } from "../../src/webhooks/automatic-review-policy.ts";
 import { createGithubAppWebhookHandler } from "../../src/webhooks/github-app-handler.ts";
 import { createJobQueueReviewTriggerIntake } from "../../src/webhooks/job-queue-intake.ts";
+import { defaultWorkspaceId } from "../../src/test-support/workspaces.ts";
 
 const HEAD_1 = FIXTURE_HEAD_SHA;
 const HEAD_2 = "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00";
@@ -84,11 +85,19 @@ async function startHarness(
   });
   const clock = { now: new Date(START) };
   const now = () => new Date(clock.now);
-  const queue = createJobQueue(h.db, { now });
-  const repositories = createRepositoriesRepository(h.db);
+  const queue = createTestQueue(h.db, await defaultWorkspaceId(h.db), {
+    now,
+  });
+  const repositories = createRepositoriesRepository(
+    h.db,
+    await defaultWorkspaceId(h.db),
+  );
   const settings = createReviewSettingsService({
-    appSettings: createAppSettingsRepository(h.db),
-    projects: createProjectsRepository(h.db),
+    appSettings: createAppSettingsRepository(
+      h.db,
+      await defaultWorkspaceId(h.db),
+    ),
+    projects: createProjectsRepository(h.db, await defaultWorkspaceId(h.db)),
     builtIn: () => builtInReviewSettings("test/model"),
   });
   const routeLog: string[] = [];
@@ -106,19 +115,21 @@ async function startHarness(
     integrations: h.integrations,
     deliveries: h.deliveries,
     sync: h.sync,
-    projects: h.projects,
-    automatic: {
+    workspace: () => ({
+      projects: h.projects,
       settingsFor: createAutomaticReviewSettingsSource({
         repositories,
         settings,
       }),
+      intake,
+    }),
+    automatic: {
       debounceMs: options.debounceMs ?? AUTOMATIC_REVIEW_DEBOUNCE_MS,
       ...(options.headCheckTimeoutMs === undefined
         ? {}
         : { headCheckTimeoutMs: options.headCheckTimeoutMs }),
       now,
     },
-    intake,
     logger: {
       info: (line) => routeLog.push(line),
       error: (line) => routeLog.push(line),

@@ -6,10 +6,10 @@ import { createIntegrationsRepository } from "../db/repositories/integrations-re
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
 import { getDatabase } from "../db/startup.ts";
 import { integrationRegistry } from "../integrations/registry.ts";
-import { getJobQueue } from "../jobs/shared.ts";
+import { getRunnerQueue } from "../jobs/shared.ts";
 import { getLlmAccess } from "../llm/shared.ts";
-import { getProjectService } from "../projects/shared.ts";
-import { getReviewSettingsService } from "../review-settings/shared.ts";
+import { projectServiceFor } from "../projects/shared.ts";
+import { reviewSettingsServiceFor } from "../review-settings/shared.ts";
 import { createRunnerApi, type RunnerApi } from "./api.ts";
 import { createClaimedKeys, type ClaimedKeys } from "./claimed-keys.ts";
 import { createProjectClaimGuard } from "./project-claim-guard.ts";
@@ -33,15 +33,19 @@ function getClaimedKeys(): ClaimedKeys {
 export function getRunnerApi(): RunnerApi {
   const db = getDatabase();
   return createRunnerApi({
-    queue: getJobQueue(),
-    repositories: createRepositoriesRepository(db),
-    integrations: createIntegrationsRepository(db),
+    // Runners serve the whole instance: the queue is not scoped, and everything the claim looks up
+    // for a job is looked up in the job's own workspace.
+    queue: getRunnerQueue(),
+    repositories: (workspaceId) =>
+      createRepositoriesRepository(db, workspaceId),
+    integrations: (workspaceId) =>
+      createIntegrationsRepository(db, workspaceId),
     registry: integrationRegistry,
     // A job runs only while its repository has an active project; see claim-guard.ts.
-    guard: createProjectClaimGuard({ projects: getProjectService() }),
+    guard: createProjectClaimGuard({ projects: projectServiceFor }),
     // The review settings of the project over the global defaults; see job-options.ts.
     jobOptions: createReviewSettingsJobOptionsSource({
-      settings: getReviewSettingsService(),
+      settings: reviewSettingsServiceFor,
     }),
     // The shared LLM configuration, read from the environment on every claim (src/llm).
     loadLlm: () => getLlmAccess(),

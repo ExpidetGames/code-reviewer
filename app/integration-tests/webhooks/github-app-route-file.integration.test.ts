@@ -23,6 +23,7 @@ import {
   testGithubAppEnv,
 } from "../../src/test-support/github-app.ts";
 import { createTestDirectory } from "../../src/test-support/test-database.ts";
+import { defaultWorkspaceId } from "../../src/test-support/workspaces.ts";
 
 type Route = typeof import("../../src/app/api/webhooks/github-app/route.ts");
 
@@ -123,8 +124,10 @@ describe("the webhook route file", () => {
       author: { login: "alice", id: 1001 },
     });
     // The repository must be a project before its pull requests are reviewed.
-    const [repository] =
-      await createRepositoriesRepository(getDatabase()).list();
+    const [repository] = await createRepositoriesRepository(
+      getDatabase(),
+      await defaultWorkspaceId(getDatabase()),
+    ).list();
     await getProjectService().activateProject(repository!.id);
     vi.mocked(console.info).mockClear();
 

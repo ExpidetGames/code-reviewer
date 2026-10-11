@@ -64,6 +64,9 @@ describe("the migrations of both epics", () => {
       "20261010201500_create_app_settings",
       "20261011090000_create_job_comments",
       "20261011100000_add_jobs_repository_recent_index",
+      "20261011160000_create_workspaces",
+      "20261011160100_add_workspace_to_customer_data",
+      "20261011160200_prepare_users_for_accounts",
     ]);
   });
 
@@ -116,6 +119,8 @@ describe("starting the database", () => {
       "users",
       "verifications",
       "webhook_deliveries",
+      "workspace_members",
+      "workspaces",
     ]);
     const { rows } = await sql<{
       name: string;

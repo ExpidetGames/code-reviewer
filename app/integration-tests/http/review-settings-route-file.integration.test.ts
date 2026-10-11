@@ -23,6 +23,7 @@ import {
   GET as GET_GLOBAL,
   PUT as PUT_GLOBAL,
 } from "../../src/app/api/review-settings/route.ts";
+import { defaultWorkspaceId } from "../../src/test-support/workspaces.ts";
 
 const session = vi.hoisted(() => ({
   requireUser: vi.fn<() => Promise<SessionUser>>(),
@@ -42,7 +43,9 @@ async function startRoutes() {
   });
   const db = getDatabase();
   const { first } = await seedRepositories(db);
-  await createProjectsRepository(db).activate(first.id);
+  await createProjectsRepository(db, await defaultWorkspaceId(db)).activate(
+    first.id,
+  );
   const context = (repositoryId: string) =>
     ({ params: Promise.resolve({ repositoryId }) }) as Parameters<
       typeof PUT_PROJECT

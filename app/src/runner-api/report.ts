@@ -5,7 +5,7 @@
 //
 // The answers never contain the git token or the LLM key: only the claim response does.
 import "server-only";
-import type { JobQueue } from "../jobs/job-queue.ts";
+import type { RunnerQueue } from "../jobs/runner-queue.ts";
 import type { JobOutcome } from "../jobs/job-types.ts";
 import {
   RUNNER_API_VERSION,
@@ -24,7 +24,7 @@ import {
 import { errorResponse, jsonResponse } from "./responses.ts";
 
 export type ReportDeps = {
-  queue: Pick<JobQueue, "get" | "heartbeat" | "complete" | "release">;
+  queue: Pick<RunnerQueue, "get" | "heartbeat" | "complete" | "release">;
   logger: RunnerApiLogger;
   /** Exact values (the current LLM key, the runner token) that must never end up in a stored result. */
   knownSecrets: () => readonly string[];
