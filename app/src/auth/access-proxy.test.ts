@@ -251,7 +251,10 @@ describe("the header that marks a request as one for a missing path", () => {
 
 describe("a request for a workspace address", () => {
   const roleOf = (role: "owner" | "admin" | "member" | null) =>
-    vi.fn((_userId: string, _slug: string) => Promise.resolve(role));
+    vi.fn((...args: [string, string]) => {
+      void args;
+      return Promise.resolve(role);
+    });
 
   // #101-WM-06
   it.each([

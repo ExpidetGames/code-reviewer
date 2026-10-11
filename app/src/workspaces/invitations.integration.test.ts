@@ -12,7 +12,7 @@ import {
   WORKSPACE_TEST_BASE_URL,
   type WorkspaceHarness,
 } from "../test-support/workspace-harness.ts";
-import { INVITATION_TTL_MS } from "./invitations.ts";
+import { createInvitationService, INVITATION_TTL_MS } from "./invitations.ts";
 import {
   ACCEPT_PERSON_MAX,
   ACCEPT_TOKEN_MAX,
@@ -188,6 +188,44 @@ describe("creating an invitation", () => {
     const result = await invite(h, workspace, admin.id, "new@example.test");
 
     expect(result).toEqual({ ok: false, error: "forbidden" });
+  });
+
+  // #101-WM-11
+  it("judges the role again inside the transaction: a person demoted while the request was on its way creates nothing", async () => {
+    const { h, workspace, owner, admin } = await setup();
+    // Between the first look at the role and the transaction (the counters are asked in between), the
+    // Admin is demoted by an Owner.
+    const racing = createInvitationService({
+      db: h.db,
+      mail: h.mail,
+      baseUrl: "https://reviews.example.test",
+      githubConfigured: () => false,
+      now: h.now,
+      limits: {
+        ...h.limits,
+        async invite(input) {
+          await h.members.changeRole({
+            workspaceId: workspace.id,
+            actorId: owner.id,
+            targetUserId: admin.id,
+            role: "member",
+          });
+          return h.limits.invite(input);
+        },
+      },
+    });
+
+    const result = await racing.create({
+      workspaceId: workspace.id,
+      workspaceName: workspace.name,
+      actorId: admin.id,
+      inviterName: "Admin",
+      email: "new@example.test",
+      role: "member",
+    });
+
+    expect(result).toEqual({ ok: false, error: "forbidden" });
+    expect(await h.invitationRows(workspace.id)).toEqual([]);
   });
 
   // #101-WM-07

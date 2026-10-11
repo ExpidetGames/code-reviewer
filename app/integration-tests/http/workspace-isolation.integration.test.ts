@@ -529,6 +529,33 @@ describe("a member of a workspace asking for it with the ids of another one", ()
   });
 });
 
+describe("an account that may not use the app", () => {
+  // #101-WM-02
+  it.each(ENTRIES.map((entry) => [entry.name, entry] as const))(
+    "gets nothing from %s: not without a workspace, not before the address is confirmed, not without a session",
+    async (_name, entry) => {
+      const t = await start();
+      const before = await t.rowsOf(t.alpha.workspace.id);
+      const user = (await signedInMember(t.db, { id: "owner-alpha" })).user;
+      const lookups: Array<[SessionLookup, number, string]> = [
+        [{ kind: "no_workspace", user }, 403, "no_workspace_access"],
+        [{ kind: "unverified", user }, 403, "email_not_verified"],
+        [{ kind: "denied", reason: "not_allowed" }, 401, "UNAUTHENTICATED"],
+        [{ kind: "none" }, 401, "UNAUTHENTICATED"],
+      ];
+
+      for (const [lookup, status, code] of lookups) {
+        session.currentLookup.mockResolvedValue(lookup);
+        const response = await t.call(entry, "alpha", t.alpha.ids);
+        const text = await response.text();
+        expect(response.status, `${lookup.kind}: ${text}`).toBe(status);
+        expect(JSON.parse(text)).toEqual({ error: code });
+      }
+      expect(await t.rowsOf(t.alpha.workspace.id)).toEqual(before);
+    },
+  );
+});
+
 describe("the role a route needs", () => {
   const cases = ENTRIES.filter(
     (entry) => entry.notInRoleMatrix !== true,
@@ -576,8 +603,8 @@ describe("the table of routes", () => {
     );
     const found: string[] = [];
     for (const { route, file } of files) {
-      const module = (await import(file)) as Record<string, unknown>;
-      for (const method of Object.keys(module))
+      const routeModule = (await import(file)) as Record<string, unknown>;
+      for (const method of Object.keys(routeModule))
         if (/^[A-Z]+$/.test(method)) found.push(`${method} ${route}`);
     }
 
