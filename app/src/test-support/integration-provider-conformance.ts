@@ -63,6 +63,7 @@ export const CONFORMANCE_CHECKS = [
   "hands out job access as normalized git access with a hidden token",
   "returns pull requests as normalized pull request references",
   "reports an unknown pull request with a stable error code",
+  "stops a pull request read when the abort signal has already fired",
   "reports one error per field for an invalid config",
 ] as const;
 export type ConformanceCheck = (typeof CONFORMANCE_CHECKS)[number];
@@ -230,6 +231,29 @@ export async function integrationProviderViolations(
       )
         problems.push(
           "a missing pull request did not fail with INTEGRATION_PULL_REQUEST_NOT_FOUND",
+        );
+      break;
+    }
+    case "stops a pull request read when the abort signal has already fired": {
+      const controller = new AbortController();
+      controller.abort();
+      const failure = await provider
+        .getPullRequest(
+          integration,
+          repo,
+          subject.existingPullRequestNumber,
+          controller.signal,
+        )
+        .then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+      if (
+        !(failure instanceof IntegrationError) ||
+        failure.code !== "INTEGRATION_ACCESS_UNAVAILABLE"
+      )
+        problems.push(
+          "getPullRequest with an aborted signal did not fail with INTEGRATION_ACCESS_UNAVAILABLE",
         );
       break;
     }

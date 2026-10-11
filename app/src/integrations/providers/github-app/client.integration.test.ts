@@ -448,6 +448,136 @@ describe("pull requests", () => {
   });
 });
 
+describe("aborting a read", () => {
+  // The client's own timeout is far longer than every signal below, so only the caller's signal can
+  // close a connection within the wait of `abortedPaths`.
+  const LONG_CLIENT_TIMEOUT = { requestTimeoutMs: 60_000 };
+
+  /** Waits until the fake has seen the client close a connection, or fails after a few seconds. */
+  async function abortedPaths(fake: FakeGithub, count: number) {
+    const deadline = Date.now() + 5000;
+    while (fake.abortedRequests().length < count && Date.now() < deadline)
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    return fake.abortedRequests().map((request) => request.path);
+  }
+
+  // Head check: the request must be cancelled, not just waited for no longer.
+  it("closes the connection of a pull request read that GitHub never answers when the signal fires", async () => {
+    const { client, fake } = await setup(LONG_CLIENT_TIMEOUT);
+    // The token request passes; the pull request itself never gets an answer.
+    fake.fail({ pathIncludes: "/pulls/", hang: true });
+
+    const failure = await failureOf(
+      client.getPullRequest(
+        "4242",
+        "acme/widgets",
+        7,
+        AbortSignal.timeout(100),
+      ),
+    );
+
+    expect(failure).toMatchObject({ code: "GITHUB_APP_UNAVAILABLE" });
+    expect(await abortedPaths(fake, 1)).toEqual([
+      "/repos/acme/widgets/pulls/7",
+    ]);
+  });
+
+  it("closes the connection of the token request when the signal fires while the token is minted", async () => {
+    const { client, fake } = await setup(LONG_CLIENT_TIMEOUT);
+    fake.fail({ pathIncludes: "/access_tokens", hang: true });
+
+    const failure = await failureOf(
+      client.getPullRequest(
+        "4242",
+        "acme/widgets",
+        7,
+        AbortSignal.timeout(100),
+      ),
+    );
+
+    expect(failure).toMatchObject({ code: "GITHUB_APP_UNAVAILABLE" });
+    expect(await abortedPaths(fake, 1)).toEqual([
+      "/app/installations/4242/access_tokens",
+    ]);
+  });
+
+  it("closes the connection of a listing of open pull requests that GitHub never answers when the signal fires", async () => {
+    const { client, fake } = await setup(LONG_CLIENT_TIMEOUT);
+    fake.fail({ pathIncludes: "/pulls", hang: true });
+
+    const failure = await failureOf(
+      client.listOpenPullRequests(
+        "4242",
+        "acme/widgets",
+        AbortSignal.timeout(100),
+      ),
+    );
+
+    expect(failure).toMatchObject({ code: "GITHUB_APP_UNAVAILABLE" });
+    expect(await abortedPaths(fake, 1)).toEqual(["/repos/acme/widgets/pulls"]);
+  });
+
+  it("reports a signal that fires while the answer is being read as unavailable, not as a malformed answer", async () => {
+    const { client, fake } = await setup(LONG_CLIENT_TIMEOUT);
+    fake.addPullRequest("acme/widgets", {
+      number: 7,
+      title: "Add widget caching",
+      state: "open",
+      headSha: "abc123",
+      headRef: "feature/caching",
+      baseRef: "main",
+      author: { login: "alice", id: 1001 },
+    });
+    fake.fail({ pathIncludes: "/pulls/", hangBody: true });
+
+    const failure = await failureOf(
+      client.getPullRequest(
+        "4242",
+        "acme/widgets",
+        7,
+        AbortSignal.timeout(200),
+      ),
+    );
+
+    expect(failure).toMatchObject({ code: "GITHUB_APP_UNAVAILABLE" });
+    expect(await abortedPaths(fake, 1)).toEqual([
+      "/repos/acme/widgets/pulls/7",
+    ]);
+  });
+
+  it("sends no request at all when the signal has already fired", async () => {
+    const { client, fake } = await setup();
+    const controller = new AbortController();
+    controller.abort();
+
+    const failure = await failureOf(
+      client.getPullRequest("4242", "acme/widgets", 7, controller.signal),
+    );
+
+    expect(failure).toMatchObject({ code: "GITHUB_APP_UNAVAILABLE" });
+    expect(fake.requests()).toEqual([]);
+  });
+
+  it("still gives up on its own timeout when the caller's signal never fires", async () => {
+    const { client, fake } = await setup({ requestTimeoutMs: 100 });
+    fake.fail({ pathIncludes: "/pulls/", hang: true });
+
+    const failure = await failureOf(
+      client.getPullRequest(
+        "4242",
+        "acme/widgets",
+        7,
+        new AbortController().signal,
+      ),
+    );
+
+    expect(failure).toMatchObject({ code: "GITHUB_APP_UNAVAILABLE" });
+    expect(await abortedPaths(fake, 1)).toEqual([
+      "/repos/acme/widgets/pulls/7",
+    ]);
+  });
+});
+
 describe("collaborator permissions", () => {
   it("returns the permission of a user and none for a user without access", async () => {
     const { fake, client } = await setup();

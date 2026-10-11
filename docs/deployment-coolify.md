@@ -316,12 +316,12 @@ codes, in the backup README):
 4. Start the application and check `/api/health`, the login and the project list.
 
 The command checks the backup first and moves the current database aside (`app.db.before-restore-<time>`)
-instead of deleting it. **A leftover `-wal` or `-shm` file next to a restored database must never stay in
+instead of deleting it. **A leftover `-journal`, `-wal` or `-shm` file next to a restored database must never stay in
 place.** SQLite treats `app.db-wal` as part of `app.db`: it replays a log it finds when it opens the database
-(and deletes the log after a clean close), so a log of the old database would be replayed into the
+(and deletes the log after a clean close), and it rolls a leftover `app.db-journal` (the rollback journal of an interrupted write) back into whatever file has the name. A log or journal of the old database would be applied to the
 restored one. The
-restore command therefore moves the old `-wal` and `-shm` away together with the old database. If you ever restore by hand, do the same: stop the app, move `app.db`,
-`app.db-wal` and `app.db-shm` aside, and only then put the backup file in place as `app.db`. A backup file itself never has a `-wal`.
+restore command therefore moves the old `-journal`, `-wal` and `-shm` away together with the old database. If you ever restore by hand, do the same: stop the app, move `app.db`,
+`app.db-journal`, `app.db-wal` and `app.db-shm` aside, and only then put the backup file in place as `app.db`. A backup file itself never has a `-wal`.
 
 ## 9. Runner sizing and `RUNNER_CONCURRENCY`
 

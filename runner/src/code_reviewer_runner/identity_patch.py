@@ -17,7 +17,7 @@ from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
 from code_reviewer_runner.identity_funnel import FunnelError, verify_identity_funnel
-from code_reviewer_runner.job import _BOT_LOGIN  # pyright: ignore[reportPrivateUsage]
+from code_reviewer_runner.job import BOT_LOGIN_PATTERN
 from code_reviewer_runner.result import ErrorCode
 
 PATCHED_FOR_VERSION = "0.47.0"
@@ -75,7 +75,7 @@ def apply_identity_patch(
     """
     if not isinstance(bot_login, str):  # pyright: ignore[reportUnnecessaryIsInstance]
         raise TypeError("the bot login must be a string")
-    if not _BOT_LOGIN.fullmatch(bot_login):
+    if not BOT_LOGIN_PATTERN.fullmatch(bot_login):
         # No fallback to another identity: PR-Agent would post under a login it cannot recognise.
         # parse_job guarantees this already; the patch does not rely on its caller.
         raise IdentityPatchError(

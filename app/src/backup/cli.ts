@@ -69,6 +69,14 @@ function restore(
       out(
         `[restore] the previous database was kept as ${result.previousKeptAs}`,
       );
+    // Its -journal, -wal and -shm, or (without a database) the leftover files that were alone.
+    const others = result.keptAside.filter(
+      (path) => path !== result.previousKeptAs,
+    );
+    if (others.length > 0)
+      out(
+        `[restore] ${result.previousKeptAs === null ? "no database was in place; leftover files were kept as" : "its side files were kept as"} ${others.join(", ")}`,
+      );
     return 0;
   } catch (error) {
     return fail(error, err);

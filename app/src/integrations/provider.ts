@@ -86,16 +86,22 @@ export interface IntegrationProvider {
   /** Credentials for one job on one repository; short-lived where the platform allows it. */
   jobAccess(integration: Integration, repo: RepoRef): Promise<GitAccess>;
 
-  /** One pull request of a repository, for example to start a review by hand. */
+  /**
+   * One pull request of a repository, for example to start a review by hand. When `signal` fires, the
+   * request to the platform is aborted (not just no longer waited for) and the call rejects with
+   * `INTEGRATION_ACCESS_UNAVAILABLE`.
+   */
   getPullRequest(
     integration: Integration,
     repo: RepoRef,
     prNumber: number,
+    signal?: AbortSignal,
   ): Promise<PullRequestRef>;
 
-  /** The open pull requests of a repository (drafts included, marked as such). */
+  /** The open pull requests of a repository (drafts included, marked as such). Aborts like `getPullRequest`. */
   listOpenPullRequests(
     integration: Integration,
     repo: RepoRef,
+    signal?: AbortSignal,
   ): Promise<PullRequestRef[]>;
 }
