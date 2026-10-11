@@ -121,7 +121,8 @@ reach it; everyone else gets a 404. It offers:
 - **Setup choices.** Tenancy and sign-up rule can be changed at any time, with two restrictions:
   single to multi is always allowed; multi to single is allowed only while **at most one workspace
   exists** (if none exists, the default workspace is created and the admin becomes its Owner). The
-  sign-up rule can only be changed to values that are selectable at that moment (section 2.5).
+  sign-up rule can always be changed; an email or domain rule shows a notice while it is fail-closed
+  (section 2.5).
   Changing the sign-up rule affects new accounts and new invitations; it does not delete or lock
   existing accounts.
 - **Sign-in methods.** Email with password and GitHub can each be switched off, but at least one stays
