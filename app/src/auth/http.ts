@@ -35,12 +35,22 @@ export function isAuthEndpointAllowed(
 const SIGN_IN_EMAIL_PATH = `${AUTH_BASE_PATH}/sign-in/email`;
 const SIGN_IN_BODY_MAX_BYTES = 8 * 1024;
 
-/** The email address of a sign in request, as typed; "" when the body is not what a sign in sends. */
-async function typedEmail(request: Request): Promise<string> {
-  const body = await readLimitedBody(request.clone(), SIGN_IN_BODY_MAX_BYTES);
-  if (!body.ok) return "";
+/**
+ * Whether the request says its body is JSON, and nothing else: the media type is exactly
+ * `application/json` (case does not matter, parameters such as a charset are fine). Better Auth
+ * reads a sign in body in several formats (JSON, form encoded, multipart, plain text), and an
+ * address counted from one format while Better Auth signs in with another would let a guesser pick
+ * the key that is counted.
+ */
+function isJsonSignIn(request: Request): boolean {
+  const type = request.headers.get("content-type") ?? "";
+  return (type.split(";")[0] ?? "").trim().toLowerCase() === "application/json";
+}
+
+/** The email address in the JSON body, as typed; "" when the body is not what a sign in sends. */
+function typedEmail(text: string): string {
   try {
-    const parsed: unknown = JSON.parse(body.text);
+    const parsed: unknown = JSON.parse(text);
     const email =
       typeof parsed === "object" && parsed !== null
         ? (parsed as { email?: unknown }).email
@@ -51,12 +61,19 @@ async function typedEmail(request: Request): Promise<string> {
   }
 }
 
+const NO_STORE = { "cache-control": "no-store" };
+
 /**
  * Passes a request on to Better Auth when it is one of the allowed calls. The sign in with email and
  * password is counted first, with the same shared counters as the login form (sign-in-limit.ts): a
  * refused attempt is answered `429 rate_limited` with `Retry-After` and never reaches Better Auth.
  * Better Auth's own limiter is off (auth.ts) because it keys on a client address that this app cannot
  * trust.
+ *
+ * For the sign in the body is read exactly once, must be JSON (anything else is `415` and never
+ * reaches Better Auth), and Better Auth is handed a new request with exactly the bytes that were
+ * counted, so the limiter and Better Auth always see the same email address. Only the body carries
+ * the address: Better Auth's sign in reads nothing from the query string or the headers.
  */
 export async function handleAuthRequest(
   auth: Pick<Auth, "handler">,
@@ -68,7 +85,27 @@ export async function handleAuthRequest(
     return Response.json({ error: "NOT_FOUND" }, { status: 404 });
   if (pathname !== SIGN_IN_EMAIL_PATH) return auth.handler(request);
 
-  const email = await typedEmail(request);
+  if (!isJsonSignIn(request))
+    return Response.json(
+      { error: "unsupported_content_type" },
+      { status: 415, headers: NO_STORE },
+    );
+  const body = await readLimitedBody(request, SIGN_IN_BODY_MAX_BYTES);
+  if (!body.ok)
+    return Response.json(
+      { error: "body_too_large" },
+      { status: 413, headers: NO_STORE },
+    );
+  const email = typedEmail(body.text);
+  const forwarded = new Headers(request.headers);
+  forwarded.delete("content-length");
+  forwarded.delete("transfer-encoding");
+  const counted = new Request(request.url, {
+    method: request.method,
+    headers: forwarded,
+    body: body.bytes as BodyInit,
+  });
+
   let permission: SignInPermission;
   try {
     permission = await limiter.check(email);
@@ -78,7 +115,7 @@ export async function handleAuthRequest(
     );
     return Response.json(
       { error: "sign_in_unavailable" },
-      { status: 503, headers: { "cache-control": "no-store" } },
+      { status: 503, headers: NO_STORE },
     );
   }
   if (!permission.allowed)
@@ -93,7 +130,7 @@ export async function handleAuthRequest(
       },
     );
 
-  const response = await auth.handler(request);
+  const response = await auth.handler(counted);
   if (response.ok) {
     try {
       await limiter.succeeded(email);

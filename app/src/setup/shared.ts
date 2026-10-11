@@ -100,7 +100,12 @@ export function checkCurrentSetupSession(
  */
 function runSyncAfterSetup(): void {
   if (!anyGithubAppVariableSet(process.env)) return;
-  void import("../integrations/sync/startup.ts").then(({ runStartupSync }) =>
-    runStartupSync(),
-  );
+  void import("../integrations/sync/startup.ts")
+    .then(({ runStartupSync }) => runStartupSync())
+    .catch(() => {
+      // Never the reason, and never thrown: the setup is done either way.
+      console.error(
+        "[setup] SETUP_SYNC_FAILED: the synchronization with GitHub after the setup could not run; use Sync from GitHub.",
+      );
+    });
 }

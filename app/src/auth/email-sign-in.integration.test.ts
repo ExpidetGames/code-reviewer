@@ -307,4 +307,182 @@ describe("the limit on the sign in", () => {
       "SIGN_IN_LIMIT_UNAVAILABLE",
     );
   });
+
+  // #97-LIMIT
+  it.each([
+    [
+      "a form encoded body with a decoy first email",
+      "application/x-www-form-urlencoded",
+      `{"email":"rnd1&email=${encodeURIComponent(SETUP_TEST_ADMIN.email)}&password=guess&x=1"}`,
+    ],
+    [
+      "a form encoded body with the real address",
+      "application/x-www-form-urlencoded",
+      `email=${encodeURIComponent(SETUP_TEST_ADMIN.email)}&password=guess`,
+    ],
+    [
+      "multipart form data",
+      "multipart/form-data; boundary=x",
+      `--x\r\nContent-Disposition: form-data; name="email"\r\n\r\n${SETUP_TEST_ADMIN.email}\r\n--x\r\nContent-Disposition: form-data; name="password"\r\n\r\nguess\r\n--x--\r\n`,
+    ],
+    [
+      "plain text that carries JSON",
+      "text/plain",
+      JSON.stringify({ email: SETUP_TEST_ADMIN.email, password: "guess" }),
+    ],
+    [
+      "a vendor JSON type",
+      "application/vnd.api+json",
+      JSON.stringify({ email: SETUP_TEST_ADMIN.email, password: "guess" }),
+    ],
+    [
+      "JSON hidden in a longer type",
+      "text/plain; application/json",
+      JSON.stringify({ email: SETUP_TEST_ADMIN.email, password: "guess" }),
+    ],
+    [
+      "no content type at all",
+      null,
+      JSON.stringify({ email: SETUP_TEST_ADMIN.email, password: "guess" }),
+    ],
+  ])(
+    "answers 415 for %s and never lets it reach Better Auth, so no body format can pick the counted address",
+    async (_name, contentType, body) => {
+      const { harness, limiter } = await limited();
+      const handler = vi.fn(() => Promise.resolve(new Response("reached")));
+
+      const statuses: number[] = [];
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        const response = await handleAuthRequest(
+          { handler },
+          new Request(`${SETUP_TEST_BASE_URL}/api/auth/sign-in/email`, {
+            method: "POST",
+            headers: {
+              origin: SETUP_TEST_BASE_URL,
+              ...(contentType === null ? {} : { "content-type": contentType }),
+            },
+            body,
+          }),
+          limiter,
+        );
+        statuses.push(response.status);
+      }
+
+      expect(statuses).toEqual(Array(8).fill(415));
+      expect(handler).not.toHaveBeenCalled();
+      // And with the real Better Auth: no session, and the admin's counter was not touched.
+      const real = await handleAuthRequest(
+        harness.auth,
+        new Request(`${SETUP_TEST_BASE_URL}/api/auth/sign-in/email`, {
+          method: "POST",
+          headers: {
+            origin: SETUP_TEST_BASE_URL,
+            ...(contentType === null ? {} : { "content-type": contentType }),
+          },
+          body: body.replace("guess", SETUP_TEST_ADMIN.password),
+        }),
+        limiter,
+      );
+      expect(real.status).toBe(415);
+      expect(real.headers.getSetCookie()).toEqual([]);
+    },
+  );
+
+  // #97-LIMIT
+  it("counts a JSON body on the address Better Auth signs in with, whatever the case of the type, a charset, or a repeated key", async () => {
+    const { limiter } = await limited();
+    const send = (contentType: string, body: string) =>
+      handleAuthRequest(
+        {
+          handler: (request) =>
+            // What Better Auth would read: the same bytes.
+            request.text().then((text) => new Response(text, { status: 401 })),
+        },
+        new Request(`${SETUP_TEST_BASE_URL}/api/auth/sign-in/email`, {
+          method: "POST",
+          headers: { "content-type": contentType, origin: SETUP_TEST_BASE_URL },
+          body,
+        }),
+        limiter,
+      );
+    const admin = SETUP_TEST_ADMIN.email;
+    const bodies: Array<[string, string]> = [
+      ["application/json", JSON.stringify({ email: admin, password: "g" })],
+      [
+        "Application/JSON; charset=UTF-8",
+        JSON.stringify({ email: admin.toUpperCase(), password: "g" }),
+      ],
+      [
+        "application/json",
+        `{"email":"decoy@example.com","email":"${admin}","password":"g"}`,
+      ],
+      [
+        "application/json;charset=utf-8",
+        JSON.stringify({ email: `  ${admin}`, password: "g" }),
+      ],
+      ["application/json", JSON.stringify({ email: admin, password: "g" })],
+    ];
+
+    const statuses: number[] = [];
+    for (const [type, body] of bodies)
+      statuses.push((await send(type, body)).status);
+    const sixth = await send(
+      "application/json",
+      JSON.stringify({ email: admin, password: "g" }),
+    );
+
+    expect(statuses).toEqual([401, 401, 401, 401, 401]);
+    expect(sixth.status).toBe(429);
+  });
+
+  // #97-LIMIT
+  it("hands Better Auth exactly the bytes it counted", async () => {
+    const { limiter } = await limited();
+    const original = JSON.stringify({
+      email: "a@example.com",
+      password: "p\u00e4ss",
+    });
+    let seen = "";
+
+    await handleAuthRequest(
+      {
+        handler: async (request) => {
+          seen = await request.text();
+          return new Response("{}", { status: 401 });
+        },
+      },
+      new Request(`${SETUP_TEST_BASE_URL}/api/auth/sign-in/email`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: SETUP_TEST_BASE_URL,
+        },
+        body: original,
+      }),
+      limiter,
+    );
+
+    expect(seen).toBe(original);
+  });
+
+  it("refuses a body that is too large before counting or signing in", async () => {
+    const { limiter } = await limited();
+    const handler = vi.fn(() => Promise.resolve(new Response("reached")));
+
+    const response = await handleAuthRequest(
+      { handler },
+      new Request(`${SETUP_TEST_BASE_URL}/api/auth/sign-in/email`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          email: "a@example.com",
+          password: "x".repeat(20_000),
+        }),
+      }),
+      limiter,
+    );
+
+    expect(response.status).toBe(413);
+    expect(handler).not.toHaveBeenCalled();
+  });
 });
