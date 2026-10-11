@@ -276,6 +276,12 @@ All automated tests are hermetic: a network guard blocks every host except loopb
   first and trips over `runner/.python-version`. Put the real uv (for example `~/.local/bin`) before
   `~/.pyenv/shims` in your `PATH`, or install the Python version with pyenv.
 
+## Contributing
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow (branch names, commit messages,
+pull requests, which checks to run) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Report security
+problems privately as described in [SECURITY.md](SECURITY.md).
+
 ## Branching
 
 - `main` and `development` are permanent branches. `development` is the default branch.
