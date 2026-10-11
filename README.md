@@ -88,6 +88,14 @@ which value goes into which variable (`GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHU
 `GITHUB_APP_PRIVATE_KEY`), how to keep the private key safe and how to install the app on the
 repositories. The production server refuses to start without these four settings; `pnpm dev` does not.
 
+## Supported browsers
+
+The web UI is built for current Chrome and Edge (123 or newer), Firefox (120 or newer) and Safari
+17.5 or newer. The color tokens use `light-dark()` and `color-mix()` without a fallback, so an older
+browser shows the page without its colors; there is no polyfill on purpose (a team tool, always
+up to date browsers). The navigation menu on narrow screens and the user menu need JavaScript; the
+sign in, the sign out and the three places themselves are plain links and forms.
+
 ## Run the runner locally
 
 ```sh
@@ -242,12 +250,12 @@ make verify            # all of the above, run before every pull request
 
 Or per part:
 
-| | App (`cd app`) | Runner (`cd runner`) |
-|---|---|---|
-| Lint | `pnpm lint` and `pnpm format:check` (`pnpm format` fixes) | `uv run ruff check .` and `uv run ruff format --check .` |
-| Typecheck | `pnpm typecheck` | `uv run pyright` |
-| Unit tests | `pnpm test` | `uv run pytest -m unit` |
-| Integration | `pnpm test:int` | `uv run pytest -m "integration or contract"` |
+|             | App (`cd app`)                                            | Runner (`cd runner`)                                     |
+| ----------- | --------------------------------------------------------- | -------------------------------------------------------- |
+| Lint        | `pnpm lint` and `pnpm format:check` (`pnpm format` fixes) | `uv run ruff check .` and `uv run ruff format --check .` |
+| Typecheck   | `pnpm typecheck`                                          | `uv run pyright`                                         |
+| Unit tests  | `pnpm test`                                               | `uv run pytest -m unit`                                  |
+| Integration | `pnpm test:int`                                           | `uv run pytest -m "integration or contract"`             |
 
 End-to-end tests run against a production build on port 3417 (`E2E_PORT`), next to a fake GitHub on
 a random port (`fakes/github`):
