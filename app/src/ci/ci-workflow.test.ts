@@ -259,6 +259,53 @@ describe("CI compose job", () => {
   });
 });
 
+describe("CI license job", () => {
+  // #118-T01
+  it("installs both parts from their lockfiles and runs the dependency license check", () => {
+    const job = jobNamed("licenses");
+    const lines = commandLines(job);
+
+    expect(lines).toContain("pnpm install --frozen-lockfile");
+    expect(lines).toContain("uv sync --locked");
+    expect(lines).toContain("pnpm licenses:check");
+    // Installing comes first: the check reads the metadata of what is installed.
+    expect(lines.indexOf("pnpm licenses:check")).toBeGreaterThan(
+      lines.indexOf("uv sync --locked"),
+    );
+    expect(lines.indexOf("pnpm licenses:check")).toBeGreaterThan(
+      lines.indexOf("pnpm install --frozen-lockfile"),
+    );
+    expect(
+      steps(job).find((step) => step.run === "uv sync --locked")?.[
+        "working-directory"
+      ],
+    ).toBe("runner");
+  });
+
+  // #118-T01
+  it("runs for code changes of either part and for every pull request into main and push", () => {
+    const condition = String(jobNamed("licenses").if);
+
+    expect(condition).toContain("github.event_name == 'push'");
+    expect(condition).toContain("github.base_ref == 'main'");
+    expect(condition).toContain("needs.changes.outputs.app == 'true'");
+    expect(condition).toContain("needs.changes.outputs.runner == 'true'");
+  });
+
+  // #118-T01
+  it("is a required part of the aggregate check, so a red license check blocks the merge", () => {
+    expect(jobNamed("ci-passed").needs).toContain("licenses");
+  });
+
+  // #118-T01
+  it("is part of make verify, so the check can be run before opening a pull request", () => {
+    const makefile = readFileSync(`${repoRoot}Makefile`, "utf8");
+
+    expect(makefile).toMatch(/^verify: .*\bcheck-licenses\b/m);
+    expect(makefile).toMatch(/^check-licenses:\n\t\$\(APP\) licenses:check$/m);
+  });
+});
+
 describe("CI workflow aggregate check", () => {
   // CR-16-T02
   it("provides one final job that waits for every other job and always runs", () => {
@@ -311,6 +358,7 @@ describe("CI workflow aggregate check", () => {
       "runner-fast",
       "engine",
       "e2e",
+      "licenses",
       "compose",
       "actionlint",
     ]) {

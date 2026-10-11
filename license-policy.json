@@ -1,0 +1,153 @@
+{
+  "allowed": [
+    "0BSD",
+    "Apache-2.0",
+    "BlueOak-1.0.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CC0-1.0",
+    "CNRI-Python",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "PSF-2.0",
+    "Python-2.0",
+    "TCL"
+  ],
+  "exceptions": [
+    {
+      "ecosystem": "npm",
+      "package": "@img/sharp-*",
+      "licenses": ["LGPL-3.0-or-later"],
+      "reason": "Prebuilt libvips binaries of sharp, which Next.js uses for image optimization; used unmodified."
+    },
+    {
+      "ecosystem": "npm",
+      "package": "axe-core",
+      "licenses": ["MPL-2.0"],
+      "reason": "Accessibility test tooling only; used unmodified."
+    },
+    {
+      "ecosystem": "npm",
+      "package": "caniuse-lite",
+      "licenses": ["CC-BY-4.0"],
+      "reason": "Browser support data for the build tooling; attribution is in THIRD_PARTY_LICENSES.md."
+    },
+    {
+      "ecosystem": "npm",
+      "package": "lightningcss",
+      "licenses": ["MPL-2.0"],
+      "reason": "Build tool of Next.js; used unmodified."
+    },
+    {
+      "ecosystem": "npm",
+      "package": "lightningcss-*",
+      "licenses": ["MPL-2.0"],
+      "reason": "Platform binaries of lightningcss; used unmodified."
+    },
+    {
+      "ecosystem": "python",
+      "package": "certifi",
+      "licenses": ["MPL-2.0"],
+      "reason": "Required by PR-Agent's dependencies; used unmodified."
+    },
+    {
+      "ecosystem": "python",
+      "package": "giteapy",
+      "licenses": ["NONE"],
+      "reason": "Declares no license; required by PR-Agent, never used by the runner."
+    },
+    {
+      "ecosystem": "python",
+      "package": "html2text",
+      "licenses": ["GPL-3.0-only"],
+      "reason": "Required by PR-Agent; installed unmodified, its complete source is in the image."
+    },
+    {
+      "ecosystem": "python",
+      "package": "PyGithub",
+      "licenses": ["LicenseRef-LGPL"],
+      "reason": "Required by PR-Agent; used unmodified as a library. Only the generic LGPL classifier is declared."
+    },
+    {
+      "ecosystem": "python",
+      "package": "python-gitlab",
+      "licenses": ["LGPL-3.0-or-later"],
+      "reason": "Required by PR-Agent; used unmodified as a library."
+    },
+    {
+      "ecosystem": "python",
+      "package": "tqdm",
+      "licenses": ["MPL-2.0"],
+      "reason": "Required by PR-Agent's dependencies; used unmodified."
+    }
+  ],
+  "notInstalled": [
+    {
+      "ecosystem": "npm",
+      "package": "@emnapi/*",
+      "license": "MIT",
+      "reason": "WebAssembly fallback of native packages; installed only on platforms without a binary."
+    },
+    {
+      "ecosystem": "npm",
+      "package": "@img/sharp-*",
+      "license": "Apache-2.0 AND LGPL-3.0-or-later AND MIT",
+      "reason": "sharp and libvips binaries for other platforms; the strictest declaration of any of them."
+    },
+    {
+      "ecosystem": "npm",
+      "package": "@napi-rs/wasm-runtime",
+      "license": "MIT",
+      "reason": "WebAssembly fallback of native packages."
+    },
+    {
+      "ecosystem": "npm",
+      "package": "@next/swc-*",
+      "license": "MIT",
+      "reason": "Next.js compiler binaries for other platforms."
+    },
+    {
+      "ecosystem": "npm",
+      "package": "@rolldown/binding-*",
+      "license": "MIT",
+      "reason": "Rolldown binaries for other platforms."
+    },
+    {
+      "ecosystem": "npm",
+      "package": "@tybys/wasm-util",
+      "license": "MIT",
+      "reason": "WebAssembly fallback of native packages."
+    },
+    {
+      "ecosystem": "npm",
+      "package": "@unrs/resolver-binding-*",
+      "license": "MIT",
+      "reason": "Resolver binaries for other platforms."
+    },
+    {
+      "ecosystem": "npm",
+      "package": "lightningcss-*",
+      "license": "MPL-2.0",
+      "reason": "lightningcss binaries for other platforms."
+    },
+    {
+      "ecosystem": "python",
+      "package": "colorama",
+      "license": "BSD-3-Clause",
+      "reason": "Installed on Windows only."
+    },
+    {
+      "ecosystem": "python",
+      "package": "httpx2-jsfetch",
+      "license": "BSD-3-Clause",
+      "reason": "Installed on Pyodide only."
+    },
+    {
+      "ecosystem": "python",
+      "package": "win32-setctime",
+      "license": "MIT",
+      "reason": "Installed on Windows only."
+    }
+  ]
+}

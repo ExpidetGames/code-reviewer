@@ -127,5 +127,10 @@ is no CLA and no copyright assignment: you keep the copyright to your work, and 
 anything. Make sure you have the right to submit what you contribute, in particular that you did
 not copy code with an incompatible license.
 
-If you add a dependency, check its license and record it in
-`THIRD_PARTY_LICENSES.md` when it needs attribution or is not permissive.
+If you add a dependency, check its license. `make check-licenses` (part of `make verify`, and the CI
+job "Licenses: dependency check") fails when a package of `app/pnpm-lock.yaml` or `runner/uv.lock`
+has a license outside the allow list of `license-policy.json`. Permissive licenses pass without any
+entry. For any other license, choose another dependency, or, when that is not reasonable, add an
+exception with a reason to `license-policy.json` and to the matching table in
+`THIRD_PARTY_LICENSES.md` (a test fails when the two disagree). Also record the dependency there when
+it needs attribution.
