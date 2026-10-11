@@ -14,6 +14,7 @@ type FormElement = {
   id?: string;
   attributes: {
     label?: string;
+    render?: string;
     description?: string;
     value?: string;
     options?: unknown[];
@@ -101,6 +102,7 @@ describe("bug report form", () => {
     expect(logs.attributes.description).toMatch(/API keys?/);
     expect(logs.attributes.description).toMatch(/tokens?/);
     expect(logs.validations?.required).not.toBe(true);
+    expect(logs.attributes.render).toBe("text");
   });
 
   it("makes people confirm that they removed secrets before submitting", () => {
