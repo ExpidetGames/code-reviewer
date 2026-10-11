@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The copy for everything that can go wrong when a person activates a project or runs the sync.
 // The routes answer with stable codes; this is where a code becomes a sentence (the UI translates
 // codes, never the other way round). A code written out in a sentence is a bug, so an unknown code

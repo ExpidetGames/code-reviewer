@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The trigger policy for automatic reviews is a pure function: which pull request events start a
 // review, which wait, which are dropped. No database, no GitHub.
 import { describe, expect, it } from "vitest";

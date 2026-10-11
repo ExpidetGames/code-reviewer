@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The setup code and everything that protects it, kept in the memory of one process
 // (docs/decisions/0001-editions-setup-and-accounts.md, section 2.2):
 //

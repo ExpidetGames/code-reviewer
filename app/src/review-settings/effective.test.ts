@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down how the layers (built-in values, global defaults, project overrides) become the settings
 // of one review, and what the switches for triggers and commands mean.
 import { describe, expect, it } from "vitest";

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """The runner's side of the runner API (`contracts/runner-api.v1.json`).
 
 Three calls: `claim` (200 with a job, 204 for none), `heartbeat` and `complete`. What a caller has

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Starts the real job entry point (`code-reviewer-run-job`) as a process, against the fakes.
 
 The runner reads the job from stdin and prints one line of JSON. The process gets a minimal

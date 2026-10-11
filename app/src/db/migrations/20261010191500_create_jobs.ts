@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The job queue: one row per requested review (or other command) on one pull request. Rows are never
 // deleted by the queue; a job that is replaced or dropped keeps its row with status `superseded` or
 // `cancelled`, so the history stays readable.

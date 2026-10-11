@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 "use server";
 // The buttons of the app: "Sign in with GitHub", the email and password form, and "Sign out". They
 // are forms that post to these server actions, so they work without client JavaScript.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the repositories table against a real SQLite file: reconciling a list from the platform
 // adds, renames, deactivates and reactivates rows without ever deleting or duplicating one.
 import type { Kysely } from "kysely";

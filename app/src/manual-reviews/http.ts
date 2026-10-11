@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The handlers behind `GET /api/repositories/:repositoryId/pull-requests` (the pull requests a
 // person can pick) and `POST /api/repositories/:repositoryId/reviews` (start a command for one of
 // them), with their collaborators passed in so the route files only wire the real ones and tests wire

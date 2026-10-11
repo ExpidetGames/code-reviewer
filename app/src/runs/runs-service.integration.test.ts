@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the runs read side against a real SQLite file: the jobs are made through the job queue
 // (enqueue, claim, complete) and read back as the pages see them.
 import { describe, expect, it } from "vitest";

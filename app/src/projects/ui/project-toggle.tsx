@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 "use client";
 // The switch of one project in the list: on means the repository is reviewed. It calls the project
 // route, shows what went wrong as a sentence (never a raw code) and refreshes the page data after a

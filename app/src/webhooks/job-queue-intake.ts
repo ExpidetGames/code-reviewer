@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The review trigger intake of the running app: it turns a trigger into a job in the queue. This is
 // a thin mapping and nothing else. Deciding whether a trigger deserves a job (the repository has an
 // active project, drafts wait, `synchronize` is debounced) is trigger policy, which the webhook

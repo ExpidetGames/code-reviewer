@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // A second workspace with its own data is invisible to the first through every scoped repository
 // (docs/decisions/0001-editions-setup-and-accounts.md, section 2.7). Table driven over the methods of
 // every scoped repository: each is called with the scope of workspace A against the ids and keys of

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // GET|PUT|DELETE /api/repositories/:repositoryId/project/settings: the review settings a project
 // overrides. Protected: the proxy asks for a session, and `requireUser()` (called by the handlers)
 // is the second guard. The logic is in src/review-settings/http.ts.

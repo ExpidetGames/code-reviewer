@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // `rate_limits`: shared counters with a window, for the endpoints that must be rate limited the same
 // way whichever app instance a request reaches (sign in, verification, password reset, invitations;
 // docs/decisions/0001-editions-setup-and-accounts.md, section 2.10). One row per counter `key`

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Checks the body that starts a review by hand. The values come from the browser, so nothing here
 // trusts a type: every field is looked at as `unknown`. Only `ask` takes text; for the other
 // commands PR-Agent would read text after the command as options, so it never reaches a job.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The content of the page of one run. `loadRunDetailPage` gathers the data from the service (passed
 // in), `RunDetailPageContent` renders it. An id nobody has gives `not_found`: the page then shows
 // the not-found page and nothing of any other run.

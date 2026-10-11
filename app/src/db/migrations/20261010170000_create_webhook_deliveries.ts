@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The webhook deliveries the app has seen, one row per `X-GitHub-Delivery` id. A redelivery of the
 // same id finds its row and, once the delivery succeeded, produces no second trigger. Rows are
 // short-lived: the repository prunes the old ones now and then. The delivery id is the primary key, so

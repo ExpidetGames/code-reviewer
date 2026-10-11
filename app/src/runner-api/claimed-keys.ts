@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Remembers, in memory only, which LLM key was handed to the runner with the claim of a job. The key
 // can be rotated while a job runs, and the runner's log may then hold the old key: to mask it in the
 // result the app needs the key of the claim as well as the current one. Nothing is stored in the

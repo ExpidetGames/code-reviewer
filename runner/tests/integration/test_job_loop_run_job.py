@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Pins down the job loop together with the real job entry point (`code_reviewer_runner.runner`):
 the loop starts it as a process, the runner builds its result around PR-Agent's code with
 `handle_request` replaced by the double of pr_agent_double.py, and the loop reports that result to

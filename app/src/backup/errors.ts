@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Stable error codes of the backup and restore code. Callers branch on `code`, never on the message
 // text. Messages name paths and error codes of the operating system, never data from the database.
 export const BACKUP_ERROR_CODES = [

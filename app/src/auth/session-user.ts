@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Reading the signed in user from request headers: asks Better Auth (which checks the session row
 // and its expiry in the database) and then the access policy. The proxy and the pages both use it,
 // so the answer is the same everywhere.

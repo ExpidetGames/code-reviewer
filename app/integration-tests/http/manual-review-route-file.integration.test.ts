@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the real route files `GET /api/repositories/:repositoryId/pull-requests` and
 // `POST /api/repositories/:repositoryId/reviews` with the wiring the running server uses: the
 // dynamic segment, the database opened at start, the registry configured from the environment (the

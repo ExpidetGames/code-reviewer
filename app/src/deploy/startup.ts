@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // What the production server checks about the deployment when it starts, besides sign in (see
 // src/auth/startup.ts, which requires the master key and the public address): the shared token of the
 // runner. A missing value would otherwise show up later as a failing runner with a less helpful

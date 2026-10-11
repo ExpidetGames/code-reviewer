@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 "use client";
 // The control for the color mode: System (the default), Light or Dark. The page itself is the
 // source of truth: whatever `data-theme` is on <html> is what is shown, so the buttons always match

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // GET /api/runs/:id: one run, as the detail page polls it while the run is waiting or running.
 // Protected: the proxy asks for a session, and `requireUser()` (called by the handler) is the second
 // guard. The logic is in src/runs/http.ts.

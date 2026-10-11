@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Access to the projects table of ONE workspace (the factory takes the workspace id; see
 // ../workspace-scope.ts; a project belongs to the workspace of its repository). The only code that
 // reads or writes it. A project is a repository the instance reviews. The row is created by the first

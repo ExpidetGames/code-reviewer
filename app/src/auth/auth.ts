@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The one Better Auth instance of the app: email with password (the instance admin the first-run
 // setup creates, and the accounts of the later sign-up) and, when the GitHub OAuth app is configured,
 // GitHub. Sessions live in our SQLite database for 30 days, and the four tables are the ones created

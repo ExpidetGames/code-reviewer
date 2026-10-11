@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the config validation every provider uses: one error per offending field, and a hard
 // refusal of keys that look like secrets.
 import { describe, expect, it } from "vitest";

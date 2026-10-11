@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Runs one PR-Agent command for one job. One process per job.
 
 Reads the job (JSON) from stdin, runs `PRAgent().handle_request` in user mode with the installation

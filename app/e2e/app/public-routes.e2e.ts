@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down, in the built server, that the routes which carry their own authentication stay out of
 // the login protection: a request without a session reaches them and is answered by the route, not
 // redirected to the login page and not turned away with the guard's 401.

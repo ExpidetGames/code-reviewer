@@ -1,7 +1,10 @@
 # syntax=docker/dockerfile:1
+# SPDX-License-Identifier: Apache-2.0
 #
 # Image of the Code Reviewer web app (Next.js 16, standalone output).
-# Build context: the app/ folder:  docker build -t code-reviewer-app app
+# Build context: the repository root, because the image also carries LICENSE, NOTICE and
+# THIRD_PARTY_LICENSES.md from there (app/Dockerfile.dockerignore keeps everything else out):
+#   docker build -f app/Dockerfile -t code-reviewer-app .
 #
 # Base image: Debian bookworm slim for every stage. better-sqlite3 is a native module; the binary
 # built or downloaded in the build stage only loads in a runtime with the same libc, so the two
@@ -10,12 +13,16 @@
 #   docker pull node:24-bookworm-slim && docker image inspect node:24-bookworm-slim --format '{{index .RepoDigests 0}}'
 ARG NODE_IMAGE=node:24-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20
 
+# ---- licenses: the license files of the repository, copied into the runtime stage below ----
+FROM scratch AS licenses
+COPY LICENSE NOTICE THIRD_PARTY_LICENSES.md /
+
 # ---- deps: install the dependencies from the lockfile (this layer is cached until it changes) ----
 FROM ${NODE_IMAGE} AS deps
 WORKDIR /build
 # pnpm comes from the "packageManager" field of package.json (corepack).
 RUN corepack enable
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY app/package.json app/pnpm-lock.yaml app/pnpm-workspace.yaml ./
 # --ignore-scripts: better-sqlite3 ships a prebuilt binary per platform inside its package
 # (prebuilds/linux-arm64.node, linux-x64.node, and musl variants; it picks the glibc one here), so
 # nothing has to be compiled and the image needs no Python or compiler. Without the flag, pnpm
@@ -27,7 +34,7 @@ RUN pnpm install --frozen-lockfile --ignore-scripts
 # ---- builder: production build with output "standalone" ----
 FROM deps AS builder
 ENV NEXT_TELEMETRY_DISABLED=1
-COPY . .
+COPY app/ ./
 # The standalone server serves ./public when it exists; keep the COPY below valid when it does not.
 RUN mkdir -p public && pnpm build
 
@@ -58,13 +65,16 @@ RUN groupadd --system --gid 10001 app \
     && mkdir /data /backups \
     && chown app:app /data /backups
 
+# The license of the project and of its dependencies travel with the image (Apache-2.0, section 4).
+COPY --from=licenses --chown=root:root / /licenses/
+
 WORKDIR /srv/app
 COPY --from=builder --chown=root:root /build/.next/standalone ./
 COPY --from=builder --chown=root:root /build/.next/static ./.next/static
 COPY --from=builder --chown=root:root /build/public ./public
 # The backup and restore command line (`node backup/cli.ts backup|restore`, see src/backup/README.md).
 # The folder is copied as it is: Node runs the TypeScript files directly, they import nothing of the
-# app but better-sqlite3 (resolved from ./node_modules). .dockerignore keeps the tests out.
+# app but better-sqlite3 (resolved from ./node_modules). app/Dockerfile.dockerignore keeps the tests out.
 COPY --from=builder --chown=root:root /build/src/backup ./backup
 # Two things the command line needs that the standalone server does not provide: a package.json
 # that marks the folder as ES modules (otherwise Node warns about re-parsing every file on every

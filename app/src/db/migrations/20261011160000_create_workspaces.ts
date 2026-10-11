@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Workspaces own the customer data (see docs/decisions/0001-editions-setup-and-accounts.md, section
 // 2.6 and 2.7): connections, repositories, projects, jobs and the review defaults belong to exactly
 // one workspace, and a user reaches a workspace as a member with a role.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the import rule that keeps the platform out of the rest of the app: only the registry
 // and the providers' own folder may import a provider implementation. Jobs, the runner API and the
 // UI import the normalized types, the IntegrationProvider interface or the registry, nothing else.

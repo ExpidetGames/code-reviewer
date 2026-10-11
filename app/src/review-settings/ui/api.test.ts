@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the calls the settings form makes: which route, which method and which body, for the
 // global defaults and for one project, including the reset of a project. The routes themselves are
 // proven where they live (src/review-settings/http.integration.test.ts).

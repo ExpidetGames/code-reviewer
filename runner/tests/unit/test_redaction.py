@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Pins down secret redaction: the exact secrets of a job are replaced wherever they appear (also
 quoted or encoded), well known token shapes are replaced even when the runner does not know them,
 and the streams PR-Agent writes to cannot leak a secret that is split across writes."""

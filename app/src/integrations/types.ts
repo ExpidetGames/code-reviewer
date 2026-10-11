@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The normalized vocabulary of the app. Jobs, the runner API and the UI depend on these types only;
 // they never see a GitHub (or any other platform) payload. See README.md in this folder.
 

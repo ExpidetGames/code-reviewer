@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down which repository addresses the list may turn into a link: web addresses only.
 import { describe, expect, it } from "vitest";
 import { webAddress } from "./web-address.ts";

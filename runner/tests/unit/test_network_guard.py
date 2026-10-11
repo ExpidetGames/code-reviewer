@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Pins down that runner tests cannot reach the internet: pytest-socket blocks every host except
 loopback in the default run, so a real outbound call can never slip into a test by accident."""
 

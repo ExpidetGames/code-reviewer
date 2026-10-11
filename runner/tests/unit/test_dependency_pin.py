@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Pins down that PR-Agent is installed from exactly one version everywhere it is declared: the
 dependency in pyproject.toml, the locked version in uv.lock, the version the identity patch was
 written for and the version that is installed. A mismatch means a PR-Agent upgrade happened without

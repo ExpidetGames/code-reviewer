@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The setup gate as a step of the Next.js proxy (src/proxy.ts): it applies the decision of gate.ts
 // to a request. Returns a response when the request is answered here (the setup page in place of
 // the page that was asked for, `503 setup_required`, 404), or undefined when the request goes on to

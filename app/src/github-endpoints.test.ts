@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the one rule for the GitHub addresses that the sign in and the GitHub App share.
 import { describe, expect, it } from "vitest";
 import {

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Not a journey: the first thing a run does. The apps under test start without a database, so each
 // one is a new instance that waits for the first-run setup and answers nothing else. This sets the
 // two that the other journeys use up (single-tenant, one admin), through the same routes as the

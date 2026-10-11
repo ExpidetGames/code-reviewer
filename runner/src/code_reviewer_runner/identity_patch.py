@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """The identity patch for variant B (installation token in PR-Agent's user mode).
 
 A GitHub App installation token cannot call `GET /user`, which PR-Agent's GitHub provider uses to

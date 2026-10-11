@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Services for "the workspace the signed-in user works in" (see current-workspace.ts), handed out
 // without waiting: the workspace is looked up when the first method is called, not when the service is
 // asked for. That keeps the order the routes promise ("`requireUser()` first, before any data is

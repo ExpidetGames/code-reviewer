@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The calls the settings form makes to the app's own routes (src/review-settings/http.ts): save the
 // global defaults or the overrides of one project, and reset a project to the defaults. Browser side.
 import {

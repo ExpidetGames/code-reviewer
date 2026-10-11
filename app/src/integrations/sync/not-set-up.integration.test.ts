@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down what the synchronization does on an instance whose first-run setup has not run: it puts a
 // connection that is new to the instance into no workspace (the setup decides whether there is one),
 // reports that under a stable code with a sentence an operator can act on, and works as soon as the

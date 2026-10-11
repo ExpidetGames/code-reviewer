@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Pins down that the question of an `ask` job never makes PR-Agent download an image.
 
 PR-Agent's `/ask` takes the first markdown image or the first link that ends in an image extension

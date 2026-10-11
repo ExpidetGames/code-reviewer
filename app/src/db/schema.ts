@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { ColumnType } from "kysely";
 
 // Row types of every table, the single place Kysely learns the schema from. Add a table here in the

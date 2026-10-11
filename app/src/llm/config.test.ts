@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down how the shared LLM access is read from the environment: what is required, what the
 // defaults are, that a problem is reported as a state (the app starts anyway) with stable codes and
 // variable names, and that the key never shows up in anything but `config.apiKey`.

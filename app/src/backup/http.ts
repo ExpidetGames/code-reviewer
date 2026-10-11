@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The handler behind GET /api/backup/status: the picture of the backups for the people who run the
 // instance (schedule, target, last scheduled run, newest backup). It serves no backup file, no path
 // and no error text, only stable error codes (the words are in the log): a backup holds sessions and tokens and is fetched from the server's volume, never over HTTP.

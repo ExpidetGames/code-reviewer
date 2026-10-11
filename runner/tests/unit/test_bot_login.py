@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Pins down which bot logins are valid. One public pattern, `BOT_LOGIN_PATTERN`, is the only
 definition: the job parser and the identity patch both use it, so they cannot disagree."""
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // What other modules want to know about projects. The jobs module (CR-27) implements
 // `onProjectDeactivated` to discard the project's waiting (unclaimed) jobs; this module has no idea
 // what a job is.

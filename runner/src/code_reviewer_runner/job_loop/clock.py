@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Time as a dependency, so the loop's timing can be tested without waiting."""
 
 import asyncio

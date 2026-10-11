@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The calls the runs pages make to the app's own routes while they poll: the list
 // (`GET /api/runs`, src/runs/http.ts) and one run (`GET /api/runs/:id`). Browser side; no secrets.
 import {

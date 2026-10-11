@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the start of the backup scheduler: only in production, with a clear line for what is
 // scheduled, a loud one when the target does not work, and a stop on an invalid setting.
 import { describe, expect, it, vi } from "vitest";

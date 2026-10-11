@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Documents how PR-Agent 0.47.0 lets the hidden record of findings grow, because that decides why
 the runner reports a full comment instead of bounding the record (see "The review comment size
 limit" in the README). If an upgrade changes the retention, these tests fail and the decision is due

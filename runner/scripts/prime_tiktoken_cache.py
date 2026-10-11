@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Downloads the tiktoken encoding PR-Agent counts tokens with into tiktoken's cache directory.
 
 The engine suite runs without any outside connection, so the encoding has to be cached before it

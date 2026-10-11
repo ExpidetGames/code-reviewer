@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the fake provider that other tickets build on, and the conformance suite itself: the
 // fake must pass it, and providers that break the contract must fail exactly the matching checks.
 import { describe, expect, it } from "vitest";

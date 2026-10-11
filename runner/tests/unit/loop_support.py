@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Doubles for the job loop tests (not a test file): a clock that only moves when told to, an
 in-memory runner API and a process launcher whose processes end when the test says so."""
 

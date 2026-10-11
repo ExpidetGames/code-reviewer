@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down listing the open pull requests of a project and starting a command for one of them,
 // with the real service, the real GitHub App provider and client against the fake GitHub, the real
 // job queue and a real SQLite file. The rules are those of the other triggers: an active project, a

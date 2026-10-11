@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The copy for review settings: what a problem with one field means and what to do about it, and what
 // a save that failed as a whole means. The service answers with stable codes (a field and a code per
 // problem); this is where a code becomes a sentence next to its field. A code is never shown.

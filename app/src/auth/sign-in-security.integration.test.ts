@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the security properties of a finished sign in: how the session cookie is set, that no
 // secret (client secret, GitHub access token, session token) leaks into logs, responses or
 // redirect addresses, that the GitHub token is not stored in the clear, and that a sign in cannot

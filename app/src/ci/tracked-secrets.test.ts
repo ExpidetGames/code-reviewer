@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Scans every file that git tracks or would track (not ignored; documentation and examples included)
 // for private key blocks and the shapes of well-known access tokens. Test values in this repository are fixed dummies or are
 // generated while a test runs, so a hit means a real secret, or something that looks like one, was

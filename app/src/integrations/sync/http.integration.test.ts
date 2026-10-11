@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the handler behind `POST /api/integrations/sync` (the "Sync from GitHub" button): a
 // signed in user runs the sync against the fake GitHub and learns how many repositories are new, a
 // request from another site is refused, and the user is asked for before GitHub is called. Real

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down what a completed GitHub sign in leaves in the database: one user with the GitHub name
 // and login, an account bound to the GitHub id, and one session; and how a later sign in of the same
 // GitHub account (renamed, without a public email) behaves. Goes through the real Better Auth

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Which paths need a session. Pure functions so the rule is easy to test: `proxy.ts` only wires
 // them to Next.js. The rule is default deny: a path is open only when it is on PUBLIC_PATHS, so a
 // route added later is protected until somebody decides otherwise here.

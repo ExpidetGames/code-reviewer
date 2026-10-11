@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Pins down the command line surface of the runner entry point without starting a process."""
 
 import pytest

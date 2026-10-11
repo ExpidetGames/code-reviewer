@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the real route file `POST /api/integrations/sync` with the wiring the running server
 // uses: the database opened at start, the process-wide sync service and the registry configured from
 // the environment. Only the session lookup and `connection()` are replaced (they need Next.js's

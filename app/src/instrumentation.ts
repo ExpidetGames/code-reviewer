@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Runs once when the Next.js server starts and must finish before the server accepts requests.
 // The sign in, deployment and backup settings are checked and the database is opened and migrated here, so a missing
 // setting or a broken migration stops the start; then the pins of the allow list are brought in line

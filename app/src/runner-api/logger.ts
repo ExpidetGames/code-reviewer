@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The two log levels the runner API uses; the default writes to the console and tests pass their
 // own. A line names the job, the runner and the outcome, and nothing else: never a token, a lease
 // token, a request body, a result or the text of an error that is not marked as safe.

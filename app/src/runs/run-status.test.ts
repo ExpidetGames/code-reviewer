@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, expect, it } from "vitest";
 import { JOB_STATUSES } from "../jobs/job-status.ts";
 import {

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // POST /api/runners/v1/jobs/:id/heartbeat: the runner extends the lease of the job it holds.
 import { withRunnerApi } from "../../../../../../../runner-api/shared.ts";
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Vitest global setup of the integration project: builds the migrated template database once per
 // run. Every test then copies the file (see test-database.ts) instead of migrating again.
 import { mkdtemp, rm } from "node:fs/promises";

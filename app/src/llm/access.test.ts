@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down what the claim hands to a runner (the LLM access) and how a missing configuration
 // becomes the job error `llm_not_configured`; and that the key can be masked in any text.
 import { inspect } from "node:util";

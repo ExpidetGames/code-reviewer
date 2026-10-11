@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down how the sign-in settings are read from the environment: what is required, what a
 // missing value reports, which defaults point at the real GitHub, and that no secret is ever echoed.
 import { describe, expect, it } from "vitest";

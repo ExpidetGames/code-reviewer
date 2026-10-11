@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The repositories each integration can see (for a GitHub App: the repositories of an installation).
 // A repository that disappears from the platform is marked inactive, never deleted, because
 // projects and past reviews refer to it. One row per (integration, platform id), so syncing the

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Pins down that no text from the project's settings (`job.env`) or from a repository's
 `.pr_agent.toml` is ever evaluated by Dynaconf. A value that starts with `@format` or `@jinja` is
 evaluated by Dynaconf when it is read and can pull an environment variable or any other setting,

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The status of a run as a badge: the label as text and a symbol of its own, so the status is never
 // told by color alone. The symbol is decoration for assistive technology (the label carries the
 // meaning); the description is available as a tooltip.

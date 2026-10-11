@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Access to the rate_limits table: shared counters with a window, so that every app instance counts
 // the same attempts. Instance level. The caller chooses the key (one counter per key) and the
 // window; `hit` counts one attempt and says how many there were in the current window.

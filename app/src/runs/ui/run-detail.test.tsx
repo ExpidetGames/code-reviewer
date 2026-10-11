@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // @vitest-environment jsdom
 // Pins down the detail page of a run: the facts, the comment link rules, the error sentence with its
 // code, the log notices, text from outside rendered as text, and the polling that stops at the last

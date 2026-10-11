@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // "The current workspace" of a request. TEMPORARY (docs/decisions/0001-editions-setup-and-accounts.md,
 // issue "Workspace data model"): until workspace switching and memberships exist, every signed-in user
 // works in the default workspace, and who may sign in is still decided by the existing access policy,

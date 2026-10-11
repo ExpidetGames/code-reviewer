@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // @vitest-environment jsdom
 // Pins down the list of runs: what a row shows, the empty states, text from outside rendered as text,
 // and the polling (the status moves on without a reload; a failed update keeps the last data).

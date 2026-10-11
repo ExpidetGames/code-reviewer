@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { signInWithGithub, signInWithPassword } from "@/auth/actions";

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Shared pytest setup.
 
 The level of a test is decided by its directory (tests/unit, tests/integration, tests/contract,

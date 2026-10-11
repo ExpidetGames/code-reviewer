@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Records the comments PR-Agent writes, to find the URL of the result.
 
 `PRAgent.handle_request` only returns True or False and no tool returns what it posted. All comment

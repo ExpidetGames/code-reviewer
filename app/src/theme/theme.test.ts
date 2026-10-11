@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // @vitest-environment jsdom
 // Pins down the color mode: the system setting applies until the person makes a choice (nothing
 // stored, or something unusable, means no attribute on the page and the stylesheet follows the

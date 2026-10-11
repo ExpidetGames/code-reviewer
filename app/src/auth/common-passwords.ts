@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The bundled list of common passwords (docs/decisions/0001-editions-setup-and-accounts.md, section
 // 2.2). The minimum length is 12, so only passwords that reach it matter: the longest entries of the
 // well-known leaked lists, keyboard walks, number runs, and the well-known words that people pad

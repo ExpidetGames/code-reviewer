@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Whether anybody has started to configure the GitHub App. No `GITHUB_APP_*` variable at all is the
 // normal state of an instance that is not connected to GitHub (yet): "not configured", not an error,
 // so nothing is logged about it and nothing is attempted. A partial or unusable set is a different

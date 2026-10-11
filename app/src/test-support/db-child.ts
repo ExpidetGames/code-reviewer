@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // A small program the database integration tests run as a separate OS process (node runs this file
 // directly, TypeScript types are stripped). A second process is the only honest way to hold a
 // write lock or to start a second app instance, because better-sqlite3 blocks its own thread while

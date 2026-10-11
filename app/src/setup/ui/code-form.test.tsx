@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // @vitest-environment jsdom
 // Pins down the setup code form: it sends the code, goes on when it is accepted, and says in a
 // sentence what happened when it is not (a wrong code, a lock, an expired code), never showing a code.

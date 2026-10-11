@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Encryption of credentials at rest (docs/decisions/0001-editions-setup-and-accounts.md, section 2.7):
 // AES-256-GCM with a key derived per purpose from the app secret, a random 96-bit nonce for every
 // encryption, and the table, row and field as additional authenticated data, so a ciphertext copied

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The GitHub App as an IntegrationProvider: one installation of our own app is one integration.
 // Everything GitHub specific stays in this folder; the rest of the app sees normalized types only.
 // See ../../README.md.

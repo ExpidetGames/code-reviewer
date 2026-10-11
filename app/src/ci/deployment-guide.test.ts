@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Keeps docs/deployment-coolify.md, the guide for deploying Code Reviewer on Coolify, in step with the
 // files and the code it describes: every variable of .env.example is explained, the table of settings
 // agrees with what compose.coolify.yml requires and passes on, the stated defaults are the ones the

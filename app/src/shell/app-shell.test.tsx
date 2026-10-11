@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // @vitest-environment jsdom
 // Pins down the frame around every signed in page: the navigation with its three places and the
 // current one marked, and on a narrow screen the menu button that opens and closes it. Whether it

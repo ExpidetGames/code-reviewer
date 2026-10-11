@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The first-run setup: the code form, and once the code was accepted, the wizard. While the instance
 // is not set up the proxy shows this page in place of every other page (src/setup/gate.ts); once it
 // is, the proxy answers 404 for it and this page does the same as a second line.

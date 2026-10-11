@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The wiring of the running server: the real database, the real clock and the secrets the app knows
 // (to take them out of a log should one slip through). Pages and routes ask for the service here;
 // tests build their own with `createRunsService`.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Starts the fake GitHub as its own process, for the Playwright journeys and later the Docker test
 // stack. Configuration comes from the environment; the values are dummies shared with the app under
 // test. Test code adds accounts through POST /__fake/users and clears state with POST /__fake/reset.

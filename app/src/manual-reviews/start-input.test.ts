@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down which bodies may start a review by hand: the pull request number, the command and, for
 // `ask`, a question. Every problem is reported per field, and a question is cleaned like one written
 // in a comment (no image links).

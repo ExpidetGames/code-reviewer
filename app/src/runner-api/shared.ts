@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The wiring of the runner API on the running server: the real database, queue, registry and
 // settings from the environment. This is the one place that decides which claim guard and which
 // source of job options are used (see README.md for what replaces them when the projects land).

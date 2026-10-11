@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // POST /api/integrations/sync: reads the installations and repositories from GitHub now (the "Sync
 // from GitHub" button). Protected: the proxy asks for a session, and `requireUser()` (called by the
 // handler) is the second guard. The logic is in src/integrations/sync/http.ts.

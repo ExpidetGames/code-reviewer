@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Test helper, not a test: the app's runner API on loopback, built from the contract file.
 
 It checks every request the runner sends (token, runner id, body against the contract schema) and

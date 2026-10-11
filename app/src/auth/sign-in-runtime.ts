@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The sign in limiter of the running server: the shared counters in the server's database.
 import "server-only";
 import { createRateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";

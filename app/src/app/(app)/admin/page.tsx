@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The admin area. For now only the landing page of the first-run setup; the portal itself (settings,
 // integrations, mail, limits) comes with the next issue. Only the instance admin sees it: anybody else
 // gets a 404 as if the page did not exist.

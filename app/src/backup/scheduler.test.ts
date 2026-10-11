@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the daily scheduler: when the next run falls (UTC), that a run happens when the timer
 // fires, that a failed or crashing run is recorded and does not stop the schedule, and that
 // stopping cancels the timer. Time and timers are injected, nothing waits.

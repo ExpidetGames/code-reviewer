@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The claim guard of the running server: a job runs only while its repository has an active project.
 // The webhook route already ignores triggers of repositories without one; this closes the gap for a
 // job that was queued while the project was on and is claimed after it was switched off (and for a

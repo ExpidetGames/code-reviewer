@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Pins down the identity patch against the real GitHub provider of PR-Agent: a second review of
 the same pull request edits the first comment of the bot instead of posting a duplicate, although
 `GET /user` is forbidden for an installation token. And pins down that the suite notices when the

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The wiring of the running server: the real database and the hooks other modules plug in. The one
 // place that decides what happens when a project is deactivated: the job queue cancels the waiting
 // jobs of the repository.

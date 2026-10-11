@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Reads the shared LLM access from the environment. The only place that knows the variable names.
 //
 // One LLM account serves the whole instance (a key per project or per user comes later). The app

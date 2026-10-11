@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The services for "the current workspace" look the workspace up on first use, once.
 import { describe, expect, it, vi } from "vitest";
 import { inCurrentWorkspace } from "./in-current-workspace.ts";

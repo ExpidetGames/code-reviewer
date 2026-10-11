@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Helpers of the backup tests: a database that holds data of every kind the app stores, row counts
 // and integrity checks read through a connection of their own (never through the code under test),
 // and a writer in a separate OS process for "another process writes while the backup runs".

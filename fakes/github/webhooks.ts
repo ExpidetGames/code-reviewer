@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Webhook deliveries as GitHub sends them: a JSON body, signed with HMAC-SHA256 of the raw body in
 // `X-Hub-Signature-256`, plus `X-GitHub-Event` and `X-GitHub-Delivery`. The payloads in
 // `fakes/fixtures/github-webhooks/` are reduced to the fields Code Reviewer reads (dummy data).

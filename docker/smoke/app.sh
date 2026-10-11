@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+
 # Smoke test of the app image. Usage: docker/smoke/app.sh <image>   (default: code-reviewer-app:local)
 #
 # Starts the image the way a deployment does (unprivileged user, a fresh named volume on /data, no
@@ -24,6 +26,10 @@ CLEANUP_VOLUMES+=("$volume")
 # CR-17-T07
 step "the image sets a numeric non-root user"
 assert_image_user_is_numeric_non_root "$image"
+
+# #118-T03
+step "the image ships the license files and carries the license label"
+assert_image_ships_license_files "$image"
 
 # CR-17-T09
 step "the image holds no environment files, git data, keys or secrets"

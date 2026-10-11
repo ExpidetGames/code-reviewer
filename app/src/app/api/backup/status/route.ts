@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // GET /api/backup/status: whether backups are scheduled and how the last one went.
 // Protected: the proxy asks for a session, and `requireUser()` is the second guard. The logic is in
 // src/backup/http.ts. There is deliberately no route that serves a backup file.

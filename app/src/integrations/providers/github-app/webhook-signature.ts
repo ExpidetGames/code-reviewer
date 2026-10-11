@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Checks GitHub's `X-Hub-Signature-256` header: "sha256=" and the hex HMAC-SHA256 of the raw body
 // with the webhook secret. Compared in constant time; any malformed input is simply "not valid".
 // Pass the body as the bytes that were received: a string is hashed as its UTF-8 encoding, which is

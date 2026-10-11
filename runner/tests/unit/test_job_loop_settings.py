@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Pins down how the job loop reads its configuration from the environment."""
 
 import pytest

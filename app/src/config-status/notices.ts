@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The copy of the configuration hints. The status holds variable names and stable codes; this turns
 // them into the sentences a person reads (the UI translates codes, never the other way round). Never
 // a value: a hint names what to fix, not what is there.

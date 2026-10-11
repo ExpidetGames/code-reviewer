@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the issue forms and the pull request template: GitHub only shows a form that parses
 // and has the keys it needs, the forms must apply the labels the project board relies on, and the
 // bug form must remind people to remove secrets from logs and must never ask for a credential.
