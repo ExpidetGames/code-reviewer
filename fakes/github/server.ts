@@ -77,6 +77,13 @@ export type FakeFailure = {
    * Applies to the answers of the GitHub App API.
    */
   responseDelayMs?: number;
+  /** Never answers: the request stays open until the client gives up (see `abortedRequests`). */
+  hang?: boolean;
+  /**
+   * Sends the status line, the headers and the first bytes of the body of the GitHub App API answer,
+   * then stalls: the client has its response but cannot finish reading it.
+   */
+  hangBody?: boolean;
   /** How many requests it applies to; forever when omitted. */
   times?: number;
 };
@@ -96,6 +103,11 @@ export type FakeGithub = FakeGithubOAuth &
     reset(): void;
     /** Every request received, in order (method and path only: no headers, no bodies, no tokens). */
     requests(): FakeGithubRequest[];
+    /**
+     * The requests whose connection the client closed before any answer was complete: a client that
+     * aborts a request shows up here, one that only stops waiting for it does not.
+     */
+    abortedRequests(): FakeGithubRequest[];
     /** Every credential (JWT or token) any request carried; lets a test search outputs for them. */
     seenCredentials(): string[];
     close(): Promise<void>;
@@ -126,6 +138,7 @@ export async function startGithubFake(
       : undefined;
 
   let log: FakeGithubRequest[] = [];
+  let aborted: FakeGithubRequest[] = [];
   let credentials: string[] = [];
   let failures: Array<FakeFailure & { remaining: number }> = [];
 
@@ -147,6 +160,7 @@ export async function startGithubFake(
     oauth?.reset();
     app?.reset();
     log = [];
+    aborted = [];
     credentials = [];
     failures = [];
   }
@@ -167,6 +181,9 @@ export async function startGithubFake(
       const path = url.pathname;
       const method = request.method ?? "GET";
       log.push({ method, path });
+      response.on("close", () => {
+        if (!response.writableFinished) aborted.push({ method, path });
+      });
 
       const header = request.headers.authorization;
       const bearer = header?.startsWith("Bearer ")
@@ -180,6 +197,10 @@ export async function startGithubFake(
         : takeFailure(path, url.search);
       if (failure?.delayMs !== undefined)
         await new Promise((resolve) => setTimeout(resolve, failure.delayMs));
+      if (failure?.hang === true) {
+        await new Promise<void>((resolve) => response.once("close", resolve));
+        return;
+      }
       if (failure?.status !== undefined) {
         send(
           response,
@@ -212,6 +233,16 @@ export async function startGithubFake(
               await new Promise((resolve) =>
                 setTimeout(resolve, failure.responseDelayMs),
               );
+            if (failure?.hangBody === true) {
+              response.writeHead(status, {
+                "content-type": "application/json",
+              });
+              response.write(JSON.stringify(body).slice(0, 1));
+              await new Promise<void>((resolve) =>
+                response.once("close", resolve),
+              );
+              return;
+            }
             sendJson(response, status, body);
           },
         }))
@@ -245,6 +276,7 @@ export async function startGithubFake(
     },
     reset: resetAll,
     requests: () => [...log],
+    abortedRequests: () => [...aborted],
     seenCredentials: () => [...credentials],
     async close() {
       oauth?.close();

@@ -1,5 +1,5 @@
 // Runs once when the Next.js server starts and must finish before the server accepts requests.
-// The sign in and deployment settings are checked and the database is opened and migrated here, so a missing
+// The sign in, deployment and backup settings are checked and the database is opened and migrated here, so a missing
 // setting or a broken migration stops the start; then the pins of the allow list are brought in line
 // with the settings. Last, the repositories are synchronized with GitHub in the background: that
 // never delays or stops the start. The LLM settings are only reported, never a reason to stop.
@@ -10,6 +10,11 @@ export async function register(): Promise<void> {
   // Production only: the runner token and the GitHub App credentials (docker compose passes them).
   const { checkDeploymentConfigOnStart } = await import("./deploy/startup.ts");
   await checkDeploymentConfigOnStart();
+  // An invalid BACKUP_TIME ends the start here, before the database is opened and before the sync
+  // is started in the background (production only).
+  const { checkBackupConfigOnStart, startBackupSchedulerOnStart } =
+    await import("./backup/startup.ts");
+  checkBackupConfigOnStart();
   // A missing LLM key only warns: everything but running a review works without it.
   const { checkLlmConfigOnStart } = await import("./llm/startup.ts");
   checkLlmConfigOnStart();
@@ -31,6 +36,5 @@ export async function register(): Promise<void> {
   void runStartupSync();
   // Last: the daily backup timer (production only). It needs nothing from the app's own connection,
   // and a problem with it never stops the app from serving.
-  const { startBackupSchedulerOnStart } = await import("./backup/startup.ts");
   startBackupSchedulerOnStart();
 }

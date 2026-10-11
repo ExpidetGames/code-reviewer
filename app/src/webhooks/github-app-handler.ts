@@ -129,12 +129,28 @@ class HeadCheckTimeout extends Error {
   readonly code = "HEAD_CHECK_TIMEOUT";
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+/**
+ * Runs `run` with a signal that fires after `ms`. The slow request is aborted (the connection is
+ * closed), and the answer is not waited for either, for a provider that ignores the signal. The
+ * timeout is rejected before the signal fires, so the failure is always HEAD_CHECK_TIMEOUT and
+ * never the provider's own code for an aborted request.
+ */
+function withTimeout<T>(
+  run: (signal: AbortSignal) => Promise<T>,
+  ms: number,
+): Promise<T> {
+  const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new HeadCheckTimeout()), ms);
+    timer = setTimeout(() => {
+      const failure = new HeadCheckTimeout();
+      reject(failure);
+      controller.abort(failure);
+    }, ms);
   });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+  // `run` may throw before it returns a promise: that is a rejection too, and the timer is cleared.
+  const attempt = (async () => run(controller.signal))();
+  return Promise.race([attempt, timeout]).finally(() => clearTimeout(timer));
 }
 
 /** The stable code of an error, or its class name: never its message, which may name a response. */
@@ -230,7 +246,13 @@ export function createGithubAppWebhookHandler(
   > {
     try {
       const pullRequest = await withTimeout(
-        provider.getPullRequest(integration, trigger.repo, trigger.prNumber),
+        (signal) =>
+          provider.getPullRequest(
+            integration,
+            trigger.repo,
+            trigger.prNumber,
+            signal,
+          ),
         automatic.headCheckTimeoutMs ?? HEAD_CHECK_TIMEOUT_MS,
       );
       return { kind: "found", pullRequest };

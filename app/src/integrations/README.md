@@ -42,10 +42,12 @@ interface IntegrationProvider {
     i: Integration,
     repo: RepoRef,
     n: number,
+    signal?: AbortSignal,
   ): Promise<PullRequestRef>;
   listOpenPullRequests(
     i: Integration,
     repo: RepoRef,
+    signal?: AbortSignal,
   ): Promise<PullRequestRef[]>;
 }
 ```
@@ -85,6 +87,11 @@ route calls `verifyWebhook(integration, request)` and `identifyWebhook` returns 
 `/pull-requests/7` is platform specific; the runner's `claim` response takes `prUrl` from there.
 `getPullRequest` (head SHA, draft flag, state) and `listOpenPullRequests` serve starting a review by
 hand (`src/manual-reviews/README.md`). An unknown pull request fails with `INTEGRATION_PULL_REQUEST_NOT_FOUND`.
+Both take an optional `AbortSignal`. When it fires, the request to the platform is really aborted (the
+connection is closed, also while the installation token is minted or between two pages), not just
+no longer waited for, and the call fails with `INTEGRATION_ACCESS_UNAVAILABLE`. An implementation passes
+the signal on to its HTTP client together with its own timeout (`AbortSignal.any`), so the caller's signal can
+only end a request sooner. The 5 second head check of the webhook handler is the first caller.
 `listOpenPullRequests` and `getPullRequest` report a failure as an `IntegrationError` with the provider neutral access codes
 (`INTEGRATION_ACCESS_CONNECTION_GONE`, `..._SUSPENDED`, `..._APP_AUTH_FAILED`, `..._RATE_LIMITED`,
 `..._UNAVAILABLE`, `..._FAILED`), the same mapping as `jobAccess` except that a refused request of

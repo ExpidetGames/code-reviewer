@@ -69,14 +69,19 @@ async function startHarness(
     activateProject?: boolean;
     debounceMs?: number;
     headCheckTimeoutMs?: number;
+    /** How long one request to the fake GitHub may take (the harness default: 5 seconds). */
+    requestTimeoutMs?: number;
     wrapProvider?: (provider: IntegrationProvider) => IntegrationProvider;
   } = {},
 ) {
-  const h = await startWebhookHarness(
-    options.wrapProvider === undefined
+  const h = await startWebhookHarness({
+    ...(options.wrapProvider === undefined
       ? {}
-      : { wrapProvider: options.wrapProvider },
-  );
+      : { wrapProvider: options.wrapProvider }),
+    ...(options.requestTimeoutMs === undefined
+      ? {}
+      : { requestTimeoutMs: options.requestTimeoutMs }),
+  });
   const clock = { now: new Date(START) };
   const now = () => new Date(clock.now);
   const queue = createJobQueue(h.db, { now });
@@ -403,6 +408,79 @@ describe("a pull request that is pushed to", () => {
       { headSha: HEAD_1, status: "queued" },
     ]);
     expect(t.routeLog.join("\n")).toContain("HEAD_CHECK_TIMEOUT");
+  });
+
+  it("aborts the head check request when the timeout fires, and still enqueues the push", async () => {
+    let received: AbortSignal | undefined;
+    let abortedWhenFired = false;
+    const t = await startHarness({
+      headCheckTimeoutMs: 20,
+      wrapProvider: (provider) => ({
+        ...provider,
+        // Like a real client: stays open until the signal aborts it.
+        getPullRequest: (_integration, _repo, _prNumber, signal) => {
+          received = signal;
+          return new Promise((_resolve, reject) => {
+            signal?.addEventListener("abort", () => {
+              abortedWhenFired = true;
+              reject(new Error("aborted"));
+            });
+          });
+        },
+      }),
+    });
+
+    const response = await t.send("pull_request.synchronize");
+
+    expect(await body(response)).toMatchObject({ outcome: "trigger_enqueued" });
+    expect(received).toBeDefined();
+    expect(abortedWhenFired).toBe(true);
+    expect(await t.jobs()).toMatchObject([
+      { headSha: HEAD_1, status: "queued" },
+    ]);
+    expect(t.routeLog.join("\n")).toContain("HEAD_CHECK_TIMEOUT");
+  });
+
+  it("closes the connection to GitHub when the head check times out, and still enqueues the push", async () => {
+    // The client's own timeout is far longer than the head check's: only the head check's signal can
+    // close the connection within the wait below.
+    const t = await startHarness({
+      headCheckTimeoutMs: 100,
+      requestTimeoutMs: 60_000,
+    });
+    // The pull request read never gets an answer.
+    t.h.fake.fail({ pathIncludes: "/pulls/", hang: true });
+
+    const response = await t.send("pull_request.synchronize");
+
+    expect(await body(response)).toMatchObject({ outcome: "trigger_enqueued" });
+    const deadline = Date.now() + 5000;
+    while (t.h.fake.abortedRequests().length === 0 && Date.now() < deadline)
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(t.h.fake.abortedRequests()).toEqual([
+      { method: "GET", path: "/repos/acme/widgets/pulls/7" },
+    ]);
+    expect(await t.jobs()).toMatchObject([
+      { headSha: HEAD_1, status: "queued" },
+    ]);
+  });
+
+  it("does not abort the head check request when GitHub answers in time", async () => {
+    let received: AbortSignal | undefined;
+    const t = await startHarness({
+      wrapProvider: (provider) => ({
+        ...provider,
+        getPullRequest: (integration, repo, prNumber, signal) => {
+          received = signal;
+          return provider.getPullRequest(integration, repo, prNumber, signal);
+        },
+      }),
+    });
+
+    const response = await t.send("pull_request.synchronize");
+
+    expect(await body(response)).toMatchObject({ outcome: "trigger_enqueued" });
+    expect(received?.aborted).toBe(false);
   });
 
   it.each(["pull_request.reopened", "pull_request.ready_for_review"])(
