@@ -647,6 +647,21 @@ describe("listing the open pull requests when GitHub refuses", () => {
       "INTEGRATION_ACCESS_UNAVAILABLE",
       true,
     ],
+    [
+      new GithubAppError("GITHUB_APP_RATE_LIMITED", "slow down", {
+        status: 429,
+      }),
+      "INTEGRATION_ACCESS_RATE_LIMITED",
+      true,
+    ],
+    [
+      // A refused request of another kind is not "the app has no access".
+      new GithubAppError("GITHUB_APP_REQUEST_FAILED", "unprocessable", {
+        status: 422,
+      }),
+      "INTEGRATION_ACCESS_FAILED",
+      false,
+    ],
   ] as const)(
     "reports %s as the provider neutral code %s",
     async (failure, code, retryable) => {
@@ -670,9 +685,63 @@ describe("listing the open pull requests when GitHub refuses", () => {
         (reason: unknown) => reason,
       );
 
-    expect(error).toMatchObject({ code: "INTEGRATION_ACCESS_FAILED" });
+    expect(error).toMatchObject({
+      code: "INTEGRATION_ACCESS_FAILED",
+      message: "GitHub could not be asked.",
+    });
     expect((error as Error).message).not.toContain("ghs_secret");
   });
+});
+
+describe("fetching one pull request when GitHub refuses", () => {
+  it("reports a 404 of the call as an unknown pull request", async () => {
+    const { provider } = setup();
+
+    await expect(
+      provider.getPullRequest(integration, widgets, 99),
+    ).rejects.toMatchObject({ code: "INTEGRATION_PULL_REQUEST_NOT_FOUND" });
+  });
+
+  it("reports a 404 of the token request as an installation that is gone, not as an unknown pull request", async () => {
+    const { provider } = setup({
+      getPullRequestFailure: new GithubAppError(
+        "GITHUB_APP_NOT_FOUND",
+        "gone",
+        {
+          status: 404,
+          duringTokenRequest: true,
+        },
+      ),
+    });
+
+    await expect(
+      provider.getPullRequest(integration, widgets, 7),
+    ).rejects.toMatchObject({ code: "INTEGRATION_ACCESS_CONNECTION_GONE" });
+  });
+
+  it.each([
+    [
+      new GithubAppError("GITHUB_APP_AUTH_FAILED", "no", { status: 401 }),
+      "INTEGRATION_ACCESS_APP_AUTH_FAILED",
+    ],
+    [
+      new GithubAppError("GITHUB_APP_FORBIDDEN", "refused", { status: 403 }),
+      "INTEGRATION_ACCESS_CONNECTION_SUSPENDED",
+    ],
+    [
+      new GithubAppError("GITHUB_APP_UNAVAILABLE", "down", { status: 500 }),
+      "INTEGRATION_ACCESS_UNAVAILABLE",
+    ],
+  ] as const)(
+    "reports %s as the provider neutral code %s",
+    async (failure, code) => {
+      const { provider } = setup({ getPullRequestFailure: failure });
+
+      await expect(
+        provider.getPullRequest(integration, widgets, 7),
+      ).rejects.toMatchObject({ name: "IntegrationError", code });
+    },
+  );
 });
 
 describe("a missing configuration", () => {

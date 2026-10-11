@@ -119,6 +119,15 @@ describe("listing the open pull requests of a project", () => {
     ).toMatchObject({ code: "MANUAL_REVIEW_GITHUB_UNAVAILABLE" });
   });
 
+  it("reports GitHub refusing the request itself (422) as unavailable, not as the app not being installed", async () => {
+    const { h, service, repository } = await start();
+    h.fake.fail({ pathIncludes: "/pulls", status: 422 });
+
+    expect(
+      await failureOf(service.listOpenPullRequests(repository.id)),
+    ).toMatchObject({ code: "MANUAL_REVIEW_GITHUB_UNAVAILABLE" });
+  });
+
   // CR-33-T07
   it("reports GitHub answering too slowly as unavailable", async () => {
     const { h, service, repository } = await start({ requestTimeoutMs: 150 });
@@ -514,7 +523,7 @@ describe("starting a command for a pull request", () => {
     expect(await queue.list()).toEqual([]);
   });
 
-  it("reports a head commit that is no commit id as GitHub answering something unusable", async () => {
+  it("reports a job the queue does not accept as an invalid request, not as GitHub being down", async () => {
     const { h, service, repository, queue } = await start();
     h.fake.addPullRequest(
       "acme/widgets",
@@ -528,7 +537,69 @@ describe("starting a command for a pull request", () => {
           command: "review",
         }),
       ),
-    ).toMatchObject({ code: "MANUAL_REVIEW_GITHUB_UNAVAILABLE" });
+    ).toMatchObject({ code: "MANUAL_REVIEW_REQUEST_INVALID" });
+    expect(await queue.list()).toEqual([]);
+  });
+
+  // CR-33-T08
+  it.each([401, 403])(
+    "reports GitHub answering %i for the pull request as the app not being installed, like the list does",
+    async (status) => {
+      const { h, service, repository, queue } = await start();
+      h.fake.addPullRequest("acme/widgets", pullRequest(7));
+      h.fake.fail({ pathIncludes: "/pulls/7", status });
+
+      expect(
+        await failureOf(
+          service.startReview(USER, repository.id, {
+            prNumber: 7,
+            command: "review",
+          }),
+        ),
+      ).toMatchObject({ code: "MANUAL_REVIEW_APP_NOT_INSTALLED" });
+      expect(await queue.list()).toEqual([]);
+    },
+  );
+
+  // CR-33-T08
+  it("reports a removed installation as the app not being installed, not as an unknown pull request", async () => {
+    const { h, service, repository, queue } = await start();
+    h.fake.addPullRequest("acme/widgets", pullRequest(7));
+    // The cached token runs out; the new token request finds no installation.
+    h.clock.advance(2 * 60 * 60 * 1000);
+    h.fake.removeInstallation(4242);
+
+    const starting = await failureOf(
+      service.startReview(USER, repository.id, {
+        prNumber: 7,
+        command: "review",
+      }),
+    );
+    const listing = await failureOf(
+      service.listOpenPullRequests(repository.id),
+    );
+
+    expect(starting).toMatchObject({ code: "MANUAL_REVIEW_APP_NOT_INSTALLED" });
+    expect(listing).toMatchObject({ code: "MANUAL_REVIEW_APP_NOT_INSTALLED" });
+    expect(await queue.list()).toEqual([]);
+  });
+
+  it("does not take a question that grows past the limit when its image links are replaced", async () => {
+    const { h, service, repository, queue } = await start();
+    h.fake.addPullRequest("acme/widgets", pullRequest(7));
+
+    const error = await failureOf(
+      service.startReview(USER, repository.id, {
+        prNumber: 7,
+        command: "ask",
+        question: "![]".repeat(666),
+      }),
+    );
+
+    expect(error).toMatchObject({
+      code: "MANUAL_REVIEW_REQUEST_INVALID",
+      issues: [{ field: "question", code: "too_long" }],
+    });
     expect(await queue.list()).toEqual([]);
   });
 });

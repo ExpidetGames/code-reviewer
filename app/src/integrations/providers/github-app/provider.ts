@@ -22,6 +22,7 @@ import {
   JOB_TOKEN_PERMISSIONS,
   jobTokenRepositoryIds,
   toJobAccessError,
+  toReadError,
 } from "./job-access.ts";
 import { isValidSignature } from "./webhook-signature.ts";
 import { field, payloadProblems } from "./webhook-fields.ts";
@@ -215,16 +216,20 @@ export function createGithubAppProvider(
           prNumber,
         );
       } catch (error) {
+        // A 404 of the call itself is a pull request that does not exist; a 404 of the token request
+        // is an installation that is gone, which `toReadError` reports as such. Everything else
+        // leaves as a provider neutral code too.
         if (
           error instanceof GithubAppError &&
-          error.code === "GITHUB_APP_NOT_FOUND"
+          error.code === "GITHUB_APP_NOT_FOUND" &&
+          !error.duringTokenRequest
         )
           throw new IntegrationError(
             "INTEGRATION_PULL_REQUEST_NOT_FOUND",
             `Pull request ${prNumber} does not exist in ${repo.fullName}.`,
             { cause: error },
           );
-        throw error;
+        throw toReadError(error);
       }
     },
 
@@ -237,7 +242,7 @@ export function createGithubAppProvider(
           repo.fullName,
         );
       } catch (error) {
-        throw toJobAccessError(error);
+        throw toReadError(error);
       }
     },
   };

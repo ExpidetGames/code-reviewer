@@ -85,10 +85,12 @@ route calls `verifyWebhook(integration, request)` and `identifyWebhook` returns 
 `/pull-requests/7` is platform specific; the runner's `claim` response takes `prUrl` from there.
 `getPullRequest` (head SHA, draft flag, state) and `listOpenPullRequests` serve starting a review by
 hand (`src/manual-reviews/README.md`). An unknown pull request fails with `INTEGRATION_PULL_REQUEST_NOT_FOUND`.
-`listOpenPullRequests` reports a failure as an `IntegrationError` with the provider neutral access codes
+`listOpenPullRequests` and `getPullRequest` report a failure as an `IntegrationError` with the provider neutral access codes
 (`INTEGRATION_ACCESS_CONNECTION_GONE`, `..._SUSPENDED`, `..._APP_AUTH_FAILED`, `..._RATE_LIMITED`,
-`..._UNAVAILABLE`, `..._FAILED`), the same mapping as `jobAccess`, so a page never has to know a
-platform's own codes.
+`..._UNAVAILABLE`, `..._FAILED`), the same mapping as `jobAccess` except that a refused request of
+another kind (422) is `..._FAILED`, not a refused scope. `getPullRequest` keeps `INTEGRATION_PULL_REQUEST_NOT_FOUND` for a
+404 of the call itself; a 404 of the token request (`GithubAppError.duringTokenRequest`) is a removed
+installation (`..._CONNECTION_GONE`). A page never has to know a platform's own codes.
 
 ### Rules for implementations
 

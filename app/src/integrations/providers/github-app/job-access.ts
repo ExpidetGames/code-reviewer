@@ -33,8 +33,8 @@ const CODE_FOR: Partial<Record<GithubAppError["code"], IntegrationErrorCode>> =
   };
 
 /**
- * Turns whatever went wrong while getting a job token (or while listing pull requests, which fails
- * the same ways) into an `IntegrationError` with a stable, provider neutral code. The message is the GitHub client's own (it names the call and the status,
+ * Turns whatever went wrong while getting a job token into an `IntegrationError` with a stable,
+ * provider neutral code. The message is the GitHub client's own (it names the call and the status,
  * never a credential or a response body); the original error is kept as `cause`.
  *
  * - 404 on the token call: the installation no longer exists.
@@ -59,4 +59,25 @@ export function toJobAccessError(error: unknown): IntegrationError {
     cause: error,
     retryAfterSeconds: error.retryAfterSeconds,
   });
+}
+
+/**
+ * The same for a read call (listing or fetching pull requests). A refusal of the app (401, 403), a
+ * 404 and a rate limit mean what they mean for a job token; the rest has no special meaning here: a
+ * 422 is not "the app has no access" (that code is for a refused token scope), so it and any other
+ * unexpected failure become `INTEGRATION_ACCESS_FAILED`. The message names the call and the status
+ * only, or says that GitHub could not be asked.
+ */
+export function toReadError(error: unknown): IntegrationError {
+  if (error instanceof IntegrationError) return error;
+  if (!(error instanceof GithubAppError))
+    return new IntegrationError(
+      "INTEGRATION_ACCESS_FAILED",
+      "GitHub could not be asked.",
+    );
+  return new IntegrationError(
+    CODE_FOR[error.code] ?? "INTEGRATION_ACCESS_FAILED",
+    error.message,
+    { cause: error, retryAfterSeconds: error.retryAfterSeconds },
+  );
 }

@@ -21,6 +21,8 @@ export type FakeGithubAppClientData = {
   mintFailure?: Error;
   /** Makes `listOpenPullRequests` reject with this error. */
   listPullRequestsFailure?: Error;
+  /** Makes `getPullRequest` reject with this error (an unknown pull request is rejected anyway). */
+  getPullRequestFailure?: Error;
 };
 
 export type FakeGithubAppClient = GithubAppClient & {
@@ -76,6 +78,7 @@ export function fakeGithubAppClient(
     },
     async getPullRequest(installationId, repoFullName, prNumber) {
       record("getPullRequest", installationId, repoFullName, prNumber);
+      if (data.getPullRequestFailure) throw data.getPullRequestFailure;
       const found = (pullRequests[repoFullName] ?? []).find(
         (pr) => pr.number === prNumber,
       );

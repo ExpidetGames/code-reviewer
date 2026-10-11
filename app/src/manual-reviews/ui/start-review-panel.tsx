@@ -21,11 +21,6 @@ import {
 } from "./messages.ts";
 import { PullRequestList } from "./pull-request-list.tsx";
 
-type ListState =
-  | { kind: "loading" }
-  | { kind: "failed"; code: string }
-  | { kind: "ready"; data: OpenPullRequests };
-
 type Outcome = { run: StartedReview } | { problem: string } | null;
 
 export function StartReviewPanel({
@@ -37,7 +32,10 @@ export function StartReviewPanel({
   api?: ManualReviewApi;
 }) {
   const groupName = useId();
-  const [list, setList] = useState<ListState>({ kind: "loading" });
+  // The last list that arrived, kept when a later load fails: a typed question and the sentence about
+  // a pull request that was closed stay on screen, the failure is shown beside them.
+  const [ready, setReady] = useState<OpenPullRequests | null>(null);
+  const [loadFailure, setLoadFailure] = useState<string | null>(null);
   // Bumping it loads the list again ("Try again", "Refresh", a stale pull request).
   const [loadCount, setLoadCount] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
@@ -47,9 +45,7 @@ export function StartReviewPanel({
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<Outcome>(null);
   const reload = useCallback(() => {
-    // The pull requests on screen stay until the new ones arrive, so a typed question is not lost;
-    // only a failure is replaced by the loading note.
-    setList((shown) => (shown.kind === "failed" ? { kind: "loading" } : shown));
+    setLoadFailure(null);
     setLoadCount((count) => count + 1);
   }, []);
 
@@ -58,10 +54,11 @@ export function StartReviewPanel({
     void api.listPullRequests(repositoryId).then((result) => {
       if (!current) return;
       if (!result.ok) {
-        setList({ kind: "failed", code: result.code });
+        setLoadFailure(result.code);
         return;
       }
-      setList({ kind: "ready", data: result.data });
+      setLoadFailure(null);
+      setReady(result.data);
       // A pick that is no longer in the list (closed meanwhile) is dropped; so is a command that
       // the project switched off meanwhile.
       setSelected((picked) =>
@@ -82,7 +79,7 @@ export function StartReviewPanel({
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (busy || list.kind !== "ready" || selected === null) return;
+    if (busy || ready === null || selected === null) return;
     setOutcome(null);
     if (command === "ask" && question.trim() === "") {
       setQuestionError(QUESTION_REQUIRED_COPY);
@@ -104,7 +101,7 @@ export function StartReviewPanel({
     setOutcome({ run: result.data });
   }
 
-  const ready = list.kind === "ready" ? list.data : null;
+  const loading = ready === null && loadFailure === null;
   const canStart =
     ready !== null &&
     selected !== null &&
@@ -121,14 +118,14 @@ export function StartReviewPanel({
         Start a command for an open pull request by hand. It does not wait for
         new commits and works for drafts too.
       </p>
-      {list.kind === "loading" ? (
+      {loading ? (
         <p aria-live="polite" className="muted">
           Loading the open pull requests…
         </p>
       ) : null}
-      {list.kind === "failed" ? (
+      {loadFailure !== null ? (
         <div role="alert" className="alert alert-error">
-          <p>{describeManualReviewFailure(list.code)}</p>
+          <p>{describeManualReviewFailure(loadFailure)}</p>
           <Button variant="secondary" onClick={reload}>
             Try again
           </Button>
@@ -186,7 +183,7 @@ export function StartReviewPanel({
             <p role="status" className="alert alert-success">
               {outcome.run.created
                 ? `Started: ${outcome.run.command} for pull request #${String(outcome.run.prNumber)}. `
-                : `The same ${outcome.run.command} for pull request #${String(outcome.run.prNumber)} is already waiting or running, so nothing new was started. `}
+                : `The same ${outcome.run.command} for pull request #${String(outcome.run.prNumber)} is already waiting or running (it may be the run of an earlier commit), so nothing new was started. `}
               <Link href={`/runs/${encodeURIComponent(outcome.run.runId)}`}>
                 View the run
               </Link>

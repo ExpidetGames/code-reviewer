@@ -221,6 +221,7 @@ describe("starting a command", () => {
 
     const status = await screen.findByRole("status");
     expect(status.textContent).toContain("already waiting or running");
+    expect(status.textContent).toContain("earlier commit");
     expect(screen.getByRole("link", { name: "View the run" })).toBeTruthy();
   });
 
@@ -304,6 +305,34 @@ describe("starting a command", () => {
       await screen.findByText(/There are no open pull requests/),
     ).toBeTruthy();
     expect(screen.queryByRole("radio")).toBeNull();
+  });
+
+  it("keeps the typed question and the closed-pull-request sentence when the list cannot be reloaded, and shows the failure beside them", async () => {
+    const { api, startReview } = fakeApi([
+      list([{ number: 7 }]),
+      failure("MANUAL_REVIEW_GITHUB_UNAVAILABLE", 502),
+      list([{ number: 7 }]),
+    ]);
+    startReview.mockResolvedValueOnce(
+      failure("MANUAL_REVIEW_PULL_REQUEST_NOT_OPEN"),
+    );
+    const user = await renderPanel(api);
+    await user.click(await screen.findByRole("radio", { name: /#7/ }));
+    await user.selectOptions(screen.getByLabelText("Command to run"), "ask");
+    await user.type(screen.getByLabelText("Question"), "Why was it removed?");
+
+    await user.click(button());
+
+    expect(await screen.findByText(/closed or merged/)).toBeTruthy();
+    expect(await screen.findByText(/GitHub could not be reached/)).toBeTruthy();
+    expect(
+      (screen.getByLabelText("Question") as HTMLTextAreaElement).value,
+    ).toBe("Why was it removed?");
+    expect(screen.getByRole("radio", { name: /#7/ })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() =>
+      expect(screen.queryByText(/GitHub could not be reached/)).toBeNull(),
+    );
   });
 
   it("shows any other refusal as a sentence, never as a code", async () => {

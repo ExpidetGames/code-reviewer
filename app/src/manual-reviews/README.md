@@ -26,6 +26,9 @@ is `Cache-Control: no-store`.
 pullRequests: [{ number, title, url, author, draft, headRef, baseRef }] }`, the open pull requests
   (drafts included), newest first, read from the platform through `IntegrationProvider.listOpenPullRequests`
   (every page). The head commit is not part of the answer.
+  The pages are read one after the other (up to 100 per page, 100 pages at most) every time the panel
+  is shown or the list is refreshed; fine for the MVP, and the calls share the rate limit of the
+  installation with the jobs.
 - `POST /api/repositories/:repositoryId/reviews` with `{ "prNumber": 7, "command": "review" }` (and
   `"question"` for `ask`): `201 { runId, created: true, prNumber, command }` for a new run, `200` with
   `created: false` for the run that was already waiting or running.
@@ -56,9 +59,12 @@ running job for the same pull request, command and arguments is returned instead
 (and a debounced automatic job is made due now), a manual job is due at once, and two starts at the
 same moment give one job. Draft pull requests can be started.
 
-`ask` takes a question of at most 2000 characters. It is refused when longer (the comment trigger cuts
-it instead), and markdown images and links to images are replaced like in a comment, because
-PR-Agent would fetch them from the runner. The other commands carry no text.
+`ask` takes a question of at most 2000 characters. Markdown images and links to images are replaced
+like in a comment, because PR-Agent would fetch them from the runner, and the limit counts the text
+that is left (each image link grows to `[image link removed]`, so `![]` repeated 666 times is too long
+although it is shorter as written). A longer question is refused with `too_long` (the comment trigger
+cuts it instead); anything above 8000 characters is refused without being looked at. The other
+commands carry no text.
 
 ## The panel
 

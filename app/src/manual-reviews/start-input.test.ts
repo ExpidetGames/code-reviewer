@@ -2,7 +2,10 @@
 // `ask`, a question. Every problem is reported per field, and a question is cleaned like one written
 // in a comment (no image links).
 import { describe, expect, it } from "vitest";
-import { ASK_QUESTION_MAX_CHARS } from "../integrations/comment-command.ts";
+import {
+  ASK_QUESTION_MAX_CHARS,
+  ASK_QUESTION_RAW_MAX_CHARS,
+} from "../integrations/comment-command.ts";
 import { validateStartInput } from "./start-input.ts";
 
 describe("the body that starts a review", () => {
@@ -117,6 +120,54 @@ describe("the body that starts a review", () => {
       prNumber: 7,
       command: "ask",
       question: "x".repeat(ASK_QUESTION_MAX_CHARS + 1),
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      issues: [{ field: "question", code: "too_long" }],
+    });
+  });
+
+  it("refuses a question that is within the limit as written but grows past it once its image links are replaced", () => {
+    const written = "![]".repeat(666);
+    expect(written.length).toBeLessThanOrEqual(ASK_QUESTION_MAX_CHARS);
+
+    const result = validateStartInput({
+      prNumber: 7,
+      command: "ask",
+      question: written,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      issues: [{ field: "question", code: "too_long" }],
+    });
+  });
+
+  it("keeps a question that shrinks below the limit once its long image links are replaced", () => {
+    const written = `Is https://evil.test/${"a".repeat(2500)}.png fine?`;
+
+    const result = validateStartInput({
+      prNumber: 7,
+      command: "ask",
+      question: written,
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      value: {
+        prNumber: 7,
+        command: "ask",
+        question: "Is [image link removed] fine?",
+      },
+    });
+  });
+
+  it("refuses a question far over the limit without looking at it", () => {
+    const result = validateStartInput({
+      prNumber: 7,
+      command: "ask",
+      question: "x".repeat(ASK_QUESTION_RAW_MAX_CHARS + 1),
     });
 
     expect(result).toEqual({

@@ -3,6 +3,7 @@
 // commands PR-Agent would read text after the command as options, so it never reaches a job.
 import {
   ASK_QUESTION_MAX_CHARS,
+  ASK_QUESTION_RAW_MAX_CHARS,
   removeImageLinks,
 } from "../integrations/comment-command.ts";
 import { REVIEW_COMMANDS, type ReviewCommand } from "../integrations/types.ts";
@@ -55,9 +56,17 @@ export function validateStartInput(body: unknown): StartInputCheck {
       issues.push({ field: "question", code: "invalid" });
     else if (written.trim() === "")
       issues.push({ field: "question", code: "required" });
-    else if (written.trim().length > ASK_QUESTION_MAX_CHARS)
+    // Looked at before the images are removed only so a hostile body is not chewed on at length.
+    else if (written.trim().length > ASK_QUESTION_RAW_MAX_CHARS)
       issues.push({ field: "question", code: "too_long" });
-    else question = removeImageLinks(written.trim()).trim();
+    else {
+      // The limit counts what the job carries: every image link grows to the placeholder text, so
+      // the length is checked after they are replaced, not before.
+      const cleaned = removeImageLinks(written.trim()).trim();
+      if (cleaned.length > ASK_QUESTION_MAX_CHARS)
+        issues.push({ field: "question", code: "too_long" });
+      else question = cleaned;
+    }
   }
 
   if (issues.length > 0) return { ok: false, issues };

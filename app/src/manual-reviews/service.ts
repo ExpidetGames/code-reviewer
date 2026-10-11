@@ -6,6 +6,10 @@
 // second one, and a manual job is due at once (no debounce).
 import type { IntegrationsRepository } from "../db/repositories/integrations-repository.ts";
 import type { RepositoriesRepository } from "../db/repositories/repositories-repository.ts";
+import {
+  IntegrationError,
+  type IntegrationErrorCode,
+} from "../integrations/errors.ts";
 import type { IntegrationRegistry } from "../integrations/registry.ts";
 import type {
   Integration,
@@ -100,24 +104,17 @@ const UNAVAILABLE = () =>
   );
 
 /** The codes of an access failure that mean the app has no (more) access to the repository. */
-const NO_ACCESS_CODES: readonly string[] = [
+const NO_ACCESS_CODES: readonly IntegrationErrorCode[] = [
   "INTEGRATION_ACCESS_CONNECTION_GONE",
   "INTEGRATION_ACCESS_CONNECTION_SUSPENDED",
   "INTEGRATION_ACCESS_APP_AUTH_FAILED",
   "INTEGRATION_ACCESS_SCOPE_REFUSED",
 ];
 
-/** The stable code of an error, if it has one. Never its message, which may name a response. */
-function codeOf(error: unknown): string | undefined {
-  const code = (error as { code?: unknown } | null)?.code;
-  return typeof code === "string" ? code : undefined;
-}
-
 /** What went wrong while asking the platform, as an error of this module. */
 function platformFailure(error: unknown): ManualReviewError {
   if (error instanceof ManualReviewError) return error;
-  const code = codeOf(error);
-  if (code !== undefined && NO_ACCESS_CODES.includes(code))
+  if (error instanceof IntegrationError && NO_ACCESS_CODES.includes(error.code))
     return NOT_INSTALLED();
   return UNAVAILABLE();
 }
@@ -231,7 +228,10 @@ export function createManualReviewService(
           .resolve(integration.type)
           .getPullRequest(integration, repo, prNumber);
       } catch (error) {
-        if (codeOf(error) === "INTEGRATION_PULL_REQUEST_NOT_FOUND")
+        if (
+          error instanceof IntegrationError &&
+          error.code === "INTEGRATION_PULL_REQUEST_NOT_FOUND"
+        )
           throw new ManualReviewError(
             "MANUAL_REVIEW_PULL_REQUEST_NOT_FOUND",
             "The repository has no pull request with this number.",
@@ -257,13 +257,16 @@ export function createManualReviewService(
           actorLogin: user.githubLogin,
         });
       } catch (error) {
-        // The platform sent something the queue cannot take (for example a head commit that is no
-        // commit id); asking again will not help, and nothing was written.
+        // The queue refuses what it was given (a question that is too long is caught before; this is
+        // the safety net for the rest). Asking again will not help, and nothing was written.
         if (
           error instanceof JobQueueError &&
           error.code === "JOB_INPUT_INVALID"
         )
-          throw UNAVAILABLE();
+          throw new ManualReviewError(
+            "MANUAL_REVIEW_REQUEST_INVALID",
+            "The job queue did not accept the request.",
+          );
         throw error;
       }
       log(
