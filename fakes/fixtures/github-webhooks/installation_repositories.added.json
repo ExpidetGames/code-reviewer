@@ -1,0 +1,29 @@
+{
+  "action": "added",
+  "installation": {
+    "id": 4242,
+    "node_id": "MDIzOkludGVncmF0aW9uSW5zdGFsbGF0aW9uNDI0Mg==",
+    "account": {
+      "login": "acme",
+      "id": 5001,
+      "type": "Organization"
+    },
+    "app_id": 424242,
+    "repository_selection": "selected"
+  },
+  "repository_selection": "selected",
+  "repositories_added": [
+    {
+      "id": 7002,
+      "name": "gadgets",
+      "full_name": "acme/gadgets",
+      "private": true
+    }
+  ],
+  "repositories_removed": [],
+  "sender": {
+    "login": "octocat",
+    "id": 583231,
+    "type": "User"
+  }
+}
