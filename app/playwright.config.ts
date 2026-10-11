@@ -30,7 +30,7 @@ const browser = {
 
 // What both apps under test share: the sign in, the GitHub App and the runner token, all dummies.
 const appEnv = {
-  BETTER_AUTH_SECRET: e2eEnv.authSecret,
+  APP_SECRET: e2eEnv.appSecret,
   GITHUB_OAUTH_CLIENT_ID: e2eEnv.githubClientId,
   GITHUB_OAUTH_CLIENT_SECRET: e2eEnv.githubClientSecret,
   GITHUB_OAUTH_BASE_URL: e2eEnv.githubUrl,
@@ -63,17 +63,43 @@ export default defineConfig({
   // queue when it starts and `claimNextRun` takes the oldest job of the whole queue. So they are
   // projects of their own, and the manual start waits for the Runs journeys to finish.
   projects: [
+    // The apps under test start without a database, so each is a new instance that answers nothing
+    // but its health check until it is set up. This sets up the two that the other projects use
+    // (e2e/setup/prepare-apps.e2e.ts); every other project waits for it.
+    {
+      name: "prepare",
+      use: browser,
+      testMatch: /e2e\/setup\/prepare-apps\.e2e\.ts$/,
+    },
     {
       name: "chromium",
       use: browser,
-      testIgnore: [/e2e\/runs\//, /e2e\/reviews\//, /e2e\/jobs\//],
+      dependencies: ["prepare"],
+      testIgnore: [
+        /e2e\/runs\//,
+        /e2e\/reviews\//,
+        /e2e\/jobs\//,
+        /e2e\/setup\//,
+      ],
     },
-    { name: "runs", use: browser, testMatch: /e2e\/runs\/.*\.e2e\.ts$/ },
+    {
+      name: "runs",
+      use: browser,
+      testMatch: /e2e\/runs\/.*\.e2e\.ts$/,
+      dependencies: ["prepare"],
+    },
     {
       name: "reviews",
       use: browser,
       testMatch: /e2e\/reviews\/.*\.e2e\.ts$/,
       dependencies: ["runs"],
+    },
+    // The journey of the first-run setup has an app of its own that nobody has set up (the third
+    // one), so it needs nothing to run first and disturbs nobody.
+    {
+      name: "setup",
+      use: { ...browser, baseURL: e2eEnv.setupAppUrl },
+      testMatch: /e2e\/setup\/first-run\.e2e\.ts$/,
     },
     // The journey with the real runner and the real PR-Agent. It has an app of its own (its own
     // database, the LLM configured, a real runner polling it), so it cannot disturb the queue of the
@@ -82,17 +108,23 @@ export default defineConfig({
       name: "jobs",
       use: { ...browser, baseURL: e2eEnv.pipelineAppUrl },
       testMatch: /e2e\/jobs\/.*\.e2e\.ts$/,
+      dependencies: ["prepare"],
     },
   ],
-  // Three servers. The fake GitHub stands in for github.com (sign in) and api.github.com; the app
+  // Four servers. The fake GitHub stands in for github.com (sign in) and api.github.com; the app
   // under test is pointed at it by environment variables. The journeys always run against a
   // production build, never the dev server, with a fresh SQLite file in the (git-ignored)
   // test-results folder; the app migrates it on start. All values are fixed dummies.
   //
+  // Each app's output goes to a log file in test-results: a new instance prints its setup code only
+  // there, and the journeys read it from the file (e2e/helpers/setup.ts).
+  //
   // The second app serves the same build (the servers start one after the other, so the build of
   // the first is done) with a database of its own and the settings the journey with the real
   // runner needs: the LLM access (the other app has none, a journey checks its warning), and a
-  // push that is reviewed after a second instead of after 90 seconds.
+  // push that is reviewed after a second instead of after 90 seconds. The third is the same build
+  // again, left unconfigured and not set up, for the journey that walks through the first-run
+  // wizard.
   webServer: [
     {
       command: "node ../fakes/github/main.ts",
@@ -114,7 +146,7 @@ export default defineConfig({
     {
       command:
         "pnpm build && rm -rf test-results/e2e-data && mkdir -p test-results/e2e-data && " +
-        `pnpm start --hostname 127.0.0.1 --port ${e2eEnv.appPort}`,
+        `pnpm start --hostname 127.0.0.1 --port ${e2eEnv.appPort} > ${e2eEnv.logFiles.app} 2>&1`,
       env: {
         ...appEnv,
         DATABASE_PATH: e2eEnv.databasePath,
@@ -128,7 +160,7 @@ export default defineConfig({
     {
       command:
         "rm -rf test-results/e2e-pipeline-data && mkdir -p test-results/e2e-pipeline-data && " +
-        `pnpm start --hostname 127.0.0.1 --port ${e2eEnv.pipelineAppPort}`,
+        `pnpm start --hostname 127.0.0.1 --port ${e2eEnv.pipelineAppPort} > ${e2eEnv.logFiles.pipeline} 2>&1`,
       env: {
         ...appEnv,
         DATABASE_PATH: e2eEnv.pipelineDatabasePath,
@@ -141,6 +173,20 @@ export default defineConfig({
         REVIEW_DEBOUNCE_SECONDS: "1",
       },
       url: e2eEnv.pipelineAppUrl,
+      reuseExistingServer: false,
+      timeout: 60_000,
+    },
+    {
+      command:
+        "rm -rf test-results/e2e-setup-data && mkdir -p test-results/e2e-setup-data && " +
+        `pnpm start --hostname 127.0.0.1 --port ${e2eEnv.setupAppPort} > ${e2eEnv.logFiles.setup} 2>&1`,
+      env: {
+        ...appEnv,
+        DATABASE_PATH: e2eEnv.setupDatabasePath,
+        BETTER_AUTH_URL: e2eEnv.setupAppUrl,
+        ALLOWED_GITHUB_LOGINS: e2eEnv.allowedLogins,
+      },
+      url: e2eEnv.setupAppUrl,
       reuseExistingServer: false,
       timeout: 60_000,
     },

@@ -55,6 +55,48 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# The first-run setup, as a person does it, through the app's own API (the browser journey is a
+# Playwright test). A fresh instance prints one setup code in its log and refuses everything but the
+# health check until the setup is finished.
+
+# Prints the setup code found in a log text, and fails unless the log has exactly one such line (a
+# restart prints a new one, so pass only the log of the start in question).
+# Usage: setup_code_from_log <log text>
+setup_code_from_log() {
+  local log=$1 count
+  count=$(grep -cE 'Setup code: [0-9]{6}\b' <<<"$log" || true)
+  [ "$count" = 1 ] || fail "expected exactly one setup code line in the log, found $count"
+  sed -nE 's/.*Setup code: ([0-9]{6})\b.*/\1/p' <<<"$log"
+}
+
+# Enters the code and finishes the wizard (single-tenant, everyone may sign up, an admin with a
+# throwaway password that is generated here and never printed). Fails unless the instance then
+# answers as a set up one: the setup page is gone (404) and a page without a session redirects to the
+# login. The code never goes on a command line (it would show in the process list): it is sent from
+# a file.
+# Usage: complete_setup <base url> <code>
+complete_setup() {
+  local base=$1 code=$2 jar body password status
+  jar=$(mktemp)
+  body=$(mktemp)
+  # A throwaway password, 24 random letters and digits: far from any list of common passwords.
+  password=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24)
+  printf '{"code":"%s"}' "$code" >"$body"
+  status=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 \
+    --cookie-jar "$jar" --header 'Content-Type: application/json' --data "@$body" "$base/api/setup/code")
+  [ "$status" = 200 ] || { rm -f "$jar" "$body"; fail "the setup code was not accepted (status $status)"; }
+  printf '{"tenancy":"single","signUp":{"kind":"everyone"},"admin":{"email":"smoke-admin@example.test","password":"%s"}}' \
+    "$password" >"$body"
+  status=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 20 \
+    --cookie "$jar" --header 'Content-Type: application/json' --data "@$body" "$base/api/setup/complete")
+  rm -f "$jar" "$body"
+  [ "$status" = 200 ] || fail "the wizard was not accepted (status $status)"
+  status=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 "$base/setup")
+  [ "$status" = 404 ] || fail "the setup page still answers $status after the setup (expected 404)"
+  status=$(curl --silent --output /dev/null --write-out '%{http_code} %{redirect_url}' --max-time 10 "$base/")
+  [[ "$status" == "307 "*"/login" ]] || fail "after the setup the start page did not redirect to /login (got: $status)"
+}
+
 require_image() {
   docker image inspect "$1" >/dev/null 2>&1 || fail "image $1 does not exist locally (build it first)"
 }

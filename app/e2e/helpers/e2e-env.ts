@@ -5,6 +5,9 @@ const appPort = Number(process.env.E2E_PORT) || 3417;
 // The second app of the run, for the journey that runs the real runner (see playwright.config.ts):
 // the next port unless E2E_PIPELINE_PORT says otherwise.
 const pipelineAppPort = Number(process.env.E2E_PIPELINE_PORT) || appPort + 1;
+// The third app of the run, for the journey of the first-run setup (it needs an instance that nobody
+// has set up): the port after the second one unless E2E_SETUP_PORT says otherwise.
+const setupAppPort = Number(process.env.E2E_SETUP_PORT) || appPort + 2;
 // The fake GitHub gets a random port in a high range, so two checkouts never collide however their
 // E2E_PORT values are chosen. The choice is stored in the environment: Playwright loads this file
 // again in every worker process, which inherits the main process's environment.
@@ -23,6 +26,23 @@ export const e2eEnv = {
   /** The SQLite file of the second app, relative to the app folder (fresh for every run). */
   pipelineDatabasePath: "test-results/e2e-pipeline-data/app.db",
   pipelineAppUrl: `http://127.0.0.1:${pipelineAppPort}`,
+  setupAppPort,
+  /** The SQLite file of the third app, which the setup journey sets up (fresh for every run). */
+  setupDatabasePath: "test-results/e2e-setup-data/app.db",
+  setupAppUrl: `http://127.0.0.1:${setupAppPort}`,
+  /**
+   * Where each app's output goes (relative to the app folder). The first-run setup prints its code
+   * in the log only, so the journeys read it from there, the way an operator reads `docker compose
+   * logs`. The files are fresh for every run.
+   */
+  logFiles: {
+    app: "test-results/e2e-app.log",
+    pipeline: "test-results/e2e-pipeline.log",
+    setup: "test-results/e2e-setup.log",
+  },
+  /** The instance admin the journeys create when they set an app up. A dummy, as everything here. */
+  adminEmail: "admin@e2e.test",
+  adminPassword: "e2e-admin-passphrase-orbit-lantern-77",
   /** ALLOWED_GITHUB_LOGINS of the second app. */
   pipelineAllowedLogins: "pipeline-journey",
   githubUrl: `http://127.0.0.1:${githubPort}`,
@@ -39,7 +59,7 @@ export const e2eEnv = {
     "runs-journey",
     "manual-journey",
   ].join(","),
-  authSecret: "e2e-auth-secret-0123456789-0123456789-abcdef",
+  appSecret: "e2e-app-secret-0123456789-0123456789-abcdef",
   // The production server refuses to start without the runner token. A dummy: only the journey of
   // e2e/jobs starts a runner that talks to an app (the second one); the others act on the queue
   // through its code (e2e/helpers/job-queue.ts).

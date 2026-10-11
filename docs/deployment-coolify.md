@@ -86,28 +86,33 @@ registry login above; the tags to pin are the ones named in this section.
 
 ## 3. The three GitHub things, and the order
 
-Three different things on GitHub are involved, which are easy to mix up:
+Three different things on GitHub are involved, which are easy to mix up. None of the last two is needed
+to start the instance and to finish the first-run setup ([section 7](#7-deploy-and-check-the-instance)):
+the GitHub App is what lets Code Reviewer review pull requests, and the OAuth app only adds "Sign in with
+GitHub" (the admin always signs in with email and password). Both are still configured with environment
+variables for now; a later release moves them into the browser.
 
 | What | Who uses it | Created by | Where its values go |
 |---|---|---|---|
 | **Coolify's GitHub App** | Coolify, to read this repository and to be told about pushes | Coolify's source wizard ([Coolify: GitHub App](https://coolify.io/docs/applications/sources/github/app)) | Stays inside Coolify. Not an environment variable of Code Reviewer. |
-| **Code Reviewer's GitHub App** | Code Reviewer, to receive webhooks and to read and review pull requests | You, once, with [`github-app.md`](github-app.md) | `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_WEBHOOK_SECRET`, `GITHUB_APP_PRIVATE_KEY` |
-| **GitHub OAuth app** | The login of the people using the web UI | You, once, GitHub > Settings > Developer settings > OAuth Apps | `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET` |
+| **Code Reviewer's GitHub App** | Code Reviewer, to receive webhooks and to read and review pull requests | You, once, with [`github-app.md`](github-app.md) | `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_WEBHOOK_SECRET`, `GITHUB_APP_PRIVATE_KEY` (optional for the start, needed for reviews) |
+| **GitHub OAuth app** (optional) | "Sign in with GitHub" for the people using the web UI | You, once, GitHub > Settings > Developer settings > OAuth Apps | `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET` |
 
 The apps need the domain and the deployment needs their values, so do it in this order:
 
 1. Server, DNS record and the domain ([section 1](#1-what-you-need)).
 2. Coolify's GitHub App with access to this repository ([section 4](#4-create-the-coolify-application)).
 3. Create the Coolify application and assign the domain to it, **do not deploy yet** (sections 4 and 5).
-4. Create the OAuth app: *Homepage URL* `https://<domain>`, *Authorization callback URL*
-   `https://<domain>/api/auth/callback/github` (the same address as `BETTER_AUTH_URL`, plus that path).
-   Generate its client secret.
+4. Optional, for "Sign in with GitHub": create the OAuth app: *Homepage URL* `https://<domain>`,
+   *Authorization callback URL* `https://<domain>/api/auth/callback/github` (the same address as
+   `BETTER_AUTH_URL`, plus that path). Generate its client secret.
 5. Create Code Reviewer's GitHub App (steps 1 and 2 of [`github-app.md`](github-app.md)): webhook URL
    `https://<domain>/api/webhooks/github-app`, permissions, events, private key. GitHub sends a first
    `ping` delivery right away, before anything runs on the domain: it shows as failed. That is expected;
    redeliver it after the first deploy (*Advanced > Recent Deliveries*), or ignore it.
 6. Enter all values in Coolify ([section 6](#6-environment-variables)) and deploy
-   ([section 7](#7-deploy-and-check-the-instance)).
+   ([section 7](#7-deploy-and-check-the-instance)). Only `APP_SECRET`, `BETTER_AUTH_URL` and `RUNNER_TOKEN`
+   are needed to deploy; the GitHub values can follow later with a redeploy.
 7. Install the GitHub App on the repositories (step 5 of [`github-app.md`](github-app.md)).
 
 ## 4. Create the Coolify application
@@ -179,16 +184,17 @@ value), set Literal.
 
 | Variable | Required | Where the value comes from | Notes |
 |---|---|---|---|
-| `BETTER_AUTH_URL` | yes | The public address: `https://<domain>` | No path, no port, no trailing slash. Register `<this>/api/auth/callback/github` as the OAuth app's callback URL. |
-| `BETTER_AUTH_SECRET` | yes | `openssl rand -base64 32` | At least 32 characters. Signs the session cookie and encrypts stored GitHub tokens. Changing it signs everybody out. |
-| `GITHUB_OAUTH_CLIENT_ID` | yes | The OAuth app's settings page | The OAuth app is not the GitHub App. |
-| `GITHUB_OAUTH_CLIENT_SECRET` | yes | Generated on the OAuth app's settings page | Secret. |
-| `ALLOWED_GITHUB_LOGINS` | one of two | Comma separated GitHub logins of the team | **Set this or `ALLOWED_GITHUB_ORG` (or both).** Coolify does not block the deployment when both are empty, the app is healthy and the smoke test passes, but nobody can sign in (the app logs one warning). Details, including binding a login to its numeric id (`octocat:583231`): [`app/src/auth/README.md`](../app/src/auth/README.md). |
-| `ALLOWED_GITHUB_ORG` | one of two | The name of a GitHub organization (`github.com/<name>`) | **Set this or `ALLOWED_GITHUB_LOGINS` (or both).** Its members may sign in. If both are set, either is enough. |
-| `GITHUB_APP_ID` | yes | The App ID on the GitHub App's settings page | [`github-app.md`](github-app.md), step 2. |
-| `GITHUB_APP_SLUG` | yes | The last part of `github.com/apps/<slug>` | |
-| `GITHUB_APP_WEBHOOK_SECRET` | yes | The secret entered in the GitHub App's webhook settings | Secret. Byte for byte: no trailing space or line break. |
-| `GITHUB_APP_PRIVATE_KEY` | yes | The `.pem` file generated on the GitHub App's settings page | Secret. In Coolify choose the value type **Multiline** and paste the key with its line breaks, or paste it on one line with the breaks written as `\n`; both give the same key ([`github-app.md`](github-app.md), section 3). The key is parsed at start; an unusable one stops the start and the log names the variable. |
+| `BETTER_AUTH_URL` | yes | The public address: `https://<domain>` | No path, no port, no trailing slash. If you use GitHub sign in, register `<this>/api/auth/callback/github` as the OAuth app's callback URL. |
+| `APP_SECRET` | by the app | `openssl rand -base64 32` | **Required**, at least 32 characters. The master key of the instance: it signs the session cookie and encrypts the credentials stored in the database. Coolify does not block the deployment when it is empty, the app refuses to start and the log names the variable. **Back it up separately from the database** (a password manager): a database restored without its `APP_SECRET` loses every stored credential, and it cannot be recovered. Changing it signs everybody out. |
+| `BETTER_AUTH_SECRET` | deprecated | The value an existing deployment already has | The old name of `APP_SECRET`. The app uses it as `APP_SECRET` while `APP_SECRET` is empty (and logs once that it is deprecated), so an existing deployment keeps its sessions and stored tokens. Set `APP_SECRET` to the same value, then remove this one. |
+| `GITHUB_OAUTH_CLIENT_ID` | optional | The OAuth app's settings page | Set both or neither. The OAuth app is not the GitHub App. Without it there is no "Sign in with GitHub". |
+| `GITHUB_OAUTH_CLIENT_SECRET` | optional | Generated on the OAuth app's settings page | Secret. |
+| `ALLOWED_GITHUB_LOGINS` | one of two | Comma separated GitHub logins of the team | **Set this or `ALLOWED_GITHUB_ORG` (or both) if you use GitHub sign in.** Coolify does not block the deployment when both are empty, the app is healthy and the smoke test passes, but nobody can sign in with GitHub (the app logs one warning). Details, including binding a login to its numeric id (`octocat:583231`): [`app/src/auth/README.md`](../app/src/auth/README.md). |
+| `ALLOWED_GITHUB_ORG` | one of two | The name of a GitHub organization (`github.com/<name>`) | **Set this or `ALLOWED_GITHUB_LOGINS` (or both) if you use GitHub sign in.** Its members may sign in. If both are set, either is enough. |
+| `GITHUB_APP_ID` | optional | The App ID on the GitHub App's settings page | Needed for reviews: [`github-app.md`](github-app.md), step 2. Set all four GitHub App values or none; a partial set is reported in the log at start. |
+| `GITHUB_APP_SLUG` | optional | The last part of `github.com/apps/<slug>` | |
+| `GITHUB_APP_WEBHOOK_SECRET` | optional | The secret entered in the GitHub App's webhook settings | Secret. Byte for byte: no trailing space or line break. |
+| `GITHUB_APP_PRIVATE_KEY` | optional | The `.pem` file generated on the GitHub App's settings page | Secret. In Coolify choose the value type **Multiline** and paste the key with its line breaks, or paste it on one line with the breaks written as `\n`; both give the same key ([`github-app.md`](github-app.md), section 3). The key is parsed at start; an unusable one is reported in the log by variable name and GitHub stays not configured. |
 | `RUNNER_TOKEN` | yes | `openssl rand -hex 32` | At least 32 characters. Secret shared by the app and the runner; both read this one variable. |
 | `LLM_API_KEY` | optional | The OpenRouter API key | Secret. Without it the app starts and shows a configuration error, and every review fails with `llm_not_configured`: set it before the first review. |
 | `LLM_PROVIDER` | optional | `openrouter` | The only provider for now; this is the default. |
@@ -230,8 +236,10 @@ After changing a variable, save and **Restart** (only runtime values changed) or
    open its logs and read the last lines first: a missing or invalid setting stops the start with one
    line that names the variable (for example `[deploy] DEPLOY_CONFIG_INVALID` or an `[auth]` line),
    never its value, and `restart: unless-stopped` turns that into a restart loop.
-3. Open `https://<domain>`: the login page loads over HTTPS with a valid certificate.
-4. Run the smoke test from any machine that has `curl` and a checkout of this repository (it needs no secret):
+3. Open `https://<domain>`: the page loads over HTTPS with a valid certificate and asks for a **setup
+   code**. A new instance is not set up yet. Do the first-run setup now, as described below.
+4. After the setup, run the smoke test from any machine that has `curl` and a checkout of this repository
+   (it needs no secret):
 
    ```sh
    docker/smoke/instance.sh https://<domain>
@@ -239,14 +247,47 @@ After changing a variable, save and **Restart** (only runtime values changed) or
 
    It checks that `/api/health` and `/login` answer 2xx, that a webhook delivery with a wrong signature
    gets 401, and that the runner API refuses a request without a token with 401. Any deviation makes
-   the exit code non-zero and names the check. There is no option to leave a check out.
-5. Compare the variables in Coolify with the table in [section 6](#6-environment-variables), and check that
-   **at least one of `ALLOWED_GITHUB_LOGINS` and `ALLOWED_GITHUB_ORG` is set**: neither Coolify nor the health
-   check notices when both are empty. Where the app
+   the exit code non-zero and names the check. There is no option to leave a check out. Before the
+   setup is finished it fails once, with a message that the instance is not set up yet (every request
+   but the health check answers `503 setup_required` until then).
+5. Compare the variables in Coolify with the table in [section 6](#6-environment-variables). If you use GitHub
+   sign in, check that **at least one of `ALLOWED_GITHUB_LOGINS` and `ALLOWED_GITHUB_ORG` is set**: neither
+   Coolify nor the health check notices when both are empty. Where the app
    shows configuration hints (the setup status of the project pages), they are empty once everything is set.
 6. From outside the server, only 80 and 443 answer (for example `nmap -p 1-10000 <server-ip>` from another
    machine; your hosting provider's firewall helps), and the runner has no domain.
 7. Check the webhook: [`github-app.md`](github-app.md), section 4.
+
+### The first-run setup
+
+Every start of the app prints a fresh 6-digit **setup code** in its log while the instance is not set up:
+
+1. In Coolify open the **Logs** of the service `app` and look for the line `[setup] Setup code: 482913 ...`
+   (the number is yours). On a plain Docker host: `docker compose logs app`. The code appears nowhere else
+   and is never sent to a browser.
+2. Open `https://<domain>`, enter the code, and answer three questions: single-tenant or multi-tenant,
+   who may sign up (everyone, a list of emails, or allowed email domains), and the email address and
+   password of the **instance admin**. The password needs 12 to 128 characters and must not be a common
+   password; there are no other rules. The same rule applies to every account of the instance.
+3. You land in the admin area (`/admin`), signed in. The setup page is gone for good (it answers 404).
+
+What to know:
+
+- The code is valid for **60 minutes**, works once, and the setup session that follows it lasts **30
+  minutes**. If either runs out, **restart the app**: it prints a new code. A restart before the wizard is
+  finished shows the wizard again from the start.
+- About 5 attempts per minute are accepted (counted for the whole process, not per address). After **10
+  wrong codes** the setup is **locked until the app is restarted**. This is a deliberate trade-off: whoever
+  can reach the site can lock the setup (a restart fixes it), but cannot get in: the chance to guess the
+  code is at most 10 in 1,000,000 per restart.
+- The code and its counters live **in the memory of one process**. The setup must therefore be done with
+  **one app instance running** ([section 10](#10-one-app-instance-only)).
+- An email or domain sign-up rule cannot be evaluated while no email can be verified (no mail server and
+  GitHub is not the only sign-in method): nobody but the admin can sign up under it until a mail server is
+  configured. The wizard says so next to the choice.
+- An existing deployment that updates to this version also gets the code and the wizard (the data it has is
+  kept). Until the wizard is finished only the web UI waits: the webhooks and the runner API keep working, so
+  reviews do not stop.
 
 ## 8. Storage and backups
 
@@ -411,6 +452,9 @@ Run exactly **one** app container, and never two Coolify applications on the sam
 - The database is one SQLite file with one writing process on a local disk. Do not put the `data` volume on
   a network file system.
 - The daily backup timer runs inside the app process; two processes would both run it.
+- The **setup code** and its failure counter are in the memory of the process that printed them. A second
+  process has its own code and its own counters, and refuses the code of the first. Do the first-run
+  setup with one app instance running ([section 7](#the-first-run-setup)), and only then, if ever, scale out.
 
 Do not scale the application or add replicas. Coolify does not use rolling updates for Docker Compose
 applications ([Coolify: rolling updates](https://coolify.io/docs/applications/deployments/rolling-updates)):
@@ -454,8 +498,11 @@ written since that backup is lost.
 
 Do this once with the whole team in the room; it is the acceptance test of the deployment.
 
+- [ ] **The first-run setup is done** ([section 7](#the-first-run-setup)): the admin account exists, and
+      `https://<domain>/setup` answers 404 afterwards.
 - [ ] `docker/smoke/instance.sh https://<domain>` passes ([section 7](#7-deploy-and-check-the-instance), step 4).
-- [ ] **Sign in.** A team member opens `https://<domain>` and signs in with GitHub. A GitHub account that is
+- [ ] **Sign in.** The admin signs out and in again with email and password. If GitHub sign in is set up, a
+      team member opens `https://<domain>` and signs in with GitHub. A GitHub account that is
       not on the list is turned away ("Your GitHub account is not allowed to use this Code Reviewer
       instance.") and sees no project or run data.
 - [ ] **Install the GitHub App** on a team repository ([`github-app.md`](github-app.md), step 5). The
@@ -484,7 +531,9 @@ Do this once with the whole team in the room; it is the acceptance test of the d
 | Symptom | Likely cause and fix |
 |---|---|
 | Coolify refuses to deploy and highlights a variable | A required variable ([section 6](#6-environment-variables)) is empty. Enter it. |
-| `app` restarts in a loop, the log has one `[deploy]` or `[auth]` line | A setting is missing or invalid; the line names the variable. Typical: `RUNNER_TOKEN` shorter than 32 characters, `BETTER_AUTH_URL` with `http://`, an unusable `GITHUB_APP_PRIVATE_KEY`. |
+| The page asks for a setup code | The instance is not set up yet ([section 7](#the-first-run-setup)). Read the code in the `app` log. |
+| The setup says it is locked, or the code expired | Restart the app in Coolify: it prints a new code ([section 7](#the-first-run-setup)). |
+| `app` restarts in a loop, the log has one `[deploy]` or `[auth]` line | A setting is missing or invalid; the line names the variable. Typical: `APP_SECRET` (or `BETTER_AUTH_SECRET`) missing or shorter than 32 characters, `RUNNER_TOKEN` shorter than 32 characters, `BETTER_AUTH_URL` with `http://`. An unusable `GITHUB_APP_PRIVATE_KEY` does not stop the start; the log has a `GITHUB_APP_CONFIG_INVALID` line. |
 | The domain shows "No Available Server" or a 404 from the proxy | `app` is not healthy yet, or the domain lacks `:3000` or is attached to the wrong service ([Coolify: troubleshooting](https://coolify.io/docs/applications/builds/docker-compose#troubleshoot-an-unavailable-domain)). |
 | No certificate, or a browser warning | DNS does not point to the server yet, or 80 and 443 are closed ([Coolify: Let's Encrypt](https://coolify.io/docs/troubleshoot/dns-and-domains/lets-encrypt-not-working)). |
 | GitHub says the callback URL does not match | The OAuth app's callback URL is not exactly `<BETTER_AUTH_URL>/api/auth/callback/github`. |
@@ -496,7 +545,7 @@ Do this once with the whole team in the room; it is the acceptance test of the d
 ## What is verified
 
 - Automatically, on every pull request: `compose.coolify.yml` is a valid Compose file that builds both
-  images from the repository, publishes no port, requires every secret and stays in step with `compose.yml`;
+  images from the repository, publishes no port, requires the runner token and the public address and stays in step with `compose.yml`;
   this guide mentions every variable of `.env.example`; its sizing table matches the formula; the smoke
   script `docker/smoke/instance.sh` is tested against fake instances and runs against the Docker Compose
   stack in CI.

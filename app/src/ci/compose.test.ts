@@ -250,22 +250,35 @@ describe("compose secrets", () => {
   });
 
   // CR-37-T08
-  it("stops before creating any container when a required setting is empty", () => {
-    for (const key of [
-      "BETTER_AUTH_SECRET",
-      "GITHUB_OAUTH_CLIENT_ID",
-      "GITHUB_OAUTH_CLIENT_SECRET",
-      "GITHUB_APP_ID",
-      "GITHUB_APP_SLUG",
-      "GITHUB_APP_WEBHOOK_SECRET",
-      "GITHUB_APP_PRIVATE_KEY",
-      "RUNNER_TOKEN",
-    ]) {
-      expect(service("app").environment?.[key], key).toContain(`\${${key}:?`);
-    }
+  it("stops before creating any container when the runner token is empty", () => {
+    expect(service("app").environment?.RUNNER_TOKEN).toContain(
+      "${RUNNER_TOKEN:?",
+    );
     expect(service("runner").environment?.RUNNER_TOKEN).toContain(
       "${RUNNER_TOKEN:?",
     );
+  });
+
+  // #97-SU-17
+  it("leaves the master key to the app, which names APP_SECRET when it is missing, and passes the deprecated name on", () => {
+    // Required by the app, not by compose: an existing installation updates with the .env it has
+    // (BETTER_AUTH_SECRET), and the app accepts that name in place of APP_SECRET.
+    expect(service("app").environment?.APP_SECRET).toBe("${APP_SECRET:-}");
+    expect(service("app").environment?.BETTER_AUTH_SECRET).toBe(
+      "${BETTER_AUTH_SECRET:-}",
+    );
+  });
+
+  // #97-SU-17
+  it("requires no GitHub setting: the stack starts without any, and GitHub is then not configured", () => {
+    const environment = service("app").environment ?? {};
+    const github = Object.keys(environment).filter((key) =>
+      key.startsWith("GITHUB_"),
+    );
+
+    expect(github.length).toBeGreaterThan(0);
+    for (const key of github)
+      expect(environment[key], key).toBe(`\${${key}:-}`);
   });
 });
 

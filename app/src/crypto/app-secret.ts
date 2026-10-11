@@ -17,15 +17,15 @@ export type AppSecretResolution =
     }
   | { ok: false; problem: string };
 
-function valueOf(env: Env, name: string): string | undefined {
-  const text = env[name]?.trim();
+function clean(value: string | undefined): string | undefined {
+  const text = value?.trim();
   return text === undefined || text === "" ? undefined : text;
 }
 
 /** The secret and the variable it came from, or one sentence that names the variable to fix. */
 export function resolveAppSecret(env: Env): AppSecretResolution {
-  const current = valueOf(env, APP_SECRET_VARIABLE);
-  const legacy = valueOf(env, LEGACY_APP_SECRET_VARIABLE);
+  const current = clean(env.APP_SECRET);
+  const legacy = clean(env.BETTER_AUTH_SECRET);
   const source =
     current !== undefined ? APP_SECRET_VARIABLE : LEGACY_APP_SECRET_VARIABLE;
   const secret = current ?? legacy;

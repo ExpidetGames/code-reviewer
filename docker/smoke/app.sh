@@ -35,28 +35,17 @@ $leftovers"
 
 # CR-17-T08: a fresh named volume inherits the owner of /data from the image, so the unprivileged
 # user can create the database without any chown or root step.
-# The sign in settings, the runner token and the GitHub App credentials are required (the production
-# server refuses to start without them); these are dummies that point nowhere. Nothing in this
-# script signs in or talks to GitHub.
-# The GitHub App key is a real (throwaway) RSA key, generated here and passed by name so that it
-# never appears on a command line: a stricter loader than today's presence check accepts it too.
-command -v openssl >/dev/null || fail "openssl is required (it generates the dummy GitHub App key)"
-GITHUB_APP_PRIVATE_KEY=$(openssl genrsa 2048 2>/dev/null)
-export GITHUB_APP_PRIVATE_KEY
+# Only the master key, the public address and the runner token are required (the production server
+# refuses to start without them); these are dummies that point nowhere. No GITHUB_ variable is set:
+# the image must start without any. Nothing in this script talks to GitHub.
 step "starting the container with a fresh volume on /data"
 docker volume create "$volume" >/dev/null
 docker run --detach --name "$container" \
   --publish 127.0.0.1::3000 \
   --volume "$volume:/data" \
-  --env BETTER_AUTH_SECRET=smoke-test-secret-0123456789-0123456789-abcdef \
+  --env APP_SECRET=smoke-test-secret-0123456789-0123456789-abcdef \
   --env BETTER_AUTH_URL=http://localhost:3000 \
-  --env GITHUB_OAUTH_CLIENT_ID=smoke-client-id \
-  --env GITHUB_OAUTH_CLIENT_SECRET=smoke-client-secret \
   --env RUNNER_TOKEN=smoke-runner-token-0123456789-0123456789-abcdef \
-  --env GITHUB_APP_ID=1 \
-  --env GITHUB_APP_SLUG=smoke-app \
-  --env GITHUB_APP_WEBHOOK_SECRET=smoke-webhook-secret \
-  --env GITHUB_APP_PRIVATE_KEY \
   --health-interval 2s \
   "$image" >/dev/null
 port=$(docker port "$container" 3000/tcp | head -n 1 | sed 's/.*://')
@@ -79,15 +68,27 @@ until body=$(curl --silent --fail --location --max-time 3 "http://127.0.0.1:$por
 done
 grep -qi '<html' <<<"$body" || fail "the start page did not return HTML"
 
-# CR-18: the access guard runs in the built standalone server too, not only in the tests. Without a
-# session the start page redirects to the login page, which answers; the health route is public
-# and reads the database.
-step "the start page is guarded and the health route answers"
-start_status=$(curl --silent --output /dev/null --max-time 5 --write-out '%{http_code} %{redirect_url}' "http://127.0.0.1:$port/")
-[[ "$start_status" == "307 "*"/login" ]] || fail "the start page did not redirect to /login (got: $start_status)"
+# #97-SU-01, #97-SU-03: a fresh instance prints one setup code and gates everything but the health
+# check. The start page shows the code form (and not the code), the API and the webhooks answer 503
+# setup_required, the health route reads the database.
+step "a fresh instance prints one setup code, shows the setup and gates the rest"
+logs=$(docker logs "$container" 2>&1)
+code=$(setup_code_from_log "$logs")
+start_page=$(curl --silent --max-time 5 "http://127.0.0.1:$port/")
+grep -q 'Set up Code Reviewer' <<<"$start_page" || fail "the start page does not show the setup"
+grep -qF "$code" <<<"$start_page" && fail "the setup code is in the start page"
+for path in /api/projects /api/webhooks/github-app /api/runners/v1/claim; do
+  answer=$(curl --silent --max-time 5 --write-out ' %{http_code}' --request POST "http://127.0.0.1:$port$path")
+  [ "$answer" = '{"error":"setup_required"} 503' ] || fail "POST $path did not answer 503 setup_required (got: $answer)"
+done
 health=$(curl --silent --fail --max-time 5 "http://127.0.0.1:$port/api/health") ||
   fail "GET /api/health failed"
 [ "$health" = '{"status":"ok"}' ] || fail "unexpected health answer: $health"
+
+# #97-SU-11, #97-SU-14: the setup is finished through the API; afterwards it is gone and the access
+# guard of the built server sends a visitor without a session to the login page.
+step "the setup can be finished, and afterwards the start page is guarded"
+complete_setup "http://127.0.0.1:$port" "$code"
 
 step "waiting for the container to report healthy"
 until [ "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$container")" = "healthy" ]; do
