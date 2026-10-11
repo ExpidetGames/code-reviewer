@@ -37,6 +37,7 @@ jobs:
       app: ${{ steps.filter.outputs.app }}
       runner: ${{ steps.filter.outputs.runner }}
       workflows: ${{ steps.filter.outputs.workflows }}
+      licenses: ${{ steps.filter.outputs.licenses }}
     steps:
       - name: Filter changed paths
         id: filter
@@ -56,6 +57,10 @@ jobs:
               - '!**/*.md'
             workflows:
               - '.github/**'
+            # The Markdown exclusions above skip this file, but the license check compares it with
+            # license-policy.json (policy-doc.test.ts).
+            licenses:
+              - 'THIRD_PARTY_LICENSES.md'
 
   app-fast:
     name: "App: static, unit tests & build"
@@ -213,11 +218,13 @@ jobs:
   # package of pnpm-lock.yaml or uv.lock has a license outside the allow list. It reads the license
   # metadata that pnpm and uv installed, so it needs both parts installed from the lockfiles and no
   # network service. Runs for every code change, because the policy, the lockfiles and the check
-  # itself live in both parts.
+  # itself live in both parts, and for a change to THIRD_PARTY_LICENSES.md. Besides the check it runs
+  # the tests that keep that file and the policy together, and the SPDX header check, which are
+  # app tests that a runner-only pull request would otherwise skip.
   licenses:
     name: "Licenses: dependency check"
     needs: changes
-    if: ${{ github.event_name == 'push' || github.base_ref == 'main' || needs.changes.outputs.app == 'true' || needs.changes.outputs.runner == 'true' }}
+    if: ${{ github.event_name == 'push' || github.base_ref == 'main' || needs.changes.outputs.app == 'true' || needs.changes.outputs.runner == 'true' || needs.changes.outputs.licenses == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:
@@ -245,6 +252,13 @@ jobs:
         run: uv sync --locked
       - name: Check the licenses of all dependencies
         run: pnpm licenses:check
+      # The tests that hold THIRD_PARTY_LICENSES.md and the policy together, and the SPDX header of
+      # every source file (also those of a pull request that only touches the runner, for which
+      # app-fast is skipped).
+      - name: Check that the license documentation agrees with the policy
+        run: pnpm exec vitest run --project unit src/ci/license-check
+      - name: Check the SPDX headers
+        run: pnpm spdx:check
 
   # The container images (see publish-images.yml for how they reach GHCR). A pull request builds
   # each image, starts it and checks what a unit test cannot (docker/smoke/*.sh). Nothing is

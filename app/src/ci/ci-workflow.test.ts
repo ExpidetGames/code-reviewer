@@ -29,6 +29,7 @@ type Job = {
   permissions?: Record<string, string>;
   defaults?: { run?: { "working-directory"?: string } };
   steps?: Step[];
+  outputs?: Record<string, string>;
 } & Record<string, unknown>;
 type Workflow = {
   on: {
@@ -293,6 +294,33 @@ describe("CI license job", () => {
     expect(condition).toContain("github.base_ref == 'main'");
     expect(condition).toContain("needs.changes.outputs.app == 'true'");
     expect(condition).toContain("needs.changes.outputs.runner == 'true'");
+  });
+
+  // #118-T01, #118-T04
+  it("also checks the SPDX headers and the tests of the license policy, because the app tests that hold them are skipped for a runner-only pull request", () => {
+    const lines = commandLines(jobNamed("licenses"));
+
+    expect(lines).toContain("pnpm spdx:check");
+    expect(lines).toContain(
+      "pnpm exec vitest run --project unit src/ci/license-check",
+    );
+  });
+
+  // #118-T01
+  it("runs for a change that only touches THIRD_PARTY_LICENSES.md, which the Markdown exclusions of the app and runner filters skip", () => {
+    const filterStep = steps(jobNamed("changes")).find(
+      (step) => step.id === "filter",
+    );
+    const filters = parse(String(filterStep?.with?.filters)) as Record<
+      string,
+      string[]
+    >;
+
+    expect(filters.licenses).toEqual(["THIRD_PARTY_LICENSES.md"]);
+    expect(jobNamed("changes").outputs).toHaveProperty("licenses");
+    expect(String(jobNamed("licenses").if)).toContain(
+      "needs.changes.outputs.licenses == 'true'",
+    );
   });
 
   // #118-T01
