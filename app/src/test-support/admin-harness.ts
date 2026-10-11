@@ -9,7 +9,11 @@ import { sql } from "kysely";
 import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
 import { NextRequest } from "next/server";
 import { adminAccessOf } from "../admin/access.ts";
-import { MISSING_PATH, isAdminPath } from "../admin/paths.ts";
+import {
+  MISSING_PATH,
+  PORTAL_DENIED_HEADER,
+  isAdminPath,
+} from "../admin/paths.ts";
 import { PORTAL_REWRITE_HEADER } from "../auth/access-proxy.ts";
 import { createAdminRouteHandlers } from "../admin/http.ts";
 import { createAdminService } from "../admin/service.ts";
@@ -219,6 +223,13 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
       });
     const gated = await setup.gate(build());
     const outcome = gated ?? (await setup.access(build()));
+    // A request the proxy marked as one for the files of the portal by their own address is rewritten to
+    // a missing path by next.config.ts, before it reaches any route.
+    if (
+      outcome.headers.get(`x-middleware-request-${PORTAL_DENIED_HEADER}`) !==
+      null
+    )
+      return missingAnswer();
     if (
       outcome.headers.get("x-middleware-next") !== "1" &&
       outcome.headers.get("x-middleware-rewrite") === null
@@ -265,16 +276,21 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
     return reach(build(), headers);
   }
 
+  /** The answer of a path that is no route of the app. */
+  function missingAnswer(): Response {
+    return new Response("not found", {
+      status: 404,
+      headers: { [MISSING_ANSWER_MARKER]: "1" },
+    });
+  }
+
   /** The request as the route sees it, after the proxy let it through (or without a proxy at all). */
   async function reach(request: Request, headers: Headers): Promise<Response> {
     current.headers = headers;
     const { pathname } = new URL(request.url);
     // What is no route of the app is a missing path: 404, as the app answers it.
     if (pathname === MISSING_PATH || isAdminPath(pathname))
-      return new Response("not found", {
-        status: 404,
-        headers: { [MISSING_ANSWER_MARKER]: "1" },
-      });
+      return missingAnswer();
     try {
       if (
         pathname === "/api/instance-portal/settings" &&

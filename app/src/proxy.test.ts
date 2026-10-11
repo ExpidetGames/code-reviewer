@@ -3,6 +3,7 @@
 // Pins down the proxy matcher: it must match every path except Next.js's own static files, because
 // "default deny" only holds for paths the proxy sees. A path missing from the match is open.
 import { describe, expect, it } from "vitest";
+import { PROXY_SKIPPED_PATHS } from "./admin/paths.ts";
 import { config } from "./proxy.ts";
 
 // Next.js compiles a matcher with path-to-regexp; for this pattern (a negative lookahead in one
@@ -36,4 +37,12 @@ describe("the proxy matcher", () => {
       expect(matcher.test(pathname)).toBe(false);
     },
   );
+});
+
+describe("the paths the proxy leaves out", () => {
+  // #138
+  it("are the ones next.config.ts leaves out of the rewrite on the portal's header", () => {
+    // The matcher has to be a literal in proxy.ts, so the shared constant cannot be used there.
+    expect(source).toBe(`/((?!${PROXY_SKIPPED_PATHS}).*)`);
+  });
 });
