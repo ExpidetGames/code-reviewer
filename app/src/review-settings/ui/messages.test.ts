@@ -90,9 +90,9 @@ describe("the copy for a save that failed as a whole", () => {
     expect(describeSaveFailure("REVIEW_SETTINGS_INVALID")).toMatch(/marked/);
   });
 
-  it("says a project that was never activated has no settings yet", () => {
+  it("says the repository was not found when it is gone", () => {
     expect(describeSaveFailure("REVIEW_SETTINGS_PROJECT_NOT_FOUND")).toMatch(
-      /activate/i,
+      /not found/i,
     );
   });
 });
