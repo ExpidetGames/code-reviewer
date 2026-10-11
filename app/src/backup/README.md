@@ -67,7 +67,7 @@ backup succeeded: a failing backup never shrinks the history.
 An invalid `BACKUP_TIME` stops the start with `BACKUP_CONFIG_INVALID` (a typo must not become "no
 backups"). If the target cannot be written to when the app starts, an error line says so and the app
 keeps running; the status route shows the same problem. `BACKUP_TIME` is read only by the scheduler:
-the `backup` and `restore` commands ignore it, so a typo there never blocks a restore.
+the `backup` and `restore` commands ignore it, so a typo there never blocks a restore. An invalid `BACKUP_TIME` stops the app at the start in production, before the database is opened and before the repositories are synchronized, with one line that names the variable and the format (`HH:MM` in UTC, or `off`).
 
 ## Where the backups are, and getting them off the server
 
@@ -138,21 +138,35 @@ replaces an earlier one (`app.db.before-restore-<time>`, with `-2`, `-3` added w
      <app image> node /srv/app/backup/cli.ts restore /backups/code-reviewer-20261010T023000Z.db
    ```
 
-   It prints where the previous database was kept (`app.db.before-restore-<time>`, with its `-wal`
-   and `-shm` files if there were any).
+   It prints where the previous database was kept (`app.db.before-restore-<time>`, with its
+   `-journal`, `-wal` and `-shm` files if there were any).
 
 4. Start the app. Check `/api/health`, sign in, look at the projects. Pending migrations of a newer
    image run at the start as usual.
 5. When the data is confirmed, delete the `app.db*.before-restore-*` files from the data volume.
 
+The copy of the backup is made next to the database under a temporary name, created readable by its
+owner only (mode `0600`) before the first byte is written, whatever the umask and the mode of the
+backup file. It is checked again before it becomes the database.
+
 **A leftover `app.db-wal` next to a restored `app.db`.** The restore command moves the old database
-aside together with its `-wal` and `-shm` files, so none is left. If you put a backup in place by
+aside together with its `-journal`, `-wal` and `-shm` files, so none is left. If you put a backup in place by
 hand and an old `app.db-wal` stays next to it, SQLite does not ask: it takes the log over when it
 opens the database, replaying changes of the old database into the restored one (which then holds
 writes that are not in the backup), or it discards the log if it does not fit. Which of the two
 happens cannot be known beforehand, so never start the app with such a file there: stop the app, move
 `app.db`, `app.db-wal` and `app.db-shm` aside, and only then copy the backup in as `app.db`. A backup
-file itself never has a `-wal`.
+file itself never has a `-wal`. A leftover `-journal` (a rollback journal of an interrupted write)
+is the same hazard: SQLite rolls it back into whatever file has the name.
+
+One more thing the restore does with a leftover `-wal`: the in-use check (step before the old
+database is moved aside) opens the old database to see whether another process holds it. Opening a
+database with a `-wal` next to it is what makes SQLite replay that log into the old database, or
+delete it when it does not fit, and a leftover `-journal` is rolled back or deleted the same way.
+That happens to the old database only, before it is moved aside, so the kept copy
+(`app.db.before-restore-<time>`) can already contain the replayed writes, and a leftover `-wal` or
+`-journal` may be gone from the data directory by the time the command prints where the old database
+went. Nothing of it reaches the restored database.
 
 If the restore stops with `RESTORE_BACKUP_INVALID` the file is damaged (truncated copy, bad
 transfer): try the next older backup. The database is unchanged in that case.

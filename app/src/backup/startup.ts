@@ -19,6 +19,27 @@ type StartOptions = {
   startScheduler?: typeof startBackupScheduler;
 };
 
+/**
+ * Checks the backup settings before anything else starts (production only): an invalid BACKUP_TIME
+ * ends the process with one readable line naming the variable and the format, before the database is
+ * opened and before the repositories are synchronized in the background. The scheduler below reads
+ * the same settings again and never sees an invalid value after this check.
+ */
+export function checkBackupConfigOnStart({
+  env = process.env,
+  log = console,
+  exit = (code) => process.exit(code),
+}: Pick<StartOptions, "env" | "log" | "exit"> = {}): void {
+  if (env.NODE_ENV !== "production") return;
+  try {
+    loadBackupConfig(env);
+  } catch (error) {
+    if (!(error instanceof BackupError)) throw error;
+    log.error(`[backup] ${error.code}: ${error.message}`);
+    exit(1);
+  }
+}
+
 export function startBackupSchedulerOnStart({
   env = process.env,
   log = console,

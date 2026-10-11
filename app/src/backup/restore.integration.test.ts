@@ -2,6 +2,7 @@
 // stops the restore before anything is touched; a good one replaces the database in one step, the
 // old database (with its write-ahead log) is kept aside, and the app can start on the result.
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -43,6 +44,35 @@ async function aBackup() {
     backupDir: target,
   });
   return { backup, expected: tableCounts(source.config.path), target };
+}
+
+/**
+ * A rollback journal that SQLite treats as hot for the database of `backupPath`: valid header, one
+ * record that would overwrite page 1 with garbage. Whoever opens a database of this name with this
+ * journal next to it rolls the garbage in (the file format is documented at sqlite.org/fileformat).
+ */
+function aHotJournalFor(backupPath: string): Buffer {
+  const header = readFileSync(backupPath).subarray(0, 100);
+  const rawPageSize = header.readUInt16BE(16);
+  const pageSize = rawPageSize === 1 ? 65536 : rawPageSize;
+  const sectorSize = 512;
+  const nonce = 0x1234abcd;
+  const page = Buffer.alloc(pageSize, 0xff);
+  let checksum = nonce;
+  for (let offset = pageSize - 200; offset > 0; offset -= 200)
+    checksum += page[offset] ?? 0;
+  const journalHeader = Buffer.alloc(sectorSize);
+  Buffer.from("d9d505f920a163d7", "hex").copy(journalHeader, 0);
+  journalHeader.writeUInt32BE(1, 8); // one record
+  journalHeader.writeUInt32BE(nonce, 12);
+  journalHeader.writeUInt32BE(header.readUInt32BE(28), 16); // pages of the database
+  journalHeader.writeUInt32BE(sectorSize, 20);
+  journalHeader.writeUInt32BE(pageSize, 24);
+  const record = Buffer.alloc(4 + pageSize + 4);
+  record.writeUInt32BE(1, 0); // page number
+  page.copy(record, 4);
+  record.writeUInt32BE(checksum >>> 0, 4 + pageSize);
+  return Buffer.concat([journalHeader, record]);
 }
 
 function failureOf(run: () => unknown): BackupError {
@@ -245,6 +275,78 @@ describe("restoring a backup", () => {
     expect(namesIn(current.directory)).toEqual(filesBefore);
   });
 
+  // CR-76-T01
+  it("moves a stale rollback journal aside with the old database and never applies it to the restored one", async () => {
+    const { backup, expected } = await aBackup();
+    const databasePath = join(await createTestDirectory(), "app.db");
+    // No database file, only a journal that would be replayed onto whatever file gets this name.
+    const journal = aHotJournalFor(backup.path);
+    writeFileSync(`${databasePath}-journal`, journal);
+
+    restoreBackup({ backupPath: backup.path, databasePath, now: () => NOW });
+
+    expect(existsSync(`${databasePath}-journal`)).toBe(false);
+    expect(
+      readFileSync(
+        `${databasePath}-journal.before-restore-20261011T080000Z`,
+      ).equals(journal),
+    ).toBe(true);
+    expect(integrityOf(databasePath)).toBe("ok");
+    expect(tableCounts(databasePath)).toEqual(expected);
+  });
+
+  // CR-76-T01
+  it("keeps a journal that sits next to an old database aside under the name of that database", async () => {
+    const { backup, expected } = await aBackup();
+    const current = await createTestDatabase();
+    await seedInstance(current.db);
+    await current.db.destroy();
+    writeFileSync(
+      `${current.config.path}-journal`,
+      "stale journal ".repeat(40),
+    );
+
+    const result = restoreBackup({
+      backupPath: backup.path,
+      databasePath: current.config.path,
+      now: () => NOW,
+    });
+
+    expect(existsSync(`${current.config.path}-journal`)).toBe(false);
+    expect(namesIn(current.directory)).toContain(
+      "app.db-journal.before-restore-20261011T080000Z",
+    );
+    expect(result.previousKeptAs).toBe(
+      `${current.config.path}.before-restore-20261011T080000Z`,
+    );
+    expect(tableCounts(current.config.path)).toEqual(expected);
+  });
+
+  // CR-76-T02
+  it("creates the temporary copy readable by its owner only, whatever the backup's mode and the umask", async () => {
+    const { backup } = await aBackup();
+    chmodSync(backup.path, 0o644);
+    const databasePath = join(await createTestDirectory(), "app.db");
+    const modes: number[] = [];
+    const previousUmask = process.umask(0o000);
+    try {
+      restoreBackup({
+        backupPath: backup.path,
+        databasePath,
+        hooks: {
+          afterTemporaryCopyCreated: (path) => {
+            modes.push(statSync(path).mode & 0o777);
+          },
+        },
+      });
+    } finally {
+      process.umask(previousUmask);
+    }
+
+    expect(modes).toEqual([0o600]);
+    expect(statSync(databasePath).mode & 0o777).toBe(0o600);
+  });
+
   it("refuses a data directory that does not exist", async () => {
     const { backup } = await aBackup();
     const missingDir = join(await createTestDirectory(), "nowhere", "app.db");
@@ -258,28 +360,52 @@ describe("restoring a backup", () => {
 });
 
 describe("moving the old database aside", () => {
-  async function aDatabaseWithSideFiles() {
+  async function aDatabaseWithSideFiles({ journal = false } = {}) {
     const directory = await createTestDirectory();
     const databasePath = join(directory, "app.db");
     writeFileSync(databasePath, "database");
     writeFileSync(`${databasePath}-wal`, "log");
     writeFileSync(`${databasePath}-shm`, "index");
+    if (journal) writeFileSync(`${databasePath}-journal`, "journal");
     return { directory, databasePath };
   }
 
   // CR-40-T10
-  it("moves the database, its write-ahead log and its index to one name", async () => {
-    const { directory, databasePath } = await aDatabaseWithSideFiles();
+  it("moves the database, its rollback journal, its write-ahead log and its index to one name", async () => {
+    const { directory, databasePath } = await aDatabaseWithSideFiles({
+      journal: true,
+    });
     const moved: Move[] = [];
 
     moveAside(databasePath, "20261011T080000Z", moved, undefined);
 
     expect(namesIn(directory)).toEqual([
+      "app.db-journal.before-restore-20261011T080000Z",
       "app.db-shm.before-restore-20261011T080000Z",
       "app.db-wal.before-restore-20261011T080000Z",
       "app.db.before-restore-20261011T080000Z",
     ]);
-    expect(moved).toHaveLength(3);
+    expect(moved).toHaveLength(4);
+  });
+
+  // CR-76-T01
+  it("puts the journal back when a later rename fails", async () => {
+    const { directory, databasePath } = await aDatabaseWithSideFiles({
+      journal: true,
+    });
+    const filesBefore = namesIn(directory);
+    const moved: Move[] = [];
+
+    expect(() =>
+      moveAside(databasePath, "20261011T080000Z", moved, (path) => {
+        if (path.endsWith("-shm")) throw new Error("simulated failure");
+      }),
+    ).toThrowError("simulated failure");
+
+    expect(moved.map((move) => move.from)).toContain(`${databasePath}-journal`);
+    expect(undoMoves(moved)).toEqual([]);
+    expect(namesIn(directory)).toEqual(filesBefore);
+    expect(readFileSync(`${databasePath}-journal`, "utf8")).toBe("journal");
   });
 
   // CR-40-T11
