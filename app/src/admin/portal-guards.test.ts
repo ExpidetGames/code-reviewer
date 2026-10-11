@@ -11,9 +11,9 @@ import {
   concretePath,
   discoverRoutes,
 } from "../test-support/routes.ts";
-import { isAdminPath } from "./paths.ts";
+import { isInternalPortalPath } from "./paths.ts";
 
-const ADMIN_PAGE_FOLDER = join(APP_DIRECTORY, "(app)", "admin");
+const ADMIN_PAGE_FOLDER = join(APP_DIRECTORY, "(app)", "instance-portal");
 const SRC = join(APP_DIRECTORY, "..");
 
 function filesBelow(directory: string): string[] {
@@ -27,7 +27,7 @@ function filesBelow(directory: string): string[] {
 }
 
 const routes = discoverRoutes().filter(({ route }) =>
-  isAdminPath(concretePath(route)),
+  isInternalPortalPath(concretePath(route)),
 );
 
 describe("the guards of the admin portal", () => {
@@ -71,7 +71,7 @@ describe("the guards of the admin portal", () => {
     const files = [
       ...filesBelow(ADMIN_PAGE_FOLDER),
       ...filesBelow(join(SRC, "admin")),
-      ...filesBelow(join(APP_DIRECTORY, "api", "admin")),
+      ...filesBelow(join(APP_DIRECTORY, "api", "instance-portal")),
     ];
 
     const withServerFunctions = files.filter((file) =>

@@ -9,7 +9,9 @@ import { AdminNav } from "@/admin/ui/admin-nav";
 
 export const metadata: Metadata = { title: "Admin" };
 
-export default function AdminLayout({ children }: LayoutProps<"/admin">) {
+export default function AdminLayout({
+  children,
+}: LayoutProps<"/instance-portal">) {
   return (
     <Suspense fallback={<div className="page-loading" aria-busy="true" />}>
       <AdminFrame>{children}</AdminFrame>

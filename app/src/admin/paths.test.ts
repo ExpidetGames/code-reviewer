@@ -2,7 +2,11 @@
 // that Next.js would route to an admin page or route: a path the proxy did not recognize as an admin
 // path would reach the portal without the 404 for people who are not admins.
 import { describe, expect, it } from "vitest";
-import { isAdminPath } from "./paths.ts";
+import {
+  isAdminPath,
+  isInternalPortalPath,
+  portalRewriteTarget,
+} from "./paths.ts";
 
 describe("which paths belong to the admin portal", () => {
   it.each([
@@ -54,4 +58,47 @@ describe("which paths belong to the admin portal", () => {
     expect(isAdminPath("/admin%zz")).toBe(true);
     expect(isAdminPath("/%E0%A4%A")).toBe(true);
   });
+});
+
+describe("where a portal path is served", () => {
+  it.each([
+    ["/admin", "/instance-portal"],
+    ["/admin/setup", "/instance-portal/setup"],
+    ["/admin/mail/anything/below", "/instance-portal/mail/anything/below"],
+    ["/api/admin/settings", "/api/instance-portal/settings"],
+    ["/%61dmin/setup", "/instance-portal/setup"],
+    ["/admin/", "/instance-portal"],
+    ["//admin//setup", "/instance-portal/setup"],
+    ["/admin/../admin", "/instance-portal"],
+  ])("serves %s from %s", (path, target) => {
+    expect(portalRewriteTarget(path)).toBe(target);
+  });
+
+  it.each([
+    "/",
+    "/projects",
+    "/administrator",
+    "/api/health",
+    "/admin%zz",
+    "/Admin",
+  ])("serves nothing for %s", (path) => {
+    expect(portalRewriteTarget(path)).toBeNull();
+  });
+
+  it.each([
+    "/instance-portal",
+    "/instance-portal/setup",
+    "/api/instance-portal/settings",
+    "/%69nstance-portal",
+    "//instance-portal",
+  ])("knows %s as an address of the files of the portal", (path) => {
+    expect(isInternalPortalPath(path)).toBe(true);
+  });
+
+  it.each(["/", "/admin", "/instance-portals", "/api/instance", "/projects"])(
+    "does not know %s as one",
+    (path) => {
+      expect(isInternalPortalPath(path)).toBe(false);
+    },
+  );
 });

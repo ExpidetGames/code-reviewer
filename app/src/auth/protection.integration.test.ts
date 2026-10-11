@@ -36,12 +36,13 @@ const PUBLIC_ROUTES = [
 ] as const;
 const PROTECTED_ROUTES = [
   "/",
-  // The admin portal: also a 404 for everybody who is not an instance admin (src/admin/guard.integration.test.ts).
-  "/admin",
-  "/admin/integrations",
-  "/admin/limits",
-  "/admin/mail",
-  "/admin/setup",
+  // The files of the admin portal; people use /admin, which is rewritten to them for the instance admin
+  // and does not exist for anybody else (src/admin/guard.integration.test.ts).
+  "/instance-portal",
+  "/instance-portal/integrations",
+  "/instance-portal/limits",
+  "/instance-portal/mail",
+  "/instance-portal/setup",
   "/projects",
   "/projects/[repositoryId]",
   "/runs",
@@ -50,7 +51,7 @@ const PROTECTED_ROUTES = [
 ] as const;
 // Data routes: a visitor without a session gets 401 instead of a redirect.
 const PROTECTED_DATA_ROUTES = [
-  "/api/admin/settings",
+  "/api/instance-portal/settings",
   "/api/backup/status",
   "/api/repositories/[repositoryId]/project",
   "/api/repositories/[repositoryId]/project/settings",

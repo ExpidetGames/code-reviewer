@@ -6,6 +6,8 @@
 import { sql } from "kysely";
 import { NextRequest } from "next/server";
 import { adminAccessOf } from "../admin/access.ts";
+import { MISSING_PATH, isAdminPath } from "../admin/paths.ts";
+import { PORTAL_REWRITE_HEADER } from "../auth/access-proxy.ts";
 import { createAdminRouteHandlers } from "../admin/http.ts";
 import { createAdminService } from "../admin/service.ts";
 import { createSecretStore } from "../secrets/store.ts";
@@ -32,6 +34,9 @@ export class NotFoundSignal extends Error {
     super("NEXT_HTTP_ERROR_FALLBACK;404");
   }
 }
+
+/** Marks the answer of a path that is no route of the app (the stand-in for Next.js's own 404). */
+export const MISSING_ANSWER_MARKER = "x-answer-of-a-missing-path";
 
 export type AdminHarnessOptions = {
   githubConfigured?: boolean;
@@ -175,7 +180,49 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
       });
     const gated = await setup.gate(build());
     const outcome = gated ?? (await setup.access(build()));
-    if (outcome.headers.get("x-middleware-next") !== "1") return outcome;
+    if (
+      outcome.headers.get("x-middleware-next") !== "1" &&
+      outcome.headers.get("x-middleware-rewrite") === null
+    )
+      return outcome;
+    // The instance admin's request is rewritten to the files of the portal; anybody else's goes on as it
+    // is. The files are all there is: `/admin` itself is no route.
+    const rewrite = outcome.headers.get("x-middleware-rewrite");
+    if (rewrite !== null) {
+      const target = new URL(rewrite);
+      // Next.js runs the proxy again on the path a rewrite leads to, with the headers the rewrite set.
+      const again = new Headers(headers);
+      const mark = outcome.headers.get(
+        `x-middleware-request-${PORTAL_REWRITE_HEADER}`,
+      );
+      if (mark !== null) again.set(PORTAL_REWRITE_HEADER, mark);
+      const second = await setup.access(
+        new NextRequest(
+          `${ADMIN_TEST_BASE_URL}${target.pathname}${target.search}`,
+          {
+            method,
+            headers: again,
+            ...(bodyText === undefined ? {} : { body: bodyText }),
+          },
+        ),
+      );
+      const followed = second.headers.get("x-middleware-rewrite");
+      if (second.headers.get("x-middleware-next") !== "1")
+        return followed === null
+          ? second
+          : reach(new Request(followed), headers);
+      return reach(
+        new Request(
+          `${ADMIN_TEST_BASE_URL}${target.pathname}${target.search}`,
+          {
+            method,
+            headers,
+            ...(bodyText === undefined ? {} : { body: bodyText }),
+          },
+        ),
+        headers,
+      );
+    }
     return reach(build(), headers);
   }
 
@@ -183,10 +230,22 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
   async function reach(request: Request, headers: Headers): Promise<Response> {
     current.headers = headers;
     const { pathname } = new URL(request.url);
+    // What is no route of the app is a missing path: 404, as the app answers it.
+    if (pathname === MISSING_PATH || isAdminPath(pathname))
+      return new Response("not found", {
+        status: 404,
+        headers: { [MISSING_ANSWER_MARKER]: "1" },
+      });
     try {
-      if (pathname === "/api/admin/settings" && request.method === "GET")
+      if (
+        pathname === "/api/instance-portal/settings" &&
+        request.method === "GET"
+      )
         return await handlers.getSettings(request);
-      if (pathname === "/api/admin/settings" && request.method === "PUT")
+      if (
+        pathname === "/api/instance-portal/settings" &&
+        request.method === "PUT"
+      )
         return await handlers.putSettings(request);
     } catch (error) {
       if (error instanceof NotFoundSignal)
@@ -194,6 +253,22 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
       throw error;
     }
     return new Response("reached", { status: 200 });
+  }
+
+  /** What the access proxy itself answers, before any route (for comparing two paths). */
+  async function askProxy(
+    path: string,
+    init: { method?: string; cookies?: CookieJar } = {},
+  ): Promise<Response> {
+    const headers = new Headers();
+    if (init.cookies && init.cookies.size > 0)
+      headers.set("cookie", cookieHeader(init.cookies));
+    return setup.access(
+      new NextRequest(`${ADMIN_TEST_BASE_URL}${path}`, {
+        method: init.method ?? "GET",
+        headers,
+      }),
+    );
   }
 
   /** Calls the data route's handler directly, as if the proxy had not been there. */
@@ -247,6 +322,7 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
     createUser,
     signIn,
     visit,
+    askProxy,
     callRoute,
   };
 }

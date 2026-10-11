@@ -6,20 +6,26 @@
 // gets in, with an unverified email address too. The routes are read from the file system, so a page or
 // route added to the portal without a decision here fails the test.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ADMIN_HIDDEN_PATH } from "../auth/access-proxy.ts";
 import {
+  MISSING_ANSWER_MARKER,
   createAdminHarness,
   type AdminHarness,
 } from "../test-support/admin-harness.ts";
 import { concretePath, discoverRoutes } from "../test-support/routes.ts";
-import { isAdminPath } from "./paths.ts";
+import { isInternalPortalPath } from "./paths.ts";
 
 const MEMBER = { email: "member@example.com", password: "k4Pq-v8Zm2Xw" };
 const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
 
-const adminRoutes = discoverRoutes().filter(({ route }) =>
-  isAdminPath(concretePath(route)),
+// The files of the portal live below /instance-portal; the address of a person is /admin
+// (src/admin/paths.ts). `route` is the address a person uses.
+const portalFiles = discoverRoutes().filter(({ route }) =>
+  isInternalPortalPath(concretePath(route)),
 );
+const adminRoutes = portalFiles.map(({ route, file }) => ({
+  route: route.replace(/^(\/api)?\/instance-portal/, "$1/admin"),
+  file,
+}));
 const pageRoutes = adminRoutes.filter(({ file }) => /page\.[a-z]+$/.test(file));
 const dataRoutes = adminRoutes.filter(({ file }) =>
   /route\.[a-z]+$/.test(file),
@@ -32,9 +38,15 @@ async function startPortal() {
   return { portal, memberCookies };
 }
 
+// The answer of a path that is no route of the app (the harness's stand-in for Next.js's 404): nothing
+// of the portal reached, no redirect, no rewrite header.
 function isHidden(response: Response): boolean {
-  const rewrite = response.headers.get("x-middleware-rewrite");
-  return rewrite !== null && new URL(rewrite).pathname === ADMIN_HIDDEN_PATH;
+  return (
+    response.status === 404 &&
+    response.headers.get(MISSING_ANSWER_MARKER) === "1" &&
+    response.headers.get("x-middleware-rewrite") === null &&
+    response.headers.get("location") === null
+  );
 }
 
 afterEach(() => {
@@ -52,6 +64,23 @@ describe("the routes of the portal", () => {
       "/api/admin/settings",
     ]);
   });
+});
+
+describe("the files of the portal", () => {
+  it.each(portalFiles.map(({ route }) => route))(
+    "are not reachable by their own address %s, not even for the admin",
+    async (route) => {
+      const { portal, memberCookies } = await startPortal();
+
+      const asAdmin = await portal.visit(route, {
+        cookies: portal.adminCookies,
+      });
+      const asMember = await portal.visit(route, { cookies: memberCookies });
+
+      expect(isHidden(asAdmin)).toBe(true);
+      expect(isHidden(asMember)).toBe(true);
+    },
+  );
 });
 
 describe("a visitor without a session", () => {
@@ -91,8 +120,8 @@ describe("a visitor without a session", () => {
   it("gets 401 from the data route itself when the proxy is not in front, and nothing is changed", async () => {
     const { portal } = await startPortal();
 
-    const get = await portal.callRoute("/api/admin/settings");
-    const put = await portal.callRoute("/api/admin/settings", {
+    const get = await portal.callRoute("/api/instance-portal/settings");
+    const put = await portal.callRoute("/api/instance-portal/settings", {
       method: "PUT",
       body: { tenancy: "multi" },
     });
@@ -128,19 +157,22 @@ describe("a signed in person who is not an instance admin", () => {
   );
 
   // #98-AD-02
-  it("gets the same answer for a portal path as the rewrite to a path that is no route", async () => {
+  it("is handled by the proxy exactly like a person asking for a path that does not exist", async () => {
     const { portal, memberCookies } = await startPortal();
 
-    const portalPage = await portal.visit("/admin", { cookies: memberCookies });
-    const portalData = await portal.visit("/api/admin/settings", {
-      cookies: memberCookies,
-    });
-
-    expect(portalPage.headers.get("x-middleware-rewrite")).toBe(
-      portalData.headers.get("x-middleware-rewrite"),
-    );
-    expect(portalPage.headers.get("location")).toBeNull();
-    expect(portalPage.headers.get("cache-control")).toBe("no-store");
+    const portalPaths = ["/admin", "/admin/setup", "/api/admin/settings"];
+    const proxied = async (path: string, method = "GET") => {
+      const response = await portal.askProxy(path, {
+        cookies: memberCookies,
+        method,
+      });
+      return [...response.headers].sort();
+    };
+    for (const method of ["GET", "POST", "PUT"])
+      for (const path of portalPaths)
+        expect(await proxied(path, method), `${method} ${path}`).toEqual(
+          await proxied("/there-is-no-such-page", method),
+        );
   });
 
   // #98-AD-02
@@ -186,10 +218,12 @@ describe("a signed in person who is not an instance admin", () => {
     ];
 
     const answers = [
-      await portal.callRoute("/api/admin/settings", { cookies: memberCookies }),
+      await portal.callRoute("/api/instance-portal/settings", {
+        cookies: memberCookies,
+      }),
       ...(await Promise.all(
         attempts.map((body) =>
-          portal.callRoute("/api/admin/settings", {
+          portal.callRoute("/api/instance-portal/settings", {
             method: "PUT",
             body,
             cookies: memberCookies,
