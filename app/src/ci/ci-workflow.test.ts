@@ -20,6 +20,7 @@ type Step = {
 } & Record<string, unknown>;
 type Job = {
   name?: string;
+  uses?: string;
   needs?: string | string[];
   if?: string;
   "timeout-minutes"?: number;
@@ -116,6 +117,36 @@ describe("CI workflow triggers and jobs", () => {
     }
   });
 
+  // CR-41-T15
+  it("runs the engine suite through the shared engine workflow in its own job", () => {
+    const job = jobNamed("engine");
+
+    expect(job.needs).toBe("changes");
+    expect(job.uses).toBe("./.github/workflows/engine.yml");
+    expect(job.steps).toBeUndefined();
+  });
+
+  // CR-41-T15
+  it("runs the engine job for pull requests that change the runner and for pull requests into main, never for pushes or app-only changes", () => {
+    const condition = String(jobNamed("engine").if);
+
+    expect(condition).toContain("github.event_name == 'pull_request'");
+    expect(condition).toContain("github.base_ref == 'main'");
+    expect(condition).toContain("needs.changes.outputs.runner == 'true'");
+    expect(condition).not.toContain("needs.changes.outputs.app");
+    expect(condition).not.toContain("github.event_name == 'push'");
+  });
+
+  // CR-41-T15
+  it("keeps the engine job read-only and without secrets", () => {
+    const job = jobNamed("engine");
+
+    expect(job.permissions).toEqual({ contents: "read" });
+    expect(workflow.permissions).toEqual({ contents: "read" });
+    expect(JSON.stringify(job)).not.toContain("secrets.");
+    expect(job).not.toHaveProperty("secrets");
+  });
+
   // CR-16-T01
   it("runs the browser smoke tests against the production build with the system libraries installed", () => {
     const lines = commandLines(jobNamed("e2e"));
@@ -203,11 +234,24 @@ describe("CI workflow aggregate check", () => {
     expect(failStep?.if).not.toContain("skipped");
   });
 
+  // CR-41-T15
+  it("waits for the engine job, blocks on its failure and accepts it skipped", () => {
+    const aggregate = jobNamed("ci-passed");
+    const failStep = steps(aggregate).find((step) =>
+      step.run?.includes("exit 1"),
+    );
+
+    expect(aggregate.needs).toContain("engine");
+    expect(failStep?.if).toContain("contains(needs.*.result, 'failure')");
+    expect(failStep?.if).not.toContain("skipped");
+  });
+
   // CR-16-T04
   it("runs the app, runner, browser and workflow jobs independently so one red job stops no other", () => {
     for (const id of [
       "app-fast",
       "runner-fast",
+      "engine",
       "e2e",
       "compose",
       "actionlint",
@@ -414,8 +458,19 @@ describe("CI workflow installation and runtimes", () => {
   });
 
   // CR-16-T07
+  it("calls a reusable workflow only from the engine job, the one job exempt from its own time limit", () => {
+    expect(
+      jobs.filter(([, job]) => job.uses).map(([id, job]) => [id, job.uses]),
+    ).toEqual([["engine", "./.github/workflows/engine.yml"]]);
+  });
+
+  // CR-16-T07
   it("limits the run time of every job", () => {
-    for (const [id, job] of jobs) {
+    // Only the job that calls the engine workflow is exempt: a job that calls a reusable workflow
+    // cannot have its own limit, and the called workflow has one (engine-workflow.test.ts). Any
+    // other job still needs a limit of its own.
+    const exempt = (job: Job) => job.uses === "./.github/workflows/engine.yml";
+    for (const [id, job] of jobs.filter(([, job]) => !exempt(job))) {
       expect(job["timeout-minutes"], `${id} timeout`).toBeGreaterThan(0);
       expect(job["timeout-minutes"], `${id} timeout`).toBeLessThanOrEqual(30);
     }

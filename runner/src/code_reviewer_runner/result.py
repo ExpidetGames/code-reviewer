@@ -40,6 +40,13 @@ class ErrorCode(StrEnum):
     # handle_request returned normally, yet no review comment was recorded (for example because
     # the identity patch no longer matches what GitHub reports).
     REVIEW_NOT_PUBLISHED = "review_not_published"
+    # The review comment reached GitHub's size limit and the hidden record of earlier findings no
+    # longer fits: the record is not advanced any more, so findings are lost. The review (cut, or a
+    # standalone copy) may be on the pull request, and `commentUrl` says where when it can be found.
+    REVIEW_STATE_TRUNCATED = "review_state_truncated"
+    # The review comment reached GitHub's size limit and part of the visible review was cut off,
+    # the record of findings still fits.
+    REVIEW_TEXT_TRUNCATED = "review_text_truncated"
     UNKNOWN = "unknown"
 
 
