@@ -2,21 +2,15 @@
 // (a deployment without a runner is valid), but every call of the runner API is refused until the
 // token is fine, so the operator should hear why. The line never contains the token.
 import "server-only";
-import {
-  MIN_RUNNER_TOKEN_LENGTH,
-  configuredRunnerToken,
-} from "./token-auth.ts";
+import { runnerTokenProblem } from "./token-auth.ts";
 
 /** The line to log, or null when the token is fine. */
 export function runnerTokenWarning(
   env: Readonly<Record<string, string | undefined>>,
 ): string | null {
-  const token = configuredRunnerToken(env);
-  if (token === undefined)
-    return "[runner-api] RUNNER_TOKEN is not set: every call of the runner API is refused (401).";
-  if (token.length < MIN_RUNNER_TOKEN_LENGTH)
-    return `[runner-api] RUNNER_TOKEN is shorter than ${MIN_RUNNER_TOKEN_LENGTH} characters: every call of the runner API is refused (401). Create one with: openssl rand -hex 32`;
-  return null;
+  const problem = runnerTokenProblem(env);
+  if (problem === null) return null;
+  return `[runner-api] RUNNER_TOKEN ${problem}: every call of the runner API is refused (401). Create one with: openssl rand -hex 32`;
 }
 
 export function warnAboutRunnerToken(

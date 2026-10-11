@@ -135,6 +135,8 @@ export type ProjectsRepository = {
    * with their integration and project, ordered by name.
    */
   list(): Promise<ProjectListEntry[]>;
+  /** One entry of the list, found by the id of its repository; undefined when the list has none. */
+  find(repositoryId: string): Promise<ProjectListEntry | undefined>;
 };
 
 /**
@@ -216,6 +218,89 @@ export function createProjectsRepository(
       .where("projects.active", "=", encodeBoolean(true))
       .where("repositories.active", "=", encodeBoolean(true))
       .where("integrations.status", "=", "active");
+  }
+
+  function entryQuery() {
+    return (
+      db
+        .selectFrom("repositories")
+        .innerJoin(
+          "integrations",
+          "integrations.id",
+          "repositories.integration_id",
+        )
+        .leftJoin("projects", "projects.repository_id", "repositories.id")
+        .select([
+          "repositories.id as repository_id",
+          "repositories.external_id as repository_external_id",
+          "repositories.full_name as repository_full_name",
+          "repositories.url as repository_url",
+          "repositories.active as repository_active",
+          "integrations.id as integration_id",
+          "integrations.type as integration_type",
+          "integrations.display_name as integration_display_name",
+          "integrations.status as integration_status",
+          "projects.id as project_id",
+          "projects.active as project_active",
+          "projects.settings as project_settings",
+          "projects.created_at as project_created_at",
+          "projects.updated_at as project_updated_at",
+        ])
+        // A repository that disappeared and never had a project is of no interest to anybody.
+        .where((eb) =>
+          eb.or([
+            eb("repositories.active", "=", encodeBoolean(true)),
+            eb("projects.id", "is not", null),
+          ]),
+        )
+        .orderBy("repositories.full_name")
+        .orderBy("repositories.id")
+    );
+  }
+
+  function toEntry(
+    row: Awaited<ReturnType<ReturnType<typeof entryQuery>["execute"]>>[number],
+  ): ProjectListEntry {
+    const available =
+      decodeBoolean(row.repository_active) &&
+      row.integration_status === "active";
+    const project: StoredProject | null =
+      row.project_id === null ||
+      row.project_active === null ||
+      row.project_settings === null ||
+      row.project_created_at === null ||
+      row.project_updated_at === null
+        ? null
+        : {
+            id: row.project_id,
+            repositoryId: row.repository_id,
+            active: decodeBoolean(row.project_active),
+            settings: readSettings(row.project_settings, row.project_id, warn),
+            createdAt: row.project_created_at,
+            updatedAt: row.project_updated_at,
+          };
+    const status: ProjectStatus = !available
+      ? "unavailable"
+      : project?.active === true
+        ? "active"
+        : "inactive";
+    return {
+      repository: {
+        id: row.repository_id,
+        externalId: row.repository_external_id,
+        fullName: row.repository_full_name,
+        url: row.repository_url,
+        available,
+        integration: {
+          id: row.integration_id,
+          type: row.integration_type as IntegrationType,
+          displayName: row.integration_display_name,
+          status: row.integration_status as IntegrationStatus,
+        },
+      },
+      project,
+      status,
+    };
   }
 
   return {
@@ -365,87 +450,15 @@ export function createProjectsRepository(
     },
 
     async list() {
-      const rows = await db
-        .selectFrom("repositories")
-        .innerJoin(
-          "integrations",
-          "integrations.id",
-          "repositories.integration_id",
-        )
-        .leftJoin("projects", "projects.repository_id", "repositories.id")
-        .select([
-          "repositories.id as repository_id",
-          "repositories.external_id as repository_external_id",
-          "repositories.full_name as repository_full_name",
-          "repositories.url as repository_url",
-          "repositories.active as repository_active",
-          "integrations.id as integration_id",
-          "integrations.type as integration_type",
-          "integrations.display_name as integration_display_name",
-          "integrations.status as integration_status",
-          "projects.id as project_id",
-          "projects.active as project_active",
-          "projects.settings as project_settings",
-          "projects.created_at as project_created_at",
-          "projects.updated_at as project_updated_at",
-        ])
-        // A repository that disappeared and never had a project is of no interest to anybody.
-        .where((eb) =>
-          eb.or([
-            eb("repositories.active", "=", encodeBoolean(true)),
-            eb("projects.id", "is not", null),
-          ]),
-        )
-        .orderBy("repositories.full_name")
-        .orderBy("repositories.id")
-        .execute();
+      const rows = await entryQuery().execute();
+      return rows.map(toEntry);
+    },
 
-      return rows.map((row): ProjectListEntry => {
-        const available =
-          decodeBoolean(row.repository_active) &&
-          row.integration_status === "active";
-        const project: StoredProject | null =
-          row.project_id === null ||
-          row.project_active === null ||
-          row.project_settings === null ||
-          row.project_created_at === null ||
-          row.project_updated_at === null
-            ? null
-            : {
-                id: row.project_id,
-                repositoryId: row.repository_id,
-                active: decodeBoolean(row.project_active),
-                settings: readSettings(
-                  row.project_settings,
-                  row.project_id,
-                  warn,
-                ),
-                createdAt: row.project_created_at,
-                updatedAt: row.project_updated_at,
-              };
-        const status: ProjectStatus = !available
-          ? "unavailable"
-          : project?.active === true
-            ? "active"
-            : "inactive";
-        return {
-          repository: {
-            id: row.repository_id,
-            externalId: row.repository_external_id,
-            fullName: row.repository_full_name,
-            url: row.repository_url,
-            available,
-            integration: {
-              id: row.integration_id,
-              type: row.integration_type as IntegrationType,
-              displayName: row.integration_display_name,
-              status: row.integration_status as IntegrationStatus,
-            },
-          },
-          project,
-          status,
-        };
-      });
+    async find(repositoryId) {
+      const row = await entryQuery()
+        .where("repositories.id", "=", repositoryId)
+        .executeTakeFirst();
+      return row === undefined ? undefined : toEntry(row);
     },
   };
 }

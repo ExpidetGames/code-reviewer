@@ -1,31 +1,7 @@
-import { Suspense } from "react";
-import { signOut } from "@/auth/actions";
-import { requireUser } from "@/auth/session";
+import { redirect } from "next/navigation";
 
-// The start page is a placeholder until the UI epic replaces it. It already proves the session:
-// it greets the signed in person and offers the sign out.
+// The start page has no content of its own: the signed in app opens on its first place.
+// Visitors without a session never get here, the proxy sends them to /login first.
 export default function Home() {
-  return (
-    <main>
-      <h1>Code Reviewer</h1>
-      {/* The user comes from the session cookie, so it is read at request time, behind a boundary. */}
-      <Suspense fallback={null}>
-        <CurrentUser />
-      </Suspense>
-    </main>
-  );
-}
-
-async function CurrentUser() {
-  const user = await requireUser();
-  return (
-    <>
-      <p>
-        Signed in as <strong>{user.name}</strong> (@{user.githubLogin})
-      </p>
-      <form action={signOut}>
-        <button type="submit">Sign out</button>
-      </form>
-    </>
-  );
+  redirect("/projects");
 }

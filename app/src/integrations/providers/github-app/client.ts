@@ -391,17 +391,29 @@ export function createGithubAppClient(
     scope?: JobTokenScope,
   ): Promise<InstallationToken> {
     checkInstallationId(installationId);
-    const json = await request(
-      appJwt(),
-      "POST",
-      `/app/installations/${installationId}/access_tokens`,
-      scope === undefined
-        ? undefined
-        : {
-            repository_ids: [...scope.repositoryIds],
-            permissions: { ...scope.permissions },
-          },
-    );
+    let json: unknown;
+    try {
+      json = await request(
+        appJwt(),
+        "POST",
+        `/app/installations/${installationId}/access_tokens`,
+        scope === undefined
+          ? undefined
+          : {
+              repository_ids: [...scope.repositoryIds],
+              permissions: { ...scope.permissions },
+            },
+      );
+    } catch (error) {
+      // Same code and message; only marked as the answer to the token request.
+      if (error instanceof GithubAppError)
+        throw new GithubAppError(error.code, error.message, {
+          status: error.status,
+          retryAfterSeconds: error.retryAfterSeconds,
+          duringTokenRequest: true,
+        });
+      throw error;
+    }
     if (
       !isRecord(json) ||
       typeof json.token !== "string" ||

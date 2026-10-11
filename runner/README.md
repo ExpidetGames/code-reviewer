@@ -65,7 +65,8 @@ Rules (the CR-29 decisions; tests in `tests/unit/test_job_loop*.py` and `tests/i
   + 5 s between SIGTERM and SIGKILL + up to 10 s to report `runner_shutdown`; Docker's default of 10 s
   would SIGKILL the runner before the jobs are reported). `PR_AGENT_COMMAND` must never be set in a
   production compose file: the job, with its credentials, would go to that command (the loop logs a
-  warning at start when it is set).
+  warning at start when it is set). Only `docker/smoke/compose.fake-job.yml`, the override file of the compose
+  smoke test, sets it.
 - The codes the loop adds to the ones of the table below: `runner_shutdown`. `timeout` and
   `runner_error` are also reported by the loop itself.
 

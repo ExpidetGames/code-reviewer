@@ -41,7 +41,7 @@ touches it is `src/db/repositories/projects-repository.ts`.
   project), and CR-34 may want to say "will resume if the repository comes back" in the list. The
   alternative (the sync running the deactivate path when it flips a repository inactive) was rejected.
 - Events that arrive while a project is inactive are not replayed on activation: a pull request opened
-  in between needs a new push, a comment command or the manual start (CR-33).
+  in between needs a new push, a comment command or the manual start ("Review now", `src/manual-reviews/README.md`).
 - `listProjects()` returns one entry per repository the platform lists, plus the ones that
   disappeared but have a project, ordered by name, each with its integration and its project (or
   `null`). A repository that disappeared and never had a project is left out.
@@ -109,8 +109,33 @@ first.
 - If `requireUser()` is ever reached without a session (the proxy matcher changed), it redirects to the
   login page; the proxy normally answers 401/403 first.
 
-The project list page and its buttons are the UI ticket (CR-34); it calls this route (or a Server
-Function that calls the service and starts with `requireUser()`) and reads `listProjects()`.
+## The pages
+
+The Projects page (`src/app/(app)/projects/page.tsx`) and the settings page of one project
+(`src/app/(app)/projects/[repositoryId]/page.tsx`) are built from `src/projects/ui/`:
+
+| File                           | Role                                                                                                                                                                                                                                                                                               |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ui/list-view.ts`              | `loadProjectList` / `loadProjectRow`: one row per repository from `listProjects()` (or one from `findProject()`), with the status of its last run. `LastRunSource` is the seam for the jobs table (wired by `getLastRunSource()` in `src/runs/shared.ts`); without one the list says "No run yet". |
+| `ui/project-list.tsx`          | The list: name (a link to the settings once there is a project), installation, state, last run and the switch; the empty state with the install steps (`no-repositories.tsx`).                                                                                                                     |
+| `ui/project-toggle.tsx`        | The switch. Calls `PUT /api/repositories/:id/project` and refreshes; a refusal is shown as a sentence (`ui/messages.ts`), never as a code. Off projects cannot be switched on while the GitHub App is not configured.                                                                              |
+| `ui/sync-button.tsx`           | "Sync from GitHub": `POST /api/integrations/sync`, says how many repositories are new and what went wrong at GitHub.                                                                                                                                                                               |
+| `ui/projects-page.tsx`         | `loadProjectsPage` gathers the data from the services, `ProjectsPageContent` renders the hints and the list.                                                                                                                                                                                       |
+| `ui/project-settings-page.tsx` | The settings page of a project: the form of `src/review-settings/ui` for the overrides; a repository without a project says how to make it one; an unknown id shows the not-found page (status 200: under Cache Components the data sits behind `<Suspense>`).                                     |
+
+The components never touch the database: pages call the services (`getProjectService()`,
+`getReviewSettingsService()`), the browser calls the routes above. Everything that comes from GitHub
+(repository names, installation names, addresses) is untrusted and rendered as text; a repository
+address becomes a link only when it is an http(s) address. The configuration hints
+(`src/config-status/`) name the variables of a missing GitHub App setting or LLM key, never a value.
+
+**Review now:** the settings page of an active project starts with the `StartReviewPanel` of
+`src/manual-reviews/ui` (pick an open pull request and a command, start it); a project that is off says
+that reviews can be started by hand only while it is active.
+
+**Last run:** `projects/page.tsx` passes `getLastRunSource()` (`src/runs/shared.ts`) to
+`loadProjectsPage`: the newest job of each repository, whatever its status, with the time it last
+changed (finished, else started, else queued). The list links it to the runs of that project.
 
 ## Testing
 

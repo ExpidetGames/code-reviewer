@@ -5,7 +5,7 @@ APP := pnpm --dir app
 RUNNER := uv --directory runner
 
 .PHONY: help install lint lint-app lint-runner typecheck typecheck-app typecheck-runner \
-	test-unit test-unit-app test-unit-runner test-integration test-engine test-e2e test-images verify
+	test-unit test-unit-app test-unit-runner test-integration test-engine test-e2e test-images test-compose verify
 
 help:
 	@echo "make install           install app and runner dependencies from the lockfiles"
@@ -16,6 +16,7 @@ help:
 	@echo "make test-engine       the real PR-Agent against the fake GitHub and LLM (about 4 minutes, not part of verify)"
 	@echo "make test-e2e          Playwright journeys against a production build (ARGS=... to filter)"
 	@echo "make test-images       build both container images and run their smoke tests (needs Docker)"
+	@echo "make test-compose      build both images and smoke test the Docker Compose stack (needs Docker)"
 	@echo "make verify            lint, typecheck, unit and host integration tests; run before every PR"
 
 install:
@@ -67,5 +68,14 @@ test-images:
 	docker build --tag code-reviewer-runner:local runner
 	docker/smoke/app.sh code-reviewer-app:local
 	docker/smoke/runner.sh code-reviewer-runner:local
+
+# Builds both images (under tags of their own, so images of other work stay untouched) and runs
+# docker/smoke/compose.sh against them: the stack starts with dummy settings, the runner waits for a
+# healthy app, the data survives down and up, a killed app restarts. Needs a running Docker daemon.
+# Not part of `make verify`; CI runs it for pull requests that touch app, runner or the compose files.
+test-compose:
+	docker build --tag code-reviewer-app:compose app
+	docker build --tag code-reviewer-runner:compose runner
+	docker/smoke/compose.sh code-reviewer-app:compose code-reviewer-runner:compose
 
 verify: lint typecheck test-unit test-integration
