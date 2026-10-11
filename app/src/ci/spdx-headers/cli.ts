@@ -14,7 +14,12 @@
 // extension and no TypeScript-only runtime syntax.
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { addHeader, commentStyle, findHeader } from "./rules.ts";
+import {
+  addHeader,
+  commentStyle,
+  headerProblem,
+  SPDX_IDENTIFIER,
+} from "./rules.ts";
 import { listSourceFiles } from "./source-files.ts";
 
 const USAGE = "Usage: node src/ci/spdx-headers/cli.ts --write | --check";
@@ -34,19 +39,35 @@ export function runCli(
     err(USAGE);
     return 2;
   }
-  const missing = listSourceFiles(repoRoot).filter(
-    (path) => findHeader(readFileSync(`${repoRoot}/${path}`, "utf8")) === null,
+  const problems = listSourceFiles(repoRoot).flatMap((path) => {
+    const problem = headerProblem(readFileSync(`${repoRoot}/${path}`, "utf8"));
+    return problem === null ? [] : [{ path, problem }];
+  });
+  const missing = problems.filter(
+    (entry) => entry.problem === "HEADER_MISSING",
   );
+  const other = problems.filter(
+    (entry) => entry.problem === "HEADER_OTHER_LICENSE",
+  );
+  // A header with another identifier is never rewritten: whether a file may carry another license
+  // is a decision for a person, so both modes report it and fail.
+  for (const { path } of other) {
+    err(
+      `SPDX identifier other than ${SPDX_IDENTIFIER} (decide by hand): ${path}`,
+    );
+  }
   if (mode === "--check") {
-    for (const path of missing) err(`missing SPDX header: ${path}`);
-    if (missing.length > 0) {
-      err(`${missing.length} file(s) lack the header; run: pnpm spdx:add`);
+    for (const { path } of missing) err(`missing SPDX header: ${path}`);
+    if (problems.length > 0) {
+      err(
+        `${problems.length} file(s) without the right header; run: pnpm spdx:add`,
+      );
       return 1;
     }
     out("Every source file has the SPDX header.");
     return 0;
   }
-  for (const path of missing) {
+  for (const { path } of missing) {
     const style = commentStyle(path);
     if (style === null) continue;
     const file = `${repoRoot}/${path}`;
@@ -54,7 +75,7 @@ export function runCli(
     out(path);
   }
   out(`Added the header to ${missing.length} file(s).`);
-  return 0;
+  return other.length > 0 ? 1 : 0;
 }
 
 // Runs only when started as the program, not when a test imports `runCli`.

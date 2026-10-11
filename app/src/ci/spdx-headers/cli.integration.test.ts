@@ -101,4 +101,26 @@ describe("spdx-headers cli", () => {
     expect(run(["--fix"], root).exitCode).toBe(2);
     expect(run(["--check", "--write"], root).exitCode).toBe(2);
   });
+
+  // #118-T04
+  it("--check fails for a header with another identifier, and --write reports it and leaves the file alone", () => {
+    const root = repository({
+      "mit.ts": "// SPDX-License-Identifier: MIT\n\nexport {};\n",
+      "new.ts": "export {};\n",
+    });
+
+    const check = run(["--check"], root);
+    const written = run(["--write"], root);
+
+    expect(check.exitCode).toBe(1);
+    expect(check.err.join("\n")).toContain("decide by hand): mit.ts");
+    expect(written.exitCode).toBe(1);
+    expect(written.err.join("\n")).toContain("decide by hand): mit.ts");
+    expect(readFileSync(join(root, "mit.ts"), "utf8")).toBe(
+      "// SPDX-License-Identifier: MIT\n\nexport {};\n",
+    );
+    expect(readFileSync(join(root, "new.ts"), "utf8")).toBe(
+      `// ${HEADER}\n\nexport {};\n`,
+    );
+  });
 });

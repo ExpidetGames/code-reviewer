@@ -8,6 +8,7 @@ import {
   addHeader,
   commentStyle,
   findHeader,
+  headerProblem,
   isSourceFile,
   SPDX_HEADER_TEXT,
 } from "./rules.ts";
@@ -124,6 +125,17 @@ describe("addHeader", () => {
     );
   });
 
+  it("keeps a run of Dockerfile parser directives together on top", () => {
+    expect(
+      addHeader(
+        "# syntax=docker/dockerfile:1\n# check=error=true\nFROM x\n",
+        "hash",
+      ),
+    ).toBe(
+      `# syntax=docker/dockerfile:1\n# check=error=true\n# ${SPDX_HEADER_TEXT}\n\nFROM x\n`,
+    );
+  });
+
   it("does not add a second blank line when the file continues with one", () => {
     expect(addHeader("#!/bin/sh\n\necho hi\n", "hash")).toBe(
       `#!/bin/sh\n# ${SPDX_HEADER_TEXT}\n\necho hi\n`,
@@ -168,5 +180,21 @@ describe("findHeader", () => {
     expect(
       findHeader("a\nb\nc\nd\n// SPDX-License-Identifier: Apache-2.0\n"),
     ).toBeNull();
+  });
+});
+
+describe("headerProblem", () => {
+  it("is null for a file with the required header", () => {
+    expect(headerProblem(`// ${SPDX_HEADER_TEXT}\n\nexport {};\n`)).toBeNull();
+  });
+
+  it("reports a file without a header as missing", () => {
+    expect(headerProblem("export {};\n")).toBe("HEADER_MISSING");
+  });
+
+  it("reports a header with another license identifier, because that is not the license of the project", () => {
+    expect(
+      headerProblem("// SPDX-License-Identifier: MIT\n\nexport {};\n"),
+    ).toBe("HEADER_OTHER_LICENSE");
   });
 });

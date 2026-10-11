@@ -7,7 +7,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { findHeader, SPDX_IDENTIFIER } from "./rules.ts";
+import { headerProblem } from "./rules.ts";
 import { listSourceFiles } from "./source-files.ts";
 
 const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
@@ -42,13 +42,12 @@ describe("SPDX license headers", () => {
   it("start every source file with SPDX-License-Identifier: Apache-2.0", () => {
     const without = files.filter(
       (path) =>
-        findHeader(readFileSync(`${repoRoot}${path}`, "utf8")) !==
-        SPDX_IDENTIFIER,
+        headerProblem(readFileSync(`${repoRoot}${path}`, "utf8")) !== null,
     );
 
     expect(
       without,
-      "source files without the header (run: make fix-spdx-headers)",
+      "source files without the right header (run: make fix-spdx-headers; another identifier needs a decision by hand)",
     ).toEqual([]);
   });
 });

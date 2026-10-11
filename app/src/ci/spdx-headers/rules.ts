@@ -90,10 +90,30 @@ export function findHeader(content: string): string | null {
   return null;
 }
 
-// The first line stays where it is when the language or a tool gives it a meaning: a shebang, and
-// the parser directive of a Dockerfile (it has to come before any other comment).
-function keepsFirstLine(firstLine: string): boolean {
-  return firstLine.startsWith("#!") || /^#\s*syntax\s*=/.test(firstLine);
+// The leading lines stay where they are when the language or a tool gives them a meaning: a
+// shebang (one line), or the parser directives of a Dockerfile (`# syntax=`, `# escape=`,
+// `# check=`), which have to come before any other comment.
+function leadingLinesToKeep(lines: string[]): number {
+  if ((lines[0] ?? "").startsWith("#!")) return 1;
+  let count = 0;
+  while (/^#\s*(syntax|escape|check)\s*=/i.test(lines[count] ?? "")) count += 1;
+  return count;
+}
+
+export const HEADER_PROBLEMS = [
+  "HEADER_MISSING",
+  "HEADER_OTHER_LICENSE",
+] as const;
+export type HeaderProblem = (typeof HEADER_PROBLEMS)[number];
+
+/**
+ * The one rule for "has the right header", used by the check, the command and the test: null when
+ * the first lines carry `SPDX-License-Identifier: Apache-2.0`, otherwise why not.
+ */
+export function headerProblem(content: string): HeaderProblem | null {
+  const identifier = findHeader(content);
+  if (identifier === null) return "HEADER_MISSING";
+  return identifier === SPDX_IDENTIFIER ? null : "HEADER_OTHER_LICENSE";
 }
 
 /** Adds the header to a file that has none; returns a file that has one unchanged. */
@@ -104,7 +124,7 @@ export function addHeader(content: string, style: CommentStyle): string {
   const header = headerLine(style);
   if (lines.length === 0) return `${header}${eol}`;
 
-  const keep = keepsFirstLine(lines[0] ?? "") ? 1 : 0;
+  const keep = leadingLinesToKeep(lines);
   const before = lines.slice(0, keep);
   const after = lines.slice(keep);
   // One blank line between the header and what follows, unless the file brings its own. In a hash
