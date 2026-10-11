@@ -49,6 +49,7 @@ app/.pnpm-store
 
 # Tests and test tooling
 app/e2e
+app/integration-tests
 app/playwright-report
 app/test-results
 **/*.test.ts

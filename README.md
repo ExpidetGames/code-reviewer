@@ -143,7 +143,9 @@ uv run python scripts/manual_review.py
 
 ## Container images
 
-Two images are built from the repository, each with its own Dockerfile and `Dockerfile.dockerignore`.
+Two images are built from the repository, each with its own Dockerfile and `Dockerfile.dockerignore`
+(a root `.dockerignore` lists the same exclusions for the classic builder, which only reads that
+file; both builders produce working images).
 The build context is the repository root (the images also carry `LICENSE`, `NOTICE` and
 `THIRD_PARTY_LICENSES.md` from there, in `/licenses`), so the Dockerfile is named with `--file`:
 

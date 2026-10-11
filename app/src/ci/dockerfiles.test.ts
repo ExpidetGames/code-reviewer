@@ -341,3 +341,38 @@ describe("Dockerfile ignore files", () => {
     },
   );
 });
+
+describe("root .dockerignore for the classic builder", () => {
+  function patterns(path: string): string[] {
+    return read(path)
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line !== "" && !line.startsWith("#"));
+  }
+  const root = patterns(".dockerignore");
+
+  // #118-T03 (review of PR #136)
+  it("lets only the app and runner folders and the license files into the build context", () => {
+    expect(root.slice(0, 6)).toEqual([
+      "*",
+      "!app",
+      "!runner",
+      "!LICENSE",
+      "!NOTICE",
+      "!THIRD_PARTY_LICENSES.md",
+    ]);
+    expect(root.filter((entry) => entry.startsWith("!"))).toHaveLength(5);
+  });
+
+  // #118-T03 (review of PR #136)
+  it.each(["app", "runner"])(
+    "excludes everything that the %s ignore file excludes, because the classic builder reads only this file",
+    (name) => {
+      const own = patterns(`${name}/Dockerfile.dockerignore`).filter(
+        (entry) => entry !== "*" && !entry.startsWith("!"),
+      );
+
+      expect(own.filter((entry) => !root.includes(entry))).toEqual([]);
+    },
+  );
+});

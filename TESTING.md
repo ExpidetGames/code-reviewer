@@ -331,7 +331,7 @@ references) and pushes `ghcr.io/expidetgames/code-reviewer-app` and `-runner` wi
 It pushes the commit tags of both images first and the floating tags last, so no floating tag points at a half published release. It is the only workflow with `packages: write`, granted to that job alone. A failing build or smoke
 test stops the job before the login, so no tag moves. The structure of both files is pinned by
 `app/src/ci/images-workflow.test.ts`; `app/src/ci/dockerfiles.test.ts` pins the runtime versions,
-digests, user, license files and ignore rules (`Dockerfile.dockerignore`) of the Dockerfiles.
+digests, user, license files and ignore rules (`Dockerfile.dockerignore`, and the root `.dockerignore` that the classic builder reads instead) of the Dockerfiles.
 
 `.github/workflows/nightly.yml` (workflow "Nightly") calls the same `engine.yml` every night on the default branch and on demand (`workflow_dispatch`). The structure is pinned by `app/src/ci/engine-workflow.test.ts` (the shared job), `nightly-workflow.test.ts` and `ci-workflow.test.ts` (the callers).
 

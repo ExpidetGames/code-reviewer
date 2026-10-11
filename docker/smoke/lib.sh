@@ -219,7 +219,7 @@ assert_key_scan_works() {
 }
 
 # CR-17-T09: nothing that must stay out of an image is inside it, and its configuration and build
-# history carry no secrets. This is the proof that the .dockerignore files work.
+# history carry no secrets. This is the proof that the ignore files (Dockerfile.dockerignore) work.
 # Usage: assert_image_has_no_secrets <image> "<paths of our own files for the key content scan>"
 # The paths are the places that hold project-owned files (application directory, data, home
 # directories, the project's own Python package). Third-party packages (node_modules,

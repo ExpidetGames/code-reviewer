@@ -74,7 +74,7 @@ COPY --from=builder --chown=root:root /build/.next/static ./.next/static
 COPY --from=builder --chown=root:root /build/public ./public
 # The backup and restore command line (`node backup/cli.ts backup|restore`, see src/backup/README.md).
 # The folder is copied as it is: Node runs the TypeScript files directly, they import nothing of the
-# app but better-sqlite3 (resolved from ./node_modules). .dockerignore keeps the tests out.
+# app but better-sqlite3 (resolved from ./node_modules). app/Dockerfile.dockerignore keeps the tests out.
 COPY --from=builder --chown=root:root /build/src/backup ./backup
 # Two things the command line needs that the standalone server does not provide: a package.json
 # that marks the folder as ES modules (otherwise Node warns about re-parsing every file on every
