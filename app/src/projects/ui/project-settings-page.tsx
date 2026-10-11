@@ -88,7 +88,7 @@ export function ProjectSettingsPageContent({
       <ConfigNotices status={data.config} />
       <p className="muted">{STATE_TEXT[row.status]}</p>
       {/* Keyed on the repository: a panel that Cache Components kept mounted for another project
-              must not show its pull requests. Only an active project can be started by hand. */}
+          must not show its pull requests. Only an active project can be started by hand. */}
       {row.status === "active" ? (
         <StartReviewPanel
           key={row.repositoryId}
@@ -101,7 +101,7 @@ export function ProjectSettingsPageContent({
         </p>
       )}
       {/* Keyed on the server data: with Cache Components a page that was left stays mounted, and
-              when it is shown again with fresh data the form must start from that data. */}
+          when it is shown again with fresh data the form must start from that data. */}
       <SettingsForm
         key={JSON.stringify(data.model)}
         initial={data.model}

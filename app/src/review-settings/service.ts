@@ -95,7 +95,10 @@ export type ReviewSettingsService = {
   resetProjectSettings(repositoryId: string): Promise<ProjectSettingsView>;
   /**
    * The settings a review of the repository's project uses (project over global over built-in), or
-   * undefined when the repository has no project. The claim and the webhook intake use this.
+   * undefined when the repository has no project row. It also answers for a row that is switched off
+   * (one that only holds saved settings), so it is **not** a gate: the claim, the webhook intake and
+   * the manual start check for an active project first (`hasActiveProject`,
+   * `getActiveProjectForRepository`) and only then ask for the settings.
    */
   resolveForRepository(
     repositoryId: string,

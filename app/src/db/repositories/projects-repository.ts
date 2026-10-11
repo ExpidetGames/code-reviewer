@@ -2,8 +2,9 @@
 // instance reviews. The row is created by the first activation or by the first save of settings
 // (then switched off), and never deleted: deactivating sets `active` to 0, and activating again
 // switches the same row back on, so the settings a project collected in between survive. Only an
-// active row is ever reviewed; a row that is off is just a place for settings. A repository the platform stopped listing keeps its row too; it is
-// "unavailable" and cannot be activated (the repositories table says so, not this one).
+// active row is ever reviewed; a row that is off is just a place for settings. A repository the
+// platform stopped listing keeps its row too; it is "unavailable" and cannot be activated (the
+// repositories table says so, not this one).
 import "server-only";
 import type { Kysely } from "kysely";
 import type {
@@ -454,7 +455,9 @@ export function createProjectsRepository(
         if (updated !== undefined) return toStored(updated);
 
         // No project yet: make one that is switched off. The repository must be one the list shows
-        // (the platform still lists it), the same rule as for activating.
+        // (the platform still lists it). Unlike activating, a suspended or removed installation does
+        // not matter: the row is off and only keeps settings, which is also what the settings page
+        // of an unavailable repository promises ("its settings are kept").
         const repository = await trx
           .selectFrom("repositories")
           .select("id")

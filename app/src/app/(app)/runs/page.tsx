@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { requireUser } from "@/auth/session";
 import { getProjectService } from "@/projects/shared";
 import { loadRunsPage, RunsPageContent } from "@/runs/ui/runs-page";
-import { getRunsService } from "@/runs/shared";
+import { getLastRunSource, getRunsService } from "@/runs/shared";
 import { PageHeader } from "@/ui/page-header";
 
 export const metadata: Metadata = { title: "Runs" };
@@ -32,6 +32,7 @@ async function RunsContent({
   const data = await loadRunsPage(await searchParams, {
     runs: getRunsService(),
     projects: getProjectService(),
+    lastRuns: getLastRunSource(),
   });
   return <RunsPageContent data={data} />;
 }

@@ -6,6 +6,7 @@
 import Link from "next/link";
 import type { JobStatus } from "../../jobs/job-status.ts";
 import type { ProjectService } from "../../projects/service.ts";
+import { noRunsYet, type LastRunSource } from "../../projects/ui/list-view.ts";
 import { EmptyState } from "../../ui/empty-state.tsx";
 import { RUN_STATUS_ORDER, RUN_STATUS_PRESENTATION } from "../run-status.ts";
 import { parseRunsFilter, type RunsService } from "../runs-service.ts";
@@ -19,7 +20,7 @@ export type RunsPageData =
       kind: "ready";
       filter: RunsFilter;
       snapshot: RunsSnapshot;
-      /** The projects the filter offers: repositories that have a project. */
+      /** The projects the filter offers: repositories that are switched on or have had runs. */
       projects: { id: string; name: string }[];
     };
 
@@ -33,6 +34,8 @@ export async function loadRunsPage(
   deps: {
     runs: Pick<RunsService, "list">;
     projects: Pick<ProjectService, "listProjects">;
+    /** Which repositories have runs; without it only switched-on projects are offered. */
+    lastRuns?: LastRunSource;
   },
 ): Promise<RunsPageData> {
   const parsed = parseRunsFilter({
@@ -45,12 +48,24 @@ export async function loadRunsPage(
     deps.runs.list(filter),
     deps.projects.listProjects(),
   ]);
+  // A repository that only holds saved settings (never switched on) can have no runs: leave it out.
+  // A project that was switched off keeps its place as long as it has runs, and the repository the
+  // address names stays so the select can show it.
+  const withRuns = await (deps.lastRuns ?? noRunsYet)(
+    entries.map((entry) => entry.repository.id),
+  );
   return {
     kind: "ready",
     filter,
     snapshot,
     projects: entries
-      .filter((entry) => entry.project !== null)
+      .filter(
+        (entry) =>
+          entry.project?.active === true ||
+          withRuns.has(entry.repository.id) ||
+          (entry.project !== null &&
+            entry.repository.id === filter.repositoryId),
+      )
       .map((entry) => ({
         id: entry.repository.id,
         name: entry.repository.fullName,
