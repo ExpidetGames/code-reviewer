@@ -112,7 +112,7 @@ issue for it.
 
 - TypeScript is strict, and `any` needs a comment that says why. Python is typed (pyright strict)
   and formatted with ruff. `make lint` checks both parts; `pnpm --dir app format` and
-  `uv --directory runner run ruff format .` fix formatting.
+  `uv --directory runner run ruff format . ../fakes` fix formatting.
 - Identifiers, comments, documentation and every user visible string are in English.
 - Keep secrets out of code, logs, test output and commits. Configuration comes from environment
   variables, documented in the `.env.example` files.

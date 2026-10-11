@@ -256,7 +256,7 @@ no process identifiers in titles), `verify:server-only-canary`, the Docker test 
 |---|---|---|
 | Install | `make install` | `pnpm --dir app install --frozen-lockfile`, `uv --directory runner sync --locked` |
 | Everything before a PR | `make verify` | lint, typecheck, unit and host integration tests of both parts |
-| Lint | `make lint` | `pnpm lint`, `pnpm format:check`; `ruff check`, `ruff format --check` |
+| Lint | `make lint` | `pnpm lint`, `pnpm format:check`; `ruff check . ../fakes`, `ruff format --check . ../fakes` |
 | Typecheck | `make typecheck` | `pnpm typecheck`; `pyright` |
 | Unit tests | `make test-unit` | `pnpm test`; `pytest -m unit` |
 | Integration tests (host) | `make test-integration` | `pnpm test:int`; `pytest -m "integration or contract"` |
@@ -309,7 +309,7 @@ file is pinned by `app/src/ci/ci-workflow.test.ts`.
 |---|---|---|
 | `changes` | pull requests | Path filter: `app` (anything except `runner/**`, top-level Markdown and `fakes/**` Markdown; Markdown inside `app/` stays because Prettier checks it), `runner` (anything except `app/**` and Markdown), `workflows` (`.github/**`). |
 | `app-fast` | app changed | `pnpm format:check`, `lint`, `typecheck`, `test` (unit), `test:int` (host), `build` with placeholder env. |
-| `runner-fast` | runner changed | `ruff check`, `ruff format --check`, `pyright`, `pytest -m unit`, `pytest -m "integration or contract"`. |
+| `runner-fast` | runner changed | `ruff check . ../fakes`, `ruff format --check . ../fakes`, `pyright`, `pytest -m unit`, `pytest -m "integration or contract"`. |
 | `engine` | pull requests that change the runner, and every pull request into `main` (never pushes, never app-only changes) | Calls `engine.yml` (the one definition, also used by the nightly workflow): `uv sync --locked`, the tiktoken encoding from the cache (`scripts/prime_tiktoken_cache.py` fills it, with retries, the one step with internet), then `pytest -m engine` in a network namespace without network. No Docker stack, no secrets, `contents: read`, 20 minutes. |
 | `e2e` ("E2E: browser journeys") | app or runner changed | `playwright install --with-deps chromium`, the runner (`uv sync --locked` in `runner/`) and the tiktoken encoding (restored from the cache, primed with `scripts/prime_tiktoken_cache.py`) for the journey with the real runner, then the journeys against the production build: `@smoke` only on pull requests into `development` and `CR-*`, all (without `@flaky`) on pull requests into `main` and on pushes. |
 | `compose` ("Compose: stack smoke test") | pull requests: app or runner changed, or any pull request into `main` | Builds both images (`load`, no push, GHA layer cache), then runs `docker/smoke/compose.sh` against them. Same rights as the image jobs. |
