@@ -19,6 +19,7 @@ import { handleAuthRequest } from "./http.ts";
 import { signInWithPasswordChecked } from "./password-sign-in.ts";
 import { createSignInLimiter } from "./sign-in-limit.ts";
 import { lookupSession } from "./session-user.ts";
+import { openGates } from "../test-support/open-gates.ts";
 
 async function setUpInstance() {
   const harness = await createSetupHarness();
@@ -55,6 +56,7 @@ describe("signing in with email and password", () => {
       harness.auth,
       new Headers({ cookie: cookieHeader(cookies) }),
       () => Promise.resolve({ allowed: false, reason: "not_allowed" }),
+      openGates,
     );
 
     expect(response.status).toBe(200);

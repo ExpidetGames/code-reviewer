@@ -4,8 +4,10 @@
 // about 5 attempts per 15 minutes per email address, the same for an address nobody owns, a
 // generous limit for the whole instance, and a fresh start after a success or the end of the window.
 import { describe, expect, it } from "vitest";
+import { openDatabase } from "../db/connection.ts";
 import { createRateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
-import { createTestDatabase } from "../test-support/test-database.ts";
+import { createTestDatabase, track } from "../test-support/test-database.ts";
+import { handleAuthRequest } from "./http.ts";
 import {
   accountKey,
   createSignInLimiter,
@@ -140,5 +142,61 @@ describe("the sign in limit for the whole instance", () => {
     expect(await limiter.check("another@example.com")).toEqual({
       allowed: true,
     });
+  });
+});
+
+describe("the sign in limit across app instances", () => {
+  // #99-SR-19
+  it("counts the failed attempts of two app instances on one database together and answers 429 with Retry-After", async () => {
+    const { db, config } = await createTestDatabase();
+    // A second app instance: its own connection to the same file, its own limiter, no shared memory.
+    const second = track(openDatabase(config));
+    const first = createSignInLimiter(createRateLimitsRepository(db));
+    const other = createSignInLimiter(createRateLimitsRepository(second));
+    const email = "admin@example.com";
+
+    const results = [];
+    for (let attempt = 0; attempt < SIGN_IN_ACCOUNT_MAX_ATTEMPTS; attempt += 1)
+      results.push(await (attempt % 2 === 0 ? first : other).check(email));
+    const refusedByFirst = await first.check(email);
+    const refusedBySecond = await other.check(email);
+
+    expect(results.every((result) => result.allowed)).toBe(true);
+    expect(refusedByFirst).toMatchObject({ allowed: false });
+    expect(refusedBySecond).toEqual(refusedByFirst);
+  });
+
+  // #99-SR-19
+  it("answers 429 with Retry-After through the HTTP route of whichever instance gets the request", async () => {
+    const { db, config } = await createTestDatabase();
+    const second = track(openDatabase(config));
+    const limiters = [
+      createSignInLimiter(createRateLimitsRepository(db)),
+      createSignInLimiter(createRateLimitsRepository(second)),
+    ];
+    const auth = {
+      handler: () => Promise.resolve(new Response("{}", { status: 401 })),
+    };
+    const send = (limiter: (typeof limiters)[number]) =>
+      handleAuthRequest(
+        auth,
+        new Request("http://localhost:3000/api/auth/sign-in/email", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            email: "admin@example.com",
+            password: "wrong-password",
+          }),
+        }),
+        limiter,
+      );
+
+    for (let attempt = 0; attempt < SIGN_IN_ACCOUNT_MAX_ATTEMPTS; attempt += 1)
+      expect((await send(limiters[attempt % 2]!)).status).toBe(401);
+    const refused = await send(limiters[1]!);
+
+    expect(refused.status).toBe(429);
+    expect(Number(refused.headers.get("retry-after"))).toBeGreaterThan(0);
+    expect(await refused.json()).toEqual({ error: "rate_limited" });
   });
 });

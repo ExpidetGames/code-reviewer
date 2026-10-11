@@ -5,7 +5,9 @@
 // are forms that post to these server actions, so they work without client JavaScript.
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { getAccessGates } from "./access-gates-runtime.ts";
 import { getAuth } from "./auth.ts";
+import { pathAfterPasswordSignIn } from "./post-sign-in.ts";
 import { signInWithPasswordChecked } from "./password-sign-in.ts";
 import { getSignInLimiter, getSignInMethods } from "./sign-in-runtime.ts";
 
@@ -63,5 +65,34 @@ export async function signInWithPassword(formData: FormData): Promise<void> {
     error = outcome.kind === "ok" ? null : outcome.kind;
   }
   // redirect() works by throwing, so it stays outside the try block.
-  redirect(error === null ? "/" : `/login?error=${error}`);
+  redirect(
+    error === null
+      ? await landingAfterSignIn(email as string)
+      : `/login?error=${error}`,
+  );
+}
+
+/** The page a person who just signed in with this address lands on (post-sign-in.ts). */
+async function landingAfterSignIn(email: string): Promise<string> {
+  try {
+    const context = await getAuth().$context;
+    const found = await context.internalAdapter.findUserByEmail(
+      email.trim().toLowerCase(),
+    );
+    if (found === null) return "/";
+    return await pathAfterPasswordSignIn(
+      {
+        id: found.user.id,
+        emailVerified: found.user.emailVerified,
+        // The adapter's type does not list our additional fields; the value is there.
+        isInstanceAdmin:
+          (found.user as { isInstanceAdmin?: unknown }).isInstanceAdmin ===
+          true,
+      },
+      getAccessGates(),
+    );
+  } catch {
+    // The proxy decides on the next request anyway.
+    return "/";
+  }
 }

@@ -26,6 +26,7 @@ import { migration as createRateLimits } from "./20261011170100_create_rate_limi
 import { migration as addInstanceAdminFlagToUsers } from "./20261011170200_add_instance_admin_flag_to_users.ts";
 import { migration as createSecrets } from "./20261011200000_create_secrets.ts";
 import { migration as createPasswordResetTokens } from "./20261011200100_create_password_reset_tokens.ts";
+import { migration as createEmailVerificationTokens } from "./20261011210000_create_email_verification_tokens.ts";
 
 const migrations: Record<string, Migration> = {
   "0001_create_app_meta": createAppMeta,
@@ -51,6 +52,8 @@ const migrations: Record<string, Migration> = {
     addInstanceAdminFlagToUsers,
   "20261011200000_create_secrets": createSecrets,
   "20261011200100_create_password_reset_tokens": createPasswordResetTokens,
+  "20261011210000_create_email_verification_tokens":
+    createEmailVerificationTokens,
 };
 
 export const migrationProvider: MigrationProvider = {

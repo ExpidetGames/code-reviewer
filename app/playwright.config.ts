@@ -82,6 +82,7 @@ export default defineConfig({
         /e2e\/reviews\//,
         /e2e\/jobs\//,
         /e2e\/setup\//,
+        /e2e\/auth\/sign-up\.e2e\.ts$/,
       ],
     },
     {
@@ -95,6 +96,15 @@ export default defineConfig({
       use: browser,
       testMatch: /e2e\/reviews\/.*\.e2e\.ts$/,
       dependencies: ["runs"],
+    },
+    // The journey of the sign-up and the email verification has an app of its own (the fourth), because
+    // its mail outbox makes the instance ask every email account for a verified address, which would
+    // change what the admin of the other journeys sees.
+    {
+      name: "signup",
+      use: { ...browser, baseURL: e2eEnv.signupAppUrl },
+      testMatch: /e2e\/auth\/sign-up\.e2e\.ts$/,
+      dependencies: ["prepare"],
     },
     // The journey of the first-run setup has an app of its own that nobody has set up (the third
     // one), so it needs nothing to run first and disturbs nobody.
@@ -113,7 +123,7 @@ export default defineConfig({
       dependencies: ["prepare"],
     },
   ],
-  // Four servers. The fake GitHub stands in for github.com (sign in) and api.github.com; the app
+  // Five servers. The fake GitHub stands in for github.com (sign in) and api.github.com; the app
   // under test is pointed at it by environment variables. The journeys always run against a
   // production build, never the dev server, with a fresh SQLite file in the (git-ignored)
   // test-results folder; the app migrates it on start. All values are fixed dummies.
@@ -126,7 +136,8 @@ export default defineConfig({
   // runner needs: the LLM access (the other app has none, a journey checks its warning), and a
   // push that is reviewed after a second instead of after 90 seconds. The third is the same build
   // again, left unconfigured and not set up, for the journey that walks through the first-run
-  // wizard.
+  // wizard. The fourth is the same build with a database of its own and a mail outbox (the test stack's
+  // stand-in for a mail server, src/mail/outbox-sender.ts), for the sign-up journey.
   webServer: [
     {
       command: "node ../fakes/github/main.ts",
@@ -189,6 +200,23 @@ export default defineConfig({
         ALLOWED_GITHUB_LOGINS: e2eEnv.allowedLogins,
       },
       url: e2eEnv.setupAppUrl,
+      reuseExistingServer: false,
+      timeout: 60_000,
+    },
+    {
+      command:
+        "rm -rf test-results/e2e-signup-data && mkdir -p test-results/e2e-signup-data && " +
+        `rm -f ${e2eEnv.mailOutboxFile} && ` +
+        `pnpm start --hostname 127.0.0.1 --port ${e2eEnv.signupAppPort} > ${e2eEnv.logFiles.signup} 2>&1`,
+      env: {
+        ...appEnv,
+        DATABASE_PATH: e2eEnv.signupDatabasePath,
+        BETTER_AUTH_URL: e2eEnv.signupAppUrl,
+        ALLOWED_GITHUB_LOGINS: e2eEnv.allowedLogins,
+        ALLOW_TEST_MAIL_OUTBOX: "true",
+        TEST_MAIL_OUTBOX_FILE: e2eEnv.mailOutboxFile,
+      },
+      url: e2eEnv.signupAppUrl,
       reuseExistingServer: false,
       timeout: 60_000,
     },

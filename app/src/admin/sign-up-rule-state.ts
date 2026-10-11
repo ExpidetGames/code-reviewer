@@ -7,12 +7,29 @@
 // server and sign-in is not GitHub only. The state is worked out when it is asked for, never stored,
 // so removing the mail server turns the rule fail-closed again.
 //
-// The portal uses this for its notice (overview and setup page). The sign-up itself comes with the
-// sign-up rules issue, which reads the same function.
+// The portal uses this for its notice (overview and setup page), and the sign-up reads the same
+// function (src/signup/availability.ts), so the notice and the behavior cannot disagree.
 import type { InstanceSettingValues } from "../db/repositories/instance-settings-repository.ts";
 import type { SignInMethods } from "./sign-in-methods.ts";
 
 export type SignUpRuleState = { failClosed: boolean };
+
+/**
+ * Whether the instance can verify an email address at all: through a mail server (the app sends a link),
+ * or because GitHub is the only way to sign in (GitHub reports the verified primary email). Evaluated
+ * when it matters, never stored.
+ */
+export function verificationPathExists({
+  mailConfigured,
+  signInMethods,
+}: {
+  mailConfigured: boolean;
+  /** What is actually on (`effectiveSignInMethods`). */
+  signInMethods: SignInMethods;
+}): boolean {
+  const githubOnly = signInMethods.github && !signInMethods.emailPassword;
+  return mailConfigured || githubOnly;
+}
 
 export function signUpRuleState({
   rule,
@@ -25,6 +42,7 @@ export function signUpRuleState({
   signInMethods: SignInMethods;
 }): SignUpRuleState {
   if (rule.kind === "everyone") return { failClosed: false };
-  const githubOnly = signInMethods.github && !signInMethods.emailPassword;
-  return { failClosed: !mailConfigured && !githubOnly };
+  return {
+    failClosed: !verificationPathExists({ mailConfigured, signInMethods }),
+  };
 }

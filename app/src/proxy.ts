@@ -8,6 +8,7 @@
 // 2. The access check: nothing is reachable without a session except the paths in src/auth/access.ts.
 //    The logic is in src/auth/access-proxy.ts so it can be tested without a server.
 import type { NextRequest } from "next/server";
+import { getAccessGates } from "./auth/access-gates-runtime.ts";
 import { createAccessProxy } from "./auth/access-proxy.ts";
 import { getAccessPolicy } from "./auth/access-runtime.ts";
 import { getAuth } from "./auth/auth.ts";
@@ -22,6 +23,7 @@ const setupGate = createSetupGate({
 const accessProxy = createAccessProxy({
   getAuth,
   getPolicy: getAccessPolicy,
+  getGates: getAccessGates,
 });
 
 export async function proxy(request: NextRequest) {

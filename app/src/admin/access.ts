@@ -19,10 +19,13 @@ export type AdminAccess =
 
 /**
  * `denied` (signed in, but turned away by the GitHub allow list) counts as anonymous: such a person
- * is not signed in as far as the app is concerned.
+ * is not signed in as far as the app is concerned. An admin who still has to verify the address is the
+ * admin all the same, and somebody who is not an admin gets the answer of a missing path whether or not
+ * their address is verified or they have a workspace.
  */
 export function adminAccessOf(lookup: SessionLookup): AdminAccess {
-  if (lookup.kind !== "user") return { kind: "anonymous" };
+  if (lookup.kind === "none" || lookup.kind === "denied")
+    return { kind: "anonymous" };
   return lookup.user.isInstanceAdmin
     ? { kind: "admin", user: lookup.user }
     : { kind: "not_admin" };

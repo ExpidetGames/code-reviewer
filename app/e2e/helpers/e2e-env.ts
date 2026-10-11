@@ -10,6 +10,10 @@ const pipelineAppPort = Number(process.env.E2E_PIPELINE_PORT) || appPort + 1;
 // The third app of the run, for the journey of the first-run setup (it needs an instance that nobody
 // has set up): the port after the second one unless E2E_SETUP_PORT says otherwise.
 const setupAppPort = Number(process.env.E2E_SETUP_PORT) || appPort + 2;
+// The fourth app of the run, for the journey of the sign-up and the email verification (it has a mail
+// outbox, which makes every other journey's admin ask for a verified address): the port after the third
+// one unless E2E_SIGNUP_PORT says otherwise.
+const signupAppPort = Number(process.env.E2E_SIGNUP_PORT) || appPort + 3;
 // The fake GitHub gets a random port in a high range, so two checkouts never collide however their
 // E2E_PORT values are chosen. The choice is stored in the environment: Playwright loads this file
 // again in every worker process, which inherits the main process's environment.
@@ -32,6 +36,15 @@ export const e2eEnv = {
   /** The SQLite file of the third app, which the setup journey sets up (fresh for every run). */
   setupDatabasePath: "test-results/e2e-setup-data/app.db",
   setupAppUrl: `http://127.0.0.1:${setupAppPort}`,
+  signupAppPort,
+  /** The SQLite file of the fourth app, which the sign-up journey uses (fresh for every run). */
+  signupDatabasePath: "test-results/e2e-signup-data/app.db",
+  signupAppUrl: `http://127.0.0.1:${signupAppPort}`,
+  /**
+   * The file the fourth app writes its mail to instead of sending it (one JSON message per line, fresh
+   * for every run): the journey reads the verification link from it like from an inbox.
+   */
+  mailOutboxFile: "test-results/e2e-signup-mail.jsonl",
   /**
    * Where each app's output goes (relative to the app folder). The first-run setup prints its code
    * in the log only, so the journeys read it from there, the way an operator reads `docker compose
@@ -41,6 +54,7 @@ export const e2eEnv = {
     app: "test-results/e2e-app.log",
     pipeline: "test-results/e2e-pipeline.log",
     setup: "test-results/e2e-setup.log",
+    signup: "test-results/e2e-signup.log",
   },
   /** The instance admin the journeys create when they set an app up. A dummy, as everything here. */
   adminEmail: "admin@e2e.test",

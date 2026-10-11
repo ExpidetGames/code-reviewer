@@ -218,6 +218,7 @@ Variables that exist in `.env.example` but that you **do not set on Coolify**:
 | `GITHUB_APP_PRIVATE_KEY_PATH` | not used | The Compose file mounts no key file; use `GITHUB_APP_PRIVATE_KEY`. |
 | `BACKUP_DIR` | not used | The image fixes it to `/backups`, the mount point of the backup volume. |
 | `ALLOW_TEST_GITHUB_ENDPOINTS`, `GITHUB_OAUTH_BASE_URL`, `GITHUB_API_BASE_URL` | not used | For the test stack with a fake GitHub only. Never set them in a real deployment. |
+| `ALLOW_TEST_MAIL_OUTBOX`, `TEST_MAIL_OUTBOX_FILE` | not used | For the test stack only: mail goes to a file instead of being sent. Never set them in a real deployment; mail is configured in the admin portal, not here. |
 | `RUNNER_API_URL` | fixed | The Compose file sets it to `http://app:3000`, the app over the Docker network. It is not a setting. |
 | `RUNNER_SHUTDOWN_GRACE_SECONDS` | not used | How long running reviews may finish after a stop. The Compose file leaves the runner's 60 seconds and gives the runner `stop_grace_period: 90s` for it ([section 9](#stopping-the-runner)); the two belong together. |
 | `PR_AGENT_COMMAND` | not used | Replaces PR-Agent by another command, for test stacks with a fake. The runner would hand that command every job with its GitHub token and LLM key. The Compose files never pass it on; never set it. |
@@ -290,7 +291,9 @@ What to know:
   **one app instance running** ([section 10](#10-one-app-instance-only)).
 - An email or domain sign-up rule cannot be evaluated while no email can be verified (no mail server and
   GitHub is not the only sign-in method): nobody but the admin can sign up under it until a mail server is
-  configured. The wizard says so next to the choice.
+  configured. The wizard says so next to the choice. Under the rule "everyone" people can sign up at
+  `/sign-up` at once; with a mail server they have to confirm their address with a link first. A new
+  account belongs to no workspace and sees no data until an admin invites it.
 - If `GITHUB_APP_*` is set, the synchronization with GitHub that ran at start could not put a new
   installation into a workspace while the setup was open (its log line says `WORKSPACE_NOT_AVAILABLE`); it
   runs again when the setup is finished, and a webhook about a new installation in that window answers 503,

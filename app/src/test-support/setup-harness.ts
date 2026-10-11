@@ -5,6 +5,7 @@
 // gate and access proxy in front of them, and a code store with a clock the test moves. The tests
 // send real `Request` objects and keep cookies, the way a browser does. Nothing listens on a port.
 import { NextRequest } from "next/server";
+import type { AccessGates } from "../auth/access-gates.ts";
 import { createAccessProxy } from "../auth/access-proxy.ts";
 import { createAccessPolicy } from "../auth/access-policy.ts";
 import { parseAccessConfig } from "../auth/access-config.ts";
@@ -66,7 +67,14 @@ function assemble(
       ? {}
       : { secureCookies: options.secureCookies }),
   };
-  const auth = createAuth({ db, config });
+  // Whether the instance can send mail, which a test switches: the sign in refuses an unverified address
+  // while it can, and the gates in front of the app ask the same.
+  const gateState = { mail: false };
+  const auth = createAuth({
+    db,
+    config,
+    verificationRequired: () => Promise.resolve(gateState.mail),
+  });
   let time = Date.parse("2026-10-11T08:00:00.000Z");
   const store = createSetupCodeStore({
     now: () => time,
@@ -111,6 +119,20 @@ function assemble(
   });
 
   const gate = createSetupGate({ readState });
+  // The gates in front of the app: a verified address (while the instance can send mail, which a test
+  // switches with `gateState.mail`) and a workspace (read from the database, like the server does).
+  const gates: AccessGates = {
+    verificationRequired: () => Promise.resolve(gateState.mail),
+    async hasWorkspace(userId) {
+      const membership = await db
+        .selectFrom("workspace_members")
+        .select("user_id")
+        .where("user_id", "=", userId)
+        .limit(1)
+        .executeTakeFirst();
+      return membership !== undefined;
+    },
+  };
   // The allow list is for GitHub identities; none is configured here, and nobody signs in with GitHub.
   const problems: string[] = [];
   const access = createAccessProxy({
@@ -123,6 +145,7 @@ function assemble(
           revokeSessions: () => Promise.resolve(),
         },
       }),
+    getGates: () => gates,
   });
 
   /**
@@ -189,6 +212,9 @@ function assemble(
     /** The two proxies in front of every route, for harnesses that route requests themselves. */
     gate,
     access,
+    /** The access gates the proxy uses; `gateState.mail` says whether the instance can send mail. */
+    gates,
+    gateState,
     /** What the server does at start: reads the state and prints the code (to `logs`). */
     async start() {
       const printed: string[] = [];

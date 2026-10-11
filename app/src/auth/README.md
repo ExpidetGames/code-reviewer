@@ -33,10 +33,17 @@ table `allowed_login_pins` from `20261010133000_create_allowed_login_pins`, see 
 
 ## Who may use the instance
 
-An account with a password (the instance admin the setup creates; later the accounts the sign-up rule
-lets in) is admitted on every request: it exists because the setup or the sign-up rule created it, and
-the GitHub allow list below is about GitHub identities only (`session-user.ts`). Nobody can sign up
-through Better Auth yet (`emailAndPassword.disableSignUp`, and the endpoint is not reachable).
+An account with a password (the instance admin the setup creates, and the accounts the sign-up rule lets
+in, `src/signup/README.md`) is admitted on every request: it exists because the setup or the sign-up rule
+created it, and the GitHub allow list below is about GitHub identities only (`session-user.ts`). Two gates
+stand in front of such an account (`access-gates.ts`, `lookupSession`): its address has to be verified
+while the instance can send mail (the instance admin keeps `/admin`), and it has to belong to a workspace
+(the admin is exempt; an account made by the sign-up has none, so it sees no data until it is invited).
+A refused account is `unverified` or `no_workspace` in the session lookup: a page goes to `/verify-email`
+or `/no-access`, a data route answers 403 `email_not_verified` or `no_workspace_access`. Accounts that
+sign in with GitHub only are asked neither. Nobody signs up through Better Auth
+(`emailAndPassword.disableSignUp`, and the endpoint is not reachable): `POST /api/sign-up` creates the
+account.
 
 Signing in with GitHub is not enough; the account must be allowed. Two settings, both optional,
 at least one needed (`app/.env.example`):
@@ -164,7 +171,7 @@ settings needs a restart of the server (they are read once per process).
 
 Everything needs a session except `/login`, `/api/health`, `/api/auth/**`, `/api/runners/**` (own
 token), `/api/webhooks/**` (own signature), `/reset-password` and `/api/password-reset` (the token in a
-reset link is the credential) and, while the instance is not set up, `/setup` and
+reset link is the credential), `/sign-up`, `/api/sign-up`, `/verify-email`, `/api/verify-email/**` and `/no-access` (the sign-up and the verification have limits of their own, `src/signup/limits.ts`) and, while the instance is not set up, `/setup` and
 `/api/setup/**` (the setup code and the setup session; the setup gate in `src/proxy.ts`, which runs before
 this check, answers 404 for them once the instance is set up and 503 `setup_required` for everything
 else before that, `src/setup/gate.ts`). The list is `PUBLIC_PATHS` in `access.ts`; a route

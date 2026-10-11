@@ -100,6 +100,11 @@ complete_setup "http://127.0.0.1:$port" "$code"
 step "the admin portal is guarded, and admin reset-password gives the admin a way back in"
 check_admin_portal "http://127.0.0.1:$port" "$container"
 
+# #99-SR-08, #99-SR-14, #99-SR-21: a visitor signs up (no mail server exists in the image), the answer
+# does not depend on the address, and the new account has no access to any data.
+step "a visitor can sign up, the answer does not depend on the address, and the account has no workspace"
+check_sign_up "http://127.0.0.1:$port"
+
 step "waiting for the container to report healthy"
 until [ "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$container")" = "healthy" ]; do
   if [ "$SECONDS" -ge "$deadline" ]; then
