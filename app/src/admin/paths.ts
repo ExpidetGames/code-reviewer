@@ -19,6 +19,14 @@ export const PORTAL_PAGE_ROOT = "/instance-portal";
 export const PORTAL_API_ROOT = "/api/instance-portal";
 /** A path that is no route of the app, and never will be. */
 export const MISSING_PATH = "/page-not-found-a41e0c";
+/**
+ * The request header with which the proxy (src/auth/access-proxy.ts) marks a request for the files of the
+ * portal by their own address. `next.config.ts` rewrites a request that carries it to `MISSING_PATH`, so
+ * Next.js itself answers it, as it answers any path that does not exist. (A rewrite or a 404 made by the
+ * proxy would be recognizable: the proxy's answer carries `x-middleware-rewrite` and lower-case header
+ * names.) Only the proxy may set it: it takes it off every request that comes from outside.
+ */
+export const PORTAL_DENIED_HEADER = "x-portal-denied";
 
 /** The path as the router sees it, or null when it cannot be decoded. */
 function normalize(pathname: string): string | null {
