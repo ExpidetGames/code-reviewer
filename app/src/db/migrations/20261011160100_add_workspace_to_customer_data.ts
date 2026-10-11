@@ -260,6 +260,16 @@ export const migration: Migration = {
       db,
     );
 
+    // Dropping a table deletes its rows first, and for every row SQLite looks for rows that refer to
+    // it. `jobs_old` refers to itself through `superseded_by`, which has no index, so without this one
+    // every deleted job scans the whole table: 10 000 jobs with 2 KB results took 44 seconds, with the
+    // index 0.4. The other old tables have no child left at this point (they go leaf first).
+    await db.schema
+      .createIndex("jobs_old_superseded_by")
+      .on("jobs_old")
+      .column("superseded_by")
+      .execute();
+
     // The old tables go, leaf first: nothing refers to them any more except tables that are gone.
     for (const table of [
       "job_comments_old",

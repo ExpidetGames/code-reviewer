@@ -111,9 +111,13 @@ Migrations `20261011160000_create_workspaces`, `20261011160100_add_workspace_to_
   is rebuilt parents first (rename to `*_old`, create, copy), the old tables are dropped leaf first and
   the indexes are created last. No foreign key is violated at any point. `users` is not rebuilt (its
   children cascade on delete): `github_login` is replaced by a nullable copy of itself.
-- **Time budget.** The migration of a database with 10 000 jobs must finish within 10 seconds in one
-  transaction (`workspace-migration.integration.test.ts`; on a laptop it takes well under one second,
-  the budget is generous so that a slow CI machine does not make the test flaky). If you make the
+- **Time budget.** The migration of a database with 10 000 jobs that each hold a result of about 2 KB
+  must finish within 10 seconds in one transaction (`workspace-migration.integration.test.ts`). It
+  takes about 0.4 seconds on a laptop; the budget is generous so that a slow CI machine does not make
+  the test flaky. The size of the results matters: dropping `jobs_old` deletes its rows, and for every
+  row SQLite looks for rows that refer to it through `superseded_by`. Without the index
+  `jobs_old_superseded_by` that is a scan per row, and this very database took 44 to 47 seconds. Any
+  later change that rebuilds a table with a self-reference needs the same index. If you make the
   migration slower, say why here.
 
 ## Workspace scoping

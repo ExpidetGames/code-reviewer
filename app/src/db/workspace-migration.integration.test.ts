@@ -39,6 +39,7 @@ async function openAtPreviousVersion(): Promise<OldDb> {
 }
 
 const T = "2026-10-01T10:00:00.000Z";
+const RESULT_2KB = JSON.stringify({ ok: true, logTail: "x".repeat(2000) });
 
 async function seedInstallation(db: OldDb): Promise<void> {
   for (const [id, login] of [
@@ -145,6 +146,8 @@ function oldJob(
   prNumber: number,
   supersededBy: string | null = null,
 ) {
+  // A finished job holds the result of its review, about 2 KB; the size is what makes a migration of
+  // many jobs slow when something in it is not indexed.
   return {
     id,
     repository_id: repositoryId,
@@ -158,6 +161,7 @@ function oldJob(
     status: "succeeded",
     run_after: T,
     attempts: 0,
+    result: RESULT_2KB,
     superseded_by: supersededBy,
     created_at: T,
     updated_at: T,
