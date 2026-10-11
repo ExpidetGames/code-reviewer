@@ -127,7 +127,7 @@ While the instance is not set up:
    creates the one workspace (or, for an existing installation, uses the imported one) and makes the
    admin its Owner (section 2.6).
 
-**Trade-offs, stated openly.** A 6-digit code is a deliberate customer decision for convenience. Its
+**Trade-offs, stated openly.** A 6-digit code is a deliberate project decision for convenience. Its
 protection is the lock after 10 failures and the fact that the code is only in the process memory and
 log of the server. An attacker who can reach the site can force a lock, and the operator then has to
 restart the app (a denial of service for the setup), but cannot get in: the chance to guess the code
