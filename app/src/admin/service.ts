@@ -13,6 +13,12 @@ import {
   type InstanceSettingValues,
 } from "../db/repositories/instance-settings-repository.ts";
 import type { Database } from "../db/schema.ts";
+import type {
+  SmtpConfigStore,
+  SmtpPasswordState,
+} from "../mail/smtp-config.ts";
+import type { SmtpSettings } from "../mail/smtp-settings.ts";
+import type { TestMailResult, TestMailService } from "../mail/test-mail.ts";
 import type { SecretStatus, SecretStore } from "../secrets/store.ts";
 import type { SetupIssue } from "../setup/errors.ts";
 import { parseSignUpRule } from "../setup/input.ts";
@@ -55,6 +61,11 @@ export type AdminSettingsView = {
     effective: SignInMethods;
   };
   maxWorkspacesPerUser: SettingView<number>;
+  /**
+   * The mail server (null: none). The password is never part of it: `password` says whether one is set, and
+   * whether it can still be read.
+   */
+  smtp: SettingView<SmtpSettings | null> & { password: SmtpPasswordState };
   workspaceCount: number;
   githubConfigured: boolean;
   mailConfigured: boolean;
@@ -91,6 +102,10 @@ export type AdminService = {
     actorId: string,
     limits: { maxWorkspacesPerUser: unknown },
   ): Promise<ChangeResult>;
+  /** `smtp` is the request's `smtp` value as received: an object to save, or null to remove the mail server. */
+  changeSmtp(actorId: string, smtp: unknown): Promise<ChangeResult>;
+  /** Sends the test mail to the acting admin's own address. */
+  sendTestMail(actor: { id: string; email: string }): Promise<TestMailResult>;
 };
 
 export type AdminServiceOptions = {
@@ -100,6 +115,10 @@ export type AdminServiceOptions = {
   githubConfigured: () => boolean;
   /** Whether a mail server is configured (the mail settings come with the SMTP issue). */
   mailConfigured: () => Promise<boolean>;
+  /** The stored mail server settings and password (src/mail/smtp-config.ts). */
+  smtp: SmtpConfigStore;
+  /** The test mail button (src/mail/test-mail.ts). */
+  testMail: TestMailService;
   /** The rule that decides who may sign in with GitHub (the allow list), asked for the acting admin's identity. */
   accessPolicy: AccessPolicy;
   now?: () => Date;
@@ -112,6 +131,8 @@ function isObject(value: unknown): value is Record<string, unknown> {
 export function createAdminService({
   db,
   secrets,
+  smtp,
+  testMail,
   githubConfigured,
   mailConfigured,
   accessPolicy,
@@ -140,8 +161,14 @@ export function createAdminService({
       ];
       const [tenancy, rule, methods, maxWorkspaces, completed] =
         await Promise.all(keys.map((key) => settings.getWithMeta(key)));
-      const ids = [tenancy, rule, methods, maxWorkspaces]
-        .map((meta) => meta?.updatedBy)
+      const mailServer = await smtp.view();
+      const ids = [
+        tenancy?.updatedBy,
+        rule?.updatedBy,
+        methods?.updatedBy,
+        maxWorkspaces?.updatedBy,
+        mailServer.updatedBy,
+      ]
         .filter((id): id is string => typeof id === "string");
       const emails = await emailsOf([...new Set(ids)]);
       const view = <T>(
@@ -182,6 +209,18 @@ export function createAdminService({
           (maxWorkspaces?.value as number | undefined) ??
             DEFAULT_MAX_WORKSPACES_PER_USER,
         ),
+        smtp: {
+          ...view(
+            mailServer.updatedAt === null
+              ? undefined
+              : {
+                  updatedBy: mailServer.updatedBy,
+                  updatedAt: mailServer.updatedAt,
+                },
+            mailServer.settings,
+          ),
+          password: mailServer.password,
+        },
         workspaceCount: Number(count.count),
         githubConfigured: github,
         mailConfigured: mail,
@@ -235,6 +274,16 @@ export function createAdminService({
       await settings.set("sign_in_methods", wanted, actorId);
       return { ok: true };
     },
+
+    async changeSmtp(actorId, value) {
+      if (value === null) {
+        await smtp.remove();
+        return { ok: true };
+      }
+      return smtp.save(actorId, value);
+    },
+
+    sendTestMail: (actor) => testMail.send(actor),
 
     async changeLimits(actorId, limits) {
       const value = limits.maxWorkspacesPerUser;

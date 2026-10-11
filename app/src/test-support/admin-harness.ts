@@ -17,6 +17,10 @@ import {
 import { PORTAL_REWRITE_HEADER } from "../auth/access-proxy.ts";
 import { createAdminRouteHandlers } from "../admin/http.ts";
 import { createAdminService } from "../admin/service.ts";
+import { createRateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
+import { createSmtpConfigStore } from "../mail/smtp-config.ts";
+import type { SmtpTimeouts } from "../mail/smtp-delivery.ts";
+import { createTestMailService } from "../mail/test-mail.ts";
 import { createSecretStore } from "../secrets/store.ts";
 import { lookupSession } from "../auth/session-user.ts";
 import { createAccessPolicy } from "../auth/access-policy.ts";
@@ -50,6 +54,14 @@ export type AdminHarnessOptions = {
   mailConfigured?: boolean;
 };
 
+/** Short waits, so a test of a mail server that never answers does not take half a minute. */
+export const ADMIN_TEST_SMTP_TIMEOUTS: SmtpTimeouts = {
+  connectionMs: 1_500,
+  greetingMs: 400,
+  socketMs: 1_500,
+  totalMs: 3_000,
+};
+
 export async function createAdminHarness(options: AdminHarnessOptions = {}) {
   const setup = await createSetupHarness();
   const { db, auth } = setup;
@@ -75,11 +87,20 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
     githubAllowed: true,
   };
   const secrets = createSecretStore({ db, appSecret: SETUP_TEST_SECRET });
+  const smtp = createSmtpConfigStore({ db, secrets });
   const service = createAdminService({
     db,
     secrets,
+    smtp,
+    testMail: createTestMailService({
+      config: smtp,
+      rateLimits: createRateLimitsRepository(db),
+      baseUrl: ADMIN_TEST_BASE_URL,
+      timeouts: ADMIN_TEST_SMTP_TIMEOUTS,
+    }),
     githubConfigured: () => flags.github,
-    mailConfigured: () => Promise.resolve(flags.mail),
+    // A test switches the flag; a mail server saved through the portal counts as well.
+    mailConfigured: async () => flags.mail || (await smtp.isConfigured()),
     accessPolicy: () =>
       Promise.resolve(
         flags.githubAllowed
@@ -302,6 +323,11 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
         request.method === "PUT"
       )
         return await handlers.putSettings(request);
+      if (
+        pathname === "/api/instance-portal/mail/test" &&
+        request.method === "POST"
+      )
+        return await handlers.testMail(request);
     } catch (error) {
       if (error instanceof NotFoundSignal)
         return new Response("not found", { status: 404 });
@@ -372,6 +398,7 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
     adminId: adminRow.id,
     adminCookies,
     secrets,
+    smtp,
     service,
     flags,
     createUser,
