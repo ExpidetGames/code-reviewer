@@ -3,8 +3,24 @@
 // answer of Better Auth is "the credentials are not accepted"; anything else (a locked database, a
 // broken configuration, an unexpected exception) is the server's problem, logged under its own code
 // without the reason (it may quote the request) and shown as "unavailable", never as a wrong password.
-import { APIError } from "better-auth/api";
 import type { SignInLimiter } from "./sign-in-limit.ts";
+
+/**
+ * The HTTP status of an error that Better Auth threw on purpose, or null for anything else. Read by
+ * shape, not with `instanceof APIError`: in the built server the class that Better Auth throws and the
+ * one this module could import are not always the same copy, and `instanceof` then fails silently
+ * (a wrong password would be reported as a server error).
+ */
+export function apiErrorStatus(error: unknown): number | null {
+  if (typeof error !== "object" || error === null) return null;
+  const { name, statusCode } = error as {
+    name?: unknown;
+    statusCode?: unknown;
+  };
+  return name === "APIError" && typeof statusCode === "number"
+    ? statusCode
+    : null;
+}
 
 export type PasswordSignInOutcome =
   | { kind: "ok" }
@@ -42,12 +58,10 @@ export async function signInWithPasswordChecked(
   try {
     await signIn(email, password);
   } catch (error) {
-    if (error instanceof APIError) {
-      if (error.statusCode === 429)
-        return { kind: "rate_limited", retryAfterSeconds: 60 };
-      if (error.statusCode >= 400 && error.statusCode < 500)
-        return { kind: "invalid_credentials" };
-    }
+    const status = apiErrorStatus(error);
+    if (status === 429) return { kind: "rate_limited", retryAfterSeconds: 60 };
+    if (status !== null && status >= 400 && status < 500)
+      return { kind: "invalid_credentials" };
     log(
       "[auth] SIGN_IN_SERVER_ERROR: the sign in failed on the server, not because of the credentials.",
     );

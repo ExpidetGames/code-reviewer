@@ -3,7 +3,10 @@
 // code and shown as unavailable, never as a wrong password, and never with its reason.
 import { APIError } from "better-auth/api";
 import { describe, expect, it, vi } from "vitest";
-import { signInWithPasswordChecked } from "./password-sign-in.ts";
+import {
+  apiErrorStatus,
+  signInWithPasswordChecked,
+} from "./password-sign-in.ts";
 import type { SignInLimiter } from "./sign-in-limit.ts";
 
 function limiter(overrides: Partial<SignInLimiter> = {}): SignInLimiter {
@@ -13,6 +16,54 @@ function limiter(overrides: Partial<SignInLimiter> = {}): SignInLimiter {
     ...overrides,
   };
 }
+
+describe("recognizing an error of Better Auth", () => {
+  it("reads the status of an APIError by its shape, also from another copy of the class", () => {
+    class OtherCopyOfAPIError extends Error {
+      statusCode = 401;
+      constructor() {
+        super("Invalid password");
+        this.name = "APIError";
+      }
+    }
+
+    expect(apiErrorStatus(new APIError("UNAUTHORIZED"))).toBe(401);
+    expect(apiErrorStatus(new OtherCopyOfAPIError())).toBe(401);
+  });
+
+  it("knows nothing else as one", () => {
+    expect(apiErrorStatus(new Error("database is locked"))).toBeNull();
+    expect(apiErrorStatus({ statusCode: 401 })).toBeNull();
+    expect(apiErrorStatus({ name: "APIError", statusCode: "401" })).toBeNull();
+    expect(apiErrorStatus(null)).toBeNull();
+    expect(apiErrorStatus("APIError")).toBeNull();
+  });
+
+  // #97-LIMIT
+  it("sorts an error of another copy of the class like the original: wrong credentials, not a server error", async () => {
+    class OtherCopyOfAPIError extends Error {
+      statusCode = 401;
+      constructor() {
+        super("Invalid password");
+        this.name = "APIError";
+      }
+    }
+    const log = vi.fn();
+
+    const outcome = await signInWithPasswordChecked(
+      {
+        limiter: limiter(),
+        signIn: () => Promise.reject(new OtherCopyOfAPIError()),
+        log,
+      },
+      "a@example.com",
+      "pw",
+    );
+
+    expect(outcome).toEqual({ kind: "invalid_credentials" });
+    expect(log).not.toHaveBeenCalled();
+  });
+});
 
 describe("signing in with a password", () => {
   it("signs in and forgets the failed attempts", async () => {
