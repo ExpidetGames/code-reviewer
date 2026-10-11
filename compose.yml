@@ -1,0 +1,103 @@
+# Code Reviewer: the app and the runner on one machine. See "Run with Docker Compose" in README.md.
+#
+#   cp .env.example .env     # then fill in the values; a missing required value stops `up` with a
+#                            # message naming the variable, before any container is created
+#   docker compose up -d --wait
+#
+# Images come from GHCR by default (the packages are private: `docker login ghcr.io` first). To build
+# them from this checkout instead, add the override file:
+#   docker compose -f compose.yml -f compose.build.yml up -d --build --wait
+#
+# Every setting is read from the environment of this command or from `.env` (see .env.example for
+# what each one means). No secret is written in this file.
+#
+# On Coolify use compose.coolify.yml instead (docs/deployment-coolify.md): same services, but built
+# from the repository and without a published port.
+name: code-reviewer
+
+services:
+  app:
+    image: ${APP_IMAGE:-ghcr.io/expidetgames/code-reviewer-app:development}
+    restart: unless-stopped
+    ports:
+      # Loopback only by default; set APP_BIND_ADDRESS=0.0.0.0 to reach the app from other machines
+      # without a reverse proxy. The container always listens on 3000.
+      - "${APP_BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-3000}:3000"
+    volumes:
+      # The SQLite database (/data/app.db) lives in a named volume: it survives `docker compose down`
+      # and image updates, and is only removed by `docker compose down -v`.
+      - data:/data
+      # The daily backups (BACKUP_DIR=/backups, fixed by the image) go to a volume of their own, never
+      # next to the data. Survives `docker compose down` like the data; to get them off this machine
+      # replace the named volume by a path on the host (see app/src/backup/README.md).
+      - backups:/backups
+    environment:
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required, see .env.example}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:${APP_PORT:-3000}}
+      GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:?GITHUB_OAUTH_CLIENT_ID is required, see .env.example}
+      GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET:?GITHUB_OAUTH_CLIENT_SECRET is required, see .env.example}
+      ALLOWED_GITHUB_LOGINS: ${ALLOWED_GITHUB_LOGINS:-}
+      ALLOWED_GITHUB_ORG: ${ALLOWED_GITHUB_ORG:-}
+      GITHUB_APP_ID: ${GITHUB_APP_ID:?GITHUB_APP_ID is required, see .env.example}
+      GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:?GITHUB_APP_SLUG is required, see .env.example}
+      GITHUB_APP_WEBHOOK_SECRET: ${GITHUB_APP_WEBHOOK_SECRET:?GITHUB_APP_WEBHOOK_SECRET is required, see .env.example}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:?GITHUB_APP_PRIVATE_KEY is required, see .env.example}
+      # The runner presents the same token; both services read the one variable.
+      RUNNER_TOKEN: ${RUNNER_TOKEN:?RUNNER_TOKEN is required, see .env.example}
+      # One shared LLM access for the team. Not needed for the stack to start: without a key the app
+      # runs and shows a configuration error, and review jobs fail with a stable error code.
+      LLM_PROVIDER: ${LLM_PROVIDER:-openrouter}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-}
+      REVIEW_DEBOUNCE_SECONDS: ${REVIEW_DEBOUNCE_SECONDS:-}
+      DATABASE_BUSY_TIMEOUT_MS: ${DATABASE_BUSY_TIMEOUT_MS:-}
+      # When the app backs up the database every day (HH:MM, UTC), or "off". Empty: the default.
+      BACKUP_TIME: ${BACKUP_TIME:-}
+    healthcheck:
+      # Node is in the image, curl is not. /api/health is public and reads the database. Declared
+      # here so the timings are visible and tunable; keep the command in sync with the HEALTHCHECK
+      # in app/Dockerfile.
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  runner:
+    image: ${RUNNER_IMAGE:-ghcr.io/expidetgames/code-reviewer-runner:development}
+    restart: unless-stopped
+    # No published port: the runner only talks to the app, over the compose network.
+    # The memory the runner may use as a whole: 2 GiB by default, the figure the number of parallel
+    # reviews (RUNNER_CONCURRENCY, about 1.5 per GiB) is calculated from, see docs/deployment-coolify.md,
+    # section 9, for the pairs to choose from. A review needs about 320 MB; without a limit too many at
+    # once could take the whole server's memory. Change both settings together.
+    mem_limit: ${RUNNER_MEMORY_LIMIT:-2g}
+    # `docker compose stop` and a redeploy send SIGTERM. The loop then stops claiming, gives running
+    # reviews 60 seconds to finish (RUNNER_SHUTDOWN_GRACE_SECONDS, not passed on here so that it cannot
+    # outgrow this value), reports what is left as runner_shutdown, and exits. Docker's default of 10
+    # seconds would kill it before the reports are sent; 90 = 60 + 5 between SIGTERM and SIGKILL of a
+    # stuck job + up to 10 to report + margin. The image's tini passes the signal on (no `init: true`).
+    stop_grace_period: 90s
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      # The image's own entry point is the job loop (runner/README.md, "The job loop").
+      RUNNER_API_URL: http://app:3000
+      RUNNER_TOKEN: ${RUNNER_TOKEN:?RUNNER_TOKEN is required, see .env.example}
+      # Reviews at the same time: about 1.5 per GiB of the memory limit above (docs/deployment-coolify.md,
+      # section 9). Hard timeout of one review in seconds. Wait between two claims in seconds.
+      RUNNER_CONCURRENCY: ${RUNNER_CONCURRENCY:-3}
+      RUNNER_JOB_TIMEOUT_SECONDS: ${RUNNER_JOB_TIMEOUT_SECONDS:-1200}
+      RUNNER_POLL_INTERVAL_SECONDS: ${RUNNER_POLL_INTERVAL_SECONDS:-5}
+      # A name for this runner in the app's logs. Empty: runner-<container host name>.
+      RUNNER_ID: ${RUNNER_ID:-}
+
+volumes:
+  data:
+  backups:

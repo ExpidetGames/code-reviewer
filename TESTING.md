@@ -45,6 +45,7 @@ it. Do not document planned things as if they existed in READMEs or PR descripti
 | Runner integration | pytest, marker `integration` | host or Docker stack | Real processes and real loopback sockets: the real loop against the app or a fake runner API, with the fake PR-Agent executable as a real subprocess (exit codes, timeouts, kill). | exists (entry points; the job runner as a real process with `handle_request` replaced by a double; the job loop with real processes (`fake_job.py`), a real loopback server that checks every request against the contract (`fake_app.py`), real signals, and together with the job runner double) |
 | Engine smoke | pytest, marker `engine` | Docker stack, nightly and release PRs | The real, pinned PR-Agent against the GitHub fake and the LLM fake. Asserts the shape of what was posted, never review quality. Deselected by default. | marker exists, no tests yet |
 | Image smoke | Bash scripts `docker/smoke/app.sh` and `docker/smoke/runner.sh` | Docker daemon (host or CI) | The built container images: the app starts as a non-root user with a fresh volume, turns a visitor without a session away from the start page, answers `/api/health`, creates and migrates the database; the runner answers `--version`; neither image holds env files, git data, keys or secrets. Fails without Docker, never skips. | exists |
+| Compose smoke | Bash script `docker/smoke/compose.sh`, plus `app/src/ci/compose.test.ts` (unit, on the files) | Docker daemon (host or CI) | The Docker Compose stack with dummy settings: the settings are validated before a container exists, the runner does not start while the app is unhealthy, the stack becomes healthy and the runner's job loop starts and polls the app without a failure, the database survives `down` and `up`, an app process that exits by itself restarts and the runner keeps running, a stop while a (fake) review runs ends with the runner reporting it, a backup of the running stack restores into an empty data volume and the app is healthy again. Fails without Docker, never skips. | exists |
 | E2E | Playwright, chromium | production build (`next build` and `next start`) next to the fake GitHub, later the Docker stack | User-visible flows. At most about 8 `@smoke` journeys. | exists (start page guard, sign in and sign out, refused account) |
 | Manual | none | a developer machine | Real PR-Agent against a real model on a sandbox repository before a release. The result goes into the PR description. Never in CI. | n/a |
 
@@ -80,7 +81,7 @@ app/                               Next.js project (pnpm)
   src/<owner>/foo.test.ts          unit test beside the code
   src/<owner>/foo.integration.test.ts   single-owner integration test beside the code
   src/test-support/                shared test setup (network guard, SQLite template and child process helpers, the sign in harness: database, real Better Auth and the fake GitHub); not product code
-  src/ci/                          structure tests of the CI and publish workflows and of the Dockerfiles
+  src/ci/                          structure tests of the CI and publish workflows and of the Dockerfiles, and the scan of all tracked files for keys and tokens
   integration-tests/               cross-owner integration tests (exists: webhooks/)
     http/ webhooks/ workflows/ compatibility/ support/   closed list; support/ holds no tests
   e2e/<area>/<journey>.e2e.ts      Playwright; areas: app/, auth/, reviews/, jobs/, settings/
@@ -183,6 +184,26 @@ the method the identity patch replaces, the tiktoken encodings load without netw
 gets an `invalid_job` result, and a job through the real PR-Agent with no network at all ends in a
 well formed `git_unavailable` result without a secret in any output.
 
+Compose (`docker/smoke/compose.sh <app image> <runner image>`): works in a temporary directory with a copy
+of `compose.yml`, a project name of its own and dummy settings (the GitHub App key is generated on the
+spot), so it never touches a real `.env`, stack or volume. Order: `docker compose config` and the
+service list; `up` without `RUNNER_TOKEN` is refused with a message naming it and creates no
+container; with an override that makes the app never healthy `up` fails and the runner is only
+`created`; then the real start with `--wait`, `/api/health`, no published port on the runner, `/data`
+as a named volume, the runner log (the job loop's `started` line, no `trying again in` warning, no token), a record written
+to `/data/app.db` that is still there after `down` and `up`, and an app process terminated from inside
+the container that comes back through `unless-stopped` while the runner stays up, and a `docker compose stop` while a review runs: an override file (`docker/smoke/compose.fake-job.yml`, the only file that sets `PR_AGENT_COMMAND`) swaps the app's runner API for a fake that hands out one job and PR-Agent for a fake that never finishes, and the runner must report the job as `runner_shutdown` and exit with status 0 instead of being killed. `docker kill` and
+`docker stop` are deliberately not used: Docker treats them as a manual stop and `unless-stopped` then
+keeps the container stopped. Everything is removed on exit. The files themselves (services, ports,
+volume, health check, `depends_on`, one `RUNNER_TOKEN` variable, no secret in `compose.yml`, every
+variable read by compose or the code documented in `.env.example`, no secret value there, `.env`
+ignored) are pinned by `app/src/ci/compose.test.ts`. Not covered: real GitHub App credentials and a
+real LLM key (manual, with the deployment ticket), other Docker versions and Windows.
+
+The GitHub App guide `docs/github-app.md` is pinned to the code by
+`app/src/integrations/providers/github-app/setup-doc.test.ts` (its permission and event tables must
+equal the lists in the code); creating the real app on GitHub is a manual step the guide describes.
+
 Planned: `verify:structure` (placement and naming rules, test files must be discovered by a runner,
 no process identifiers in titles), `verify:server-only-canary`, the Docker test stack
 (`docker/compose.test.yml`).
@@ -199,6 +220,7 @@ no process identifiers in titles), `verify:server-only-canary`, the Docker test 
 | Integration tests (host) | `make test-integration` | `pnpm test:int`; `pytest -m "integration or contract"` |
 | E2E | `make test-e2e` | `pnpm test:e2e` (`ARGS="--grep @smoke"` filters) |
 | Image smoke tests | `make test-images` | builds both images with `docker build`, then runs `docker/smoke/app.sh` and `docker/smoke/runner.sh` (needs a Docker daemon; not part of `make verify`) |
+| Compose smoke test | `make test-compose` | builds both images under the tags `code-reviewer-*:compose`, then runs `docker/smoke/compose.sh` (needs a Docker daemon; not part of `make verify`) |
 
 Inside `app/`: `pnpm dev | build | start | lint | typecheck | test | test:watch | test:int | test:e2e`.
 Inside `runner/`: `uv sync --locked`, `uv run ruff check .`, `uv run ruff format --check .`,
@@ -247,6 +269,7 @@ file is pinned by `app/src/ci/ci-workflow.test.ts`.
 | `app-fast` | app changed | `pnpm format:check`, `lint`, `typecheck`, `test` (unit), `test:int` (host), `build` with placeholder env. |
 | `runner-fast` | runner changed | `ruff check`, `ruff format --check`, `pyright`, `pytest -m unit`, `pytest -m "integration or contract"`. |
 | `e2e` ("E2E: browser journeys") | app changed | `playwright install --with-deps chromium`, then the journeys against the production build: `@smoke` only on pull requests into `development` and `CR-*`, all (without `@flaky`) on pull requests into `main` and on pushes. |
+| `compose` ("Compose: stack smoke test") | pull requests: app or runner changed, or any pull request into `main` | Builds both images (`load`, no push, GHA layer cache), then runs `docker/smoke/compose.sh` against them. Same rights as the image jobs. |
 | `image-app`, `image-runner` | pull requests: app (runner) changed, or any pull request into `main` | Builds the image with `docker/build-push-action` (`load`, no push, GHA layer cache), then runs its smoke test. No registry login, read-only token. Pushes do not run these jobs because the publish workflow builds the same images. |
 | `actionlint` | workflows changed | actionlint with `.github/actionlint.yaml`. |
 | `ci-passed` ("All checks passed?") | always | Fails on any failed or cancelled job, accepts skipped jobs. |
