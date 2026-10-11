@@ -8,6 +8,7 @@
 import { NextRequest } from "next/server";
 import { describe, expect, it, vi } from "vitest";
 import { PORTAL_DENIED_HEADER } from "../admin/paths.ts";
+import type { AccessGates } from "./access-gates.ts";
 import type { AccessPolicy } from "./access-policy.ts";
 import { PORTAL_REWRITE_HEADER, createAccessProxy } from "./access-proxy.ts";
 import type { SessionLookup } from "./session-user.ts";
@@ -46,13 +47,16 @@ function aUser(isInstanceAdmin: boolean): SessionLookup {
   return { kind: "user", user };
 }
 
-function newProxy() {
+function newProxy(
+  gates: Partial<AccessGates> = {},
+): ReturnType<typeof createAccessProxy> {
   return createAccessProxy({
     // Never used: the session lookup is replaced above.
     getAuth: () => undefined as never,
     getPolicy: () => undefined as unknown as AccessPolicy,
-    // Never used either.
-    getGates: () => undefined as never,
+    // The proxy asks the gates only about a workspace address (and the session lookup, which is replaced
+    // above, asks the others).
+    getGates: () => gates as AccessGates,
   });
 }
 
@@ -243,4 +247,183 @@ describe("the header that marks a request as one for a missing path", () => {
       );
     },
   );
+});
+
+describe("a request for a workspace address", () => {
+  const roleOf = (role: "owner" | "admin" | "member" | null) =>
+    vi.fn((_userId: string, _slug: string) => Promise.resolve(role));
+
+  // #101-WM-06
+  it.each([
+    "/w/acme",
+    "/w/acme/projects",
+    "/w/acme/runs/42",
+    "/api/w/acme/runs",
+    "/api/w/acme/repositories/7/project",
+  ])("goes on untouched for a member of the workspace (%s)", async (path) => {
+    lookupSession.mockResolvedValue(aUser(false));
+    const workspaceRole = roleOf("member");
+
+    const response = await newProxy({ workspaceRole })(request(path));
+
+    expect(wentOnUntouched(response)).toBe(true);
+    expect(workspaceRole).toHaveBeenCalledWith("u1", "acme");
+  });
+
+  // #101-WM-06, #101-WM-07
+  it.each([
+    "/w/acme",
+    "/w/acme/projects",
+    "/w/acme/members",
+    "/api/w/acme/runs",
+    "/api/w/acme/invitations",
+    "/api/w/acme/members/someone",
+  ])(
+    "goes on marked as one for a missing path for a person who does not belong to the workspace (%s), the instance admin included",
+    async (path) => {
+      for (const isAdmin of [false, true]) {
+        lookupSession.mockResolvedValue(aUser(isAdmin));
+
+        const response = await newProxy({ workspaceRole: roleOf(null) })(
+          request(path),
+        );
+
+        expect(isMarkedAsMissing(response), path).toBe(true);
+      }
+    },
+  );
+
+  // #101-WM-06
+  it.each([
+    "/w/ACME/projects",
+    "/w/-x/projects",
+    "/w/a_b/runs",
+    "/api/w/a%2Fb/runs",
+  ])(
+    "is a missing path when the address is not shaped like a workspace, without asking the database (%s)",
+    async (path) => {
+      lookupSession.mockResolvedValue(aUser(false));
+      const workspaceRole = roleOf("owner");
+
+      const response = await newProxy({ workspaceRole })(request(path));
+
+      expect(isMarkedAsMissing(response)).toBe(true);
+      expect(workspaceRole).not.toHaveBeenCalled();
+    },
+  );
+
+  // #101-WM-06
+  it("answers a workspace that does not exist exactly like one the person does not belong to", async () => {
+    lookupSession.mockResolvedValue(aUser(false));
+    const proxy = newProxy({ workspaceRole: roleOf(null) });
+
+    const theirs = await proxy(request("/api/w/acme/runs"));
+    const nothing = await proxy(request("/api/w/no-such-one/runs"));
+
+    expect(isMarkedAsMissing(theirs)).toBe(true);
+    expect(isMarkedAsMissing(nothing)).toBe(true);
+    expect([...theirs.headers.keys()].sort()).toEqual(
+      [...nothing.headers.keys()].sort(),
+    );
+  });
+
+  // #101-WM-06
+  it("refuses with 503 when the membership cannot be read, instead of letting the request through", async () => {
+    lookupSession.mockResolvedValue(aUser(false));
+    const error = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const workspaceRole = vi.fn(() => Promise.reject(new Error("db is gone")));
+
+    const response = await newProxy({ workspaceRole })(
+      request("/w/acme/projects"),
+    );
+
+    expect(response.status).toBe(503);
+    error.mockRestore();
+  });
+
+  it("is sent to the login without a session, and a data route answers 401", async () => {
+    lookupSession.mockResolvedValue({ kind: "none" });
+    const workspaceRole = roleOf("owner");
+    const proxy = newProxy({ workspaceRole });
+
+    const page = await proxy(request("/w/acme/projects"));
+    const data = await proxy(request("/api/w/acme/runs"));
+
+    expect(page.status).toBe(307);
+    expect(data.status).toBe(401);
+    expect(workspaceRole).not.toHaveBeenCalled();
+  });
+});
+
+describe("a person without a workspace", () => {
+  const without = (): SessionLookup => ({
+    kind: "no_workspace",
+    user: (aUser(false) as { user: SessionUser }).user,
+  });
+
+  // #101-WM-02
+  it.each([
+    "/api/w/acme/runs",
+    "/api/w/acme/invitations",
+    "/api/backup/status",
+  ])(
+    "is refused by every data route with 403 no_workspace_access (%s)",
+    async (path) => {
+      lookupSession.mockResolvedValue(without());
+
+      const response = await newProxy()(request(path));
+
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({ error: "no_workspace_access" });
+    },
+  );
+
+  // #101-WM-01, #101-WM-02
+  it.each(["/w/acme/projects", "/projects", "/", "/runs", "/admin"])(
+    "is sent to the page that says what to do by %s",
+    async (path) => {
+      lookupSession.mockResolvedValue(without());
+
+      const response = await newProxy()(request(path));
+
+      expect(response.status).toBe(307);
+      expect(new URL(response.headers.get("location") ?? "").pathname).toBe(
+        "/no-access",
+      );
+    },
+  );
+
+  // #101-WM-01
+  it.each([
+    "/no-access",
+    "/invitations",
+    "/workspaces/new",
+    "/api/workspaces",
+    "/api/invitations/accept",
+  ])("reaches %s, which is made for them", async (path) => {
+    lookupSession.mockResolvedValue(without());
+
+    const response = await newProxy()(request(path));
+
+    expect(wentOnUntouched(response)).toBe(true);
+  });
+
+  // #101-WM-02
+  it.each([
+    "/no-access/",
+    "/no-access/x",
+    "/api/workspaces/x",
+    "/api/invitations",
+    "/api/invitations/accept/x",
+    "/workspaces",
+    "/invitations/x",
+  ])("reaches nothing that only looks like those (%s)", async (path) => {
+    lookupSession.mockResolvedValue(without());
+
+    const response = await newProxy()(request(path));
+
+    expect(wentOnUntouched(response)).toBe(false);
+  });
 });

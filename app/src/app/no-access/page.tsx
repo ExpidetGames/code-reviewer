@@ -11,7 +11,6 @@
 // A person who has a workspace is sent on to it. The proxy lets a person without a workspace reach this
 // page and a handful of others (src/auth/access.ts, NO_WORKSPACE_PATHS) and nothing else.
 import type { Metadata } from "next";
-import Link from "next/link";
 import { connection } from "next/server";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
@@ -20,8 +19,7 @@ import { currentLookup } from "@/auth/session";
 import { loginPath } from "@/auth/session-user";
 import { loadAccountView } from "@/workspaces/account-view";
 import { workspaceHome } from "@/workspaces/paths";
-import { CreateWorkspaceForm } from "@/workspaces/ui/create-workspace-form";
-import { PendingInvitations } from "@/workspaces/ui/pending-invitations";
+import { NoAccessContent } from "@/workspaces/ui/no-access-content";
 import { Button } from "@/ui/button";
 
 export const metadata: Metadata = { title: "No workspace yet" };
@@ -55,29 +53,10 @@ async function WhatToDo() {
   if (first !== undefined) redirect(workspaceHome(first.workspace.slug));
 
   return (
-    <>
-      <PendingInvitations invitations={view.pending} />
-      {view.multiTenant ? (
-        <section aria-labelledby="create-heading">
-          <h2 id="create-heading">Create a workspace</h2>
-          <p>
-            A workspace holds your connections, repositories and reviews, and
-            the people you invite. You become its Owner.
-          </p>
-          <CreateWorkspaceForm />
-        </section>
-      ) : (
-        <p>
-          Your account exists, but it is not part of a workspace. Ask an admin
-          of this instance for an invitation.
-        </p>
-      )}
-      {lookup.user.isInstanceAdmin ? (
-        <p className="muted small">
-          You run this instance:{" "}
-          <Link href="/admin">open the admin portal</Link>.
-        </p>
-      ) : null}
-    </>
+    <NoAccessContent
+      multiTenant={view.multiTenant}
+      pending={view.pending}
+      isInstanceAdmin={lookup.user.isInstanceAdmin}
+    />
   );
 }

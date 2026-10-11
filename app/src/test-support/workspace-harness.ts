@@ -13,12 +13,8 @@ import {
   createWorkspacesRepository,
   type Workspace,
 } from "../db/repositories/workspaces-repository.ts";
-import {
-  createInvitationService,
-  type Acceptor,
-} from "../workspaces/invitations.ts";
-import { createMembersService } from "../workspaces/members.ts";
-import { createWorkspaceLimits } from "../workspaces/rate-limits.ts";
+import { assembleWorkspaces } from "../workspaces/assemble.ts";
+import type { Acceptor } from "../workspaces/invitations.ts";
 import type { WorkspaceRole } from "../workspaces/roles.ts";
 import { createFakeMail } from "./fake-mail.ts";
 import { createTestDatabase } from "./test-database.ts";
@@ -56,13 +52,11 @@ export async function createWorkspaceHarness(
 
   const mail = createFakeMail(options.mail ?? false);
   const rateLimits = createRateLimitsRepository(db, now);
-  const limits = createWorkspaceLimits(rateLimits, now);
   const tokens: string[] = [];
   const logs: string[] = [];
-  const invitations = createInvitationService({
+  const assembled = assembleWorkspaces({
     db,
     mail,
-    limits,
     baseUrl: WORKSPACE_TEST_BASE_URL,
     githubConfigured: () => options.github ?? false,
     now,
@@ -76,7 +70,7 @@ export async function createWorkspaceHarness(
     },
     log: (line) => logs.push(line),
   });
-  const members = createMembersService({ db, now });
+  const { limits, invitations, members } = assembled;
   const workspaces = createWorkspacesRepository(db, now);
 
   async function addUser(
@@ -150,6 +144,8 @@ export async function createWorkspaceHarness(
     limits,
     invitations,
     members,
+    /** The route handlers, over the same services. */
+    handlers: assembled.handlers,
     workspaces,
     /** Every token the invitation service made, oldest first. */
     tokens,
