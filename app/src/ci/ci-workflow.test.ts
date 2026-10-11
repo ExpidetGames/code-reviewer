@@ -77,13 +77,9 @@ function jobNamed(id: string): Job {
 }
 
 describe("CI workflow triggers and jobs", () => {
-  // CR-16-T01
-  it("runs on pull requests into development, main and epic branches and on pushes to development and main", () => {
-    expect(workflow.on.pull_request?.branches).toEqual([
-      "development",
-      "main",
-      "CR-*",
-    ]);
+  // CR-16-T01, trigger changed by #129
+  it("runs on pull requests into development and main and on pushes to development and main", () => {
+    expect(workflow.on.pull_request?.branches).toEqual(["development", "main"]);
     expect(workflow.on.push?.branches).toEqual(["development", "main"]);
   });
 
