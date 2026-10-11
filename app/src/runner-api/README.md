@@ -16,7 +16,7 @@ The runner (Python, `runner/`) asks the app for work over HTTP: it **claims** a 
 | `claim.ts`                         | The claim: guard, settings, pull request, credentials, the response                                                                                                                                             |
 | `report.ts`                        | Heartbeat and complete                                                                                                                                                                                          |
 | `requests.ts`                      | The checks on job id, `X-Runner-Id` and the two request bodies (hand written, kept in line with the contract by the compatibility test)                                                                         |
-| `token-auth.ts`, `startup.ts`      | The `RUNNER_TOKEN` check (constant time, at least 32 characters) and the hint at server start                                                                                                                   |
+| `token-auth.ts`, `startup.ts`      | The `RUNNER_TOKEN` check (constant time, at least 32 characters) and the warning at a start without the production check                                                                                        |
 | `redact.ts`                        | Removes anything that looks like a credential from a result before it is stored                                                                                                                                 |
 | `responses.ts`                     | Every answer: `Cache-Control: no-store`, the error form `{ error: { code, message } }`                                                                                                                          |
 | `claim-guard.ts`, `job-options.ts` | The two hooks (below); `project-claim-guard.ts` and `review-settings-job-options.ts` are what the running server plugs in                                                                                       |
@@ -37,7 +37,7 @@ through (`src/auth/access.ts`): this token is the authentication.
 
 `X-Runner-Id` is a free-form name (letters, digits and `._:@-`, up to 64 characters) that ends up in
 `jobs.runner_id` and in the logs. There is no rate limit on failed attempts: that is why the token must
-be long and random (`openssl rand -hex 32`); the server logs one warning at start if it is missing or short. It is bookkeeping, not a security boundary: what proves that a runner
+be long and random (`openssl rand -hex 32`); a production start with a missing or short token is refused (`DEPLOY_CONFIG_INVALID`, `src/deploy/startup.ts`), any other start logs one warning. It is bookkeeping, not a security boundary: what proves that a runner
 holds a job is the **lease token**.
 
 ## The lease token
@@ -127,7 +127,7 @@ The body is `{ leaseToken, result }`. `result` is what `code-reviewer-run-job` p
   not a different result.
 - A body over 64 KiB is refused with `413` before it is parsed.
 
-## Hooks that other tickets fill in
+## Hooks
 
 - **`ClaimGuard`** (`claim-guard.ts`): `check(job)` returns `{ allow: true }` or
   `{ allow: false, errorCode, outcome? }`. The running server uses `createProjectClaimGuard`
@@ -163,7 +163,7 @@ The body is `{ leaseToken, result }`. `result` is what `code-reviewer-run-job` p
   (capped, oldest first; a restart forgets it, and masking then falls back to the current key and to the
   shape of a credential), because a key is never written to the database.
 
-## Before this is used in production
+## Where the trigger policy lives
 
 The trigger policy (CR-31: drafts, the review settings, the debounce of a push, the check against
 the current head commit, dropping the waiting jobs of a closed pull request) and the project gate

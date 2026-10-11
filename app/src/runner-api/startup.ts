@@ -1,6 +1,9 @@
-// A check at server start: is the runner token set and strong enough? The server starts either way
-// (a deployment without a runner is valid), but every call of the runner API is refused until the
-// token is fine, so the operator should hear why. The line never contains the token.
+// The start-up warning about the runner token: names what is wrong with RUNNER_TOKEN (not set, too
+// short, or with white space or control characters inside). A production start never gets this far
+// with such a token: src/deploy/startup.ts judges it by the same rule (runnerTokenProblem) and ends
+// the process with DEPLOY_CONFIG_INVALID. Where that check does not run (the dev server) the server
+// starts anyway, every call of the runner API is refused (401) until the token is fine, and this
+// warning tells the developer why. The line never contains the token.
 import "server-only";
 import { runnerTokenProblem } from "./token-auth.ts";
 
