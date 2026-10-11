@@ -18,6 +18,10 @@ export const PUBLIC_PATHS: readonly PublicPath[] = [
   { path: "/api/setup", match: "prefix" },
   // Better Auth: sign in, the OAuth callback, sign out.
   { path: "/api/auth", match: "prefix" },
+  // Setting a new password with a reset link: the token in the link is the credential (and the data route
+  // is rate limited), see src/auth/password-reset-http.ts.
+  { path: "/reset-password", match: "exact" },
+  { path: "/api/password-reset", match: "exact" },
   // The runner authenticates with its own shared token, not with a session.
   { path: "/api/runners", match: "prefix" },
   // GitHub authenticates a webhook with its signature, not with a session.

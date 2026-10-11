@@ -3,6 +3,7 @@
 // gate and the access proxy in front, the real admin data routes behind them, and the real settings
 // service and secret store over a real SQLite file. Requests are real `Request` objects with cookies, the
 // way a browser sends them; nothing listens on a port.
+import { sql } from "kysely";
 import { NextRequest } from "next/server";
 import { adminAccessOf } from "../admin/access.ts";
 import { createAdminRouteHandlers } from "../admin/http.ts";
@@ -230,8 +231,14 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
     .where("email", "=", SETUP_TEST_ADMIN.email)
     .executeTakeFirstOrThrow();
 
+  // The file the database lives in, for the command line, which opens its own connection.
+  const { rows: files } = await sql<{
+    file: string;
+  }>`select file from pragma_database_list where name = 'main'`.execute(db);
+
   return {
     ...setup,
+    databasePath: files[0]?.file ?? "",
     adminId: adminRow.id,
     adminCookies,
     secrets,

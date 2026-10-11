@@ -24,6 +24,9 @@ const PUBLIC_ROUTES = [
   "/api/setup/code",
   "/api/setup/complete",
   "/api/auth/[...all]",
+  // A reset link carries its own credential, the token (src/auth/password-reset-http.ts).
+  "/reset-password",
+  "/api/password-reset",
   // GitHub signs its deliveries; the route checks the signature itself (src/webhooks/README.md).
   "/api/webhooks/github-app",
   // The runner sends its own shared token (src/runner-api/README.md).
