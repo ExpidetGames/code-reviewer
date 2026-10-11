@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The ordered list of migrations. Kysely runs them in the alphabetical order of these keys, so
 // every key after the first starts with a UTC timestamp, `YYYYMMDDHHMMSS_what_it_does`; "0001" sorts
 // before all of them. A migration that has run is never edited: add a new one instead. Registered

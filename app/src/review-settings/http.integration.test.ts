@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the handlers behind the review settings routes: the user is asked for first, a change is
 // checked for where it comes from, its content type, size and shape, the answer carries the settings
 // and their sources, and every refusal is a stable error code (an invalid setting adds the fields).

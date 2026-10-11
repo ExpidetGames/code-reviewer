@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // PUT /api/repositories/:repositoryId/project: switches the project of a repository on or off.
 // Protected: the proxy asks for a session, and `requireUser()` (called by the handler) is the second
 // guard. The logic is in src/projects/http.ts.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The handler behind `POST /api/webhooks/github-app`. It is a function of its collaborators, so the
 // route file only wires the real ones in (`shared.ts`) and tests wire fakes in.
 //

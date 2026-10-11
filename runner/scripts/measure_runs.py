@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Measures the memory and duration of runner processes against the sandbox pull requests (CR-13).
 
 Builds the job like `manual_review.py` (installation token limited to the sandbox repository, LLM

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The five sections of the admin portal. One list feeds the links and the active state.
 
 export const ADMIN_NAV_ITEMS = [

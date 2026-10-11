@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the journey of a person whose GitHub account is not on the allow list: they authorize
 // at GitHub, land back on the login page with a clear message, and are still signed out afterwards.
 // Which accounts are allowed (case, whitespace, organization, re-checks) is proven at a lower level.

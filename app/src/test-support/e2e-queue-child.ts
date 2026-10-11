@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // A program the Playwright journeys run (node runs this file directly, TypeScript types are
 // stripped; `--conditions=react-server` lets `server-only` pass) to act on the job queue of the app
 // under test the way the running app and a runner do: through the real job queue on the app's SQLite

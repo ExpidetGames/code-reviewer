@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // @vitest-environment jsdom
 // Pins down the forms of the admin pages: what each one sends, the sentences for what the server
 // refuses, and the notice for a sign-up rule that cannot work yet. The rules themselves are the server's

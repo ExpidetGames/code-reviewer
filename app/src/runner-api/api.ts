@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The runner API as three functions of their collaborators (`createRunnerApi`). The route files
 // only call `withRunnerApi` (shared.ts); tests build the API with fakes and a real database.
 //

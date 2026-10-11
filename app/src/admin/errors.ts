@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The stable error codes of the admin data routes and the HTTP status of each. The pages translate a
 // code to copy (ui/messages.ts), never the other way round. A code never contains a secret.
 import { SIGN_IN_METHODS_ERROR_CODES } from "./sign-in-methods.ts";

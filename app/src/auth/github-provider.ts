@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The GitHub OAuth app as a Better Auth provider. Better Auth's built-in GitHub provider has the
 // GitHub URLs hard-coded, so the sign in could never be pointed at the fake GitHub in tests. This
 // provider is the generic OAuth one with GitHub's three endpoints made configurable; everything

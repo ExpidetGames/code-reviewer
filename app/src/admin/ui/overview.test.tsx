@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // @vitest-environment jsdom
 // Pins down the overview of the portal: the checklist shows what is configured and what is not, the
 // notice for a sign-up rule that cannot work yet is there exactly when the state says so, and stored

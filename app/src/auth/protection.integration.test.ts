@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down who gets in: the access proxy in front of every route, driven with real requests
 // against a real Better Auth instance and a real SQLite file. Without a valid session a page sends
 // the person to the login page and a data route answers 401; a signed out, expired or forged

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // @vitest-environment jsdom
 // Pins down the navigation of the portal: the five sections in order, and the current one marked, with
 // Overview current only on its own page (every other page of the portal is below /admin).

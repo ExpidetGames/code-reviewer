@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The first-run setup, assembled for integration tests: a real SQLite file, the real Better Auth
 // instance (email and password only), the real completion, the real route handlers, the real setup
 // gate and access proxy in front of them, and a code store with a clock the test moves. The tests

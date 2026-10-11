@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Removes markdown images and links to images from the question of an `ask` job.
 
 PR-Agent's `/ask` takes the first markdown image (`![image]`) or the first link that ends in an

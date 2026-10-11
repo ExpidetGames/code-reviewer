@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The one rule for the GitHub addresses the app talks to. They default to the real GitHub. The sign
 // in sends the client secret and the authorization code to its address, the GitHub App sends its
 // JWT and tokens to its address, so any other address is only accepted together with

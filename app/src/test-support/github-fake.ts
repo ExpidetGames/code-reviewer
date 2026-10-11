@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The one fake GitHub of the app's tests: it speaks the sign in (OAuth, user and organization
 // lookups) and the GitHub App API on the same address, so a test of the login and a test of the
 // GitHub integration use the same fake, and a test that needs both can use one instance. It is

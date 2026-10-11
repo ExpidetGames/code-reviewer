@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The stable error codes of the review settings routes and service. A caller (the UI, a test)
 // branches on `code`, never on the message; the UI translates codes to copy.
 import type { ReviewSettingIssue } from "./validate.ts";

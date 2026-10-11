@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down that the reset page asks the browser not to pass its address on as a referrer: the reset token
 // is in the address, and a link on the page or a resource it loads must not receive it. (The page sets it
 // as a <meta name="referrer"> tag; the e2e journey checks the tag in the served page.)

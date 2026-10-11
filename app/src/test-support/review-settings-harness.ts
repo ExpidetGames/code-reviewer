@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Shared setup of the review settings integration tests: a real SQLite file with one repository, and
 // the service on top of it. Not product code.
 import { createAppSettingsRepository } from "../db/repositories/app-settings-repository.ts";

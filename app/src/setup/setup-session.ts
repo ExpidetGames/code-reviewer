@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The setup session: what the browser holds after it entered the correct setup code. A signed cookie
 // (HMAC with a key derived for this purpose from the app secret), HttpOnly, SameSite=Strict, Secure
 // when the app is served over https, valid for 30 minutes from the moment the code was accepted. It

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // A project is a repository the instance reviews. The row is created the first time a repository is
 // activated and kept from then on: deactivating sets `active` to 0 and leaves the row (and its
 // settings) in place, so activating again finds the same row. `repository_id` is unique, which is

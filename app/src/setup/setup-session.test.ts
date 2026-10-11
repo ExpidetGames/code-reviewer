@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the setup session cookie: valid for 30 minutes, bound to the issuance of the code it was
 // made for, worthless when forged or tampered with, and set with the attributes that keep it from
 // scripts and other sites.

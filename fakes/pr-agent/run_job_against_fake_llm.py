@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """The real job entry point of the runner, with the address of a fake LLM added to the job.
 
 The app hands a runner a job without `llm.baseUrl` (the app has no setting for it: the model is

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Access to the secrets table: the encrypted credentials of the instance, one row per name. This
 // module only moves rows; the encryption, the additional authenticated data and the rules for what
 // may be shown are in src/secrets/. Instance level (a credential of the instance belongs to no

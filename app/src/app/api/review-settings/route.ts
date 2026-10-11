@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // GET|PUT /api/review-settings: the global default values of the review settings.
 // Protected: the proxy asks for a session, and `requireUser()` (called by the handlers) is the second
 // guard. The logic is in src/review-settings/http.ts.

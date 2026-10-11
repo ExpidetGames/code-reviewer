@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Which request paths belong to the admin portal: the pages below `/admin` and the data routes below
 // `/api/admin`. Those paths are not routes of the app: the files of the portal live below
 // `/instance-portal` and `/api/instance-portal`, and the proxy (access-proxy.ts) rewrites the request

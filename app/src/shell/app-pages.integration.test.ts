@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down who sees the pages inside the app frame (Projects, Runs, Settings): a visitor without a
 // session is sent to the login page and gets neither navigation nor user data, from the proxy and
 // again from the page itself (the second guard), and the "Sign out" action ends the session on the

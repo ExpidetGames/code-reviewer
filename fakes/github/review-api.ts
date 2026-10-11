@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The part of the fake GitHub that a reviewer reads and writes: the files and the diff of a pull
 // request, its commits, the contents of files, and the comments below it. These are the calls the
 // GitHub provider of PR-Agent makes (through PyGithub) when the runner reviews a pull request, so

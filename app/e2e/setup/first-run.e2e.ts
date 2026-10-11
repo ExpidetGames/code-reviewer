@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The first-run setup, the way an operator does it: read the code from the log of a production build,
 // enter it in the browser, answer the three questions, and land in /admin signed in. The app has a
 // database of its own that nobody has set up (the third app of the run, see playwright.config.ts).

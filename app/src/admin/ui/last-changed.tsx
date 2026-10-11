@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // "Last changed by ada@example.com on 2026-10-11 09:00 UTC", under a setting: who and when, as the
 // settings service recorded it. A setting that was never changed says so.
 import { formatUtc } from "../../ui/format-time.ts";

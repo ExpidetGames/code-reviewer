@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the rules for the ways to sign in: what is on when nothing was ever saved, what is
 // actually on when GitHub is switched on but not configured, and which changes are refused.
 import { describe, expect, it } from "vitest";

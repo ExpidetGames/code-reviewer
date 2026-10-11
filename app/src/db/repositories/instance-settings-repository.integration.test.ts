@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the instance settings repository against a real SQLite file: a setting without a row
 // reads as undefined (never as a guess), a value round-trips as JSON, and a second write replaces
 // the value and records who and when.

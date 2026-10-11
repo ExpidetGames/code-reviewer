@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the credentials a job gets: a fresh token per call, limited to one repository and the
 // least permissions, a stable code for every way it can fail, and no token, JWT or key anywhere it
 // should not be. The provider and the real client run against the fake GitHub API over real HTTP;

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the password rule: the length bounds, the common password list, and that the refusal
 // carries a stable code (the form translates it to a sentence).
 import { describe, expect, it } from "vitest";

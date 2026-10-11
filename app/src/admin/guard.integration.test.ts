@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down who reaches the admin portal, with real requests through the real proxy and the real data
 // route over a real database and the real Better Auth: a visitor without a session is sent to the
 // sign-in (a page) or gets 401 (a data route); a signed in person who is not an instance admin gets

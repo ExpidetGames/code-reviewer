@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // A complete sign in setup for integration tests: a real SQLite file, the real Better Auth
 // instance of the app, and the fake GitHub on a loopback port. The tests call `auth.handler`
 // with real `Request` objects, the same entry point the route handler uses, and walk the OAuth

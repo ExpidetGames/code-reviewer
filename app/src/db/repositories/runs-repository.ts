@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The read side of the jobs table of ONE workspace (the factory takes the workspace id; see
 // ../workspace-scope.ts) for the pages: the runs list, one run, and the latest run of each
 // repository. It only reads: every change to a job goes through the job queue

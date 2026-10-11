@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Pins down the identity patch (variant B): PR-Agent is run with an installation token, which
 cannot call GET /user, so the login PR-Agent posts as is injected. The patch is tied to the exact
 PR-Agent version it was written for and refuses to apply to anything else."""

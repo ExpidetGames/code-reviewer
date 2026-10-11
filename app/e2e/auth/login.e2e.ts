@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the two journeys that make the app usable: signing in with GitHub (against the fake
 // GitHub, as a person does through the form) and signing out again. Every other behavior of the
 // sign in is proven at a lower level.

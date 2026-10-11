@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Starts the real runner (the job loop, `code-reviewer-runner`) as a process of its own, polling an
 // app under test, and stops it again. Every job it claims runs the real PR-Agent through the real
 // job entry point; only the address of the fake LLM is added to the job on the way (see

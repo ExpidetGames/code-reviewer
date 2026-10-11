@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the Runs pages in a real browser, against a production build next to the fake GitHub: a
 // pull request opened at GitHub reaches the app through a signed delivery, the run shows up on the
 // open Runs page without a reload as waiting, then running, then succeeded, and its page links the

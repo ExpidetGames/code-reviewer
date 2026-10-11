@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down what happens when syncs and deliveries overlap in time. GitHub's answer is slowed down
 // (it reflects the moment the request arrived and reaches the app later), so a sync that is not
 // ordered against a delivery, or that trusts an old snapshot, ends in a wrong state. Also pins down

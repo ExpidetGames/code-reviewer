@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down what a comment on a pull request does: a signed `issue_comment` delivery with one of the
 // four commands from a user with write access becomes a job with exactly that command, through the
 // real webhook handler, the real GitHub App provider, the real job queue and a real SQLite file.

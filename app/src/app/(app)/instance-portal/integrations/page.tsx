@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Integrations: GitHub first. A placeholder until the GitHub issue fills it. Instance admin only.
 import type { Metadata } from "next";
 import { requireAdmin } from "@/admin/session";

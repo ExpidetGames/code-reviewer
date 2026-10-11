@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 "use client";
 // What every form of the admin pages does when it is sent: one call to the data route, a sentence for
 // the result, and a refresh of the page's data on success. Nothing throws; a failure is a stable code

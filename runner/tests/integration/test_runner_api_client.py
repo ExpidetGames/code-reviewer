@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Pins down the HTTP client of the runner API against a real server on loopback: what it sends
 (token, runner id, bodies of the contract) and how it tells the answers apart."""
 

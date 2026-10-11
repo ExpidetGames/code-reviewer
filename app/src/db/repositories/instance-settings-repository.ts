@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Access to the instance_settings table: the settings of the whole instance, one row per setting
 // with a JSON value, and who changed it last. Instance level (it belongs to no workspace). The
 // setup markers live here (see src/setup/README.md); the typed service and the admin portal build

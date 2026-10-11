@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Where a reset link lands: the form for the new password. Public (the token in the link is the
 // credential; src/auth/password-reset-http.ts). The token is in the address, so the page asks the browser
 // not to pass the address on as a referrer, and it is read at request time, behind a boundary.

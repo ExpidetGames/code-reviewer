@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 "use client";
 // The ways to sign in: email with password and GitHub. At least one stays on; GitHub only when it is
 // configured; GitHub as the only way needs your own linked GitHub account. The server judges every

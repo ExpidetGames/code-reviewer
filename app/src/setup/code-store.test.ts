@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the setup code store with a fake clock: expiry after 60 minutes, about five attempts per
 // minute for the whole process, the lock after ten wrong attempts until a new code is issued, and
 // single use. The store never writes anywhere, so there is nothing to leak but its return values.

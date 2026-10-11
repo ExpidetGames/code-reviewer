@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 "use client";
 // The tenancy setting: one workspace for the whole instance (single-tenant) or workspaces that users
 // create themselves (multi-tenant). The rules are the server's (src/admin/tenancy.ts); the form says

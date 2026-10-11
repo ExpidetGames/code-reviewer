@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The reset token of a password reset link (docs/decisions/0001-editions-setup-and-accounts.md, sections
 // 2.3 and 2.7): 256 random bits, spelled base64url so it is safe in a link, valid for 30 minutes, used
 // once. Only its SHA-256 hash is ever stored (`password_reset_tokens.token_hash`), so a copy of the

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+
 # Smoke test of the Docker Compose stack (compose.yml).
 # Usage: docker/smoke/compose.sh [<app image> [<runner image>]]
 #   (defaults: code-reviewer-app:local and code-reviewer-runner:local; build them first, for example

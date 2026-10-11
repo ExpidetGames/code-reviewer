@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The admin check for the code that runs inside a request: the pages, the data routes. The proxy
 // has done the same check first (src/auth/access-proxy.ts); this is the second guard, close to the
 // data, because the proxy alone must not be the only one (a changed matcher would silently remove it).

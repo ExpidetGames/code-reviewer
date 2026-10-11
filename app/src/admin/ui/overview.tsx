@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The overview of the portal: a checklist of what the instance needs (a mail server, GitHub), what it is
 // set to (tenancy, sign-up rule, ways to sign in), and the notices that matter now: a sign-up rule that
 // cannot work yet, and stored credentials that cannot be read any more.

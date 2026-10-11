@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The copy for what the admin data route answers: one sentence per stable code (src/admin/errors.ts) and
 // for the fields of the forms. The codes are the contract, these sentences are only what the page shows.
 import {

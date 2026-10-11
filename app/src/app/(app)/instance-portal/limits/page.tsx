@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Limits: the instance limits. Instance admin only.
 import type { Metadata } from "next";
 import { requireAdmin } from "@/admin/session";

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The wiring of the running server for the admin portal: the settings service on the server's database,
 // the secret store, and the facts the portal shows. Server code only.
 import "server-only";

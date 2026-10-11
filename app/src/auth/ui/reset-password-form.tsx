@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 "use client";
 // The form behind a password reset link: the new password twice. The server judges the password (the
 // password rule of every account) and the token; this form collects them and shows the reasons. The token

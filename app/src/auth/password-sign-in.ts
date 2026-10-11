@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The email and password sign in as the login form runs it: the limit first (sign-in-limit.ts), then
 // Better Auth, and every outcome sorted into one of four answers the page can translate. Only a 4xx
 // answer of Better Auth is "the credentials are not accepted"; anything else (a locked database, a

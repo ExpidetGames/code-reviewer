@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The setup must never accept an admin email address that the sign in then refuses: the instance
 // would be set up for good (the setup answers 404 afterwards) with an admin who cannot sign in.
 // Property style: a large, seeded set of addresses with all the odd parts people and tools produce

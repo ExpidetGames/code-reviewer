@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the operator's command `admin reset-password <email>` against a real SQLite file: it prints a
 // link for an account that has a password, once, with a token the database keeps only as a hash; a new
 // link replaces the old one; an unknown account or one without a password is reported and nothing is

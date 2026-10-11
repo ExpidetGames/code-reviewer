@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down when a sign-up rule is fail-closed (docs/decisions/0001-editions-setup-and-accounts.md,
 // section 2.5): a rule that names emails or domains needs verifiable addresses, that is a mail server
 // or GitHub as the only way to sign in.

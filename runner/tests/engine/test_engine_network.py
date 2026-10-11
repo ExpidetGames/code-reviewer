@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Pins down that the engine suite never leaves the machine: every connection of a job process goes
 to loopback (the process records its connections and refuses all others, see connect_guard/), the
 caches PR-Agent needs are on disk, and a job that points the LLM key at a foreign host is refused

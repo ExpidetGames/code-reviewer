@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Proves the setup end to end: a small key/value table for facts about the installation itself.
 import type { Migration } from "kysely/migration";
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the Docker Compose setup (compose.yml, compose.build.yml, .env.example) as files: which
 // services exist and how they are wired, that no secret is written in the compose file, and that
 // .env.example documents every variable the stack and the code read. Whether the stack really
@@ -16,7 +18,7 @@ function read(path: string): string {
 
 type Service = {
   image?: string;
-  build?: { context?: string };
+  build?: { context?: string; dockerfile?: string };
   restart?: string;
   ports?: string[];
   volumes?: string[];
@@ -135,9 +137,14 @@ describe("compose services", () => {
     );
   });
 
-  it("builds both images from their folders when the build override is added", () => {
-    expect(buildOverride.services.app?.build?.context).toBe("app");
-    expect(buildOverride.services.runner?.build?.context).toBe("runner");
+  // #118-T03 (the context is the repository root, so the images carry the license files)
+  it("builds both images from the checkout, with the Dockerfile of each folder, when the build override is added", () => {
+    for (const name of ["app", "runner"] as const) {
+      expect(buildOverride.services[name]?.build?.context).toBe(".");
+      expect(buildOverride.services[name]?.build?.dockerfile).toBe(
+        `${name}/Dockerfile`,
+      );
+    }
     expect(statSync(`${repoRoot}app/Dockerfile`).isFile()).toBe(true);
     expect(statSync(`${repoRoot}runner/Dockerfile`).isFile()).toBe(true);
   });

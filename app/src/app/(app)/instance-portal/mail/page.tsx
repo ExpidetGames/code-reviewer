@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Mail: the mail server (SMTP). A placeholder until the mail issue fills it. Instance admin only.
 import type { Metadata } from "next";
 import { requireAdmin } from "@/admin/session";

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The content of the Projects page: the configuration hints on top, then the list of repositories.
 // `loadProjectsPage` gathers the data from the services (passed in, so a test uses real ones against
 // a test database), `ProjectsPageContent` renders it. The page file only wires the real services.

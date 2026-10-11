@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Starts src/test-support/db-child.ts as a real process and gives tests line based control of it.
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";

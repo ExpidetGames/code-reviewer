@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The estimated cost of one review with the model (and the fallback model), and the warnings of the
 // cost guard (src/review-settings/cost.ts): above the customer's limit, a model without a known
 // price. Those two advise and never block a save; a token budget that does not fit the model's

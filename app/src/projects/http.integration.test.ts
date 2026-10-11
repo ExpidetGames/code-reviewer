@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the handler behind `PUT /api/repositories/:id/project`: it asks for the user first, checks
 // the request, calls the service and answers with a stable error code. The user check is injected so
 // this test needs no session; the proxy in front of the real route is tested in

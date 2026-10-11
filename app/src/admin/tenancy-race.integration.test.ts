@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the race the switch to single-tenant has with the creation of a workspace: two real
 // processes, each with its own connection to one database file, start together. However they
 // interleave, the instance never ends up single-tenant with two workspaces; one of the two is refused

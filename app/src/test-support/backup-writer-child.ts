@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // A process that uses the database next to a backup (see backup-harness.ts). It runs until it is
 // killed.
 //

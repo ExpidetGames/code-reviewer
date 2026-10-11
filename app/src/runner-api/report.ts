@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // POST /api/runners/v1/jobs/:id/heartbeat and /complete: what a runner says about a job it holds.
 // Both prove the claim with the lease token of the claim response (not with the runner id, which is
 // bookkeeping only), so a stale execution of a job that was requeued and claimed again gets 409

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The request guard behind `src/proxy.ts`. Every request runs through it (the proxy matcher only
 // leaves out Next.js's own static files): a path that is not public needs a valid session, which is
 // looked up in the database on each request, so a signed out or expired session stops working at

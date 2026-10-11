@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down "has the GitHub App been started to configure": any one variable with a value, white
 // space does not count, and none at all is the normal state of an instance that is not connected.
 import { describe, expect, it } from "vitest";

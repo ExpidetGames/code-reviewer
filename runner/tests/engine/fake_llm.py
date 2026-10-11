@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """A fake OpenAI-compatible LLM endpoint for the engine suite (OpenRouter shaped, loopback only).
 
 PR-Agent talks to it through LiteLLM's real OpenRouter code path: `OPENROUTER__API_BASE` points at

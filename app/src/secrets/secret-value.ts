@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // A secret that was read out of the store (docs/decisions/0001-editions-setup-and-accounts.md,
 // section 2.7: never returned by an API, never logged, never in an error message). The value is a
 // private field that `reveal()` hands out on purpose; everything that happens by accident (a string,

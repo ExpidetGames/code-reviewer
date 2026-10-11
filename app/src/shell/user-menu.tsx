@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 "use client";
 // The user menu in the header: a button with the avatar and the name that opens a small panel with
 // the person, the color theme and "Sign out". It is a disclosure (a button that shows and hides a

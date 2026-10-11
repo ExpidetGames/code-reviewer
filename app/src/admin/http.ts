@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The handlers behind the admin data routes, with their collaborators passed in so the route files only
 // wire the real ones and tests wire fakes:
 //

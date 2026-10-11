@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down that the running server reads the LLM variables from the process environment on every
 // call: a value changed while the app runs is used by the next claim and the next page load.
 import { afterEach, describe, expect, it, vi } from "vitest";

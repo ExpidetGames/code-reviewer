@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The places of the signed in app. One list feeds the navigation, so the labels, the links and the
 // active state cannot drift apart.
 

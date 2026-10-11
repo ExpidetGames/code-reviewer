@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Turns the settings of one review into the fields of a runner job. Pure: the settings go in, the
 // `llm` fields, the `env` and the fallback models come out, and nothing else.
 //

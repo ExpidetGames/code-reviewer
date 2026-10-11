@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The wiring of the running server: the LLM configuration as the process environment has it right
 // now. Read on every call, never cached, so a changed value is used by the next claim or page.
 import "server-only";

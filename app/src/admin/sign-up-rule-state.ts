@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Whether the sign-up rule works right now (docs/decisions/0001-editions-setup-and-accounts.md,
 // section 2.5). A rule that names emails or domains is only meaningful for verified addresses, and an
 // address can be verified through a mail server or through GitHub. It is fail-closed (nobody except

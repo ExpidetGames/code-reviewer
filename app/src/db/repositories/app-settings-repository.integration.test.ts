@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the app_settings repository against a real SQLite file: reading a setting that was never
 // saved, saving and replacing a value with the time and the person, JSON values of every shape, and
 // removing a setting.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Changing the tenancy of the instance (docs/decisions/0001-editions-setup-and-accounts.md, section
 // 2.3):
 //

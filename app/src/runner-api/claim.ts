@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // POST /api/runners/v1/claim: hands the next job to a runner, with everything it needs to run it.
 //
 // The credentials are created here, at claim time, and nowhere else (never when the job is queued):

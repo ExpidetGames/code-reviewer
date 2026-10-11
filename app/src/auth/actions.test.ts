@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the gates of the login form's Server Functions: a way to sign in that the admin switched off
 // is refused here too, before Better Auth is asked, because the form calls Better Auth directly and never
 // passes the HTTP interface (src/auth/http.ts) that has the same gate.

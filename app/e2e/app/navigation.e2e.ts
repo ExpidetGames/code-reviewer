@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the frame around the signed in app in a real browser: the three places load one after
 // the other inside the same frame and signing out lands on the login page, on a desktop window and
 // on a phone-sized one (where the navigation sits behind the Menu button and the page must not

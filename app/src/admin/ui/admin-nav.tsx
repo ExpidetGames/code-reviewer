@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 "use client";
 // The navigation between the five sections of the portal. `SectionLinks` takes the path as a value;
 // `AdminNav` reads it from the router, which can wait for the request, so the frame shows the links

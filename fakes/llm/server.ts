@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // A fake OpenAI-compatible LLM endpoint (OpenRouter shaped, loopback only) for the tests that run
 // the real PR-Agent: it is reached through LiteLLM's real OpenRouter code path, which sends
 // `POST <api base>/chat/completions` with the key in the `Authorization` header. The fake records

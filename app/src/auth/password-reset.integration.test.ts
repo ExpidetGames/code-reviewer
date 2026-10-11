@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the lost admin password without a mail server, end to end over a real database and the real
 // Better Auth: `admin reset-password` prints a link, the link sets a new password once within 30
 // minutes under the password rule and ends the sessions of the account, and a link that was used,

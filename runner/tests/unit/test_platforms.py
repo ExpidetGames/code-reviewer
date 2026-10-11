@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Pins down the table that maps the platform of a job (`git.provider`) to PR-Agent settings."""
 
 import json

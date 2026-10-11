@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // @vitest-environment jsdom
 // Pins down the configuration hints the pages show: nothing while everything works, a visible hint
 // naming the variable (never a value) when the LLM key or the GitHub App settings are wrong, and

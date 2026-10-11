@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // A section that a later issue fills (mail, integrations): a heading and a sentence on what will be here.
 import { EmptyState } from "../../ui/empty-state.tsx";
 

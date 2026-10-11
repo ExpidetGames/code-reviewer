@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The encrypted secret store (docs/decisions/0001-editions-setup-and-accounts.md, section 2.7), on
 // top of the crypto helpers (src/crypto/):
 //

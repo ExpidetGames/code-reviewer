@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Translates the `error` code in the login page URL to copy. The code comes from Better Auth (or
 // from GitHub, for access_denied) and is untrusted: it only selects a message, it is never shown.
 

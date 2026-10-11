@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The content of the Settings page: the configuration hints, the state of the instance (GitHub App
 // and LLM access) and the form for the global defaults every project inherits. `loadGlobalSettingsPage`
 // gathers the data from the service (passed in), `GlobalSettingsPageContent` renders it.

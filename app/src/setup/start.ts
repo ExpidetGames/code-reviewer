@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // What the server does about the setup when it starts (called from src/instrumentation.ts, after the
 // migrations): while the instance is not set up, every start of a process prints a fresh setup code
 // with one clear line and keeps its hash in the memory of this process. This is the only place that

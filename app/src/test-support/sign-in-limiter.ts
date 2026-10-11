@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // A sign in limiter that never refuses, for tests that are about something else than the limit.
 import { handleAuthRequest } from "../auth/http.ts";
 import type { SignInLimiter } from "../auth/sign-in-limit.ts";

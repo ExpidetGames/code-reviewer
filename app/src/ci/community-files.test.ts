@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the community files that GitHub looks for (CONTRIBUTING.md, CODE_OF_CONDUCT.md,
 // SECURITY.md): that they exist, that the Code of Conduct has a real way to report, that the
 // contribution guide names the commands and rules the project actually has, that their relative

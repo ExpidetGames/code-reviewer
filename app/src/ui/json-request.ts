@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // How the pages call the app's own JSON routes (activate a project, save settings, run the sync).
 // One function so every call sends the same headers and every failure ends up as a stable code the
 // page can translate: nothing here throws. The routes check where a request comes from, so the call

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Who may use the admin portal: the signed in instance admin, and nobody else. A person who is not
 // signed in is sent to the sign-in (a page) or gets 401 (a data route); a signed in person who is not
 // an instance admin gets the same 404 as for a path that does not exist, so nothing says that the

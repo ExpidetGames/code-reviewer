@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the proxy matcher: it must match every path except Next.js's own static files, because
 // "default deny" only holds for paths the proxy sees. A path missing from the match is open.
 import { describe, expect, it } from "vitest";

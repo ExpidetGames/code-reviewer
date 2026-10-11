@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 "use client";
 // The instance limits. For now one: how many workspaces a single user may own (the workspaces feature
 // enforces it).

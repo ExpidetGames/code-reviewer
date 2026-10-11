@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Turns a job into PR-Agent configuration.
 
 PR-Agent reads settings from Dynaconf, which loads every process environment variable with the

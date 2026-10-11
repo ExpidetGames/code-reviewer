@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The setup gate, as a pure decision: what to do with a request while the instance is, or is not,
 // set up (docs/decisions/0001-editions-setup-and-accounts.md, section 2.2). The proxy
 // (src/proxy.ts) applies it before the session check.

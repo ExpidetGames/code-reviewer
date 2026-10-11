@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Access to the repositories table of ONE workspace (the factory takes the workspace id; see
 // ../workspace-scope.ts). The only code that reads or writes it. A repository is never
 // deleted: when the platform stops listing it, it becomes inactive, and it becomes active again

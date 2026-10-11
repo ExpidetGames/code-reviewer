@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Connections to git platforms (see src/integrations/README.md). `config` and `credentials` are JSON
 // text; `credentials` and `webhook_secret` stay empty for a GitHub App and are reserved for token
 // integrations (encrypted before they are used). `external_id` is the platform's id for the

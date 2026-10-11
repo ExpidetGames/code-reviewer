@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // What a job gets from the shared LLM configuration, and how a missing configuration is reported.
 //
 // The claim of the runner API calls `resolveLlmAccess` once per claim, with the environment as it is

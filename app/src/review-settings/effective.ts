@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Puts the layers together: built-in values, global defaults, project overrides. Pure.
 import type { ReviewCommand } from "../integrations/types.ts";
 import {

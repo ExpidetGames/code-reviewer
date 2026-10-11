@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the health answer: ok while the database can be read, an error when it cannot, and an
 // error (not a crash) when the app never opened its database.
 import { describe, expect, it } from "vitest";

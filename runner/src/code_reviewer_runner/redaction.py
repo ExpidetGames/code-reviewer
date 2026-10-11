@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Secret redaction for everything the runner lets out: logs, stdout, stderr and the result.
 
 Two layers. First the exact secrets of the job (and their URL-quoted and base64 forms) are replaced,

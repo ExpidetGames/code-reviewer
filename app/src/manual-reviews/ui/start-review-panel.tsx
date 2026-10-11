@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 "use client";
 // The "Review now" panel of a project: it loads the open pull requests of the repository, lets a
 // person pick one and a command, and starts it. Everything it knows about pull requests comes from

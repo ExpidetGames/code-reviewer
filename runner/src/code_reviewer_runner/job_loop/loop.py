@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """The job loop.
 
 Claims jobs while fewer than `concurrency` run, starts one process per job, beats the heart of

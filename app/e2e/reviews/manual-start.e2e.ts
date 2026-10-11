@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down starting a review by hand in a real browser, against a production build next to the
 // fake GitHub: a person opens the project, picks an open pull request and the command and presses
 // "Review now"; the run shows up on the Runs page as started by them and, once a runner (stood in

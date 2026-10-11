@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the encrypted secret store against a real SQLite file: a value goes in encrypted and
 // comes back exactly, a copy of the stored ciphertext under another name is worthless, a value that
 // cannot be read (changed, wrong APP_SECRET) is a stable error state and never an exception, and

@@ -1,8 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the licensing of the repository: the Apache-2.0 text, the NOTICE with the attribution
 // that the license of PR-Agent demands, and the license declared in every place that carries
 // metadata (package.json, pyproject.toml, both container images). Whether the dependencies of the
-// app and the runner fit Apache-2.0 is recorded in THIRD_PARTY_LICENSES.md; it is checked by hand
-// when dependencies change, because a scan needs the package managers and so is not a unit test.
+// app and the runner fit Apache-2.0 is decided by license-policy.json and enforced by the CI job
+// "Licenses: dependency check" (app/src/ci/license-check, which needs the package managers and so
+// is not a unit test); THIRD_PARTY_LICENSES.md has to agree with the policy (policy-doc.test.ts).
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";

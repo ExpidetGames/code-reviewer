@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The secrets of the instance, by name (docs/decisions/0001-editions-setup-and-accounts.md, section
 // 2.7: the SMTP password and the credentials of the GitHub App). The name is the row id of the
 // `secrets` table and is bound into the ciphertext, so the list is closed: a feature that stores a

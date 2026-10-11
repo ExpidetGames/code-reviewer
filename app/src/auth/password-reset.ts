@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Setting a new password with a reset link (docs/decisions/0001-editions-setup-and-accounts.md, sections
 // 2.3 and 2.7). The link carries a random 256 bit token; the database keeps its hash. A token works once
 // within 30 minutes. A successful reset sets the new password and ends every session of the account, in

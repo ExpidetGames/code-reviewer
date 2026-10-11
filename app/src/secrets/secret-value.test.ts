@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the wrapper around a revealed secret: the value is reachable on purpose (`reveal`) and
 // by no accident, so a secret that ends up in a log call, a string, JSON or an error is shown as a
 // placeholder.

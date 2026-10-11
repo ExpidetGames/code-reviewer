@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // @vitest-environment jsdom
 // Pins down the form behind a password reset link: the two passwords have to match before anything is
 // sent, the server's reasons are shown as sentences, and a link that is not valid says so and what to do.

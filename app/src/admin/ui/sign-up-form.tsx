@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 "use client";
 // The sign-up rule: everyone, a list of emails or allowed email domains. It changes who can create an
 // account from now on; accounts that exist are never deleted or locked by it. An email or domain rule

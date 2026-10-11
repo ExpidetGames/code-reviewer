@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Checks what `enqueue` is given before anything is written. The values come from webhooks and
 // comments, so nothing here trusts a type annotation: every field is looked at as `unknown`.
 import { REVIEW_COMMANDS, type ReviewCommand } from "../integrations/types.ts";

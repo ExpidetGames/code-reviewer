@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the shared secret check of the runner API: only the exact token passes, whatever the
 // lengths and characters of the two sides, and the comparison never throws.
 import { describe, expect, it } from "vitest";

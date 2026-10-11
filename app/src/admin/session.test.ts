@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the second guard of the portal's pages (the proxy is the first): `requireAdmin()` returns the
 // instance admin, sends nobody to the sign-in without a session, and gives a signed in person who is not
 // an admin the 404 page; and every page of the portal asks it before it reads anything.

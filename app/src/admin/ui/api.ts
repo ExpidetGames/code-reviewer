@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The calls the admin pages make to the portal's own data route (src/admin/http.ts). Browser side;
 // nothing throws, a failure is a stable code the page translates (messages.ts).
 import {

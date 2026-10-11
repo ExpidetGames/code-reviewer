@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 "use client";
 // The three links of the main navigation. `NavLinks` takes the current path as a value so it can be
 // rendered anywhere; `CurrentNavLinks` reads it from the router. The router read can wait for the

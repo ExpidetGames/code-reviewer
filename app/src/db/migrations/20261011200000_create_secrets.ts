@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // `secrets`: the credentials of the instance, encrypted at rest (docs/decisions/0001-editions-setup-and-
 // accounts.md, section 2.7): the SMTP password, the GitHub App private key and the like. One row per
 // secret `name`. The value is AES-256-GCM encrypted with a key derived from `APP_SECRET`; the table,

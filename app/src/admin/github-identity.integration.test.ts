@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the check behind "GitHub only": the acting admin's GitHub identity has to be one that signs in
 // today, that is one the access policy lets through, not just a row in `accounts`. Otherwise switching
 // email with password off would lock everybody out, the admin included.

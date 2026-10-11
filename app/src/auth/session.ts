@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The signed in user for pages and server actions. The proxy has already turned away a request
 // without a session; this is the second check, close to the data, because the proxy alone must not
 // be the only guard (a changed matcher would silently remove it).

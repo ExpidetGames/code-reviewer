@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Setup: the tenancy, the sign-up rule and the ways to sign in. Instance admin only.
 import type { Metadata } from "next";
 import { requireAdmin } from "@/admin/session";

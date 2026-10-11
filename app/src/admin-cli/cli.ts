@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The command line for the operator of an instance, run inside the app container:
 //
 //   admin reset-password <email>     print a single-use link that sets a new password (valid 30 minutes)

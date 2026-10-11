@@ -37,6 +37,7 @@ jobs:
       app: ${{ steps.filter.outputs.app }}
       runner: ${{ steps.filter.outputs.runner }}
       workflows: ${{ steps.filter.outputs.workflows }}
+      licenses: ${{ steps.filter.outputs.licenses }}
     steps:
       - name: Filter changed paths
         id: filter
@@ -56,6 +57,10 @@ jobs:
               - '!**/*.md'
             workflows:
               - '.github/**'
+            # The Markdown exclusions above skip this file, but the license check compares it with
+            # license-policy.json (policy-doc.test.ts).
+            licenses:
+              - 'THIRD_PARTY_LICENSES.md'
 
   app-fast:
     name: "App: static, unit tests & build"
@@ -209,6 +214,52 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
+  # The dependency license check (license-policy.json, app/src/ci/license-check): fails when a
+  # package of pnpm-lock.yaml or uv.lock has a license outside the allow list. It reads the license
+  # metadata that pnpm and uv installed, so it needs both parts installed from the lockfiles and no
+  # network service. Runs for every code change, because the policy, the lockfiles and the check
+  # itself live in both parts, and for a change to THIRD_PARTY_LICENSES.md. Besides the check it runs
+  # the tests that keep that file and the policy together, and the SPDX header check, which are
+  # app tests that a runner-only pull request would otherwise skip.
+  licenses:
+    name: "Licenses: dependency check"
+    needs: changes
+    if: ${{ github.event_name == 'push' || github.base_ref == 'main' || needs.changes.outputs.app == 'true' || needs.changes.outputs.runner == 'true' || needs.changes.outputs.licenses == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: app/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - name: Install the app dependencies
+        run: pnpm install --frozen-lockfile
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.0"
+          enable-cache: true
+          cache-dependency-glob: runner/uv.lock
+      - name: Install the runner dependencies
+        working-directory: runner
+        run: uv sync --locked
+      - name: Check the licenses of all dependencies
+        run: pnpm licenses:check
+      # The tests that hold THIRD_PARTY_LICENSES.md and the policy together, and the SPDX header of
+      # every source file (also those of a pull request that only touches the runner, for which
+      # app-fast is skipped).
+      - name: Check that the license documentation agrees with the policy
+        run: pnpm exec vitest run --project unit src/ci/license-check
+      - name: Check the SPDX headers
+        run: pnpm spdx:check
+
   # The container images (see publish-images.yml for how they reach GHCR). A pull request builds
   # each image, starts it and checks what a unit test cannot (docker/smoke/*.sh). Nothing is
   # pushed here: these jobs have no login and only the read-only token of the workflow. Pushes to
@@ -225,7 +276,8 @@ jobs:
       - name: Build the image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          context: app
+          context: .
+          file: app/Dockerfile
           load: true
           push: false
           tags: code-reviewer-app:ci
@@ -246,7 +298,8 @@ jobs:
       - name: Build the image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          context: runner
+          context: .
+          file: runner/Dockerfile
           load: true
           push: false
           tags: code-reviewer-runner:ci
@@ -271,7 +324,8 @@ jobs:
       - name: Build the app image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          context: app
+          context: .
+          file: app/Dockerfile
           load: true
           push: false
           tags: code-reviewer-app:ci
@@ -280,7 +334,8 @@ jobs:
       - name: Build the runner image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
-          context: runner
+          context: .
+          file: runner/Dockerfile
           load: true
           push: false
           tags: code-reviewer-runner:ci
@@ -305,7 +360,7 @@ jobs:
   # fails on any failed or cancelled job and accepts skipped jobs (path filter).
   ci-passed:
     name: All checks passed?
-    needs: [changes, app-fast, runner-fast, engine, e2e, image-app, image-runner, compose, actionlint]
+    needs: [changes, app-fast, runner-fast, engine, e2e, licenses, image-app, image-runner, compose, actionlint]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5

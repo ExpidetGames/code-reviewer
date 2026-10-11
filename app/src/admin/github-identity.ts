@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Whether a user's linked GitHub identity would actually sign in today. "GitHub only" is refused unless
 // the acting admin has one (docs/decisions/0001-editions-setup-and-accounts.md, section 2.3), and a row
 // in `accounts` is not enough: GitHub sign-in still goes through the access policy (the allow list), so

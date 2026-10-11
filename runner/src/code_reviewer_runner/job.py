@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """The job the runner reads from stdin, and its validation.
 
 Shape (basis of the runner contract v1, see the lead decisions for CR-10):

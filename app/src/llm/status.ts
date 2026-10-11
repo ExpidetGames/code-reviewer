@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // What the UI may know about the LLM access: whether it works and, if it does not, which variables
 // are wrong. Never the key, and never any value of a variable that is wrong.
 import type { LlmConfigIssue, LlmConfigState, LlmProvider } from "./config.ts";

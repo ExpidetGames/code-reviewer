@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the sign in with email and password against the real Better Auth instance and a real
 // database: the instance admin the setup creates signs in, is recognized as the instance admin, needs
 // no GitHub identity and no entry on the GitHub allow list, a wrong password and an unknown email get

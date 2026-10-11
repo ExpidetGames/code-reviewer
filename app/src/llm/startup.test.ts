@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down what the server says about the LLM access when it starts: a problem is one warning with
 // the code and the variable names, the start goes on, and no value is printed.
 import { describe, expect, it, vi } from "vitest";

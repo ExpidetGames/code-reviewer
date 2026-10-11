@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the reset token: 256 random bits in a link-safe spelling, only ever stored as a hash, and
 // valid for 30 minutes.
 import { describe, expect, it } from "vitest";

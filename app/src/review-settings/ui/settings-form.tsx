@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 "use client";
 // The review settings form, for the global defaults and for one project. Every field shows the value
 // that is in force and where it comes from. Changing a field sets it for this layer; "Use default"

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down that every part of the admin portal asks for the admin itself, not only the proxy in front of
 // it: each page calls `requireAdmin()`, the layout does too, each data route hands `lookupAdmin` to the
 // handlers that check it first, and no file of Server Functions lives in the portal's folders (a Server

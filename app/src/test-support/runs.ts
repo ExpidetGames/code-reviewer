@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Fixtures for the tests of the runs pages: runs in every state, made through the job queue the way the
 // running app makes them (enqueue, claim, complete), never by writing rows. Builds on the job queue
 // fixture: two repositories, a clock the test moves by hand.
