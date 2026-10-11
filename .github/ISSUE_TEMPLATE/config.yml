@@ -1,0 +1,11 @@
+# Every report uses one of the forms next to this file. Questions have their own form because
+# GitHub Discussions are switched off for this repository; when they are enabled, replace the
+# question form with a contact link to the Discussions page.
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/ExpidetGames/code-reviewer/security/advisories/new
+    about: Report vulnerabilities privately here. Do not open a public issue for a security problem.
+  - name: Documentation
+    url: https://github.com/ExpidetGames/code-reviewer#readme
+    about: Setup, configuration, deployment and testing are described in the README and the docs folder.
