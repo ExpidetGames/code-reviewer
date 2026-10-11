@@ -3,11 +3,14 @@
 // in the container), so exit codes, output and files on disk are what is checked.
 import { spawnSync } from "node:child_process";
 import {
+  copyFileSync,
+  existsSync,
   mkdirSync,
   readFileSync,
   statSync,
   symlinkSync,
   truncateSync,
+  writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -175,6 +178,47 @@ describe("the restore command", () => {
     track(db);
     const users = await db.selectFrom("users").select("id").execute();
     expect(users).toHaveLength(2);
+  });
+
+  // CR-76-T01
+  it("prints where leftover side files went when there is no database to move", async () => {
+    const { env } = await setup();
+    expect(run(["backup"], env).status).toBe(0);
+    const [fileName] = namesIn(env.BACKUP_DIR);
+    const databasePath = join(await createTestDirectory(), "app.db");
+    writeFileSync(`${databasePath}-wal`, "log");
+
+    const result = run(["restore", join(env.BACKUP_DIR, fileName ?? "")], {
+      ...env,
+      DATABASE_PATH: databasePath,
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("no database was in place");
+    expect(result.stdout).toContain(`${databasePath}-wal.before-restore-`);
+    expect(existsSync(`${databasePath}-wal`)).toBe(false);
+  });
+
+  // CR-76-T01
+  it("prints where the side files of the previous database went as well", async () => {
+    const { env } = await setup();
+    expect(run(["backup"], env).status).toBe(0);
+    const [fileName] = namesIn(env.BACKUP_DIR);
+    // An old database that no handle of this process holds (the CLI runs as another process).
+    const databasePath = join(await createTestDirectory(), "app.db");
+    copyFileSync(join(env.BACKUP_DIR, fileName ?? ""), databasePath);
+    writeFileSync(`${databasePath}-shm`, "index ".repeat(50));
+
+    const result = run(["restore", join(env.BACKUP_DIR, fileName ?? "")], {
+      ...env,
+      DATABASE_PATH: databasePath,
+    });
+
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("the previous database was kept as");
+    expect(result.stdout).toContain("its side files were kept as");
+    expect(result.stdout).toContain(`${databasePath}-shm.before-restore-`);
   });
 
   // CR-40-T11
