@@ -51,7 +51,12 @@ export function accountKey(email: unknown): string {
   return `sign-in:email:${hash}`;
 }
 
-function secondsLeft(started: Date, windowMs: number, now: Date): number {
+/** Seconds until the window that began at `started` is over (at least 1), for `Retry-After`. */
+export function secondsLeft(
+  started: Date,
+  windowMs: number,
+  now: Date,
+): number {
   return Math.max(
     1,
     Math.ceil((started.getTime() + windowMs - now.getTime()) / 1000),

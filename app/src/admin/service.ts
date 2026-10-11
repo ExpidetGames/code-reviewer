@@ -16,6 +16,7 @@ import type { Database } from "../db/schema.ts";
 import type { SecretStatus, SecretStore } from "../secrets/store.ts";
 import type { SetupIssue } from "../setup/errors.ts";
 import { parseSignUpRule } from "../setup/input.ts";
+import { CLOSED_RULE } from "../signup/rule.ts";
 import { githubIdentityPasses } from "./github-identity.ts";
 import {
   checkSignInMethods,
@@ -159,10 +160,8 @@ export function createAdminService({
       const mail = await mailConfigured();
       const storedMethods = methods?.value as SignInMethods | undefined;
       const effective = effectiveSignInMethods(storedMethods, github);
-      const signUp: SignUpRule = (rule?.value as SignUpRule | undefined) ?? {
-        kind: "emails",
-        entries: [],
-      };
+      const signUp: SignUpRule =
+        (rule?.value as SignUpRule | undefined) ?? CLOSED_RULE;
       const count = await db
         .selectFrom("workspaces")
         .select((eb) => eb.fn.countAll<number>().as("count"))

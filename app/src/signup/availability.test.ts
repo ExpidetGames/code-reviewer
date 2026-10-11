@@ -6,13 +6,14 @@
 import { describe, expect, it } from "vitest";
 import type { SignInMethods } from "../admin/sign-in-methods.ts";
 import { signUpAvailability } from "./availability.ts";
+import type { SignUpRule } from "./rule.ts";
 
 const EMAIL: SignInMethods = { emailPassword: true, github: false };
 const GITHUB_ONLY: SignInMethods = { emailPassword: false, github: true };
 const BOTH: SignInMethods = { emailPassword: true, github: true };
-const EVERYONE = { kind: "everyone" } as const;
-const LIST = { kind: "emails", entries: ["a@example.com"] } as const;
-const DOMAINS = { kind: "domains", entries: ["example.com"] } as const;
+const EVERYONE: SignUpRule = { kind: "everyone" };
+const LIST: SignUpRule = { kind: "emails", entries: ["a@example.com"] };
+const DOMAINS: SignUpRule = { kind: "domains", entries: ["example.com"] };
 
 describe("the availability of the email sign-up", () => {
   // #99-SR-08

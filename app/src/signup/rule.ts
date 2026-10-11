@@ -17,6 +17,12 @@ import { isValidEmail } from "../setup/input.ts";
 
 export type SignUpRule = InstanceSettingValues["sign_up_rule"];
 
+/**
+ * What nothing saved reads as: a rule that lets nobody in (an empty list). The admin portal shows the
+ * same, so the page and the behavior agree.
+ */
+export const CLOSED_RULE: SignUpRule = { kind: "emails", entries: [] };
+
 export const SIGN_UP_RULE_ERROR_CODES = [
   /** The text is not a well-formed email address. */
   "invalid_email",
