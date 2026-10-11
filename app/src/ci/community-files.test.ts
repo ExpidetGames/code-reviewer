@@ -13,6 +13,15 @@ function read(path: string): string {
   return readFileSync(`${repoRoot}${path}`, "utf8");
 }
 
+/** Relative link targets of a Markdown text: inline links and reference definitions, anchors cut off. */
+function relativeLinks(text: string): string[] {
+  const inline = [...text.matchAll(/\]\((?!https?:|#|mailto:)([^)#\s]+)/g)];
+  const definitions = [
+    ...text.matchAll(/^\[[^\]]+\]:\s*(?!https?:|#|mailto:)([^#\s]+)/gm),
+  ];
+  return [...inline, ...definitions].map((match) => match[1] ?? "");
+}
+
 const files = ["CONTRIBUTING.md", "CODE_OF_CONDUCT.md", "SECURITY.md"] as const;
 
 describe.each(files)("%s", (file) => {
@@ -30,16 +39,26 @@ describe.each(files)("%s", (file) => {
   });
 
   it("links only to files that exist", () => {
-    const links = [
-      ...text.matchAll(/\]\((?!https?:|#|mailto:)([^)#\s]+)/g),
-    ].map((m) => m[1]);
-
-    for (const link of links) {
+    for (const link of relativeLinks(text)) {
       expect(
-        existsSync(resolve(dirname(`${repoRoot}${file}`), link ?? "")),
+        existsSync(resolve(dirname(`${repoRoot}${file}`), link)),
         link,
       ).toBe(true);
     }
+  });
+});
+
+describe("relativeLinks", () => {
+  it("finds inline links and reference-style definitions, and skips web, anchor and mail links", () => {
+    const sample = [
+      "See [a](docs/a.md#part), [b][ref], [web](https://example.com), [top](#top).",
+      "",
+      "[ref]: ./b.md",
+      "[site]: https://example.com/x",
+      "[mail]: mailto:someone@example.com",
+    ].join("\n");
+
+    expect(relativeLinks(sample)).toEqual(["docs/a.md", "./b.md"]);
   });
 });
 
@@ -56,6 +75,11 @@ describe("CODE_OF_CONDUCT.md", () => {
     expect(text).toContain(
       "https://github.com/ExpidetGames/code-reviewer/security/advisories/new",
     );
+  });
+
+  it("accepts conduct reports through the private reporting channel", () => {
+    expect(text).toMatch(/conduct reports are explicitly accepted/);
+    expect(text).toContain('start the title with "Code of conduct"');
   });
 });
 

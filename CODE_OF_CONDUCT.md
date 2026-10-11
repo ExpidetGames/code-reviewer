@@ -37,7 +37,7 @@ This Code of Conduct applies within all community spaces, and also applies when 
 
 ## Enforcement
 
-Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to the community leaders responsible for enforcement through a private report that only the maintainers can see: open a private security advisory at [https://github.com/ExpidetGames/code-reviewer/security/advisories/new](https://github.com/ExpidetGames/code-reviewer/security/advisories/new) and start the title with "Code of conduct". The report is not public. All complaints will be reviewed and investigated promptly and fairly.
+Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to the community leaders responsible for enforcement through the repository's private reporting channel (GitHub private vulnerability reporting). The channel is meant for security issues, but conduct reports are explicitly accepted there as well, and only the maintainers can see them. To report, open [https://github.com/ExpidetGames/code-reviewer/security/advisories/new](https://github.com/ExpidetGames/code-reviewer/security/advisories/new) and start the title with "Code of conduct". The report is not public. All complaints will be reviewed and investigated promptly and fairly.
 
 All community leaders are obligated to respect the privacy and security of the reporter of any incident.
 
