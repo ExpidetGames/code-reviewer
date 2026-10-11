@@ -103,4 +103,21 @@ test.describe("the first-run setup", () => {
     await page.goto("/admin");
     await expect(page.getByRole("heading", { name: "Admin" })).toBeVisible();
   });
+
+  // #97-LIMIT
+  test("the login form refuses the sixth attempt for one email address with a sentence about waiting, for an unknown address as for a known one", async ({
+    page,
+  }) => {
+    await page.goto("/login");
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      await page.getByLabel("Email address").fill("nobody@e2e.test");
+      await page.getByLabel("Password").fill("not-the-right-password-1");
+      await page.getByRole("button", { name: "Sign in", exact: true }).click();
+      await expect(page).toHaveURL(/\/login\?error=/);
+    }
+
+    await expect(
+      page.getByRole("alert").filter({ hasText: "Too many sign-in attempts" }),
+    ).toBeVisible();
+  });
 });
