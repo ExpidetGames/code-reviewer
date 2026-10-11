@@ -255,6 +255,36 @@ test.describe("the admin portal", () => {
   });
 
   // #138
+  test("the header that marks a request as one for a missing path does nothing on the paths the proxy does not see", async ({
+    page,
+    request,
+  }) => {
+    await signInThroughTheForm(page, member);
+    // Found in the page of the app, so the files exist whatever the build is called.
+    const html = await (await request.get("/login")).text();
+    const script = /\/_next\/static\/[^"']+\.js/.exec(html)?.[0];
+    expect(script).toBeDefined();
+    const image = `/_next/image?url=${encodeURIComponent("/favicon.ico")}&w=32&q=75`;
+
+    for (const path of [script ?? "", image, "/favicon.ico"]) {
+      const marked = await observe(page, path, {
+        headers: { "x-portal-denied": "1" },
+      });
+      expect((await observe(page, path)).status, path).toBe(200);
+      expect(marked.status, path).toBe(200);
+    }
+    // The marker makes a page that is seen by the proxy a missing one for the requester alone: the proxy
+    // takes it off first.
+    expect(
+      (
+        await observe(page, "/projects", {
+          headers: { "x-portal-denied": "1" },
+        })
+      ).status,
+    ).toBe(200);
+  });
+
+  // #138
   test("the files of the portal by their own address are a missing path to the instance admin too, in every detail", async ({
     page,
   }) => {

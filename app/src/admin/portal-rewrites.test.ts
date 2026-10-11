@@ -20,13 +20,23 @@ describe("the rewrites of next.config.ts", () => {
   it("send a request the proxy marked to the missing path before any file is looked at", async () => {
     const { beforeFiles } = await rewrites();
 
-    expect(beforeFiles).toEqual([
-      {
-        source: "/:path*",
-        has: [{ type: "header", key: PORTAL_DENIED_HEADER }],
-        destination: MISSING_PATH,
-      },
-    ]);
+    expect(beforeFiles).toHaveLength(1);
+    const [rule] = beforeFiles ?? [];
+    expect(rule?.has).toEqual([{ type: "header", key: PORTAL_DENIED_HEADER }]);
+    expect(rule?.destination).toBe(MISSING_PATH);
+    // Only what the proxy sees: the proxy takes the header off a request from outside, and does not see
+    // Next.js's static files, the image route and the favicon.
+    const matches = new RegExp(
+      `^${(rule?.source ?? "").replace("/:path", "")}$`,
+    );
+    for (const seen of ["/", "/login", "/admin/setup", "/instance-portal/x"])
+      expect(matches.test(seen.slice(1)), seen).toBe(true);
+    for (const skipped of [
+      "_next/static/chunks/a.js",
+      "_next/image",
+      "favicon.ico",
+    ])
+      expect(matches.test(skipped), skipped).toBe(false);
   });
 
   // #138

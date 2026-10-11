@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { NextConfig } from "next";
-import { MISSING_PATH, PORTAL_DENIED_HEADER } from "./src/admin/paths.ts";
+import {
+  MISSING_PATH,
+  PORTAL_DENIED_HEADER,
+  PROXY_SKIPPED_PATHS,
+} from "./src/admin/paths.ts";
 
 const nextConfig: NextConfig = {
   // A self-contained server (`.next/standalone/server.js`) with only the files it needs, for the
@@ -16,7 +20,8 @@ const nextConfig: NextConfig = {
       // with nothing of the portal in the answer.
       beforeFiles: [
         {
-          source: "/:path*",
+          // Only what the proxy sees: it is the proxy that takes the header off a request from outside.
+          source: `/:path((?!${PROXY_SKIPPED_PATHS}).*)`,
           has: [{ type: "header", key: PORTAL_DENIED_HEADER }],
           destination: MISSING_PATH,
         },

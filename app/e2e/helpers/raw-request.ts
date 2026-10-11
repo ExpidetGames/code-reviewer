@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // An HTTP request that keeps what Playwright's request API hides: the header names exactly as the
-// server wrote them (Playwright lower-cases them), in the order they arrived. The journeys that compare
+// server wrote them (Playwright lower-cases them), as an observer sees them. The journeys that compare
 // an answer with the answer of a path that does not exist need this: a header that Next.js writes as
 // `Cache-Control` and the proxy as `cache-control` is an observable difference.
 import { request } from "node:http";

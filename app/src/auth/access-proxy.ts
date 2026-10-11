@@ -55,7 +55,8 @@ export function createAccessProxy({
 
   /**
    * Lets the request go on. The header that marks a request for the files of the portal is the proxy's
-   * alone: one that arrives from outside is taken off, so nobody can have an answer rewritten to a
+   * alone: one that arrives from outside is taken off every request the proxy sees (not the static files it
+   * leaves out, which the rewrite on the header leaves out as well), so nobody can have an answer rewritten to a
    * missing path (and a cache between us and them cannot be made to keep that answer).
    */
   function forward(request: NextRequest): NextResponse {

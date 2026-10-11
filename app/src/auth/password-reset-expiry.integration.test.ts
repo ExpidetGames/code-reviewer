@@ -38,14 +38,20 @@ async function aLinkMadeByTheOperator() {
   expect(code).toBe(0);
   const hash = (await portal.auth.$context).password.hash;
 
-  /** Uses the link with a clock that answers `instants` one after the other (the last one from then on). */
+  /**
+   * Uses the link with a clock that answers `instants` one after the other (the last one from then on).
+   * `clockCalls` is how often it was asked: the tests rely on the look and then the statement, so on exactly
+   * two (one, when the look refuses the link), so a change that asks a third time cannot silently turn them into tests of something else.
+   */
   async function useTheLink(...instants: Date[]) {
-    let calls = 0;
-    const now = () => instants[Math.min(calls++, instants.length - 1)] as Date;
-    return completePasswordReset(
+    let clockCalls = 0;
+    const now = () =>
+      instants[Math.min(clockCalls++, instants.length - 1)] as Date;
+    const result = await completePasswordReset(
       { db: portal.db, hashPassword: hash, now },
       { token, password: NEW_PASSWORD },
     );
+    return { result, clockCalls };
   }
 
   async function theLinkInTheDatabase() {
@@ -85,8 +91,9 @@ describe("the end of a password reset link", () => {
   it("lets the link work in the last millisecond before it", async () => {
     const { useTheLink, theLinkInTheDatabase } = await aLinkMadeByTheOperator();
 
-    const result = await useTheLink(LAST_MOMENT, LAST_MOMENT);
+    const { result, clockCalls } = await useTheLink(LAST_MOMENT, LAST_MOMENT);
 
+    expect(clockCalls).toBe(2);
     expect(result).toEqual({ ok: true });
     expect((await theLinkInTheDatabase()).used_at).toBe(
       LAST_MOMENT.toISOString(),
@@ -99,8 +106,9 @@ describe("the end of a password reset link", () => {
       await aLinkMadeByTheOperator();
     const before = await passwordHash();
 
-    const result = await useTheLink(EXPIRES_AT, LAST_MOMENT);
+    const { result, clockCalls } = await useTheLink(EXPIRES_AT, LAST_MOMENT);
 
+    expect(clockCalls).toBe(1);
     expect(result).toEqual({ ok: false, error: "invalid_token" });
     expect((await theLinkInTheDatabase()).used_at).toBeNull();
     expect(await passwordHash()).toBe(before);
@@ -112,8 +120,9 @@ describe("the end of a password reset link", () => {
       await aLinkMadeByTheOperator();
     const before = await passwordHash();
 
-    const result = await useTheLink(LAST_MOMENT, EXPIRES_AT);
+    const { result, clockCalls } = await useTheLink(LAST_MOMENT, EXPIRES_AT);
 
+    expect(clockCalls).toBe(2);
     expect(result).toEqual({ ok: false, error: "invalid_token" });
     expect((await theLinkInTheDatabase()).used_at).toBeNull();
     expect(await passwordHash()).toBe(before);

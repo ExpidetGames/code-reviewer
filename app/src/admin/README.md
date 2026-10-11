@@ -36,8 +36,8 @@ The command line for a lost admin password is `src/admin-cli/` (below).
   files by their own address (`/instance-portal`, `/api/instance-portal`) are a missing path for everybody,
   the admin included. The proxy does not answer such a request itself (its answer would carry
   `x-middleware-rewrite` and lower-case header names, and `Cache-Control` would not be the one of Next.js's
-  own 404): it lets it go on marked with `PORTAL_DENIED_HEADER`, which it takes off every request that
-  arrives with it, and `next.config.ts` rewrites a marked request to a path that is no route. Next.js adds
+  own 404): it lets it go on marked with `PORTAL_DENIED_HEADER`, which it takes off every request it
+  sees that arrives with it, and `next.config.ts` rewrites a marked request to a path that is no route. Next.js adds
   `x-nextjs-rewritten-path` to the RSC answer of any rewrite, so the same rewrite also catches every other
   path that is no route (`fallback`, Next.js's own files left out); then the marked request and a missing
   path are answered by the same code, and the e2e journey compares every header, with its name as written.

@@ -24,9 +24,16 @@ export const MISSING_PATH = "/page-not-found-a41e0c";
  * portal by their own address. `next.config.ts` rewrites a request that carries it to `MISSING_PATH`, so
  * Next.js itself answers it, as it answers any path that does not exist. (A rewrite or a 404 made by the
  * proxy would be recognizable: the proxy's answer carries `x-middleware-rewrite` and lower-case header
- * names.) Only the proxy may set it: it takes it off every request that comes from outside.
+ * names.) Only the proxy may set it: it takes it off every request it sees that comes from outside.
  */
 export const PORTAL_DENIED_HEADER = "x-portal-denied";
+/**
+ * What the proxy does not see (the alternatives of the negative lookahead in `config.matcher` of
+ * src/proxy.ts, which has to be a literal there, so src/proxy.test.ts checks that the two agree).
+ * A request for these never has its `PORTAL_DENIED_HEADER` taken off, so the rewrite that acts on the
+ * header leaves them out too.
+ */
+export const PROXY_SKIPPED_PATHS = "_next/static/|_next/image$|favicon\\.ico$";
 
 /** The path as the router sees it, or null when it cannot be decoded. */
 function normalize(pathname: string): string | null {
