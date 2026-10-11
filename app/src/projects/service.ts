@@ -49,12 +49,17 @@ export type ProjectService = {
 // A repository id is a UUID made by this app; anything else that is plausible is simply unknown.
 const MAX_ID_LENGTH = 128;
 
+/** Whether a value can be the id of one of our repositories; anything else is simply unknown. */
+function isPlausibleRepositoryId(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.trim() !== "" &&
+    value.length < MAX_ID_LENGTH
+  );
+}
+
 function checkRepositoryId(value: unknown): string {
-  if (
-    typeof value !== "string" ||
-    value.trim() === "" ||
-    value.length > MAX_ID_LENGTH
-  )
+  if (!isPlausibleRepositoryId(value))
     throw new ProjectError(
       "PROJECT_REQUEST_INVALID",
       "The repository id is missing or malformed.",
@@ -128,12 +133,7 @@ export function createProjectService(deps: {
 
     async findProject(repositoryId) {
       // An id that cannot be one of ours is simply not found.
-      if (
-        typeof repositoryId !== "string" ||
-        repositoryId.trim() === "" ||
-        repositoryId.length > MAX_ID_LENGTH
-      )
-        return undefined;
+      if (!isPlausibleRepositoryId(repositoryId)) return undefined;
       return projects.find(repositoryId);
     },
   };
