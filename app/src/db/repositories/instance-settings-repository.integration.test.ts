@@ -81,3 +81,34 @@ describe("the instance settings repository", () => {
     expect(rows).toEqual([{ updated_by: null }]);
   });
 });
+
+describe("the instance settings repository, with who and when", () => {
+  // #98-AD-14
+  it("reads a setting together with the user who saved it and the time", async () => {
+    const { db } = await createTestDatabase();
+    await sql`insert into users (id, name, email, email_verified, created_at, updated_at)
+      values ('u1', 'Admin', 'admin@example.test', 0, '2026-10-11T00:00:00.000Z', '2026-10-11T00:00:00.000Z')`.execute(
+      db,
+    );
+    const repository = createInstanceSettingsRepository(
+      db,
+      () => new Date("2026-10-11T09:30:00.000Z"),
+    );
+
+    await repository.set("max_workspaces_per_user", 12, "u1");
+
+    expect(await repository.getWithMeta("max_workspaces_per_user")).toEqual({
+      value: 12,
+      updatedBy: "u1",
+      updatedAt: "2026-10-11T09:30:00.000Z",
+    });
+  });
+
+  it("reads undefined with the meta call for a setting that has no row", async () => {
+    const { db } = await createTestDatabase();
+
+    expect(
+      await createInstanceSettingsRepository(db).getWithMeta("tenancy"),
+    ).toBeUndefined();
+  });
+});

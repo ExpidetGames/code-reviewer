@@ -23,14 +23,34 @@ export type InstanceSettingValues = {
     | { kind: "everyone" }
     | { kind: "emails"; entries: string[] }
     | { kind: "domains"; entries: string[] };
+  /**
+   * Which ways to sign in are switched on (src/admin/sign-in-methods.ts). No row: email with
+   * password is on, and GitHub is on while it is configured.
+   */
+  sign_in_methods: { emailPassword: boolean; github: boolean };
+  /** The most workspaces one user may own (the limits page). No row: the default (10). */
+  max_workspaces_per_user: number;
 };
 export type InstanceSettingKey = keyof InstanceSettingValues;
+
+/** A setting with who saved it last and when. */
+export type InstanceSettingWithMeta<K extends InstanceSettingKey> = {
+  value: InstanceSettingValues[K];
+  /** The id of the user who saved it, or null (the system, or a user who was deleted since). */
+  updatedBy: string | null;
+  /** ISO 8601 text in UTC. */
+  updatedAt: string;
+};
 
 export type InstanceSettingsRepository = {
   /** The value, or undefined when the setting has no row. */
   get<K extends InstanceSettingKey>(
     key: K,
   ): Promise<InstanceSettingValues[K] | undefined>;
+  /** The value with who saved it last and when, or undefined when the setting has no row. */
+  getWithMeta<K extends InstanceSettingKey>(
+    key: K,
+  ): Promise<InstanceSettingWithMeta<K> | undefined>;
   /** Inserts the setting or replaces its value, recording who and when. */
   set<K extends InstanceSettingKey>(
     key: K,
@@ -51,6 +71,21 @@ export function createInstanceSettingsRepository(
         .where("key", "=", key)
         .executeTakeFirst();
       return row === undefined ? undefined : decodeJson(row.value);
+    },
+
+    async getWithMeta(key) {
+      const row = await db
+        .selectFrom("instance_settings")
+        .select(["value", "updated_by", "updated_at"])
+        .where("key", "=", key)
+        .executeTakeFirst();
+      return row === undefined
+        ? undefined
+        : {
+            value: decodeJson(row.value),
+            updatedBy: row.updated_by,
+            updatedAt: row.updated_at,
+          };
     },
 
     async set(key, value, updatedBy) {

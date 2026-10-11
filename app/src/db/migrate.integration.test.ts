@@ -70,6 +70,8 @@ describe("the migrations of both epics", () => {
       "20261011170000_create_instance_settings",
       "20261011170100_create_rate_limits",
       "20261011170200_add_instance_admin_flag_to_users",
+      "20261011200000_create_secrets",
+      "20261011200100_create_password_reset_tokens",
     ]);
   });
 
@@ -117,9 +119,11 @@ describe("starting the database", () => {
       "jobs",
       "kysely_migration",
       "kysely_migration_lock",
+      "password_reset_tokens",
       "projects",
       "rate_limits",
       "repositories",
+      "secrets",
       "sessions",
       "users",
       "verifications",
