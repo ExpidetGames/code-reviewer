@@ -17,6 +17,7 @@ import { testGithubAppEnv } from "../../test-support/github-app.ts";
 import { startSyncHarness } from "../../test-support/integration-sync-harness.ts";
 import { createProjectService } from "../service.ts";
 import { loadProjectsPage, ProjectsPageContent } from "./projects-page.tsx";
+import { defaultWorkspaceId } from "../../test-support/workspaces.ts";
 
 afterEach(cleanup);
 
@@ -47,7 +48,7 @@ async function openPage(env: Record<string, string | undefined> = WORKING_ENV) {
   ]);
   await h.sync.syncAll();
   const projects = createProjectService({
-    projects: createProjectsRepository(h.db),
+    projects: createProjectsRepository(h.db, await defaultWorkspaceId(h.db)),
   });
   const widgets = (await h.repositories.list()).find(
     (repo) => repo.fullName === "acme/widgets",

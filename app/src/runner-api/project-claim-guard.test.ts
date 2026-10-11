@@ -3,19 +3,23 @@ import { describe, expect, it } from "vitest";
 import type { Job } from "../jobs/job-types.ts";
 import { createProjectClaimGuard } from "./project-claim-guard.ts";
 
-const job = { id: "job-1", repositoryId: "repo-1" } as Job;
+const job = {
+  id: "job-1",
+  workspaceId: "workspace-1",
+  repositoryId: "repo-1",
+} as Job;
 
 describe("the project claim guard", () => {
   // CR-46-T01
   it("allows a job whose repository has an active project", async () => {
     const asked: string[] = [];
     const guard = createProjectClaimGuard({
-      projects: {
+      projects: () => ({
         getActiveProjectForRepository: async (repositoryId) => {
           asked.push(repositoryId);
           return {} as never;
         },
-      },
+      }),
     });
 
     expect(await guard.check(job)).toStrictEqual({ allow: true });
@@ -25,7 +29,9 @@ describe("the project claim guard", () => {
   // CR-46-T01
   it("cancels a job whose repository has no active project", async () => {
     const guard = createProjectClaimGuard({
-      projects: { getActiveProjectForRepository: async () => undefined },
+      projects: () => ({
+        getActiveProjectForRepository: async () => undefined,
+      }),
     });
 
     expect(await guard.check(job)).toStrictEqual({

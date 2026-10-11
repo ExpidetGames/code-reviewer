@@ -24,6 +24,7 @@ import {
 } from "../../src/test-support/github-app.ts";
 import { getProjectService } from "../../src/projects/shared.ts";
 import { createTestDirectory } from "../../src/test-support/test-database.ts";
+import { defaultWorkspaceId } from "../../src/test-support/workspaces.ts";
 
 const RUNNER_TOKEN = "route-file-runner-token-91ac-5d2e8b7f0c14";
 const LLM_KEY = "route-file-llm-key-77de";
@@ -147,8 +148,10 @@ describe("the runner API route files", () => {
       ).toBe(202);
       if (event === "installation") {
         // The repository must be a project before its pull requests are reviewed.
-        const [repository] =
-          await createRepositoriesRepository(getDatabase()).list();
+        const [repository] = await createRepositoriesRepository(
+          getDatabase(),
+          await defaultWorkspaceId(getDatabase()),
+        ).list();
         await getProjectService().activateProject(repository!.id);
       }
     }

@@ -51,6 +51,8 @@ export type IntegrationStatus = (typeof INTEGRATION_STATUSES)[number];
 /** A configured connection to a git platform, as stored in the `integrations` table. */
 export type Integration = {
   id: string;
+  /** The workspace the connection belongs to (a connection belongs to exactly one). */
+  workspaceId: string;
   type: IntegrationType;
   displayName: string;
   /** The platform's id for this connection (GitHub App: the installation id). Never empty. */

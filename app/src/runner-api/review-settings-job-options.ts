@@ -7,13 +7,16 @@ import { toRunnerSettings } from "../review-settings/runner-settings.ts";
 import type { JobOptionsSource } from "./job-options.ts";
 
 export function createReviewSettingsJobOptionsSource(deps: {
-  settings: Pick<ReviewSettingsService, "resolveForRepository">;
+  /** The settings service of the workspace the claimed job belongs to (`job.workspaceId`). */
+  settings: (
+    workspaceId: string,
+  ) => Pick<ReviewSettingsService, "resolveForRepository">;
 }): JobOptionsSource {
   return {
     async optionsFor(job) {
-      const resolved = await deps.settings.resolveForRepository(
-        job.repositoryId,
-      );
+      const resolved = await deps
+        .settings(job.workspaceId)
+        .resolveForRepository(job.repositoryId);
       // No project: the claim guard refuses such a job before it asks for options, so this is a job
       // that raced with a deletion. No options is the safe answer (the runner's defaults apply).
       if (resolved === undefined) return { env: {} };

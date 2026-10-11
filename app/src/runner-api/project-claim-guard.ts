@@ -11,13 +11,16 @@ import type { ClaimGuard } from "./claim-guard.ts";
 export const PROJECT_DEACTIVATED = "project_deactivated" satisfies JobErrorCode;
 
 export function createProjectClaimGuard(deps: {
-  projects: Pick<ProjectService, "getActiveProjectForRepository">;
+  /** The project service of the workspace the claimed job belongs to (`job.workspaceId`). */
+  projects: (
+    workspaceId: string,
+  ) => Pick<ProjectService, "getActiveProjectForRepository">;
 }): ClaimGuard {
   return {
     async check(job) {
-      const project = await deps.projects.getActiveProjectForRepository(
-        job.repositoryId,
-      );
+      const project = await deps
+        .projects(job.workspaceId)
+        .getActiveProjectForRepository(job.repositoryId);
       if (project !== undefined) return { allow: true };
       // Cancelled, not failed: the job did nothing wrong, and so are the other jobs of the repository.
       return {

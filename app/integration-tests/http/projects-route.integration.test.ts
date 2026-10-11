@@ -17,18 +17,25 @@ import {
   createAuthHarness,
   type CookieJar,
 } from "../../src/test-support/auth-harness.ts";
+import { defaultWorkspaceId } from "../../src/test-support/workspaces.ts";
 
 type Harness = Awaited<ReturnType<typeof createAuthHarness>>;
 
 async function startApp() {
   const harness = await createAuthHarness();
-  const integration = await createIntegrationsRepository(harness.db).create({
+  const integration = await createIntegrationsRepository(
+    harness.db,
+    await defaultWorkspaceId(harness.db),
+  ).create({
     type: "github_app",
     displayName: "acme",
     externalId: "4242",
     config: {},
   });
-  const repositories = createRepositoriesRepository(harness.db);
+  const repositories = createRepositoriesRepository(
+    harness.db,
+    await defaultWorkspaceId(harness.db),
+  );
   await repositories.reconcile(integration.id, [
     {
       integrationId: integration.id,
@@ -39,7 +46,10 @@ async function startApp() {
   ]);
   const [repository] = await repositories.list();
   if (repository === undefined) throw new Error("seeding failed");
-  const projects = createProjectsRepository(harness.db);
+  const projects = createProjectsRepository(
+    harness.db,
+    await defaultWorkspaceId(harness.db),
+  );
   const service = createProjectService({ projects });
 
   /**

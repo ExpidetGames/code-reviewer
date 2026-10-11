@@ -20,7 +20,11 @@ platform; the MVP has exactly one kind, the GitHub App (`github_app`, `providers
 
 The tables are `integrations` (`src/db/migrations/20261010134000_create_integrations.ts`) and
 `repositories` (`src/db/migrations/20261010143000_create_repositories.ts`); the only code that touches
-them is `src/db/repositories/integrations-repository.ts` and `repositories-repository.ts`.
+them is `src/db/repositories/integrations-repository.ts` and `repositories-repository.ts`, both created for
+one workspace (a connection belongs to exactly one, `Integration.workspaceId`; one installation is linked
+to one workspace only). Finding a connection before the workspace is known (a webhook, the
+synchronization) is the job of `integration-directory-repository.ts`, which only reads. See
+`src/workspaces/README.md`.
 
 ## The interface in short
 
@@ -254,7 +258,11 @@ never a token, JWT, key or response body.
 
 ## Synchronization
 
-`sync/service.ts` (`createIntegrationSync`) keeps the tables in line with the platform. A repository row
+`sync/service.ts` (`createIntegrationSync`) keeps the tables in line with the platform. It serves the whole
+instance: it finds every connection through the directory and changes each one through repositories of the
+workspace that connection belongs to. A connection that is new to the instance is put in the default
+workspace (`workspaceForNewConnection`, temporary: the workspace feature binds an installation to the
+workspace of the person who installed it). The button syncs every connection of the instance for now. A repository row
 is `active` while the platform lists it for its integration and becomes inactive when it does not;
 nothing is deleted, so projects and past reviews keep their reference. A repository that comes back
 gets its old row back. New repositories are active in this table; whether a project reviews them is

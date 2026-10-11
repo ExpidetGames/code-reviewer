@@ -1,10 +1,11 @@
-// Access to the projects table. The only code that reads or writes it. A project is a repository the
-// instance reviews. The row is created by the first activation or by the first save of settings
-// (then switched off), and never deleted: deactivating sets `active` to 0, and activating again
-// switches the same row back on, so the settings a project collected in between survive. Only an
-// active row is ever reviewed; a row that is off is just a place for settings. A repository the
-// platform stopped listing keeps its row too; it is "unavailable" and cannot be activated (the
-// repositories table says so, not this one).
+// Access to the projects table of ONE workspace (the factory takes the workspace id; see
+// ../workspace-scope.ts; a project belongs to the workspace of its repository). The only code that
+// reads or writes it. A project is a repository the instance reviews. The row is created by the first
+// activation or by the first save of settings (then switched off), and never deleted: deactivating
+// sets `active` to 0, and activating again switches the same row back on, so the settings a project
+// collected in between survive. Only an active row is ever reviewed; a row that is off is just a place
+// for settings. A repository the platform stopped listing keeps its row too; it is "unavailable" and
+// cannot be activated (the repositories table says so, not this one).
 import "server-only";
 import type { Kysely } from "kysely";
 import type {
@@ -20,6 +21,7 @@ import {
   formatTimestamp,
 } from "../codecs.ts";
 import type { Database, ProjectsTable } from "../schema.ts";
+import type { WorkspaceId } from "../workspace-scope.ts";
 
 export type ProjectSettings = { [key: string]: JsonValue };
 
@@ -180,6 +182,7 @@ function toStoredProject(
 
 export function createProjectsRepository(
   db: Kysely<Database>,
+  workspaceId: WorkspaceId,
   now: () => Date = () => new Date(),
   newId: () => string = () => crypto.randomUUID(),
   warn: (message: string) => void = console.warn,
@@ -222,6 +225,7 @@ export function createProjectsRepository(
         "projects.created_at",
         "projects.updated_at",
       ])
+      .where("repositories.workspace_id", "=", workspaceId)
       .where("projects.active", "=", encodeBoolean(true))
       .where("repositories.active", "=", encodeBoolean(true))
       .where("integrations.status", "=", "active");
@@ -253,6 +257,7 @@ export function createProjectsRepository(
           "projects.created_at as project_created_at",
           "projects.updated_at as project_updated_at",
         ])
+        .where("repositories.workspace_id", "=", workspaceId)
         // A repository that disappeared and never had a project is of no interest to anybody.
         .where((eb) =>
           eb.or([
@@ -314,8 +319,10 @@ export function createProjectsRepository(
     async get(repositoryId) {
       const row = await db
         .selectFrom("projects")
-        .selectAll()
-        .where("repository_id", "=", repositoryId)
+        .innerJoin("repositories", "repositories.id", "projects.repository_id")
+        .selectAll("projects")
+        .where("repositories.workspace_id", "=", workspaceId)
+        .where("projects.repository_id", "=", repositoryId)
         .executeTakeFirst();
       return row === undefined ? undefined : toStored(row);
     },
@@ -351,6 +358,7 @@ export function createProjectsRepository(
             "repositories.active",
             "integrations.status as integration_status",
           ])
+          .where("repositories.workspace_id", "=", workspaceId)
           .where("repositories.id", "=", repositoryId)
           .executeTakeFirst();
         if (repository === undefined) return { kind: "repository_not_found" };
@@ -409,21 +417,20 @@ export function createProjectsRepository(
 
     deactivate(repositoryId, afterDeactivate) {
       return inTransaction(async (trx): Promise<DeactivateResult> => {
+        const repository = await trx
+          .selectFrom("repositories")
+          .select("id")
+          .where("workspace_id", "=", workspaceId)
+          .where("id", "=", repositoryId)
+          .executeTakeFirst();
+        if (repository === undefined) return { kind: "repository_not_found" };
         const existing = await trx
           .selectFrom("projects")
           .selectAll()
           .where("repository_id", "=", repositoryId)
           .executeTakeFirst();
-        if (existing === undefined) {
-          const repository = await trx
-            .selectFrom("repositories")
-            .select("id")
-            .where("id", "=", repositoryId)
-            .executeTakeFirst();
-          return repository === undefined
-            ? { kind: "repository_not_found" }
-            : { kind: "deactivated", project: undefined, changed: false };
-        }
+        if (existing === undefined)
+          return { kind: "deactivated", project: undefined, changed: false };
 
         const changed = decodeBoolean(existing.active);
         const row = changed
@@ -450,6 +457,12 @@ export function createProjectsRepository(
           .updateTable("projects")
           .set({ settings: encodeJson(settings), updated_at: timestamp })
           .where("repository_id", "=", repositoryId)
+          .where("repository_id", "in", (eb) =>
+            eb
+              .selectFrom("repositories")
+              .select("id")
+              .where("workspace_id", "=", workspaceId),
+          )
           .returningAll()
           .executeTakeFirst();
         if (updated !== undefined) return toStored(updated);
@@ -461,6 +474,7 @@ export function createProjectsRepository(
         const repository = await trx
           .selectFrom("repositories")
           .select("id")
+          .where("workspace_id", "=", workspaceId)
           .where("id", "=", repositoryId)
           .where("active", "=", encodeBoolean(true))
           .executeTakeFirst();

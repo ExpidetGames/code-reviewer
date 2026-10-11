@@ -28,7 +28,7 @@ import type {
   IntegrationType,
   RepoRef,
 } from "../integrations/types.ts";
-import type { JobQueue } from "../jobs/job-queue.ts";
+import type { RunnerQueue } from "../jobs/runner-queue.ts";
 import type { ClaimResult, Job, JobErrorCode } from "../jobs/job-types.ts";
 import { revealLlmAccess, type LlmAccessResult } from "../llm/access.ts";
 import {
@@ -83,9 +83,16 @@ const MAX_REFUSED_PER_REQUEST = 25;
 const MAX_QUESTION_CHARS = 4000;
 
 export type ClaimDeps = {
-  queue: Pick<JobQueue, "claimNext" | "complete" | "release" | "cancelClaimed">;
-  repositories: Pick<RepositoriesRepository, "get">;
-  integrations: Pick<IntegrationsRepository, "get">;
+  queue: Pick<
+    RunnerQueue,
+    "claimNext" | "complete" | "release" | "cancelClaimed"
+  >;
+  /**
+   * The repositories and integrations of one workspace. A claim serves the whole instance, so the
+   * workspace is the one the claimed job names (`job.workspaceId`).
+   */
+  repositories: (workspaceId: string) => Pick<RepositoriesRepository, "get">;
+  integrations: (workspaceId: string) => Pick<IntegrationsRepository, "get">;
   registry: IntegrationRegistry;
   guard: ClaimGuard;
   jobOptions: JobOptionsSource;
@@ -201,11 +208,13 @@ async function prepare(
   if (job.leaseExpiresAt === null)
     throw new Error(`Claimed job ${job.id} has no lease expiry.`);
 
-  const repository = await deps.repositories.get(job.repositoryId);
+  const repository = await deps
+    .repositories(job.workspaceId)
+    .get(job.repositoryId);
   const integration =
     repository === undefined
       ? undefined
-      : await deps.integrations.get(repository.integrationId);
+      : await deps.integrations(job.workspaceId).get(repository.integrationId);
   if (
     repository === undefined ||
     integration === undefined ||

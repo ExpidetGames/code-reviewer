@@ -26,6 +26,7 @@ import {
   testGithubAppEnv,
 } from "../../src/test-support/github-app.ts";
 import { createTestDirectory } from "../../src/test-support/test-database.ts";
+import { defaultWorkspaceId } from "../../src/test-support/workspaces.ts";
 
 const session = vi.hoisted(() => ({
   requireUser: vi.fn<() => Promise<SessionUser>>(),
@@ -57,13 +58,19 @@ async function startRoutes() {
     env: { DATABASE_PATH: join(await createTestDirectory(), "app.db") },
   });
   const db = getDatabase();
-  const integration = await createIntegrationsRepository(db).create({
+  const integration = await createIntegrationsRepository(
+    db,
+    await defaultWorkspaceId(db),
+  ).create({
     type: "github_app",
     displayName: "acme",
     externalId: "4242",
     config: {},
   });
-  const repositories = createRepositoriesRepository(db);
+  const repositories = createRepositoriesRepository(
+    db,
+    await defaultWorkspaceId(db),
+  );
   await repositories.reconcile(integration.id, [
     {
       integrationId: integration.id,

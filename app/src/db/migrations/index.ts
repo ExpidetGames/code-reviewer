@@ -16,6 +16,9 @@ import { migration as createJobs } from "./20261010191500_create_jobs.ts";
 import { migration as createAppSettings } from "./20261010201500_create_app_settings.ts";
 import { migration as createJobComments } from "./20261011090000_create_job_comments.ts";
 import { migration as addJobsRepositoryRecentIndex } from "./20261011100000_add_jobs_repository_recent_index.ts";
+import { migration as createWorkspaces } from "./20261011160000_create_workspaces.ts";
+import { migration as addWorkspaceToCustomerData } from "./20261011160100_add_workspace_to_customer_data.ts";
+import { migration as prepareUsersForAccounts } from "./20261011160200_prepare_users_for_accounts.ts";
 
 const migrations: Record<string, Migration> = {
   "0001_create_app_meta": createAppMeta,
@@ -32,6 +35,9 @@ const migrations: Record<string, Migration> = {
   "20261011090000_create_job_comments": createJobComments,
   "20261011100000_add_jobs_repository_recent_index":
     addJobsRepositoryRecentIndex,
+  "20261011160000_create_workspaces": createWorkspaces,
+  "20261011160100_add_workspace_to_customer_data": addWorkspaceToCustomerData,
+  "20261011160200_prepare_users_for_accounts": prepareUsersForAccounts,
 };
 
 export const migrationProvider: MigrationProvider = {

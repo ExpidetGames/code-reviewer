@@ -5,6 +5,7 @@ import {
   webhookDelivery,
   webhookFixture,
 } from "../../../fakes/github/webhooks.ts";
+import { createIntegrationDirectory } from "../db/repositories/integration-directory-repository.ts";
 import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
 import { createDefaultIntegrationRegistry } from "../integrations/registry.ts";
@@ -13,6 +14,7 @@ import {
   type InstallationChangeResult,
 } from "../integrations/sync/service.ts";
 import { TEST_WEBHOOK_SECRET } from "./github-app.ts";
+import { defaultWorkspaceId } from "./workspaces.ts";
 import { startGithubAppHarness } from "./github-app-harness.ts";
 import { createTestDatabase } from "./test-database.ts";
 
@@ -39,8 +41,11 @@ export async function startSyncHarness(
     registry,
     log: (line) => logged.push(line),
   });
-  const integrations = createIntegrationsRepository(db);
-  const repositories = createRepositoriesRepository(db);
+  // The sync puts a connection that is new to the instance in the default workspace.
+  const workspaceId = await defaultWorkspaceId(db);
+  const integrations = createIntegrationsRepository(db, workspaceId);
+  const repositories = createRepositoriesRepository(db, workspaceId);
+  const directory = createIntegrationDirectory(db);
 
   /** The webhook route's job for an installation delivery, step by step as the README describes. */
   async function deliver(
@@ -57,7 +62,7 @@ export async function startSyncHarness(
     if (!(await provider.verifyWebhook(null, request))) return "refused";
     const identity = await provider.identifyWebhook(request);
     if (identity === null) return "unidentified";
-    const known = await integrations.findByExternalId(
+    const known = await directory.findByExternalId(
       "github_app",
       identity.externalId,
     );
@@ -66,6 +71,7 @@ export async function startSyncHarness(
     const event = await provider.parseEvent(
       known ?? {
         id: "unknown",
+        workspaceId,
         type: "github_app",
         displayName: "",
         externalId: identity.externalId,
@@ -91,7 +97,9 @@ export async function startSyncHarness(
     db,
     registry,
     sync,
+    workspaceId,
     integrations,
+    directory,
     repositories,
     logged,
     deliver,

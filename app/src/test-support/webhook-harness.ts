@@ -18,6 +18,7 @@ import { AUTOMATIC_REVIEW_DEBOUNCE_MS } from "../webhooks/automatic-review-polic
 import {
   createGithubAppWebhookHandler,
   type AutomaticReviewDeps,
+  type WorkspaceCollaborators,
 } from "../webhooks/github-app-handler.ts";
 import {
   builtInReviewSettings,
@@ -78,7 +79,7 @@ export async function startWebhookHarness(
 
   const deliveries = createWebhookDeliveriesRepository(base.db);
   const projects = createProjectService({
-    projects: createProjectsRepository(base.db),
+    projects: createProjectsRepository(base.db, base.workspaceId),
   });
   const intake = createRecordingReviewTriggerIntake();
   const infoLines: string[] = [];
@@ -91,19 +92,19 @@ export async function startWebhookHarness(
     ...builtInReviewSettings("test/model"),
     ...options.reviewSettings,
   };
+  const settingsFor: WorkspaceCollaborators["settingsFor"] = async () =>
+    settings;
   const automatic: AutomaticReviewDeps = {
-    settingsFor: async () => settings,
     debounceMs: options.debounceMs ?? AUTOMATIC_REVIEW_DEBOUNCE_MS,
     now: options.now ?? (() => new Date()),
   };
   const handler = createGithubAppWebhookHandler({
     registry,
-    integrations: base.integrations,
+    integrations: base.directory,
     deliveries,
     sync: base.sync,
-    projects,
+    workspace: () => ({ projects, settingsFor, intake }),
     automatic,
-    intake,
     logger,
     ...(options.maxBodyBytes === undefined
       ? {}
@@ -213,6 +214,7 @@ export async function startWebhookHarness(
     parseEvent,
     deliveries,
     projects,
+    settingsFor,
     automatic,
     intake,
     handler,
