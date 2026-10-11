@@ -127,6 +127,12 @@
     },
     {
       "ecosystem": "npm",
+      "package": "fsevents",
+      "license": "MIT",
+      "reason": "File watching on macOS only; an optional dependency of watchers."
+    },
+    {
+      "ecosystem": "npm",
       "package": "lightningcss-*",
       "license": "MPL-2.0",
       "reason": "lightningcss binaries for other platforms."

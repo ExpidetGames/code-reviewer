@@ -96,6 +96,7 @@ were read from the npm registry when the entries were added and are judged like 
 | `@rolldown/binding-*` | MIT | Rolldown binaries for other platforms |
 | `@tybys/wasm-util` | MIT | WebAssembly fallback of native packages |
 | `@unrs/resolver-binding-*` | MIT | Resolver binaries for other platforms |
+| `fsevents` | MIT | File watching on macOS only, an optional dependency of watchers |
 | `lightningcss-*` | MPL-2.0 | lightningcss binaries for other platforms |
 
 No package of the app uses a license that conflicts with distributing this project under Apache-2.0.
