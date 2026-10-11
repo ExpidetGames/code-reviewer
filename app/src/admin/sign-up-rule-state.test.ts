@@ -5,7 +5,10 @@
 // or GitHub as the only way to sign in.
 import { describe, expect, it } from "vitest";
 import type { InstanceSettingValues } from "../db/repositories/instance-settings-repository.ts";
-import { signUpRuleState } from "./sign-up-rule-state.ts";
+import {
+  signUpRuleState,
+  verificationPathExists,
+} from "./sign-up-rule-state.ts";
 
 const EMAIL_PASSWORD_ONLY = { emailPassword: true, github: false };
 const GITHUB_ONLY = { emailPassword: false, github: true };
@@ -64,5 +67,37 @@ describe("the state of the sign-up rule", () => {
         signInMethods: EMAIL_PASSWORD_ONLY,
       }),
     ).toEqual({ failClosed: false });
+  });
+});
+
+describe("the verification path", () => {
+  // #99-SR-05
+  it.each([
+    ["SMTP present, email with password only", true, EMAIL_PASSWORD_ONLY, true],
+    ["SMTP present, GitHub only", true, GITHUB_ONLY, true],
+    ["SMTP present, both ways", true, BOTH, true],
+    ["no SMTP, GitHub only", false, GITHUB_ONLY, true],
+    ["no SMTP, email with password only", false, EMAIL_PASSWORD_ONLY, false],
+    ["no SMTP, both ways", false, BOTH, false],
+  ])(
+    "for %s the answer is %s",
+    (_name, mailConfigured, signInMethods, path) => {
+      expect(verificationPathExists({ mailConfigured, signInMethods })).toBe(
+        path,
+      );
+    },
+  );
+
+  // #99-SR-05
+  it("is not needed by the rule everyone, whatever the answer", () => {
+    for (const mailConfigured of [true, false])
+      for (const signInMethods of [EMAIL_PASSWORD_ONLY, GITHUB_ONLY, BOTH])
+        expect(
+          signUpRuleState({
+            rule: { kind: "everyone" },
+            mailConfigured,
+            signInMethods,
+          }),
+        ).toEqual({ failClosed: false });
   });
 });

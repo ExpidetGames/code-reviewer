@@ -288,6 +288,21 @@ export interface PasswordResetTokensTable {
   used_at: string | null;
 }
 
+/** A single-use link that verifies an email address; only the hash of the token is kept (src/signup/). */
+export interface EmailVerificationTokensTable {
+  /** SHA-256 of the token, hex. */
+  token_hash: string;
+  user_id: string;
+  /** The address the link verifies; it verifies nothing once the account has another address. */
+  email: string;
+  /** ISO 8601 text in UTC. */
+  created_at: string;
+  /** ISO 8601 text in UTC. */
+  expires_at: string;
+  /** ISO 8601 text in UTC, or null while the token is unused. */
+  used_at: string | null;
+}
+
 export interface Database {
   app_meta: AppMetaTable;
   users: UsersTable;
@@ -308,4 +323,5 @@ export interface Database {
   rate_limits: RateLimitsTable;
   secrets: SecretsTable;
   password_reset_tokens: PasswordResetTokensTable;
+  email_verification_tokens: EmailVerificationTokensTable;
 }

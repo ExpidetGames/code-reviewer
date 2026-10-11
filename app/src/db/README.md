@@ -139,7 +139,7 @@ sections 2.2, 2.3 and 2.10):
 None of these is customer data, so none is workspace scoped (`scoping.test.ts` lists them as instance
 level).
 
-### Secrets and password reset tokens
+### Secrets, password reset tokens and email verification tokens
 
 Migrations `20261011200000_create_secrets` and `20261011200100_create_password_reset_tokens` (sections 2.3
 and 2.7):
@@ -149,6 +149,10 @@ and 2.7):
   name is the row id that is bound into the ciphertext.
 - `password_reset_tokens` (`token_hash`, `user_id`, `created_at`, `expires_at`, `used_at`): single-use reset
   links; only the SHA-256 hash of the token is kept (`src/auth/password-reset.ts`). A row goes with its user.
+- `email_verification_tokens` (`token_hash`, `user_id`, `email`, `created_at`, `expires_at`, `used_at`), migration
+  `20261011210000_create_email_verification_tokens` (section 2.5): single-use verification links, valid 24 hours;
+  only the SHA-256 hash of the token is kept, and a link is bound to the address it was made for
+  (`src/signup/`). A row goes with its user.
 - `instance_settings` gained two keys: `sign_in_methods` and `max_workspaces_per_user` (typed in
   `instance-settings-repository.ts`, which also reads a value with who saved it and when).
 
