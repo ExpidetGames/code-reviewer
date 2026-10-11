@@ -71,15 +71,15 @@ function llmNotice(issue: LlmConfigIssue): ConfigNotice {
 export function describeConfigNotices(status: ConfigStatus): ConfigNotice[] {
   const notices: ConfigNotice[] = [];
   if (!status.githubApp.configured) {
-    const { problem, variables } = status.githubApp;
+    const { kind, variables } = status.githubApp;
     notices.push({
       id: "github_app",
       severity: "error",
       title:
-        problem === "missing"
+        kind === "missing"
           ? "GitHub App not configured"
           : "GitHub App settings not valid",
-      detail: `${problem === "missing" ? "Missing" : "Not valid"}: ${variables.join(", ")}. Repositories cannot be read from GitHub and projects cannot be activated until this is fixed.`,
+      detail: `${kind === "missing" ? "Missing" : "Not valid"}: ${variables.join(", ")}. Repositories cannot be read from GitHub and projects cannot be activated until this is fixed.`,
     });
   }
   const llmIssues = status.llm.configured ? [] : status.llm.issues;

@@ -35,8 +35,14 @@ $leftovers"
 
 # CR-17-T08: a fresh named volume inherits the owner of /data from the image, so the unprivileged
 # user can create the database without any chown or root step.
-# The sign in settings are required (the server refuses to start without them); these are dummies
-# that point nowhere. Nothing in this script signs in.
+# The sign in settings, the runner token and the GitHub App credentials are required (the production
+# server refuses to start without them); these are dummies that point nowhere. Nothing in this
+# script signs in or talks to GitHub.
+# The GitHub App key is a real (throwaway) RSA key, generated here and passed by name so that it
+# never appears on a command line: a stricter loader than today's presence check accepts it too.
+command -v openssl >/dev/null || fail "openssl is required (it generates the dummy GitHub App key)"
+GITHUB_APP_PRIVATE_KEY=$(openssl genrsa 2048 2>/dev/null)
+export GITHUB_APP_PRIVATE_KEY
 step "starting the container with a fresh volume on /data"
 docker volume create "$volume" >/dev/null
 docker run --detach --name "$container" \
@@ -46,6 +52,11 @@ docker run --detach --name "$container" \
   --env BETTER_AUTH_URL=http://localhost:3000 \
   --env GITHUB_OAUTH_CLIENT_ID=smoke-client-id \
   --env GITHUB_OAUTH_CLIENT_SECRET=smoke-client-secret \
+  --env RUNNER_TOKEN=smoke-runner-token-0123456789-0123456789-abcdef \
+  --env GITHUB_APP_ID=1 \
+  --env GITHUB_APP_SLUG=smoke-app \
+  --env GITHUB_APP_WEBHOOK_SECRET=smoke-webhook-secret \
+  --env GITHUB_APP_PRIVATE_KEY \
   --health-interval 2s \
   "$image" >/dev/null
 port=$(docker port "$container" 3000/tcp | head -n 1 | sed 's/.*://')

@@ -60,7 +60,7 @@ describe("the configuration hints", () => {
           ...WORKING,
           githubApp: {
             configured: false,
-            problem: "missing",
+            kind: "missing",
             variables: ["GITHUB_APP_ID", "GITHUB_APP_WEBHOOK_SECRET"],
             slug: null,
           },
@@ -79,7 +79,7 @@ describe("the configuration hints", () => {
       ...WORKING,
       githubApp: {
         configured: false,
-        problem: "invalid",
+        kind: "invalid",
         variables: ["GITHUB_APP_PRIVATE_KEY"],
         slug: null,
       },
