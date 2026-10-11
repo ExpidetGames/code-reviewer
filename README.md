@@ -285,16 +285,14 @@ problems privately as described in [SECURITY.md](SECURITY.md).
 ## Branching
 
 - `main` and `development` are permanent branches. `development` is the default branch.
-- Epic branches start with the epic's ticket key and branch off `development`, e.g. `CR-2-foundation`.
-- Ticket branches start with the ticket key and branch off their epic branch, e.g. `CR-14-repo-skeleton`.
-
-Pull requests flow upwards:
-
-1. Ticket branch -> PR into its epic branch.
-2. Epic branch -> PR into `development`.
-3. `development` -> PR into `main` for releases.
+- Every change starts from a GitHub issue `#<n>`. Its branch is named `<n>-<slug>` and branches off
+  `development`, e.g. `123-fix-webhook-retry`.
+- A pull request goes into `development`, its description contains `Closes #<n>`, and it is squash
+  merged once the review is done and CI is green.
+- `development` -> PR into `main` for releases.
 
 Direct pushes to `main` and `development` are not allowed; all changes go through pull requests.
+[CONTRIBUTING.md](CONTRIBUTING.md) has the full workflow.
 
 ## License
 
