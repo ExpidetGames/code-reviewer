@@ -1,0 +1,13 @@
+code-review.com
+Copyright 2026 Webspired and the code-review.com contributors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product includes software developed by third parties. The notices that their licenses
+require us to keep are in THIRD_PARTY_LICENSES.md, in particular:
+
+  PR-Agent (https://github.com/qodo-ai/pr-agent)
+  Copyright (c) 2026 The PR Agent
+  Licensed under the MIT License.
+  The runner installs the pinned release of PR-Agent as a dependency and runs it to produce the
+  reviews.
