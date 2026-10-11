@@ -4,6 +4,9 @@
 //
 //   GITHUB_FAKE_CLIENT_ID      required
 //   GITHUB_FAKE_CLIENT_SECRET  required
+//   GITHUB_FAKE_APP_ID         optional, together with the next one: switches the GitHub App API on
+//   GITHUB_FAKE_APP_PUBLIC_KEY SPKI PEM the App JWTs are checked with; installations are added
+//                              with POST /__fake/installations
 //   GITHUB_FAKE_PORT           default 4010
 //   GITHUB_FAKE_HOST           default 127.0.0.1
 import { startGithubFake } from "./server.ts";
@@ -17,9 +20,21 @@ if (!clientId || !clientSecret) {
   process.exit(1);
 }
 
+const appId = process.env.GITHUB_FAKE_APP_ID;
+const publicKeyPem = process.env.GITHUB_FAKE_APP_PUBLIC_KEY;
+if ((appId === undefined) !== (publicKeyPem === undefined)) {
+  console.error(
+    "GITHUB_FAKE_APP_ID and GITHUB_FAKE_APP_PUBLIC_KEY must be set together.",
+  );
+  process.exit(1);
+}
+
 const fake = await startGithubFake({
   clientId,
   clientSecret,
+  ...(appId === undefined || publicKeyPem === undefined
+    ? {}
+    : { appId, publicKeyPem }),
   host: process.env.GITHUB_FAKE_HOST || "127.0.0.1",
   port: Number(process.env.GITHUB_FAKE_PORT) || 4010,
 });

@@ -234,6 +234,40 @@ jobs:
       - name: Smoke test the image
         run: docker/smoke/runner.sh code-reviewer-runner:ci
 
+  # The Docker Compose stack (compose.yml): both images are built here and the stack is started
+  # with dummy settings by docker/smoke/compose.sh. Nothing is pushed; the job has no login and only
+  # the read-only token of the workflow. Pushes to development and main are covered by the publish
+  # workflow, which smoke tests the same images.
+  compose:
+    name: "Compose: stack smoke test"
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && (github.base_ref == 'main' || needs.changes.outputs.app == 'true' || needs.changes.outputs.runner == 'true') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build the app image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: app
+          load: true
+          push: false
+          tags: code-reviewer-app:ci
+          cache-from: type=gha,scope=app
+          cache-to: type=gha,mode=max,scope=app
+      - name: Build the runner image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: runner
+          load: true
+          push: false
+          tags: code-reviewer-runner:ci
+          cache-from: type=gha,scope=runner
+          cache-to: type=gha,mode=max,scope=runner
+      - name: Smoke test the stack
+        run: docker/smoke/compose.sh code-reviewer-app:ci code-reviewer-runner:ci
+
   actionlint:
     name: Lint workflow files
     needs: changes
@@ -250,7 +284,7 @@ jobs:
   # fails on any failed or cancelled job and accepts skipped jobs (path filter).
   ci-passed:
     name: All checks passed?
-    needs: [changes, app-fast, runner-fast, engine, e2e, image-app, image-runner, actionlint]
+    needs: [changes, app-fast, runner-fast, engine, e2e, image-app, image-runner, compose, actionlint]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5

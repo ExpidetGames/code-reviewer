@@ -157,6 +157,33 @@ describe("Dockerfile app runtime", () => {
     expect(lines).toContain("VOLUME /data");
   });
 
+  // CR-40-T04
+  it("prepares /backups as a volume of its own for the unprivileged user and points BACKUP_DIR at it", () => {
+    const lines = instructions(appDockerfile);
+
+    expect(lines.join("\n")).toContain("BACKUP_DIR=/backups");
+    expect(lines.find((line) => line.includes("mkdir /data"))).toContain(
+      "mkdir /data /backups",
+    );
+    expect(lines.find((line) => line.includes("mkdir /data"))).toContain(
+      "chown app:app /data /backups",
+    );
+    expect(lines).toContain("VOLUME /backups");
+  });
+
+  // CR-40-T10
+  it("ships the backup command line and what it needs to run on its own", () => {
+    const lines = instructions(appDockerfile);
+
+    expect(lines).toContain(
+      "COPY --from=builder --chown=root:root /build/src/backup ./backup",
+    );
+    const prepare = lines.find((line) => line.includes("backup/package.json"));
+    expect(prepare).toContain('{"type":"module"}');
+    expect(prepare).toContain("ln -s");
+    expect(prepare).toContain("better-sqlite3");
+  });
+
   // CR-17-T04
   it("gives the unprivileged user a writable Next.js cache directory below the otherwise root-owned application", () => {
     const lines = instructions(appDockerfile);

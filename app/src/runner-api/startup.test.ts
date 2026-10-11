@@ -11,6 +11,7 @@ describe("the runner token at start", () => {
     ["not set", undefined],
     ["blank", "   "],
     ["too short", "a".repeat(31)],
+    ["split by a space", `${"a".repeat(20)} ${"a".repeat(20)}`],
   ])(
     "warns that every call is refused when the token is %s",
     (_name, token) => {

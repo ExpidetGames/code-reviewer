@@ -40,7 +40,8 @@ ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \
     HOSTNAME=0.0.0.0 \
-    DATABASE_PATH=/data/app.db
+    DATABASE_PATH=/data/app.db \
+    BACKUP_DIR=/backups
 
 # Fixed numeric ids so that volume permissions are predictable. /data is the database directory:
 # the app never creates it itself (a wrong DATABASE_PATH must not silently start an empty database),
@@ -48,21 +49,36 @@ ENV NODE_ENV=production \
 # host directory writable for uid 10001. Without any mount, Docker creates an anonymous volume for
 # /data (VOLUME below), so the app starts but the data is easy to lose: deployments must mount a
 # named volume.
+# /backups is where the daily backup goes (BACKUP_DIR). It is a volume of its own, never part of /data:
+# a backup that lives with the data is lost with it, and the app refuses such a target. Same rules
+# as /data: a named volume inherits this owner, a bind mount must be writable for uid 10001.
 RUN groupadd --system --gid 10001 app \
     && useradd --system --uid 10001 --gid app --no-create-home --shell /usr/sbin/nologin app \
-    && mkdir /data \
-    && chown app:app /data
+    && mkdir /data /backups \
+    && chown app:app /data /backups
 
 WORKDIR /srv/app
 COPY --from=builder --chown=root:root /build/.next/standalone ./
 COPY --from=builder --chown=root:root /build/.next/static ./.next/static
 COPY --from=builder --chown=root:root /build/public ./public
+# The backup and restore command line (`node backup/cli.ts backup|restore`, see src/backup/README.md).
+# The folder is copied as it is: Node runs the TypeScript files directly, they import nothing of the
+# app but better-sqlite3 (resolved from ./node_modules). .dockerignore keeps the tests out.
+COPY --from=builder --chown=root:root /build/src/backup ./backup
+# Two things the command line needs that the standalone server does not provide: a package.json
+# that marks the folder as ES modules (otherwise Node warns about re-parsing every file on every
+# run), and better-sqlite3 under its own name (the standalone output keeps it under a hashed name in
+# .next/node_modules, for the server only). The ls fails the build if the package is not found.
+RUN echo '{"type":"module"}' > backup/package.json \
+    && cd node_modules \
+    && ln -s "$(ls -d .pnpm/better-sqlite3@*/node_modules/better-sqlite3)" better-sqlite3
 # The sources stay root-owned and read-only for the app; only the runtime cache (ISR, image
 # optimization) is writable.
 RUN mkdir -p .next/cache && chown -R app:app .next/cache
 
 USER 10001:10001
 VOLUME /data
+VOLUME /backups
 EXPOSE 3000
 # /api/health is public (every other route needs a session) and reads the database.
 HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \

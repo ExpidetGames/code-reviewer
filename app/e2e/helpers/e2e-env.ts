@@ -12,6 +12,8 @@ const githubPort = Number(process.env.E2E_GITHUB_PORT);
 
 export const e2eEnv = {
   appPort,
+  /** The SQLite file of the app under test, relative to the app folder (fresh for every run). */
+  databasePath: "test-results/e2e-data/app.db",
   githubPort,
   appUrl: `http://127.0.0.1:${appPort}`,
   githubUrl: `http://127.0.0.1:${githubPort}`,
@@ -20,8 +22,17 @@ export const e2eEnv = {
   // ALLOWED_GITHUB_LOGINS of the app under test: the accounts of the journeys that sign in. A new
   // journey that signs in with an account of its own adds the login here. Accounts that are not
   // listed are refused (see e2e/auth/allow-list.e2e.ts).
-  allowedLogins: ["login-journey"].join(","),
+  allowedLogins: [
+    "login-journey",
+    "nav-journey",
+    "projects-journey",
+    "runs-journey",
+    "manual-journey",
+  ].join(","),
   authSecret: "e2e-auth-secret-0123456789-0123456789-abcdef",
+  // The production server refuses to start without the runner token. A dummy: nothing in the
+  // journeys talks to the runner API.
+  runnerToken: "e2e-runner-token-0123456789-0123456789-abcdef",
   // The GitHub App of the app under test. Only the webhook secret matters to the journeys (they
   // sign deliveries with it); the private key is generated for each run in playwright.config.ts.
   githubAppId: "424242",

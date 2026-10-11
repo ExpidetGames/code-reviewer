@@ -4,8 +4,9 @@ A job is one requested run of a command (`review`, `improve`, `describe`, `ask`)
 The queue lives in SQLite (table `jobs`, migration `20261010191500_create_jobs`); runners take jobs
 from it through the runner API (CR-28), webhooks and the UI put jobs in. Everything goes through
 `createJobQueue` (`job-queue.ts`), which checks input and calls the jobs repository
-(`src/db/repositories/jobs-repository.ts`, the only code that touches the table). The running server
-gets its queue from `getJobQueue()` (`shared.ts`).
+(`src/db/repositories/jobs-repository.ts`, the only code that changes the table). The running server
+gets its queue from `getJobQueue()` (`shared.ts`). The pages that show runs read the table through
+`src/db/repositories/runs-repository.ts` (read only; `src/runs/README.md`).
 
 | File            | Role                                                                                                                                                                                                                              |
 | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -59,7 +60,9 @@ reported).
    only one job per pull request runs at a time.
 
 `run_after` is `now` unless the caller passes a later time (the debounce of `synchronize` is policy and
-is decided by the webhook handler's trigger policy, CR-31). A manual job is due at once.
+is decided by the webhook handler's trigger policy, CR-31). A manual job is due at once. The start button
+(CR-33, `src/manual-reviews/README.md`) is the producer of `manual` jobs; it passes the head commit and the
+pull request address it got from the platform and the login of the signed in person.
 
 Unique indexes enforce the promises even if the code were wrong: one job per delivery id, one answer
 per comment of a repository (the primary key of `job_comments`, migration `20261011090000_create_job_comments`),
