@@ -10,7 +10,9 @@ import { describe, expect, it, vi } from "vitest";
 import { PORTAL_DENIED_HEADER } from "../admin/paths.ts";
 import type { AccessPolicy } from "./access-policy.ts";
 import { PORTAL_REWRITE_HEADER, createAccessProxy } from "./access-proxy.ts";
-import type { SessionLookup, SessionUser } from "./session-user.ts";
+import type { SessionLookup } from "./session-user.ts";
+
+type SessionUser = Extract<SessionLookup, { kind: "user" }>["user"];
 
 // The real function would look the session up in Better Auth; these tests decide who is asking.
 const lookupSession = vi.hoisted(() => vi.fn());
@@ -136,7 +138,7 @@ describe("the mark of the portal rewrite", () => {
   ])("is refused when the request carries %s", async (_name, wrong) => {
     const proxy = newProxy();
     const mark = await markOf(proxy);
-    const sent =
+    const sent: Record<string, string> =
       wrong === undefined
         ? {}
         : {
