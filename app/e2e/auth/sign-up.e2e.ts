@@ -8,10 +8,17 @@
 // integration tests (src/signup/, src/auth/access-gates.integration.test.ts).
 import { expect, test, type Page } from "@playwright/test";
 import { e2eEnv } from "../helpers/e2e-env";
-import { readOutbox, verificationLinkTo } from "../helpers/mail";
+import { verificationLinkTo, verificationLinksTo } from "../helpers/mail";
 
 const ADDRESS = "newcomer@e2e.test";
 const PASSWORD = "e2e-newcomer-passphrase-ember-quartz-31";
+
+// The page behind a link: the password of the sign-up that made it, and the click.
+async function confirmWith(page: Page, password: string): Promise<void> {
+  const form = page.getByRole("form", { name: "Confirm email address" });
+  await form.getByLabel("Password").fill(password);
+  await form.getByRole("button", { name: "Confirm email address" }).click();
+}
 
 async function signInThroughTheForm(
   page: Page,
@@ -26,11 +33,15 @@ async function signInThroughTheForm(
 
 // The form of the page. (Next.js keeps the page the visitor came from in the document, hidden, so labels
 // are looked up inside the form.)
-async function fillSignUp(page: Page, address: string): Promise<void> {
+async function fillSignUp(
+  page: Page,
+  address: string,
+  password: string = PASSWORD,
+): Promise<void> {
   const form = page.getByRole("form", { name: "Sign-up form" });
   await form.getByLabel("Email address").fill(address);
-  await form.getByLabel("Password", { exact: true }).fill(PASSWORD);
-  await form.getByLabel("Repeat the password").fill(PASSWORD);
+  await form.getByLabel("Password", { exact: true }).fill(password);
+  await form.getByLabel("Repeat the password").fill(password);
   await form.getByRole("button", { name: "Create account" }).click();
 }
 
@@ -64,7 +75,7 @@ test.describe("signing up", () => {
       "content",
       "no-referrer",
     );
-    await page.getByRole("button", { name: "Confirm email address" }).click();
+    await confirmWith(page, PASSWORD);
     await expect(page.getByRole("status")).toContainText("confirmed");
 
     await signInThroughTheForm(page, ADDRESS, PASSWORD);
@@ -83,23 +94,48 @@ test.describe("signing up", () => {
   });
 
   // #99-SR-14
-  test("a visitor who signs up with an address that has an account sees the same answer and no mail goes to it", async ({
+  test("a visitor who signs up with the address of an account that waits for verification sees the same answer", async ({
     page,
   }) => {
-    async function signUp(address: string): Promise<void> {
-      await page.goto("/sign-up");
-      await fillSignUp(page, address);
-      await expect(page.getByRole("status")).toContainText("Check your inbox");
-    }
+    const answer =
+      "Check your inbox. If this address may sign up, we sent it a link to confirm it. The account can be used once the address is confirmed.";
+    await page.goto("/sign-up");
+    await fillSignUp(page, e2eEnv.adminEmail);
+    await expect(page.getByRole("status")).toHaveText(answer);
+    await page.goto("/sign-up");
+    await fillSignUp(page, "brand-new@e2e.test");
+    await expect(page.getByRole("status")).toHaveText(answer);
+  });
 
-    await signUp(e2eEnv.adminEmail);
-    // A new address after it: once its mail is there, a mail to the first one would be too.
-    await signUp("second@e2e.test");
-    await verificationLinkTo("second@e2e.test");
+  // #99-SR-12
+  test("a person who signed up second completes their own sign-up, and the password the first one chose is not an account", async ({
+    page,
+  }) => {
+    const address = "contested@e2e.test";
+    const attackersPassword = "e2e-attacker-passphrase-copper-wave-52";
+    await page.goto("/sign-up");
+    await fillSignUp(page, address, attackersPassword);
+    await expect(page.getByRole("status")).toContainText("Check your inbox");
+    await page.goto("/sign-up");
+    await fillSignUp(page, address, PASSWORD);
+    await expect(page.getByRole("status")).toContainText("Check your inbox");
+    const [attackers, owners] = await verificationLinksTo(address, 2);
 
-    expect(
-      readOutbox().filter((message) => message.to === e2eEnv.adminEmail),
-    ).toEqual([]);
+    // The link of the first sign-up cannot be completed with the owner's password.
+    await page.goto(attackers ?? "");
+    await confirmWith(page, PASSWORD);
+    await expect(
+      page.getByRole("alert").filter({ hasText: "link or the password" }),
+    ).toBeVisible();
+
+    await page.goto(owners ?? "");
+    await confirmWith(page, PASSWORD);
+    await expect(page.getByRole("status")).toContainText("confirmed");
+
+    await signInThroughTheForm(page, address, attackersPassword);
+    await expect(page).toHaveURL(/\/login\?error=invalid_credentials$/);
+    await signInThroughTheForm(page, address, PASSWORD);
+    await expect(page).toHaveURL(/\/no-access$/);
   });
 
   // #99-SR-24
@@ -125,11 +161,11 @@ test.describe("signing up", () => {
   }) => {
     await page.goto("/verify-email?token=" + "A".repeat(43));
 
-    await page.getByRole("button", { name: "Confirm email address" }).click();
+    await confirmWith(page, PASSWORD);
 
     // (Next.js has an alert of its own, the route announcer.)
     await expect(
-      page.getByRole("alert").filter({ hasText: "not valid" }),
+      page.getByRole("alert").filter({ hasText: "link or the password" }),
     ).toBeVisible();
     await expect(
       page.getByRole("link", { name: "Ask for a new link" }),

@@ -60,7 +60,10 @@ describe("signing in with an address that is not verified", () => {
   it("works after the link was opened", async () => {
     const harness = await createSignUpHarness({ mail: true });
     await signedUp(harness);
-    await harness.verify({ token: harness.mail.lastToken(ADDRESS) });
+    await harness.verify({
+      token: harness.mail.lastToken(ADDRESS),
+      password: SIGNUP_TEST_PASSWORD,
+    });
 
     const response = await signIn(harness, ADDRESS, SIGNUP_TEST_PASSWORD);
 

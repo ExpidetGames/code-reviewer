@@ -51,7 +51,7 @@ export function ResendForm({
       {sent ? (
         <p role="status" className="alert alert-success">
           If this address is waiting to be confirmed, a new link is on its way.
-          The older link no longer works.
+          It is used with the password of the sign-up it belongs to.
         </p>
       ) : null}
       <div className="field">

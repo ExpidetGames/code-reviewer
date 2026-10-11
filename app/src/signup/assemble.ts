@@ -12,13 +12,18 @@ import { createSignUpLimits } from "./limits.ts";
 import { resendVerification } from "./resend.ts";
 import { signUp } from "./sign-up.ts";
 import { readSignUpFacts } from "./state.ts";
-import { completeVerification } from "./verification-tokens.ts";
+import {
+  completeVerification,
+  type VerifyPassword,
+} from "./verification-tokens.ts";
 
 export type AssembleSignUpOptions = {
   db: Kysely<Database>;
   mail: MailSender;
   /** Better Auth's password hash (`context.password.hash`). */
   hashPassword: (password: string) => Promise<string>;
+  /** Better Auth's password check (`context.password.verify`). */
+  verifyPassword: VerifyPassword;
   githubConfigured: () => boolean;
   /** The configured public address of the app. */
   baseUrl: string;
@@ -58,7 +63,11 @@ export function assembleSignUp(options: AssembleSignUpOptions) {
     currentUserId: options.currentUserId,
     database: db,
     limits,
-    verify: (token) => completeVerification(db, token, { now }),
+    verify: (token, password) =>
+      completeVerification(db, token, password, {
+        verifyPassword: options.verifyPassword,
+        now,
+      }),
     log: options.log,
   });
 }

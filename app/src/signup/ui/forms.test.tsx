@@ -139,16 +139,26 @@ describe("the sign-up form", () => {
 });
 
 describe("the confirmation of an address", () => {
-  // #99-SR-11
-  it("verifies only when the person clicks, and then points to the sign-in", async () => {
-    const fetchImpl = answer(200, { ok: true });
+  async function confirm(
+    fetchImpl: FetchLike,
+    password = "my-sign-up-password",
+  ) {
     const user = userEvent.setup();
     render(<VerifyEmailForm token={"t".repeat(43)} fetchImpl={fetchImpl} />);
-    expect(fetchImpl).not.toHaveBeenCalled();
-
+    await user.type(screen.getByLabelText("Password"), password);
     await user.click(
       screen.getByRole("button", { name: "Confirm email address" }),
     );
+  }
+
+  // #99-SR-11
+  it("verifies only when the person clicks, with the token and the password, and then points to the sign-in", async () => {
+    const fetchImpl = answer(200, { ok: true });
+    render(<VerifyEmailForm token={"t".repeat(43)} fetchImpl={fetchImpl} />);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    cleanup();
+
+    await confirm(fetchImpl);
 
     await waitFor(() =>
       expect(screen.getByRole("status").textContent).toContain("confirmed"),
@@ -157,31 +167,34 @@ describe("the confirmation of an address", () => {
     expect(call?.[0]).toBe("/api/verify-email");
     expect(JSON.parse(String(call?.[1]?.body))).toEqual({
       token: "t".repeat(43),
+      password: "my-sign-up-password",
     });
     expect(
       screen.getByRole("link", { name: "Sign in" }).getAttribute("href"),
     ).toBe("/login");
   });
 
+  it("asks for the password of the sign-up before it sends anything", async () => {
+    const fetchImpl = answer(200, { ok: true });
+    const user = userEvent.setup();
+    render(<VerifyEmailForm token={"t".repeat(43)} fetchImpl={fetchImpl} />);
+
+    await user.click(
+      screen.getByRole("button", { name: "Confirm email address" }),
+    );
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   // #99-SR-12
   it.each([
     ["token_expired", 410, "expired"],
     ["token_used", 409, "used already"],
-    ["invalid_token", 400, "not valid"],
+    ["invalid_token", 400, "link or the password"],
   ])(
     "says what is wrong with a link that gets %s, and offers a new one",
     async (code, status, words) => {
-      const user = userEvent.setup();
-      render(
-        <VerifyEmailForm
-          token={"t".repeat(43)}
-          fetchImpl={answer(status, { error: code })}
-        />,
-      );
-
-      await user.click(
-        screen.getByRole("button", { name: "Confirm email address" }),
-      );
+      await confirm(answer(status, { error: code }));
 
       await waitFor(() =>
         expect(screen.getByRole("alert").textContent).toContain(words),

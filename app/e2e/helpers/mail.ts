@@ -35,3 +35,24 @@ export async function verificationLinkTo(address: string): Promise<string> {
     .not.toBe("");
   return link;
 }
+
+/** The links of the mails to `address`, oldest first, once there are `count` of them. */
+export async function verificationLinksTo(
+  address: string,
+  count: number,
+): Promise<string[]> {
+  let links: string[] = [];
+  await expect
+    .poll(
+      () => {
+        links = readOutbox()
+          .filter((entry) => entry.to === address)
+          .map((entry) => /https?:\/\/\S+/.exec(entry.text)?.[0] ?? "")
+          .filter((link) => link !== "");
+        return links.length;
+      },
+      { message: `${String(count)} mails with a link to ${address}` },
+    )
+    .toBeGreaterThanOrEqual(count);
+  return links;
+}

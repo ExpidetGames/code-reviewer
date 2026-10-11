@@ -57,9 +57,11 @@ async function VerifyOrExplain({
   return (
     <>
       <p>
-        Open the link in the email we sent to the address you signed up with.
-        The account can be used once the address is confirmed. A link works once
-        and for 24 hours.
+        Open the link in the email we sent to the address you signed up with and
+        enter the password you chose then. The account can be used once the
+        address is confirmed. A link works once and for 24 hours. If a link does
+        not accept your password, sign up again with the same address and the
+        password you want to use: that sends a link of its own.
       </p>
       <ResendForm initialEmail={email ?? ""} />
       {isAdmin ? (

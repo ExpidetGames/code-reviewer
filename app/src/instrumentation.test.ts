@@ -46,6 +46,11 @@ vi.mock("./backup/startup.ts", () => ({
   startBackupSchedulerOnStart: () => void calls.push("backup"),
 }));
 
+// The cleanup of old rows: the real one is tested in src/maintenance/.
+vi.mock("./maintenance/startup.ts", () => ({
+  startCleanupOnStart: () => void calls.push("cleanup"),
+}));
+
 import { register } from "./instrumentation.ts";
 
 beforeEach(() => {
@@ -79,6 +84,7 @@ describe("starting the server", () => {
       "pins",
       "setup",
       "sync",
+      "cleanup",
       "backup",
     ]);
   });
@@ -111,6 +117,7 @@ describe("starting the server", () => {
       "pins",
       "setup",
       "sync",
+      "cleanup",
       "backup",
     ]);
   });

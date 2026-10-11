@@ -4,7 +4,8 @@
 // collaborators passed in so the route files only wire the real ones and tests wire fakes:
 //
 //   POST /api/sign-up                { email, password }   creates an account when the rule lets the address in
-//   POST /api/verify-email           { token }             verifies the address a link was made for
+//   POST /api/verify-email           { token, password }   verifies the address a link was made for, with
+//                                                          the password of the sign-up that made it
 //   POST /api/verify-email/resend    { email }             sends a new link
 //
 // All three are public: the visitor has no session yet (or, for a link, the token is the credential).
@@ -84,7 +85,7 @@ export type SignUpRouteDependencies = {
   currentUserId: (request: Request) => Promise<string | null>;
   database: Parameters<typeof findVerificationToken>[0];
   limits: SignUpLimits;
-  verify: (token: unknown) => Promise<VerificationResult>;
+  verify: (token: unknown, password: unknown) => Promise<VerificationResult>;
   log?: (message: string) => void;
 };
 
@@ -169,7 +170,7 @@ export function createSignUpRouteHandlers({
     async verify(request) {
       const body = await readJsonObject(request, SIGN_UP_REQUEST_MAX_BYTES);
       if (!body.ok) return refusal(body.error);
-      const { token } = body.value;
+      const { token, password } = body.value;
       if (!isWellFormedVerificationToken(token))
         return refusal("invalid_token");
 
@@ -190,7 +191,7 @@ export function createSignUpRouteHandlers({
         if (signedInAs !== null && signedInAs !== known.userId)
           return refusal("invalid_token");
 
-        const result = await verify(token);
+        const result = await verify(token, password);
         if (result.ok)
           return Response.json({ ok: true }, { headers: NO_STORE });
         return refusal(result.error);

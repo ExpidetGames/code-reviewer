@@ -48,6 +48,9 @@ export async function register(): Promise<void> {
     const { runStartupSync } = await import("./integrations/sync/startup.ts");
     void runStartupSync();
   }
+  // Old counters and spent verification links are removed now and every hour (production only).
+  const { startCleanupOnStart } = await import("./maintenance/startup.ts");
+  startCleanupOnStart();
   // Last: the daily backup timer (production only). It needs nothing from the app's own connection,
   // and a problem with it never stops the app from serving.
   startBackupSchedulerOnStart();

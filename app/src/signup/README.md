@@ -21,7 +21,8 @@ domains is only ever applied to addresses that can be verified. The decision is 
 
 Nothing about an address. `POST /api/sign-up` answers the same (status, body, headers) for an address that is
 new, that already has an account and that the rule refuses, and does the same amount of work: the password is
-hashed in every case, and the mail goes out after the answer. The request for a new link answers the same for
+hashed in every case, and the mail goes out after the answer (to a new address, and to an address whose account
+waits for verification; an address with a verified account gets none). The request for a new link answers the same for
 an address with an account that waits, with an account that does not, and with no account. What differs is only
 what does not depend on the address: that the sign-up is closed (`signup_closed`), that it is switched off
 (`sign_up_disabled`), that the form is wrong (`invalid_input` with the field and a code), that the instance has
@@ -47,10 +48,21 @@ account to verify at its next sign-in. Existing accounts are never deleted or lo
 2. Opening it shows a page with a button. The address is verified by the click, a `POST /api/verify-email`: a
    mail scanner or a link preview that opens every link in a message would otherwise use the link up first.
    The page asks browsers not to send its address as a referrer.
-3. A link verifies the address it was made for, once, within 24 hours. Used, expired and made-up links get
-   `token_used` (409), `token_expired` (410) and `invalid_token` (400) and change nothing. A link opened in a
-   browser that is signed in as somebody else is `invalid_token` too, and stays valid.
-4. A new link (`POST /api/verify-email/resend`, the sign-up when it makes an account) replaces the unused ones.
+3. A link is used **with the password of the sign-up that made it**, in the same POST. The link is bound to that
+   password's hash; the token is only used up when the password matches. On success that hash is the account's
+   password (sessions of the account end when it changed), the address is verified, and every other pending link
+   of the account stops working. This closes the pre-hijack: if someone signs up with another person's address
+   first, the owner's mail (from either sign-up) cannot be completed with the owner's password on the attacker's
+   link, a repeat sign-up never replaces the account's password, and the owner completes the link of their own
+   sign-up with their own password, which then replaces the attacker's. A wrong token and a wrong password are
+   one answer, `invalid_token` (400), and count against the 10 attempts of the link; `token_used` (409) and
+   `token_expired` (410) are only told to somebody who has the password, and nothing changes in any refusal. A
+   link opened in a browser that is signed in as somebody else is `invalid_token` too, and stays valid. A reset
+   of the account's password (`admin reset-password`) drops its pending links, because using one would put the
+   old password back.
+4. Several links of one account can be pending (one per mailed sign-up); making one does not cancel the others,
+   or somebody could keep a person's link from working by signing up again. A new link on request
+   (`POST /api/verify-email/resend`) is bound to the password the account has now.
 5. An account that has not verified its address is refused at the sign in while a mail server exists
    (403 `EMAIL_NOT_VERIFIED`, after the right password, no session; `src/auth/unverified-sign-in.ts`), and a
    session it already holds is turned away at every request (`src/auth/access-gates.ts`). The instance admin
@@ -66,7 +78,7 @@ not exist touches no counter and there is no counter for all links, so junk requ
 attempts of a person's valid link. The counter for an address is asked first, so attempts beyond it do not use
 up the instance's. The sign in keeps the limit of `src/auth/sign-in-limit.ts`. A refusal by a limit is
 `429 rate_limited` with `Retry-After`, the same for every address; counters that cannot be read refuse the
-request (`503 unavailable`), they never wave it through. The price of keying on the address: somebody can use
+request (`503 unavailable`), they never wave it through. The server removes old counters and spent links every hour (`src/maintenance/`). The price of keying on the address: somebody can use
 up the mail budget of an address and so keep its owner from asking for a new link for an hour; a link already
 in the inbox keeps working.
 

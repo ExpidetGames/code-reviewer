@@ -9,7 +9,10 @@
 // it is switched off, that the form is wrong, that they are going too fast.
 //
 // With a mail server the account is created unverified and a link goes to the address; it cannot be used
-// until the address is verified (src/auth/access-gates.ts). Without one, nothing can be verified and the
+// until the address is verified (src/auth/access-gates.ts). A sign-up for an address whose account still
+// waits for verification does not change that account: it makes one more link, bound to the password of
+// this sign-up, and mails it (verification-tokens.ts), so the answer and the mail are those of a new
+// account, and whoever owns the address completes the sign-up they know the password of. Without one, nothing can be verified and the
 // account is usable at once under the rule everyone (a rule that names addresses is closed then). The new
 // user has an account but no workspace: in a single-tenant instance they ask an admin for an invitation
 // (the workspaces issue); nothing here joins them to anything.
@@ -126,6 +129,22 @@ async function createAccount(
   }
 }
 
+/** The account at this address when it is an email and password account that waits for verification. */
+async function findWaitingAccount(
+  db: Kysely<Database>,
+  email: string,
+): Promise<{ id: string } | null> {
+  const row = await db
+    .selectFrom("users")
+    .innerJoin("accounts", "accounts.user_id", "users.id")
+    .select("users.id")
+    .where("users.email", "=", email)
+    .where("users.email_verified", "=", 0)
+    .where("accounts.provider_id", "=", CREDENTIAL_PROVIDER_ID)
+    .executeTakeFirst();
+  return row ?? null;
+}
+
 export async function signUp(
   dependencies: SignUpDependencies,
   input: { email: unknown; password: unknown },
@@ -164,7 +183,14 @@ export async function signUp(
 
   if (!evaluateSignUpRule(state.rule, email).ok)
     return { kind: "accepted", next };
-  const account = await createAccount(dependencies, email, passwordHash);
+  const created = await createAccount(dependencies, email, passwordHash);
+  // An address that has an account already: the account is left as it is (its password is not
+  // replaced). Only when it waits for verification a link for this sign-up's password goes out.
+  const account =
+    created ??
+    (availability.verifyByMail
+      ? await findWaitingAccount(dependencies.db, email)
+      : null);
   if (account !== null && availability.verifyByMail)
     defer(
       sendVerificationMail(
@@ -176,6 +202,7 @@ export async function signUp(
           log: dependencies.log,
         },
         { id: account.id, email },
+        passwordHash,
       ),
     );
   return { kind: "accepted", next };

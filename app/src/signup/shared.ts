@@ -20,6 +20,8 @@ export function getSignUpRouteHandlers(): SignUpRouteHandlers {
     mail: getMailSender(),
     hashPassword: async (password) =>
       (await getAuth().$context).password.hash(password),
+    verifyPassword: async (input) =>
+      (await getAuth().$context).password.verify(input),
     githubConfigured: () => githubSignInConfigured(process.env),
     // The address the links point to is the configured one, never a request header.
     baseUrl: loadAuthConfig(process.env).baseUrl,

@@ -64,6 +64,7 @@ export async function createSignUpHarness(options: SignUpHarnessOptions = {}) {
   const handlers = assembleSignUp({
     db,
     mail,
+    verifyPassword: (await auth.$context).password.verify,
     hashPassword: (password) => {
       hashed.count += 1;
       return hash(password);

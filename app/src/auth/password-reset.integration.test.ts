@@ -307,6 +307,33 @@ describe("a lost admin password without a mail server", () => {
     ).toEqual([]);
   });
 
+  // #99-SR-12
+  it("drops the pending verification links of the account, which would put the old password back", async () => {
+    const { portal, operatorMakesLink, post } = await startInstance();
+    const { token } = operatorMakesLink();
+    await portal.db
+      .insertInto("email_verification_tokens")
+      .values({
+        token_hash: "e".repeat(64),
+        user_id: portal.adminId,
+        email: "admin@example.com",
+        password_hash: "old-hash",
+        created_at: "2026-10-11T08:00:00.000Z",
+        expires_at: "2026-10-12T08:00:00.000Z",
+        used_at: null,
+      })
+      .execute();
+
+    await post({ token, password: NEW_PASSWORD });
+
+    expect(
+      await portal.db
+        .selectFrom("email_verification_tokens")
+        .selectAll()
+        .execute(),
+    ).toEqual([]);
+  });
+
   it("lets a new link replace the old one, which then stops working", async () => {
     const { operatorMakesLink, post, canSignIn } = await startInstance();
     const first = operatorMakesLink();

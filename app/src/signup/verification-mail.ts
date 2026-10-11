@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Sends a verification link to an account: makes the link (the unused ones of the account stop working)
-// and mails it. Never throws and never reports why a mail did not go out to the caller: the sign-up and
+// Sends a verification link to an account: makes the link, bound to the password it is to be used with
+// (verification-tokens.ts), and mails it. Never throws and never reports why a mail did not go out to the caller: the sign-up and
 // the resend answer the same whatever happens here (no account enumeration). A failure is logged by its
 // code only, never with the address, the message or the token.
 import type { Kysely } from "kysely";
@@ -34,11 +34,14 @@ export async function sendVerificationMail(
     log = console.error,
   }: SendVerificationMailDependencies,
   user: { id: string; email: string },
+  /** The hash of the password the link is used with: the one of the sign-up this mail answers. */
+  passwordHash: string,
 ): Promise<void> {
   try {
     const token = await issueVerificationToken(db, {
       userId: user.id,
       email: user.email,
+      passwordHash,
       now,
     });
     const result = await mail.send(

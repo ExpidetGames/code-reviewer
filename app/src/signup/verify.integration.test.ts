@@ -35,7 +35,9 @@ describe("opening a verification link", () => {
     const token = await signedUp(harness);
     await signedUp(harness, "other@example.com");
 
-    const result = await answer(await harness.verify({ token }));
+    const result = await answer(
+      await harness.verify({ token, password: SIGNUP_TEST_PASSWORD }),
+    );
 
     expect(result).toMatchObject({ status: 200, body: { ok: true } });
     expect((await harness.user(ADDRESS))?.email_verified).toBe(1);
@@ -46,9 +48,11 @@ describe("opening a verification link", () => {
   it("refuses a link that was used before, and nothing changes", async () => {
     const harness = await createSignUpHarness({ mail: true });
     const token = await signedUp(harness);
-    await harness.verify({ token });
+    await harness.verify({ token, password: SIGNUP_TEST_PASSWORD });
 
-    const second = await answer(await harness.verify({ token }));
+    const second = await answer(
+      await harness.verify({ token, password: SIGNUP_TEST_PASSWORD }),
+    );
 
     expect(second).toMatchObject({
       status: 409,
@@ -63,7 +67,9 @@ describe("opening a verification link", () => {
     const token = await signedUp(harness);
 
     harness.advance(VERIFICATION_TOKEN_TTL_MS + 1000);
-    const late = await answer(await harness.verify({ token }));
+    const late = await answer(
+      await harness.verify({ token, password: SIGNUP_TEST_PASSWORD }),
+    );
 
     expect(late).toMatchObject({
       status: 410,
@@ -85,7 +91,10 @@ describe("opening a verification link", () => {
       const token = await signedUp(harness);
 
       const result = await answer(
-        await harness.verify({ token: spoil(token) }),
+        await harness.verify({
+          token: spoil(token),
+          password: SIGNUP_TEST_PASSWORD,
+        }),
       );
 
       expect(result).toMatchObject({
@@ -113,9 +122,13 @@ describe("opening a verification link", () => {
     const other = await harness.user(harness.admin.email);
     harness.session.userId = other?.id ?? null;
 
-    const wrongSession = await answer(await harness.verify({ token }));
+    const wrongSession = await answer(
+      await harness.verify({ token, password: SIGNUP_TEST_PASSWORD }),
+    );
     harness.session.userId = (await harness.user(ADDRESS))?.id ?? null;
-    const ownSession = await answer(await harness.verify({ token }));
+    const ownSession = await answer(
+      await harness.verify({ token, password: SIGNUP_TEST_PASSWORD }),
+    );
 
     expect(wrongSession).toMatchObject({
       status: 400,
@@ -131,7 +144,9 @@ describe("opening a verification link", () => {
     const token = await signedUp(harness);
     harness.session.userId = null;
 
-    expect((await harness.verify({ token })).status).toBe(200);
+    expect(
+      (await harness.verify({ token, password: SIGNUP_TEST_PASSWORD })).status,
+    ).toBe(200);
   });
 
   // #99-SR-12
@@ -145,7 +160,7 @@ describe("opening a verification link", () => {
       }),
     );
     const cross = await harness.verify(
-      { token },
+      { token, password: SIGNUP_TEST_PASSWORD },
       { "sec-fetch-site": "cross-site" },
     );
 
@@ -162,9 +177,12 @@ describe("opening a verification link", () => {
       { length: 60 },
       (_v, i) => `${String(i).padStart(2, "0")}${"J".repeat(41)}`,
     );
-    for (const attempt of junk) await harness.verify({ token: attempt });
+    for (const attempt of junk)
+      await harness.verify({ token: attempt, password: SIGNUP_TEST_PASSWORD });
 
-    const valid = await answer(await harness.verify({ token }));
+    const valid = await answer(
+      await harness.verify({ token, password: SIGNUP_TEST_PASSWORD }),
+    );
 
     expect(valid.status).toBe(200);
     const counters = await harness.db
@@ -180,11 +198,15 @@ describe("opening a verification link", () => {
   it("refuses the 11th attempt at one link with 429 and Retry-After", async () => {
     const harness = await createSignUpHarness({ mail: true });
     const token = await signedUp(harness);
-    await harness.verify({ token });
+    await harness.verify({ token, password: SIGNUP_TEST_PASSWORD });
 
     const results = [];
     for (let i = 0; i < 11; i += 1)
-      results.push(await answer(await harness.verify({ token })));
+      results.push(
+        await answer(
+          await harness.verify({ token, password: SIGNUP_TEST_PASSWORD }),
+        ),
+      );
 
     expect(results.slice(0, 9).every((r) => r.status === 409)).toBe(true);
     expect(results[9]).toMatchObject({
@@ -199,7 +221,9 @@ describe("opening a verification link", () => {
     const token = await signedUp(harness);
     await harness.db.schema.dropTable("rate_limits").execute();
 
-    const result = await answer(await harness.verify({ token }));
+    const result = await answer(
+      await harness.verify({ token, password: SIGNUP_TEST_PASSWORD }),
+    );
 
     expect(result).toMatchObject({
       status: 503,
@@ -211,7 +235,7 @@ describe("opening a verification link", () => {
 
 describe("asking for a new verification link", () => {
   // #99-SR-13
-  it("sends a link to an account that waits for verification and the older link stops working", async () => {
+  it("sends a link to an account that waits for verification, and using one stops the other", async () => {
     const harness = await createSignUpHarness({ mail: true });
     const first = await signedUp(harness);
 
@@ -222,8 +246,14 @@ describe("asking for a new verification link", () => {
     expect(response).toMatchObject({ status: 200, body: { ok: true } });
     expect(harness.mail.to(ADDRESS)).toHaveLength(2);
     expect(second).not.toBe(first);
-    expect((await harness.verify({ token: first })).status).toBe(400);
-    expect((await harness.verify({ token: second })).status).toBe(200);
+    expect(
+      (await harness.verify({ token: second, password: SIGNUP_TEST_PASSWORD }))
+        .status,
+    ).toBe(200);
+    expect(
+      (await harness.verify({ token: first, password: SIGNUP_TEST_PASSWORD }))
+        .status,
+    ).toBe(400);
   });
 
   // #99-SR-13
@@ -269,7 +299,7 @@ describe("asking for a new verification link", () => {
   it("sends no link to an account that is verified already, with the same answer", async () => {
     const harness = await createSignUpHarness({ mail: true });
     const token = await signedUp(harness);
-    await harness.verify({ token });
+    await harness.verify({ token, password: SIGNUP_TEST_PASSWORD });
     const mails = harness.mail.outbox.length;
 
     const response = await answer(await harness.resend({ email: ADDRESS }));

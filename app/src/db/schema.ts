@@ -295,6 +295,11 @@ export interface EmailVerificationTokensTable {
   user_id: string;
   /** The address the link verifies; it verifies nothing once the account has another address. */
   email: string;
+  /**
+   * The password hash (Better Auth's format) of the sign-up that made the link. The link is used with that
+   * password, and that hash becomes the password of the account.
+   */
+  password_hash: string;
   /** ISO 8601 text in UTC. */
   created_at: string;
   /** ISO 8601 text in UTC. */

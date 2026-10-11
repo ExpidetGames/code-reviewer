@@ -23,7 +23,7 @@ const FAILURE_COPY: Record<string, string> = {
   not_available:
     "Email is not set up on this instance, so there is nothing to confirm.",
   invalid_token:
-    "This link is not valid. It is incomplete, or it was made for another account. Ask for a new one.",
+    "The link or the password is not correct. Use the password you chose when you signed up with this link; a link from somebody else's sign-up cannot be completed.",
   token_expired: "This link has expired. Ask for a new one.",
   token_used:
     "This link was used already. If you cannot sign in, ask for a new one.",

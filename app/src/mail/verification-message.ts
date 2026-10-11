@@ -35,19 +35,19 @@ export function verificationMessage({
   const text = [
     "Confirm your email address",
     "",
-    "Someone created an account at Code Reviewer with this email address. Open this link to confirm it",
-    `(it works once and for ${String(validForHours)} hours):`,
+    "Someone created an account at Code Reviewer with this email address. Open this link and enter the",
+    `password chosen at that sign-up to confirm it (the link works once and for ${String(validForHours)} hours):`,
     "",
     link,
     "",
-    "If this was not you, ignore this message: the account stays unusable until the address is confirmed.",
+    "If this was not you, ignore this message: without that password the link does nothing.",
   ].join("\n");
   const html = [
     "<p>Confirm your email address</p>",
-    "<p>Someone created an account at Code Reviewer with this email address. Open this link to confirm it",
-    `(it works once and for ${String(validForHours)} hours):</p>`,
+    "<p>Someone created an account at Code Reviewer with this email address. Open this link and enter the",
+    `password chosen at that sign-up to confirm it (the link works once and for ${String(validForHours)} hours):</p>`,
     `<p><a href="${escapeHtml(link)}">${escapeHtml(link)}</a></p>`,
-    "<p>If this was not you, ignore this message: the account stays unusable until the address is confirmed.</p>",
+    "<p>If this was not you, ignore this message: without that password the link does nothing.</p>",
   ].join("\n");
   return { to, subject: "Confirm your email address", text, html };
 }

@@ -93,12 +93,21 @@ describe("signing up under the rule everyone", () => {
   });
 
   // #99-SR-14
-  it("answers a sign-up for an existing address exactly like a new one and changes nothing", async () => {
+  it("answers a sign-up for an address with a verified account exactly like a new one, changes nothing and sends nothing", async () => {
     const harness = await createSignUpHarness({ mail: true });
     const fresh = await readAnswer(
       await harness.signUp({ email: ADDRESS, password: SIGNUP_TEST_PASSWORD }),
     );
     await harness.flush();
+    await harness.verify({
+      token: harness.mail.lastToken(ADDRESS),
+      password: SIGNUP_TEST_PASSWORD,
+    });
+    await harness.db
+      .updateTable("users")
+      .set({ email_verified: 1 })
+      .where("email", "=", harness.admin.email)
+      .execute();
     const before = await harness.counts();
     const mails = harness.mail.outbox.length;
 
@@ -126,6 +135,40 @@ describe("signing up under the rule everyone", () => {
         body: { email: ADDRESS, password: "a-completely-different-pw-77" },
       }),
     ).rejects.toMatchObject({ statusCode: 401 });
+  });
+
+  // #99-SR-14
+  it("answers a sign-up for an address whose account waits for verification like a new one, without changing the account", async () => {
+    const harness = await createSignUpHarness({ mail: true });
+    const fresh = await readAnswer(
+      await harness.signUp({ email: ADDRESS, password: SIGNUP_TEST_PASSWORD }),
+    );
+    await harness.flush();
+    const before = await harness.counts();
+    const passwordBefore = await harness.db
+      .selectFrom("accounts")
+      .select("password")
+      .where("user_id", "=", (await harness.user(ADDRESS))?.id ?? "")
+      .executeTakeFirstOrThrow();
+
+    const again = await readAnswer(
+      await harness.signUp({
+        email: ADDRESS,
+        password: "a-completely-different-pw-77",
+      }),
+    );
+    await harness.flush();
+
+    expect(again).toEqual(fresh);
+    expect(await harness.counts()).toEqual(before);
+    // The account keeps its password; the second sign-up has a link of its own, like a new account.
+    const passwordAfter = await harness.db
+      .selectFrom("accounts")
+      .select("password")
+      .where("user_id", "=", (await harness.user(ADDRESS))?.id ?? "")
+      .executeTakeFirstOrThrow();
+    expect(passwordAfter).toEqual(passwordBefore);
+    expect(harness.mail.to(ADDRESS)).toHaveLength(2);
   });
 
   // #99-SR-14
@@ -181,7 +224,8 @@ describe("signing up under the rule everyone", () => {
       .where("email", "=", ADDRESS)
       .execute();
     expect(rows).toHaveLength(1);
-    expect(harness.mail.to(ADDRESS)).toHaveLength(1);
+    // Each of the two sign-ups has a link of its own, bound to its password.
+    expect(harness.mail.to(ADDRESS)).toHaveLength(2);
   });
 
   it("still creates the account when the mail cannot be sent, and logs only a code", async () => {
@@ -302,7 +346,10 @@ describe("signing up under a rule that names addresses", () => {
     });
     await harness.signUp({ email: ADDRESS, password: SIGNUP_TEST_PASSWORD });
     await harness.flush();
-    await harness.verify({ token: harness.mail.lastToken(ADDRESS) });
+    await harness.verify({
+      token: harness.mail.lastToken(ADDRESS),
+      password: SIGNUP_TEST_PASSWORD,
+    });
 
     harness.mail.configured = false;
     const closed = await readAnswer(
@@ -369,7 +416,10 @@ describe("signing up under a rule that names addresses", () => {
     const harness = await createSignUpHarness({ mail: true });
     await harness.signUp({ email: ADDRESS, password: SIGNUP_TEST_PASSWORD });
     await harness.flush();
-    await harness.verify({ token: harness.mail.lastToken(ADDRESS) });
+    await harness.verify({
+      token: harness.mail.lastToken(ADDRESS),
+      password: SIGNUP_TEST_PASSWORD,
+    });
 
     await harness.settings.set(
       "sign_up_rule",
@@ -591,8 +641,10 @@ describe("what a sign-up leaves in answers and logs", () => {
     await take(
       await harness.signUp({ email: ADDRESS, password: SIGNUP_TEST_PASSWORD }),
     );
-    await take(await harness.verify({ token }));
-    await take(await harness.verify({ token: newToken }));
+    await take(await harness.verify({ token, password: SIGNUP_TEST_PASSWORD }));
+    await take(
+      await harness.verify({ token: newToken, password: SIGNUP_TEST_PASSWORD }),
+    );
     harness.mail.failNext();
     await harness.resend({ email: ADDRESS });
     await harness.flush();

@@ -2,7 +2,8 @@
 
 // Asking for a new verification link (docs/decisions/0001-editions-setup-and-accounts.md, section 2.5).
 // The answer is the same whether or not the address has an account that waits for verification: a link
-// goes out only when it does, after the answer, and the request is counted before anything is looked up,
+// goes out only when it does (bound to the password the account has now, so the person who knows it can
+// use it, and nobody else), after the answer, and the request is counted before anything is looked up,
 // so the limit refuses an unknown address exactly when it refuses a known one. Without a mail server
 // there is nothing to resend, and that is the same answer for every address too.
 import type { Kysely } from "kysely";
@@ -49,16 +50,17 @@ export async function resendVerification(
   const waiting = await db
     .selectFrom("users")
     .innerJoin("accounts", "accounts.user_id", "users.id")
-    .select(["users.id", "users.email"])
+    .select(["users.id", "users.email", "accounts.password"])
     .where("users.email", "=", email)
     .where("users.email_verified", "=", 0)
     .where("accounts.provider_id", "=", CREDENTIAL_PROVIDER_ID)
     .executeTakeFirst();
-  if (waiting !== undefined)
+  if (waiting?.password)
     defer(
       sendVerificationMail(
         { db, mail, baseUrl, now, log },
         { id: waiting.id, email: waiting.email },
+        waiting.password,
       ),
     );
   return { kind: "accepted" };
