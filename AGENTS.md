@@ -31,9 +31,10 @@ and `CONTRIBUTING.md`.
   touch another worktree.
 - Commit per green step, plain imperative message prefixed with the issue number:
   `#14: add runner skeleton`. **Never add a `Co-Authored-By` trailer.**
-- PR title: `<summary in English> (#<n>)`. The description has `Closes #<n>`, what changed, a test case
-  mapping table (`Test case | Test file / name | Status`) covering every test case of the issue, the
-  checks run locally, and follow-ups.
+- PR title: `<summary in English> (#<n>)`. The description has `Closes #<n>`, what changed, the checks
+  run locally, and follow-ups. Maintainers and agents add a test case mapping table
+  (`Test case | Test file / name | Status`) covering every test case of the issue; for outside
+  contributors it is optional.
 - Never run `git reset --hard`, `git clean`, `git stash`, `git checkout -- .` or force pushes on
   shared branches.
 
@@ -62,7 +63,8 @@ Run from the repository root.
   network guard. Follow it. Each behavior at the lowest level that can prove it.
 - No real network or model call in any automated test. Use the fakes in `fakes/`.
 - Never weaken, skip or delete a test to make a run green. Report flaky tests.
-- Reference the test case id from the issue in a comment above the test (`// T03`), never in the title.
+- Reference the test case in a comment above the test with the issue number and the case id from the
+  issue (`// #123-T03`), never in the title.
 
 ## Code
 

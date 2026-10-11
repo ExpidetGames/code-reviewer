@@ -12,6 +12,18 @@ for example `make verify`, `make test-engine`, `make test-e2e`, `make test-image
 If no automated test applies, say why (for example a purely visual change or documentation).
 -->
 
+## Test cases
+
+<!--
+Optional for contributors, expected from maintainers. If the issue has a "Test cases" table, map each
+case to the test that proves it, or say why it is manual or not applicable. Delete this section if the
+issue has no such table.
+-->
+
+| Test case | Test file / name | Status |
+| --- | --- | --- |
+|  |  |  |
+
 ## Checklist
 
 - [ ] The change is linked to an issue above (`Closes #n`) and the pull request goes into `development`.

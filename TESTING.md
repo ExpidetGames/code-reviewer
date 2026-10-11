@@ -108,8 +108,9 @@ contracts/                         runner API schema (runner-api.v1.json) and on
   match the body"): no implementation words and no issue, ADR or section identifiers. Runner test
   function names are behavior sentences too (`test_a_claimed_job_is_released_when_the_heartbeat_is_rejected`).
   E2E titles are full sentences with tags (`@smoke`, `@flaky`).
-- Link a test to its test case from the issue with a comment above the test (`// T03` or `# T03`),
-  never in the title.
+- Link a test to its test case from the issue with a comment above the test that names the issue
+  number and the case id (`// #123-T03` or `# #123-T03`), so the test traces back to its issue; never
+  in the title.
 - Every test file starts with a short comment or docstring: which behavior it pins down and why.
 - One behavior per test. Given, when, then is the shape of the body (arrange, act, assert separated by
   blank lines), not keywords in the code.
@@ -337,7 +338,8 @@ Planned, added with the suites they run: the Docker stack job (`integration`) an
 
 Every issue that changes behavior has a "Test cases" section: one row per behavior with id (T01, T02, ...), type (happy, error, edge,
 security), level, given, when, then. Cases are written when the issue is refined. The PR description
-maps every case of the issue to a test file and name, or to "manual" or "not applicable" with the reason. Every
+maps every case of the issue to a test file and name, or to "manual" or "not applicable" with the reason (a rule for
+maintainers and agents; the table is optional for outside contributors). Every
 issue covers: the happy path, every error it can produce, edge cases (empty, maximum, duplicates and
 replays, ordering and concurrency, expiry, idempotency, large diffs, fork and draft PRs), security
 cases whenever auth, webhooks, the runner API, tokens or user input are touched (secrets must not
