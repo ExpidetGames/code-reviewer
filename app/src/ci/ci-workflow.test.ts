@@ -107,14 +107,31 @@ describe("CI workflow triggers and jobs", () => {
     const lines = commandLines(jobNamed("runner-fast"));
 
     for (const command of [
-      "uv run ruff check .",
-      "uv run ruff format --check .",
+      "uv run ruff check . ../fakes",
+      "uv run ruff format --check . ../fakes",
       "uv run pyright",
       "uv run pytest -m unit",
       'uv run pytest -m "integration or contract"',
     ]) {
       expect(lines, command).toContain(command);
     }
+  });
+
+  // #124
+  it("lints and type-checks the Python under fakes/ with the runner's tools, in make verify and in CI", () => {
+    const makefile = readFileSync(`${repoRoot}Makefile`, "utf8");
+    const pyproject = readFileSync(`${repoRoot}runner/pyproject.toml`, "utf8");
+
+    // CI and make verify run the same commands (`$(RUNNER) run` is `uv run` inside runner/).
+    expect(makefile).toContain("$(RUNNER) run ruff check . ../fakes\n");
+    expect(makefile).toContain(
+      "$(RUNNER) run ruff format --check . ../fakes\n",
+    );
+    // Pyright takes its files from the pyproject include, for both entry points.
+    const include = /\[tool\.pyright\][^[]*?include = \[([^\]]*)\]/.exec(
+      pyproject,
+    );
+    expect(include?.[1]).toContain('"../fakes"');
   });
 
   // CR-41-T15

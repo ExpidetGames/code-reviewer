@@ -168,7 +168,9 @@ Runner (`runner/`, Python version pinned in `.python-version`, uv, `uv.lock` com
   `engine` is deselected by default, run it with `-m engine`. `pytest-timeout` per level, set in
   `tests/conftest.py` from the test's directory: unit 10 s, integration and contract 60 s, engine
   180 s. `pytest-socket` as described above.
-- `ruff check` and `ruff format --check`, `pyright` in strict mode.
+- `ruff check` and `ruff format --check`, `pyright` in strict mode. They cover the runner and the
+  Python under `fakes/` (the e2e wrapper `fakes/pr-agent/run_job_against_fake_llm.py`): ruff gets
+  `. ../fakes` as paths, pyright has `../fakes` in its `include` in `runner/pyproject.toml`.
 
 Engine suite (`runner/tests/engine/`, `uv run pytest -m engine`, about 4 minutes, `make test-engine`):
 
@@ -263,7 +265,7 @@ no process identifiers in titles), `verify:server-only-canary`, the Docker test 
 | Compose smoke test | `make test-compose` | builds both images under the tags `code-reviewer-*:compose`, then runs `docker/smoke/compose.sh` (needs a Docker daemon; not part of `make verify`) |
 
 Inside `app/`: `pnpm dev | build | start | lint | typecheck | test | test:watch | test:int | test:e2e`.
-Inside `runner/`: `uv sync --locked`, `uv run ruff check .`, `uv run ruff format --check .`,
+Inside `runner/`: `uv sync --locked`, `uv run ruff check . ../fakes`, `uv run ruff format --check . ../fakes`,
 `uv run pyright`, `uv run pytest` (default: everything except `engine`), `uv run pytest -m unit`,
 `uv run pytest -m "integration or contract"`, `uv run pytest -m engine`.
 
