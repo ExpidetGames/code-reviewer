@@ -4,10 +4,10 @@
 // leaves out Next.js's own static files): a path that is not public needs a valid session, which is
 // looked up in the database on each request, so a signed out or expired session stops working at
 // once. Anything that goes wrong while checking denies the request.
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import {
-  MISSING_PATH,
+  PORTAL_DENIED_HEADER,
   isInternalPortalPath,
   portalRewriteTarget,
 } from "../admin/paths.ts";
@@ -27,6 +27,11 @@ import {
  */
 export const PORTAL_REWRITE_HEADER = "x-portal-rewrite";
 
+/** SHA-256 of a text: equal in length whatever the text, which is what `timingSafeEqual` needs. */
+function digest(text: string): Buffer {
+  return createHash("sha256").update(text).digest();
+}
+
 export type AccessProxyDependencies = {
   getAuth: () => Pick<Auth, "api" | "$context">;
   /** Called per request, so the policy is created on first use (not when the module is loaded). */
@@ -39,6 +44,38 @@ export function createAccessProxy({
 }: AccessProxyDependencies) {
   // Per proxy, not per request; a request that comes from outside cannot know it.
   const rewriteMark = randomBytes(24).toString("base64url");
+  const rewriteMarkDigest = digest(rewriteMark);
+
+  /** Whether the request carries the mark (compared in constant time, whatever the length of what was sent). */
+  function hasRewriteMark(request: NextRequest): boolean {
+    const sent = request.headers.get(PORTAL_REWRITE_HEADER);
+    if (sent === null) return false;
+    return timingSafeEqual(digest(sent), rewriteMarkDigest);
+  }
+
+  /**
+   * Lets the request go on. The header that marks a request for the files of the portal is the proxy's
+   * alone: one that arrives from outside is taken off every request the proxy sees (not the static files it
+   * leaves out, which the rewrite on the header leaves out as well), so nobody can have an answer rewritten to a
+   * missing path (and a cache between us and them cannot be made to keep that answer).
+   */
+  function forward(request: NextRequest): NextResponse {
+    if (!request.headers.has(PORTAL_DENIED_HEADER)) return NextResponse.next();
+    const headers = new Headers(request.headers);
+    headers.delete(PORTAL_DENIED_HEADER);
+    return NextResponse.next({ request: { headers } });
+  }
+
+  /**
+   * The files of the portal by their own address are for nobody. The request goes on marked, and
+   * `next.config.ts` rewrites a marked request to a path that does not exist, so Next.js answers it itself
+   * (a rewrite or a 404 made here would show in the answer, see PORTAL_DENIED_HEADER).
+   */
+  function treatAsMissing(request: NextRequest): NextResponse {
+    const headers = new Headers(request.headers);
+    headers.set(PORTAL_DENIED_HEADER, "1");
+    return NextResponse.next({ request: { headers } });
+  }
 
   return async function accessProxy(
     request: NextRequest,
@@ -46,7 +83,7 @@ export function createAccessProxy({
     const { pathname } = request.nextUrl;
 
     // A public path needs no lookup.
-    if (isPublicPath(pathname)) return NextResponse.next();
+    if (isPublicPath(pathname)) return forward(request);
 
     let lookup: SessionLookup;
     try {
@@ -74,26 +111,24 @@ export function createAccessProxy({
         // everybody else the request goes on as it is and gets the answer of a path that does not
         // exist, with nothing that says the portal is there (src/admin/paths.ts). The pages and routes
         // check again themselves (src/admin/session.ts).
-        if (lookup.kind !== "user") return NextResponse.next();
         // The files by their own address are for nobody: not even the admin comes this way. (The admin's
         // own rewrite arrives here once more, with the mark.)
-        if (
-          isInternalPortalPath(pathname) &&
-          request.headers.get(PORTAL_REWRITE_HEADER) !== rewriteMark
-        )
-          return NextResponse.rewrite(new URL(MISSING_PATH, request.url));
+        if (isInternalPortalPath(pathname) && !hasRewriteMark(request))
+          return treatAsMissing(request);
+        if (lookup.kind !== "user") return forward(request);
         const target = lookup.user.isInstanceAdmin
           ? portalRewriteTarget(pathname)
           : null;
         if (target !== null) {
           const marked = new Headers(request.headers);
+          marked.delete(PORTAL_DENIED_HEADER);
           marked.set(PORTAL_REWRITE_HEADER, rewriteMark);
           return NextResponse.rewrite(
             new URL(`${target}${request.nextUrl.search}`, request.url),
             { request: { headers: marked } },
           );
         }
-        return NextResponse.next();
+        return forward(request);
       }
       case "unauthorized":
         // A user the policy turned away is known, so the answer is "forbidden", with the reason.

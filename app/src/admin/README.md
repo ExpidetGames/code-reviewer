@@ -28,12 +28,19 @@ The command line for a lost admin password is `src/admin-cli/` (below).
   `portalRewriteTarget`). For everybody else the request goes on untouched and Next.js answers it itself:
   same status, same headers (including the `Cache-Control` that keeps it out of shared caches), same
   behavior for an RSC request, a prefetch, a write and a posted Server Function, and no rewrite header.
-  A 404 built by hand, or a rewrite to a not-found route, would show (`x-middleware-rewrite`,
-  `x-nextjs-rewritten-path`, a year of shared caching of the prerendered not-found); the e2e journey
-  compares the full header set and body against a missing path.
+  A 404 built by hand, or a rewrite to a not-found route made by the proxy, would show
+  (`x-middleware-rewrite`, a year of shared caching of the prerendered not-found); the e2e journey compares
+  the full header set (names as written) and body against a missing path.
 - Next.js runs the proxy a second time on the path a rewrite leads to. The admin's rewrite carries a header
-  with a value only that process knows (`PORTAL_REWRITE_HEADER`), so the files by their own address
-  (`/instance-portal`) are answered as a missing path for everybody, the admin included.
+  with a value only that process knows (`PORTAL_REWRITE_HEADER`, compared with `timingSafeEqual`), so the
+  files by their own address (`/instance-portal`, `/api/instance-portal`) are a missing path for everybody,
+  the admin included. The proxy does not answer such a request itself (its answer would carry
+  `x-middleware-rewrite` and lower-case header names, and `Cache-Control` would not be the one of Next.js's
+  own 404): it lets it go on marked with `PORTAL_DENIED_HEADER`, which it takes off every request it
+  sees that arrives with it, and `next.config.ts` rewrites a marked request to a path that is no route. Next.js adds
+  `x-nextjs-rewritten-path` to the RSC answer of any rewrite, so the same rewrite also catches every other
+  path that is no route (`fallback`, Next.js's own files left out); then the marked request and a missing
+  path are answered by the same code, and the e2e journey compares every header, with its name as written.
 - The admin keeps access with an unverified email address, so that a mail problem can always be fixed.
 - Taking the admin flag away takes effect on the next request (the session lookup reads it every time).
 
@@ -123,5 +130,14 @@ The command runs without Next.js and imports only its own folder and better-sqli
   `tenancy-race.integration.test.ts`: the settings, their rules, the concurrency and what is never in an
   answer or a log line. `src/secrets/store.integration.test.ts` and `secret-value.test.ts`: the store.
 - `src/admin-cli/*.test.ts`, `src/auth/password-reset.integration.test.ts`: the lost password.
-- `ui/*.test.tsx`: the forms, the overview and the navigation. Journey: `e2e/admin/admin-portal.e2e.ts`.
+  `src/auth/password-reset-expiry.integration.test.ts`: the exact 30:00 end of a link, held by the look before
+  the reset and by the statement that uses the link up, each on its own (the clock answers a different instant
+  to each).
+- `ui/*.test.tsx`: the forms, the overview and the navigation. Journey: `e2e/admin/admin-portal.e2e.ts`; it
+  compares the answer of a missing path with the answer for `/admin/**`, `/api/admin/**` and the files by
+  their own address, for a page, an RSC request and prefetch, JSON, HEAD, OPTIONS, writes and a posted Server
+  Function, as a member and as the admin.
+- `src/auth/access-proxy.test.ts`: the rewrite mark (random per proxy, constant-time comparison, any length
+  refused) and the marking of the files by their own address. `portal-rewrites.test.ts`: the two rewrites of
+  `next.config.ts`.
 - The image smoke test (`docker/smoke/app.sh`) runs `admin reset-password` in the built image.
