@@ -14,10 +14,15 @@ function setup(methods: () => Promise<SignInMethods>) {
     check: vi.fn(() => Promise.resolve({ allowed: true as const })),
     succeeded: vi.fn(() => Promise.resolve()),
   };
-  const call = (method: string, path: string, body?: unknown) =>
+  const call = (
+    method: string,
+    path: string,
+    body?: unknown,
+    origin = "http://localhost:3000",
+  ) =>
     handleAuthRequest(
       { handler },
-      new Request(`http://localhost:3000${path}`, {
+      new Request(`${origin}${path}`, {
         method,
         headers: { "content-type": "application/json" },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -74,9 +79,26 @@ describe("a way to sign in that is switched off", () => {
 
     expect(response.status).toBe(302);
     expect(response.headers.get("location")).toBe(
-      "http://localhost:3000/login?error=sign_in_method_disabled",
+      "/login?error=sign_in_method_disabled",
     );
     expect(handler).not.toHaveBeenCalled();
+  });
+
+  // #98-SIGN-IN-METHODS
+  it("sends the person back to the login page of the address they used, not of the server's own", async () => {
+    const { call } = setup(EMAIL_ONLY);
+
+    const response = await call(
+      "GET",
+      "/api/auth/callback/github?code=abc&state=s",
+      undefined,
+      "http://0.0.0.0:3000",
+    );
+
+    expect(response.headers.get("location")).toBe(
+      "/login?error=sign_in_method_disabled",
+    );
+    expect(response.headers.get("location")).not.toContain("0.0.0.0");
   });
 
   it("still lets a person sign out", async () => {

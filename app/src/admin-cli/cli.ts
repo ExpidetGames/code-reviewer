@@ -6,7 +6,8 @@
 // It is how a lost admin password is recovered when no mail server is configured; with one, the normal
 // reset mail does the same. Exit code 0 on success, 1 when it could not be done (the reason is one line
 // on stderr: a stable code and a sentence), 2 for a wrong command line. The output holds the link (that
-// is the point), the address and the time it expires; the database keeps only the hash of the token.
+// is the point), the address and the time it expires, and one line when it had to switch email with
+// password sign-in back on; the database keeps only the hash of the token.
 //
 // Node runs this file as it is (TypeScript types are stripped), without Next.js and without the app's
 // other code: it imports only the files of this folder and better-sqlite3. That is why the image copies
@@ -73,6 +74,10 @@ function resetPassword(
       `Password reset link for ${email.trim().toLowerCase()}. It works once and expires at ${result.expiresAt} (30 minutes):`,
     );
     out(result.link);
+    if (result.emailPasswordReenabled)
+      out(
+        "Email with password sign-in was switched off in the admin portal. It is switched on again, so that the new password can be used.",
+      );
     return 0;
   } catch (error) {
     // A locked or damaged database. The message may quote a path, never a token.

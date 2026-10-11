@@ -205,6 +205,11 @@ describe("changing a setting", () => {
 
     const refused = await put(portal, body);
     await portal.db
+      .updateTable("users")
+      .set({ github_login: "octocat" })
+      .where("id", "=", portal.adminId)
+      .execute();
+    await portal.db
       .insertInto("accounts")
       .values({
         id: "github-account",

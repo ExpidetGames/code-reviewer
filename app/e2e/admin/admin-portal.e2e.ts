@@ -198,6 +198,18 @@ test.describe("the admin portal", () => {
     await expect(page.getByRole("link", { name: "Admin" })).toHaveCount(0);
   });
 
+  // #98-AD-17
+  test("the page of a reset link asks the browser not to send its address on as a referrer", async ({
+    request,
+  }) => {
+    const page = await request.get("/reset-password?token=abc");
+
+    expect(page.status()).toBe(200);
+    expect(await page.text()).toMatch(
+      /<meta name="referrer" content="no-referrer"\/?>/,
+    );
+  });
+
   // #98-AD-01
   test("a visitor without a session is sent to the login, and the data route says 401", async ({
     page,

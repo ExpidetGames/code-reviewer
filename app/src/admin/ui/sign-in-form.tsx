@@ -65,6 +65,10 @@ export function SignInMethodsForm({
           </span>
         </label>
       </fieldset>
+      <p className="muted small">
+        Switching a way off does not sign anybody out: people who are signed in
+        stay signed in until their session ends or they sign out.
+      </p>
       <LastChanged setting={settings.signInMethods} />
       <div className="form-actions">
         <Button type="submit" disabled={pending}>

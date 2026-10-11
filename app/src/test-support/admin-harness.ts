@@ -57,6 +57,8 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
   const flags = {
     github: options.githubConfigured ?? false,
     mail: options.mailConfigured ?? false,
+    /** What the access policy answers for a GitHub identity. */
+    githubAllowed: true,
   };
   const secrets = createSecretStore({ db, appSecret: SETUP_TEST_SECRET });
   const service = createAdminService({
@@ -64,6 +66,12 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
     secrets,
     githubConfigured: () => flags.github,
     mailConfigured: () => Promise.resolve(flags.mail),
+    accessPolicy: () =>
+      Promise.resolve(
+        flags.githubAllowed
+          ? { allowed: true }
+          : { allowed: false, reason: "not_allowed" },
+      ),
   });
 
   const policy = createAccessPolicy({

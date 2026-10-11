@@ -236,6 +236,13 @@ describe("the form of the ways to sign in", () => {
     expect(screen.getByText(/GitHub is not configured yet/)).toBeTruthy();
   });
 
+  // #98-SIGN-IN-METHODS
+  it("says that switching a way off does not end the sessions that exist", () => {
+    render(<SignInMethodsForm settings={view()} />);
+
+    expect(screen.getByText(/does not sign anybody out/)).toBeTruthy();
+  });
+
   it("sends the two switches", async () => {
     const { api, change } = apiAnswering(SAVED);
     const user = userEvent.setup();

@@ -8,7 +8,7 @@
 //
 // The count, the workspace and the setting are one transaction, and a user creates a workspace in a
 // transaction that reads the tenancy (src/workspaces/create-workspace.ts). On SQLite every
-// transaction takes the write lock when it begins, so the two cannot interleave: whichever comes
+// transaction takes the write lock when it begins (`begin immediate`, set in src/db/dialect.ts), so the two cannot interleave: whichever comes
 // first decides, and the other sees its result. An instance can therefore never end up
 // single-tenant with two workspaces. (A database without that lock needs a row lock on the tenancy
 // setting here and there; the Postgres port is a later issue.)

@@ -27,6 +27,8 @@ async function startService(
   const flags = {
     github: options.githubConfigured ?? false,
     mail: options.mailConfigured ?? false,
+    /** What the access policy answers for a GitHub identity. */
+    githubAllowed: true,
   };
   const secrets = createSecretStore({
     db,
@@ -38,6 +40,12 @@ async function startService(
     secrets,
     githubConfigured: () => flags.github,
     mailConfigured: () => Promise.resolve(flags.mail),
+    accessPolicy: () =>
+      Promise.resolve(
+        flags.githubAllowed
+          ? { allowed: true }
+          : { allowed: false, reason: "not_allowed" },
+      ),
     now: () => now,
   });
   return {
@@ -50,6 +58,9 @@ async function startService(
       now = new Date(value);
     },
     async linkGithub(userId: string) {
+      await sql`update users set github_login = 'octocat' where id = ${userId}`.execute(
+        db,
+      );
       await sql`insert into accounts (id, account_id, provider_id, user_id, created_at, updated_at)
         values (${`acc-${userId}`}, '583231', 'github', ${userId}, '2026-10-11T00:00:00.000Z', '2026-10-11T00:00:00.000Z')`.execute(
         db,
@@ -232,6 +243,26 @@ describe("changing the ways to sign in", () => {
       emailPassword: false,
       github: true,
     });
+  });
+
+  // #98-AD-16
+  it("refuses GitHub only when the linked identity would not pass the access policy, because nobody could sign in then", async () => {
+    const { service, settings, linkGithub, flags } = await startService({
+      githubConfigured: true,
+    });
+    await linkGithub("admin-1");
+    flags.githubAllowed = false;
+
+    const result = await service.changeSignInMethods("admin-1", {
+      emailPassword: false,
+      github: true,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: "admin_needs_github_identity",
+    });
+    expect(await settings.get("sign_in_methods")).toBeUndefined();
   });
 
   // #98-AD-16

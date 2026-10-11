@@ -112,11 +112,16 @@ export async function handleAuthRequest(
     }
     if (isEmail ? !methods.emailPassword : !methods.github) {
       // Somebody coming back from GitHub is in a browser: tell them on the login page. The rest are calls.
+      // A relative address: in a route handler the request's own address is the server's (its host
+      // name and port), not the one the person used.
       if (pathname.endsWith("/callback/github"))
-        return Response.redirect(
-          new URL("/login?error=sign_in_method_disabled", request.url),
-          302,
-        );
+        return new Response(null, {
+          status: 302,
+          headers: {
+            location: "/login?error=sign_in_method_disabled",
+            ...NO_STORE,
+          },
+        });
       return Response.json(
         { error: "sign_in_method_disabled" },
         { status: 403, headers: NO_STORE },

@@ -15,7 +15,7 @@ const FAILURE_COPY: Record<string, string> = {
   github_not_configured:
     "GitHub sign-in cannot be switched on before GitHub is configured.",
   admin_needs_github_identity:
-    "Before GitHub is the only way to sign in, link your own GitHub account to your admin account. Otherwise you could not sign in afterwards.",
+    "Before GitHub is the only way to sign in, link your own GitHub account to your admin account, and make sure it is allowed to sign in. Otherwise you could not sign in afterwards.",
   invalid_input: "Some of the values are not valid. Check the fields.",
 };
 

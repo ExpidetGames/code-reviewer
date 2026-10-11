@@ -4,7 +4,7 @@
 // decision record, and records the admin and the time in `instance_settings`. The secrets appear only
 // as their status (configured, or cannot be read), never as a value.
 import type { Kysely } from "kysely";
-import { GITHUB_PROVIDER_ID } from "../auth/github-provider.ts";
+import type { AccessPolicy } from "../auth/access-policy.ts";
 import {
   createInstanceSettingsRepository,
   type InstanceSettingKey,
@@ -14,6 +14,7 @@ import type { Database } from "../db/schema.ts";
 import type { SecretStatus, SecretStore } from "../secrets/store.ts";
 import type { SetupIssue } from "../setup/errors.ts";
 import { parseSignUpRule } from "../setup/input.ts";
+import { githubIdentityPasses } from "./github-identity.ts";
 import {
   checkSignInMethods,
   effectiveSignInMethods,
@@ -96,6 +97,8 @@ export type AdminServiceOptions = {
   githubConfigured: () => boolean;
   /** Whether a mail server is configured (the mail settings come with the SMTP issue). */
   mailConfigured: () => Promise<boolean>;
+  /** The rule that decides who may sign in with GitHub (the allow list), asked for the acting admin's identity. */
+  accessPolicy: AccessPolicy;
   now?: () => Date;
 };
 
@@ -108,6 +111,7 @@ export function createAdminService({
   secrets,
   githubConfigured,
   mailConfigured,
+  accessPolicy,
   now = () => new Date(),
 }: AdminServiceOptions): AdminService {
   const settings = createInstanceSettingsRepository(db, now);
@@ -120,16 +124,6 @@ export function createAdminService({
       .where("id", "in", ids)
       .execute();
     return new Map(rows.map((row) => [row.id, row.email]));
-  }
-
-  async function actorHasGithubIdentity(actorId: string): Promise<boolean> {
-    const row = await db
-      .selectFrom("accounts")
-      .select("id")
-      .where("user_id", "=", actorId)
-      .where("provider_id", "=", GITHUB_PROVIDER_ID)
-      .executeTakeFirst();
-    return row !== undefined;
   }
 
   return {
@@ -230,7 +224,11 @@ export function createAdminService({
       };
       const checked = checkSignInMethods(wanted, {
         githubConfigured: githubConfigured(),
-        actorHasGithubIdentity: await actorHasGithubIdentity(actorId),
+        actorHasGithubIdentity: await githubIdentityPasses(
+          db,
+          accessPolicy,
+          actorId,
+        ),
       });
       if (!checked.ok) return checked;
       await settings.set("sign_in_methods", wanted, actorId);

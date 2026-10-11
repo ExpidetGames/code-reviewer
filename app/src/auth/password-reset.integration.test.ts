@@ -13,9 +13,10 @@ import {
   ADMIN_TEST_BASE_URL,
   ADMIN_TEST_CREDENTIALS,
 } from "../test-support/admin-harness.ts";
-import { completePasswordReset } from "./password-reset.ts";
+import { completePasswordReset, isKnownResetToken } from "./password-reset.ts";
 import {
   PASSWORD_RESET_MAX_ATTEMPTS,
+  PASSWORD_RESET_WINDOW_MS,
   createPasswordResetHandler,
 } from "./password-reset-http.ts";
 
@@ -26,6 +27,7 @@ async function startInstance() {
   let now = new Date("2026-10-11T12:00:00.000Z");
   const handler = createPasswordResetHandler({
     rateLimits: createRateLimitsRepository(portal.db, () => now),
+    isKnownToken: (token) => isKnownResetToken(portal.db, token),
     complete: async (input) =>
       completePasswordReset(
         {
@@ -142,6 +144,7 @@ describe("a lost admin password without a mail server", () => {
 
     const tooShort = await post({ token, password: "short" });
     const common = await post({ token, password: "password1234" });
+    const hashAfterRefusals = await passwordHash();
     const stillGood = await post({ token, password: NEW_PASSWORD });
 
     expect(tooShort.status).toBe(422);
@@ -153,8 +156,9 @@ describe("a lost admin password without a mail server", () => {
       error: "invalid_input",
       issues: [{ field: "password", code: "password_too_common" }],
     });
-    expect(hashBefore).not.toBe(await passwordHash());
+    expect(hashAfterRefusals).toBe(hashBefore);
     expect(stillGood.status).toBe(200);
+    expect(await passwordHash()).not.toBe(hashBefore);
     expect(await canSignIn(NEW_PASSWORD)).toBe(true);
   });
 
@@ -225,6 +229,52 @@ describe("a lost admin password without a mail server", () => {
     expect(await passwordHash()).toBe(hashBefore);
     expect(await canSignIn(ADMIN_TEST_CREDENTIALS.password)).toBe(true);
   });
+
+  // #98-AD-18
+  it("works up to the last moment and is refused at exactly 30:00", async () => {
+    const atTheEdge = await startInstance();
+    const last = atTheEdge.operatorMakesLink();
+    atTheEdge.advance(30 * 60 * 1000 - 1);
+    const accepted = await atTheEdge.post({
+      token: last.token,
+      password: NEW_PASSWORD,
+    });
+
+    const exactly = await startInstance();
+    const link = exactly.operatorMakesLink();
+    exactly.advance(30 * 60 * 1000);
+    const refused = await exactly.post({
+      token: link.token,
+      password: NEW_PASSWORD,
+    });
+
+    expect(accepted.status).toBe(200);
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toEqual({ error: "invalid_token" });
+  });
+
+  // #98-AD-17
+  it.each([
+    ["129 characters", "a".repeat(129)],
+    ["65 emoji, which are 130 UTF-16 code units", "\u{1F600}".repeat(65)],
+  ])(
+    "refuses a new password of %s as too long and keeps the link good",
+    async (_name, password) => {
+      const { operatorMakesLink, post, passwordHash } = await startInstance();
+      const { token } = operatorMakesLink();
+      const hashBefore = await passwordHash();
+
+      const response = await post({ token, password });
+
+      expect(response.status).toBe(422);
+      expect(await response.json()).toEqual({
+        error: "invalid_input",
+        issues: [{ field: "password", code: "password_too_long" }],
+      });
+      expect(await passwordHash()).toBe(hashBefore);
+      expect((await post({ token, password: NEW_PASSWORD })).status).toBe(200);
+    },
+  );
 
   // #98-AD-18
   it("stores the token only as a hash", async () => {
@@ -325,11 +375,38 @@ describe("the data route behind the link", () => {
     );
   });
 
-  it("is rate limited for the whole instance, whatever the token, and says when to try again", async () => {
+  // #98-AD-18
+  it("still accepts a valid link after 100 junk requests, which touch no counter", async () => {
+    const { post, operatorMakesLink, portal, canSignIn } =
+      await startInstance();
+    const { token } = operatorMakesLink();
+
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const junk = await post({ token: newResetToken(), password: "y" });
+      expect(junk.status).toBe(400);
+    }
+    const response = await post({ token, password: NEW_PASSWORD });
+
+    expect(response.status).toBe(200);
+    expect(await canSignIn(NEW_PASSWORD)).toBe(true);
+    const counters = await portal.db
+      .selectFrom("rate_limits")
+      .select("key")
+      .execute();
+    expect(
+      counters.filter(({ key }) => key.startsWith("password-reset")),
+    ).toEqual([
+      { key: expect.stringMatching(/^password-reset:[0-9a-f]{64}$/) as string },
+    ]);
+  });
+
+  it("limits the attempts against one link, whatever they say, and says when to try again", async () => {
     const { post, operatorMakesLink } = await startInstance();
     const { token } = operatorMakesLink();
-    for (let attempt = 0; attempt < PASSWORD_RESET_MAX_ATTEMPTS; attempt += 1)
-      await post({ token: newResetToken(), password: NEW_PASSWORD });
+    for (let attempt = 0; attempt < PASSWORD_RESET_MAX_ATTEMPTS; attempt += 1) {
+      const refused = await post({ token, password: "short" });
+      expect(refused.status).toBe(422);
+    }
 
     const limited = await post({ token, password: NEW_PASSWORD });
 
@@ -338,16 +415,28 @@ describe("the data route behind the link", () => {
     expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
   });
 
-  it("starts counting again when the window is over", async () => {
+  it("does not let the attempts against one link stop another link", async () => {
+    const { post, operatorMakesLink } = await startInstance();
+    const old = operatorMakesLink();
+    for (let attempt = 0; attempt <= PASSWORD_RESET_MAX_ATTEMPTS; attempt += 1)
+      await post({ token: old.token, password: "short" });
+    const fresh = operatorMakesLink();
+
+    const response = await post({ token: fresh.token, password: NEW_PASSWORD });
+
+    expect(response.status).toBe(200);
+  });
+
+  it("counts the attempts of a link for as long as the link lives", async () => {
     const { post, operatorMakesLink, advance } = await startInstance();
     const { token } = operatorMakesLink();
     for (let attempt = 0; attempt <= PASSWORD_RESET_MAX_ATTEMPTS; attempt += 1)
-      await post({ token: newResetToken(), password: NEW_PASSWORD });
-    advance(61 * 1000);
+      await post({ token, password: "short" });
+    advance(PASSWORD_RESET_WINDOW_MS - 1000);
 
-    const response = await post({ token, password: NEW_PASSWORD });
+    const stillLimited = await post({ token, password: NEW_PASSWORD });
 
-    expect(response.status).toBe(200);
+    expect(stillLimited.status).toBe(429);
   });
 
   it("is a public route: a person without a session reaches it through the proxy", async () => {

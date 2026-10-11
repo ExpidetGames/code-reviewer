@@ -19,14 +19,26 @@ The command line for a lost admin password is `src/admin-cli/` (below).
 
 ## Who gets in
 
-- Not signed in: a page redirects to the sign-in, a data route answers `401`.
-- Signed in, not an instance admin: **404**, the answer of a path that does not exist. The proxy
-  (`src/auth/access-proxy.ts`) rewrites every `/admin/**` and `/api/admin/**` request of such a person, any
-  method, to a path that is no route, so a Server Function posted to a portal page is turned away as well.
+- Not signed in: a page redirects to the sign-in, a data route answers `401`, exactly as for any other
+  path that does not exist.
+- Signed in, not an instance admin: **the answer of a path that does not exist**, in every detail. This is
+  by construction, not by imitation: `/admin/**` and `/api/admin/**` are not routes of the app. The files
+  of the portal live below `/instance-portal` and `/api/instance-portal`, and only the proxy
+  (`src/auth/access-proxy.ts`) rewrites the instance admin's request there (`paths.ts`,
+  `portalRewriteTarget`). For everybody else the request goes on untouched and Next.js answers it itself:
+  same status, same headers (including the `Cache-Control` that keeps it out of shared caches), same
+  behavior for an RSC request, a prefetch, a write and a posted Server Function, and no rewrite header.
+  A 404 built by hand, or a rewrite to a not-found route, would show (`x-middleware-rewrite`,
+  `x-nextjs-rewritten-path`, a year of shared caching of the prerendered not-found); the e2e journey
+  compares the full header set and body against a missing path.
+- Next.js runs the proxy a second time on the path a rewrite leads to. The admin's rewrite carries a header
+  with a value only that process knows (`PORTAL_REWRITE_HEADER`), so the files by their own address
+  (`/instance-portal`) are answered as a missing path for everybody, the admin included.
 - The admin keeps access with an unverified email address, so that a mail problem can always be fixed.
 - Taking the admin flag away takes effect on the next request (the session lookup reads it every time).
 
-The proxy is not the only guard. Every page and the layout call `requireAdmin()`, every data route hands
+The proxy is not the only guard. Every page and the layout call `requireAdmin()` (a person who is not an
+admin gets `notFound()`, `session.test.ts` runs every page as such a person), every data route hands
 `lookupAdmin` to `createAdminRouteHandlers`, which checks it before anything is read (401 for nobody, the
 Next.js `notFound()` for somebody who is not an admin). `portal-guards.test.ts` fails for a page or route
 that forgot it, and for a file of Server Functions inside the portal's folders (the portal has none: its
@@ -52,7 +64,7 @@ value and the admin belong together.
 `src/workspaces/create-workspace.ts` (`createWorkspaceUnderTenancy`) is the one place that creates a
 workspace for a user: it reads the tenancy in the same transaction that inserts the workspace, and refuses
 on a single-tenant instance. The switch to single-tenant counts the workspaces in its transaction. On SQLite
-every transaction takes the write lock when it begins, so the two cannot interleave and an instance never
+every transaction takes the write lock when it begins (`BEGIN IMMEDIATE`, set in `src/db/dialect.ts`), so the two cannot interleave and an instance never
 ends up single-tenant with two workspaces (`tenancy-race.integration.test.ts` races two real processes).
 A Postgres port needs a row lock on the tenancy setting in both places.
 
@@ -91,8 +103,14 @@ new link replaces the unused ones of the account. The link opens `/reset-passwor
 `POST /api/password-reset` (`src/auth/password-reset*.ts`): the new password must pass the password rule,
 the token is used up by one statement, and every session of the account ends in the same transaction. An
 unknown, used, expired or changed token gets one answer, `invalid_token`. The route is public (the token is
-the credential) and rate limited in `rate_limits` (20 attempts a minute for the instance, key
-`password-reset:all`). With a mail server the reset mail of the SMTP issue ends in the same function.
+the credential). It is rate limited per link, not for the instance: attempts against a token that exists
+are counted in `rate_limits` (key `password-reset:<hash>`, 10 in the 30 minutes a link lives); a token that
+does not exist gets the same generic answer and touches no counter, so junk requests cannot lock the
+operator out of the recovery path. With a mail server the reset mail of the SMTP issue ends in the same function.
+
+If the admin had switched email with password sign-in off, the command switches it back on, prints one line
+saying so, and records the system (`updated_by` null) as the one who changed it: a new password is of no
+use otherwise, and the shell operator is trusted with exactly this recovery.
 
 The command runs without Next.js and imports only its own folder and better-sqlite3, like `src/backup/`.
 

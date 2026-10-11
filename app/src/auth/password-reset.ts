@@ -30,6 +30,20 @@ export type PasswordResetResult =
 // Thrown inside the transaction to undo it; never leaves this file.
 class Rollback extends Error {}
 
+/** Whether a link with this token was ever made. Used and expired links count; a malformed token does not. */
+export async function isKnownResetToken(
+  db: Kysely<Database>,
+  token: unknown,
+): Promise<boolean> {
+  if (!isWellFormedResetToken(token)) return false;
+  const row = await db
+    .selectFrom("password_reset_tokens")
+    .select("token_hash")
+    .where("token_hash", "=", hashResetToken(token))
+    .executeTakeFirst();
+  return row !== undefined;
+}
+
 export async function completePasswordReset(
   { db, hashPassword, now = () => new Date() }: PasswordResetDependencies,
   { token, password }: { token: unknown; password: unknown },

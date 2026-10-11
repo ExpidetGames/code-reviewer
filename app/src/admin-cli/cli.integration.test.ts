@@ -118,6 +118,92 @@ describe("admin reset-password", () => {
   });
 
   // #98-AD-18
+  // #98-AD-17
+  it("switches email with password sign-in back on when the admin had switched it off, says so, and records the system as the one who changed it", async () => {
+    const { db, run } = await startInstance();
+    await db
+      .insertInto("instance_settings")
+      .values({
+        key: "sign_in_methods",
+        value: JSON.stringify({ emailPassword: false, github: true }),
+        updated_by: "github-1",
+        updated_at: "2026-10-10T00:00:00.000Z",
+      })
+      .execute();
+
+    const result = run(["reset-password", "admin@example.test"]);
+
+    expect(result.code).toBe(0);
+    expect(result.out).toHaveLength(3);
+    expect(result.out[2]).toContain("switched on again");
+    expect(
+      await db
+        .selectFrom("instance_settings")
+        .selectAll()
+        .where("key", "=", "sign_in_methods")
+        .executeTakeFirst(),
+    ).toEqual({
+      key: "sign_in_methods",
+      value: JSON.stringify({ emailPassword: true, github: true }),
+      updated_by: null,
+      updated_at: "2026-10-11T12:00:00.000Z",
+    });
+  });
+
+  it("leaves the ways to sign in alone when email with password is on, or nothing was ever saved", async () => {
+    const { db, run } = await startInstance();
+    const untouched = run(["reset-password", "admin@example.test"]);
+    await db
+      .insertInto("instance_settings")
+      .values({
+        key: "sign_in_methods",
+        value: JSON.stringify({ emailPassword: true, github: false }),
+        updated_by: "github-1",
+        updated_at: "2026-10-10T00:00:00.000Z",
+      })
+      .execute();
+
+    const on = run(["reset-password", "admin@example.test"]);
+
+    expect(untouched.out).toHaveLength(2);
+    expect(on.out).toHaveLength(2);
+    expect(
+      (
+        await db
+          .selectFrom("instance_settings")
+          .select(["updated_by", "updated_at"])
+          .where("key", "=", "sign_in_methods")
+          .executeTakeFirstOrThrow()
+      ).updated_at,
+    ).toBe("2026-10-10T00:00:00.000Z");
+  });
+
+  it("changes nothing in the settings when the account is unknown", async () => {
+    const { db, run } = await startInstance();
+    await db
+      .insertInto("instance_settings")
+      .values({
+        key: "sign_in_methods",
+        value: JSON.stringify({ emailPassword: false, github: true }),
+        updated_by: null,
+        updated_at: "2026-10-10T00:00:00.000Z",
+      })
+      .execute();
+
+    run(["reset-password", "nobody@example.test"]);
+
+    expect(
+      JSON.parse(
+        (
+          await db
+            .selectFrom("instance_settings")
+            .select("value")
+            .executeTakeFirstOrThrow()
+        ).value,
+      ),
+    ).toEqual({ emailPassword: false, github: true });
+  });
+
   it("reports an unknown account and writes nothing", async () => {
     const { run, tokens } = await startInstance();
 

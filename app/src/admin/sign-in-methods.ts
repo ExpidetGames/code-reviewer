@@ -12,7 +12,7 @@ export const SIGN_IN_METHODS_ERROR_CODES = [
   "at_least_one_method",
   /** GitHub would be on, and the GitHub integration is not configured. */
   "github_not_configured",
-  /** GitHub only, and the acting admin has no linked GitHub identity to sign in with afterwards. */
+  /** GitHub only, and the acting admin has no linked GitHub identity that would sign in afterwards. */
   "admin_needs_github_identity",
 ] as const;
 export type SignInMethodsErrorCode =
@@ -36,7 +36,10 @@ export function effectiveSignInMethods(
 
 export type SignInMethodsFacts = {
   githubConfigured: boolean;
-  /** Whether the admin who makes the change has a GitHub identity linked to their account. */
+  /**
+   * Whether the admin who makes the change has a GitHub identity linked to their account that the
+   * access policy lets through today (github-identity.ts): one that would sign in.
+   */
   actorHasGithubIdentity: boolean;
 };
 
