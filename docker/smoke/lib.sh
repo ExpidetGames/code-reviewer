@@ -9,6 +9,18 @@ fail() {
   exit 1
 }
 
+# Unsets every variable the given compose files interpolate (${NAME}, ${NAME:-default} and nested
+# ones), so that a value in the caller's shell or in CI cannot change what a smoke test runs
+# against. The list is read from the files, not written by hand: a variable added to a compose file
+# later is covered without anyone remembering it. Call it before exporting the dummy settings.
+# Usage: unset_compose_variables <compose file>...
+unset_compose_variables() {
+  local name
+  while read -r name; do
+    unset "$name"
+  done < <(grep -ohE '\$\{[A-Za-z_][A-Za-z0-9_]*' "$@" | sed 's/^\${//' | sort -u)
+}
+
 # Containers and volumes created by a smoke run, removed on exit (also after a failure).
 CLEANUP_CONTAINERS=()
 CLEANUP_VOLUMES=()

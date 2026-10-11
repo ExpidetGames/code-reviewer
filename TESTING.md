@@ -221,7 +221,7 @@ well formed `git_unavailable` result without a secret in any output.
 
 Compose (`docker/smoke/compose.sh <app image> <runner image>`): works in a temporary directory with a copy
 of `compose.yml`, a project name of its own and dummy settings (the GitHub App key is generated on the
-spot), so it never touches a real `.env`, stack or volume. Order: `docker compose config` and the
+spot), so it never touches a real `.env`, stack or volume. It first unsets every variable the compose files read (the list is derived from the files by `unset_compose_variables` in `docker/smoke/lib.sh`, pinned by `app/src/ci/compose-smoke-env.test.ts`), so the caller's shell cannot change the result. Order: `docker compose config` and the
 service list; `up` without `RUNNER_TOKEN` is refused with a message naming it and creates no
 container; with an override that makes the app never healthy `up` fails and the runner is only
 `created`; then the real start with `--wait`, `/api/health`, no published port on the runner, `/data`
