@@ -69,6 +69,8 @@ Run from the repository root.
 ## Code
 
 - English for code, comments, documentation and UI strings.
+- Every new source file starts with `SPDX-License-Identifier: Apache-2.0` in its language's comment syntax
+  (`make fix-spdx-headers` adds it; a unit test fails without it; `CONTRIBUTING.md`, section "License").
 - TypeScript strict. No `any` without a comment explaining why. Python is checked with pyright in
   strict mode.
 - Stable error codes (`as const` sets in TypeScript, enums or constants in Python) for anything a

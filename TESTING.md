@@ -347,6 +347,10 @@ Planned, added with the suites they run: the Docker stack job (`integration`) an
 - `check.ts` judges: a license outside the allow list and not granted to the package by name fails; a lockfile package that is not installed and not declared in `notInstalled` fails (its license cannot be read); an exception that matches no lockfile package fails (so the list shrinks with the dependencies).
 - `THIRD_PARTY_LICENSES.md` has the same allow list and the same tables; `policy-doc.test.ts` fails when they differ, `policy.test.ts` checks the policy against the real lockfiles, `check.test.ts` and `cli.test.ts` cover the rules with made-up packages (an unlisted copyleft dependency exits with 1).
 
+### SPDX headers
+
+`app/src/ci/spdx-headers/` holds the rules (`rules.ts`: which files are source files, the comment syntax per language, how the header is added without moving a shebang or a Dockerfile `# syntax=` line), the command that writes and checks the headers (`cli.ts`: `pnpm spdx:add`, `pnpm spdx:check`, `make fix-spdx-headers`) and the tests. `spdx-headers.test.ts` lists every file that git tracks or would track and fails for each source file without `SPDX-License-Identifier: Apache-2.0` in its first lines. `rules.test.ts` and `cli.integration.test.ts` cover the rules and the command with made-up files. After merging a branch that predates the rule, run `make fix-spdx-headers` and commit the result.
+
 ## 9. Test cases in GitHub issues
 
 Every issue that changes behavior has a "Test cases" section: one row per behavior with id (T01, T02, ...), type (happy, error, edge,
