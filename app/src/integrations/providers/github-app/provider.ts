@@ -208,12 +208,13 @@ export function createGithubAppProvider(
       }
     },
 
-    async getPullRequest(integration, repo, prNumber) {
+    async getPullRequest(integration, repo, prNumber, signal) {
       try {
         return await getClient().getPullRequest(
           integration.externalId,
           repo.fullName,
           prNumber,
+          signal,
         );
       } catch (error) {
         // A 404 of the call itself is a pull request that does not exist; a 404 of the token request
@@ -233,13 +234,14 @@ export function createGithubAppProvider(
       }
     },
 
-    async listOpenPullRequests(integration, repo) {
+    async listOpenPullRequests(integration, repo, signal) {
       // Failures leave as provider neutral codes (the installation is gone, access is refused, GitHub
       // is down), so the page that lists the pull requests never has to know GitHub's error codes.
       try {
         return await getClient().listOpenPullRequests(
           integration.externalId,
           repo.fullName,
+          signal,
         );
       } catch (error) {
         throw toReadError(error);
