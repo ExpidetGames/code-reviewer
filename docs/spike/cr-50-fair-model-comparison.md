@@ -1,7 +1,6 @@
 # CR-50: fair model comparison, every model under identical conditions
 
-Date: 2026-10-10. Data and blind scoring are final. The recommendation (CR-50-T06) is **pending customer
-decision**.
+Date: 2026-10-10. Data, blind scoring and recommendation are final (decided by the customer). CR-50 supersedes the hit rates of CR-44 and CR-48 (shared comment state, see "Comparison with CR-44 and CR-48"); their cost data stays valid.
 
 Follow-up to [`cr-44-model-comparison.md`](cr-44-model-comparison.md) and the CR-48 addendum
 (`cr-48-model-addendum.md`, branch `CR-48-model-addendum`). In CR-44 and CR-48 every run on a playground pull
@@ -25,6 +24,8 @@ DeepSeek V4.1 Flash hit GitHub's comment size limit). Here every run is a first 
 - **Blind-scored hit rates (found of 28):** Sonnet 24 (+1 borderline), DeepSeek V4.1 Flash 23, Opus 22 (+2), Haiku 22
   (+2), GPT-5.4 mini 18 (+2), DeepSeek V3.2 14 (+2), Gemini 12. False positives: 4 in 84 runs (Haiku 2, GPT-5.4 mini 2).
   See "Hit rates" and "Results" for cost and duration.
+- **Recommendation:** the default stays `anthropic/claude-haiku-5.5`; `deepseek/deepseek-v4.1-flash` is a close alternative,
+  `anthropic/claude-sonnet-5.5` the per-project choice, Opus 5.5 is not recommended (see "Recommendation").
 
 ## Method
 
@@ -310,6 +311,18 @@ the gap. The fair run is the one to trust for ranking the models; the earlier ta
 history. The medium pull request lowered the scores of the models that earlier found most there, which fits an
 earlier advantage from carried-over findings, but this is an interpretation and was not tested.
 
+## Recommendation (CR-50-T06)
+
+Decided by the customer on 2026-10-11 on the basis of this report. CR-50 supersedes the hit rates of CR-44 and CR-48 (shared comment state, see "Comparison with CR-44 and CR-48"); their cost data stays valid.
+
+| Role | Model id | Why |
+|---|---|---|
+| **Default (unchanged)** | `anthropic/claude-haiku-5.5` | 22 of 28 found (+2 borderline), 2 false positives, 0.30 cent (0.0030 USD) per review on average, about 22 s. |
+| Close alternative | `deepseek/deepseek-v4.1-flash` | 23 of 28 found, no false positive, similar cost (0.0037 USD average). About three times slower (63 s on average, up to about 4 minutes) and it routes the code to DeepSeek providers through OpenRouter. The difference of one finding in 28 is within the run-to-run noise. |
+| Per-project choice for important repositories | `anthropic/claude-sonnet-5.5` | Finds the most (24 of 28). Average 0.0552 USD, but above the 0.10 USD warning on large pull requests (0.1194 USD average on #3, so the CR-25 warning applies). |
+| Not recommended | `anthropic/claude-opus-5.5` | No gain over Sonnet (22 of 28 against 24) at about twice the cost (0.1171 USD average, 0.2413 USD on #3). |
+| Not recommended | `openai/gpt-5.4-mini`, `deepseek/deepseek-v3.2`, `google/gemini-3.8-flash` | They find clearly less on the medium pull request (4, 0 and 0 of 12, against 6 to 8 for the four models above) and 18, 14 and 12 of 28 in total. |
+
 ## Failures (CR-50-T03)
 
 - **Model failures: none.** 84 of 84 counted runs ended with `ok: true` and a review comment. No
@@ -342,7 +355,6 @@ earlier advantage from carried-over findings, but this is an interpretation and 
 - Since all models now get the whole diff of #3 (37k PR-Agent tokens), the costs of the large pull request are
   higher than in CR-44 for Claude (54.7k input tokens, as already seen in CR-48 for Opus); CR-44's 45.0k came from
   an older cut of the diff.
-- The recommendation (CR-50-T06) is pending the customer decision.
 
 ## Test cases
 
@@ -353,7 +365,7 @@ earlier advantage from carried-over findings, but this is an interpretation and 
 | CR-50-T03 | "Settings" table (identical), 4 counted runs in each of the 21 cells, order mixed per round with seed 980016226; failures in "Failures". |
 | CR-50-T04 | Anonymous comments (84) and `index.csv`; scored by a separate blind scorer without model names, the mapping applied afterwards (section "Hit rates"). |
 | CR-50-T05 | Total 2.9075 USD (limit 5.00), per model and in total in "Results", confirmed by OpenRouter's key counter. |
-| CR-50-T06 | Pending customer decision. |
+| CR-50-T06 | Section "Recommendation": default stays `anthropic/claude-haiku-5.5`, alternatives and exclusions as decided by the customer. |
 | CR-50-T07 | This report names the problems only as #1 A/B, #2 A/B/C and #3 A/B. |
 
 ## Commands

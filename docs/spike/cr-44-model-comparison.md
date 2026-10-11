@@ -5,6 +5,8 @@ command `review`, installation token, models through OpenRouter. Everything belo
 `runner/scripts/manual_review.py` (extended in this ticket with `--record-dir` and `--label`, see
 "Method"). The customer limit is at most 0.10 USD per review on average.
 
+> Note (2026-10-11): CR-50 supersedes the hit rates of CR-44 and CR-48 (shared comment state, see "Comparison with CR-44 and CR-48" in [`cr-50-fair-model-comparison.md`](cr-50-fair-model-comparison.md)); their cost data stays valid.
+
 ## Decision
 
 Decided by the project lead on 2026-10-10 on the basis of this report: the default review model is
