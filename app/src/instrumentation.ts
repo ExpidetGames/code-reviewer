@@ -41,7 +41,7 @@ export async function register(): Promise<void> {
   // Without any GitHub App variable the instance is simply not connected to GitHub (yet): there is
   // nothing to read, so nothing is attempted and nothing is reported as failed.
   const { anyGithubAppVariableSet } =
-    await import("./integrations/providers/github-app/configured.ts");
+    await import("./integrations/registry.ts");
   if (anyGithubAppVariableSet(process.env)) {
     const { runStartupSync } = await import("./integrations/sync/startup.ts");
     void runStartupSync();

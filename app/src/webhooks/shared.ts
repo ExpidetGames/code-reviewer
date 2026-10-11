@@ -6,8 +6,10 @@ import { createRepositoriesRepository } from "../db/repositories/repositories-re
 import { createWebhookDeliveriesRepository } from "../db/repositories/webhook-deliveries-repository.ts";
 import { getDatabase } from "../db/startup.ts";
 import { jobQueueFor } from "../jobs/shared.ts";
-import { anyGithubAppVariableSet } from "../integrations/providers/github-app/configured.ts";
-import { integrationRegistry } from "../integrations/registry.ts";
+import {
+  anyGithubAppVariableSet,
+  integrationRegistry,
+} from "../integrations/registry.ts";
 import { getIntegrationSync } from "../integrations/sync/shared.ts";
 import {
   createGithubAppWebhookHandler,

@@ -3,7 +3,7 @@
 // modules), the state reader on the server's database, and the route handlers with the real hash and
 // the real sign in.
 import "server-only";
-import { anyGithubAppVariableSet } from "../integrations/providers/github-app/configured.ts";
+import { anyGithubAppVariableSet } from "../integrations/registry.ts";
 import { loadAuthConfig } from "../auth/config.ts";
 import { getAuth } from "../auth/auth.ts";
 import { getDatabase } from "../db/startup.ts";
