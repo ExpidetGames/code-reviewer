@@ -242,6 +242,7 @@ def test_typed_settings_switch_review_labels_progress_comments_and_the_update_me
     assert settings["config.output_run_cost"] is True
     assert settings["config.fallback_models"] == []
     assert settings["pr_reviewer.final_update_message"] is False
+    assert settings["pr_description.final_update_message"] is False
     assert settings["pr_reviewer.enable_review_labels_security"] is False
     assert settings["pr_reviewer.enable_review_labels_effort"] is False
     assert settings["litellm.turn_off_message_logging"] is True

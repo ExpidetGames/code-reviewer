@@ -425,6 +425,27 @@ describe("pull requests", () => {
       await failureOf(client.getPullRequest("4242", "acme/widgets", 99)),
     ).toMatchObject({ code: "GITHUB_APP_NOT_FOUND", status: 404 });
   });
+
+  it("tells a 404 of the pull request from a 404 of the token request", async () => {
+    const { client, fake } = await withPullRequests();
+
+    const missingPullRequest = await failureOf(
+      client.getPullRequest("4242", "acme/widgets", 99),
+    );
+    fake.removeInstallation(4242);
+    const missingInstallation = await failureOf(
+      client.getPullRequest("4242", "acme/widgets", 7),
+    );
+
+    expect(missingPullRequest).toMatchObject({
+      code: "GITHUB_APP_NOT_FOUND",
+      duringTokenRequest: false,
+    });
+    expect(missingInstallation).toMatchObject({
+      code: "GITHUB_APP_NOT_FOUND",
+      duringTokenRequest: true,
+    });
+  });
 });
 
 describe("collaborator permissions", () => {

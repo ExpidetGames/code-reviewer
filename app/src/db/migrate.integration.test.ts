@@ -63,6 +63,7 @@ describe("the migrations of both epics", () => {
       "20261010191500_create_jobs",
       "20261010201500_create_app_settings",
       "20261011090000_create_job_comments",
+      "20261011100000_add_jobs_repository_recent_index",
     ]);
   });
 

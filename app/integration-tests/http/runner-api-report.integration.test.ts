@@ -194,6 +194,34 @@ describe("completing a job", () => {
     });
   });
 
+  // CR-49-T04 (the runs overview that shows the code to a person lives on the UI branch, which has a
+  // test that every code of the runner contract has a sentence there)
+  it.each(["review_state_truncated", "review_text_truncated"])(
+    "stores %s as the code of a failed run and keeps the link to the review that was posted",
+    async (errorCode) => {
+      const h = await startRunnerApiHarness();
+      const job = await claimedJob(h);
+      const commentUrl =
+        "https://github.com/octo/widgets/pull/7#issuecomment-1";
+
+      const response = await h.complete(job.id, job.leaseToken, {
+        ok: false,
+        commentUrl,
+        errorCode,
+        logTail:
+          "WARNING Persistent review state did not fit the provider comment limit",
+      });
+
+      expect(response.status).toBe(200);
+      expect((await response.json()).job.status).toBe("failed");
+      expect(await h.queue.get(job.id)).toMatchObject({
+        status: "failed",
+        errorCode,
+        result: { ok: false, errorCode, commentUrl },
+      });
+    },
+  );
+
   it("keeps a successful run without a comment link ok", async () => {
     const h = await startRunnerApiHarness();
     const job = await claimedJob(h);

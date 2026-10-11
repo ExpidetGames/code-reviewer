@@ -1,0 +1,30 @@
+name: Nightly
+
+# The suites that are too slow or too heavy for every pull request, on the default branch (the
+# schedule always runs there). Today that is the engine suite (engine.yml): the real, pinned
+# PR-Agent through the job entry point against a fake GitHub and a fake LLM. The same suite runs in
+# ci.yml for pull requests that change the runner and for pull requests into main. No secret of the
+# repository is used.
+on:
+  schedule:
+    - cron: "23 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+env:
+  CI: "true"
+
+jobs:
+  engine:
+    name: "Runner: engine tests"
+    # A fork has no use for a nightly run of its own.
+    if: ${{ github.repository == 'ExpidetGames/code-reviewer' }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/engine.yml

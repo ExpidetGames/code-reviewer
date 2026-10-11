@@ -1,4 +1,4 @@
-import { generateKeyPairSync } from "node:crypto";
+import { createPublicKey, generateKeyPairSync } from "node:crypto";
 import { defineConfig, devices } from "@playwright/test";
 import { e2eEnv } from "./e2e/helpers/e2e-env";
 
@@ -16,6 +16,18 @@ const githubAppPrivateKey = generateKeyPairSync("rsa", {
   publicKeyEncoding: { type: "spki", format: "pem" },
 }).privateKey;
 
+// The fake GitHub checks the App JWTs of the app under test with the public half of that key.
+const githubAppPublicKey = createPublicKey(githubAppPrivateKey)
+  .export({ type: "spki", format: "pem" })
+  .toString();
+
+// Locally an installed Chrome can be used instead of a downloaded Chromium:
+// PLAYWRIGHT_CHANNEL=chrome pnpm test:e2e
+const browser = {
+  ...devices["Desktop Chrome"],
+  channel: process.env.PLAYWRIGHT_CHANNEL || undefined,
+};
+
 export default defineConfig({
   testDir: "e2e",
   testMatch: /.*\.e2e\.ts$/,
@@ -30,15 +42,22 @@ export default defineConfig({
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
+  // The journeys share one app and one database file. The ones that put runs into the queue or claim
+  // them (the Runs pages and the manual start) must not overlap: the Runs journey expects an empty
+  // queue when it starts and `claimNextRun` takes the oldest job of the whole queue. So they are
+  // projects of their own, and the manual start waits for the Runs journeys to finish.
   projects: [
     {
       name: "chromium",
-      use: {
-        ...devices["Desktop Chrome"],
-        // Locally an installed Chrome can be used instead of a downloaded Chromium:
-        // PLAYWRIGHT_CHANNEL=chrome pnpm test:e2e
-        channel: process.env.PLAYWRIGHT_CHANNEL || undefined,
-      },
+      use: browser,
+      testIgnore: [/e2e\/runs\//, /e2e\/reviews\//],
+    },
+    { name: "runs", use: browser, testMatch: /e2e\/runs\/.*\.e2e\.ts$/ },
+    {
+      name: "reviews",
+      use: browser,
+      testMatch: /e2e\/reviews\/.*\.e2e\.ts$/,
+      dependencies: ["runs"],
     },
   ],
   // Two servers. The fake GitHub stands in for github.com (sign in) and api.github.com; the app
@@ -52,6 +71,8 @@ export default defineConfig({
         GITHUB_FAKE_PORT: String(e2eEnv.githubPort),
         GITHUB_FAKE_CLIENT_ID: e2eEnv.githubClientId,
         GITHUB_FAKE_CLIENT_SECRET: e2eEnv.githubClientSecret,
+        GITHUB_FAKE_APP_ID: e2eEnv.githubAppId,
+        GITHUB_FAKE_APP_PUBLIC_KEY: githubAppPublicKey,
       },
       url: `${e2eEnv.githubUrl}/__fake/health`,
       reuseExistingServer: false,
@@ -62,7 +83,7 @@ export default defineConfig({
         "pnpm build && rm -rf test-results/e2e-data && mkdir -p test-results/e2e-data && " +
         `pnpm start --hostname 127.0.0.1 --port ${e2eEnv.appPort}`,
       env: {
-        DATABASE_PATH: "test-results/e2e-data/app.db",
+        DATABASE_PATH: e2eEnv.databasePath,
         BETTER_AUTH_SECRET: e2eEnv.authSecret,
         BETTER_AUTH_URL: e2eEnv.appUrl,
         GITHUB_OAUTH_CLIENT_ID: e2eEnv.githubClientId,

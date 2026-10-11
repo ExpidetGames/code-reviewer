@@ -194,6 +194,26 @@ def test_the_error_codes_the_runner_reports_are_listed_once() -> None:
     assert {"timeout", "llm_auth", "git_rate_limit", "runner_shutdown", "unknown"} <= set(codes)
 
 
+def test_every_error_code_of_the_runner_is_in_the_contract() -> None:
+    from code_reviewer_runner.result import ErrorCode
+
+    schema: Document = _load(SCHEMA_PATH)
+    listed: list[str] = schema["$defs"]["KnownRunnerErrorCode"]["enum"]
+
+    assert {code.value for code in ErrorCode} <= set(listed)
+
+
+def test_a_failed_result_may_carry_the_link_of_a_review_that_was_posted_but_shortened() -> None:
+    result = _example("CompleteRequest")["result"]
+    result.update(
+        ok=False,
+        errorCode="review_state_truncated",
+        commentUrl="https://github.com/octo/repo/pull/7#issuecomment-1",
+    )
+
+    assert _accepts("RunnerResult", result)
+
+
 def test_a_complete_response_may_say_the_job_was_given_back_after_a_shutdown() -> None:
     response = _example("CompleteResponse")
     response["job"]["status"] = "queued"
