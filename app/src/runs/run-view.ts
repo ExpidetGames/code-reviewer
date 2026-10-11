@@ -126,6 +126,15 @@ export function readStoredResult(result: JsonValue | null): StoredResult {
   };
 }
 
+/**
+ * Failed runs whose review is on the pull request all the same: the runner shortened it to fit
+ * GitHub's comment limit and reports it as a failure, with the link to the comment it posted.
+ */
+const POSTED_REVIEW_ERROR_CODES: readonly string[] = [
+  "review_state_truncated",
+  "review_text_truncated",
+];
+
 function describeTrigger(kind: JobTriggerKind, actor: string): string {
   switch (kind) {
     case "webhook":
@@ -202,8 +211,12 @@ export function toRunDetailView(
   const stored = readStoredResult(job.result);
   const cleaned = redact(cleanLog(stored.logTail));
   const overlong = cleaned.length > MAX_LOG_CHARS;
-  const commentUrl =
-    job.status === "succeeded" ? safeGithubUrl(stored.commentUrl) : null;
+  const hasPostedReview =
+    job.status === "succeeded" ||
+    (job.status === "failed" &&
+      job.errorCode !== null &&
+      POSTED_REVIEW_ERROR_CODES.includes(job.errorCode));
+  const commentUrl = hasPostedReview ? safeGithubUrl(stored.commentUrl) : null;
   const error =
     job.errorCode === null ? null : describeErrorCode(job.errorCode);
   return {

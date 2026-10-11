@@ -62,7 +62,9 @@ fields only; tests search the answers for them). The log is cleaned (terminal es
 characters out) and passed through the same redaction the runner API uses for results, with the secrets
 the app knows. Everything that came from outside (project name, login, a question of `/ask`, the log)
 is rendered as text. The links made from stored data are the comment link and the pull request link, and only when they are `https://github.com/` addresses
-(`rel="noopener noreferrer"`, one rule: `safeGithubUrl`).
+(`rel="noopener noreferrer"`, one rule: `safeGithubUrl`). The comment link is shown for succeeded runs
+and for the two failed runs whose review was posted but shortened to GitHub's comment limit
+(`review_state_truncated`, `review_text_truncated`); for every other failed run it is not shown.
 
 ## Access
 

@@ -199,6 +199,32 @@ describe("the detail page", () => {
     expect(text(container)).toContain("<img src=y onerror=alert(3)>");
   });
 
+  // CR-53-T01
+  it("shows the sentence for a review that outgrew the comment limit together with the link to the review", () => {
+    const { container } = render(
+      <RunDetail
+        initial={snap(
+          detail({
+            status: "failed",
+            problem:
+              "The review was posted, but it grew past GitHub's comment size limit, so earlier findings are no longer tracked.",
+            errorCode: "review_state_truncated",
+            errorCodeKnown: true,
+          }),
+        )}
+        api={apiAnswering([])}
+      />,
+    );
+
+    expect(text(container)).toContain("grew past GitHub's comment size limit");
+    expect(text(container)).toContain("review_state_truncated");
+    expect(
+      screen
+        .getByRole("link", { name: "Open the comment on GitHub" })
+        .getAttribute("href"),
+    ).toBe("https://github.com/acme/widgets/pull/7#issuecomment-9");
+  });
+
   // CR-35-T14
   it("shows no comment link for a run without one, and says the link was not found", () => {
     const { container } = render(
