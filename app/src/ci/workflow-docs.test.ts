@@ -23,10 +23,10 @@ function section(text: string, heading: string): string {
 
 /**
  * What the retired scheme left behind, as concrete patterns: Jira, ticket keys such as `CR-14` or
- * `CR-<ticket>`, and the German heading of the Jira test case table. These are safe to ban in a whole
- * file.
+ * `CR-<ticket>`, the `CR-*` branch pattern, and the German heading of the Jira test case table.
+ * These are safe to ban in a whole file.
  */
-const oldScheme = /\bjira\b|\bCR-(\d+|<)|testf[aä]lle/i;
+const oldScheme = /\bjira\b|\bCR-(\d+|<|\*)|testf[aä]lle/i;
 
 /**
  * Words of the retired scheme that are ordinary prose elsewhere ("user story" in a description of a
@@ -132,6 +132,7 @@ describe("oldScheme and oldWorkflowWords", () => {
       "Jira story",
       "CR-14: add runner",
       "CR-<ticket>-<slug>",
+      "the `CR-*` pattern",
       "## 9. Test cases in Jira",
       "a Testfälle section",
     ]) {
