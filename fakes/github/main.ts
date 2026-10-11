@@ -7,6 +7,8 @@
 //   GITHUB_FAKE_APP_ID         optional, together with the next one: switches the GitHub App API on
 //   GITHUB_FAKE_APP_PUBLIC_KEY SPKI PEM the App JWTs are checked with; installations are added
 //                              with POST /__fake/installations
+//   GITHUB_FAKE_APP_SLUG       optional: the slug the app's comments are authored with (<slug>[bot])
+//   GITHUB_FAKE_SELF_LINKS     optional, "true": links in answers (html_url) point to the fake itself
 //   GITHUB_FAKE_PORT           default 4010
 //   GITHUB_FAKE_HOST           default 127.0.0.1
 import { startGithubFake } from "./server.ts";
@@ -35,6 +37,10 @@ const fake = await startGithubFake({
   ...(appId === undefined || publicKeyPem === undefined
     ? {}
     : { appId, publicKeyPem }),
+  ...(process.env.GITHUB_FAKE_APP_SLUG
+    ? { appSlug: process.env.GITHUB_FAKE_APP_SLUG }
+    : {}),
+  selfLinks: process.env.GITHUB_FAKE_SELF_LINKS === "true",
   host: process.env.GITHUB_FAKE_HOST || "127.0.0.1",
   port: Number(process.env.GITHUB_FAKE_PORT) || 4010,
 });
