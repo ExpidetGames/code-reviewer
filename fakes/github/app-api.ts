@@ -15,6 +15,13 @@
 import { createPublicKey, randomBytes, verify } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { readBody } from "./http.ts";
+import {
+  createReviewApi,
+  type FakeChangedFile,
+  type FakeComment,
+} from "./review-api.ts";
+
+export type { FakeChangedFile, FakeComment } from "./review-api.ts";
 
 export type FakeInstallation = {
   id: number;
@@ -40,6 +47,10 @@ export type FakePullRequest = {
   headRef: string;
   baseRef: string;
   author: { login: string; id: number };
+  /** The description. Empty when omitted. */
+  body?: string;
+  /** The files the pull request changes, with their diffs. A small Python change when omitted. */
+  files?: FakeChangedFile[];
 };
 
 /** The body of `POST /__fake/pull-requests`, or null when it is not one. */
@@ -93,6 +104,19 @@ export type FakeAppOptions = {
   publicKeyPem: string;
   /** The fake's clock in milliseconds since the epoch. Default Date.now. */
   now?: () => number;
+  /**
+   * The slug of the GitHub App: its comments are written as `<slug>[bot]`. Default "fake-app".
+   */
+  appSlug?: string;
+  /**
+   * The address the links in answers (`html_url`) point to, no trailing slash. Default
+   * `https://github.test`, an address nothing listens on. A test that has the runner's PR-Agent
+   * read a pull request needs links on the fake itself: the runner demands that the address of the
+   * pull request and the API address of a job are on the same host.
+   */
+  webBase?: () => string;
+  /** The address of the REST API in `url` fields. Default the same as `webBase`. */
+  apiBase?: () => string;
 };
 
 export type FakeTokenRequest = {
@@ -131,6 +155,15 @@ export type FakeGithubAppControls = {
     login: string,
     permission: FakeCollaboratorPermission,
   ): void;
+  /** The comments below a pull request, oldest first. */
+  pullRequestComments(repoFullName: string, number: number): FakeComment[];
+  /** Writes a comment below a pull request, by default as the bot of the app. */
+  addPullRequestComment(
+    repoFullName: string,
+    number: number,
+    body: string,
+    login?: string,
+  ): FakeComment;
   /** The permissions the app itself is granted; token requests may not exceed them (422). */
   setAppPermissions(permissions: FakePermissions): void;
   /**
@@ -194,16 +227,18 @@ function pageOf<T>(items: T[], query: URLSearchParams): T[] {
   return items.slice((page - 1) * perPage, page * perPage);
 }
 
-function accountJson(account: FakeInstallation["account"]) {
+const DEFAULT_WEB_BASE = "https://github.test";
+
+function accountJson(account: FakeInstallation["account"], webBase: string) {
   return {
     login: account.login,
     id: account.id,
     type: account.type,
-    html_url: `https://github.test/${account.login}`,
+    html_url: `${webBase}/${account.login}`,
   };
 }
 
-function repositoryJson(repository: FakeRepository) {
+function repositoryJson(repository: FakeRepository, webBase: string) {
   const [owner = ""] = repository.fullName.split("/");
   const ownerId = 9000 + owner.length;
   return {
@@ -211,24 +246,9 @@ function repositoryJson(repository: FakeRepository) {
     name: repository.fullName.split("/")[1],
     full_name: repository.fullName,
     private: repository.private ?? false,
-    html_url: `https://github.test/${repository.fullName}`,
+    html_url: `${webBase}/${repository.fullName}`,
     default_branch: repository.defaultBranch ?? "main",
     owner: { login: owner, id: ownerId },
-  };
-}
-
-function pullRequestJson(repository: FakeRepository, pr: FakePullRequest) {
-  return {
-    number: pr.number,
-    title: pr.title,
-    html_url: `https://github.test/${repository.fullName}/pull/${pr.number}`,
-    state: pr.state,
-    merged: pr.merged ?? false,
-    merged_at: pr.merged ? "2026-10-09T10:00:00Z" : null,
-    draft: pr.draft ?? false,
-    user: { login: pr.author.login, id: pr.author.id },
-    head: { sha: pr.headSha, ref: pr.headRef },
-    base: { ref: pr.baseRef },
   };
 }
 
@@ -239,6 +259,13 @@ function base64urlDecode(text: string): Buffer {
 export function createAppPart(options: FakeAppOptions): AppPart {
   const now = options.now ?? Date.now;
   const publicKey = createPublicKey(options.publicKeyPem);
+  const webBase = options.webBase ?? (() => DEFAULT_WEB_BASE);
+  const apiBase = options.apiBase ?? webBase;
+  const review = createReviewApi({
+    webBase,
+    apiBase,
+    botLogin: `${options.appSlug ?? "fake-app"}[bot]`,
+  });
 
   const installations = new Map<number, FakeInstallation>();
   const repositories = new Map<number, FakeRepository[]>();
@@ -355,13 +382,28 @@ export function createAppPart(options: FakeAppOptions): AppPart {
       return send(201, { ok: true });
     }
 
+    // Control endpoint for a test that runs the fake as its own process (Playwright): the comments
+    // below a pull request, as `?repository=owner/name&number=7`.
+    if (path === "/__fake/comments" && method === "GET") {
+      const repository = url.searchParams.get("repository") ?? "";
+      const number = Number(url.searchParams.get("number"));
+      if (repository === "" || !Number.isInteger(number))
+        return send(400, { message: "Invalid query" });
+      return send(200, review.comments(repository, number));
+    }
+
+    // Control endpoint for a test that runs the fake as its own process (Playwright): every
+    // installation token issued so far, so a test can search outputs for them.
+    if (path === "/__fake/installation-tokens" && method === "GET")
+      return send(200, issuedTokens);
+
     // App JWT endpoints
     if (path === "/app/installations" && method === "GET") {
       if (bearer === undefined || !jwtIsValid(bearer)) return unauthorized();
       const list: unknown[] = [...installations.values()].map(
         (installation) => ({
           id: installation.id,
-          account: accountJson(installation.account),
+          account: accountJson(installation.account, webBase()),
           suspended_at: installation.suspended ? "2026-10-01T00:00:00Z" : null,
           app_id: Number(options.appId),
         }),
@@ -377,7 +419,7 @@ export function createAppPart(options: FakeAppOptions): AppPart {
       if (installation === undefined) return notFound();
       return send(200, {
         id: installation.id,
-        account: accountJson(installation.account),
+        account: accountJson(installation.account, webBase()),
         suspended_at: installation.suspended ? "2026-10-01T00:00:00Z" : null,
         app_id: Number(options.appId),
       });
@@ -490,7 +532,7 @@ export function createAppPart(options: FakeAppOptions): AppPart {
           : {
               repositories: known
                 .filter((repo) => reach.includes(repo.id))
-                .map(repositoryJson),
+                .map((repo) => repositoryJson(repo, webBase())),
             }),
         ...tokenAnswerPatch,
       });
@@ -515,7 +557,9 @@ export function createAppPart(options: FakeAppOptions): AppPart {
       const listed = all.filter((repo) => !hidden.includes(repo.id));
       return send(200, {
         total_count: all.length,
-        repositories: pageOf(listed, url.searchParams).map(repositoryJson),
+        repositories: pageOf(listed, url.searchParams).map((repo) =>
+          repositoryJson(repo, webBase()),
+        ),
       });
     }
 
@@ -542,16 +586,9 @@ export function createAppPart(options: FakeAppOptions): AppPart {
         return send(
           200,
           pageOf(matching, url.searchParams).map((pr) =>
-            pullRequestJson(repository, pr),
+            review.pullRequestJson(repository, pr),
           ),
         );
-      }
-      const pullMatch = /^\/pulls\/(\d+)$/.exec(rest);
-      if (pullMatch && method === "GET") {
-        if (!mayDo(issued, "pull_requests", "read")) return forbidden();
-        const pr = prs.find((item) => item.number === Number(pullMatch[1]));
-        if (pr === undefined) return notFound();
-        return send(200, pullRequestJson(repository, pr));
       }
       const permissionMatch = /^\/collaborators\/([^/]+)\/permission$/.exec(
         rest,
@@ -566,6 +603,56 @@ export function createAppPart(options: FakeAppOptions): AppPart {
           user: { login },
         });
       }
+
+      // The rest is what a reviewer reads and writes: one pull request, its files, comments, ...
+      const answer = await review.handle({
+        method,
+        rest,
+        query: url.searchParams,
+        repository,
+        pullRequests: prs,
+        body: () => readBody(request),
+        mayDo: (names, level) =>
+          names.some((name) => mayDo(issued, name, level)),
+        changePullRequest(number, changes) {
+          const changed = prs.map((pr) =>
+            pr.number === number ? { ...pr, ...changes } : pr,
+          );
+          pullRequests.set(fullName, changed);
+          return changed.find((pr) => pr.number === number) as FakePullRequest;
+        },
+      });
+      if (answer === undefined) return;
+      if (answer.status === 204) {
+        response.writeHead(204);
+        response.end();
+        return;
+      }
+      return send(answer.status, answer.body);
+    }
+
+    // Calls a reviewer makes that name no repository.
+    if (issued !== undefined && method === "GET" && path === "/rate_limit") {
+      const window = {
+        limit: 5000,
+        remaining: 4999,
+        reset: 4102444800,
+        used: 1,
+      };
+      return send(200, {
+        resources: { core: window, graphql: window },
+        rate: window,
+      });
+    }
+    if (
+      issued !== undefined &&
+      method === "POST" &&
+      (path === "/graphql" || path === "/api/graphql")
+    ) {
+      // PR-Agent asks for the review threads of the pull request; there are none.
+      return send(200, {
+        data: { repository: { pullRequest: { reviewThreads: { nodes: [] } } } },
+      });
     }
   }
 
@@ -629,6 +716,10 @@ export function createAppPart(options: FakeAppOptions): AppPart {
     setCollaboratorPermission(repoFullName, login, permission) {
       permissions.set(`${repoFullName}#${login.toLowerCase()}`, permission);
     },
+    pullRequestComments: (repoFullName, number) =>
+      review.comments(repoFullName, number),
+    addPullRequestComment: (repoFullName, number, body, login) =>
+      review.addComment(repoFullName, number, body, login),
     setAppPermissions(permissions) {
       appPermissions = { ...permissions };
     },
@@ -651,6 +742,7 @@ export function createAppPart(options: FakeAppOptions): AppPart {
       repositories.clear();
       pullRequests.clear();
       permissions.clear();
+      review.reset();
       omitted.clear();
       rawInstallationRecords.length = 0;
       tokens.clear();
