@@ -22,6 +22,9 @@ const MESSAGES: Readonly<Record<string, string>> = {
     "We could not check whether your GitHub account is allowed to use this Code Reviewer instance. Please try again later.",
   sign_in_again:
     "Your GitHub authorization is no longer valid. Please sign in again.",
+  // Email and password.
+  invalid_credentials: "The email address or the password is not correct.",
+  rate_limited: "Too many sign-in attempts. Wait a few minutes and try again.",
   account_not_linked:
     "This GitHub account could not be matched to an existing user. Ask an administrator for help.",
 };

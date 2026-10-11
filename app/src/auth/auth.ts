@@ -76,7 +76,6 @@ export function createAuth({
         githubLogin: {
           type: "string",
           required: false,
-          input: false,
           fieldName: "github_login",
         },
         // The instance admin flag. Set by the first-run setup, never by a request.

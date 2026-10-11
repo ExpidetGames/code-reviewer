@@ -558,7 +558,7 @@ describe("what a refusal tells the person", () => {
     const warnings: string[] = [];
     checkAuthConfigOnStart({
       env: {
-        BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
+        APP_SECRET: TEST_AUTH_SECRET,
         BETTER_AUTH_URL: TEST_BASE_URL,
         GITHUB_OAUTH_CLIENT_ID: "id",
         GITHUB_OAUTH_CLIENT_SECRET: "secret-value",

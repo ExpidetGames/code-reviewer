@@ -23,7 +23,10 @@ import {
   testGithubAppEnv,
 } from "../../src/test-support/github-app.ts";
 import { createTestDirectory } from "../../src/test-support/test-database.ts";
-import { defaultWorkspaceId } from "../../src/test-support/workspaces.ts";
+import {
+  defaultWorkspaceId,
+  markInstanceSetUp,
+} from "../../src/test-support/workspaces.ts";
 
 type Route = typeof import("../../src/app/api/webhooks/github-app/route.ts");
 
@@ -52,6 +55,8 @@ async function startRoute(
   await initializeDatabaseOnStart({
     env: { DATABASE_PATH: join(directory, "app.db") },
   });
+  // A deployment that is in use has been set up (the first-run setup decides about workspaces).
+  await markInstanceSetUp(getDatabase());
   // The registry reads the environment on first use, so every test loads the route anew.
   vi.resetModules();
   return {

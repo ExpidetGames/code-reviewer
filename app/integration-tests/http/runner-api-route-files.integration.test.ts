@@ -24,7 +24,10 @@ import {
 } from "../../src/test-support/github-app.ts";
 import { getProjectService } from "../../src/projects/shared.ts";
 import { createTestDirectory } from "../../src/test-support/test-database.ts";
-import { defaultWorkspaceId } from "../../src/test-support/workspaces.ts";
+import {
+  defaultWorkspaceId,
+  markInstanceSetUp,
+} from "../../src/test-support/workspaces.ts";
 
 const RUNNER_TOKEN = "route-file-runner-token-91ac-5d2e8b7f0c14";
 const LLM_KEY = "route-file-llm-key-77de";
@@ -62,6 +65,8 @@ async function startRoutes() {
   await initializeDatabaseOnStart({
     env: { DATABASE_PATH: join(directory, "app.db") },
   });
+  // A deployment that is in use has been set up (the first-run setup decides about workspaces).
+  await markInstanceSetUp(getDatabase());
   // The registry reads the environment on first use, so every test loads the routes anew.
   vi.resetModules();
   return {

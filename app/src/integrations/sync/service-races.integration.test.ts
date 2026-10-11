@@ -8,6 +8,7 @@ import { startSyncHarness } from "../../test-support/integration-sync-harness.ts
 import { createIntegrationRegistry } from "../registry.ts";
 import { createIntegrationSync } from "./service.ts";
 import { createTestDatabase } from "../../test-support/test-database.ts";
+import { markInstanceSetUp } from "../../test-support/workspaces.ts";
 
 type Harness = Awaited<ReturnType<typeof startSyncHarness>>;
 
@@ -147,6 +148,7 @@ describe("overlapping syncs and deliveries", () => {
 describe("a failure for one installation", () => {
   it("is reported with the installation's id and does not stop the others", async () => {
     const { db } = await createTestDatabase();
+    await markInstanceSetUp(db);
     const base = fakeIntegrationProvider();
     const provider = {
       ...base,

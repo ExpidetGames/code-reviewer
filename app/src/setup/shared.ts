@@ -6,6 +6,7 @@ import "server-only";
 import { loadAuthConfig } from "../auth/config.ts";
 import { getAuth } from "../auth/auth.ts";
 import { getDatabase } from "../db/startup.ts";
+import { checkSetupSession, type SetupSessionCheck } from "./setup-session.ts";
 import { createSetupCodeStore, type SetupCodeStore } from "./code-store.ts";
 import { completeSetup } from "./complete.ts";
 import { createSetupRouteHandlers, type SetupRouteHandlers } from "./http.ts";
@@ -70,4 +71,16 @@ export function getSetupRouteHandlers(): SetupRouteHandlers {
       return response.ok ? response.headers.getSetCookie() : null;
     },
   });
+}
+
+/** Whether a setup session cookie value is valid now, for the current code of this process. */
+export function checkCurrentSetupSession(
+  cookieValue: string | undefined,
+): SetupSessionCheck {
+  return checkSetupSession(
+    loadAuthConfig(process.env).secret,
+    cookieValue,
+    getSetupCodeStore().currentIssueId(),
+    Date.now(),
+  );
 }
