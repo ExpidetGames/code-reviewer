@@ -170,6 +170,10 @@ def schedule(seed: int, rounds: int) -> list[dict[str, Any]]:
 def label_of(model: str, pr: int, round_no: int) -> str:
     return f"{model.split('/')[1].replace('.', '_')}-pr{pr}-r{round_no}"
 
+def normalize_usage(result: dict[str, Any]) -> dict[str, Any]:
+    """Treat missing or null usage as unknown rather than crashing."""
+    usage = result.get("usage")
+    return usage if isinstance(usage, dict) else {}
 
 def run_one(args: argparse.Namespace) -> int:
     out = Path(args.out)
@@ -203,8 +207,10 @@ def run_one(args: argparse.Namespace) -> int:
         return 1
     record = json.loads(record_path.read_text())
     result = record["result"]
-    usage = result.get("usage", {})
+
+    usage = normalize_usage(result)
     cost = float(usage.get("costUsd") or 0.0)
+
     comment_path = records / f"{label}.comment.md"
     body = comment_path.read_text() if comment_path.exists() else None
     anon_id = ""
