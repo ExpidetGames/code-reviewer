@@ -16,6 +16,7 @@ import { browserManualReviewApi, type ManualReviewApi } from "./api.ts";
 import { CommandFields } from "./command-fields.tsx";
 import {
   describeManualReviewFailure,
+  describeQuestionIssue,
   QUESTION_REQUIRED_COPY,
   staleListFailure,
 } from "./messages.ts";
@@ -94,6 +95,13 @@ export function StartReviewPanel({
     });
     setBusy(false);
     if (!result.ok) {
+      // The route refused the question itself (for example it grew past the limit once its image
+      // links were replaced): say so at the question, not as a general failure.
+      const questionProblem = describeQuestionIssue(result.issues);
+      if (questionProblem !== null) {
+        setQuestionError(questionProblem);
+        return;
+      }
       setOutcome({ problem: describeManualReviewFailure(result.code) });
       if (staleListFailure(result.code)) reload();
       return;

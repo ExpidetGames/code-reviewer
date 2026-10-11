@@ -2,6 +2,7 @@
 // command. The routes answer with stable codes; this is where a code becomes a sentence (the UI
 // translates codes, never the other way round). Nothing a response carried (a raw answer of GitHub,
 // a token) is ever put into a sentence: the sentences are fixed. An unknown code gets a generic one.
+import { ASK_QUESTION_MAX_CHARS } from "../../integrations/comment-command.ts";
 import type { ManualReviewErrorCode } from "../errors.ts";
 import {
   describeTransportFailure,
@@ -47,6 +48,21 @@ export function staleListFailure(code: string): boolean {
     code === "MANUAL_REVIEW_PULL_REQUEST_NOT_FOUND" ||
     code === "MANUAL_REVIEW_PULL_REQUEST_NOT_OPEN"
   );
+}
+
+/**
+ * The sentence for the question field when the route refused the question (`issues` of a
+ * `MANUAL_REVIEW_REQUEST_INVALID` answer), or null when the issues are not about the question.
+ */
+export function describeQuestionIssue(
+  issues: readonly { field: string; code: string }[],
+): string | null {
+  const issue = issues.find((candidate) => candidate.field === "question");
+  if (issue === undefined) return null;
+  if (issue.code === "too_long")
+    return QUESTION_TOO_LONG_COPY(ASK_QUESTION_MAX_CHARS);
+  if (issue.code === "required") return QUESTION_REQUIRED_COPY;
+  return null;
 }
 
 export const QUESTION_REQUIRED_COPY =

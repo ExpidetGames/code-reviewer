@@ -268,6 +268,33 @@ describe("starting a command", () => {
     },
   );
 
+  it("shows a question the route refused as too long at the question, not as a general failure", async () => {
+    const { api, startReview } = fakeApi([list([{ number: 7 }])]);
+    startReview.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      code: "MANUAL_REVIEW_REQUEST_INVALID",
+      issues: [{ field: "question", code: "too_long" }],
+    });
+    const user = await renderPanel(api);
+    await user.click(await screen.findByRole("radio", { name: /#7/ }));
+    await user.selectOptions(screen.getByLabelText("Command to run"), "ask");
+    await user.type(
+      screen.getByLabelText("Question"),
+      "What is in the pictures?",
+    );
+
+    await user.click(button());
+
+    const message = await screen.findByText(/The question is too long/);
+    expect(message.textContent).toContain("2,000 characters");
+    expect(screen.getByLabelText("Question").getAttribute("aria-invalid")).toBe(
+      "true",
+    );
+    expect(screen.queryByText(/reload the page/i)).toBeNull();
+    expect(screen.getByRole("radio", { name: /#7/ })).toBeTruthy();
+  });
+
   // CR-33-T05
   it("sends the question with ask and nothing with the other commands", async () => {
     const { api, startReview } = fakeApi([list([{ number: 7 }])]);
