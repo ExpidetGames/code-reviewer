@@ -186,6 +186,12 @@ describe("pull request template", () => {
     expect(template).toMatch(/## Follow-ups/);
   });
 
+  it("has an optional test cases section with a case, test and status table", () => {
+    expect(template).toMatch(/## Test cases/);
+    expect(template).toMatch(/Optional for contributors/);
+    expect(template).toContain("| Test case | Test file / name | Status |");
+  });
+
   it("has a checklist for tests first, make verify, documentation and no secrets", () => {
     expect(template).toMatch(/- \[ \] .*test.*first/i);
     expect(template).toContain("make verify");

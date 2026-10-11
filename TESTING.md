@@ -3,7 +3,7 @@
 This file is the source of truth for how Code Reviewer is tested. A change without the tests it
 requires (section 3) is not done. If code and this file disagree, fix one of them in the same PR.
 
-Status markers: "exists" means it works in the repository today; "planned" means a later ticket adds
+Status markers: "exists" means it works in the repository today; "planned" means a later issue adds
 it. Do not document planned things as if they existed in READMEs or PR descriptions.
 
 ## 1. Principles
@@ -26,7 +26,7 @@ it. Do not document planned things as if they existed in READMEs or PR descripti
   Vitest files (`vitest/no-disabled-tests`, `vitest/no-focused-tests`) and in Playwright files
   (`playwright/no-skipped-test`, `playwright/no-focused-test`).
 - The only quarantine is for e2e journeys: a journey failing twice without a code change gets
-  `@flaky` in its title in the same PR that opens a repair ticket (PRs skip tagged journeys with
+  `@flaky` in its title in the same PR that opens a repair issue (PRs skip tagged journeys with
   `--grep-invert @flaky`, the nightly run still runs them). Unit and integration tests have no
   quarantine: fix at once, or report to the project lead; do not skip.
 - Time budget: a PR CI run over 15 minutes, or a smoke run over 5 minutes, is a defect to be fixed
@@ -70,7 +70,7 @@ database.
 | Runner process handling (spawn, timeout, kill, parallelism) | Real subprocess with the fake PR-Agent | Runner integration |
 | New core user flow | One e2e journey; `@smoke` only for a real core path | E2E |
 | PR-Agent upgrade, config or prompt change | Engine smoke green; note the PR-Agent version in the PR | Engine smoke |
-| Purely visual change | No automated test; the ticket says so explicitly | none |
+| Purely visual change | No automated test; the issue says so explicitly | none |
 | Refactor without behavior change | No new test; all existing tests stay green | none |
 
 ## 4. Where tests live and how they are named
@@ -105,11 +105,12 @@ contracts/                         runner API schema (runner-api.v1.json) and on
 - New top-level test folders or new `integration-tests/` categories need an agreed change to this
   file first.
 - App test titles are plain English behavior sentences ("rejects a delivery whose signature does not
-  match the body"): no implementation words and no ticket, ADR or section identifiers. Runner test
+  match the body"): no implementation words and no issue, ADR or section identifiers. Runner test
   function names are behavior sentences too (`test_a_claimed_job_is_released_when_the_heartbeat_is_rejected`).
   E2E titles are full sentences with tags (`@smoke`, `@flaky`).
-- Link a test to its Jira test case with a comment above the test (`// CR-27-T03` or `# CR-27-T03`),
-  never in the title.
+- Link a test to its test case from the issue with a comment above the test that names the issue
+  number and the case id (`// #123-T03` or `# #123-T03`), so the test traces back to its issue; never
+  in the title.
 - Every test file starts with a short comment or docstring: which behavior it pins down and why.
 - One behavior per test. Given, when, then is the shape of the body (arrange, act, assert separated by
   blank lines), not keywords in the code.
@@ -212,7 +213,7 @@ migration, and that the log reports no database error. `runner.sh <image>` check
 `lib.sh` (no `.env*`, `.git`, key or database files, no private key material, no secret-looking
 variable in the image configuration or build history). The private key scan is proven first on files made for it (`docker/smoke/test-key-scan.sh`, also run at the start of every scan): a PEM file, a JSON embedded key, a split, joined or URL encoded key are caught, the harmless `indexOf("-----BEGIN ...")` comparison of a bundled library is not. The scans run as root in a throwaway container and the script stops if a scan itself fails (docker, `find` or `grep` error), so a broken scan can never pass as a clean one; the key content scan covers project-owned paths only, not third-party packages, and the file name scan lets two public files of third-party packages pass (a public key of LiteLLM and the root certificates of gRPC). Containers and volumes are removed on exit,
 also after a failure. What is not covered: the real push to GHCR and pulling from the deployment
-server (manual, see the PR of the image ticket), and a job with a working GitHub and LLM (the engine
+server (manual, see the PR of the image issue), and a job with a working GitHub and LLM (the engine
 smoke covers that once the fakes exist). `runner.sh` also checks the PR-Agent part of the runner
 image: the installed version equals the pin in `runner/pyproject.toml`, PR-Agent imports and still has
 the method the identity patch replaces, the tiktoken encodings load without network, an invalid job
@@ -237,7 +238,7 @@ keeps the container stopped. Everything is removed on exit. The files themselves
 volume, health check, `depends_on`, one `RUNNER_TOKEN` variable, no secret in `compose.yml`, every
 variable read by compose or the code documented in `.env.example`, no secret value there, `.env`
 ignored) are pinned by `app/src/ci/compose.test.ts`. Not covered: real GitHub App credentials and a
-real LLM key (manual, with the deployment ticket), other Docker versions and Windows.
+real LLM key (manual, with the deployment issue), other Docker versions and Windows.
 
 The GitHub App guide `docs/github-app.md` is pinned to the code by
 `app/src/integrations/providers/github-app/setup-doc.test.ts` (its permission and event tables must
@@ -293,8 +294,8 @@ Inside `runner/`: `uv sync --locked`, `uv run ruff check .`, `uv run ruff format
 
 ## 8. CI
 
-`.github/workflows/ci.yml` (workflow "CI") runs on pull requests into `development`, `main` and `CR-*`
-epic branches, and on pushes to `development` and `main`. A new push to a pull request cancels its
+`.github/workflows/ci.yml` (workflow "CI") runs on pull requests into `development`, `main` and branches named
+`CR-*` (a pattern the workflow still matches, no new work uses it), and on pushes to `development` and `main`. A new push to a pull request cancels its
 superseded run. A run for a push is never cancelled or replaced: the concurrency group of a push
 contains the commit hash, so every pushed commit gets its own run. No repository secrets in test jobs, the token is
 limited to `contents: read` (the `changes` job also reads pull requests for the path filter), every job has a
@@ -333,12 +334,13 @@ digests, user and `.dockerignore` rules of the Dockerfiles.
 Planned, added with the suites they run: the Docker stack job (`integration`) and `enforce-pr-source-branch.yml`. `main` accepts pull requests only from
 `development` or `hotfix/*`.
 
-## 9. Test cases in Jira
+## 9. Test cases in GitHub issues
 
-Every story has a "Testfälle" section: one row per behavior with id, type (happy, error, edge,
-security), level, given, when, then. Cases are written when the story is refined. The PR description
-maps every case to a test file and name, or to "manual" or "not applicable" with the reason. Every
-story covers: the happy path, every error it can produce, edge cases (empty, maximum, duplicates and
+Every issue that changes behavior has a "Test cases" section: one row per behavior with id (T01, T02, ...), type (happy, error, edge,
+security), level, given, when, then. Cases are written when the issue is refined. The PR description
+maps every case of the issue to a test file and name, or to "manual" or "not applicable" with the reason (a rule for
+maintainers and agents; the table is optional for outside contributors). Every
+issue covers: the happy path, every error it can produce, edge cases (empty, maximum, duplicates and
 replays, ordering and concurrency, expiry, idempotency, large diffs, fork and draft PRs), security
 cases whenever auth, webhooks, the runner API, tokens or user input are touched (secrets must not
 appear in logs, responses or PR comments; PR content is data and never changes runner commands or
