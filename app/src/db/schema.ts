@@ -24,6 +24,8 @@ export interface UsersTable {
    * null. Set by the import only; only imported users qualify for the merge with the instance admin.
    */
   imported_at: string | null;
+  /** 1 for the instance admin (the account the first-run setup creates), otherwise 0. */
+  is_instance_admin: number;
   /** When the membership in the allowed GitHub organization was last confirmed (ISO 8601, UTC), or null. */
   org_checked_at: string | null;
   /** The GitHub organization that check was made for, or null. */
@@ -229,6 +231,25 @@ export interface JobCommentsTable {
   job_id: string;
 }
 
+/** One setting of the whole instance, with a JSON value (src/db/repositories/instance-settings-repository.ts). */
+export interface InstanceSettingsTable {
+  key: string;
+  /** JSON text. */
+  value: string;
+  /** The id of the user who saved it last, or null. */
+  updated_by: string | null;
+  /** ISO 8601 text in UTC. */
+  updated_at: string;
+}
+
+/** A shared counter with a window (src/db/repositories/rate-limits-repository.ts). */
+export interface RateLimitsTable {
+  key: string;
+  /** ISO 8601 text in UTC: when the current window began. */
+  window_started_at: string;
+  count: number;
+}
+
 export interface Database {
   app_meta: AppMetaTable;
   users: UsersTable;
@@ -245,4 +266,6 @@ export interface Database {
   jobs: JobsTable;
   job_comments: JobCommentsTable;
   app_settings: AppSettingsTable;
+  instance_settings: InstanceSettingsTable;
+  rate_limits: RateLimitsTable;
 }
