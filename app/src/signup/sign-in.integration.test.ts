@@ -151,6 +151,59 @@ describe("signing in with an address that is not verified", () => {
   });
 });
 
+describe("the answer to a sign in with a wrong password", () => {
+  // #99-SR-14
+  it("is the same bytes, with the same content type and headers, for an unknown, refused, verified and waiting address", async () => {
+    const harness = await createSignUpHarness({
+      mail: true,
+      rule: { kind: "emails", entries: [ADDRESS, "verified@example.com"] },
+    });
+    await signedUp(harness);
+    await harness.signUp({
+      email: "verified@example.com",
+      password: SIGNUP_TEST_PASSWORD,
+    });
+    await harness.flush();
+    await harness.verify({
+      token: harness.mail.lastToken("verified@example.com"),
+      password: SIGNUP_TEST_PASSWORD,
+    });
+    await harness.signUp({
+      email: "refused@evil.example",
+      password: SIGNUP_TEST_PASSWORD,
+    });
+    await harness.flush();
+
+    const answers: Array<{
+      text: string;
+      type: string | null;
+      headers: string[];
+      status: number;
+    }> = [];
+    for (const email of [
+      "nobody@example.com",
+      "refused@evil.example",
+      "verified@example.com",
+      ADDRESS,
+    ]) {
+      const response = await signIn(harness, email, "not-the-password-1234");
+      answers.push({
+        status: response.status,
+        // The text as it came, not parsed: the order of the keys is part of the answer.
+        text: await response.text(),
+        type: response.headers.get("content-type"),
+        headers: [...response.headers.keys()].sort(),
+      });
+    }
+
+    expect(answers[0]?.status).toBe(401);
+    expect(answers[0]?.text).toBe(
+      '{"message":"Invalid email or password","code":"INVALID_EMAIL_OR_PASSWORD"}',
+    );
+    for (const answer of answers.slice(1)) expect(answer).toEqual(answers[0]);
+  });
+});
+
 describe("the work of a sign in with a wrong password", () => {
   // Counts every hash and every check of a password that Better Auth's context is asked for, for
   // whichever code asks (its sign in and our hook in front of it use the same context).

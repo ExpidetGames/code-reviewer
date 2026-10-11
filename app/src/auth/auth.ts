@@ -6,7 +6,7 @@
 // by migration 20261010123800_create_auth_tables.
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { betterAuth } from "better-auth";
+import { BASE_ERROR_CODES, betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { nextCookies } from "better-auth/next-js";
 import { genericOAuth } from "better-auth/plugins/generic-oauth";
@@ -233,10 +233,10 @@ export function createAuth({
               message: "Verify your email address to sign in.",
             });
           if (verdict === "wrong_password")
-            throw new APIError("UNAUTHORIZED", {
-              code: "INVALID_EMAIL_OR_PASSWORD",
-              message: "Invalid email or password",
-            });
+            throw APIError.from(
+              "UNAUTHORIZED",
+              BASE_ERROR_CODES.INVALID_EMAIL_OR_PASSWORD,
+            );
         }
 
         // The password rule on every endpoint that sets a password, with a stable code.
