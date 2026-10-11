@@ -21,6 +21,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from loguru import logger
+
 _FUNCTION = "append_review_state"
 _EXPECTED_PARAMETERS = ["review_body", "state", "max_chars"]
 
@@ -83,8 +85,13 @@ def install_review_state_watch(
 def _without_limit(original: Callable[..., Any], review_body: str, state: Any) -> str | None:
     try:
         return str(original(review_body, state, None))
-    except Exception:
-        return None  # observing must never break the review
+    except ValueError:
+        return None  # a state that is not valid at all: nothing to compare, nothing to report
+    except Exception as error:
+        # Observing must never break the review, but a watch that went blind should leave a trace.
+        # The class only: the text of the error may carry content of the pull request.
+        logger.warning(f"the review state watch could not compare ({type(error).__name__})")
+        return None
 
 
 def _fits_without_limit(original: Callable[..., Any], review_body: str, state: Any) -> bool:

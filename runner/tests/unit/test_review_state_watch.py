@@ -149,3 +149,44 @@ def test_pr_agent_still_calls_the_function_from_the_review_tool_with_a_limit() -
         "state",
         "max_chars",
     ]
+
+
+def test_an_unexpected_error_in_the_extra_pass_is_logged_with_its_class_only() -> None:
+    from loguru import logger
+
+    class Module:
+        @staticmethod
+        def append_review_state(review_body: str, state: Any, max_chars: int | None = None) -> str:
+            if max_chars is None:
+                raise RuntimeError("secret detail that must not be logged")
+            return review_body
+
+    lines: list[str] = []
+    sink = logger.add(lambda message: lines.append(str(message)), level="WARNING")
+    module = Module()
+    try:
+        _, undo = install_review_state_watch(module)
+        module.append_review_state("review", {}, 100)
+        undo()
+    finally:
+        logger.remove(sink)
+
+    assert len(lines) == 1
+    assert "RuntimeError" in lines[0]
+    assert "secret detail" not in lines[0]
+
+
+def test_an_invalid_state_in_the_extra_pass_is_not_worth_a_warning() -> None:
+    from loguru import logger
+
+    lines: list[str] = []
+    sink = logger.add(lambda message: lines.append(str(message)), level="WARNING")
+    try:
+        _, undo = install_review_state_watch()
+        with pytest.raises(ValueError):
+            pr_reviewer.append_review_state("review", {"schema_version": 7}, LIMIT)
+        undo()
+    finally:
+        logger.remove(sink)
+
+    assert lines == []

@@ -22,6 +22,7 @@ import sys
 import threading
 import time
 from collections.abc import Mapping, Sequence
+from contextlib import ExitStack
 from dataclasses import replace
 from typing import Any, TextIO
 
@@ -84,29 +85,38 @@ def run_job(
     job: Job, capture: LogCapture, started: float, timeout_seconds: float | None = None
 ) -> JobResult:
     """Run the job's command with PR-Agent. Never raises: every failure becomes a result."""
+    # Everything that is patched into PR-Agent is undone in the end, whichever install fails.
+    patches = ExitStack()
     try:
-        check_pr_agent_version()
-        import litellm
+        try:
+            check_pr_agent_version()
+            import litellm
 
-        litellm.suppress_debug_info = True
-        undo_patch = apply_identity_patch(job.git.bot_login)
-    except IdentityPatchError as error:
-        return _failure(error.code, error.detail, started, capture)
-    except Exception as error:
-        capture.add(_ERROR_LEVEL, "ERROR", "cannot load PR-Agent", error)
-        return _failure(ErrorCode.RUNNER_ERROR, "cannot load PR-Agent", started, capture)
+            litellm.suppress_debug_info = True
+            patches.callback(apply_identity_patch(job.git.bot_login))
+        except IdentityPatchError as error:
+            return _failure(error.code, error.detail, started, capture)
+        except Exception as error:
+            capture.add(_ERROR_LEVEL, "ERROR", "cannot load PR-Agent", error)
+            return _failure(ErrorCode.RUNNER_ERROR, "cannot load PR-Agent", started, capture)
 
-    try:
-        watch, undo_watch = install_review_state_watch()
-    except WatchError as error:
-        undo_patch()
-        capture.add(_ERROR_LEVEL, "ERROR", "cannot watch the review state", error)
-        return _failure(ErrorCode.RUNNER_ERROR, "cannot watch the review state", started, capture)
+        # Only a review keeps a record of findings that can outgrow the comment.
+        watch = ReviewStateWatch()
+        if job.command is Command.REVIEW:
+            try:
+                watch, undo_watch = install_review_state_watch()
+            except WatchError as error:
+                capture.add(_ERROR_LEVEL, "ERROR", "cannot watch the review state", error)
+                return _failure(
+                    ErrorCode.RUNNER_ERROR, "cannot watch the review state", started, capture
+                )
+            patches.callback(undo_watch)
 
-    recorder: CommentRecorder
-    recorder, undo_recorder = install_comment_recorder()
-    guard, undo_guard = install_repo_settings_guard()
-    try:
+        recorder: CommentRecorder
+        recorder, undo_recorder = install_comment_recorder()
+        patches.callback(undo_recorder)
+        guard, undo_guard = install_repo_settings_guard()
+        patches.callback(undo_guard)
         try:
             handled, failed_flag, usage = asyncio.run(execute(job, guard, timeout_seconds))
         except JobTimeout:
@@ -128,10 +138,7 @@ def run_job(
             code = classify_failure(capture.exceptions, capture.error_messages)
             return _failure(code or ErrorCode.UNKNOWN, "the command raised", started, capture)
     finally:
-        undo_guard()
-        undo_recorder()
-        undo_watch()
-        undo_patch()
+        patches.close()
 
     failure_comment = recorder.failure_comment_posted()
     comment_url = None if failure_comment else recorder.comment_url(job.command)

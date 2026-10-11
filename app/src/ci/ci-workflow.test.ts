@@ -435,7 +435,7 @@ describe("CI workflow installation and runtimes", () => {
   it("limits the run time of every job", () => {
     // Only the job that calls the engine workflow is exempt: a job that calls a reusable workflow
     // cannot have its own limit, and the called workflow has one (engine-workflow.test.ts). Any
-    // other `uses` job, or a local action, still needs a limit of its own.
+    // other job still needs a limit of its own.
     const exempt = (job: Job) => job.uses === "./.github/workflows/engine.yml";
     for (const [id, job] of jobs.filter(([, job]) => !exempt(job))) {
       expect(job["timeout-minutes"], `${id} timeout`).toBeGreaterThan(0);

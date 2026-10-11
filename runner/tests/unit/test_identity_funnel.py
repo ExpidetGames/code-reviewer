@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 from pr_agent.agent import pr_agent as pr_agent_module
-from pr_agent.algo import comment_identity
+from pr_agent.algo import comment_identity, review_finding_state
 from pr_agent.algo.comment_identity import PRReviewIdentity
 from pr_agent.git_providers.git_provider import GitProvider
 from pr_agent.git_providers.github_provider import GithubProvider
@@ -51,13 +51,17 @@ FINGERPRINTS_FOR_0_47_0 = {
     "comment_identity.hidden_marker_forms": "84a40a8e0b1093a6",
     "PRReviewer._review_comment_authorship_available": "b30659553deca3a0",
     "PRReviewer._review_finding_state_in_play": "ee6991ca5ecc7abf",
+    # Not part of the identity chain: the function the review state watch wraps to notice that the
+    # review comment was shortened to fit GitHub's limit (review_state_watch.py).
+    "review_finding_state.append_review_state": "c1c9200939f260f2",
 }
 
 HOW_TO_FIX = (
-    "PR-Agent code that the identity patch relies on has changed. Read the diff of the release, "
-    "check that the patched _resolve_user_login still decides which comment is PR-Agent's own, "
-    "then update FINGERPRINTS_FOR_0_47_0 and PATCHED_FOR_VERSION together with the pin in "
-    "pyproject.toml."
+    "PR-Agent code that the identity patch or the review state watch relies on has changed. Read "
+    "the diff of the release, check that the patched _resolve_user_login still decides which "
+    "comment is PR-Agent's own and that append_review_state still shortens a review only when "
+    "the comment limit forces it (review_state_watch.py), then update FINGERPRINTS_FOR_0_47_0 and "
+    "PATCHED_FOR_VERSION together with the pin in pyproject.toml."
 )
 
 
@@ -67,6 +71,7 @@ def _target(name: str) -> Any:  # Any: PR-Agent ships no type information
         "GitProvider": GitProvider,
         "PRReviewer": PRReviewer,
         "comment_identity": comment_identity,
+        "review_finding_state": review_finding_state,
     }
     owner, method = name.split(".")
     return getattr(owners[owner], method)

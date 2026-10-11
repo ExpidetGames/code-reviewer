@@ -27,8 +27,6 @@ _IMPROVE_MARKERS = ("<!-- pr-agent:improve:summary -->",)
 _MARKER_LINES = 5
 # The tools publish these when a command fails but they still return normally.
 _FAILURE_PREFIXES = ("Failed to ",)
-# The heading of the review PR-Agent posts when it cannot update the canonical one safely.
-_STANDALONE_HEADING = "## Standalone PR Review"
 
 
 @dataclass(frozen=True)
@@ -79,15 +77,6 @@ class CommentRecorder:
             event.over_limit
             for event in self.events
             if not event.temporary and not event.body_head.startswith(_FAILURE_PREFIXES)
-        )
-
-    def standalone_review_posted(self) -> bool:
-        """PR-Agent posted its "Standalone PR Review": a review without the marker that would let
-        the next run find it again."""
-        return any(
-            event.body_head.startswith(_STANDALONE_HEADING)
-            for event in self.events
-            if not event.temporary
         )
 
     def comment_url(self, command: Command) -> str | None:

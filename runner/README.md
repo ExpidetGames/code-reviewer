@@ -198,8 +198,7 @@ characters each, the record and the visible review list the same text). Dropping
 make the next run treat them as new (the loss CR-11 recognition is meant to prevent) and needs a second
 private PR-Agent function patched; shortening stored bodies has the same cost. The levers that exist
 today are `pr_reviewer.num_max_findings` (default 3 per run, a project setting) and the fact that a
-complete run resolves findings that are gone. A follow-up story can compact the record (see the PR of
-CR-49), and the detection above keeps the loss visible until then.
+complete run resolves findings that are gone. Compacting the record is CR-52; the detection above keeps the loss visible until then.
 
 ## Settings policy
 
@@ -291,7 +290,9 @@ protect it:
   job against the real, pinned PR-Agent (no network). They fail when the pin, the lock file, the
   installed package and `PATCHED_FOR_VERSION` disagree, when the methods the patch relies on are
   gone or changed, or when the fingerprint of one of them (a hash of its syntax tree) differs from
-  the one recorded for 0.47.0. A PR that bumps `pr-agent` therefore turns the check
+  the one recorded for 0.47.0. The same file also records the fingerprint of
+  `append_review_state`, the function the review state watch wraps (see "The review comment size
+  limit"): read what it cuts and when before updating that fingerprint. A PR that bumps `pr-agent` therefore turns the check
   `All checks passed?` red until someone has read the release diff and updated the recorded
   fingerprints and `PATCHED_FOR_VERSION` together with the pin. The fingerprints are hashes of
   the syntax tree and were recorded on Python 3.13 (the version of `.python-version` and the

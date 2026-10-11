@@ -317,15 +317,3 @@ def test_a_failure_comment_beyond_the_limit_is_not_a_cut_review(recorder: Commen
     provider.publish_comment("Failed to review PR: " + "x" * 70_000)
 
     assert recorder.cut_comment_posted() is False
-
-
-def test_a_standalone_review_is_detected(recorder: CommentRecorder) -> None:
-    record(recorder, "created", "https://x/standalone", "## Standalone PR Review\n\n_text_")
-
-    assert recorder.standalone_review_posted() is True
-
-
-def test_a_canonical_review_is_not_a_standalone_review(recorder: CommentRecorder) -> None:
-    record(recorder, "created", "https://x/review", f"## PR Reviewer Guide 🔍\n\n{REVIEW_MARKER}\n")
-
-    assert recorder.standalone_review_posted() is False

@@ -1264,3 +1264,48 @@ def test_a_review_tool_the_watch_cannot_observe_stops_the_job_before_handle_requ
     assert result.ok is False
     assert result.error_code is ErrorCode.RUNNER_ERROR
     assert calls == []
+
+
+def test_the_review_state_watch_is_installed_only_for_a_review(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pr_reviewer = pr_agent_module("pr_agent.tools.pr_reviewer")
+    original = pr_reviewer.append_review_state
+    seen: dict[str, bool] = {}
+
+    async def double() -> bool:
+        seen["watched"] = pr_reviewer.append_review_state is not original
+        return True
+
+    use_double(monkeypatch, double)
+
+    run(make_job(command="improve"))
+    assert seen == {"watched": False}
+    run(make_job(command="review"))
+    assert seen == {"watched": True}
+
+
+def test_everything_patched_in_is_undone_when_a_later_install_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pr_reviewer = pr_agent_module("pr_agent.tools.pr_reviewer")
+    provider_class: Any = GithubProvider
+    before = (
+        provider_class._resolve_user_login,
+        provider_class.publish_comment,
+        pr_reviewer.append_review_state,
+    )
+
+    def failing_guard() -> Any:
+        raise RuntimeError("the guard could not be installed")
+
+    monkeypatch.setattr(runner, "install_repo_settings_guard", failing_guard)
+
+    with pytest.raises(RuntimeError):
+        run()
+
+    assert before == (
+        provider_class._resolve_user_login,
+        provider_class.publish_comment,
+        pr_reviewer.append_review_state,
+    )
