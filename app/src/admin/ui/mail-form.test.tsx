@@ -64,14 +64,14 @@ const configured = (extra: Partial<AdminSettingsView["smtp"]> = {}) =>
   });
 
 function api(
-  change: RequestResult<{ ok: true; settings: AdminSettingsView }> = {
+  changeResult: RequestResult<{ ok: true; settings: AdminSettingsView }> = {
     ok: true,
     data: { ok: true, settings: view() },
   },
   testMail: RequestResult<TestMailAnswer> = { ok: true, data: { ok: true } },
 ) {
-  const changeMock = vi.fn<(change: SettingChange) => Promise<typeof change>>(
-    () => Promise.resolve(change),
+  const changeMock = vi.fn<(change: SettingChange) => Promise<typeof changeResult>>(
+    () => Promise.resolve(changeResult),
   );
   const testMock = vi.fn<AdminApi["testMail"]>(() => Promise.resolve(testMail));
   return { api: { change: changeMock, testMail: testMock } satisfies AdminApi, changeMock, testMock };

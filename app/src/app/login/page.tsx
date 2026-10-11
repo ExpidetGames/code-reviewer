@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { signInWithGithub, signInWithPassword } from "@/auth/actions";
 import { loginErrorMessage } from "@/auth/login-errors";
+import { getPasswordResetAvailable } from "@/auth/password-reset-runtime";
 import { getSignInMethods } from "@/auth/sign-in-runtime";
 import { getSignUpAvailability } from "@/signup/shared";
 import { Button } from "@/ui/button";
@@ -37,6 +38,8 @@ async function SignInForms() {
   const signUp = methods.emailPassword
     ? await getSignUpAvailability()
     : { open: false as const };
+  // The link to "forgot your password" is offered while the instance can send the mail.
+  const canReset = methods.emailPassword && (await getPasswordResetAvailable());
   return (
     <>
       {methods.emailPassword ? (
@@ -68,6 +71,11 @@ async function SignInForms() {
           <Button type="submit" className="btn-block">
             Sign in
           </Button>
+          {canReset ? (
+            <p className="muted small">
+              <Link href="/forgot-password">Forgot your password?</Link>
+            </p>
+          ) : null}
         </form>
       ) : null}
       {signUp.open ? (

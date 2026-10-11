@@ -24,6 +24,11 @@ export const PUBLIC_PATHS: readonly PublicPath[] = [
   // is rate limited), see src/auth/password-reset-http.ts.
   { path: "/reset-password", match: "exact" },
   { path: "/api/password-reset", match: "exact" },
+  // Asking for a reset link by mail: the visitor has no session (that is why they ask). Rate limited per
+  // address and for the instance, and the answer is the same for every address
+  // (src/auth/password-reset-request.ts). Both are a 404 while the instance cannot send mail.
+  { path: "/forgot-password", match: "exact" },
+  { path: "/api/password-reset/request", match: "exact" },
   // Signing up and verifying an address: the visitor has no session yet. The sign-up and the request for
   // a new link are rate limited per address and for the instance, and a verification link is the
   // credential of its own route (src/signup/http.ts). `/no-access` only explains and offers sign out.
