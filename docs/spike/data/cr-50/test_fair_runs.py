@@ -41,6 +41,14 @@ class UsageFiguresTest(unittest.TestCase):
             {"promptTokens": None, "completionTokens": None, "costUsd": None},
         )
 
+    def test_a_usage_that_is_not_a_block_means_unknown(self) -> None:
+        for odd in ("n/a", 42, 1.5, ["promptTokens", 1], True):
+            with self.subTest(usage=odd):
+                self.assertEqual(
+                    fair_runs.usage_figures({"usage": odd}),
+                    {"promptTokens": None, "completionTokens": None, "costUsd": None},
+                )
+
     def test_a_missing_usage_key_means_unknown(self) -> None:
         self.assertEqual(
             fair_runs.usage_figures({"ok": False, "errorCode": "llm_error"}),
@@ -114,6 +122,20 @@ class RunWithoutUsageTest(unittest.TestCase):
     def test_a_result_with_usage_null_is_recorded_with_unknown_figures(self) -> None:
         header, row, code = self.run_with_result(
             {"ok": False, "errorCode": "x", "usage": None}
+        )
+
+        self.assertEqual(code, 0)
+        cells = dict(zip(header, row, strict=True))
+        self.assertEqual(
+            (cells["costUsd"], cells["promptTokens"], cells["completionTokens"]),
+            ("", "", ""),
+        )
+
+    def test_a_result_with_a_usage_that_is_not_a_block_is_recorded_with_unknown_figures(
+        self,
+    ) -> None:
+        header, row, code = self.run_with_result(
+            {"ok": False, "errorCode": "x", "usage": "n/a"}
         )
 
         self.assertEqual(code, 0)

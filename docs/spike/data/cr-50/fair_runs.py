@@ -174,10 +174,12 @@ def label_of(model: str, pr: int, round_no: int) -> str:
 def usage_figures(result: dict[str, Any]) -> dict[str, Any]:
     """Token counts and cost of a run; None for what is unknown.
 
-    Some providers return no usage block, so `usage` may be null or missing, and a figure inside it
+    Some providers return no usage block, so `usage` may be null, missing or not a block at all, and a figure inside it
     may be missing too. That is "unknown", never zero (a real cost of 0 stays 0).
     """
-    usage = result.get("usage") or {}
+    usage = result.get("usage")
+    if not isinstance(usage, dict):
+        usage = {}  # null, missing, or something that is not a usage block
     cost = usage.get("costUsd")
     return {
         "promptTokens": usage.get("promptTokens"),
