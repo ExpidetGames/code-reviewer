@@ -15,6 +15,7 @@ Code Reviewer wraps PR-Agent: it runs PR-Agent against pull requests and adds a 
 | `compose.yml` | The whole stack on one machine (app and runner), see "Run with Docker Compose" |
 | `compose.coolify.yml` | The same stack for Coolify (built from the repository, no published port), see "Deploy on Coolify" |
 | `docs/` | Guides for operators: [`docs/deployment-coolify.md`](docs/deployment-coolify.md) (deploying on Coolify), [`docs/github-app.md`](docs/github-app.md) (creating and installing the team's GitHub App) |
+| `docs/decisions/` | Architecture decision records, see [`docs/decisions/README.md`](docs/decisions/README.md) |
 | `fakes/` | Fake servers and fixtures used by the tests |
 | `TESTING.md` | Testing strategy |
 | `AGENTS.md` | Rules for agents and contributors |
