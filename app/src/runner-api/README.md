@@ -24,6 +24,14 @@ The runner (Python, `runner/`) asks the app for work over HTTP: it **claims** a 
 | `contract.ts`                      | The TypeScript types and code lists of the contract                                                                                                                                                             |
 | `shared.ts`                        | The wiring of the running server (`getRunnerApi()`, `withRunnerApi`); the route files under `src/app/api/runners/v1/` only call `withRunnerApi`, which answers a failure while setting up in the usual 500 form |
 
+## Workspaces
+
+The runner token belongs to the instance, not to a workspace: a claim hands out the oldest due job of any
+workspace (`createRunnerQueue`, not scoped). Everything the claim then looks up for that job (repository,
+connection, project, review settings) is looked up in the workspace of the job (`job.workspaceId`), so the
+credentials are those of the job's own connection. Nothing of this shows in the contract: the answers
+are the same as for a single workspace.
+
 ## Authentication
 
 `Authorization: Bearer <RUNNER_TOKEN>` on every call. One shared token in the MVP, read from the

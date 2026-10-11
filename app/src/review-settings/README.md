@@ -1,13 +1,14 @@
 # Review settings
 
-What a review can be tuned by, with sensible built-in values, global defaults for the whole instance
+What a review can be tuned by, with sensible built-in values, global defaults for the whole workspace
 and overrides per project. The settings end up in the runner job (`llm.model`, `llm.maxTokens`, `env`)
 through one pure function.
 
 ## Layers
 
 From weakest to strongest: **built-in values** (`settings.ts`, with the model from `LLM_MODEL`, see
-`src/llm/README.md`), **global defaults** (`app_settings`, key `review_defaults`) and the **overrides of
+`src/llm/README.md`), **global defaults** (`app_settings`, key `review_defaults`, one set per workspace: changing them in one workspace
+does not touch another, and a workspace that never saved any uses the built-in values) and the **overrides of
 one project** (`projects.settings`). A layer only holds the fields somebody changed, the rest is
 inherited when the settings are read (`resolveReviewSettings` in `effective.ts`, which also says where
 each field comes from). So a changed global default reaches every project that does not override the
