@@ -9,6 +9,35 @@ fail() {
   exit 1
 }
 
+# Unsets every variable the given compose files interpolate (${NAME}, ${NAME:-default}, nested
+# ones and the short form $NAME), so that a value in the caller's shell or in CI cannot change what
+# a smoke test runs against. The list is read from the files, not written by hand: a variable added
+# to a compose file later is covered without anyone remembering it. Call it before exporting the
+# dummy settings. `$$` is an escaped dollar sign in a compose file and interpolates nothing, so it
+# is removed before matching ($${HOME} must not unset HOME). A name that cannot be unset (a read
+# only one such as UID) is skipped. A missing file is an error: reading no file would unset
+# nothing and look like success.
+# Usage: unset_compose_variables <compose file>...
+unset_compose_variables() {
+  local file name names
+  [ "$#" -gt 0 ] || {
+    printf 'unset_compose_variables: no compose file given\n' >&2
+    return 1
+  }
+  for file in "$@"; do
+    [ -f "$file" ] || {
+      printf 'unset_compose_variables: not a file: %s\n' "$file" >&2
+      return 1
+    }
+  done
+  # `|| true`: grep exits 1 for a file without any variable, which is fine.
+  names=$({ sed 's/\$\$//g' "$@" | grep -oE '\$\{?[A-Za-z_][A-Za-z0-9_]*' | sed -E 's/^\$\{?//' | sort -u; } || true)
+  while read -r name; do
+    [ -n "$name" ] || continue
+    unset "$name" 2>/dev/null || true
+  done <<<"$names"
+}
+
 # Containers and volumes created by a smoke run, removed on exit (also after a failure).
 CLEANUP_CONTAINERS=()
 CLEANUP_VOLUMES=()
