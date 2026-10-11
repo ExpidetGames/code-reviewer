@@ -212,6 +212,16 @@ describe("checkLicenses", () => {
       ]);
     });
 
+    it("compares Python versions the way PEP 440 does, so 2024.02.26 and 2024.2.26 are the same version", () => {
+      const result = run([py("html2text", "GPL-3.0-only", "2024.02.26")], {
+        locked: [
+          { ecosystem: "python", name: "html2text", version: "2024.2.26" },
+        ],
+      });
+
+      expect(result.violations).toEqual([]);
+    });
+
     it("treats another installed version as not installed", () => {
       const result = run([npm("a", "MIT", "1.0.0")], {
         locked: [{ ecosystem: "npm", name: "a", version: "2.0.0" }],

@@ -47,6 +47,9 @@ const NAMES: Record<string, string> = {
   "python software foundation license": "PSF-2.0",
 };
 
+// License fields that only say there is no usable answer.
+const PLACEHOLDERS = new Set(["unknown", "other", "n/a", "see license file"]);
+
 // The classifiers after "License :: ". Generic ones (any LGPL, any GPL) cannot name a version, so
 // they become a LicenseRef that a policy has to allow by name.
 const CLASSIFIERS: Record<string, string> = {
@@ -88,6 +91,8 @@ function fromLicenseField(field: string): string | null {
   const line = firstLine.trim();
   const named = NAMES[line.toLowerCase()];
   if (named) return named;
+  // A placeholder says nothing; a valid classifier next to it should decide.
+  if (PLACEHOLDERS.has(line.toLowerCase())) return null;
   // A whole field that is one short line and reads as an expression ("MPL-2.0 AND MIT") is taken
   // as it is. A sentence or a copyright line does not parse and falls through to the classifiers.
   if (line === field.trim() && line.length <= 100 && isExpression(line)) {

@@ -55,6 +55,23 @@ export function normalizeName(ecosystem: Ecosystem, name: string): string {
     : name;
 }
 
+/**
+ * Python versions are compared the way PEP 440 normalizes them: separators become dots and leading
+ * zeros of numeric parts go (2024.02.26 is 2024.2.26). npm versions are exact.
+ */
+export function normalizeVersion(
+  ecosystem: Ecosystem,
+  version: string,
+): string {
+  if (ecosystem !== "python") return version;
+  return version
+    .toLowerCase()
+    .replace(/[-_]/g, ".")
+    .split(".")
+    .map((part) => (/^\d+$/.test(part) ? String(Number(part)) : part))
+    .join(".");
+}
+
 /** An exact package name, or a prefix ending in `*`. */
 export function matchesPackage(
   ecosystem: Ecosystem,

@@ -140,6 +140,17 @@ function run(command: string, args: string[], cwd: string): string {
   });
 }
 
+// `--no-sync`: uv must not touch the environment, which could install packages (and so use the
+// network) when it is stale. The check judges what is installed; `uv sync --locked` (make install,
+// the CI job) is what installs it. `--locked` still fails when uv.lock is out of date.
+export const UV_LICENSES_ARGS = [
+  "run",
+  "--locked",
+  "--no-sync",
+  "python",
+  "scripts/list_licenses.py",
+];
+
 /** Starts pnpm and uv; both need their dependencies installed (`make install`). */
 export function collectAll(repoRoot: string): Collected {
   const appDir = `${repoRoot}/app`;
@@ -147,13 +158,7 @@ export function collectAll(repoRoot: string): Collected {
   return {
     installed: [
       ...parsePnpmLicenses(run("pnpm", ["licenses", "list", "--json"], appDir)),
-      ...parsePythonInstalled(
-        run(
-          "uv",
-          ["run", "--locked", "python", "scripts/list_licenses.py"],
-          runnerDir,
-        ),
-      ),
+      ...parsePythonInstalled(run("uv", UV_LICENSES_ARGS, runnerDir)),
     ],
     locked: [
       ...parsePnpmLock(readFileSync(`${appDir}/pnpm-lock.yaml`, "utf8")),

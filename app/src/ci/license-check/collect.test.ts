@@ -8,6 +8,7 @@ import {
   parsePnpmLock,
   parsePythonInstalled,
   parseUvLock,
+  UV_LICENSES_ARGS,
 } from "./collect.ts";
 
 describe("parsePnpmLicenses", () => {
@@ -119,5 +120,13 @@ describe("parsePythonInstalled", () => {
     expect(() => parsePythonInstalled("{}")).toThrow(
       "PYTHON_LICENSES_UNREADABLE",
     );
+  });
+});
+
+describe("the uv command", () => {
+  // #118-T02
+  it("never syncs the environment, so the check cannot install packages or use the network", () => {
+    expect(UV_LICENSES_ARGS).toContain("--no-sync");
+    expect(UV_LICENSES_ARGS).toContain("--locked");
   });
 });

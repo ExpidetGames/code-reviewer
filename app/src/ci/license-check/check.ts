@@ -7,6 +7,7 @@
 import {
   matchesPackage,
   normalizeName,
+  normalizeVersion,
   type Ecosystem,
   type Policy,
 } from "./policy.ts";
@@ -123,7 +124,7 @@ export function checkLicenses(input: {
   for (const entry of installed) {
     checked[entry.ecosystem] += 1;
     installedKeys.add(
-      `${entry.ecosystem}:${normalizeName(entry.ecosystem, entry.name)}@${entry.version}`,
+      `${entry.ecosystem}:${normalizeName(entry.ecosystem, entry.name)}@${normalizeVersion(entry.ecosystem, entry.version ?? "")}`,
     );
     const problem = judge(policy, entry.ecosystem, entry.name, entry.license);
     if (problem) {
@@ -138,7 +139,7 @@ export function checkLicenses(input: {
   }
 
   for (const entry of locked) {
-    const key = `${entry.ecosystem}:${normalizeName(entry.ecosystem, entry.name)}@${entry.version}`;
+    const key = `${entry.ecosystem}:${normalizeName(entry.ecosystem, entry.name)}@${normalizeVersion(entry.ecosystem, entry.version ?? "")}`;
     if (installedKeys.has(key)) continue;
     const declared = policy.notInstalled.find(
       (candidate) =>

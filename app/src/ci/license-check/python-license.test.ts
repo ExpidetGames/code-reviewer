@@ -98,6 +98,17 @@ describe("pythonLicenseExpression", () => {
     ).toBe("MIT");
   });
 
+  it("ignores a placeholder license field such as UNKNOWN when a classifier names the license", () => {
+    expect(
+      pythonLicenseExpression(
+        record({
+          license: "UNKNOWN",
+          classifiers: ["License :: OSI Approved :: MIT License"],
+        }),
+      ),
+    ).toBe("MIT");
+  });
+
   it("marks an unknown classifier so the check reports it", () => {
     expect(
       pythonLicenseExpression(
