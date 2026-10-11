@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // @vitest-environment jsdom
 // Pins down the "Review now" panel with a stand-in for the routes: it loads the open pull requests,
 // starts a command only for a picked pull request, validates the question of `ask` before it sends

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The wiring of the webhook route: the real database, registry, sync service and intake. This is the
 // one place that decides where review triggers go.
 import "server-only";

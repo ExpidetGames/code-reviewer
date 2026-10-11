@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down restoring a backup into the data directory: the backup is checked first and a bad one
 // stops the restore before anything is touched; a good one replaces the database in one step, the
 // old database (with its write-ahead log) is kept aside, and the app can start on the result.

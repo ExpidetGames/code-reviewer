@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the sync that runs when the server starts: it fills the tables, and whatever goes wrong
 // (GitHub down, settings missing, no database) is logged and never stops the start.
 import { describe, expect, it } from "vitest";

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down compose.coolify.yml, the Compose file of the Coolify deployment, as a file: it is built
 // from the repository (nothing is pulled from the private GHCR packages), publishes no host port so
 // that Coolify's proxy is the only way in, asks for every secret as a required variable, and stays in

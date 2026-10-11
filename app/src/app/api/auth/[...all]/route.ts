@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Better Auth's HTTP interface: the email and password sign in (limited, see src/auth/sign-in-limit.ts),
 // the GitHub sign in, its callback and sign out. Public (see
 // src/auth/access.ts); what is reachable is limited in src/auth/http.ts.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Access to the workspaces table: the owners of customer data. Instance level (it is the table that
 // scoping starts from, so it takes no workspace). Members are not handled here yet; the workspaces
 // feature adds them. See src/workspaces/README.md.

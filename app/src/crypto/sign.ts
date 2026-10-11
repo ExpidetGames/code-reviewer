@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // HMAC-SHA256 signing of small values that make a round trip through the browser (a cookie, a state
 // parameter). The key is derived per purpose (keys.ts); the comparison is constant time. A signed
 // value is `<base64url value>.<base64url mac>`: it is integrity protected, not secret.

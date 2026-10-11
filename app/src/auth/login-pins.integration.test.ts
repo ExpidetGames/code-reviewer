@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down that a login on the allow list is bound to one GitHub account: the first account to use
 // it (or the id given as `login:id`) keeps it, an account that merely carries the same login (a
 // renamed account's old name, taken by somebody else) is refused at sign in and on every request, and

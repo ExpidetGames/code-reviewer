@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // A program the job queue tests run as a separate OS process (node runs this file directly,
 // TypeScript types are stripped): a second app instance or runner API handler working on the same
 // database file. Every command prints "ready", waits for a line "go <epoch ms>", spins until that

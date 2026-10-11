@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down how a stored integration type is turned into its provider, and that every way of not
 // finding one ends in a stable error code.
 import { generateKeyPairSync } from "node:crypto";

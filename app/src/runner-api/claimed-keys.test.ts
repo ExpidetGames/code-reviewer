@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the list of the keys handed out with a claim: it knows the key of a job, replaces it when
 // the job is claimed again, and cannot grow without bound.
 import { describe, expect, it } from "vitest";

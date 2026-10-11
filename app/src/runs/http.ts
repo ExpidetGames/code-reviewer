@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The handlers behind `GET /api/runs` (the list, with its filter) and `GET /api/runs/:id` (one run):
 // what the pages ask for again and again while a run is waiting or running. Their collaborators are
 // passed in so the route files only wire the real ones and tests wire fakes.

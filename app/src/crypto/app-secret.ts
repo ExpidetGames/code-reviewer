@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // `APP_SECRET`, the master key of the instance (docs/decisions/0001-editions-setup-and-accounts.md,
 // section 2.1). `BETTER_AUTH_SECRET`, its old name, is accepted in its place when `APP_SECRET` is not
 // set, so an installation from before this setting keeps its sessions and its encrypted tokens. The

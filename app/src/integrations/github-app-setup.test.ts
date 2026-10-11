@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down that the check of the GitHub App settings is remembered for a short time, because it
 // reads the key file and parses the key and the pages ask on every render: a changed variable counts
 // at once, a key file replaced under the same path counts when the memory expires.

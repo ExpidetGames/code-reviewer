@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The list of repositories on the Projects page: name (a link to the settings, also while the
 // repository is inactive), installation, state, the status of the last run and the switch. Everything that
 // comes from GitHub (names, addresses) is untrusted and rendered as text.

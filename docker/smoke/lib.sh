@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+
 # Shared helpers of the smoke tests (docker/smoke/app.sh, runner.sh and compose.sh). Sourced,
 # not executed. The smoke tests need a Docker daemon and fail loudly without one; they never skip.
 

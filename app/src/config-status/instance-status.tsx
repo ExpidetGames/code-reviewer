@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The "Instance" block on the Settings page: whether the GitHub App and the LLM access work, in
 // plain words. Variable names where something is wrong, provider and model where it works, never a
 // value (src/config-status/status.ts).

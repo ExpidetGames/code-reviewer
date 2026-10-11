@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the key derivation: the same secret, purpose and version always give the same key, and
 // anything that differs gives another one, so a key for one use cannot stand in for another.
 import { describe, expect, it } from "vitest";

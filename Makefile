@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 # Entry points for developers and agents. Every target is a thin wrapper around the commands
 # of app/package.json and runner/pyproject.toml; see TESTING.md for what each level means.
 

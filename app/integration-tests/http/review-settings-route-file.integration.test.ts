@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the real route files of the review settings with the wiring the running server uses: the
 // dynamic segment, the database opened at start, the service on top of it and the user check. Only the
 // session lookup and `connection()` are replaced (they need Next.js's request scope). The behavior of

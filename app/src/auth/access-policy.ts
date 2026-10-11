@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // "Who may use this instance", decided on every authenticated request. Both places that grant access
 // go through it: the proxy (every request) and `requireUser` (every page or action that needs the
 // user), via `lookupSession`.

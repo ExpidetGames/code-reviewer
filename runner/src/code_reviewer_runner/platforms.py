@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """The platforms a job may come from, and what each one means for PR-Agent.
 
 One table maps `git.provider` of a job to the PR-Agent settings that platform needs. The MVP has

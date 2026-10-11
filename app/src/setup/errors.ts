@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The stable error codes of the first-run setup and the HTTP status of each. The UI translates a
 // code to copy (ui/messages.ts), never the other way round. A code never contains a digit of the
 // setup code, a password or a token.

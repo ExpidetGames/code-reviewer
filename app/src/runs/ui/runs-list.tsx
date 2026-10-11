@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 "use client";
 // The list of runs on the Runs page. The server renders the first snapshot; while a run waits or runs
 // the browser asks for newer ones (every few seconds), and it keeps asking slowly once everything is

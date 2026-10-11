@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the Docker Compose setup (compose.yml, compose.build.yml, .env.example) as files: which
 // services exist and how they are wired, that no secret is written in the compose file, and that
 // .env.example documents every variable the stack and the code read. Whether the stack really

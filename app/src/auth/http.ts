@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // What the public HTTP interface of Better Auth is allowed to do. Better Auth ships many endpoints
 // (list and revoke sessions, update the user, link accounts, ...) that this app neither needs nor
 // wants reachable: some would reveal the session token or let a user rewrite their own profile.

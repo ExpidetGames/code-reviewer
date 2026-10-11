@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The four tables Better Auth reads and writes through its Kysely adapter (users, sessions,
 // accounts, verifications), with the names and columns that src/auth/auth.ts maps its model to.
 // `users.github_login` is our own column: the current GitHub login, refreshed on every sign in.

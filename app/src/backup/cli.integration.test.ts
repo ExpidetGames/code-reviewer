@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the command line that a Coolify scheduled task, an operator or the restore guide runs:
 // `node cli.ts backup` and `node cli.ts restore <file>`. It runs as a real process (the way it runs
 // in the container), so exit codes, output and files on disk are what is checked.

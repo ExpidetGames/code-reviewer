@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Access to the app_meta table. The only code that reads or writes it.
 import "server-only";
 import type { Kysely } from "kysely";

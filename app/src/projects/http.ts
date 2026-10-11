@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The handler behind `PUT /api/repositories/:repositoryId/project`, with its collaborators passed in
 // so the route file only wires the real ones and tests wire fakes. The body is `{ "active": true }`
 // to activate and `{ "active": false }` to deactivate; both are idempotent.

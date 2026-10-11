@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down that the webhook route only starts work for a repository with an active project: a
 // signed pull request or comment command delivery for a repository without a project, with a
 // deactivated one, or with one whose repository disappeared is answered 202 `project_not_active` and

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Reads a request body as text with a hard size limit, without trusting the declared length: a
 // `Content-Length` over the limit is refused before anything is read, and a body without a length (or
 // with a wrong one) is cut off as soon as it grows past the limit, so a large body never sits in

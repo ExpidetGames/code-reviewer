@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 "use client";
 // The detail page of one run: what it was about, who or what started it, its status and times, the
 // link to the review comment on GitHub, why it did not succeed (in words, with the error code

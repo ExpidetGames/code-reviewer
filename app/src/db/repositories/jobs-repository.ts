@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Access to the jobs table of ONE workspace (the factory takes the workspace id; see
 // ../workspace-scope.ts): creating jobs, dropping waiting ones, reading them. The lease side of the
 // queue (claim, heartbeat, complete, release, expiry) is not scoped, because runners serve the whole

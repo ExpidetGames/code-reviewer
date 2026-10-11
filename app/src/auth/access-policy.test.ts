@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the rule that decides, on every authenticated request, whether a signed in user may
 // still use the instance: the logins list is checked every time, the organization membership at
 // most every 24 hours, and anything that cannot be decided is a no.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the last line of defense against a secret in a stored result. The runner redacts its
 // own output; this removes what still looks like a credential, and the secrets the app itself knows.
 import { describe, expect, it } from "vitest";

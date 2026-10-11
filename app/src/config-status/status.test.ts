@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down what the pages may know about the instance's configuration: which GitHub App variables
 // are missing or wrong (by name only), whether the LLM access works, and the address people use to
 // install the GitHub App. Never a value: the private key, the webhook secret and the LLM key must

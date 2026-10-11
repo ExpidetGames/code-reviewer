@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // What the server says about the LLM access when it starts. A problem is one warning with the code
 // and the variable names and never stops the start: the rest of the app works without an LLM, the
 // UI shows the problem and a job fails with `llm_not_configured`. A wrong optional variable

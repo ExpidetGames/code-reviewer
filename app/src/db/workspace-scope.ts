@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The one vocabulary of workspace scoping (docs/decisions/0001-editions-setup-and-accounts.md,
 // section 2.7). A repository that reads or writes customer data is created for ONE workspace:
 // its factory takes `workspaceId` as a required parameter and every query it runs filters or sets

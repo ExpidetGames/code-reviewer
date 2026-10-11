@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the projects table against a real SQLite file: activating a repository creates its one
 // project, deactivating keeps the row and its settings, activating again reuses the row, a repository
 // the platform no longer lists cannot be activated but keeps its project row, and two simultaneous

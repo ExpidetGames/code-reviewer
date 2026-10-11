@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Pins down the runner as a real process: the job goes in on stdin, exactly one line of JSON comes
 out on stdout, nothing leaks to either stream, and the environment, argv and working directory stay
 free of secrets. PR-Agent's `handle_request` is replaced by a double (pr_agent_double.py), so the

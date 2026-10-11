@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // @vitest-environment jsdom
 // Pins down the Settings page with real data: the form for the global defaults saves through the
 // route handler into the real database and every project that has no value of its own follows, the

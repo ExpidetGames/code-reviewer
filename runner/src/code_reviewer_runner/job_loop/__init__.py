@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """The job loop: claims jobs from the app, runs one process per job, reports the outcome.
 
 settings.py   what the operator configures (environment variables)

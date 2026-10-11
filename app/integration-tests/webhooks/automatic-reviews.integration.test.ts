@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The automatic reviews of CR-31, end to end up to the queue: a signed `pull_request` delivery goes
 // through the real webhook handler, the real GitHub App provider (against the fake GitHub), the real
 // trigger policy with the real review settings, and the real job queue on a real SQLite file. Time

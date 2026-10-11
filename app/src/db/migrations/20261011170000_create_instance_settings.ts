@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // `instance_settings`: the settings of the whole instance, one row per setting with a JSON value
 // (docs/decisions/0001-editions-setup-and-accounts.md, sections 2.2 and 2.7). The first two rows are
 // the explicit markers of the first-run setup: `setup_completed_at` (null until the wizard has

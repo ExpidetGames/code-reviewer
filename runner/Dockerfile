@@ -1,4 +1,5 @@
 # syntax=docker/dockerfile:1
+# SPDX-License-Identifier: Apache-2.0
 #
 # Image of the Code Reviewer runner (Python, uv). Build context: the repository root, because the
 # image also carries LICENSE, NOTICE and THIRD_PARTY_LICENSES.md from there

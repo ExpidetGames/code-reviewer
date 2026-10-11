@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down who may change the review settings: the access proxy (real Better Auth, real database)
 // in front of the handlers of `PUT /api/review-settings` and of the project settings routes. A request
 // without a session gets 401, one from a signed in user who is no longer on the allow list gets 403,

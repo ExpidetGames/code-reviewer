@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Pins down the orchestration of one job: which PR-Agent call is made, how its outcome becomes ok,
 the comment URL and the error code, and that the patch and the recorder are undone afterwards. The
 real PR-Agent code is imported, but its `handle_request` is replaced by a test double, so nothing

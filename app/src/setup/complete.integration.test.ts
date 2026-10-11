@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the completion of the first-run setup against a real SQLite file: the admin is created
 // with a hashed password and the instance admin flag, the choices are stored, the workspace follows
 // the tenancy (a fresh instance, an existing one with an imported workspace, with and without an

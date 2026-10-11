@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Everything a test of the synchronization needs: a real SQLite file, the registry with the real
 // GitHub App provider and client, the fake GitHub API behind it, and `deliver`, which does what the
 // webhook route does with a delivery (verify, identify, find the row, translate, hand over).

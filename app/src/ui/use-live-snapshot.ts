@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 "use client";
 // Keeps a page's data fresh without a reload: the server renders the first snapshot, the browser asks
 // for newer ones while something can still change. Three rules make it safe with Cache Components,

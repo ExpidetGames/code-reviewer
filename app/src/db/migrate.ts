@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Brings the database to the latest schema. All pending migrations run in one transaction (see
 // dialect.ts): if one fails, nothing of the batch is applied or recorded, and the error names the
 // migration. Two instances starting at once take turns on the write lock; the second finds nothing

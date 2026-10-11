@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // What the project list shows, worked out from the project service: one row per repository the
 // GitHub App can read (plus the ones that disappeared but kept a project), with its installation,
 // its state and the status of its last run. Plain data: the components render it and the page only

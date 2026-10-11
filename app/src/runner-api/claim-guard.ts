@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // A hook between "a runner claimed a job" and "the runner gets its credentials": a place to refuse
 // jobs that must not run any more. The runner API asks the guard before it creates any credentials.
 // A refused job never reaches the runner, which is handed the next job instead.

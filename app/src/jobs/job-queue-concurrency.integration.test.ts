@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the queue when several callers work on one database file at the same moment. The other
 // callers are real OS processes (a second app instance, a second runner API handler), started
 // together by a barrier: better-sqlite3 blocks its thread on a lock, so threads in one process could

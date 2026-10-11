@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the licensing of the repository: the Apache-2.0 text, the NOTICE with the attribution
 // that the license of PR-Agent demands, and the license declared in every place that carries
 // metadata (package.json, pyproject.toml, both container images). Whether the dependencies of the

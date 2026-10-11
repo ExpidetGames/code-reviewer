@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down who is let in when the OAuth callback is completed: a listed login at once, otherwise
 // a member of the organization (asked with the token that was just issued), and every doubt is a no.
 import { describe, expect, it, vi } from "vitest";

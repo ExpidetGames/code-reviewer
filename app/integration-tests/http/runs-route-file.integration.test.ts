@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the real route files `GET /api/runs` and `GET /api/runs/:id` with the wiring the running
 // server uses: the database opened at start, the runs service and the user check. Only the session
 // lookup and `connection()` are replaced (they need Next.js's request scope). The behavior of the

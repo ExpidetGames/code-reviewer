@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Keeps secrets out of the runner's own log lines.
 
 The loop never logs a job's input, a lease token or a header on purpose. This is the second line:

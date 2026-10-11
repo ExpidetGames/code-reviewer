@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the parts of the Dockerfiles and their ignore files that must not drift: runtime
 // versions that have to match the rest of the repository, digest pinning, the unprivileged user and
 // the files kept out of the build context. Whether the built images really behave (start, serve,

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """What the operator configures for the job loop, read from environment variables.
 
 | Variable                        | Meaning                                         | Default |

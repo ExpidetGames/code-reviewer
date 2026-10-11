@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Settings of the whole instance, one row per setting, the value as JSON text. The first one is
 // `review_defaults`: the global default values of the review settings, holding only the fields
 // somebody changed (src/review-settings/README.md). A later setting of the instance is a new key,

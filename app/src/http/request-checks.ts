@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Checks every state-changing route makes on the request itself, before it reads the body.
 
 // Defense in depth for a session cookie that is `SameSite=Lax` already. Browsers say where a request

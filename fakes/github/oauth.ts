@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The sign in part of the fake GitHub: the OAuth authorize and token endpoints, the two profile
 // endpoints Code Reviewer reads (`/user`, `/user/emails`) and the organization membership check
 // (`/user/memberships/orgs/:org`). State lives in memory. Dummy values only: the tokens and codes it

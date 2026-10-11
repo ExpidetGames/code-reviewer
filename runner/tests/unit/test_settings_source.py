@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Pins down where PR-Agent 0.47.0 reads a repository's `.pr_agent.toml` from, as the runner
 configures it: the default branch of the repository, through the contents API without a ref. Not
 from the head of the pull request, so the author of a pull request cannot change how the review is

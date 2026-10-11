@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // A small GitHub client for the app: authenticates as the app (JWT) and as an installation (token),
 // lists installations and their repositories, reads pull requests and permissions. Everything it
 // returns is already in the shapes the provider needs; nothing outside this folder sees GitHub JSON.

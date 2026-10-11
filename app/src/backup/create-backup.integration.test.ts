@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down what one backup run produces from a real SQLite file in WAL mode: a single, consistent,
 // verified file under a UTC time stamp in the target directory, published atomically and readable
 // by its owner only; and what it does when the source or the target is unusable (a clear error code,

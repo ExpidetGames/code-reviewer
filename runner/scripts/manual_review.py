@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Manual run of the runner against a real pull request (CR-10-T12), the proof of the spike.
 
 Creates a GitHub App JWT from the private key, exchanges it for an installation token, builds the

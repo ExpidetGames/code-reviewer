@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """The measuring wrapper of the CR-13 spike as real processes: it runs a command (or several at
 once) and reports the peak memory and the duration of each."""
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // What the user menu shows about the signed in person. The name is whatever GitHub gave us, so it
 // is untrusted text: these functions only produce plain strings, React renders them as text.
 

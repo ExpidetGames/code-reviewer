@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The frame of every signed in page. The frame itself is static; the user menu needs the session,
 // so it streams in behind a <Suspense> boundary (Cache Components), and so does the page, which
 // reads the session itself (`requireUser`). The proxy has already turned away a visitor without a

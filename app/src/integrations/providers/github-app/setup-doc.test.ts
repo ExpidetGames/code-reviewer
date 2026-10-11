@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Keeps docs/github-app.md (the guide for creating the team's GitHub App) in step with the code: the
 // permissions and webhook events the guide tells people to set are exactly the ones the code works
 // with, the webhook path is the route that exists, and every environment variable the loader reads

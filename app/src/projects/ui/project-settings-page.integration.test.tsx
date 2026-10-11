@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // @vitest-environment jsdom
 // Pins down the settings page of a project with real data: a repository that was never activated,
 // a project that follows the defaults, the effect of changing the global defaults, a value saved on

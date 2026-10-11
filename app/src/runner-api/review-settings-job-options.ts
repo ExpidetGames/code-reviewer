@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The job options of the running server: the review settings of the job's repository, the project's
 // overrides over the global defaults over the built-in values (CR-25), turned into the fields of a job
 // by `toRunnerSettings`. The claim asks once per job, so a change of the settings reaches the next

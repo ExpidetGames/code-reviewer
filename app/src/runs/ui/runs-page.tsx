@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The content of the Runs page: the filter, then the list. `loadRunsPage` gathers the data from the
 // services (passed in, so a test uses real ones against a test database), `RunsPageContent` renders
 // it. The page file only wires the real services. The filter is the address (`?repository=...&status=...`),

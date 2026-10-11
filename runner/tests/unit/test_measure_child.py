@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Pins down the measuring wrapper of the CR-13 spike: it runs a command (or several at once),
 reports the peak memory and the duration of each, serves the canned model answer for the fake LLM
 mode and reads the memory counters of the container when there are any."""

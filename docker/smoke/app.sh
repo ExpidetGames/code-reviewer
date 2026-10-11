@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+
 # Smoke test of the app image. Usage: docker/smoke/app.sh <image>   (default: code-reviewer-app:local)
 #
 # Starts the image the way a deployment does (unprivileged user, a fresh named volume on /data, no

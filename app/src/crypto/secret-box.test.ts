@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the encryption of credentials at rest: AES-256-GCM with a key per purpose, a fresh
 // random nonce for every encryption, the key version stored with the value, and the table, row and
 // field bound into the ciphertext so a copy to another place does not decrypt.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the rule that the proxy is not the only guard: a Server Function is a POST to the page
 // it lives on, so the proxy may let it through (a public page) or stop seeing it (a changed
 // matcher). Every route handler that is not public, and every file of Server Functions, must

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the retention rule: 7 daily and 4 weekly backups, counted in days and weeks that have a
 // backup (a gap in the history never deletes the history), with the newest backup and everything
 // younger than a day always kept. The rule is a pure function of the file names and the clock.

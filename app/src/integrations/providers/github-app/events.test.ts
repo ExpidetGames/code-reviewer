@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down which pull request actions start a review: opened, reopened, ready for review and new
 // commits do, everything else does not; a closed pull request is its own event. Whether a draft or a
 // disabled setting still stops the review is decided by the automatic trigger policy

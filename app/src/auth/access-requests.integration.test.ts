@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down what happens to a person who is already signed in when the allow list changes or time
 // passes: a login that was removed from the list loses access on the very next request, an
 // organization member is asked about again after 24 hours (and not before), and every doubt is a

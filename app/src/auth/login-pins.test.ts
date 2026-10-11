@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down how a login on the allow list is compared with the GitHub id it is bound to: the first
 // id wins, a different id is a mismatch, and a store that cannot answer is never a match.
 import { describe, expect, it, vi } from "vitest";

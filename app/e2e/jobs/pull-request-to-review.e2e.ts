@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the whole path of a review in a real browser, against a production build: a signed
 // `pull_request` webhook reaches the app, the app queues a job, the REAL runner (the job loop, a
 // process of its own) claims it and runs the REAL PR-Agent against the fake GitHub and a fake LLM,

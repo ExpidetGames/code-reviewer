@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down that docker/smoke/compose.sh starts from a clean environment: every variable the compose
 // files it uses read is unset before the script exports its own dummy settings, so a value in the
 // caller's shell or in CI can never change what the smoke test runs against. The list is derived from

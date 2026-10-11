@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down how the container images are built and published: the image jobs of the CI workflow
 // (.github/workflows/ci.yml) only build and smoke test, and the publish workflow
 // (.github/workflows/publish-images.yml) is the only place that holds the right to push to GHCR.

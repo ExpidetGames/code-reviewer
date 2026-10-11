@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Pins down that the question of an `ask` job is data: it reaches PR-Agent as one encoded argument,
 whatever characters it holds, and the command stays `ask`. The question comes from a comment on a
 pull request, so nothing in it may be read as a shell command, an option or a second argument."""

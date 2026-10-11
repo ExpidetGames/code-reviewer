@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Pins down the per-level pytest timeouts that tests/conftest.py applies from a test's directory,
 so a hung test fails fast at the unit level and still gets room at the slower levels."""
 

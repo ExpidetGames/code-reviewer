@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """The runner's own log sink.
 
 PR-Agent logs through loguru and, left alone, writes everything (down to DEBUG: prompts and diffs)

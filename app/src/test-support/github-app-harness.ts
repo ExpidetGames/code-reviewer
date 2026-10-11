@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The fake GitHub (src/test-support/github-fake.ts) together with the GitHub App environment that
 // points at it, for tests of the GitHub client, the provider and the sync.
 import type { FakeGithub } from "../../../fakes/github/server.ts";
