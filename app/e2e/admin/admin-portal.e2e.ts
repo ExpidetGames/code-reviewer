@@ -99,7 +99,7 @@ test.describe("the admin portal", () => {
   });
 
   // #98-AD-02
-  test("@smoke a signed in person who is not an admin gets the 404 of a page that does not exist, everywhere in the portal", async ({
+  test("a signed in person who is not an admin gets the 404 of a page that does not exist, everywhere in the portal", async ({
     page,
   }) => {
     await signInThroughTheForm(page, member);
