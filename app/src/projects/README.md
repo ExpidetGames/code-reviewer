@@ -41,7 +41,7 @@ touches it is `src/db/repositories/projects-repository.ts`.
   project), and CR-34 may want to say "will resume if the repository comes back" in the list. The
   alternative (the sync running the deactivate path when it flips a repository inactive) was rejected.
 - Events that arrive while a project is inactive are not replayed on activation: a pull request opened
-  in between needs a new push, a comment command or the manual start (CR-33).
+  in between needs a new push, a comment command or the manual start ("Review now", `src/manual-reviews/README.md`).
 - `listProjects()` returns one entry per repository the platform lists, plus the ones that
   disappeared but have a project, ordered by name, each with its integration and its project (or
   `null`). A repository that disappeared and never had a project is left out.
@@ -128,6 +128,10 @@ The components never touch the database: pages call the services (`getProjectSer
 (repository names, installation names, addresses) is untrusted and rendered as text; a repository
 address becomes a link only when it is an http(s) address. The configuration hints
 (`src/config-status/`) name the variables of a missing GitHub App setting or LLM key, never a value.
+
+**Review now:** the settings page of an active project starts with the `StartReviewPanel` of
+`src/manual-reviews/ui` (pick an open pull request and a command, start it); a project that is off says
+that reviews can be started by hand only while it is active.
 
 **Last run:** `projects/page.tsx` passes `getLastRunSource()` (`src/runs/shared.ts`) to
 `loadProjectsPage`: the newest job of each repository, whatever its status, with the time it last

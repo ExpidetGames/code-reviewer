@@ -26,6 +26,12 @@ export class GithubAppError extends Error implements SafeMessageError {
   /** HTTP status of the answer; null for a network failure, a timeout or a configuration error. */
   readonly status: number | null;
   readonly retryAfterSeconds: number | null;
+  /**
+   * True when the failure was GitHub's answer to the request for an installation token, not to the
+   * call that needed the token. A 404 then means the installation is gone; a 404 of the call itself
+   * means the thing it asked for does not exist (a pull request, a repository).
+   */
+  readonly duringTokenRequest: boolean;
 
   constructor(
     code: GithubAppErrorCode,
@@ -33,6 +39,7 @@ export class GithubAppError extends Error implements SafeMessageError {
     options: {
       status?: number | null;
       retryAfterSeconds?: number | null;
+      duringTokenRequest?: boolean;
     } = {},
   ) {
     super(message);
@@ -40,6 +47,7 @@ export class GithubAppError extends Error implements SafeMessageError {
     this.code = code;
     this.status = options.status ?? null;
     this.retryAfterSeconds = options.retryAfterSeconds ?? null;
+    this.duringTokenRequest = options.duringTokenRequest ?? false;
   }
 }
 
