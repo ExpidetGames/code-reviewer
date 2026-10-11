@@ -3,6 +3,7 @@
 // IntegrationProvider interface. See README.md in this folder.
 import "server-only";
 import { IntegrationError } from "./errors.ts";
+import { GithubAppConfigError } from "./providers/github-app/errors.ts";
 import type { IntegrationProvider } from "./provider.ts";
 import { loadGithubAppConfig } from "./providers/github-app/config.ts";
 import { createGithubAppProvider } from "./providers/github-app/provider.ts";
@@ -63,6 +64,30 @@ export function createIntegrationRegistry(
       return INTEGRATION_TYPES.filter((type) => providers[type] !== undefined);
     },
   };
+}
+
+export type GithubAppConfigProblem = {
+  kind: "missing" | "invalid";
+  /** Names of environment variables, never their values. */
+  variables: readonly string[];
+};
+
+/**
+ * Whether the GitHub App settings in `env` are usable, asked of the one loader the provider itself
+ * uses. Returns what is wrong (the kind of problem and the variable names, never a value), or null.
+ * The production start (src/deploy/startup.ts) calls it, so a bad deployment stops at once instead
+ * of at the first webhook.
+ */
+export function findGithubAppConfigProblem(
+  env: Readonly<Record<string, string | undefined>>,
+): GithubAppConfigProblem | null {
+  try {
+    loadGithubAppConfig(env);
+    return null;
+  } catch (error) {
+    if (!(error instanceof GithubAppConfigError)) throw error;
+    return { kind: error.problem, variables: error.variables };
+  }
 }
 
 export type DefaultRegistryOptions = {

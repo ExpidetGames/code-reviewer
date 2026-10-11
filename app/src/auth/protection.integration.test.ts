@@ -36,6 +36,7 @@ const PROTECTED_ROUTES = [
 ] as const;
 // Data routes: a visitor without a session gets 401 instead of a redirect.
 const PROTECTED_DATA_ROUTES = [
+  "/api/backup/status",
   "/api/repositories/[repositoryId]/project",
   "/api/repositories/[repositoryId]/project/settings",
   "/api/repositories/[repositoryId]/pull-requests",

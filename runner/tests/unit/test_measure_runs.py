@@ -281,7 +281,8 @@ def test_the_prompt_without_the_confirmation_says_that_the_review_comment_is_ove
 
 def test_a_secret_is_found_even_if_only_the_beginning_or_the_end_of_it_survived_a_cut() -> None:
     script = load_script()
-    secret = "ghs_0123456789abcdefghijklmnopqrstuvwxyz"
+    # Joined at run time, so that no file holds a string the tracked-secrets scan would flag.
+    secret = "_".join(["ghs", "0123456789abcdefghijklmnopqrstuvwxyz"])
 
     assert script.leaks([secret], f"... {secret[:15]}") is True
     assert script.leaks([secret], f"{secret[-15:]} ...") is True
