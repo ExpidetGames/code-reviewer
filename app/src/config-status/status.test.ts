@@ -4,6 +4,7 @@
 // not be in anything this returns.
 import { generateKeyPairSync } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import { findGithubAppConfigProblem } from "../integrations/registry.ts";
 import { describeConfigStatus, githubAppInstallUrl } from "./status.ts";
 
 const KEY = generateKeyPairSync("rsa", {
@@ -46,7 +47,7 @@ describe("describing the configuration for the pages", () => {
 
     expect(status.githubApp).toEqual({
       configured: false,
-      problem: "missing",
+      kind: "missing",
       variables: [
         "GITHUB_APP_ID",
         "GITHUB_APP_WEBHOOK_SECRET",
@@ -65,9 +66,33 @@ describe("describing the configuration for the pages", () => {
 
     expect(status.githubApp).toMatchObject({
       configured: false,
-      problem: "invalid",
+      kind: "invalid",
       variables: ["GITHUB_APP_PRIVATE_KEY"],
     });
+  });
+
+  // CR-53-T02
+  it("reports the same kind of problem and variable names as the start check", () => {
+    const cases = [
+      COMPLETE,
+      {},
+      { ...COMPLETE, GITHUB_APP_ID: undefined, GITHUB_APP_SLUG: undefined },
+      { ...COMPLETE, GITHUB_APP_PRIVATE_KEY: "not a key" },
+      { ...COMPLETE, GITHUB_APP_WEBHOOK_SECRET: "   " },
+    ];
+
+    for (const env of cases) {
+      const problem = findGithubAppConfigProblem(env);
+      const { githubApp } = describeConfigStatus(env);
+
+      if (problem === null) expect(githubApp.configured).toBe(true);
+      else
+        expect(githubApp).toMatchObject({
+          configured: false,
+          kind: problem.kind,
+          variables: problem.variables,
+        });
+    }
   });
 
   // CR-34-T09
