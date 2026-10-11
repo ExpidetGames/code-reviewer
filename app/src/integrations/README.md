@@ -5,17 +5,18 @@ Everything that depends on a git platform (GitHub, later Bitbucket and others) l
 normalized types below and never see a platform payload. An integration is one connection to a
 platform; the MVP has exactly one kind, the GitHub App (`github_app`, `providers/github-app/`).
 
-| File                      | Role                                                                                                                                                                            |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `types.ts`                | `Integration`, `RepoRef`, `ReviewTrigger`, `PullRequestRef`, `IntegrationEvent`, `GitAccess`, the `IntegrationType` set and the other `as const` sets                           |
-| `normalized.ts`           | Runtime guards (`isRepoRef`, `isReviewTrigger`, `isIntegrationEvent`, ...) with exact key sets, so a raw payload cannot pass as a type; `createGitAccess` and `revealGitAccess` |
-| `provider.ts`             | The `IntegrationProvider` interface                                                                                                                                             |
-| `config-schema.ts`        | Field-level validation of an integration's `config` (one error per field) and the secret-key guard                                                                              |
-| `registry.ts`             | `createIntegrationRegistry`, `integrationRegistry`: maps a type to its provider; the only place that imports a provider                                                         |
-| `errors.ts`               | `IntegrationError` with stable codes (`INTEGRATION_TYPE_UNKNOWN`, `INTEGRATION_ACCESS_*`, ...), `retryable` and `retryAfterSeconds`                                             |
-| `provider-import-rule.ts` | The import rule that keeps providers out of the rest of the app (see "The boundary")                                                                                            |
-| `providers/<type>/`       | One folder per implementation: `providers/github-app/` (see "The GitHub App provider")                                                                                          |
-| `sync/`                   | `createIntegrationSync`: keeps the `integrations` and `repositories` tables in line with the platform (see "Synchronization")                                                   |
+| File                                   | Role                                                                                                                                                                                                                                                                                                                                                                                     |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `types.ts`                             | `Integration`, `RepoRef`, `ReviewTrigger`, `PullRequestRef`, `IntegrationEvent`, `GitAccess`, the `IntegrationType` set and the other `as const` sets                                                                                                                                                                                                                                    |
+| `normalized.ts`                        | Runtime guards (`isRepoRef`, `isReviewTrigger`, `isIntegrationEvent`, ...) with exact key sets, so a raw payload cannot pass as a type; `createGitAccess` and `revealGitAccess`                                                                                                                                                                                                          |
+| `provider.ts`                          | The `IntegrationProvider` interface                                                                                                                                                                                                                                                                                                                                                      |
+| `config-schema.ts`                     | Field-level validation of an integration's `config` (one error per field) and the secret-key guard                                                                                                                                                                                                                                                                                       |
+| `registry.ts`                          | `createIntegrationRegistry`, `integrationRegistry`: maps a type to its provider; the only place that imports a provider. Also the one export for the GitHub App settings: `findGithubAppConfigProblem(env)` (`{ kind, variables }` or null, used by the production start) and `describeGithubAppSetup(env)` (the same answer for the pages, remembered for 30 seconds per set of values) |
+| `errors.ts`                            | `IntegrationError` with stable codes (`INTEGRATION_TYPE_UNKNOWN`, `INTEGRATION_ACCESS_*`, ...), `retryable` and `retryAfterSeconds`                                                                                                                                                                                                                                                      |
+| `provider-import-rule.ts`              | The import rule that keeps providers out of the rest of the app (see "The boundary")                                                                                                                                                                                                                                                                                                     |
+| `providers/github-app/setup-status.ts` | The app's URL name and the install address (`githubAppInstallUrl`); re-exported by `registry.ts`                                                                                                                                                                                                                                                                                         |
+| `providers/<type>/`                    | One folder per implementation: `providers/github-app/` (see "The GitHub App provider")                                                                                                                                                                                                                                                                                                   |
+| `sync/`                                | `createIntegrationSync`: keeps the `integrations` and `repositories` tables in line with the platform (see "Synchronization")                                                                                                                                                                                                                                                            |
 
 The tables are `integrations` (`src/db/migrations/20261010134000_create_integrations.ts`) and
 `repositories` (`src/db/migrations/20261010143000_create_repositories.ts`); the only code that touches
@@ -83,7 +84,13 @@ route calls `verifyWebhook(integration, request)` and `identifyWebhook` returns 
 `ReviewTrigger.prUrl` and `PullRequestRef.url` are built by the provider, because `/pull/7` versus
 `/pull-requests/7` is platform specific; the runner's `claim` response takes `prUrl` from there.
 `getPullRequest` (head SHA, draft flag, state) and `listOpenPullRequests` serve starting a review by
-hand. An unknown pull request fails with `INTEGRATION_PULL_REQUEST_NOT_FOUND`.
+hand (`src/manual-reviews/README.md`). An unknown pull request fails with `INTEGRATION_PULL_REQUEST_NOT_FOUND`.
+`listOpenPullRequests` and `getPullRequest` report a failure as an `IntegrationError` with the provider neutral access codes
+(`INTEGRATION_ACCESS_CONNECTION_GONE`, `..._SUSPENDED`, `..._APP_AUTH_FAILED`, `..._RATE_LIMITED`,
+`..._UNAVAILABLE`, `..._FAILED`), the same mapping as `jobAccess` except that a refused request of
+another kind (422) is `..._FAILED`, not a refused scope. `getPullRequest` keeps `INTEGRATION_PULL_REQUEST_NOT_FOUND` for a
+404 of the call itself; a 404 of the token request (`GithubAppError.duringTokenRequest`) is a removed
+installation (`..._CONNECTION_GONE`). A page never has to know a platform's own codes.
 
 ### Rules for implementations
 
@@ -267,6 +274,12 @@ the button use `getIntegrationSync()` (`sync/shared.ts`), the process-wide servi
 `createIntegrationSync`. A full sync works from a list that can be older than a delivery, so it never
 decides from the list alone: before it disables a row the list does not mention, and before it
 suspends or resumes one, it asks GitHub about that one installation inside the lock.
+
+The button is `POST /api/integrations/sync` (`sync/http.ts`, the route file in `src/app/api/integrations/sync`):
+`requireUser()` first, a same-site check, then `getIntegrationSync().syncAll()`. The answer is
+`{ added, errors }` (`summary.repositories.added` and `summary.errors`, stage and stable code, never a
+credential). Overlapping full syncs share one run: `getIntegrationSync()` wraps the service with
+`coalesceSyncAll` (`sync/coalesce.ts`), so several tabs or the start-up sync meeting the button read GitHub once. The Projects page shows it as "Sync from GitHub".
 
 `disabled` always means "suspended or gone on GitHub": a full sync resumes any disabled row GitHub
 lists as active. There is no way to keep an integration disabled by hand.

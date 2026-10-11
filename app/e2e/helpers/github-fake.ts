@@ -21,7 +21,7 @@ export async function addGithubAccount(
   expect(response.status()).toBe(201);
 }
 
-/** Opens the app, signs in as `account` at the fake GitHub and waits for the signed in page. */
+/** Opens the app, signs in as `account` at the fake GitHub and waits for the signed in app (the user menu with their name). */
 export async function signInThroughTheForm(
   page: Page,
   account: GithubAccount,
@@ -32,5 +32,77 @@ export async function signInThroughTheForm(
   await page
     .getByRole("button", { name: `Authorize ${account.login}` })
     .click();
-  await expect(page.getByText(`Signed in as ${account.name}`)).toBeVisible();
+  await expect(userMenuButton(page, account)).toBeVisible();
+}
+
+/** The button of the user menu in the header, named after the person. */
+export function userMenuButton(page: Page, account: GithubAccount) {
+  return page.getByRole("button", { name: account.name });
+}
+
+/** Opens the user menu and presses "Sign out". */
+export async function signOutThroughTheMenu(
+  page: Page,
+  account: GithubAccount,
+): Promise<void> {
+  await userMenuButton(page, account).click();
+  await page.getByRole("button", { name: "Sign out" }).click();
+}
+
+export type GithubInstallation = {
+  id: number;
+  account: { login: string; id: number; type: "User" | "Organization" };
+};
+
+/**
+ * Installs the GitHub App for an account at the fake, with these repositories (replacing the ones
+ * of an installation that exists). Each spec file owns its installations, like its accounts. The app
+ * learns about them at its next sync (the "Sync from GitHub" button).
+ */
+export async function addGithubInstallation(
+  request: APIRequestContext,
+  installation: GithubInstallation,
+  repositories: Array<{ id: number; fullName: string }>,
+): Promise<void> {
+  const response = await request.post(
+    `${e2eEnv.githubUrl}/__fake/installations`,
+    { data: { installation, repositories } },
+  );
+  expect(response.status()).toBe(201);
+}
+
+export type GithubPullRequest = {
+  number: number;
+  title: string;
+  state?: "open" | "closed";
+  draft?: boolean;
+  author?: { login: string; id: number };
+};
+
+/**
+ * Puts a pull request into a repository of the fake GitHub (replacing one with the same number). The
+ * head commit is derived from the number, so every pull request has its own.
+ */
+export async function addGithubPullRequest(
+  request: APIRequestContext,
+  repositoryFullName: string,
+  pullRequest: GithubPullRequest,
+): Promise<void> {
+  const response = await request.post(
+    `${e2eEnv.githubUrl}/__fake/pull-requests`,
+    {
+      data: {
+        repository: repositoryFullName,
+        pullRequest: {
+          state: "open",
+          headSha: String(pullRequest.number).padStart(40, "a"),
+          headRef: `feature/${String(pullRequest.number)}`,
+          baseRef: "main",
+          author: { login: "alice", id: 1001 },
+          ...pullRequest,
+        },
+      },
+    },
+  );
+  expect(response.status()).toBe(201);
 }

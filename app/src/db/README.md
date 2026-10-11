@@ -139,7 +139,7 @@ first activation, switched off with `active = 0`, never deleted; see `src/projec
 redelivery produces no second trigger; rows are pruned after 7 days; see `src/webhooks/README.md`.
 
 `jobs` (migration `20261010191500_create_jobs`, repository `jobs-repository.ts`, claim in
-`jobs-claim.ts`) is the job queue; the rules (dedupe, supersession, leases, attempts, timeouts) are
+`jobs-claim.ts`) is the job queue (the index `jobs_repository_recent`, migration `20261011100000_add_jobs_repository_recent_index`, serves the runs pages: newest job of a repository, `runs-repository.ts`); the rules (dedupe, supersession, leases, attempts, timeouts) are
 in `src/jobs/README.md`. `jobs-claim.ts` holds the one statement written for SQLite (see its head
 comment); everything else is query builder code.
 
