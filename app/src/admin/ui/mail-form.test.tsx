@@ -233,6 +233,11 @@ describe("the mail form", () => {
     await user.click(screen.getByRole("button", { name: "Yes, remove it" }));
 
     await waitFor(() => expect(changeMock).toHaveBeenCalledWith({ smtp: null }));
+    // The form starts empty again.
+    await waitFor(() =>
+      expect((screen.getByLabelText("Host") as HTMLInputElement).value).toBe(""),
+    );
+    expect((screen.getByLabelText("User") as HTMLInputElement).value).toBe("");
   });
 
   it("offers no removal when there is no mail server", () => {

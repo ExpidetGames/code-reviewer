@@ -20,12 +20,12 @@ export default async function AdminMailPage() {
         description="The mail server of this instance."
       />
       <section className="settings-section">
-        {/* Keyed on the saved values, so the form starts again from the server's data after a save. */}
-        <MailForm key={JSON.stringify(settings.smtp)} settings={settings} />
+        {/* Not keyed on the saved values: the form keeps what was typed (which is what was saved) and its
+            "Saved." sentence while the page's data is refreshed; it clears itself after a removal. */}
+        <MailForm settings={settings} />
       </section>
       <section className="settings-section">
         <TestMailPanel
-          key={JSON.stringify(settings.smtp)}
           configured={settings.smtp.value !== null}
           adminEmail={user.email}
         />

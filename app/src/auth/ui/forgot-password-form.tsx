@@ -60,7 +60,11 @@ export function ForgotPasswordForm({
   }
 
   return (
-    <form onSubmit={(event) => void submit(event)} className="login-form">
+    <form
+      onSubmit={(event) => void submit(event)}
+      className="login-form"
+      aria-label="Request a reset link"
+    >
       {problem ? (
         <p role="alert" className="alert alert-error">
           {problem}

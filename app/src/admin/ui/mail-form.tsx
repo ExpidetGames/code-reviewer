@@ -95,8 +95,20 @@ export function MailForm({
   }
 
   function remove() {
-    void save({ smtp: null });
     setConfirmRemove(false);
+    void save({ smtp: null }).then((ok) => {
+      if (!ok) return;
+      // The mail server is gone: the form starts empty again.
+      setHost("");
+      setPortText("587");
+      setSecurity("starttls");
+      setUser("");
+      setPassword("");
+      setClearPassword(false);
+      setSenderAddress("");
+      setSenderName("");
+      setAllowSelfSigned(false);
+    });
   }
 
   const issues = status?.kind === "failed" ? status.issues : [];
