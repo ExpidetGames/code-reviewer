@@ -2,11 +2,8 @@
 # Smoke test of a running Code Reviewer instance, reached over HTTP(S). It needs nothing but curl and
 # no secret: it only sends requests that a healthy instance must refuse or answer without a session.
 #
-# Usage: docker/smoke/instance.sh [--skip-runner-endpoint] <base-url>
+# Usage: docker/smoke/instance.sh <base-url>
 #   <base-url>  the address people use, for example https://reviews.example.com (no path)
-#   --skip-runner-endpoint  leaves out the runner API check. Only for a build that does not have the
-#                           runner API yet (the CR-9 epic before CR-6 is merged); never for a real
-#                           deployment. The skip is printed.
 #
 # Checks (the exit code is 0 only when every one of them passes):
 #   1. GET  /api/health                 answers 2xx (the app is up and reads its database)
@@ -20,15 +17,13 @@
 set -uo pipefail
 
 usage() {
-  printf 'Usage: %s [--skip-runner-endpoint] <base-url>\n' "${0##*/}" >&2
+  printf 'Usage: %s <base-url>\n' "${0##*/}" >&2
   exit 2
 }
 
-skip_runner=0
 base=""
 for argument in "$@"; do
   case "$argument" in
-    --skip-runner-endpoint) skip_runner=1 ;;
     -h | --help) usage ;;
     -*) printf 'unknown option: %s\n' "$argument" >&2; usage ;;
     *)
@@ -87,18 +82,10 @@ expect "POST /api/webhooks/github-app with a wrong signature" 401 "$(status \
   --data '{"zen":"smoke test"}' \
   "$base/api/webhooks/github-app")"
 
-if [ "$skip_runner" = 1 ]; then
-  printf 'skipped POST /api/runners/v1/claim without a token (--skip-runner-endpoint)\n'
-else
-  expect "POST /api/runners/v1/claim without a token" 401 "$(status --request POST "$base/api/runners/v1/claim")"
-fi
+expect "POST /api/runners/v1/claim without a token" 401 "$(status --request POST "$base/api/runners/v1/claim")"
 
 if [ "$failures" -gt 0 ]; then
   printf 'SMOKE TEST FAILED: %s check(s) failed against %s\n' "$failures" "$base" >&2
   exit 1
 fi
-if [ "$skip_runner" = 1 ]; then
-  printf 'smoke test passed (runner API check skipped)\n'
-else
-  printf 'smoke test passed\n'
-fi
+printf 'smoke test passed\n'

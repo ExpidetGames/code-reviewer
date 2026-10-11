@@ -230,31 +230,15 @@ describe("the instance smoke test", () => {
     );
   });
 
-  // CR-39-T01
-  it("leaves out the runner check only when asked to, says so, and still fails on every other check", async () => {
-    const withoutRunnerApi = { ...HEALTHY, "POST /api/runners/v1/claim": 404 };
-    const { url, seen } = await fakeInstance(withoutRunnerApi);
+  // CR-51-T01
+  it("has no option that leaves out the runner check: the option is unknown and nothing is sent", async () => {
+    const { url, seen } = await fakeInstance(HEALTHY);
 
-    const skipped = await run(["--skip-runner-endpoint", url]);
+    const result = await run(["--skip-runner-endpoint", url]);
 
-    expect(skipped.code).toBe(0);
-    expect(skipped.out).toContain("skipped POST /api/runners/v1/claim");
-    expect(skipped.out).toContain(
-      "smoke test passed (runner API check skipped)",
-    );
-    expect(seen.map((entry) => entry.path)).not.toContain(
-      "/api/runners/v1/claim",
-    );
-
-    const { url: brokenUrl } = await fakeInstance({
-      ...withoutRunnerApi,
-      "GET /api/health": 503,
-    });
-    const stillBroken = await run(["--skip-runner-endpoint", brokenUrl]);
-    expect(stillBroken.code).toBe(1);
-
-    const withoutFlag = await run([url]);
-    expect(withoutFlag.code).toBe(1);
+    expect(result.code).toBe(2);
+    expect(result.err).toContain("unknown option: --skip-runner-endpoint");
+    expect(seen).toEqual([]);
   });
 
   it.each([
