@@ -14,7 +14,7 @@ last run. Jobs are made and changed only by the job queue (`src/jobs`); this mod
 | `run-view.ts`     | The boundary to the browser: `toRunRowView`, `toRunDetailView`. Only listed fields leave the server; of the stored result only the comment link and the log tail are read. `safeCommentUrl`, `cleanLog`            |
 | `runs-service.ts` | `createRunsService` (`list`, `get`), `parseRunsFilter`, `createLastRunSource` (the real `LastRunSource` of the project list)                                                                                       |
 | `http.ts`         | The handlers behind `GET /api/runs` and `GET /api/runs/:id`, the two polling routes (`src/app/api/runs/`)                                                                                                          |
-| `shared.ts`       | The wiring of the running server: `getRunsService()` (with the secrets of the app removed from a log) and `getLastRunSource()`                                                                                     |
+| `shared.ts`       | The wiring of the running server: `getRunsService()` (with the secrets of the app removed from a log) and `getLastRunSource()`, both for the workspace the signed-in user works in                                 |
 | `ui/`             | `RunsList`, `RunDetail`, `RunStatusBadge`, the page contents (`runs-page.tsx`, `run-detail-page.tsx`) and the browser side of the polling (`api.ts`)                                                               |
 
 The read side of the table is `src/db/repositories/runs-repository.ts` (a join with the repository name,

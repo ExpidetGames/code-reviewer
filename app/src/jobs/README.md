@@ -3,21 +3,26 @@
 A job is one requested run of a command (`review`, `improve`, `describe`, `ask`) on one pull request.
 The queue lives in SQLite (table `jobs`, migration `20261010191500_create_jobs`); runners take jobs
 from it through the runner API (CR-28), webhooks and the UI put jobs in. Everything goes through
-`createJobQueue` (`job-queue.ts`), which checks input and calls the jobs repository
-(`src/db/repositories/jobs-repository.ts`, the only code that changes the table). The running server
-gets its queue from `getJobQueue()` (`shared.ts`). The pages that show runs read the table through
+`createJobQueue` (`job-queue.ts`, scoped to one workspace) and `createRunnerQueue` (`runner-queue.ts`, the
+lease side, for the whole instance). They call the jobs repositories
+(`src/db/repositories/jobs-repository.ts` and `runner-jobs-repository.ts`, the only code that changes the
+table). The running server gets its queues from `jobQueueFor(workspaceId)` / `getJobQueue()` (the
+workspace the signed-in user works in) and `getRunnerQueue()` (`shared.ts`). The pages that show runs read the table through
 `src/db/repositories/runs-repository.ts` (read only; `src/runs/README.md`).
 
-| File            | Role                                                                                                                                                                                                                              |
-| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `job-queue.ts`  | `createJobQueue(db, options)`: `enqueue`, `claimNext`, `heartbeat`, `complete`, `release`, `cancelClaimed`, `cancelWaitingForRepository`, `discardWaitingForPr`, `discardWaitingAutomaticForPr`, `expireStaleJobs`, `get`, `list` |
-| `job-status.ts` | The statuses and the table of allowed transitions; the repository builds its update conditions from it                                                                                                                            |
-| `job-input.ts`  | `validateEnqueueInput`: field level checks before anything is written                                                                                                                                                             |
-| `job-types.ts`  | `Job`, the inputs and results, the trigger kinds and the error codes the queue itself writes                                                                                                                                      |
-| `job-limits.ts` | Lease, maximum runtime and maximum attempts, with their defaults                                                                                                                                                                  |
-| `errors.ts`     | `JobQueueError` with the stable codes `JOB_INPUT_INVALID` (with `fieldErrors`) and `JOB_REPOSITORY_UNKNOWN`                                                                                                                       |
+| File              | Role                                                                                                                                                                                                                                                                                                                         |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `job-queue.ts`    | `createJobQueue(db, workspaceId, options)`: `enqueue`, `cancelWaitingForRepository`, `discardWaitingForPr`, `discardWaitingAutomaticForPr`, `get`, `list`. A job of another workspace is not there for it                                                                                                                    |
+| `runner-queue.ts` | `createRunnerQueue(db, options)`: `claimNext`, `heartbeat`, `complete`, `release`, `cancelClaimed`, `expireStaleJobs`, `get`. **Not scoped**: runners serve the whole instance, a claim hands out the oldest due job of any workspace, and every change is fenced by the lease token. The `Job` it returns has `workspaceId` |
+| `job-status.ts`   | The statuses and the table of allowed transitions; the repository builds its update conditions from it                                                                                                                                                                                                                       |
+| `job-input.ts`    | `validateEnqueueInput`: field level checks before anything is written                                                                                                                                                                                                                                                        |
+| `job-types.ts`    | `Job`, the inputs and results, the trigger kinds and the error codes the queue itself writes                                                                                                                                                                                                                                 |
+| `job-limits.ts`   | Lease, maximum runtime and maximum attempts, with their defaults                                                                                                                                                                                                                                                             |
+| `errors.ts`       | `JobQueueError` with the stable codes `JOB_INPUT_INVALID` (with `fieldErrors`) and `JOB_REPOSITORY_UNKNOWN`                                                                                                                                                                                                                  |
 
-Jobs refer to `repositories`, not to projects. Whether a repository has an active project is checked
+Every job belongs to the workspace of its repository (`jobs.workspace_id`; the database refuses a job
+whose repository is in another workspace, which `enqueue` reports as `JOB_REPOSITORY_UNKNOWN`). Jobs
+refer to `repositories`, not to projects. Whether a repository has an active project is checked
 by the code that enqueues (the trigger policy of the webhook handler, CR-31), not here.
 
 ## Statuses

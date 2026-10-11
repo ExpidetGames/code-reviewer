@@ -11,11 +11,13 @@
 // the platform's current state, so repeating or overlapping them is harmless.
 import "server-only";
 import type { Kysely } from "kysely";
+import { createIntegrationDirectory } from "../../db/repositories/integration-directory-repository.ts";
 import { createIntegrationsRepository } from "../../db/repositories/integrations-repository.ts";
 import {
   createRepositoriesRepository,
   type ReconcileResult,
 } from "../../db/repositories/repositories-repository.ts";
+import { createWorkspacesRepository } from "../../db/repositories/workspaces-repository.ts";
 import type { Database } from "../../db/schema.ts";
 import { hasSafeMessage, IntegrationError } from "../errors.ts";
 import type { IntegrationProvider } from "../provider.ts";
@@ -106,6 +108,12 @@ export type IntegrationSyncOptions = {
   lock?: KeyedLock;
   /** Receives one line per failure. Default: console.error. */
   log?: (line: string) => void;
+  /**
+   * The workspace a connection that is new to the instance is put in. TEMPORARY: the default
+   * workspace, until the installation of a connection is bound to the workspace of the person who
+   * installed it (the workspace feature). Connections that exist keep their workspace.
+   */
+  workspaceForNewConnection?: () => Promise<string>;
 };
 
 function emptySummary(): SyncSummary {
@@ -142,8 +150,16 @@ export function createIntegrationSync(
 ): IntegrationSyncService {
   const { db, registry } = options;
   const log = options.log ?? ((line: string) => console.error(line));
-  const integrations = createIntegrationsRepository(db, options.now);
-  const repositories = createRepositoriesRepository(db, options.now);
+  // The sync walks every connection of the instance. It finds them through the directory, which
+  // belongs to no workspace, and changes each one through repositories of the workspace it names.
+  const directory = createIntegrationDirectory(db);
+  const integrationsOf = (executor: Kysely<Database>, workspaceId: string) =>
+    createIntegrationsRepository(executor, workspaceId, options.now);
+  const repositoriesOf = (executor: Kysely<Database>, workspaceId: string) =>
+    createRepositoriesRepository(executor, workspaceId, options.now);
+  const workspaceForNewConnection =
+    options.workspaceForNewConnection ??
+    (async () => (await createWorkspacesRepository(db).ensureDefault()).id);
   const lock = options.lock ?? sharedKeyedLock();
   const lockKey = (type: IntegrationType, externalId: string) =>
     `${type}:${externalId}`;
@@ -176,15 +192,15 @@ export function createIntegrationSync(
   ): Promise<void> {
     await db.transaction().execute(async (trx) => {
       if (integration.status !== "disabled") {
-        await createIntegrationsRepository(trx, options.now).setStatus(
+        await integrationsOf(trx, integration.workspaceId).setStatus(
           integration.id,
           "disabled",
         );
         summary.integrations.disabled += 1;
       }
-      const deactivated = await createRepositoriesRepository(
+      const deactivated = await repositoriesOf(
         trx,
-        options.now,
+        integration.workspaceId,
       ).deactivateAll(integration.id);
       summary.repositories.deactivated += deactivated;
     });
@@ -202,7 +218,10 @@ export function createIntegrationSync(
         `The platform's description of connection ${connection.externalId} is not a valid config.`,
       );
     try {
-      const created = await integrations.create({
+      const created = await integrationsOf(
+        db,
+        await workspaceForNewConnection(),
+      ).create({
         type: provider.type,
         displayName: connection.displayName,
         externalId: connection.externalId,
@@ -217,10 +236,7 @@ export function createIntegrationSync(
         error instanceof IntegrationError &&
         error.code === "INTEGRATION_ALREADY_EXISTS"
       )
-        return integrations.findByExternalId(
-          provider.type,
-          connection.externalId,
-        );
+        return directory.findByExternalId(provider.type, connection.externalId);
       throw error;
     }
   }
@@ -251,18 +267,27 @@ export function createIntegrationSync(
 
     let current = existing;
     if (!sameDetails(existing, effective)) {
-      await integrations.updateDetails(existing.id, {
-        displayName: effective.displayName,
-        config: effective.config,
-      });
+      await integrationsOf(db, existing.workspaceId).updateDetails(
+        existing.id,
+        {
+          displayName: effective.displayName,
+          config: effective.config,
+        },
+      );
       summary.integrations.updated += 1;
     }
     if (effective.suspended && existing.status === "active") {
-      await integrations.setStatus(existing.id, "disabled");
+      await integrationsOf(db, existing.workspaceId).setStatus(
+        existing.id,
+        "disabled",
+      );
       summary.integrations.disabled += 1;
       current = { ...current, status: "disabled" };
     } else if (!effective.suspended && existing.status === "disabled") {
-      await integrations.setStatus(existing.id, "active");
+      await integrationsOf(db, existing.workspaceId).setStatus(
+        existing.id,
+        "active",
+      );
       summary.integrations.enabled += 1;
       current = { ...current, status: "active" };
     }
@@ -275,7 +300,7 @@ export function createIntegrationSync(
     integrationId: string,
     summary: SyncSummary,
   ): Promise<"synced" | "skipped" | "failed"> {
-    const integration = await integrations.get(integrationId);
+    const integration = await directory.get(integrationId);
     // Re-read inside the lock: a delivery may have disabled it since the list was made.
     if (integration === undefined || integration.status !== "active")
       return "skipped";
@@ -289,7 +314,10 @@ export function createIntegrationSync(
     const own = remote.filter((repo) => repo.integrationId === integration.id);
     addRepositories(
       summary.repositories,
-      await repositories.reconcile(integration.id, own),
+      await repositoriesOf(db, integration.workspaceId).reconcile(
+        integration.id,
+        own,
+      ),
     );
     return "synced";
   }
@@ -316,7 +344,7 @@ export function createIntegrationSync(
         async () => {
           let integrationId: string | null = null;
           try {
-            const existing = await integrations.findByExternalId(
+            const existing = await directory.findByExternalId(
               provider.type,
               connection.externalId,
             );
@@ -341,11 +369,11 @@ export function createIntegrationSync(
     // A row the list does not mention is not necessarily gone: it may have been created by a
     // delivery after the list was read. Only the platform's own answer about that one connection,
     // asked inside the lock, decides; without that answer the row is left alone.
-    for (const known of await integrations.list()) {
+    for (const known of await directory.list()) {
       if (known.type !== provider.type || seen.has(known.externalId)) continue;
       await lock.run(lockKey(known.type, known.externalId), async () => {
         try {
-          const current = await integrations.get(known.id);
+          const current = await directory.get(known.id);
           if (current === undefined || provider.findConnection === undefined)
             return;
           const confirmed = await provider.findConnection(current.externalId);
@@ -358,7 +386,7 @@ export function createIntegrationSync(
       });
     }
 
-    for (const integration of await integrations.list()) {
+    for (const integration of await directory.list()) {
       if (integration.type !== provider.type || integration.status !== "active")
         continue;
       await lock.run(
@@ -389,7 +417,7 @@ export function createIntegrationSync(
 
     async syncIntegration(integrationId) {
       const summary = emptySummary();
-      const integration = await integrations.get(integrationId);
+      const integration = await directory.get(integrationId);
       if (integration === undefined) return summary;
       await lock.run(lockKey(integration.type, integration.externalId), () =>
         syncRepositories(
@@ -409,7 +437,7 @@ export function createIntegrationSync(
         lockKey(type, externalId),
         async (): Promise<InstallationChangeOutcome> => {
           try {
-            let integration = await integrations.findByExternalId(
+            let integration = await directory.findByExternalId(
               type,
               externalId,
             );

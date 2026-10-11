@@ -1,30 +1,20 @@
-// The job queue: the one door through which jobs are created, handed to runners and finished. It
+// The job queue of ONE workspace: the door through which jobs are created, dropped and read. It
 // checks input (job-input.ts) and leaves every query to the jobs repository, which holds the rules
-// of the queue in transactions. See README.md in this folder for the rules.
+// of the queue in transactions. Handing jobs to runners and finishing them is not scoped and lives in
+// runner-queue.ts. See README.md in this folder for the rules.
 import "server-only";
 import type { Kysely } from "kysely";
 import {
   createJobsRepository,
-  type ExpiryReport,
   type JobListFilter,
   type JobsRepositoryOptions,
 } from "../db/repositories/jobs-repository.ts";
 import type { Database } from "../db/schema.ts";
+import type { WorkspaceId } from "../db/workspace-scope.ts";
 import { errorCode } from "../db/errors.ts";
 import { JobQueueError } from "./errors.ts";
 import { validateEnqueueInput } from "./job-input.ts";
-import type {
-  CancelClaimedResult,
-  ClaimResult,
-  CompleteResult,
-  EnqueueJobInput,
-  EnqueueResult,
-  HeartbeatResult,
-  Job,
-  JobErrorCode,
-  JobOutcome,
-  ReleaseResult,
-} from "./job-types.ts";
+import type { EnqueueJobInput, EnqueueResult, Job } from "./job-types.ts";
 
 export type JobQueue = {
   /**
@@ -45,50 +35,9 @@ export type JobQueue = {
    *
    * Rejects with a `JobQueueError` and writes nothing when the input is not valid
    * (`JOB_INPUT_INVALID`, with `fieldErrors`) or the repository does not exist
-   * (`JOB_REPOSITORY_UNKNOWN`).
+   * (`JOB_REPOSITORY_UNKNOWN`), also when it belongs to another workspace.
    */
   enqueue(input: EnqueueJobInput): Promise<EnqueueResult>;
-  /**
-   * Gives the runner the oldest due job with the lease token of the claim, or null. First puts jobs
-   * whose lease ran out back in the queue (or fails them after the last attempt, or on timeout), so
-   * nothing else has to watch the clock. At most one job per pull request is running at any time.
-   */
-  claimNext(runnerId: string): Promise<ClaimResult>;
-  /**
-   * Extends the lease of the claim the token belongs to; `not_holder` for any other token (a stale
-   * execution of the same job counts, even under the same runner id) and for a job past the hard
-   * limit, which this call fails with `timeout`.
-   */
-  heartbeat(jobId: string, leaseToken: string): Promise<HeartbeatResult>;
-  /** Finishes the claim; reporting the same outcome again answers `already_completed`. */
-  complete(
-    jobId: string,
-    leaseToken: string,
-    outcome: JobOutcome,
-  ): Promise<CompleteResult>;
-  /**
-   * Gives a claimed job back (for example the runner shuts down, or the token for the repository
-   * could not be created). It counts as a lost attempt with the same cap as a lapsed lease: the job
-   * waits again, from `retryAt` if given, or fails with `reason` on the last allowed attempt.
-   */
-  release(
-    jobId: string,
-    leaseToken: string,
-    reason: string,
-    options?: { retryAt?: Date },
-  ): Promise<ReleaseResult>;
-  /**
-   * Cancels a claimed job (the project of its repository is off): running -> cancelled with
-   * `errorCode`, in one statement fenced by the lease token. No attempt is counted, so the job ends
-   * `cancelled` also on its last allowed attempt, and it is never queued again in between.
-   */
-  cancelClaimed(
-    jobId: string,
-    leaseToken: string,
-    errorCode: JobErrorCode,
-  ): Promise<CancelClaimedResult>;
-  /** The expiry step of `claimNext` on its own. */
-  expireStaleJobs(): Promise<ExpiryReport>;
   /** Cancels all waiting jobs of a repository (project deactivated); running jobs finish. */
   cancelWaitingForRepository(repositoryId: string): Promise<number>;
   /**
@@ -118,9 +67,10 @@ function repositoryUnknown(repositoryId: string, cause: unknown) {
 
 export function createJobQueue(
   db: Kysely<Database>,
+  workspaceId: WorkspaceId,
   options: JobsRepositoryOptions = {},
 ): JobQueue {
-  const jobs = createJobsRepository(db, options);
+  const jobs = createJobsRepository(db, workspaceId, options);
 
   return {
     async enqueue(input) {
@@ -139,22 +89,6 @@ export function createJobQueue(
         throw error;
       }
     },
-    claimNext: (runnerId) => jobs.claimNext(runnerId),
-    heartbeat: (jobId, leaseToken) => jobs.heartbeat(jobId, leaseToken),
-    complete: (jobId, leaseToken, outcome) =>
-      jobs.complete(jobId, leaseToken, outcome),
-    async release(jobId, leaseToken, reason, releaseOptions) {
-      if (reason.trim() === "")
-        throw new JobQueueError(
-          "JOB_INPUT_INVALID",
-          "The reason is not valid: reason (required).",
-          { fieldErrors: [{ field: "reason", code: "required" }] },
-        );
-      return jobs.release(jobId, leaseToken, reason, releaseOptions);
-    },
-    expireStaleJobs: () => jobs.expireStaleJobs(),
-    cancelClaimed: (jobId, leaseToken, errorCode) =>
-      jobs.cancelClaimed(jobId, leaseToken, errorCode),
     cancelWaitingForRepository: (repositoryId) =>
       jobs.cancelWaitingForRepository(repositoryId),
     discardWaitingForPr: (repositoryId, prNumber) =>

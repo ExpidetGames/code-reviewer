@@ -11,7 +11,7 @@ on the Runs page as "Started by <login>".
 | `start-input.ts`              | `validateStartInput`: the body (`prNumber`, `command`, `question` for `ask`), checked field by field                               |
 | `errors.ts`                   | `ManualReviewError` with the stable codes (`MANUAL_REVIEW_*`), their HTTP status and the field `issues`                            |
 | `http.ts`                     | The handlers behind the two routes: user first, then origin, content type and body, then the service                               |
-| `shared.ts`                   | The wiring of the running server (`getManualReviewService()`)                                                                      |
+| `shared.ts`                   | The wiring of the running server (`getManualReviewService()`, for the workspace the signed-in user works in)                       |
 | `ui/start-review-panel.tsx`   | The client panel: loads the list, picks, validates the question, sends, shows the answer and a link to the run                     |
 | `ui/pull-request-list.tsx`    | The radio list of pull requests (number, title, author, draft); the empty state                                                    |
 | `ui/command-fields.tsx`       | The command choice and, for `ask`, the question field                                                                              |

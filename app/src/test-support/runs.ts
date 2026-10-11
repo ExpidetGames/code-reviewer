@@ -27,7 +27,7 @@ let nextPr = 100;
 
 export async function createRunsFixture(): Promise<RunsFixture> {
   const base = await createJobQueueFixture();
-  const runsRepository = createRunsRepository(base.db);
+  const runsRepository = createRunsRepository(base.db, base.workspaceId);
   const runs = createRunsService({
     runs: runsRepository,
     now: base.clock.now,

@@ -10,7 +10,9 @@
 //   4. relevance an event the app does not use is answered at once                 202
 //   5. claim     the delivery id is claimed; a succeeded id is a duplicate         202
 //                an id another request is handling right now                        409
-//   6. identify  `identifyWebhook` names the installation; the integration is loaded
+//   6. identify  `identifyWebhook` names the installation; the integration is loaded, and with it
+//                the workspace the delivery belongs to (everything after this runs in that
+//                workspace: its projects, its settings, its job queue)
 //   7. translate `parseEvent`: a review trigger, an installation change or "ignored"
 //   8. act       trigger -> the repository must have an active project, then the trigger
 //                policy (automatic-review-policy.ts: drafts, settings, the debounce of a push;
@@ -27,7 +29,7 @@
 // code, which `after()` could not do.
 import "server-only";
 import type { WebhookDeliveriesRepository } from "../db/repositories/webhook-deliveries-repository.ts";
-import type { IntegrationsRepository } from "../db/repositories/integrations-repository.ts";
+import type { IntegrationDirectory } from "../db/repositories/integration-directory-repository.ts";
 import { hasSafeMessage } from "../integrations/errors.ts";
 import type { IntegrationRegistry } from "../integrations/registry.ts";
 import type { IntegrationSyncService } from "../integrations/sync/service.ts";
@@ -82,8 +84,19 @@ const DELIVERY_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
  */
 export type ProjectGate = Pick<ProjectService, "hasActiveProject">;
 
-/** What the trigger policy needs besides the trigger: the project's settings, the wait and the clock. */
+/** What the trigger policy needs besides the trigger: the wait, the head check and the clock. */
 export type AutomaticReviewDeps = {
+  /** How long a push waits before its review may start. */
+  debounceMs: number;
+  /** How long the check against GitHub's current head may take (default 5 seconds). */
+  headCheckTimeoutMs?: number;
+  now(): Date;
+};
+
+/** The collaborators that act inside one workspace. */
+export type WorkspaceCollaborators = {
+  /** Which repositories of the workspace are reviewed at all. */
+  projects: ProjectGate;
   /**
    * The settings a review of the repository's project uses (project over global over built-in), or
    * `undefined` when the repository has no project.
@@ -92,22 +105,22 @@ export type AutomaticReviewDeps = {
     integrationId: string,
     repositoryExternalId: string,
   ): Promise<ReviewSettings | undefined>;
-  /** How long a push waits before its review may start. */
-  debounceMs: number;
-  /** How long the check against GitHub's current head may take (default 5 seconds). */
-  headCheckTimeoutMs?: number;
-  now(): Date;
+  intake: ReviewTriggerIntake;
 };
 
 export type GithubAppWebhookDeps = {
   registry: IntegrationRegistry;
-  integrations: Pick<IntegrationsRepository, "findByExternalId">;
+  /**
+   * Finds the integration an installation id belongs to, in any workspace: the delivery names the
+   * installation before anybody knows the workspace, and the integration says which one it is.
+   */
+  integrations: Pick<IntegrationDirectory, "findByExternalId">;
   deliveries: WebhookDeliveriesRepository;
   /** The process-wide sync service (`getIntegrationSync()`), never one created for the route. */
   sync: Pick<IntegrationSyncService, "handleInstallationChange">;
-  projects: ProjectGate;
+  /** The collaborators of one workspace; called with the workspace of the delivery's integration. */
+  workspace: (workspaceId: string) => WorkspaceCollaborators;
   automatic: AutomaticReviewDeps;
-  intake: ReviewTriggerIntake;
   logger?: WebhookLogger;
   maxBodyBytes?: number;
 };
@@ -171,6 +184,8 @@ function describeError(error: unknown): string {
 function standIn(externalId: string): Integration {
   return {
     id: "unknown",
+    // The stand-in is only handed to `parseEvent`, which reads nothing of it but the platform ids.
+    workspaceId: "unknown",
     type: TYPE,
     displayName: "",
     externalId,
@@ -200,15 +215,7 @@ function loggedUnverifiableFor(): WeakSet<WebhookLogger> {
 export function createGithubAppWebhookHandler(
   deps: GithubAppWebhookDeps,
 ): WebhookHandler {
-  const {
-    registry,
-    integrations,
-    deliveries,
-    sync,
-    projects,
-    automatic,
-    intake,
-  } = deps;
+  const { registry, integrations, deliveries, sync, automatic } = deps;
   const logger = deps.logger ?? consoleWebhookLogger;
   const maxBodyBytes = deps.maxBodyBytes ?? WEBHOOK_MAX_BODY_BYTES;
 
@@ -325,6 +332,11 @@ export function createGithubAppWebhookHandler(
     // the check keeps that true even if a provider changes.
     if (integration === undefined) return "unknown_installation";
 
+    // From here on the delivery is the business of the workspace the installation is linked to.
+    const { projects, settingsFor, intake } = deps.workspace(
+      integration.workspaceId,
+    );
+
     // A closed pull request starts nothing; the jobs still waiting for it are dropped. Only for a
     // repository with an active project (deactivating a project drops its waiting jobs already).
     if (event.kind === "pull_request_closed") {
@@ -373,10 +385,7 @@ export function createGithubAppWebhookHandler(
 
     // The settings of the project decide for a command (which ones people may use) and for an
     // automatic trigger (the policy below).
-    const settings = await automatic.settingsFor(
-      integration.id,
-      trigger.repo.externalId,
-    );
+    const settings = await settingsFor(integration.id, trigger.repo.externalId);
     if (settings === undefined) return "project_not_active";
 
     // A comment command is not subject to the policy for automatic reviews (drafts, the automatic

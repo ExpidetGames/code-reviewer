@@ -5,9 +5,11 @@ import { createIntegrationsRepository } from "../db/repositories/integrations-re
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
 import type { Database } from "../db/schema.ts";
 import { createJobQueue, type JobQueue } from "../jobs/job-queue.ts";
+import { createRunnerQueue, type RunnerQueue } from "../jobs/runner-queue.ts";
 import type { EnqueueJobInput, Job } from "../jobs/job-types.ts";
 import type { JobQueueLimits } from "../jobs/job-limits.ts";
 import { createTestDatabase } from "./test-database.ts";
+import { defaultWorkspaceId } from "./workspaces.ts";
 
 export const T0 = new Date("2026-10-10T12:00:00.000Z");
 
@@ -34,11 +36,29 @@ export function createTestClock(start: Date = T0): TestClock {
   };
 }
 
+/**
+ * The queue of one workspace together with the runner side of the queue, for tests that enqueue and
+ * claim through one object. In the app these are two objects: the runner side is not scoped.
+ */
+export type TestQueue = JobQueue & RunnerQueue;
+
+export function createTestQueue(
+  db: Kysely<Database>,
+  workspaceId: string,
+  options: { now?: () => Date; limits?: Partial<JobQueueLimits> } = {},
+): TestQueue {
+  return {
+    ...createJobQueue(db, workspaceId, options),
+    ...createRunnerQueue(db, options),
+  };
+}
+
 export type JobQueueFixture = {
   db: Kysely<Database>;
+  workspaceId: string;
   /** The path of the database file, for a second connection or a child process. */
   databasePath: string;
-  queue: JobQueue;
+  queue: TestQueue;
   clock: TestClock;
   /** The first repository (it gets all jobs of `enqueue` unless told otherwise). */
   repositoryId: string;
@@ -58,13 +78,18 @@ export async function createJobQueueFixture(
 ): Promise<JobQueueFixture> {
   const { db, config } = await createTestDatabase();
   const clock = createTestClock();
-  const integration = await createIntegrationsRepository(db, clock.now).create({
+  const workspaceId = await defaultWorkspaceId(db);
+  const integration = await createIntegrationsRepository(
+    db,
+    workspaceId,
+    clock.now,
+  ).create({
     type: "github_app",
     displayName: "acme",
     externalId: "4242",
     config: {},
   });
-  const repositories = createRepositoriesRepository(db, clock.now);
+  const repositories = createRepositoriesRepository(db, workspaceId, clock.now);
   await repositories.reconcile(integration.id, [
     {
       integrationId: integration.id,
@@ -85,7 +110,10 @@ export async function createJobQueueFixture(
   if (first === undefined || second === undefined)
     throw new Error("The fixture repositories were not created.");
 
-  const queue = createJobQueue(db, { now: clock.now, limits: options.limits });
+  const queue = createTestQueue(db, workspaceId, {
+    now: clock.now,
+    limits: options.limits,
+  });
   const defaults = (overrides: Partial<EnqueueJobInput>): EnqueueJobInput => ({
     repositoryId: first.id,
     prNumber: 7,
@@ -98,6 +126,7 @@ export async function createJobQueueFixture(
   });
   return {
     db,
+    workspaceId,
     databasePath: config.path,
     queue,
     clock,

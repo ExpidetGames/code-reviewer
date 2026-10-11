@@ -6,16 +6,18 @@ import { sql } from "kysely";
 import { describe, expect, it, vi } from "vitest";
 import type { RepoRef } from "../../integrations/types.ts";
 import { createTestDatabase } from "../../test-support/test-database.ts";
+import { defaultWorkspaceId } from "../../test-support/workspaces.ts";
 import { createIntegrationsRepository } from "./integrations-repository.ts";
 import { createProjectsRepository } from "./projects-repository.ts";
 import { createRepositoriesRepository } from "./repositories-repository.ts";
 
 async function setup() {
   const { db } = await createTestDatabase();
+  const workspaceId = await defaultWorkspaceId(db);
   let tick = 0;
   const now = () => new Date(Date.UTC(2026, 9, 10, 12, 0, tick++));
-  const integrations = createIntegrationsRepository(db, now);
-  const repositories = createRepositoriesRepository(db, now);
+  const integrations = createIntegrationsRepository(db, workspaceId, now);
+  const repositories = createRepositoriesRepository(db, workspaceId, now);
   const integration = await integrations.create({
     type: "github_app",
     displayName: "acme",
@@ -41,9 +43,9 @@ async function setup() {
     remote,
     first,
     second,
-    projects: createProjectsRepository(db, now),
+    projects: createProjectsRepository(db, workspaceId, now),
     projectsWithWarning: (warn: (message: string) => void) =>
-      createProjectsRepository(db, now, undefined, warn),
+      createProjectsRepository(db, workspaceId, now, undefined, warn),
     rows: () => db.selectFrom("projects").selectAll().execute(),
   };
 }

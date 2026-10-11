@@ -6,7 +6,6 @@ import { createIntegrationsRepository } from "../db/repositories/integrations-re
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
 import { createDefaultIntegrationRegistry } from "../integrations/registry.ts";
 import type { JobQueueLimits } from "../jobs/job-limits.ts";
-import type { JobQueue } from "../jobs/job-queue.ts";
 import { resolveLlmAccess } from "../llm/access.ts";
 import { loadLlmConfig } from "../llm/config.ts";
 import { createRunnerApi } from "../runner-api/api.ts";
@@ -32,7 +31,7 @@ import { createProjectService } from "../projects/service.ts";
 import { createReviewSettingsService } from "../review-settings/service.ts";
 import { builtInReviewSettings } from "../review-settings/settings.ts";
 import { startGithubAppHarness } from "./github-app-harness.ts";
-import { createJobQueueFixture, sha } from "./jobs.ts";
+import { createJobQueueFixture, sha, type TestQueue } from "./jobs.ts";
 
 export const TEST_RUNNER_TOKEN = "test-runner-token-4f9c2a7e1b-0d58a3c6e9f2";
 export const TEST_LLM_API_KEY = "test-llm-api-key-8d3b6e0a5c";
@@ -58,7 +57,7 @@ export async function startRunnerApiHarness(
      */
     projects?: boolean;
     /** Wraps the job queue the API uses, for example to make one call fail. */
-    wrapQueue?: (queue: JobQueue) => JobQueue;
+    wrapQueue?: (queue: TestQueue) => TestQueue;
     limits?: Partial<JobQueueLimits>;
     /** Replaces or (with undefined) removes variables of the app's environment. */
     env?: Record<string, string | undefined>;
@@ -93,6 +92,7 @@ export async function startRunnerApiHarness(
       });
   const repository = await createRepositoriesRepository(
     fixture.db,
+    fixture.workspaceId,
     fixture.clock.now,
   ).get(fixture.repositoryId);
   if (repository === undefined)
@@ -126,30 +126,45 @@ export async function startRunnerApiHarness(
     error: (line) => errorLines.push(line),
   };
   const projectService = createProjectService({
-    projects: createProjectsRepository(fixture.db, fixture.clock.now),
-    hooks: createJobProjectHooks(),
+    projects: createProjectsRepository(
+      fixture.db,
+      fixture.workspaceId,
+      fixture.clock.now,
+    ),
+    hooks: createJobProjectHooks(fixture.workspaceId),
   });
-  const appSettings = createAppSettingsRepository(fixture.db);
+  const appSettings = createAppSettingsRepository(
+    fixture.db,
+    fixture.workspaceId,
+  );
   const reviewSettings = createReviewSettingsService({
     appSettings,
-    projects: createProjectsRepository(fixture.db, fixture.clock.now),
+    projects: createProjectsRepository(
+      fixture.db,
+      fixture.workspaceId,
+      fixture.clock.now,
+    ),
     builtIn: () => builtInReviewSettings(env.LLM_MODEL ?? TEST_LLM_MODEL),
   });
   const claimedKeys = createClaimedKeys();
   const api = createRunnerApi({
     queue: options.wrapQueue?.(fixture.queue) ?? fixture.queue,
-    repositories: createRepositoriesRepository(fixture.db, fixture.clock.now),
-    integrations: createIntegrationsRepository(fixture.db, fixture.clock.now),
+    repositories: (workspaceId) =>
+      createRepositoriesRepository(fixture.db, workspaceId, fixture.clock.now),
+    integrations: (workspaceId) =>
+      createIntegrationsRepository(fixture.db, workspaceId, fixture.clock.now),
     registry,
     guard:
       options.guard ??
       (options.projects === true
-        ? createProjectClaimGuard({ projects: projectService })
+        ? createProjectClaimGuard({ projects: () => projectService })
         : allowAllClaimGuard),
     jobOptions:
       options.jobOptions ??
       (options.projects === true
-        ? createReviewSettingsJobOptionsSource({ settings: reviewSettings })
+        ? createReviewSettingsJobOptionsSource({
+            settings: () => reviewSettings,
+          })
         : emptyJobOptionsSource),
     loadLlm: () => resolveLlmAccess(loadLlmConfig(env)),
     claimedKeys,

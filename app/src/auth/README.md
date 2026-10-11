@@ -171,7 +171,7 @@ neither listed as public nor as protected there.
   cookies, so an extension could not reach the browser).
 - No cookie cache: every request checks the session row, so signing out or deleting a row takes
   effect at once.
-- `users.github_login` is written from the GitHub profile at every sign in (`overrideUserInfo`) and
+- `users.github_login` (optional since the workspace migration: a user can exist without a GitHub account, and `users.imported_at` marks users of an installation that existed before accounts) is written from the GitHub profile at every sign in (`overrideUserInfo`) and
   nowhere else (`/update-user` is not reachable). The identity is the GitHub id in
   `accounts.account_id`, so a renamed GitHub account keeps its user.
 - The user is the GitHub account, never an email address: account linking is off. Otherwise a

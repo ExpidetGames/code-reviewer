@@ -5,12 +5,13 @@ import { describe, expect, it } from "vitest";
 import type { SessionUser } from "../../auth/access-policy.ts";
 import { createProjectsRepository } from "../../db/repositories/projects-repository.ts";
 import { createRunsRepository } from "../../db/repositories/runs-repository.ts";
-import { createJobQueue } from "../../jobs/job-queue.ts";
+import { createTestQueue } from "../../test-support/jobs.ts";
 import { createLastRunSource } from "../../runs/runs-service.ts";
 import { startSyncHarness } from "../../test-support/integration-sync-harness.ts";
 import { createProjectRouteHandler } from "../http.ts";
 import { createProjectService } from "../service.ts";
 import { loadProjectList, type LastRunSource } from "./list-view.ts";
+import { defaultWorkspaceId } from "../../test-support/workspaces.ts";
 
 const ACME = { login: "acme", id: 5001, type: "Organization" } as const;
 const OCTOCAT = { login: "octocat", id: 583231, type: "User" } as const;
@@ -27,7 +28,7 @@ async function startList() {
   h.fake.setRepositories(4300, [{ id: 8001, fullName: "octocat/hello" }]);
   await h.sync.syncAll();
   const projects = createProjectService({
-    projects: createProjectsRepository(h.db),
+    projects: createProjectsRepository(h.db, await defaultWorkspaceId(h.db)),
   });
   const handler = createProjectRouteHandler({
     requireUser: async () => ({ id: "u1" }) as unknown as SessionUser,
@@ -101,9 +102,9 @@ describe("the project list", () => {
     const gadgets = await app.idOf("acme/gadgets");
     await app.projects.activateProject(widgets);
     await app.projects.activateProject(gadgets);
-    const queue = createJobQueue(app.db);
+    const queue = createTestQueue(app.db, await defaultWorkspaceId(app.db));
     const lastRuns = createLastRunSource({
-      runs: createRunsRepository(app.db),
+      runs: createRunsRepository(app.db, await defaultWorkspaceId(app.db)),
     });
     const prUrl = "https://github.com/acme/widgets/pull/1";
     const created = await queue.enqueue({

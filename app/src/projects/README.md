@@ -10,7 +10,7 @@ becomes a project only when somebody activates it. New repositories are **not** 
 | `errors.ts`  | `ProjectError` and the stable codes `PROJECT_REQUEST_INVALID` (400), `PROJECT_REPOSITORY_NOT_FOUND` (404), `PROJECT_REPOSITORY_UNAVAILABLE` (409), `PROJECT_INTEGRATION_UNAVAILABLE` (409), `PROJECT_CROSS_SITE_REQUEST` (403), `PROJECT_BODY_TOO_LARGE` (413), `PROJECT_CONTENT_TYPE_UNSUPPORTED` (415) |
 | `hooks.ts`   | `ProjectHooks.onProjectDeactivated`, the seam the jobs module plugs into; the default does nothing                                                                                                                                                                                                       |
 | `http.ts`    | The handler behind `PUT /api/repositories/:repositoryId/project` (`src/app/api/repositories/[repositoryId]/project/route.ts`)                                                                                                                                                                            |
-| `shared.ts`  | The wiring of the running server: `getProjectService()` and `getProjectHooks()`                                                                                                                                                                                                                          |
+| `shared.ts`  | The wiring of the running server: `projectServiceFor(workspaceId)`, `getProjectService()` (the workspace the signed-in user works in) and `getProjectHooks(workspaceId)`                                                                                                                                 |
 
 The table is `projects` (`src/db/migrations/20261010190000_create_projects.ts`); the only code that
 touches it is `src/db/repositories/projects-repository.ts`.
@@ -55,8 +55,8 @@ touches it is `src/db/repositories/projects-repository.ts`.
 
 Deactivating a project stops new reviews and discards its **waiting** (unclaimed) jobs; a job that a
 runner already holds (running) finishes. This module knows nothing about jobs. The jobs module
-implements `ProjectHooks.onProjectDeactivated(event, executor)` (`createJobProjectHooks` in
-`src/jobs/project-hooks.ts`, which cancels the waiting jobs of the repository) and `getProjectHooks()` in
+implements `ProjectHooks.onProjectDeactivated(event, executor)` (`createJobProjectHooks(workspaceId)` in
+`src/jobs/project-hooks.ts`, which cancels the waiting jobs of the repository) and `getProjectHooks(workspaceId)` in
 `shared.ts` returns it:
 
 - It runs in the transaction that switches the project off. Write with `executor` (never the outer

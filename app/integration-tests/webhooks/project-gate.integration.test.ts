@@ -102,10 +102,10 @@ describe("a pull request delivery for a repository that is not a project", () =>
   it("is answered 202 project_not_active without a trigger when the project only exists because settings were saved", async () => {
     const h = await startWebhookHarness();
     await h.seedInstallation({ activateProject: false });
-    const saved = await createProjectsRepository(h.db).updateSettings(
-      await repositoryIdOf(h),
-      { maxFindings: 2 },
-    );
+    const saved = await createProjectsRepository(
+      h.db,
+      h.workspaceId,
+    ).updateSettings(await repositoryIdOf(h), { maxFindings: 2 });
     expect(saved).toMatchObject({ active: false });
 
     const response = await h.deliver("pull_request.opened");

@@ -10,7 +10,7 @@ import { lookupSession } from "../../src/auth/session-user.ts";
 import { createIntegrationsRepository } from "../../src/db/repositories/integrations-repository.ts";
 import { createRepositoriesRepository } from "../../src/db/repositories/repositories-repository.ts";
 import { createRunsRepository } from "../../src/db/repositories/runs-repository.ts";
-import { createJobQueue } from "../../src/jobs/job-queue.ts";
+import { createTestQueue } from "../../src/test-support/jobs.ts";
 import { createRunsRouteHandlers } from "../../src/runs/http.ts";
 import { createRunsService } from "../../src/runs/runs-service.ts";
 import {
@@ -19,6 +19,7 @@ import {
   createAuthHarness,
   type CookieJar,
 } from "../../src/test-support/auth-harness.ts";
+import { defaultWorkspaceId } from "../../src/test-support/workspaces.ts";
 
 type Harness = Awaited<ReturnType<typeof createAuthHarness>>;
 
@@ -26,13 +27,19 @@ const SECRET_LOG_MARKER = "a-log-line-of-this-run";
 
 async function startApp() {
   const harness = await createAuthHarness();
-  const integration = await createIntegrationsRepository(harness.db).create({
+  const integration = await createIntegrationsRepository(
+    harness.db,
+    await defaultWorkspaceId(harness.db),
+  ).create({
     type: "github_app",
     displayName: "acme",
     externalId: "4242",
     config: {},
   });
-  const repositories = createRepositoriesRepository(harness.db);
+  const repositories = createRepositoriesRepository(
+    harness.db,
+    await defaultWorkspaceId(harness.db),
+  );
   await repositories.reconcile(integration.id, [
     {
       integrationId: integration.id,
@@ -45,7 +52,10 @@ async function startApp() {
   if (repository === undefined) throw new Error("seeding failed");
 
   // One finished run, made through the queue the way the runner API makes it.
-  const queue = createJobQueue(harness.db);
+  const queue = createTestQueue(
+    harness.db,
+    await defaultWorkspaceId(harness.db),
+  );
   const created = await queue.enqueue({
     repositoryId: repository.id,
     prNumber: 7,
@@ -69,7 +79,10 @@ async function startApp() {
   });
 
   const service = createRunsService({
-    runs: createRunsRepository(harness.db),
+    runs: createRunsRepository(
+      harness.db,
+      await defaultWorkspaceId(harness.db),
+    ),
   });
 
   /** What the server does with a request: the proxy first, the handler only if the proxy lets it by. */

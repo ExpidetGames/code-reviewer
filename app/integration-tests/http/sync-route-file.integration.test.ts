@@ -23,6 +23,7 @@ import {
   testGithubAppEnv,
 } from "../../src/test-support/github-app.ts";
 import { createTestDirectory } from "../../src/test-support/test-database.ts";
+import { defaultWorkspaceId } from "../../src/test-support/workspaces.ts";
 
 const session = vi.hoisted(() => ({
   requireUser: vi.fn<() => Promise<SessionUser>>(),
@@ -89,9 +90,12 @@ describe("the sync route file", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ added: 1, errors: [] });
     expect(
-      (await createRepositoriesRepository(getDatabase()).list()).map(
-        (repo) => repo.fullName,
-      ),
+      (
+        await createRepositoriesRepository(
+          getDatabase(),
+          await defaultWorkspaceId(getDatabase()),
+        ).list()
+      ).map((repo) => repo.fullName),
     ).toEqual(["acme/widgets"]);
   });
 

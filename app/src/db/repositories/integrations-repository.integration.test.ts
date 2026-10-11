@@ -4,6 +4,7 @@ import { sql } from "kysely";
 import { describe, expect, it } from "vitest";
 import type { JsonValue } from "../../integrations/types.ts";
 import { createTestDatabase } from "../../test-support/test-database.ts";
+import { defaultWorkspaceId } from "../../test-support/workspaces.ts";
 import { createIntegrationsRepository } from "./integrations-repository.ts";
 
 const gitHubApp = {
@@ -17,7 +18,8 @@ describe("the integrations repository", () => {
   // CR-20-T02
   it("reads back the type and configuration exactly as they were saved", async () => {
     const { db } = await createTestDatabase();
-    const repository = createIntegrationsRepository(db);
+    const workspaceId = await defaultWorkspaceId(db);
+    const repository = createIntegrationsRepository(db, workspaceId);
 
     const saved = await repository.create(gitHubApp);
     const loaded = await repository.get(saved.id);
@@ -34,8 +36,9 @@ describe("the integrations repository", () => {
 
   it("stores the configuration as JSON text and the timestamps as ISO 8601", async () => {
     const { db } = await createTestDatabase();
+    const workspaceId = await defaultWorkspaceId(db);
     const now = new Date("2026-10-10T08:00:00.123Z");
-    const repository = createIntegrationsRepository(db, () => now);
+    const repository = createIntegrationsRepository(db, workspaceId, () => now);
 
     const saved = await repository.create(gitHubApp);
 
@@ -58,15 +61,17 @@ describe("the integrations repository", () => {
 
   it("returns undefined for an id that does not exist", async () => {
     const { db } = await createTestDatabase();
+    const workspaceId = await defaultWorkspaceId(db);
 
     expect(
-      await createIntegrationsRepository(db).get("missing"),
+      await createIntegrationsRepository(db, workspaceId).get("missing"),
     ).toBeUndefined();
   });
 
   it("finds an integration by its type and the platform's id and lists all of them", async () => {
     const { db } = await createTestDatabase();
-    const repository = createIntegrationsRepository(db);
+    const workspaceId = await defaultWorkspaceId(db);
+    const repository = createIntegrationsRepository(db, workspaceId);
     const first = await repository.create(gitHubApp);
     const second = await repository.create({
       ...gitHubApp,
@@ -87,8 +92,9 @@ describe("the integrations repository", () => {
 
   it("changes the status and moves the update time", async () => {
     const { db } = await createTestDatabase();
+    const workspaceId = await defaultWorkspaceId(db);
     let now = new Date("2026-10-10T08:00:00.000Z");
-    const repository = createIntegrationsRepository(db, () => now);
+    const repository = createIntegrationsRepository(db, workspaceId, () => now);
     const saved = await repository.create(gitHubApp);
 
     now = new Date("2026-10-10T09:00:00.000Z");
@@ -103,8 +109,9 @@ describe("the integrations repository", () => {
 
   it("updates the display name and the configuration and moves the update time", async () => {
     const { db } = await createTestDatabase();
+    const workspaceId = await defaultWorkspaceId(db);
     let now = new Date("2026-10-10T08:00:00.000Z");
-    const repository = createIntegrationsRepository(db, () => now);
+    const repository = createIntegrationsRepository(db, workspaceId, () => now);
     const saved = await repository.create(gitHubApp);
 
     now = new Date("2026-10-10T09:00:00.000Z");
@@ -123,7 +130,8 @@ describe("the integrations repository", () => {
 
   it("refuses new details that carry a secret and keeps the old ones", async () => {
     const { db } = await createTestDatabase();
-    const repository = createIntegrationsRepository(db);
+    const workspaceId = await defaultWorkspaceId(db);
+    const repository = createIntegrationsRepository(db, workspaceId);
     const saved = await repository.create(gitHubApp);
 
     await expect(
@@ -140,7 +148,8 @@ describe("the integrations repository", () => {
 
   it("refuses a second integration with the same type and platform id", async () => {
     const { db } = await createTestDatabase();
-    const repository = createIntegrationsRepository(db);
+    const workspaceId = await defaultWorkspaceId(db);
+    const repository = createIntegrationsRepository(db, workspaceId);
     await repository.create(gitHubApp);
 
     await expect(repository.create(gitHubApp)).rejects.toMatchObject({
@@ -151,15 +160,20 @@ describe("the integrations repository", () => {
 
   it("refuses to change the status of an integration that does not exist", async () => {
     const { db } = await createTestDatabase();
+    const workspaceId = await defaultWorkspaceId(db);
 
     await expect(
-      createIntegrationsRepository(db).setStatus("missing", "disabled"),
+      createIntegrationsRepository(db, workspaceId).setStatus(
+        "missing",
+        "disabled",
+      ),
     ).rejects.toMatchObject({ code: "INTEGRATION_NOT_FOUND" });
   });
 
   it("refuses an integration without the platform's id and stores nothing", async () => {
     const { db } = await createTestDatabase();
-    const repository = createIntegrationsRepository(db);
+    const workspaceId = await defaultWorkspaceId(db);
+    const repository = createIntegrationsRepository(db, workspaceId);
 
     for (const externalId of [undefined, "", null]) {
       await expect(
@@ -172,7 +186,8 @@ describe("the integrations repository", () => {
 
   it("refuses a status it does not know, on create and on update", async () => {
     const { db } = await createTestDatabase();
-    const repository = createIntegrationsRepository(db);
+    const workspaceId = await defaultWorkspaceId(db);
+    const repository = createIntegrationsRepository(db, workspaceId);
     const saved = await repository.create(gitHubApp);
 
     await expect(
@@ -191,22 +206,24 @@ describe("the integrations repository", () => {
 
   it("fails with a stable code when a stored row has a status this version does not know", async () => {
     const { db } = await createTestDatabase();
+    const workspaceId = await defaultWorkspaceId(db);
     await sql`insert into integrations
-      (id, type, display_name, external_id, config, status, created_at, updated_at)
-      values ('x', 'github_app', 'Old', '1', '{}', 'paused', 'now', 'now')`.execute(
+      (id, workspace_id, type, display_name, external_id, config, status, created_at, updated_at)
+      values ('x', ${workspaceId}, 'github_app', 'Old', '1', '{}', 'paused', 'now', 'now')`.execute(
       db,
     );
 
     await expect(
-      createIntegrationsRepository(db).get("x"),
+      createIntegrationsRepository(db, workspaceId).get("x"),
     ).rejects.toMatchObject({ code: "INTEGRATION_STATUS_INVALID" });
   });
 
   it("refuses a type it does not know with a stable code", async () => {
     const { db } = await createTestDatabase();
+    const workspaceId = await defaultWorkspaceId(db);
 
     await expect(
-      createIntegrationsRepository(db).create({
+      createIntegrationsRepository(db, workspaceId).create({
         ...gitHubApp,
         type: "gitlab" as never,
       }),
@@ -215,14 +232,15 @@ describe("the integrations repository", () => {
 
   it("fails with a stable code when a stored row has a type this version does not know", async () => {
     const { db } = await createTestDatabase();
+    const workspaceId = await defaultWorkspaceId(db);
     await sql`insert into integrations
-      (id, type, display_name, external_id, config, status, created_at, updated_at)
-      values ('x', 'gitlab', 'Old', '1', '{}', 'active', 'now', 'now')`.execute(
+      (id, workspace_id, type, display_name, external_id, config, status, created_at, updated_at)
+      values ('x', ${workspaceId}, 'gitlab', 'Old', '1', '{}', 'active', 'now', 'now')`.execute(
       db,
     );
 
     await expect(
-      createIntegrationsRepository(db).get("x"),
+      createIntegrationsRepository(db, workspaceId).get("x"),
     ).rejects.toMatchObject({ code: "INTEGRATION_TYPE_UNKNOWN" });
   });
 });
@@ -231,7 +249,10 @@ describe("secrets in the integrations table", () => {
   // CR-20-T05
   it("keeps no private key, webhook secret or token in the row of a GitHub App", async () => {
     const { db } = await createTestDatabase();
-    const saved = await createIntegrationsRepository(db).create(gitHubApp);
+    const workspaceId = await defaultWorkspaceId(db);
+    const saved = await createIntegrationsRepository(db, workspaceId).create(
+      gitHubApp,
+    );
 
     const { rows } = await sql<Record<string, unknown>>`
       select * from integrations where id = ${saved.id}`.execute(db);
@@ -247,7 +268,8 @@ describe("secrets in the integrations table", () => {
   // CR-20-T05
   it("refuses a webhook secret or credentials for a GitHub App and stores nothing", async () => {
     const { db } = await createTestDatabase();
-    const repository = createIntegrationsRepository(db);
+    const workspaceId = await defaultWorkspaceId(db);
+    const repository = createIntegrationsRepository(db, workspaceId);
 
     await expect(
       repository.create({ ...gitHubApp, webhookSecret: "whsec_dummy" }),
@@ -262,7 +284,8 @@ describe("secrets in the integrations table", () => {
   // CR-20-T05
   it("refuses a configuration that carries a key, secret or token and stores nothing", async () => {
     const { db } = await createTestDatabase();
-    const repository = createIntegrationsRepository(db);
+    const workspaceId = await defaultWorkspaceId(db);
+    const repository = createIntegrationsRepository(db, workspaceId);
 
     const configs: Array<{ [key: string]: JsonValue }> = [
       { privateKey: "-----BEGIN RSA PRIVATE KEY-----" },
@@ -280,8 +303,9 @@ describe("secrets in the integrations table", () => {
 
   it("does not echo the offending value in the error", async () => {
     const { db } = await createTestDatabase();
+    const workspaceId = await defaultWorkspaceId(db);
 
-    const failure = await createIntegrationsRepository(db)
+    const failure = await createIntegrationsRepository(db, workspaceId)
       .create({ ...gitHubApp, config: { privateKey: "SUPER-SECRET-VALUE" } })
       .catch((error: unknown) => error);
 

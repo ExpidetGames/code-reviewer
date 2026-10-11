@@ -14,6 +14,7 @@ opens a database or writes SQL. The one exception is `src/backup/` (backup and r
 | `schema.ts`                 | Row types of every table (`Database`)                                                                                                                                        |
 | `codecs.ts`                 | The only code that knows how JSON, booleans and timestamps are stored                                                                                                        |
 | `repositories/`             | One small module per table (or aggregate); the only code that queries it. Exception: `users`, `sessions`, `accounts` and `verifications` belong to Better Auth (`src/auth/`) |
+| `workspace-scope.ts`        | `WorkspaceId`, the type of the workspace parameter every scoped repository takes (see "Workspace scoping")                                                                   |
 | `errors.ts`                 | `DatabaseError` with stable codes (`DATABASE_CONFIG_INVALID`, `DATABASE_DIRECTORY_UNAVAILABLE`, `DATABASE_OPEN_FAILED`, `DATABASE_LOCKED`, `MIGRATION_FAILED`)               |
 
 ## Why better-sqlite3
@@ -81,6 +82,71 @@ never hold one open across an `await` on something slow (network, model, subproc
   the start with a clear message that names the path. The directory is not created for you: a wrong
   `DATABASE_PATH` or an unmounted volume must not silently create a new, empty database.
 
+### Workspaces and the migration that introduced them
+
+Migrations `20261011160000_create_workspaces`, `20261011160100_add_workspace_to_customer_data` and
+`20261011160200_prepare_users_for_accounts` (docs/decisions/0001-editions-setup-and-accounts.md, sections
+2.6, 2.7, 2.10):
+
+- `workspaces` (id, name, unique slug, created by, created at) and `workspace_members` (workspace, user,
+  role, created at; primary key (workspace, user); the role is restricted to `owner`, `admin`, `member`
+  by a check constraint, the same list as `WORKSPACE_ROLES` in `src/workspaces/roles.ts`).
+- `workspace_id` (required) on `integrations`, `repositories`, `jobs` and `app_settings`; a project
+  belongs to a workspace through its repository. `repositories` and `jobs` repeat it so that no query
+  needs a join to scope. Two composite foreign keys make the database itself refuse a link across
+  workspaces: a repository must name an integration of its own workspace, a job a repository of its own.
+  `app_settings` is per workspace (primary key (workspace, key)): the review defaults of one workspace
+  are not those of another. The unique index `(type, external_id)` on `integrations` stays global: one
+  installation is linked to one workspace only.
+- `users.github_login` is optional (a user can exist without a GitHub account); `users.imported_at` is
+  null except for users the import of an existing installation marks.
+- **Backfill.** A database that holds data (a row in `users`, `integrations`, `repositories`, `projects`,
+  `jobs` or `app_settings`) gets one workspace, "Default workspace" (slug `default`), and every row of
+  the four tables moves into it; no row is lost or changed otherwise. A database without data gets no
+  workspace: the first-run setup makes it. **The migration creates no membership**; who becomes a member
+  is decided by the import of an existing installation (it looks at the allow list of that day).
+- **How the tables are rebuilt.** SQLite cannot add a NOT NULL column that references another table,
+  and the usual rebuild recipe needs `PRAGMA foreign_keys = OFF`, which does nothing inside the
+  migration transaction. So the chain `integrations`, `repositories`, `projects`, `jobs`, `job_comments`
+  is rebuilt parents first (rename to `*_old`, create, copy), the old tables are dropped leaf first and
+  the indexes are created last. No foreign key is violated at any point. `users` is not rebuilt (its
+  children cascade on delete): `github_login` is replaced by a nullable copy of itself.
+- **Time budget.** The migration of a database with 10 000 jobs that each hold a result of about 2 KB
+  must finish within 10 seconds in one transaction (`workspace-migration.integration.test.ts`). It
+  takes about 0.4 seconds on a laptop; the budget is generous so that a slow CI machine does not make
+  the test flaky. The size of the results matters: dropping `jobs_old` deletes its rows, and for every
+  row SQLite looks for rows that refer to it through `superseded_by`. Without the index
+  `jobs_old_superseded_by` that is a scan per row, and this very database took 44 to 47 seconds. Any
+  later change that rebuilds a table with a self-reference needs the same index. If you make the
+  migration slower, say why here.
+
+## Workspace scoping
+
+Every repository that reads or writes customer data is created for one workspace:
+`createIntegrationsRepository(db, workspaceId, ...)`, and the same for repositories, projects,
+app settings, jobs and runs. Every query it runs filters or sets `workspace_id`, and an id of another
+workspace is simply not there: fetching, changing or deleting it behaves like a missing id.
+`WorkspaceId` is a plain string; a repository takes it as its second parameter, always named
+`workspaceId`.
+
+- `repositories/scoping.test.ts` reads the source of the repositories and fails when a module is
+  neither scoped nor on the explicit list of instance level modules, or when an exported function of a
+  scoped one takes a database connection without a `workspaceId`.
+- `repositories/scoped-isolation.integration.test.ts` calls every method of every scoped repository
+  with the scope of one workspace against the ids of another and checks that nothing comes back and
+  nothing changes. It has a row for every method; a method without one fails the test.
+
+Not scoped, each for a reason (the list is in `scoping.test.ts`):
+
+| Module                                                               | Why                                                                                                                                                                                                                                                                               |
+| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app-meta`, `allowed-login-pins`, `webhook-deliveries`, `workspaces` | Not customer data (facts about the installation, the sign-in allow list, delivery ids, the owners themselves)                                                                                                                                                                     |
+| `integration-directory-repository.ts`                                | Reads integrations of any workspace. A webhook names an installation before anybody knows the workspace, and the synchronization walks every connection. It only reads, and the answer carries `workspaceId`; everything done next goes through scoped repositories               |
+| `runner-jobs-repository.ts`                                          | The lease side of the job queue (claim, heartbeat, complete, release, expiry). Runners serve the whole instance with one token, so a claim hands out the oldest due job of any workspace; every change is fenced by the lease token, and the job it returns carries `workspaceId` |
+
+Until workspace switching exists, a signed-in user works in the default workspace
+(`src/workspaces/current-workspace.ts`, temporary).
+
 ## Portable schema conventions
 
 The MVP runs on SQLite only, but the schema stays portable so that Postgres remains possible later.
@@ -121,8 +187,8 @@ string or a timestamp string format. Route handlers and server code get the conn
 `getDatabase()` (`startup.ts`) and pass it in; tests pass in a database from
 `src/test-support/test-database.ts`.
 
-`integrations` (migration `20261010134000_create_integrations`, repository `integrations-repository.ts`) holds the connections to
-git platforms; see `src/integrations/README.md`. It keeps no secret of a GitHub App, and the
+`integrations` (migration `20261010134000_create_integrations`, repository `integrations-repository.ts`, plus the
+instance level `integration-directory-repository.ts`) holds the connections to git platforms; see `src/integrations/README.md`. It keeps no secret of a GitHub App, and the
 repository refuses secret-looking keys in `config`.
 
 `repositories` (migration `20261010143000_create_repositories`, repository `repositories-repository.ts`)
@@ -138,14 +204,20 @@ first activation or the first save of settings (then off), switched off with `ac
 `webhook-deliveries-repository.ts`) holds the delivery ids the webhook route has accepted, so a
 redelivery produces no second trigger; rows are pruned after 7 days; see `src/webhooks/README.md`.
 
-`jobs` (migration `20261010191500_create_jobs`, repository `jobs-repository.ts`, claim in
-`jobs-claim.ts`) is the job queue (the index `jobs_repository_recent`, migration `20261011100000_add_jobs_repository_recent_index`, serves the runs pages: newest job of a repository, `runs-repository.ts`); the rules (dedupe, supersession, leases, attempts, timeouts) are
+`jobs` (migration `20261010191500_create_jobs`, rebuilt by `20261011160100_add_workspace_to_customer_data`;
+the scoped repository `jobs-repository.ts` creates, drops and reads jobs, the instance level
+`runner-jobs-repository.ts` with the claim in `jobs-claim.ts` hands them to runners) is the job queue (the index `jobs_repository_recent`, migration `20261011100000_add_jobs_repository_recent_index`, serves the runs pages: newest job of a repository, `runs-repository.ts`); the rules (dedupe, supersession, leases, attempts, timeouts) are
 in `src/jobs/README.md`. `jobs-claim.ts` holds the one statement written for SQLite (see its head
 comment); everything else is query builder code.
 
-`app_settings` (migration `20261010201500_create_app_settings`, repository `app-settings-repository.ts`) holds
-settings of the whole instance, one row per setting with a JSON value; the first is `review_defaults`, the
-global default values of the review settings (`src/review-settings/README.md`).
+`app_settings` (migration `20261010201500_create_app_settings`, rebuilt per workspace by
+`20261011160100_add_workspace_to_customer_data`, repository `app-settings-repository.ts`) holds settings of
+one workspace, one row per setting with a JSON value; the first is `review_defaults`, the default values of
+the review settings of the workspace (`src/review-settings/README.md`).
+
+`workspaces` and `workspace_members` (migration `20261011160000_create_workspaces`, repository
+`workspaces-repository.ts`; members have no repository yet) are described under "Workspaces and the
+migration that introduced them" above and in `src/workspaces/README.md`.
 
 `app_meta` (a key/value table for facts about the installation) exists to prove the setup. Product
 tables come with the tickets that need them: add the migration, the row type in `schema.ts` and the

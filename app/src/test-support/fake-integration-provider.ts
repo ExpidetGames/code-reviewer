@@ -120,6 +120,7 @@ export function fakeIntegration(
 ): Integration {
   return {
     id: "integration-1",
+    workspaceId: "workspace-1",
     type: "github_app",
     displayName: "Fake integration",
     externalId: "installation-1",

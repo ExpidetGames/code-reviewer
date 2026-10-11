@@ -36,11 +36,15 @@ if (command === "idle") {
 }
 
 function writeForever(): void {
+  // The settings it writes belong to a workspace of their own.
+  sqlite.exec(
+    "insert or ignore into workspaces (id, name, slug, created_by, created_at) values ('writer', 'writer', 'writer', null, 'now')",
+  );
   const insertMeta = sqlite.prepare(
     "insert into app_meta (key, value, updated_at) values (?, ?, ?)",
   );
   const insertSetting = sqlite.prepare(
-    "insert into app_settings (key, value, updated_at, updated_by) values (?, ?, ?, null)",
+    "insert into app_settings (workspace_id, key, value, updated_at, updated_by) values ('writer', ?, ?, ?, null)",
   );
   const writeBoth = sqlite.transaction((key: string) => {
     const now = new Date().toISOString();
