@@ -35,8 +35,6 @@ export type ProjectRowView = {
   /** The installation the repository comes from (the account that installed the app). */
   installation: string;
   status: ProjectStatus;
-  /** Whether the repository has a project at all (the settings page needs one). */
-  hasProject: boolean;
   /** Whether the project is switched on (also for a repository that is unavailable). */
   switchedOn: boolean;
   lastRun: LastRun | null;
@@ -54,7 +52,6 @@ function toRowView(
     url: webAddress(repository.url),
     installation: repository.integration.displayName,
     status,
-    hasProject: project !== null,
     switchedOn: project?.active ?? false,
     lastRun,
   };

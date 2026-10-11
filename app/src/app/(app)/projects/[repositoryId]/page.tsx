@@ -15,7 +15,8 @@ export const metadata: Metadata = { title: "Project settings" };
 // nobody knows shows the not-found page; with Cache Components the data sits behind the layout's
 // <Suspense>, so the response is already streaming and its HTTP status stays 200 (a status of 404
 // would need the lookup before the first byte, which only data outside Suspense allows). A
-// repository that is not a project yet says how to make it one.
+// repository that was never activated has its settings page too (the settings are saved first and
+// apply once the project is switched on).
 export default async function ProjectSettingsPage({
   params,
 }: PageProps<"/projects/[repositoryId]">) {

@@ -194,7 +194,7 @@ complete list in one transaction.
 
 `projects` (migration `20261010190000_create_projects`, repository `projects-repository.ts`) holds
 the repositories that are reviewed: one row per repository (`repository_id` unique), created by the
-first activation, switched off with `active = 0`, never deleted; see `src/projects/README.md`.
+first activation or the first save of settings (then off), switched off with `active = 0`, never deleted; see `src/projects/README.md`.
 
 `webhook_deliveries` (migration `20261010170000_create_webhook_deliveries`, repository
 `webhook-deliveries-repository.ts`) holds the delivery ids the webhook route has accepted, so a

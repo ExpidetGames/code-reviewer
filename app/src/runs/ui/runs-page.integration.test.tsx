@@ -6,6 +6,7 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { createProjectsRepository } from "../../db/repositories/projects-repository.ts";
 import { createProjectService } from "../../projects/service.ts";
+import { createLastRunSource } from "../runs-service.ts";
 import { createRunsFixture } from "../../test-support/runs.ts";
 import { loadRunDetailPage, RunDetailPageContent } from "./run-detail-page.tsx";
 import { loadRunsPage, RunsPageContent } from "./runs-page.tsx";
@@ -32,17 +33,20 @@ async function openRuns() {
   const widgetsWaiting = await f.waiting({
     repositoryId: f.otherRepositoryId,
   });
+  const lastRuns = createLastRunSource({ runs: f.runsRepository });
   async function page(
     searchParams: Record<string, string | string[] | undefined> = {},
   ) {
     const data = await loadRunsPage(searchParams, {
       runs: f.runs,
       projects,
+      lastRuns,
     });
     return render(<RunsPageContent data={data} />);
   }
   return {
     f,
+    projects,
     page,
     gadgetsFailed,
     gadgetsDone,
@@ -150,6 +154,50 @@ describe("the Runs page", () => {
     // Back brings the filter back.
     rerender(<RunsPageContent data={await data({ status: "succeeded" })} />);
     expect(values()).toEqual(["", "succeeded"]);
+  });
+
+  // #80
+  it("does not offer a repository that only holds saved settings, as it can never have runs", async () => {
+    const f = await createRunsFixture();
+    const projects = createProjectService({
+      projects: createProjectsRepository(f.db, f.workspaceId),
+    });
+    await createProjectsRepository(f.db, f.workspaceId).updateSettings(
+      f.repositoryId,
+      {
+        maxFindings: 2,
+      },
+    );
+    const data = await loadRunsPage(
+      {},
+      {
+        runs: f.runs,
+        projects,
+        lastRuns: createLastRunSource({ runs: f.runsRepository }),
+      },
+    );
+
+    render(<RunsPageContent data={data} />);
+
+    const project = screen.getByLabelText("Project") as HTMLSelectElement;
+    expect([...project.options].map((option) => option.text)).toEqual([
+      "All projects",
+    ]);
+  });
+
+  // #80
+  it("still offers a project that was switched off after it had runs", async () => {
+    const app = await openRuns();
+    await app.projects.deactivateProject(app.f.repositoryId);
+
+    await app.page();
+
+    const project = screen.getByLabelText("Project") as HTMLSelectElement;
+    expect([...project.options].map((option) => option.text)).toEqual([
+      "All projects",
+      "acme/gadgets",
+      "acme/widgets",
+    ]);
   });
 
   // CR-35-T03

@@ -92,7 +92,22 @@ describe("reading the settings over HTTP", () => {
     });
   });
 
-  it("answers 404 PROJECT_NOT_FOUND for a repository without a project", async () => {
+  it("answers 404 PROJECT_NOT_FOUND for a repository that does not exist", async () => {
+    const app = await setup();
+
+    const response = await app.handlers.getProject(
+      new Request(`${URL_BASE}/api/repositories/nope/project/settings`),
+      "nope",
+    );
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({
+      error: "REVIEW_SETTINGS_PROJECT_NOT_FOUND",
+    });
+  });
+
+  // #80
+  it("answers the defaults for a repository that was never activated", async () => {
     const app = await setup();
 
     const response = await app.handlers.getProject(
@@ -102,9 +117,12 @@ describe("reading the settings over HTTP", () => {
       app.second.id,
     );
 
-    expect(response.status).toBe(404);
-    expect(await response.json()).toEqual({
-      error: "REVIEW_SETTINGS_PROJECT_NOT_FOUND",
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      repositoryId: app.second.id,
+      projectId: null,
+      active: false,
+      overrides: {},
     });
   });
 });
@@ -261,7 +279,25 @@ describe("changing the settings over HTTP", () => {
     },
   );
 
-  it("answers 404 when saving or resetting the settings of a repository without a project", async () => {
+  it("answers 404 when saving or resetting the settings of a repository that does not exist", async () => {
+    const app = await setup();
+
+    const saved = await app.putProject(
+      { settings: { maxFindings: 3 } },
+      undefined,
+      "nope",
+    );
+    const reset = await app.handlers.deleteProject(
+      new Request(`${URL_BASE}/x`, { method: "DELETE" }),
+      "nope",
+    );
+
+    expect(saved.status).toBe(404);
+    expect(reset.status).toBe(404);
+  });
+
+  // #80
+  it("saves the settings of a repository that was never activated and leaves it inactive", async () => {
     const app = await setup();
 
     const saved = await app.putProject(
@@ -269,13 +305,15 @@ describe("changing the settings over HTTP", () => {
       undefined,
       app.second.id,
     );
-    const reset = await app.handlers.deleteProject(
-      new Request(`${URL_BASE}/x`, { method: "DELETE" }),
-      app.second.id,
-    );
 
-    expect(saved.status).toBe(404);
-    expect(reset.status).toBe(404);
+    expect(saved.status).toBe(200);
+    expect(await saved.json()).toMatchObject({
+      active: false,
+      overrides: { maxFindings: 3 },
+    });
+    expect(
+      await app.projects.findActiveForRepository(app.second.id),
+    ).toBeUndefined();
   });
 });
 

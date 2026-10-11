@@ -134,11 +134,16 @@ this site (`Sec-Fetch-Site`/`Origin`), be `application/json` and at most 64 KB.
 | `PUT /api/repositories/:repositoryId/project/settings`    | body `{ "settings": { ... } }`, replaces the project's overrides                                                |
 | `DELETE /api/repositories/:repositoryId/project/settings` | removes the project's overrides                                                                                 |
 
+A repository that was never activated can be read (the defaults, `projectId` null, `active` false) and
+saved: the first save creates its project with `active = 0`, so the settings are in place when it is
+activated; reviews still start only for active projects (webhook intake, manual start and claim are
+unchanged). A reset of such a repository writes nothing.
+
 Refusals are `{ "error": <code> }` (`errors.ts`): `400 REVIEW_SETTINGS_INVALID` (plus
 `"issues": [{ "field", "code" }]`), `400 REVIEW_SETTINGS_REQUEST_INVALID` (not JSON, or no `settings`
 object), `403 REVIEW_SETTINGS_CROSS_SITE_REQUEST`, `413 REVIEW_SETTINGS_BODY_TOO_LARGE`,
-`415 REVIEW_SETTINGS_CONTENT_TYPE_UNSUPPORTED`, `404 REVIEW_SETTINGS_PROJECT_NOT_FOUND` (the repository has
-no project: it was never activated). The settings pages (below) call these routes from the browser.
+`415 REVIEW_SETTINGS_CONTENT_TYPE_UNSUPPORTED`, `404 REVIEW_SETTINGS_PROJECT_NOT_FOUND` (there is no such
+repository, or the platform no longer lists it and it has no project). The settings pages (below) call these routes from the browser.
 
 ## The pages
 

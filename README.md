@@ -276,6 +276,12 @@ All automated tests are hermetic: a network guard blocks every host except loopb
   first and trips over `runner/.python-version`. Put the real uv (for example `~/.local/bin`) before
   `~/.pyenv/shims` in your `PATH`, or install the Python version with pyenv.
 
+## Contributing
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow (branch names, commit messages,
+pull requests, which checks to run) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Report security
+problems privately as described in [SECURITY.md](SECURITY.md).
+
 ## Branching
 
 - `main` and `development` are permanent branches. `development` is the default branch.
@@ -289,3 +295,9 @@ Pull requests flow upwards:
 3. `development` -> PR into `main` for releases.
 
 Direct pushes to `main` and `development` are not allowed; all changes go through pull requests.
+
+## License
+
+code-review.com is licensed under the [Apache License, Version 2.0](LICENSE). [`NOTICE`](NOTICE)
+and [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md) carry the attribution for third party
+software, including the MIT licensed PR-Agent.

@@ -1,10 +1,11 @@
 // Access to the projects table of ONE workspace (the factory takes the workspace id; see
 // ../workspace-scope.ts; a project belongs to the workspace of its repository). The only code that
-// reads or writes it. A project is a repository the
-// instance reviews. The row is created by the first activation and never deleted: deactivating sets
-// `active` to 0, and activating again switches the same row back on, so the settings a project
-// collected in between survive. A repository the platform stopped listing keeps its row too; it is
-// "unavailable" and cannot be activated (the repositories table says so, not this one).
+// reads or writes it. A project is a repository the instance reviews. The row is created by the first
+// activation or by the first save of settings (then switched off), and never deleted: deactivating
+// sets `active` to 0, and activating again switches the same row back on, so the settings a project
+// collected in between survive. Only an active row is ever reviewed; a row that is off is just a place
+// for settings. A repository the platform stopped listing keeps its row too; it is "unavailable" and
+// cannot be activated (the repositories table says so, not this one).
 import "server-only";
 import type { Kysely } from "kysely";
 import type {
@@ -69,7 +70,10 @@ export type ActivateResult =
   | {
       kind: "activated";
       project: StoredProject;
-      /** `created`: first activation; `reactivated`: the row was off; `unchanged`: it was on already. */
+      /**
+       * `created`: no row existed; `reactivated`: the row was off (deactivated, or only created to hold
+       * settings saved before the first activation); `unchanged`: it was on already.
+       */
       outcome: "created" | "reactivated" | "unchanged";
     }
   | { kind: "repository_not_found" }
@@ -126,8 +130,10 @@ export type ProjectsRepository = {
   ): Promise<DeactivateResult>;
   /**
    * Replaces the settings (the overrides of the review settings) of the project of a repository and
-   * moves `updatedAt`. Works for a project that is switched off too. Returns the project after the
-   * change, or undefined when the repository has no project (nothing is written then).
+   * moves `updatedAt`. Works for a project that is switched off too. A repository without a project
+   * gets one that is switched off, so settings can be saved before the first activation. Returns
+   * the project after the change, or undefined (nothing written) when the repository does not exist
+   * or the platform no longer lists it and it has no project.
    */
   updateSettings(
     repositoryId: string,
@@ -444,23 +450,49 @@ export function createProjectsRepository(
       });
     },
 
-    async updateSettings(repositoryId, settings) {
-      const row = await db
-        .updateTable("projects")
-        .set({
-          settings: encodeJson(settings),
-          updated_at: formatTimestamp(now()),
-        })
-        .where("repository_id", "=", repositoryId)
-        .where("repository_id", "in", (eb) =>
-          eb
-            .selectFrom("repositories")
-            .select("id")
-            .where("workspace_id", "=", workspaceId),
-        )
-        .returningAll()
-        .executeTakeFirst();
-      return row === undefined ? undefined : toStored(row);
+    updateSettings(repositoryId, settings) {
+      return inTransaction(async (trx) => {
+        const timestamp = formatTimestamp(now());
+        const updated = await trx
+          .updateTable("projects")
+          .set({ settings: encodeJson(settings), updated_at: timestamp })
+          .where("repository_id", "=", repositoryId)
+          .where("repository_id", "in", (eb) =>
+            eb
+              .selectFrom("repositories")
+              .select("id")
+              .where("workspace_id", "=", workspaceId),
+          )
+          .returningAll()
+          .executeTakeFirst();
+        if (updated !== undefined) return toStored(updated);
+
+        // No project yet: make one that is switched off. The repository must be one the list shows
+        // (the platform still lists it). Unlike activating, a suspended or removed installation does
+        // not matter: the row is off and only keeps settings, which is also what the settings page
+        // of an unavailable repository promises ("its settings are kept").
+        const repository = await trx
+          .selectFrom("repositories")
+          .select("id")
+          .where("workspace_id", "=", workspaceId)
+          .where("id", "=", repositoryId)
+          .where("active", "=", encodeBoolean(true))
+          .executeTakeFirst();
+        if (repository === undefined) return undefined;
+        const row = await trx
+          .insertInto("projects")
+          .values({
+            id: newId(),
+            repository_id: repositoryId,
+            active: encodeBoolean(false),
+            settings: encodeJson(settings),
+            created_at: timestamp,
+            updated_at: timestamp,
+          })
+          .returningAll()
+          .executeTakeFirstOrThrow();
+        return toStored(row);
+      });
     },
 
     async list() {
