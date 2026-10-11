@@ -251,12 +251,12 @@ make verify            # all of the above, run before every pull request
 
 Or per part:
 
-|             | App (`cd app`)                                            | Runner (`cd runner`)                                     |
-| ----------- | --------------------------------------------------------- | -------------------------------------------------------- |
-| Lint        | `pnpm lint` and `pnpm format:check` (`pnpm format` fixes) | `uv run ruff check .` and `uv run ruff format --check .` |
-| Typecheck   | `pnpm typecheck`                                          | `uv run pyright`                                         |
-| Unit tests  | `pnpm test`                                               | `uv run pytest -m unit`                                  |
-| Integration | `pnpm test:int`                                           | `uv run pytest -m "integration or contract"`             |
+|             | App (`cd app`)                                            | Runner (`cd runner`)                                                       |
+| ----------- | --------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Lint        | `pnpm lint` and `pnpm format:check` (`pnpm format` fixes) | `uv run ruff check . ../fakes` and `uv run ruff format --check . ../fakes` |
+| Typecheck   | `pnpm typecheck`                                          | `uv run pyright`                                                           |
+| Unit tests  | `pnpm test`                                               | `uv run pytest -m unit`                                                    |
+| Integration | `pnpm test:int`                                           | `uv run pytest -m "integration or contract"`                               |
 
 End-to-end tests run against a production build on port 3417 (`E2E_PORT`), next to a fake GitHub on
 a random port (`fakes/github`):

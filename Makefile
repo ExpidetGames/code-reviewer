@@ -28,8 +28,8 @@ lint-app:
 	$(APP) lint
 	$(APP) format:check
 lint-runner:
-	$(RUNNER) run ruff check .
-	$(RUNNER) run ruff format --check .
+	$(RUNNER) run ruff check . ../fakes
+	$(RUNNER) run ruff format --check . ../fakes
 
 typecheck: typecheck-app typecheck-runner
 typecheck-app:
