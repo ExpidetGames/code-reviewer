@@ -237,6 +237,7 @@ def run_one(args: argparse.Namespace) -> int:
                     "promptTokens",
                     "completionTokens",
                     "commentChars",
+                    "status",
                 ]
             )
         writer.writerow(
@@ -253,6 +254,8 @@ def run_one(args: argparse.Namespace) -> int:
                 usage.get("promptTokens"),
                 usage.get("completionTokens"),
                 len(body) if body is not None else "",
+                # Set by hand afterwards for a run that is replaced by a repeat (see the report).
+                "counted" if result.get("ok") and body is not None else "not_counted",
             ]
         )
     log_text = process.stdout + process.stderr

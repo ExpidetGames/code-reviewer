@@ -1,9 +1,9 @@
 # CR-50: fair model comparison, every model under identical conditions
 
-Date: 2026-10-10. Data, blind scoring and recommendation are final (decided by the customer). CR-50 supersedes the hit rates of CR-44 and CR-48 (shared comment state, see "Comparison with CR-44 and CR-48"); their cost data stays valid.
+Date: 2026-10-10. Data, blind scoring and recommendation are final (decided by the customer). CR-50 supersedes the hit rates of CR-44 and CR-48 (shared comment state, see "Comparison with CR-44 and CR-48"); their cost data stays valid, except for the Claude models on the large pull request (a different diff cut: 45.0k against 54.7k input tokens).
 
 Follow-up to [`cr-44-model-comparison.md`](cr-44-model-comparison.md) and the CR-48 addendum
-(`cr-48-model-addendum.md`, branch `CR-48-model-addendum`). In CR-44 and CR-48 every run on a playground pull
+[`cr-48-model-addendum.md`](cr-48-model-addendum.md). In CR-44 and CR-48 every run on a playground pull
 request edited the same persistent review comment, so later models ran with the finding state of earlier ones (and
 DeepSeek V4.1 Flash hit GitHub's comment size limit). Here every run is a first review.
 
@@ -19,7 +19,7 @@ DeepSeek V4.1 Flash hit GitHub's comment size limit). Here every run is a first 
 - **Before every run no bot comment existed on the pull request** (checked through the API, recorded per run,
   86 of 86). 88 comments of our own bot were deleted in total, nothing else was touched.
 - No run was cut for budget. No model failure: 84 of 84 counted runs ended with `ok: true` and a review comment,
-  no comment came near the size limit (largest 7,099 characters), and no log showed "Persistent review state did
+  no comment came near the size limit (largest 7,072 characters, Opus, #2, run 4), and no log showed "Persistent review state did
   not fit".
 - **Blind-scored hit rates (found of 28):** Sonnet 24 (+1 borderline), DeepSeek V4.1 Flash 23, Opus 22 (+2), Haiku 22
   (+2), GPT-5.4 mini 18 (+2), DeepSeek V3.2 14 (+2), Gemini 12. False positives: 4 in 84 runs (Haiku 2, GPT-5.4 mini 2).
@@ -105,7 +105,7 @@ Recorded once. Source: `runner/src/code_reviewer_runner/pr_agent_config.py` (job
 considers reasoning-capable. The logs show "Adding OpenRouter reasoning {'effort': 'medium'}" for `openai/gpt-5.4-mini`,
 `google/gemini-3.8-flash` and `deepseek/deepseek-v3.2`, and no such line for the three Claude models and
 `deepseek/deepseek-v4.1-flash`. The setting is the same for all; the effect is PR-Agent's, not ours. This is
-part of what the models cost in output tokens (Gemini and DeepSeek V4.1 Flash wrote about 11k to 12k output tokens on average on #2).
+part of what the models cost in output tokens (Gemini wrote 11k and DeepSeek V4.1 Flash 12k output tokens on average on #2, up to 20,690 for DeepSeek V4.1 Flash).
 Input token counts also differ per model for the same diff because every vendor counts tokens differently
 (#3: 54,687 for the Claude models, 49,864 Gemini, 37,103 GPT, 38,343 DeepSeek V4.1 Flash, 38,317 to 38,320 for DeepSeek V3.2 in three runs and 48,953 in the pilot run);
 that is not a setting.
@@ -195,10 +195,17 @@ the lost run), DeepSeek V3.2 0.0686, DeepSeek V4.1 Flash 0.0445.
 
 ## Hit rates (CR-50-T04)
 
-Scored blind: a separate scorer read the 84 anonymous comments in `index.csv` order without model names, run
-order or cost, and recorded a verdict per comment and planted problem (`found`, `borderline`, `missed`) plus,
+Scored blind: a separate scorer read the 84 anonymous comments in `index.csv` order without model names or
+cost, and recorded a verdict per comment and planted problem (`found`, `borderline`, `missed`) plus,
 per comment, the number of false positives and of extra valid findings. The mapping was applied only after
-the scoring was complete. Possible per cell: small 2 problems x 4 runs = 8, medium 3 x 4 = 12, large 2 x 4 = 8,
+the scoring was complete.
+
+**Who scored, and limits of the blindness.** The scorer was an AI agent (Claude Sonnet 5.5), not a human. It worked
+from the scoring key (the private list of planted problems) and never saw the mapping. Two caveats: (1) the scorer
+is a Claude model, and Claude models rank high in this comparison, so a bias in favour of Claude-style
+wording cannot be ruled out; no second scorer was used to check it. (2) The anonymised comments still carried
+PR-Agent's hidden state block with timestamps and the head commit SHA. That reveals when a run happened (and so
+roughly its position in the run order), not which model wrote it. Model names were scrubbed, and none appeared. Possible per cell: small 2 problems x 4 runs = 8, medium 3 x 4 = 12, large 2 x 4 = 8,
 total 28. "(+n)" is the number of borderline calls on top of the found ones; they are not added to the totals.
 The table is ordered by found, then borderline.
 
@@ -313,7 +320,7 @@ earlier advantage from carried-over findings, but this is an interpretation and 
 
 ## Recommendation (CR-50-T06)
 
-Decided by the customer on 2026-10-11 on the basis of this report. CR-50 supersedes the hit rates of CR-44 and CR-48 (shared comment state, see "Comparison with CR-44 and CR-48"); their cost data stays valid.
+Decided by the customer on 2026-10-11 on the basis of this report. CR-50 supersedes the hit rates of CR-44 and CR-48 (shared comment state, see "Comparison with CR-44 and CR-48"); their cost data stays valid, except for the Claude models on the large pull request (a different diff cut: 45.0k against 54.7k input tokens).
 
 | Role | Model id | Why |
 |---|---|---|
@@ -327,7 +334,7 @@ Decided by the customer on 2026-10-11 on the basis of this report. CR-50 superse
 
 - **Model failures: none.** 84 of 84 counted runs ended with `ok: true` and a review comment. No
   `llm_output_invalid`, no timeout, no "Persistent review state did not fit" warning (searched in the runner output
-  of all 86 runs), and no comment above 7,099 characters (the limit PR-Agent publishes is 65,000). DeepSeek V4.1
+  of all 86 runs), and no comment above 7,072 characters (the limit PR-Agent publishes is 65,000). DeepSeek V4.1
   Flash, which hit the limit in CR-48 because of 93 accumulated findings, produced normal comments (2,592 to 6,972
   characters) when it starts from an empty comment.
 - **Two paid or planned runs were lost to a network outage on the developer machine** at about 20:31 local time
@@ -351,7 +358,7 @@ Decided by the customer on 2026-10-11 on the basis of this report. CR-50 superse
   0.012, Haiku 0.006, DeepSeek V4.1 Flash 0.003. Only the two Anthropic models above Haiku exceed the customer's
   0.10 USD per review on the large pull request.
 - Slowest: DeepSeek V3.2 (129 s average, up to 212 s) and DeepSeek V4.1 Flash (63 s average, up to 256 s when it
-  wrote 5.5k to 12k tokens). Fastest: Haiku and Sonnet (22 s average).
+  wrote 5.5k tokens on #3 and up to 20.7k on #2). Fastest: Haiku and Sonnet (22 s average).
 - Since all models now get the whole diff of #3 (37k PR-Agent tokens), the costs of the large pull request are
   higher than in CR-44 for Claude (54.7k input tokens, as already seen in CR-48 for Opus); CR-44's 45.0k came from
   an older cut of the diff.
@@ -377,6 +384,17 @@ cd runner
 .venv/bin/python ../docs/spike/data/cr-50/fair_runs.py run --model anthropic/claude-haiku-5.5 --pr 3 --round 1 \
   --out /path/to/out --blind /path/to/blind --mapping /path/to/mapping.csv
 ```
+
+A run that has to be repeated after an outage (the "3b" runs) uses the same command with a label suffix, because
+the label of the first attempt is already taken:
+
+```
+.venv/bin/python ../docs/spike/data/cr-50/fair_runs.py run --model anthropic/claude-sonnet-5.5 --pr 3 --round 3 \
+  --suffix b --out /path/to/out --blind /path/to/blind --mapping /path/to/mapping.csv
+```
+
+The mapping has a `status` column (`counted`, or `not_counted` for a failed run and for a run without a saved
+comment text); for the two replaced runs it was set by hand to say which repeat replaces them.
 
 `run` deletes the bot's comments on the pull request, checks that none is left, runs `manual_review.py` with
 `--record-dir`, and writes the anonymous copy and the mapping row. The records stay outside the repository.
