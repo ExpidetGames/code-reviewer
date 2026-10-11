@@ -54,7 +54,7 @@ function isPlausibleRepositoryId(value: unknown): value is string {
   return (
     typeof value === "string" &&
     value.trim() !== "" &&
-    value.length < MAX_ID_LENGTH
+    value.length <= MAX_ID_LENGTH
   );
 }
 
