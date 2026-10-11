@@ -1,0 +1,20 @@
+{
+  "action": "deleted",
+  "installation": {
+    "id": 4242,
+    "node_id": "MDIzOkludGVncmF0aW9uSW5zdGFsbGF0aW9uNDI0Mg==",
+    "account": {
+      "login": "acme",
+      "id": 5001,
+      "type": "Organization"
+    },
+    "app_id": 424242,
+    "repository_selection": "selected"
+  },
+  "repositories": [],
+  "sender": {
+    "login": "octocat",
+    "id": 583231,
+    "type": "User"
+  }
+}

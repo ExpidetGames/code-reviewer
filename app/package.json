@@ -1,0 +1,47 @@
+{
+  "name": "code-reviewer-app",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "format": "prettier --write . ../fakes",
+    "format:check": "prettier --check . ../fakes",
+    "typecheck": "next typegen && tsc --noEmit --pretty false",
+    "test": "vitest run --project unit",
+    "test:watch": "vitest --project unit",
+    "test:int": "vitest run --project integration",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "better-auth": "1.7.7",
+    "better-sqlite3": "^13.0.3",
+    "kysely": "^0.29.6",
+    "next": "16.4.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "server-only": "^0.0.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.0",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^24.19.2",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitest/eslint-plugin": "^1.6.27",
+    "ajv": "^8.20.0",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.0",
+    "eslint-plugin-playwright": "^2.12.1",
+    "prettier": "^3.9.10",
+    "typescript": "^5",
+    "vitest": "^5.0.3",
+    "yaml": "^2.9.1"
+  },
+  "packageManager": "pnpm@10.17.0",
+  "engines": {
+    "node": ">=24"
+  }
+}
