@@ -1,0 +1,502 @@
+"use client";
+// The review settings form, for the global defaults and for one project. Every field shows the value
+// that is in force and where it comes from. Changing a field sets it for this layer; "Use default"
+// takes it back so the layer inherits it again. A save replaces the whole set of the layer. Problems
+// are checked before sending (the same validation the server runs, which checks again) and shown as
+// sentences next to the field; the estimated cost updates while the person types and warns above the
+// limit without blocking anything.
+import {
+  useId,
+  useMemo,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
+import { REVIEW_COMMANDS } from "../../integrations/types.ts";
+import { Button } from "../../ui/button.tsx";
+import { estimateReviewCost } from "../cost.ts";
+import { MODEL_PRICES } from "../model-pricing.ts";
+import {
+  REVIEW_SETTING_FIELDS,
+  REVIEW_SETTING_LIMITS,
+  type ReviewSettingField,
+} from "../settings.ts";
+import {
+  browserGlobalSettingsApi,
+  browserProjectSettingsApi,
+  type SettingsApi,
+} from "./api.ts";
+import { CostSummary } from "./cost-summary.tsx";
+import { modelFromAnswer, type SettingsFormModel } from "./form-model.ts";
+import {
+  buildPatch,
+  initialFormState,
+  previewSettings,
+  resetField,
+  setBoolean,
+  setCommand,
+  setText,
+  type FormState,
+} from "./form-state.ts";
+import { describeIssue, describeSaveFailure } from "./messages.ts";
+import type { RequestIssue } from "../../ui/json-request.ts";
+
+type Errors = Partial<Record<string, string>>;
+type ControlIds = {
+  id: string;
+  describedBy: string | undefined;
+  invalid: boolean;
+  /**
+   * Where the value comes from and the button that takes an own value back. A field with a label
+   * shows them in its head; a field without one (a checkbox, whose label is part of its control)
+   * places them next to the control's own text, so they never float away from it.
+   */
+  origin: ReactNode;
+};
+
+// The settings accept a fallback model, but the app does not send it to the runner yet (lead
+// decision for the MVP, src/review-settings/README.md), so the form says so instead of promising it.
+export const FALLBACK_MODEL_HINT =
+  "Stored but not used yet: reviews do not switch to this model when the main model fails. Leave empty for none.";
+
+// Plain-language hints for the two fields people ask about most.
+export const MODEL_HINT =
+  "The AI model that writes the review. Pick one from the list or type the name of any model OpenRouter offers. Smaller models cost less per review, larger ones usually review more thoroughly.";
+
+export function tokenBudgetHint(): string {
+  const { min, max } = REVIEW_SETTING_LIMITS.maxTokens;
+  return `How much of a pull request the model can read in one go. A token is about three quarters of a word, so a bigger budget lets it see more of a large change, but costs more. Between ${min.toLocaleString("en-US")} and ${max.toLocaleString("en-US")}.`;
+}
+
+/**
+ * Splits the problems of a save into those that belong to a field of the form and those that do not
+ * (a problem with the settings as a whole, a field this version does not know): the second kind is
+ * shown with the message at the foot of the form, never dropped.
+ */
+function splitIssues(issues: readonly RequestIssue[]): {
+  fieldErrors: Errors;
+  general: string[];
+} {
+  const fieldErrors: Errors = {};
+  const general: string[] = [];
+  for (const issue of issues) {
+    const text = describeIssue(issue.field, issue.code);
+    if ((REVIEW_SETTING_FIELDS as readonly string[]).includes(issue.field))
+      fieldErrors[issue.field] = text;
+    else general.push(text);
+  }
+  return { fieldErrors, general };
+}
+
+const SAVED_TEXT =
+  "Saved. Reviews that start from now on use these values; a review that is already running keeps the values it started with.";
+
+function sourceText(
+  model: SettingsFormModel,
+  state: FormState,
+  field: ReviewSettingField,
+): string {
+  if (state.overridden[field])
+    return model.mode === "project"
+      ? "Set for this project"
+      : "Changed from the built-in value";
+  if (model.mode === "global") return "Built-in value";
+  return model.sources[field] === "global"
+    ? "Global default"
+    : "Built-in value";
+}
+
+export function SettingsForm({
+  initial,
+  repositoryId,
+  api: apiOverride,
+}: {
+  initial: SettingsFormModel;
+  /** The repository of the project being edited; required for a project form. */
+  repositoryId?: string;
+  /** Only tests pass this: a server component cannot hand functions to this client component. */
+  api?: SettingsApi;
+}) {
+  const api =
+    apiOverride ??
+    (initial.mode === "project" && repositoryId !== undefined
+      ? browserProjectSettingsApi(repositoryId)
+      : browserGlobalSettingsApi);
+  const prefix = useId();
+  const [model, setModel] = useState(initial);
+  const [state, setState] = useState(() => initialFormState(initial));
+  const [errors, setErrors] = useState<Errors>({});
+  const [formError, setFormError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [confirmingReset, setConfirmingReset] = useState(false);
+
+  const preview = useMemo(() => previewSettings(model, state), [model, state]);
+  const cost = preview === null ? null : estimateReviewCost(preview);
+  const resetLabel =
+    model.mode === "project" ? "Use default" : "Use built-in value";
+
+  // A change takes the problem of its field away: the estimate already works with the new value.
+  function edit(next: FormState, changed: ReviewSettingField) {
+    setState(next);
+    setSaved(false);
+    setErrors((current) => {
+      if (current[changed] === undefined) return current;
+      const rest = { ...current };
+      delete rest[changed];
+      return rest;
+    });
+  }
+
+  function adopt(answer: unknown): boolean {
+    const next = modelFromAnswer(model.mode, answer);
+    if (next === null) return false;
+    setModel(next);
+    setState(initialFormState(next));
+    setErrors({});
+    return true;
+  }
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (busy) return;
+    setSaved(false);
+    setFormError(null);
+    const built = buildPatch(state);
+    if (!built.ok) {
+      setErrors(splitIssues(built.issues).fieldErrors);
+      setFormError(describeSaveFailure("REVIEW_SETTINGS_INVALID"));
+      return;
+    }
+    setErrors({});
+    setBusy(true);
+    const result = await api.save(built.patch);
+    setBusy(false);
+    if (!result.ok) {
+      const { fieldErrors, general } = splitIssues(result.issues);
+      setErrors(fieldErrors);
+      setFormError([describeSaveFailure(result.code), ...general].join(" "));
+      return;
+    }
+    if (!adopt(result.data))
+      setFormError(describeSaveFailure("UNEXPECTED_RESPONSE"));
+    else setSaved(true);
+  }
+
+  async function resetAll() {
+    setConfirmingReset(false);
+    if (api.reset === undefined || busy) return;
+    setSaved(false);
+    setFormError(null);
+    setBusy(true);
+    const result = await api.reset();
+    setBusy(false);
+    if (!result.ok) {
+      setFormError(describeSaveFailure(result.code));
+      return;
+    }
+    if (!adopt(result.data))
+      setFormError(describeSaveFailure("UNEXPECTED_RESPONSE"));
+    else setSaved(true);
+  }
+
+  function field(
+    name: ReviewSettingField,
+    label: string | null,
+    control: (ids: ControlIds) => ReactNode,
+    hint?: string,
+    /** What the reset button names; defaults to the label. Required when there is no label. */
+    resetFor: string | undefined = label ?? undefined,
+  ) {
+    const id = `${prefix}-${name}`;
+    const error = errors[name];
+    const describedBy =
+      [
+        hint !== undefined ? `${id}-hint` : null,
+        error !== undefined ? `${id}-error` : null,
+      ]
+        .filter(Boolean)
+        .join(" ") || undefined;
+    const origin = (
+      <>
+        <span className="badge badge-source">
+          {sourceText(model, state, name)}
+        </span>
+        {state.overridden[name] ? (
+          <button
+            type="button"
+            className="link-button"
+            aria-label={`${resetLabel} for ${resetFor ?? "this setting"}`}
+            onClick={() => edit(resetField(state, name, model), name)}
+          >
+            {resetLabel}
+          </button>
+        ) : null}
+      </>
+    );
+    return (
+      <div className="field" data-field={name}>
+        {label !== null ? (
+          <div className="field-head">
+            <label htmlFor={id}>{label}</label>
+            {origin}
+          </div>
+        ) : null}
+        {control({ id, describedBy, invalid: error !== undefined, origin })}
+        {hint !== undefined ? (
+          <p id={`${id}-hint`} className="muted small">
+            {hint}
+          </p>
+        ) : null}
+        {error !== undefined ? (
+          <p id={`${id}-error`} className="field-error">
+            {error}
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+
+  const textInput = (
+    name: "model" | "fallbackModel" | "maxFindings" | "maxTokens",
+    { id, describedBy, invalid }: ControlIds,
+    extra: {
+      list?: string;
+      inputMode?: "numeric";
+      placeholder?: string;
+    } = {},
+  ) => (
+    <input
+      id={id}
+      type="text"
+      autoComplete="off"
+      spellCheck={false}
+      value={state.values[name]}
+      aria-invalid={invalid}
+      aria-describedby={describedBy}
+      onChange={(event) => edit(setText(state, name, event.target.value), name)}
+      {...extra}
+    />
+  );
+
+  const checkbox = (
+    name:
+      | "largePrChunking"
+      | "inlineKeyIssues"
+      | "autoReviewOnOpen"
+      | "autoReviewOnPush",
+    label: string,
+    hint: string,
+  ) =>
+    field(
+      name,
+      null,
+      ({ id, describedBy, origin }) => (
+        <div className="check-line">
+          <label className="check" htmlFor={id}>
+            <input
+              id={id}
+              type="checkbox"
+              checked={state.values[name]}
+              aria-describedby={describedBy}
+              onChange={(event) =>
+                edit(setBoolean(state, name, event.target.checked), name)
+              }
+            />
+            {label}
+          </label>
+          {origin}
+        </div>
+      ),
+      hint,
+      label,
+    );
+
+  const datalistId = `${prefix}-models`;
+  const instructionsLength = state.values.extraInstructions.length;
+  return (
+    <form
+      className="settings-form"
+      onSubmit={(event) => void submit(event)}
+      noValidate
+    >
+      <datalist id={datalistId}>
+        {Object.keys(MODEL_PRICES).map((name) => (
+          <option key={name} value={name} />
+        ))}
+      </datalist>
+
+      <fieldset disabled={busy}>
+        <legend>Model</legend>
+        {field(
+          "model",
+          "Model",
+          (ids) => textInput("model", ids, { list: datalistId }),
+          MODEL_HINT,
+        )}
+        {field(
+          "fallbackModel",
+          "Fallback model",
+          (ids) =>
+            textInput("fallbackModel", ids, {
+              list: datalistId,
+              placeholder: "None",
+            }),
+          FALLBACK_MODEL_HINT,
+        )}
+        {field(
+          "maxTokens",
+          "Token budget",
+          (ids) => textInput("maxTokens", ids, { inputMode: "numeric" }),
+          tokenBudgetHint(),
+        )}
+        <CostSummary cost={cost} />
+      </fieldset>
+
+      <fieldset disabled={busy}>
+        <legend>Review</legend>
+        {field(
+          "maxFindings",
+          "Most findings per review",
+          (ids) => textInput("maxFindings", ids, { inputMode: "numeric" }),
+          `${String(REVIEW_SETTING_LIMITS.maxFindings.min)} to ${String(REVIEW_SETTING_LIMITS.maxFindings.max)}.`,
+        )}
+        {checkbox(
+          "largePrChunking",
+          "Review a large pull request in chunks",
+          "Otherwise files that do not fit the token budget are left out.",
+        )}
+        {checkbox(
+          "inlineKeyIssues",
+          "Also post every finding as an inline comment",
+          "On the line the finding is about.",
+        )}
+        {field(
+          "extraInstructions",
+          "Project rules",
+          ({ id, describedBy, invalid }) => (
+            <textarea
+              id={id}
+              rows={6}
+              value={state.values.extraInstructions}
+              aria-invalid={invalid}
+              aria-describedby={describedBy}
+              onChange={(event) =>
+                edit(
+                  setText(state, "extraInstructions", event.target.value),
+                  "extraInstructions",
+                )
+              }
+            />
+          ),
+          `Free text added to every review prompt (${instructionsLength.toLocaleString("en-US")} of ${REVIEW_SETTING_LIMITS.extraInstructionsMaxChars.toLocaleString("en-US")} characters).`,
+        )}
+      </fieldset>
+
+      <fieldset disabled={busy}>
+        <legend>When to review</legend>
+        {checkbox(
+          "autoReviewOnOpen",
+          "Review when a pull request is opened, reopened or marked ready",
+          "Draft pull requests wait until they are ready.",
+        )}
+        {checkbox(
+          "autoReviewOnPush",
+          "Review again when commits are pushed",
+          "A short pause lets several pushes count as one.",
+        )}
+        {field(
+          "allowedCommands",
+          null,
+          ({ id, describedBy, origin }) => (
+            <div
+              role="group"
+              aria-labelledby={`${id}-label`}
+              aria-describedby={describedBy}
+              id={id}
+            >
+              <div className="check-line">
+                <span id={`${id}-label`} className="field-label">
+                  Comment commands people may use
+                </span>
+                {origin}
+              </div>
+              <div className="check-row">
+                {REVIEW_COMMANDS.map((command) => (
+                  <label key={command} className="check">
+                    <input
+                      type="checkbox"
+                      checked={state.values.allowedCommands.includes(command)}
+                      onChange={(event) =>
+                        edit(
+                          setCommand(state, command, event.target.checked),
+                          "allowedCommands",
+                        )
+                      }
+                    />
+                    /{command}
+                  </label>
+                ))}
+              </div>
+            </div>
+          ),
+          undefined,
+          "comment commands",
+        )}
+      </fieldset>
+
+      {formError !== null ? (
+        <p role="alert" className="alert alert-error">
+          {formError}
+        </p>
+      ) : null}
+      {saved ? (
+        <p role="status" className="alert alert-success">
+          {SAVED_TEXT}
+        </p>
+      ) : null}
+
+      <div className="form-actions">
+        <Button type="submit" disabled={busy}>
+          {busy
+            ? "Saving..."
+            : model.mode === "project"
+              ? "Save project settings"
+              : "Save defaults"}
+        </Button>
+        {api.reset !== undefined && !confirmingReset ? (
+          <Button
+            variant="ghost"
+            disabled={busy}
+            onClick={() => setConfirmingReset(true)}
+          >
+            Use the defaults for everything
+          </Button>
+        ) : null}
+        {api.reset !== undefined && confirmingReset ? (
+          <span className="confirm" role="group" aria-label="Confirm reset">
+            <span>
+              Remove every value of this project and follow the defaults?
+            </span>
+            <Button
+              variant="destructive"
+              disabled={busy}
+              onClick={() => void resetAll()}
+            >
+              Yes, use the defaults
+            </Button>
+            <Button variant="ghost" onClick={() => setConfirmingReset(false)}>
+              Cancel
+            </Button>
+          </span>
+        ) : null}
+        {model.lastSaved !== null ? (
+          <span className="muted small">
+            Last saved {model.lastSaved.at.slice(0, 16).replace("T", " ")} UTC
+            {model.lastSaved.by !== null ? ` by ${model.lastSaved.by}` : ""}.
+          </span>
+        ) : null}
+      </div>
+    </form>
+  );
+}

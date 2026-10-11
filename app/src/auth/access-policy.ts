@@ -29,6 +29,8 @@ export type SessionUser = {
   githubLogin: string;
   /** The stable numeric GitHub id of the account (from its `accounts` row), as text. */
   githubId: string;
+  /** The avatar address from the GitHub profile (refreshed at every sign in), if there is one. For display only. */
+  image?: string | null;
   /** ISO 8601 time of the last successful organization check, or null when there was none. */
   orgCheckedAt: string | null;
   /** The organization that check was made for, or null. */

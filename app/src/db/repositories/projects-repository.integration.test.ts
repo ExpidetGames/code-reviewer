@@ -370,6 +370,37 @@ describe("looking a project up", () => {
   });
 });
 
+describe("finding one repository with its project", () => {
+  it("returns the same entry the list has for it", async () => {
+    const { projects, first } = await setup();
+    await projects.activate(first.id);
+
+    const found = await projects.find(first.id);
+
+    expect(found).toEqual(
+      (await projects.list()).find((entry) => entry.repository.id === first.id),
+    );
+    expect(found).toMatchObject({ status: "active" });
+  });
+
+  it("returns an entry without a project for a repository that was never activated", async () => {
+    const { projects, second } = await setup();
+
+    expect(await projects.find(second.id)).toMatchObject({
+      project: null,
+      status: "inactive",
+    });
+  });
+
+  it("returns nothing for an unknown id and for a repository that disappeared and never had a project", async () => {
+    const { projects, repositories, integration, second } = await setup();
+    await repositories.deactivateAll(integration.id);
+
+    expect(await projects.find("no-such-repository")).toBeUndefined();
+    expect(await projects.find(second.id)).toBeUndefined();
+  });
+});
+
 describe("listing the repositories with their projects", () => {
   it("shows every available repository with its status, ordered by name", async () => {
     const { projects, first, integration } = await setup();

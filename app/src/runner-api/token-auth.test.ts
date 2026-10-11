@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   bearerTokenOf,
   configuredRunnerToken,
+  runnerTokenProblem,
   tokensMatch,
 } from "./token-auth.ts";
 
@@ -91,6 +92,34 @@ describe("a configured token that is too weak", () => {
     expect(configuredRunnerToken({ RUNNER_TOKEN: ` ${token}\n` })).toBe(token);
     expect(configuredRunnerToken({ RUNNER_TOKEN: "  " })).toBeUndefined();
     expect(configuredRunnerToken({})).toBeUndefined();
+  });
+});
+
+describe("a configured token the runner would refuse", () => {
+  const good = "c".repeat(40);
+
+  // CR-51 (the runner refuses white space inside its token, settings.py)
+  it.each([
+    ["a space", `${good.slice(0, 20)} ${good.slice(20)}`],
+    ["a tab", `${good.slice(0, 20)}\t${good.slice(20)}`],
+    ["a line break", `${good.slice(0, 20)}\n${good.slice(20)}`],
+    ["a control character", `${good.slice(0, 20)}\u0007${good.slice(20)}`],
+    ["a no-break space", `${good.slice(0, 20)}\u00a0${good.slice(20)}`],
+  ])("is not used when it holds %s", (_name, token) => {
+    expect(configuredRunnerToken({ RUNNER_TOKEN: token })).toBeUndefined();
+    expect(runnerTokenProblem({ RUNNER_TOKEN: token })).toBe(
+      "must not contain white space or control characters",
+    );
+  });
+
+  it("names the one problem of a token, or none", () => {
+    expect(runnerTokenProblem({})).toBe("is not set");
+    expect(runnerTokenProblem({ RUNNER_TOKEN: "  \n" })).toBe("is not set");
+    expect(runnerTokenProblem({ RUNNER_TOKEN: "a".repeat(31) })).toBe(
+      "must be at least 32 characters long",
+    );
+    expect(runnerTokenProblem({ RUNNER_TOKEN: `${good}\n` })).toBeNull();
+    expect(runnerTokenProblem({ RUNNER_TOKEN: "é".repeat(40) })).toBeNull();
   });
 });
 
