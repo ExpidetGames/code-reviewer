@@ -42,7 +42,11 @@ cp "$repo_root/compose.yml" "$workdir/compose.yml"
 
 # The settings of the stack: dummies that point nowhere. Every variable the compose files read is
 # unset first (the list comes from the files themselves, see lib.sh), and the ones the stack needs
-# are exported below, so values from the caller's shell cannot leak in.
+# are exported below, so values from the caller's shell cannot leak in. Docker Compose's own switches
+# that could change which files or services it uses are unset as well. Not touched, on purpose: the
+# settings that tell the docker client which daemon to talk to (DOCKER_HOST, DOCKER_CONTEXT,
+# DOCKER_CONFIG, DOCKER_TLS_VERIFY, DOCKER_CERT_PATH); without them the script could not reach Docker.
+unset COMPOSE_FILE COMPOSE_PROFILES COMPOSE_ENV_FILES
 unset_compose_variables "$workdir/compose.yml" "$here/compose.fake-job.yml" "$repo_root/compose.coolify.yml"
 export APP_IMAGE=$app_image
 export RUNNER_IMAGE=$runner_image
