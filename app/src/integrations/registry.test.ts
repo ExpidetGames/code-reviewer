@@ -1,11 +1,13 @@
 // Pins down how a stored integration type is turned into its provider, and that every way of not
 // finding one ends in a stable error code.
+import { generateKeyPairSync } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { fakeIntegrationProvider } from "../test-support/fake-integration-provider.ts";
 import { IntegrationError } from "./errors.ts";
 import {
   createDefaultIntegrationRegistry,
   createIntegrationRegistry,
+  findGithubAppConfigProblem,
   integrationRegistry,
 } from "./registry.ts";
 import { fakeIntegration } from "../test-support/fake-integration-provider.ts";
@@ -105,6 +107,51 @@ describe("the default registry", () => {
     expect(failure).toMatchObject({
       code: "GITHUB_APP_CONFIG_INVALID",
       variables: expect.arrayContaining(["GITHUB_APP_ID", "GITHUB_APP_SLUG"]),
+    });
+  });
+});
+
+describe("checking the GitHub App settings through the registry module", () => {
+  it("reports nothing for complete settings", () => {
+    const { privateKey } = generateKeyPairSync("rsa", {
+      modulusLength: 2048,
+      privateKeyEncoding: { type: "pkcs1", format: "pem" },
+      publicKeyEncoding: { type: "spki", format: "pem" },
+    });
+
+    expect(
+      findGithubAppConfigProblem({
+        GITHUB_APP_ID: "1",
+        GITHUB_APP_SLUG: "code-reviewer",
+        GITHUB_APP_WEBHOOK_SECRET: "secret-value",
+        GITHUB_APP_PRIVATE_KEY: privateKey,
+      }),
+    ).toBeNull();
+  });
+
+  it("returns the kind of problem and the variable names, never a value", () => {
+    const problem = findGithubAppConfigProblem({
+      GITHUB_APP_ID: "1",
+      GITHUB_APP_SLUG: "code-reviewer",
+      GITHUB_APP_WEBHOOK_SECRET: "secret-value",
+      GITHUB_APP_PRIVATE_KEY: "not-a-key-value",
+    });
+
+    expect(problem).toEqual({
+      kind: "invalid",
+      variables: ["GITHUB_APP_PRIVATE_KEY"],
+    });
+  });
+
+  it("returns the missing variables when settings are absent", () => {
+    expect(findGithubAppConfigProblem({})).toEqual({
+      kind: "missing",
+      variables: [
+        "GITHUB_APP_ID",
+        "GITHUB_APP_SLUG",
+        "GITHUB_APP_WEBHOOK_SECRET",
+        "GITHUB_APP_PRIVATE_KEY (or GITHUB_APP_PRIVATE_KEY_PATH)",
+      ],
     });
   });
 });
