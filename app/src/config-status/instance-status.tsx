@@ -16,7 +16,7 @@ export function InstanceStatus({ status }: { status: ConfigStatus }) {
             </>
           ) : (
             <>
-              {githubApp.problem === "missing" ? "Missing" : "Not valid"}:{" "}
+              {githubApp.kind === "missing" ? "Missing" : "Not valid"}:{" "}
               <span className="mono">{githubApp.variables.join(", ")}</span>
             </>
           )}

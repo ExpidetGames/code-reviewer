@@ -4,16 +4,13 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-  testGithubAppEnv,
-  testAppKeys,
-} from "../../../test-support/github-app.ts";
-import { createTestDirectory } from "../../../test-support/test-database.ts";
+import { testGithubAppEnv, testAppKeys } from "../test-support/github-app.ts";
+import { createTestDirectory } from "../test-support/test-database.ts";
 import {
   describeGithubAppSetup,
   forgetGithubAppSetup,
   SETUP_CACHE_MS,
-} from "./setup-status.ts";
+} from "./registry.ts";
 
 beforeEach(forgetGithubAppSetup);
 afterEach(forgetGithubAppSetup);
@@ -56,7 +53,7 @@ describe("the remembered check of the GitHub App settings", () => {
 
     expect(describeGithubAppSetup(env, () => now)).toMatchObject({
       configured: false,
-      problem: "invalid",
+      kind: "invalid",
       variables: ["GITHUB_APP_PRIVATE_KEY_PATH"],
     });
   });
@@ -74,7 +71,7 @@ describe("the remembered check of the GitHub App settings", () => {
 
     expect(result).toMatchObject({
       configured: false,
-      problem: "missing",
+      kind: "missing",
       variables: ["GITHUB_APP_ID"],
     });
   });
