@@ -90,6 +90,7 @@ PROTECTED_SETTINGS = (
     "litellm.force_streaming_custom_llm_provider",
     "litellm.force_streaming_api_base_substrings",
     "pr_reviewer.final_update_message",
+    "pr_description.final_update_message",
     "pr_reviewer.enable_review_labels_security",
     "pr_reviewer.enable_review_labels_effort",
 )

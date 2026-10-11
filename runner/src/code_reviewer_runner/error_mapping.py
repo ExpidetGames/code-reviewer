@@ -49,8 +49,13 @@ _GITHUB_STATUS = {
     422: ErrorCode.GIT_UNPROCESSABLE,
 }
 _ATTEMPT_ERROR = re.compile(r"Attempts:.*?\b([A-Za-z]*(?:Error|Timeout|Exception))\b")
+# The wording of PR-Agent 0.47.0 for an answer that is no usable output: the tools raise a
+# FallbackEligibleError (a ValueError that is also used for "the diff does not fit", so the class
+# alone says nothing) and only the text tells the cases apart.
 _OUTPUT_INVALID = re.compile(
-    r"Failed to parse|schema validation|invalid YAML|Failed to load YAML", re.I
+    r"Failed to parse|schema validation|invalid YAML|Failed to load YAML"
+    r"|did not contain a non-empty review mapping|No valid review output was produced",
+    re.I,
 )
 _MODEL_UNKNOWN = re.compile(r"Ensure \S+ is defined in MAX_TOKENS")
 

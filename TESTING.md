@@ -38,15 +38,15 @@ it. Do not document planned things as if they existed in READMEs or PR descripti
 
 | Level | Tool | Runs on | What belongs here | Status |
 |---|---|---|---|---|
-| App unit | Vitest, project `unit` | host | Pure logic: signature verification, event filtering, job state machine, backoff, comment formatting, input validation, React components. Collaborators are fakes. No database, no network. | exists |
+| App unit | Vitest, project `unit` | host | Pure logic: signature verification, event filtering, job state machine, backoff, comment formatting, input validation, React components (a component test starts with `// @vitest-environment jsdom` and uses Testing Library). Collaborators are fakes. No database, no network. | exists |
 | App integration | Vitest, project `integration` | host or Docker stack | Real SQLite file plus real Kysely repositories; route handlers driven through the real handler (webhook, runner API, auth) including refusals; GitHub client code against the GitHub fake. | exists (database layer, sign in and access guard against the fake GitHub login, GitHub App client and sync against the GitHub fake, the GitHub App webhook route, the runner API routes claim, heartbeat and complete) |
 | Contract | Vitest in `app/integration-tests/compatibility/`, pytest in `runner/tests/contract/` | host | Pins the runner HTTP API and the GitHub webhook payload subset. One machine-readable source in `contracts/` is validated by both sides. | exists (runner API v1: the app checks its real answers and requests against `contracts/runner-api.v1.json`, the runner checks the examples and rules; webhook payload subset is covered by its own contract test in the GitHub App provider) |
 | Runner unit | pytest, marker `unit` | host | Job loop with a fake clock, heartbeat, lease loss, backoff, shutdown, PR-Agent command and env construction, output parsing, log truncation, secret redaction. Subprocess boundary replaced by a fake. | exists (job loop, API client, reporting, settings, platform table) |
 | Runner integration | pytest, marker `integration` | host or Docker stack | Real processes and real loopback sockets: the real loop against the app or a fake runner API, with the fake PR-Agent executable as a real subprocess (exit codes, timeouts, kill). | exists (entry points; the job runner as a real process with `handle_request` replaced by a double; the job loop with real processes (`fake_job.py`), a real loopback server that checks every request against the contract (`fake_app.py`), real signals, and together with the job runner double) |
-| Engine smoke | pytest, marker `engine` | Docker stack, nightly and release PRs | The real, pinned PR-Agent against the GitHub fake and the LLM fake. Asserts the shape of what was posted, never review quality. Deselected by default. | marker exists, no tests yet |
+| Engine | pytest, marker `engine` | host (loopback only), nightly, runner PRs and PRs into main | The real, pinned PR-Agent through the real job entry point (`code-reviewer-run-job`, a process per job) against a fake GitHub and a fake OpenAI-compatible LLM, both loopback servers started by the tests. Asserts the shape and the place of what was posted, the result JSON, the error codes and that no secret or request leaves the loopback fakes; never review quality. Deselected by default. | exists |
 | Image smoke | Bash scripts `docker/smoke/app.sh` and `docker/smoke/runner.sh` | Docker daemon (host or CI) | The built container images: the app starts as a non-root user with a fresh volume, turns a visitor without a session away from the start page, answers `/api/health`, creates and migrates the database; the runner answers `--version`; neither image holds env files, git data, keys or secrets. Fails without Docker, never skips. | exists |
 | Compose smoke | Bash script `docker/smoke/compose.sh`, plus `app/src/ci/compose.test.ts` (unit, on the files) | Docker daemon (host or CI) | The Docker Compose stack with dummy settings: the settings are validated before a container exists, the runner does not start while the app is unhealthy, the stack becomes healthy and the runner's job loop starts and polls the app without a failure, the database survives `down` and `up`, an app process that exits by itself restarts and the runner keeps running, a stop while a (fake) review runs ends with the runner reporting it, a backup of the running stack restores into an empty data volume and the app is healthy again. Fails without Docker, never skips. | exists |
-| E2E | Playwright, chromium | production build (`next build` and `next start`) next to the fake GitHub, later the Docker stack | User-visible flows. At most about 8 `@smoke` journeys. | exists (start page guard, sign in and sign out, refused account) |
+| E2E | Playwright, chromium | production build (`next build` and `next start`) next to the fake GitHub, later the Docker stack | User-visible flows. At most about 8 `@smoke` journeys. | exists (start page guard, sign in and sign out, refused account, the app frame: three places, sign out, narrow window, the project list and settings: sync, switch on, save, reload, cost warning, global default, the runs pages: a delivery from the fake GitHub, waiting, running, succeeded without a reload, filter, a failed run explained) |
 | Manual | none | a developer machine | Real PR-Agent against a real model on a sandbox repository before a release. The result goes into the PR description. Never in CI. | n/a |
 
 Unit means no database, no real process and no outside network. The one exception is the network
@@ -84,14 +84,15 @@ app/                               Next.js project (pnpm)
   src/ci/                          structure tests of the CI and publish workflows and of the Dockerfiles, and the scan of all tracked files for keys and tokens
   integration-tests/               cross-owner integration tests (exists: webhooks/)
     http/ webhooks/ workflows/ compatibility/ support/   closed list; support/ holds no tests
-  e2e/<area>/<journey>.e2e.ts      Playwright; areas: app/, auth/, reviews/, jobs/, settings/
-  e2e/helpers/                     shared by journeys: ports and dummy credentials, helpers for the fake GitHub
+  e2e/<area>/<journey>.e2e.ts      Playwright; areas: app/, auth/, reviews/, jobs/, runs/, settings/
+  e2e/helpers/                     shared by journeys: ports and dummy credentials, helpers for the fake GitHub and for acting on the job queue like a runner
 runner/                            Python project (uv)
   src/code_reviewer_runner/        code
   tests/unit/test_<module>.py
   tests/integration/test_<behavior_area>.py
   tests/contract/test_<contract>.py
-  tests/engine/test_<engine_area>.py     (planned)
+  tests/engine/test_engine_<area>.py     the real PR-Agent against the fakes
+  tests/engine/fake_github.py, fake_llm.py, canned.py, harness.py, connect_guard/   their support code
 fakes/                             shared fake servers and fixtures (see fakes/README.md)
 docker/smoke/                      image smoke tests (bash) and their shared helpers
 contracts/                         runner API schema (runner-api.v1.json) and one valid example per body (examples/)
@@ -127,8 +128,8 @@ production client code runs unchanged. Test stack values are fixed dummies; no e
 | Git platform behind `IntegrationProvider` (jobs, runner API, UI) | `fakeIntegrationProvider()` in `app/src/test-support/fake-integration-provider.ts`; every provider also runs the shared conformance suite (`integration-provider-conformance.ts`) | Same fake, registered through `createIntegrationRegistry`; see `app/src/integrations/README.md` |
 | GitHub webhooks (inbound) | Signature verification as a pure function (HMAC-SHA256) | The fake signs and delivers payloads exactly like GitHub (`X-Hub-Signature-256`, `X-GitHub-Delivery`, `X-GitHub-Event`); fixtures are real payloads reduced to the fields we read |
 | GitHub login (OAuth) | n/a | The same `fakes/github` server serves the OAuth authorize, token and user endpoints (exists, see `fakes/github/README.md`); the app is pointed at it with `GITHUB_OAUTH_BASE_URL` and `GITHUB_API_BASE_URL` (both only with `ALLOW_TEST_GITHUB_ENDPOINTS=true`). Exactly one e2e file signs in through the form (`e2e/auth/login.e2e.ts`); all other journeys will use an API shortcut proven equivalent by its own test (not written yet, no other journey needs a session today) |
-| LLM providers | Not reachable: runner unit tests never start PR-Agent | `fakes/llm`: OpenAI-compatible `chat/completions` with scripted answers, malformed output, 429, 500 and slow responses; dummy API key |
-| PR-Agent | Subprocess boundary behind a small protocol; unit tests use a fake implementation | `PR_AGENT_COMMAND` (read by the job loop) points at a fake PR-Agent such as `fakes/pr-agent/fake_pr_agent.py` (succeed, exit 1, hang, print secrets, huge output, crash); the runner tests use `runner/tests/integration/fake_job.py` the same way. Only engine smoke runs the real PR-Agent |
+| LLM providers | Not reachable: runner unit tests never start PR-Agent | `fakes/llm` (planned for the app and e2e): OpenAI-compatible `chat/completions` with scripted answers, malformed output, 429, 500 and slow responses; dummy API key. The engine suite has its own Python fake of the same shape, `runner/tests/engine/fake_llm.py` (see below) |
+| PR-Agent | Subprocess boundary behind a small protocol; unit tests use a fake implementation | `PR_AGENT_COMMAND` (read by the job loop) points at a fake PR-Agent such as `fakes/pr-agent/fake_pr_agent.py` (succeed, exit 1, hang, print secrets, huge output, crash); the runner tests use `runner/tests/integration/fake_job.py` the same way. Only the engine suite runs the real PR-Agent (see below) |
 | Runner and app | Fake HTTP client | Real HTTP against the app or an in-process fake runner API checked against `contracts/` |
 | Time | Injected clock | Short leases and intervals via env, not sleeping |
 
@@ -155,7 +156,7 @@ App (`app/`, Node version from `.nvmrc`, pnpm):
   one retry on CI (the accepted baseline, see section 1), trace and screenshot on failure. It builds the app and runs `next start` on
   `E2E_PORT` (default 3417, never 3000 or 3100) so it never touches another running server, with
   `DATABASE_PATH` pointing to a fresh file under `test-results/e2e-data/`. Without a
-  downloaded Chromium, run with an installed Chrome: `PLAYWRIGHT_CHANNEL=chrome`. It also starts the fake GitHub (`fakes/github/main.ts`) on a random free-range port (`E2E_GITHUB_PORT` fixes it) and gives the app dummy sign in settings plus `ALLOWED_GITHUB_LOGINS` (the accounts of the journeys, `e2eEnv.allowedLogins`) and `ALLOW_TEST_GITHUB_ENDPOINTS=true`, which the app requires before it accepts another GitHub address; ports and credentials are in `e2e/helpers/e2e-env.ts`.
+  downloaded Chromium, run with an installed Chrome: `PLAYWRIGHT_CHANNEL=chrome`. It also starts the fake GitHub (`fakes/github/main.ts`) on a random free-range port (`E2E_GITHUB_PORT` fixes it), with the GitHub App API switched on (the public half of the app's throwaway key), so a journey can install the app for its account with `addGithubInstallation` (`e2e/helpers/github-fake.ts`) and gives the app dummy sign in settings plus `ALLOWED_GITHUB_LOGINS` (the accounts of the journeys, `e2eEnv.allowedLogins`) and `ALLOW_TEST_GITHUB_ENDPOINTS=true`, which the app requires before it accepts another GitHub address; ports and credentials are in `e2e/helpers/e2e-env.ts`. A journey that needs jobs gets them the way the app does: a signed delivery to the webhook route (with the pull request added through `POST /__fake/pull-requests` of the fake), and, standing in for the runner, `claimNextRun` and `completeRun` (`e2e/helpers/job-queue.ts`), which run the app's real job queue on the app's database file in a child process (`app/src/test-support/e2e-queue-child.ts`); a journey never writes rows itself. The journeys that use the queue share one database file, so they must not overlap: `playwright.config.ts` runs `e2e/runs/` (which expects an empty queue at its start) as its own project and `e2e/reviews/` (which also starts and claims runs) as a project that depends on it.
 - ESLint flat config (Next.js core-web-vitals and TypeScript rules, `no-explicit-any` as an error,
   Vitest and Playwright plugin rules against focused and skipped tests), Prettier with its defaults
   (`pnpm format` fixes, `pnpm format:check` verifies) and `tsc --noEmit` with `strict`.
@@ -168,6 +169,40 @@ Runner (`runner/`, Python version pinned in `.python-version`, uv, `uv.lock` com
   180 s. `pytest-socket` as described above.
 - `ruff check` and `ruff format --check`, `pyright` in strict mode.
 
+Engine suite (`runner/tests/engine/`, `uv run pytest -m engine`, about 4 minutes, `make test-engine`):
+
+- Every test starts the console script `code-reviewer-run-job` as a real process with the job on stdin
+  and reads the one line of JSON it prints. `fake_github.py` is a GitHub for the REST and GraphQL
+  calls PR-Agent's provider makes (`GITHUB__BASE_URL` at `http://127.0.0.1:<port>/api/v3`, so `prUrl`
+  and `git.baseUrl` share a host as the runner demands): one pull request with a diff, comments that
+  are kept, `GET /user` answers 403 like it does for an installation token, comments longer than
+  65,536 characters are refused with a 422, faults and error texts that quote the token are
+  switched on per test, every request is recorded with its Authorization header. `fake_llm.py` is an
+  OpenRouter shaped `POST /api/v1/chat/completions` with canned answers per tool (`canned.py`), a
+  fixed error status for every request (429, 401), error texts that quote the key, and held
+  requests that report whether the client hung up. Both are Python so the runner's own ruff and
+  pyright cover them; they stay here until a second suite needs them, then they move to `fakes/`.
+- Only loopback is reachable, at two levels. On every machine, a Python level guard:
+  `connect_guard/sitecustomize.py` is put on the PYTHONPATH of the job process and records and refuses
+  every connection, datagram and name lookup that goes through the `socket` module (`connect`,
+  `connect_ex`, `sendto`, `getaddrinfo`, `gethostbyname*`, `gethostbyaddr`) to anything but
+  loopback; the libraries PR-Agent uses all go through them, and a test shows the guard works. It
+  does not see code that bypasses the module (the C level `_socket`, a subprocess). In CI the
+  operating system adds the guarantee: `scripts/run_engine_offline.sh` runs the suite in a network
+  namespace (`unshare --net`) that has a loopback interface and no route out, and checks first that
+  there really is none. pytest-socket guards the test process only.
+- The one step that needs the internet is outside the tests: PR-Agent counts tokens with a tiktoken
+  encoding that is downloaded on first use. Run `uv run python scripts/prime_tiktoken_cache.py` once
+  per machine (CI does it before the tests, the runner image bakes it in); without the cache the
+  suite fails at the start and says so, it never skips.
+- What the tests may and may not assert: where a comment was posted, who posted it, what the result
+  JSON says (`ok`, `errorCode`, `commentUrl`, exit code), what the fakes received (key, token, model,
+  prompt text) and what appears nowhere (secrets). Never the quality of a review. PR-Agent 0.47.0
+  posts a one line "Failed to ..." comment when a command fails; the tests treat it as what it is
+  and look for review comments (the hidden marker), not for an empty pull request.
+- Upgrading PR-Agent: the suite must pass unchanged, together with the identity patch guard in
+  `tests/unit/`. A change in wording that the runner matches (see `error_mapping.py`) shows up here.
+
 Images (`docker/smoke/`, bash): `app.sh <image>` starts the app image with a fresh named volume on
 `/data` and dummy sign in settings (without them the server refuses to start), polls `/` until it answers (at most `SMOKE_WAIT_SECONDS`, default 90) and waits for the
 container's own health check; it then checks that `/` redirects to `/login` and `/api/health` answers `ok` (the access guard and the database work in the built server), the image user and the uid of PID 1, that the standalone
@@ -175,7 +210,7 @@ server runs, that `/data/app.db` exists, belongs to the unprivileged user and ho
 migration, and that the log reports no database error. `runner.sh <image>` checks `--version` against
 `runner/pyproject.toml`, the PR-Agent version and offline behavior (see the end of this paragraph), the user, a writable `/tmp` and home directory. Both run the secrets scan of
 `lib.sh` (no `.env*`, `.git`, key or database files, no private key material, no secret-looking
-variable in the image configuration or build history). The scans run as root in a throwaway container and the script stops if a scan itself fails (docker, `find` or `grep` error), so a broken scan can never pass as a clean one; the key content scan covers project-owned paths only, not third-party packages, and the file name scan lets two public files of third-party packages pass (a public key of LiteLLM and the root certificates of gRPC). Containers and volumes are removed on exit,
+variable in the image configuration or build history). The private key scan is proven first on files made for it (`docker/smoke/test-key-scan.sh`, also run at the start of every scan): a PEM file, a JSON embedded key, a split, joined or URL encoded key are caught, the harmless `indexOf("-----BEGIN ...")` comparison of a bundled library is not. The scans run as root in a throwaway container and the script stops if a scan itself fails (docker, `find` or `grep` error), so a broken scan can never pass as a clean one; the key content scan covers project-owned paths only, not third-party packages, and the file name scan lets two public files of third-party packages pass (a public key of LiteLLM and the root certificates of gRPC). Containers and volumes are removed on exit,
 also after a failure. What is not covered: the real push to GHCR and pulling from the deployment
 server (manual, see the PR of the image ticket), and a job with a working GitHub and LLM (the engine
 smoke covers that once the fakes exist). `runner.sh` also checks the PR-Agent part of the runner
@@ -225,7 +260,7 @@ no process identifiers in titles), `verify:server-only-canary`, the Docker test 
 Inside `app/`: `pnpm dev | build | start | lint | typecheck | test | test:watch | test:int | test:e2e`.
 Inside `runner/`: `uv sync --locked`, `uv run ruff check .`, `uv run ruff format --check .`,
 `uv run pyright`, `uv run pytest` (default: everything except `engine`), `uv run pytest -m unit`,
-`uv run pytest -m "integration or contract"`.
+`uv run pytest -m "integration or contract"`, `uv run pytest -m engine`.
 
 ### Integration tests and SQLite
 
@@ -249,8 +284,8 @@ Inside `runner/`: `uv sync --locked`, `uv run ruff check .`, `uv run ruff format
 - Tests of file system errors that depend on permissions (a read-only directory) fail when the tests
   run as root, because root may write anywhere. Run the suite as a normal user.
 
-Planned targets: `test-engine`, `test-stack-up`, `test-stack-down`, `test:docker`, `test:e2e:docker`
-(they arrive with the Docker test stack).
+`make test-engine` runs the engine suite on your machine (after priming the tiktoken cache, see above; without the network namespace, which is Linux and CI only). Planned targets: `test-stack-up`,
+`test-stack-down`, `test:docker`, `test:e2e:docker` (they arrive with the Docker test stack).
 
 ## 8. CI
 
@@ -268,6 +303,7 @@ file is pinned by `app/src/ci/ci-workflow.test.ts`.
 | `changes` | pull requests | Path filter: `app` (anything except `runner/**`, top-level Markdown and `fakes/**` Markdown; Markdown inside `app/` stays because Prettier checks it), `runner` (anything except `app/**` and Markdown), `workflows` (`.github/**`). |
 | `app-fast` | app changed | `pnpm format:check`, `lint`, `typecheck`, `test` (unit), `test:int` (host), `build` with placeholder env. |
 | `runner-fast` | runner changed | `ruff check`, `ruff format --check`, `pyright`, `pytest -m unit`, `pytest -m "integration or contract"`. |
+| `engine` | pull requests that change the runner, and every pull request into `main` (never pushes, never app-only changes) | Calls `engine.yml` (the one definition, also used by the nightly workflow): `uv sync --locked`, the tiktoken encoding from the cache (`scripts/prime_tiktoken_cache.py` fills it, with retries, the one step with internet), then `pytest -m engine` in a network namespace without network. No Docker stack, no secrets, `contents: read`, 20 minutes. |
 | `e2e` ("E2E: browser journeys") | app changed | `playwright install --with-deps chromium`, then the journeys against the production build: `@smoke` only on pull requests into `development` and `CR-*`, all (without `@flaky`) on pull requests into `main` and on pushes. |
 | `compose` ("Compose: stack smoke test") | pull requests: app or runner changed, or any pull request into `main` | Builds both images (`load`, no push, GHA layer cache), then runs `docker/smoke/compose.sh` against them. Same rights as the image jobs. |
 | `image-app`, `image-runner` | pull requests: app (runner) changed, or any pull request into `main` | Builds the image with `docker/build-push-action` (`load`, no push, GHA layer cache), then runs its smoke test. No registry login, read-only token. Pushes do not run these jobs because the publish workflow builds the same images. |
@@ -288,8 +324,9 @@ test stops the job before the login, so no tag moves. The structure of both file
 `app/src/ci/images-workflow.test.ts`; `app/src/ci/dockerfiles.test.ts` pins the runtime versions,
 digests, user and `.dockerignore` rules of the Dockerfiles.
 
-Planned, added with the suites they run: the Docker stack jobs (`integration`, `engine`), the
-`nightly.yml` workflow and `enforce-pr-source-branch.yml`. `main` accepts pull requests only from
+`.github/workflows/nightly.yml` (workflow "Nightly") calls the same `engine.yml` every night on the default branch and on demand (`workflow_dispatch`). The structure is pinned by `app/src/ci/engine-workflow.test.ts` (the shared job), `nightly-workflow.test.ts` and `ci-workflow.test.ts` (the callers).
+
+Planned, added with the suites they run: the Docker stack job (`integration`) and `enforce-pr-source-branch.yml`. `main` accepts pull requests only from
 `development` or `hotfix/*`.
 
 ## 9. Test cases in Jira

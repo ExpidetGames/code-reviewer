@@ -36,6 +36,8 @@
         "runner_error",
         "command_failed",
         "review_not_published",
+        "review_state_truncated",
+        "review_text_truncated",
         "pr_not_found",
         "git_auth",
         "git_forbidden",
@@ -211,7 +213,7 @@
         "ok": { "type": "boolean" },
         "durationMs": { "type": "integer", "minimum": 0, "maximum": 604800000 },
         "commentUrl": {
-          "description": "Link to the comment PR-Agent wrote; null when it could not be found (the run is still ok).",
+          "description": "Link to the comment PR-Agent wrote; null when it could not be found (the run is still ok). A failed result may carry it too: review_state_truncated and review_text_truncated report a review that was posted but shortened.",
           "type": ["string", "null"],
           "maxLength": 2048,
           "pattern": "^https?://"
