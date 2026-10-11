@@ -1,0 +1,404 @@
+# 0001: One codebase for self-hosted and hosted, first-run setup, accounts and workspaces
+
+- **Status:** Accepted
+- **Date:** 2026-10-11
+- **Deciders:** the project owner (customer decisions of 2026-10-11)
+- **Implemented by:** milestone "Phase 1b: Setup and accounts" (GitHub Issues)
+
+## 1. Context
+
+Code Reviewer started as a tool for one team on one server. The code in `app/` reflects that:
+
+- **One tenant.** There is no workspace concept. Integrations (`integrations`), repositories, projects,
+  jobs and the review defaults (`app_settings`, key `review_defaults`) all belong to "the instance".
+- **Sign in is GitHub only and configured by environment variables.** Better Auth runs a GitHub
+  OAuth app (`GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`), and who may sign in is decided
+  by `ALLOWED_GITHUB_LOGINS` and `ALLOWED_GITHUB_ORG` (`app/src/auth/README.md`). Logins on the list are
+  bound to a numeric GitHub id in `allowed_login_pins`. `users.github_login` is required, so a user
+  without a GitHub account cannot exist.
+- **The GitHub App is configured by environment variables** (`GITHUB_APP_ID`, `GITHUB_APP_SLUG`,
+  `GITHUB_APP_WEBHOOK_SECRET`, `GITHUB_APP_PRIVATE_KEY`) after a manual, roughly 30 minute procedure
+  (`docs/github-app.md`). The people sign in with a second, separate GitHub OAuth app.
+- **The LLM access is one shared key** from `LLM_PROVIDER` and `LLM_API_KEY`, never stored
+  (`app/src/llm/README.md`).
+- **Mail does not exist.** There is no way to send an email, so there is no email verification,
+  no password reset and no invitation by mail.
+- **The database is SQLite only** (Kysely with better-sqlite3, `app/src/db/`). Several parts of the
+  app assume exactly one app process: the claim of a job is a single SQLite statement
+  (`db/repositories/jobs-claim.ts`, which names `FOR UPDATE SKIP LOCKED` as the only line a Postgres
+  port would change), the GitHub App status is cached in memory for 30 seconds (`SETUP_CACHE_MS` in
+  `integrations/registry.ts`), the LLM keys handed to runners are remembered in memory
+  (`runner-api/claimed-keys.ts`), the repository sync serializes work with an in-process lock
+  (`integrations/sync/keyed-lock.ts`, `coalesce.ts`), and the backup scheduler runs inside the app
+  (`backup/`).
+
+Two things are now wanted at the same time:
+
+1. A **small deployment** that a single team starts with one `docker compose up` and configures in the
+   browser, without editing environment variables for anything but the technical basics.
+2. A **large (hosted) deployment** that serves many unrelated teams: several stateless app instances,
+   several workers, an external Postgres, accounts that are not tied to GitHub, workspaces with
+   members, and an operator who runs the whole thing.
+
+Two products, two codebases, and a pile of environment variables would not survive contact with
+maintenance. The decisions below keep one codebase and one set of features, move configuration from
+the environment into the database and an admin portal, and introduce accounts and workspaces.
+
+## 2. Decision
+
+### 2.1 One codebase, two topologies
+
+The small and the large deployment have **identical functionality**. They differ only in topology and
+database.
+
+| | Small (self-host) | Large (hosted) |
+|---|---|---|
+| Processes | `app` container and `runner` (worker) container | `app` (1..n, stateless) and workers (1..n) |
+| Database | SQLite in a volume | External Postgres through `DATABASE_URL` |
+| Deployment file | One `compose.yml` | A compose or orchestrator example with Postgres and several replicas (delivered by this milestone as a documented example) |
+| Backups | Done by the app (existing `src/backup/`) | Done by the operator with Postgres tooling or the managed service |
+
+`DATABASE_URL` selects the database. A `sqlite:` URL, a path form or an **empty value** means SQLite
+(the default location stays `/data/app.db` in the image); a `postgres://` or `postgresql://` URL means
+Postgres. There is no feature that exists only in one of the two modes. Mode-specific code is limited
+to the database dialect and the places listed in section 2.10.
+
+**Environment variables keep only technical settings:** the public URL of the app (today
+`BETTER_AUTH_URL`; the name may change during implementation and the old name keeps working), the
+`APP_SECRET`, the runner token (`RUNNER_TOKEN`), and the database URL. Optional tuning variables that
+are about the deployment rather than the product (runner concurrency and timeouts, backup time and
+directory, database busy timeout, the debounce of automatic reviews) stay environment variables.
+Everything a product decision depends on (who may sign up, the GitHub App, mail, limits, keys) lives
+in the database and is edited in the admin portal.
+
+`APP_SECRET` is the master key. It encrypts every credential stored in the database (section 2.7) and
+signs state values such as the installation binding and the setup session. It is generated by the
+operator (for example `openssl rand -base64 32`, at least 32 characters), **must be backed up
+separately from the database** and cannot be recovered: a database restored without its `APP_SECRET`
+loses all stored credentials. It replaces `BETTER_AUTH_SECRET`; for an existing installation the old
+variable is accepted as the value of `APP_SECRET` when the new one is not set, so existing sessions and
+encrypted tokens stay valid (section 2.11).
+
+### 2.2 First-run setup
+
+An instance has a state "set up" or "not set up", stored in the database. While it is not set up:
+
+1. **Setup code.** Every start of an app instance prints a fresh 6-digit setup code to the app's
+   terminal and log (never to a web page), for example `Setup code: 482913`. The code is generated
+   with a cryptographically secure random source. Its hash, its failure counter and its expiry are
+   stored in the database, so the check works the same with several app instances; the code that was
+   printed last is the valid one.
+2. **The site asks for the code.** Every page and API route, except what the setup itself needs
+   (`/api/health` and static assets), shows the code form instead. Rules:
+   - at most about 5 attempts per minute, counted per instance rather than per source address (a
+     reverse proxy makes source addresses unreliable, and only the operator is meant to use this),
+   - after 10 failed attempts the code is rotated: the old one is dead and a new one is printed,
+   - the code is single use: a correct code is consumed and exchanged for a short-lived signed setup
+     session (30 minutes) that carries the wizard; when that session expires unfinished, a new code is
+     printed,
+   - the code stops being valid once the setup is completed, and the form is never shown again.
+3. **The wizard** asks three things, in this order:
+   1. **Tenancy:** single-tenant or multi-tenant.
+   2. **Sign-up rule:** everyone, a list of emails, or allowed email domains (section 2.5 for what is
+      selectable when).
+   3. **Instance admin account:** an email and a **mandatory strong password**: at least 12 and at most
+      128 characters, not on a bundled list of common passwords, and not containing the local part of
+      the email address. The server checks it; the form shows the reason. There are no
+      composition rules (no "one digit, one symbol"): length and not-common are what counts.
+4. **Completion** is one transaction that creates the admin account, stores the choices, marks the
+   instance as set up and invalidates the code. Two people finishing at the same moment cannot both
+   win. The admin lands in the admin portal at `/admin`. In single-tenant mode the same transaction
+   creates the one workspace and makes the admin its Owner (section 2.6).
+
+While the instance is not set up, no sign-up, sign-in or webhook processing happens.
+
+### 2.3 Admin portal
+
+The instance admin (a user flag, separate from workspace roles) uses `/admin`. Only instance admins
+reach it; everyone else gets a 404. It offers:
+
+- **Setup choices.** Tenancy and sign-up rule can be changed at any time, with two restrictions:
+  single to multi is always allowed; multi to single is allowed only while **at most one workspace
+  exists** (if none exists, the default workspace is created and the admin becomes its Owner). The
+  sign-up rule can only be changed to values that are selectable at that moment (section 2.5).
+  Changing the sign-up rule affects new accounts and new invitations; it does not delete or lock
+  existing accounts.
+- **Sign-in methods.** Email with password and GitHub can each be switched off, but at least one stays
+  on. GitHub can only be on when the GitHub integration is configured.
+- **Integrations.** One tile per integration. GitHub is the first (section 2.4). GitLab and Bitbucket
+  come later as further tiles behind the same provider interface (`app/src/integrations/`).
+- **Mail server.** SMTP host, port, user, password, sender address, transport security. The password is
+  stored encrypted (section 2.7). A "send test mail" button sends a mail to the admin's address and
+  reports the result. **Mail is never configured through environment variables.**
+- **Instance limits.** For example the maximum number of workspaces per user. Later: the operator's LLM
+  key for "included" usage and pricing (section 2.8).
+
+### 2.4 GitHub integration: one GitHub App for sign-in and for reviews
+
+The integration is configured at instance level by the instance admin, in two ways:
+
+- **One click (manifest flow).** The admin portal sends the admin's browser to GitHub with an app
+  manifest (name, public URL, webhook URL `<public URL>/api/webhooks/github-app`, the repository
+  permissions and events from `docs/github-app.md`, the account permission to read email addresses,
+  the callback URL for sign-in, and the setup URL for the installation binding). The manifest says
+  whether the app is public (multi-tenant) or private (single-tenant). GitHub redirects back with a
+  short-lived code; the app exchanges it for the app id, slug, private key, webhook secret, client id
+  and client secret, and stores them encrypted. The state value of the round trip is signed and bound
+  to the admin's session.
+- **Manual entry.** Step-by-step instructions, then a form for the same values (app id, slug, private
+  key, webhook secret, client id, client secret). Values are validated before they are saved (the key
+  must parse, a call to GitHub with the app JWT must succeed).
+
+The **one GitHub App provides both** "Sign in with GitHub" (its user authorization, replacing the
+separate OAuth app and `GITHUB_OAUTH_*`) and pull request reviews (installation tokens, webhooks).
+The environment variables `GITHUB_APP_*` and `GITHUB_OAUTH_*` are no longer read after the import
+described in section 2.11.
+
+### 2.5 Verified emails and what a sign-up rule may be
+
+A sign-up rule that names emails or domains is only meaningful if the email address of a new account
+is **verified**. Therefore:
+
+- **Everyone** is always selectable. No verification is required.
+- **A list of emails** and **allowed email domains** are selectable only when addresses can be
+  verified, that is, when **either** SMTP is configured (the app sends a verification link, and an
+  account without a verified email cannot be used) **or** sign-in is **GitHub only** (the verified
+  primary email address that GitHub reports is used).
+- If the condition stops holding later (SMTP removed while the rule is in force), the admin portal
+  refuses the change that would break it, and states which setting depends on which.
+- Matching is case-insensitive. A domain entry matches exactly that domain, not its subdomains. The
+  rule is evaluated against the verified email when an account is created and when an invitation is
+  created.
+
+### 2.6 Accounts, workspaces, roles and invitations
+
+**Users and identities.** A user is a person. A user has one or more **login identities**: email with
+password, GitHub, and later others (for example OIDC). Identities are decoupled from **git provider
+connections**: signing in with email and password does not require a GitHub account, and a GitHub
+sign-in does not by itself connect any repository. Better Auth's `accounts` table already models
+identities (`provider_id`, `account_id`); `users.github_login` becomes optional.
+
+**Workspaces (tenants)** have **members** with a role: **Owner**, **Admin** or **Member**.
+
+| Role | Can |
+|---|---|
+| Member | Use the workspace: see projects, runs and settings, start reviews, change project settings |
+| Admin | Everything a Member can, plus manage connections, repositories, the BYOK LLM key, invite and remove Members and Admins |
+| Owner | Everything an Admin can, plus manage Owners and Admins, rename or delete the workspace |
+
+The exact permission matrix is part of the implementation issue and is tested; the principle is that
+every action needs the lowest role that is safe. **The last Owner cannot leave or be removed** (and
+cannot be demoted); an Owner must first make somebody else an Owner.
+
+**Invitations.** Owners and Admins invite by email address with a role (an Admin cannot invite an
+Owner).
+
+- **The sign-up rule applies to invitations.** Only emails that the current sign-up rule allows can be
+  invited; an invitation does not override the rule. (An email list rule therefore needs the address
+  on the list first.)
+- An invitation is a **single-use link bound to that email address**. It expires after **7 days** and
+  can be revoked by an Owner or Admin. The link carries a random token; only its hash is stored.
+- With SMTP configured the invitation is sent by mail. Without SMTP it is shown as a link the admin
+  can copy and send themselves.
+- **Accepting** requires being signed in with that email address, verified. Without SMTP there is no
+  verification, so the invitation link itself proves the address: opening the link, then signing up or
+  signing in with that email, accepts it.
+- After sign-up or sign-in, a user sees their **pending invitations** and can accept them.
+
+**What a user sees without an invitation.**
+
+- **Multi-tenant:** the user is asked to **create a workspace** and becomes its Owner. Any user can
+  create further workspaces at any time while multi-tenant is active (subject to the instance limit
+  "max workspaces per user"). A **workspace switcher** in the navigation moves between workspaces.
+- **Single-tenant:** the user sees "Ask an admin of this instance for an invitation" and has **no
+  access** until invited. There is **no automatic join**, even when the sign-up rule lets the person
+  create an account.
+
+### 2.7 Instance level versus workspace level
+
+| Level | What lives there | Who changes it |
+|---|---|---|
+| Instance | Tenancy, sign-up rule, sign-in methods, SMTP, the GitHub App credentials (app id, slug, private key, webhook secret, client id, client secret), instance limits, later the operator's LLM key and pricing | Instance admin (the operator in the hosted version) |
+| Workspace | Connections (GitHub App installations), repositories, projects, review settings, BYOK LLM key, members, invitations | Workspace Owner or Admin |
+
+**Credentials at rest.** Every secret stored in the database (SMTP password, GitHub App private key,
+webhook secret, client secret, LLM keys) is encrypted with AES-256-GCM using a key derived from
+`APP_SECRET`, with a stored key version so that a rotation command can be added later. Secrets are
+never returned by any API after they were saved (the UI shows that one exists and, where useful, the
+last four characters), never logged, and never included in error messages.
+
+**Data model sketch.** The exact schema belongs to the implementation issues; the shape is:
+
+| Table | Purpose |
+|---|---|
+| `workspaces` | id, name, slug, created by, created at |
+| `workspace_members` | workspace, user, role |
+| `invitations` | workspace, email, role, token hash, invited by, expires at, accepted at, revoked at |
+| `instance_settings` and `secrets` | non-secret settings as JSON, and encrypted secrets with key version |
+| `setup_state` | the setup flag, the hash of the current setup code, its failure counter and expiry |
+| `rate_limits` | shared counters for setup attempts, sign-in and invitation endpoints |
+| `integrations.workspace_id` | a connection belongs to exactly one workspace; denormalized onto `repositories` and `jobs` (with an index) so that listing, scoping and usage queries do not need joins |
+| `app_settings` (existing) | the review defaults become per workspace |
+
+Every query that reads or writes workspace data is scoped by `workspace_id` through one helper; a
+test fails when a repository function takes no workspace.
+
+### 2.8 LLM key resolution
+
+For a review job, the LLM access is resolved in this order:
+
+1. The **workspace's own key (BYOK)**, entered by an Owner or Admin in the workspace settings.
+2. Otherwise the **operator's key**, if the operator offers "included" usage. Usage is then counted per
+   workspace. (The operator key, the "included" switch and the counting belong to the pricing phase;
+   this record fixes only the order and keeps room for it in the schema.)
+3. Otherwise the job fails with `llm_not_configured`, as today.
+
+The runner receives the resolved key in the claim response as it does today; keys never reach the
+browser.
+
+### 2.9 Binding a GitHub App installation to a workspace
+
+There is one GitHub App for the whole instance, and any account may install it. The app must therefore
+decide which workspace a new installation belongs to, and must not hand repositories of one customer to
+another.
+
+1. In a workspace, an Owner or Admin chooses **Connect GitHub**. The app creates a **signed state**
+   (HMAC with a key derived from `APP_SECRET`) that contains the workspace, the user, a random nonce
+   and an expiry of 10 minutes. The nonce is stored and can be used once.
+2. The browser goes to the GitHub App's installation page with that state.
+3. After the installation, GitHub redirects to the app's setup URL with the **installation id** and
+   the **state**.
+4. The app verifies the signature, the expiry and the nonce, and that the signed-in user is the one in
+   the state and still Owner or Admin of that workspace.
+5. The app verifies, **with the user's own GitHub token**, that the user can access that installation
+   (it appears in the installations the user may use) and that the user may administer the account it
+   is installed on: the installation's own account for a personal account, an organization owner for
+   an organization. A user who signed in without GitHub is asked to connect their GitHub account
+   first (GitHub's user authorization, no new account is created).
+6. Only then the app links the installation to the workspace, and the repository sync starts for it.
+   An installation can be linked to **one** workspace only; a second attempt fails with a clear error.
+
+Consequences of this design:
+
+- **Multi-tenant:** installations are never created from a bare webhook or from the app-wide
+  installation listing. An `installation created` webhook for an installation without a link is
+  recorded as unclaimed and ignored for everything else. A **"link an existing installation"** picker
+  lists the installations the user can access that are not linked yet; it covers installations that
+  needed approval from an organization owner first.
+- **Single-tenant:** the app is private to the operator, so installations are attached to the one
+  workspace automatically, as they are today. "Connect GitHub" remains available.
+- A webhook is attributed to a workspace through the installation id of its connection.
+
+### 2.10 Requirements for the large topology (several instances)
+
+The large topology only works if no app instance relies on its own memory. The following must change;
+each point has a test with two simulated instances:
+
+| Today | Required |
+|---|---|
+| Claimed LLM keys list in memory (`runner-api/claimed-keys.ts`), so a rotated key can still be masked in a result | Kept in the database, encrypted, removed together with the job's retention, so any instance can mask a result |
+| GitHub App status cached for 30 seconds in memory (`SETUP_CACHE_MS`) | No in-process cache of configuration; read from the database (a cache may only exist with a version check against the database) |
+| Backup scheduler inside the app | Runs only for SQLite; for Postgres the operator backs up the database |
+| Sync serialized by an in-process lock (`keyed-lock.ts`, `coalesce.ts`) | Serialized by a database lock per connection (advisory lock on Postgres, an equivalent on SQLite) |
+| Migrations run once, protected by the SQLite write lock | Migrations run behind a lock that makes concurrent starts wait; exactly one instance migrates |
+| Job claim is a SQLite statement | Postgres variant with `FOR UPDATE SKIP LOCKED`, same behavior, run against the same test suite |
+| Rate limits (sign-in, setup code, invitations) | Shared counters in the database (`rate_limits`), never in memory |
+| Setup code | Stored as a hash in the database (section 2.2) |
+
+The runner API needs no change for several workers: the lease token already makes a claim
+instance-independent.
+
+### 2.11 Migration of existing installations
+
+An existing installation (environment variables set, a SQLite file with data) must update without a new
+setup and without data loss. On the first start of the new version:
+
+1. Migrations create the new tables.
+2. **Settings are imported once** from the environment into the database: the GitHub App (id, slug,
+   private key, webhook secret), the GitHub OAuth client (which becomes the sign-in credentials of the
+   GitHub integration until the admin replaces them with the app's own), the LLM provider, key and
+   model, and the allow list. The tenancy is set to **single-tenant**; sign-in methods to **GitHub
+   only**. After the import the variables are ignored, and the log says so once. `BETTER_AUTH_SECRET`
+   is used as `APP_SECRET` when `APP_SECRET` is not set.
+3. **One default workspace** is created and receives all existing integrations, repositories, projects,
+   jobs and review defaults. The LLM key becomes that workspace's key.
+4. **Existing users become members** of the default workspace. The first allowed user (the earliest
+   created user) becomes **Owner**, all others **Member**, and the Owner is also the instance admin.
+5. **The allow list becomes a sign-up rule.** The rule is the list of emails: the verified emails of
+   the existing users. Allowed GitHub logins that never signed in have no known email address; the
+   admin portal lists them once with the hint to invite them by email. An allowed GitHub organization
+   has no equivalent in the new rules; the portal shows the same one-time notice (see open questions).
+6. The instance **counts as set up**; there is no setup code and no wizard.
+
+The import is idempotent (a second start does nothing) and runs in one transaction. A failure stops
+the start with a readable line and changes nothing.
+
+## 3. Alternatives considered
+
+- **Two codebases or two products (self-hosted tool, hosted service).** Rejected: features would drift,
+  the hosted service would not benefit from self-hosters' bug reports, and every fix is done twice.
+- **Keep configuring the GitHub App, OAuth, mail and LLM key through environment variables.**
+  Rejected: a hosted multi-tenant service needs these changeable at runtime by an operator, secrets in
+  a database are the only workable place for per-workspace keys anyway, and a 30 minute manual GitHub
+  procedure is the main obstacle for self-hosters.
+- **Separate GitHub OAuth app for sign-in, GitHub App for reviews (today).** Rejected: two apps to
+  create, two sets of credentials, and sign-in cannot be used to prove access to an installation.
+- **GitHub as the only identity.** Rejected: GitLab and Bitbucket are planned, and some users and
+  operators do not want a GitHub account to use the tool.
+- **Automatic join in single-tenant mode** (anybody who may sign up sees the workspace). Rejected:
+  signing up and having access to a company's repositories are different decisions.
+- **Setup by environment variables or a default admin password.** Rejected: a one-time code printed to
+  the log proves access to the server and needs no pre-shared secret.
+
+## 4. Consequences
+
+**Easier**
+
+- A self-hoster sets up in the browser with a code from the log; no GitHub procedure by hand.
+- One feature set to document, test and support; the hosted service is the same program.
+- Accounts do not depend on a git provider, which prepares GitLab, Bitbucket and OIDC.
+- Per-workspace keys and limits make a hosted offering with "bring your own key" and "included" usage
+  possible.
+
+**Harder or costly**
+
+- The data model changes at its core: every table that holds customer data gets a workspace, and every
+  query must be scoped. A missed scope is a data leak between customers, so scoping is enforced in one
+  helper and covered by tests that act as a second tenant.
+- Secrets in the database make `APP_SECRET` a single point of failure for recovery. It must be backed
+  up separately and documented loudly. Rotating it needs a re-encryption command (not part of this
+  milestone).
+- Sign-in becomes a larger attack surface (passwords, mail, invitations, password reset flows). Rate
+  limits, token hashing and the strong password rule are part of the acceptance criteria, not
+  follow-ups.
+- The Postgres port, the removal of in-process state and the migration of existing installations are
+  large changes that must not break the small deployment; the existing test suites run against both
+  databases once Postgres support lands.
+- The existing allow list by GitHub login and organization has no exact equivalent (section 2.11).
+- `docs/github-app.md`, the compose files and the README must be rewritten around the new setup.
+
+## 5. Open questions
+
+- **Two-factor authentication** for the instance admin (and later for all users): later.
+- **OIDC / SSO** as a further identity: later, behind the identity model of section 2.6.
+- **GitHub organization as a sign-up rule.** Existing installations can limit sign-in to an
+  organization today. The new rules do not have it. Decide whether to add "members of a GitHub
+  organization" as a fourth rule, or to accept the one-time import notice.
+- **Existing users when the sign-up rule changes.** This record says accounts are not locked out by a
+  rule change. Decide later whether the instance admin gets a "disable user" action.
+- **Strictness of the installation check** in section 2.9 (organization owner required). It may not be
+  possible with the permissions of a GitHub App user token for every case; the implementation issue
+  must document the result and the fallback.
+- **Rotation of `APP_SECRET`** and a re-encryption command.
+- **Password reset** for email and password accounts is expected to ship with the mail work; if it does
+  not, accounts without a second identity cannot recover a lost password until it does.
+
+## 6. Out of scope
+
+- Billing, prices, the operator's LLM key, usage counting and "included" usage (pricing phase; only the
+  resolution order is fixed here).
+- GitLab, Bitbucket and other providers; OIDC and SSO.
+- Restricting runner network egress (own issue).
+- Audit log, data retention and account deletion for the hosted service.
+- Organization-level billing or teams below the workspace.
+- Horizontal scaling of the web UI behind a CDN; only the stateless requirement is fixed here.
