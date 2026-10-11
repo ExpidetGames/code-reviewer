@@ -267,6 +267,11 @@ make test-e2e                              # needs a Playwright browser:
 make test-e2e PLAYWRIGHT_CHANNEL=chrome   # or use an installed Google Chrome
 ```
 
+The journey with the real runner and PR-Agent (`app/e2e/jobs`) also needs the runner installed
+(`make install`) and the tiktoken encoding cached once per machine
+(`uv --directory runner run python scripts/prime_tiktoken_cache.py`, needs the internet); it fails
+at the start and says so when one is missing.
+
 All automated tests are hermetic: a network guard blocks every host except loopback. See
 [TESTING.md](TESTING.md) for the test levels, naming rules and fakes.
 

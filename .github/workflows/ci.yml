@@ -140,10 +140,12 @@ jobs:
       contents: read
     uses: ./.github/workflows/engine.yml
 
+  # The journey with the real runner and the real PR-Agent (app/e2e/jobs) is part of these, so a
+  # change to the runner runs them too.
   e2e:
     name: "E2E: browser journeys"
     needs: changes
-    if: ${{ github.event_name == 'push' || github.base_ref == 'main' || needs.changes.outputs.app == 'true' }}
+    if: ${{ github.event_name == 'push' || github.base_ref == 'main' || needs.changes.outputs.app == 'true' || needs.changes.outputs.runner == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     defaults:
@@ -163,6 +165,25 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Install the browser and its system libraries
         run: pnpm exec playwright install --with-deps chromium
+      # The journey app/e2e/jobs starts the real runner (a process per journey) and the real
+      # PR-Agent: the runner from its locked environment, and the tiktoken encoding PR-Agent counts
+      # tokens with from the cache (the one step that needs the internet, as in engine.yml).
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.0"
+          enable-cache: true
+          cache-dependency-glob: runner/uv.lock
+      - name: Install the runner
+        working-directory: runner
+        run: uv sync --locked
+      - name: Restore the tiktoken encoding
+        uses: actions/cache@v4
+        with:
+          path: /tmp/data-gym-cache
+          key: tiktoken-o200k_base-v1
+      - name: Prime the tiktoken cache
+        working-directory: runner
+        run: uv run python scripts/prime_tiktoken_cache.py
       # Playwright builds the app and serves the production build itself (playwright.config.ts).
       # Pull requests into development and epic branches run the smoke journeys, everything else
       # (release pull requests into main, pushes) runs all journeys. Journeys tagged @flaky are
