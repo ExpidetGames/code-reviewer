@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down which workspace the temporary resolver hands out: the existing default one, none and an
 // error while the first-run setup has not run (the setup decides whether there is a workspace), and
 // the lazily made default workspace once the instance is set up.

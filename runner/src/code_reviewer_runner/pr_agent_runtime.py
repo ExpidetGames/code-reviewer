@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false
 """The one place that calls PR-Agent's API.
 

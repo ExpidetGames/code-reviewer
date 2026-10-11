@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down reading a request body with a size limit: a declared length over the limit is refused
 // without reading, a stream that grows past the limit is cut off, and a body of exactly the limit is
 // accepted.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down that the tables created by our migrations are the tables Better Auth expects. Better
 // Auth can compute the migration it would run for its configuration; after our migrations that plan
 // must be empty. An upgrade of Better Auth, or a change of its configuration, that needs a new

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Pins down the comment recorder: PR-Agent returns no URL of what it posted, so the runner wraps
 the two write paths of the GitHub provider (create and edit a comment) and picks the comment of the
 command from what was recorded, by the hidden marker PR-Agent puts into its own comments."""

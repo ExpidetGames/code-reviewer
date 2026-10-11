@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The one sync service of the running server. The start-up sync, the webhook route and the button all
 // use it. It is kept on `globalThis` for the same reason as the database connection and the lock:
 // Next.js loads `instrumentation.ts` and the route handlers as separate module graphs, so a plain

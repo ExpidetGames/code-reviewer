@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The claim of a job: the one place in the job queue that is written for SQLite.
 //
 // What makes it dialect specific:

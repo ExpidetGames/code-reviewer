@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // GET /api/repositories/:repositoryId/pull-requests: the open pull requests of a project, for the
 // picker of the start button. Protected: the proxy asks for a session, and `requireUser()` (called by
 // the handler) is the second guard. The logic is in src/manual-reviews/http.ts.

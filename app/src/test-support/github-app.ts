@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Dummy GitHub App credentials for tests: a fresh RSA key pair per test process (never a real key)
 // and the environment variables built from it. The public half is what the fake GitHub checks JWTs
 // with. Knows nothing about the provider, so any test may use it.

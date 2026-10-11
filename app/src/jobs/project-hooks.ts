@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // What the job queue does when a project is switched off: its waiting jobs are cancelled (status
 // `cancelled`, error code `project_deactivated`); running jobs finish. The hook runs in the
 // transaction of the deactivation, with that transaction as the executor, so the project is off and

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down `POST /api/runners/v1/claim` through the real handler: a real SQLite file with the job
 // queue, the real GitHub App provider against the fake GitHub, and the API wired to both. It covers
 // what a runner is handed and when (credentials only at claim time, one token per claim, the guard,

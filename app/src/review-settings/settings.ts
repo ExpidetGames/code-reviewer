@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The review settings: what a review can be tuned by, their limits and their built-in values.
 //
 // Three layers decide what a review uses, from weakest to strongest: the built-in values (this

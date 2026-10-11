@@ -45,7 +45,7 @@ Run from the repository root.
 | Task | Command |
 |---|---|
 | Install (from lockfiles) | `make install` |
-| Everything before a PR | `make verify` |
+| Everything before a PR | `make verify` (includes `make check-licenses`, the dependency license check against `license-policy.json`) |
 | Lint, both parts | `make lint` (app: `pnpm --dir app lint` and `pnpm --dir app format:check`; runner: `uv --directory runner run ruff check . ../fakes` and `ruff format --check . ../fakes`) |
 | Typecheck, both parts | `make typecheck` (app: `pnpm --dir app typecheck`; runner: `uv --directory runner run pyright`) |
 | Unit tests, both parts | `make test-unit` (app: `pnpm --dir app test`; runner: `uv --directory runner run pytest -m unit`) |
@@ -69,6 +69,8 @@ Run from the repository root.
 ## Code
 
 - English for code, comments, documentation and UI strings.
+- Every new source file starts with `SPDX-License-Identifier: Apache-2.0` in its language's comment syntax
+  (`make fix-spdx-headers` adds it; a unit test fails without it; `CONTRIBUTING.md`, section "License").
 - TypeScript strict. No `any` without a comment explaining why. Python is checked with pyright in
   strict mode.
 - Stable error codes (`as const` sets in TypeScript, enums or constants in Python) for anything a

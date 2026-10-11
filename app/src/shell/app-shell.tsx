@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 "use client";
 // The frame around every signed in page: skip link, header with the brand, the main navigation and
 // the user menu, and the main landmark for the page. On a narrow screen the navigation sits behind

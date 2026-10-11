@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down which review settings are accepted: every field's range and format, that all problems of
 // a request are reported at once with a stable code per field, that no value is echoed back, and
 // that stored settings that are no longer valid are dropped instead of failing a review.

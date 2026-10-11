@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the check of GitHub's X-Hub-Signature-256 header: only "sha256=" plus the hex HMAC of the
 // exact body counts, every malformed value is refused without throwing, and the comparison goes
 // through a constant time function.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the start of the server: the LLM configuration is checked, a missing key only warns and
 // the rest of the start (database, pins, sync) goes on. The other modules of the start are replaced
 // by recorders; the LLM check is the real one, and so is the runner token check (it must stay quiet).

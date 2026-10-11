@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Next.js runs this before every route. Two steps, in this order:
 //
 // 1. The setup gate (src/setup/gate.ts): while the instance is not set up, everything but the health

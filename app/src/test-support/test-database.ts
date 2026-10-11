@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Gives an integration test its own real SQLite file: a copy of the migrated template built by the
 // global setup. Every file lives in a fresh temporary directory, is never shared between tests or
 // workers, and is removed after the test (so are connections opened through `track`).

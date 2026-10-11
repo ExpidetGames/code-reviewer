@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The trigger policy for automatic reviews: which pull request events start a review, which wait and
 // which are dropped. Pure functions, no database and no GitHub; the webhook handler asks them and
 // does the I/O around them (the project's settings, the current state of the pull request).

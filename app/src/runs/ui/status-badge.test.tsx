@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // @vitest-environment jsdom
 // Pins down the status badge: every status has a label of its own and a symbol of its own, so no
 // status is told apart by color alone.

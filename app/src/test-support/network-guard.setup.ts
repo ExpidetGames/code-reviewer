@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Vitest setup file, loaded for every test file of the unit and integration projects.
 // It makes any TCP connection to a host other than loopback fail with NETWORK_GUARD_BLOCKED,
 // so no automated test can reach the internet (fetch, http, https and tls all end in

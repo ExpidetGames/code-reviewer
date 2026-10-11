@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the integrations repository against a real SQLite file: what goes in comes out
 // unchanged, a GitHub App row never holds a secret, and bad input is refused with a stable code.
 import { sql } from "kysely";

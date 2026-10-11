@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // @vitest-environment jsdom
 // Pins down the polling rules: the shown data follows the answers, polling stops when nothing can
 // change any more, a failed request keeps the last data and the next one runs on time, and new server

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the GitHub client against the fake GitHub API over real HTTP: what it reads, how it
 // pages, which token it uses, and that every failure becomes a stable code without a secret in it.
 import { describe, expect, it } from "vitest";

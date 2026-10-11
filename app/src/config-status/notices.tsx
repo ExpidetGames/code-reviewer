@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The configuration hints at the top of the pages: one alert per problem, nothing at all while the
 // configuration is complete. The text comes from `describeConfigNotices`, so it names variables and
 // never values.

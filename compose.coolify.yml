@@ -22,7 +22,8 @@
 services:
   app:
     build:
-      context: app
+      context: .
+      dockerfile: app/Dockerfile
     restart: unless-stopped
     expose:
       - "3000"
@@ -74,7 +75,8 @@ services:
 
   runner:
     build:
-      context: runner
+      context: .
+      dockerfile: runner/Dockerfile
     restart: unless-stopped
     # No port and no domain: the runner only talks to the app, over the Docker network.
     # The memory the runner may use as a whole: 2 GiB by default, the figure the number of parallel

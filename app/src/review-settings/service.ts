@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The review settings service: what the routes, the claim of the runner API and the webhook intake
 // use to read and change the settings. It validates input, keeps the layers apart (the global
 // defaults in `app_settings`, the overrides of a project in `projects.settings`), computes the

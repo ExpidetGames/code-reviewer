@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Access to the webhook_deliveries table: the record of which deliveries were accepted, so that a
 // redelivery of a delivery that already succeeded does not produce a second trigger. The only code
 // that reads or writes the table.

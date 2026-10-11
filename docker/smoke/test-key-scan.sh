@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+
 # Self-test of the key scan used by the image smoke tests (docker/smoke/lib.sh). Needs no Docker.
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // @vitest-environment jsdom
 // Pins down the instance block of the Settings page: working parts are named with provider and
 // model, broken parts with the variable names, and no secret appears in either case.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // @vitest-environment jsdom
 // Pins down the settings form in the browser: wrong values are named next to their field before
 // anything is sent, a valid change sends only the fields the person set and shows what the server

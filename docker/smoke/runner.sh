@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+
 # Smoke test of the runner image. Usage: docker/smoke/runner.sh <image>   (default: code-reviewer-runner:local)
 #
 # The entry point of the image is the job loop (CR-29), which needs a running app, so this test does
@@ -105,6 +107,10 @@ printf '    %s\n' "$result"
 # CR-17-T07
 step "the image sets a numeric non-root user"
 assert_image_user_is_numeric_non_root "$image"
+
+# #118-T03
+step "the image ships the license files and carries the license label"
+assert_image_ships_license_files "$image"
 
 step "the process of the entry point runs as a non-root user"
 # The entry point exits at once, so the same image user is asked from inside a container.

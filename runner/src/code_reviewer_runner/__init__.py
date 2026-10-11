@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Code Reviewer runner: picks up review jobs from the app and runs PR-Agent."""
 
 from importlib.metadata import PackageNotFoundError, version

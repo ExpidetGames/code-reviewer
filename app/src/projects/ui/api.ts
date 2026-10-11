@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The calls the project list makes to the app's own routes: switch a project on or off
 // (`PUT /api/repositories/:id/project`, src/projects/http.ts) and run the sync by button
 // (`POST /api/integrations/sync`, src/integrations/sync/http.ts). Browser side; no secrets here.

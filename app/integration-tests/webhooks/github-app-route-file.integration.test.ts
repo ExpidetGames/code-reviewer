@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the real route file `POST /api/webhooks/github-app` with the wiring the running server
 // uses: the database opened at start, the process-wide sync service, the registry configured from
 // the environment, and the job queue intake. The details of each behavior are in

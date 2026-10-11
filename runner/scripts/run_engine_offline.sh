@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+
 # Runs the engine suite (pytest -m engine) in a Linux network namespace that has nothing but a
 # loopback interface: the operating system itself, not only the Python level guard of the suite,
 # guarantees that the real PR-Agent can reach nobody but the fakes. For CI (GitHub's Ubuntu runners

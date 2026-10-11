@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down who may run the sync by button: the access proxy (real Better Auth, real database) in
 // front of the handler of `POST /api/integrations/sync`. A request without a session gets 401, one
 // from a signed in user who is no longer on the allow list gets 403, and in both cases GitHub is not

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Pins down what the real PR-Agent posts for each of the four commands, run through the real job
 entry point against the fake GitHub and the fake LLM: who posts, where, and what the result JSON
 says. The canned model answers are not judged, only the shape and the place of the output."""

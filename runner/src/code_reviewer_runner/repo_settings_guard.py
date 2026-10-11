@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false, reportUnknownArgumentType=false
 """Keeps a reviewed repository from taking over what the host decides.
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the text the login page shows for the `error` code that Better Auth puts into the URL
 // when a sign in fails: known codes get a specific message, anything else the generic one, and the
 // text of the URL never reaches the page.

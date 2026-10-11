@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // What the production server does about backups when it starts: read the settings, say what is
 // scheduled (and warn if the target cannot be written to right now), and start the daily timer.
 // Called from `src/instrumentation.ts`. Other environments (the dev server, tests) run no timer.

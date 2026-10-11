@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the structure of the engine workflow (.github/workflows/engine.yml), the one definition
 // of the engine suite job that ci.yml and nightly.yml call: what it runs, that the suite runs
 // without network, that it is read-only, without secrets, time limited and pinned. It reads the

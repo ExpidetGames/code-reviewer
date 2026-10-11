@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The workspaces table: the default workspace is made once, however many requests ask for it at the
 // same time, and the oldest workspace is the default.
 import { describe, expect, it } from "vitest";

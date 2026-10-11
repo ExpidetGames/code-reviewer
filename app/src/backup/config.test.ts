@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the backup settings: where the backups go (BACKUP_DIR, default /backups), when the
 // scheduler runs (BACKUP_TIME, UTC, default 02:30, "off" switches it off), and that a typo is an
 // error and not a silently missing backup.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down how the answer of GitHub's "my membership in an organization" endpoint is read: only an
 // active membership of the configured organization counts, and every answer that is not a clear yes
 // or a clear no (missing scope, outage, malformed body, timeout) is "unavailable", never a yes.

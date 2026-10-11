@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // What the UI may know about the GitHub App besides whether its settings work (that is asked of
 // `findGithubAppConfigProblem` in registry.ts): the app's URL name when it is set and well formed,
 // and where a person installs the app. Lives in the provider folder because it reads the provider's

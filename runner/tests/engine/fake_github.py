@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """A fake GitHub for the engine suite: the REST and GraphQL calls PR-Agent's GitHub provider makes.
 
 One real HTTP server on a loopback port, spoken to by PyGithub exactly as it speaks to GitHub

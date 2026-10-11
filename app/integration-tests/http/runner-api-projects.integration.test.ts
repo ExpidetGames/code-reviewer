@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down how the runner API and the job queue are wired to the projects and the settings (CR-46):
 // the claim only hands out jobs of repositories with an active project, deactivating a project
 // cancels its waiting jobs, the options of a job are the review settings of its project, and the LLM

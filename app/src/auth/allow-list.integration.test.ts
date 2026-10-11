@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down who can complete a sign in: only an account on the logins list or in the allowed
 // organization. A refused account lands on the login page with a clear code and leaves nothing
 // behind (no user, account or session), and nobody can sign in when nothing is configured. Goes

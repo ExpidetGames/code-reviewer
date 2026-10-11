@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Access to the integrations table of ONE workspace (the factory takes the workspace id; see
 // ../workspace-scope.ts). The only code that reads or writes the table, together with the instance
 // level directory (integration-directory-repository.ts) that webhooks and the sync need before a

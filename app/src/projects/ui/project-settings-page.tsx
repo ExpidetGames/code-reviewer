@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The content of the settings page of one project: what the project is, the configuration hints and
 // the form with the overrides. `loadProjectSettingsPage` gathers the data from the services (passed
 // in), `ProjectSettingsPageContent` renders it. Every repository the list shows has a settings page,

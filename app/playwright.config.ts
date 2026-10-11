@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { createPublicKey, generateKeyPairSync } from "node:crypto";
 import { defineConfig, devices } from "@playwright/test";
 import { e2eEnv, llmEnv } from "./e2e/helpers/e2e-env";

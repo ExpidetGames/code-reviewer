@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down that AGENTS.md and the README describe the same GitHub issue workflow as
 // CONTRIBUTING.md (issue `#n`, branch `<n>-<slug>` from `development`, pull request into
 // `development` with `Closes #n`, squash merge) and no longer the retired epic/ticket scheme with

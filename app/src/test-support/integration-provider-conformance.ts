@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The conformance suite every IntegrationProvider implementation runs (the fake today, the GitHub
 // App provider with its own ticket). It proves the contract of the interface: each method answers
 // in normalized types only, never in a platform's raw format, and the request body stays readable.

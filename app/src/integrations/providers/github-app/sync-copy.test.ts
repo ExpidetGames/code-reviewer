@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down that the sentences the project list shows for a problem the sync met at GitHub cover every
 // error code of the GitHub App provider. The UI may not import the provider, so it spells the codes
 // out (src/projects/ui/messages.ts); this test sits in the provider folder, where importing both is

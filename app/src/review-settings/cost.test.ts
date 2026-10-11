@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the cost guard: the estimate per review from the price table (with the tokenizer factor of
 // Claude models), the warning above the customer's limit of 0.10 USD (and only above it), the warning
 // for a model the table does not know, the upper bound, the context window check, and that the table

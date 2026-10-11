@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Puts the customer data into workspaces (docs/decisions/0001-editions-setup-and-accounts.md, sections
 // 2.6, 2.7 and 2.10): `integrations`, `repositories`, `jobs` and `app_settings` (the review defaults)
 // get a required `workspace_id`. A project belongs to a workspace through its repository.

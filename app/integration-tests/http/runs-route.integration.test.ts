@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down who may read the runs and what they get: the access proxy (real Better Auth, real
 // database) in front of the handlers of `GET /api/runs` and `GET /api/runs/:id`. A request without a
 // session gets 401, one from a signed in user who is no longer on the allow list gets 403, and in

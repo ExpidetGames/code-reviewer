@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Fixtures of the engine suite: the two fakes and the engine that runs jobs against them.
 
 The engine suite needs the tiktoken encoding in its cache (PR-Agent counts tokens with it and would

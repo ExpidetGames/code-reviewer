@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // How a run's status looks to a person: one label, one symbol and one description per status. Pure
 // data, no React, so the list, the detail page and the project list say the same thing. A status is
 // never told apart by color alone: the label is text and the symbol is a different shape for each.

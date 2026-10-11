@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Everything a test of the manual start needs: the webhook harness (a real SQLite file, the fake
 // GitHub API, the real GitHub App provider), an installation "acme" with the repository
 // "acme/widgets" as an active project, a clean fake GitHub, the real review settings service, the

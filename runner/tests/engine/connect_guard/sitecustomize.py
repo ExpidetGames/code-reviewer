@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Loaded by the interpreter of the job process in the engine suite (through PYTHONPATH).
 
 A guard at the level of Python's `socket` module: it records every connection, datagram and name

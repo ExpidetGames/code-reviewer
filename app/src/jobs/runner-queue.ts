@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The runner side of the job queue: handing jobs to runners and finishing them. NOT scoped to a
 // workspace, on purpose: runners serve the whole instance (one shared token), so a claim hands out the
 // oldest due job of any workspace. What it returns carries `workspaceId`; everything the runner API

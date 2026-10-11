@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The vocabulary shared by every place that decides "may this person use the instance": the sign in
 // (`sign-in-access.ts`) and the check on each request (`access-policy.ts`). A refusal is the same
 // value in both, so the login page needs only one set of codes (`login-errors.ts`).

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down how a comment is read as a command: only a comment that starts with one of the four
 // commands counts, only /ask carries text, and that text is cut to a fixed length.
 import { describe, expect, it } from "vitest";

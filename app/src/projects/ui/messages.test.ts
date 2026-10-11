@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down that every stable code a project action can fail with has copy a person can act on, and
 // that an unknown code still gets a sentence instead of the raw code.
 import { describe, expect, it } from "vitest";

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the HMAC signing of values that travel through the browser: a signed value verifies for
 // its own purpose and secret only, and any change to it makes it fail.
 import { describe, expect, it } from "vitest";

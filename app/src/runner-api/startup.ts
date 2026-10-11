@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The start-up warning about the runner token: names what is wrong with RUNNER_TOKEN (not set, too
 // short, or with white space or control characters inside). A production start never gets this far
 // with such a token: src/deploy/startup.ts judges it by the same rule (runnerTokenProblem) and ends

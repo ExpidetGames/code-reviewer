@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Kysely's SQLite dialect with two changes that the stock one lacks:
 //
 // 1. Transactions start with `begin immediate`. A deferred transaction that reads first and writes

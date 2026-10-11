@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Where the trigger policy gets the settings of a project from: the repository row of the delivery,
 // then the review settings service (project over global over built-in). Kept apart from `shared.ts`
 // so a test can wire the same lookup to a real database.

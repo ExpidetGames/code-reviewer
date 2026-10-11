@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // POST /api/repositories/:repositoryId/reviews: starts a command (review, improve, describe, ask) for
 // an open pull request of a project. Protected: the proxy asks for a session, and `requireUser()`
 // (called by the handler) is the second guard. The logic is in src/manual-reviews/http.ts.

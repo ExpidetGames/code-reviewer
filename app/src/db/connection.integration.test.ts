@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the connection settings the app relies on (WAL, busy timeout, foreign keys) and the
 // refusals when the database file cannot be opened.
 import { chmod, mkdir, writeFile } from "node:fs/promises";

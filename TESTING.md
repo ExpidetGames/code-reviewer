@@ -255,13 +255,14 @@ no process identifiers in titles), `verify:server-only-canary`, the Docker test 
 | Task | Command (repository root) | What it runs |
 |---|---|---|
 | Install | `make install` | `pnpm --dir app install --frozen-lockfile`, `uv --directory runner sync --locked` |
-| Everything before a PR | `make verify` | lint, typecheck, unit and host integration tests of both parts |
+| Everything before a PR | `make verify` | lint, typecheck, unit and host integration tests of both parts, and `make check-licenses` |
 | Lint | `make lint` | `pnpm lint`, `pnpm format:check`; `ruff check . ../fakes`, `ruff format --check . ../fakes` |
 | Typecheck | `make typecheck` | `pnpm typecheck`; `pyright` |
 | Unit tests | `make test-unit` | `pnpm test`; `pytest -m unit` |
 | Integration tests (host) | `make test-integration` | `pnpm test:int`; `pytest -m "integration or contract"` |
+| Dependency licenses | `make check-licenses` | `pnpm licenses:check`: every installed package of the app (`pnpm licenses list`) and the runner (`scripts/list_licenses.py`, from the installed metadata) and every package of `pnpm-lock.yaml` and `uv.lock`, against `license-policy.json`. Needs `make install`, no network (see "Dependency license check" below) |
 | E2E | `make test-e2e` | `pnpm test:e2e` (`ARGS="--grep @smoke"` filters); needs the runner installed and the tiktoken cache primed for the journey with the real runner (see section 6) |
-| Image smoke tests | `make test-images` | builds both images with `docker build`, then runs `docker/smoke/app.sh` and `docker/smoke/runner.sh` (needs a Docker daemon; not part of `make verify`) |
+| Image smoke tests | `make test-images` | builds both images with `docker build` (context: the repository root), then runs `docker/smoke/app.sh` and `docker/smoke/runner.sh`, which also check that `/licenses` holds `LICENSE`, `NOTICE` and `THIRD_PARTY_LICENSES.md` byte for byte and that the image has the license label (needs a Docker daemon; not part of `make verify`) |
 | Compose smoke test | `make test-compose` | builds both images under the tags `code-reviewer-*:compose`, then runs `docker/smoke/compose.sh` (needs a Docker daemon; not part of `make verify`) |
 
 Inside `app/`: `pnpm dev | build | start | lint | typecheck | test | test:watch | test:int | test:e2e`.
@@ -312,6 +313,7 @@ file is pinned by `app/src/ci/ci-workflow.test.ts`.
 | `runner-fast` | runner changed | `ruff check . ../fakes`, `ruff format --check . ../fakes`, `pyright`, `pytest -m unit`, `pytest -m "integration or contract"`. |
 | `engine` | pull requests that change the runner, and every pull request into `main` (never pushes, never app-only changes) | Calls `engine.yml` (the one definition, also used by the nightly workflow): `uv sync --locked`, the tiktoken encoding from the cache (`scripts/prime_tiktoken_cache.py` fills it, with retries, the one step with internet), then `pytest -m engine` in a network namespace without network. No Docker stack, no secrets, `contents: read`, 20 minutes. |
 | `e2e` ("E2E: browser journeys") | app or runner changed | `playwright install --with-deps chromium`, the runner (`uv sync --locked` in `runner/`) and the tiktoken encoding (restored from the cache, primed with `scripts/prime_tiktoken_cache.py`) for the journey with the real runner, then the journeys against the production build: `@smoke` only on pull requests into `development`, all (without `@flaky`) on pull requests into `main` and on pushes. |
+| `licenses` ("Licenses: dependency check") | app or runner changed, `THIRD_PARTY_LICENSES.md` changed (own path filter `licenses`, because the Markdown exclusions skip it), and every push and pull request into `main` | Installs both parts from their lockfiles, then `pnpm licenses:check` (fails when a dependency has a license outside the allow list of `license-policy.json`; reads installed metadata with `uv run --no-sync`), the unit tests of `src/ci/license-check` (policy against the license document and the lockfiles) and `pnpm spdx:check`. The last two are app tests that a runner-only pull request would not run in `app-fast`. No network beyond the installs, read-only token. |
 | `compose` ("Compose: stack smoke test") | pull requests: app or runner changed, or any pull request into `main` | Builds both images (`load`, no push, GHA layer cache), then runs `docker/smoke/compose.sh` against them. Same rights as the image jobs. |
 | `image-app`, `image-runner` | pull requests: app (runner) changed, or any pull request into `main` | Builds the image with `docker/build-push-action` (`load`, no push, GHA layer cache), then runs its smoke test. No registry login, read-only token. Pushes do not run these jobs because the publish workflow builds the same images. |
 | `actionlint` | workflows changed | actionlint with `.github/actionlint.yaml`. |
@@ -329,12 +331,25 @@ references) and pushes `ghcr.io/expidetgames/code-reviewer-app` and `-runner` wi
 It pushes the commit tags of both images first and the floating tags last, so no floating tag points at a half published release. It is the only workflow with `packages: write`, granted to that job alone. A failing build or smoke
 test stops the job before the login, so no tag moves. The structure of both files is pinned by
 `app/src/ci/images-workflow.test.ts`; `app/src/ci/dockerfiles.test.ts` pins the runtime versions,
-digests, user and `.dockerignore` rules of the Dockerfiles.
+digests, user, license files and ignore rules (`Dockerfile.dockerignore`, and the root `.dockerignore` that the classic builder reads instead) of the Dockerfiles.
 
 `.github/workflows/nightly.yml` (workflow "Nightly") calls the same `engine.yml` every night on the default branch and on demand (`workflow_dispatch`). The structure is pinned by `app/src/ci/engine-workflow.test.ts` (the shared job), `nightly-workflow.test.ts` and `ci-workflow.test.ts` (the callers).
 
 Planned, added with the suites they run: the Docker stack job (`integration`) and `enforce-pr-source-branch.yml`. `main` accepts pull requests only from
 `development` or `hotfix/*`.
+
+### Dependency license check
+
+`license-policy.json` (repository root) holds the allow list of SPDX license ids, the exceptions (a package, matched by exact name or a name ending in `*`, may carry the listed licenses) and the packages that the lockfiles list for other platforms but that are not installed everywhere (`notInstalled`, with the license that the registry declares). `app/src/ci/license-check/` reads it:
+
+- `collect.ts` gathers the installed packages (`pnpm licenses list --json`; `runner/scripts/list_licenses.py`, which prints the `METADATA` of what uv installed) and the packages of `pnpm-lock.yaml` and `uv.lock`. All of it is local, nothing is fetched.
+- `python-license.ts` turns Python's three ways of naming a license (expression, free text, trove classifiers) into one SPDX expression; `spdx.ts` reads expressions (`OR` needs one allowed side, `AND` needs both).
+- `check.ts` judges: a license outside the allow list and not granted to the package by name fails; a lockfile package that is not installed and not declared in `notInstalled` fails (its license cannot be read); an exception that matches no lockfile package fails (so the list shrinks with the dependencies).
+- `THIRD_PARTY_LICENSES.md` has the same allow list and the same tables; `policy-doc.test.ts` fails when they differ, `policy.test.ts` checks the policy against the real lockfiles, `check.test.ts` and `cli.test.ts` cover the rules with made-up packages (an unlisted copyleft dependency exits with 1).
+
+### SPDX headers
+
+`app/src/ci/spdx-headers/` holds the rules (`rules.ts`: which files are source files, the comment syntax per language, how the header is added without moving a shebang or a Dockerfile `# syntax=` line), the command that writes and checks the headers (`cli.ts`: `pnpm spdx:add`, `pnpm spdx:check`, `make fix-spdx-headers`) and the tests. `spdx-headers.test.ts` lists every file that git tracks or would track and fails for each source file without `SPDX-License-Identifier: Apache-2.0` in its first lines. One rule (`headerProblem` in `rules.ts`) serves the test and the command: a file with another identifier (`SPDX-License-Identifier: MIT`) fails the check too, and `pnpm spdx:add` reports it and leaves it alone, because another license is a decision for a person. `rules.test.ts` and `cli.integration.test.ts` cover the rules and the command with made-up files. After merging a branch that predates the rule, run `make fix-spdx-headers` and commit the result.
 
 ## 9. Test cases in GitHub issues
 

@@ -14,7 +14,10 @@
     "test": "vitest run --project unit",
     "test:watch": "vitest --project unit",
     "test:int": "vitest run --project integration",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "licenses:check": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON src/ci/license-check/cli.ts",
+    "spdx:add": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON src/ci/spdx-headers/cli.ts --write",
+    "spdx:check": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON src/ci/spdx-headers/cli.ts --check"
   },
   "dependencies": {
     "better-auth": "1.7.7",

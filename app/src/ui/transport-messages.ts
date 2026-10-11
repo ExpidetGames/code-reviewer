@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The copy for the failures every call from a page can run into, whatever the route: the session
 // ended, the person is not allowed, the server was not reached, the answer was not what a route
 // documents. Shared by the copy of the project list and of the settings form.

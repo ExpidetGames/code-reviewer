@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Access to the allowed_login_pins table: the GitHub id each listed login is bound to. The only
 // code that reads or writes it. The key is the lower-cased login (GitHub logins are not case
 // sensitive), so a change of spelling alone never counts as another account.

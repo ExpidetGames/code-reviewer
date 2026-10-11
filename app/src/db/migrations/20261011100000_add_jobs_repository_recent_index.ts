@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The pages that show runs ask for the newest job of a repository (the last run on the project list)
 // and for the newest jobs of one repository (the filtered list). Both read `(repository_id,
 // created_at, id)` in order, so this index answers each as one lookup instead of a scan of every job

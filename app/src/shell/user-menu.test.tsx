@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // @vitest-environment jsdom
 // Pins down the user menu in the header: who is signed in, the way to sign out, and that the menu
 // works from the keyboard. The name and avatar come from the GitHub profile, so they are shown as

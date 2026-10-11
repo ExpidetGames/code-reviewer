@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Command line entry point of the runner: without arguments it runs the job loop."""
 
 import argparse

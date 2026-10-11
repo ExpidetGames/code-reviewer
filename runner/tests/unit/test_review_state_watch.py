@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Pins down the review state watch: PR-Agent shortens the review comment when the review and the
 hidden record of earlier findings together exceed what GitHub accepts, and it says so only in a log
 line (or not at all). The watch wraps the one function that does the shortening and records whether

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down that the login protection and the webhook route work together: the access proxy (real
 // Better Auth, real database) lets a request without a session reach `/api/webhooks/github-app`, and
 // the real route file answers it exactly as it does without the protection in front. The guard must

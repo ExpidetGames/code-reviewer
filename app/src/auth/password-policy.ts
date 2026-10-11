@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The password rule of every email and password account (docs/decisions/0001-editions-setup-and-
 // accounts.md, section 2.2): at least 12 and at most 128 characters, and not a common password. No
 // composition rules ("one digit, one symbol"): length and an unguessable choice are what protect an

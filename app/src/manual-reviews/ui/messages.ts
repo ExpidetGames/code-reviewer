@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The copy for everything that can go wrong when a person loads the pull requests or starts a
 // command. The routes answer with stable codes; this is where a code becomes a sentence (the UI
 // translates codes, never the other way round). Nothing a response carried (a raw answer of GitHub,

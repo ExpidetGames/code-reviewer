@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Which ways to sign in this instance offers. Email with password always exists (the instance admin
 // signs in that way). GitHub exists while the GitHub OAuth app is configured. The admin portal will
 // make this a setting (docs/decisions/0001-editions-setup-and-accounts.md, section 2.3).

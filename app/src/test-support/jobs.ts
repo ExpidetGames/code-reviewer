@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Fixtures for the job queue tests: a migrated database with one integration and a few repositories,
 // a clock the test moves by hand, and a way to enqueue with sensible defaults.
 import type { Kysely } from "kysely";

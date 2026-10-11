@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 "use client";
 // The "Sync from GitHub" button: asks the app to read the installations and repositories from GitHub
 // now, then says how many repositories are new and what went wrong, in sentences. The list refreshes

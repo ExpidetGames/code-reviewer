@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Reads the database settings from the environment. The only place that knows the variable names.
 import { DatabaseError } from "./errors.ts";
 

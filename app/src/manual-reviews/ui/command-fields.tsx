@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The command of a manual start and, for `ask`, the question. The four commands are always listed;
 // one the project switched off is shown but cannot be picked. The question field appears only for
 // `ask`.

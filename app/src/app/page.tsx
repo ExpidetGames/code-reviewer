@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { redirect } from "next/navigation";
 
 // The start page has no content of its own: the signed in app opens on its first place.

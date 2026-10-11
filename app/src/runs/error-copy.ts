@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // What a run's error code means, in words for a person who does not run the servers. The codes come
 // from three places: the queue (`JOB_ERROR_CODES`), the claim of the runner API (`CLAIM_FAILURE_CODES`
 // and `CLAIM_RELEASE_REASONS`) and the runner itself (`RUNNER_ERROR_CODES`). A test requires a text

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The wiring of the running server: the real database, registry, project service, settings and job
 // queue behind the manual start.
 import "server-only";

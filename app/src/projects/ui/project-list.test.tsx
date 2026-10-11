@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // @vitest-environment jsdom
 // Pins down what the project list shows: the empty state with the steps to install the GitHub App,
 // "No run yet" for a project without a run, the status of the last run, the switch with its state,

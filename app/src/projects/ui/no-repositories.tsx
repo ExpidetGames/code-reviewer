@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // What the project list shows while GitHub has given the app no repository: how to install the
 // GitHub App, in steps, with the link to its installation page when the app's name is configured.
 import { EmptyState } from "../../ui/empty-state.tsx";

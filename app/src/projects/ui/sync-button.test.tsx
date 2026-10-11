@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // @vitest-environment jsdom
 // Pins down the "Sync from GitHub" button: it runs the sync, says how many repositories are new in a
 // sentence, translates the problems GitHub reported instead of showing codes, and refreshes the list.

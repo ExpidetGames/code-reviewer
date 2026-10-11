@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The handler behind `POST /api/integrations/sync`, the "Sync from GitHub" button. It runs the
 // process-wide sync (src/integrations/README.md, "Synchronization") and answers with how many
 // repositories are new and what went wrong at GitHub. The collaborators are passed in so the route

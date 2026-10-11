@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The import rule behind the integration boundary: platform specific code (a provider
 // implementation under src/integrations/providers/) is imported by the registry and by the provider's
 // own folder only. Everything else, jobs, the runner API, the UI, depends on the normalized types,

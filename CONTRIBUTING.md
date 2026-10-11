@@ -127,5 +127,18 @@ is no CLA and no copyright assignment: you keep the copyright to your work, and 
 anything. Make sure you have the right to submit what you contribute, in particular that you did
 not copy code with an incompatible license.
 
-If you add a dependency, check its license and record it in
-`THIRD_PARTY_LICENSES.md` when it needs attribution or is not permissive.
+Every source file starts with the line `SPDX-License-Identifier: Apache-2.0`, in the comment syntax of
+its language (`//` for TypeScript and JavaScript, `#` for Python, shell, Dockerfiles and the Makefile,
+`/* */` for CSS; after a shebang or the `# syntax=` line of a Dockerfile). Data and configuration
+files (JSON, YAML, TOML, lock files), Markdown, the license texts, `docs/` and `fakes/fixtures/` have
+none. A new source file without the header fails a unit test; `make fix-spdx-headers` adds it to every
+file that lacks it. The rules (which files count, how the header looks) are in
+`app/src/ci/spdx-headers/rules.ts`.
+
+If you add a dependency, check its license. `make check-licenses` (part of `make verify`, and the CI
+job "Licenses: dependency check") fails when a package of `app/pnpm-lock.yaml` or `runner/uv.lock`
+has a license outside the allow list of `license-policy.json`. Permissive licenses pass without any
+entry. For any other license, choose another dependency, or, when that is not reasonable, add an
+exception with a reason to `license-policy.json` and to the matching table in
+`THIRD_PARTY_LICENSES.md` (a test fails when the two disagree). Also record the dependency there when
+it needs attribution.

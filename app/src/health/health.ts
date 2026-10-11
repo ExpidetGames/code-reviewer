@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The answer of GET /api/health: the app is up and can read its database. Kept minimal on purpose;
 // the deployment ticket extends it.
 import { sql, type Kysely } from "kysely";

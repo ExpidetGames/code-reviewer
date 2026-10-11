@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Asks GitHub whether the signed in account is a member of the allowed organization. It uses the
 // account's own token on `GET /user/memberships/orgs/{org}`, which needs the `read:org` scope and
 // also sees private memberships (the public members list would not).

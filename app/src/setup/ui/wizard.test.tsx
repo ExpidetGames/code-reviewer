@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // @vitest-environment jsdom
 // Pins down the wizard: three steps in order, the choices are kept while going back and forth, the
 // fail-closed hint is shown next to an email or domain rule, the password rule and its reason are

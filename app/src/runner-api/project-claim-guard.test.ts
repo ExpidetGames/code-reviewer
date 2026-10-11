@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the claim guard of the projects: an active project lets the job run, anything else cancels it.
 import { describe, expect, it } from "vitest";
 import type { Job } from "../jobs/job-types.ts";

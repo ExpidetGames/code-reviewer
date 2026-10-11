@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The command line of the backup, for a Coolify scheduled task, a manual run and the restore guide:
 //
 //   node backup/cli.ts backup             back up DATABASE_PATH into BACKUP_DIR, then rotate

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // What the instance knows about its own setup, read from the two explicit markers in
 // `instance_settings` and from whether users exist (docs/decisions/0001-editions-setup-and-accounts.md,
 // section 2.2). Never inferred from whether a row exists: a database from before the markers has

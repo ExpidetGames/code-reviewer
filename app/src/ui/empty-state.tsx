@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // What a list shows while it has nothing to list: a short title, one sentence on what will appear
 // here, and optionally a next step.
 import type { ReactNode } from "react";

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The checks on what a runner sends. Written by hand (no schema library at run time), and kept in
 // line with contracts/runner-api.v1.json by the compatibility test, which runs a set of good and bad
 // bodies through both and requires the same verdict. A refusal lists fields and reasons, never
