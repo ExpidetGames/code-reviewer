@@ -384,6 +384,127 @@ async function twoWorkspaces() {
   return { db, a, b, reposA: reposOf(db, idA), reposB: reposOf(db, idB) };
 }
 
+describe("enqueueing under the scope of A against what B already has", () => {
+  /**
+   * B has a waiting automatic job (its run-after time is in the future, like a debounced push) and
+   * a job that answers a comment. Every lookup that decides "this job exists already" must stay
+   * inside the workspace: if one looks across workspaces, A is handed B's job (or B's job is changed)
+   * instead of being refused.
+   */
+  async function withBusyB() {
+    const base = await twoWorkspaces();
+    const future = "2099-01-01T00:00:00.000Z";
+    await base.db
+      .updateTable("jobs")
+      .set({ run_after: future })
+      .where("id", "=", base.b.job.id)
+      .execute();
+    const commentJob = await base.reposB.jobs.enqueue({
+      repositoryId: base.b.repository.id,
+      prNumber: 8,
+      prUrl: "https://github.test/acme/b/pull/8",
+      headSha: SHA,
+      command: "review",
+      args: "",
+      triggerKind: "comment",
+      actorLogin: "octocat",
+      deliveryId: "delivery-comment-b",
+      commentId: "comment-b",
+      runAfter: null,
+    });
+    if (commentJob.status !== "created") throw new Error("seeding failed");
+    return { ...base, commentJob: commentJob.job };
+  }
+
+  const input = (repositoryId: string) => ({
+    repositoryId,
+    prNumber: 7,
+    prUrl: "https://github.test/acme/b/pull/7",
+    headSha: SHA,
+    command: "review" as const,
+    args: "",
+    triggerKind: "manual" as const,
+    actorLogin: "mallory",
+    deliveryId: null,
+    commentId: null,
+    runAfter: null,
+  });
+
+  // DM-06, DM-07
+  it("is refused for the same pull request and command as a job of B, and B's job keeps its run-after time", async () => {
+    const { db, b, reposA } = await withBusyB();
+    const before = await rowsOf(db, b.workspaceId);
+
+    // A person's job would be "already active" and pull B's waiting job forward.
+    await expect(
+      reposA.jobs.enqueue(input(b.repository.id)),
+    ).rejects.toMatchObject({ code: "SQLITE_CONSTRAINT_FOREIGNKEY" });
+
+    expect(await rowsOf(db, b.workspaceId)).toEqual(before);
+  });
+
+  // DM-06, DM-07
+  it("is refused for the same head commit as an automatic job of B, which it would otherwise return", async () => {
+    const { db, b, reposA } = await withBusyB();
+    const before = await rowsOf(db, b.workspaceId);
+
+    await expect(
+      reposA.jobs.enqueue({
+        ...input(b.repository.id),
+        triggerKind: "webhook",
+        actorLogin: "octocat",
+      }),
+      // The unique index of automatic jobs per head commit may refuse it before the foreign key does.
+    ).rejects.toMatchObject({
+      code: expect.stringMatching(/^SQLITE_CONSTRAINT_(FOREIGNKEY|UNIQUE)$/),
+    });
+
+    expect(await rowsOf(db, b.workspaceId)).toEqual(before);
+  });
+
+  // DM-06, DM-07
+  it("does not return the job of B for the delivery id of B", async () => {
+    const { db, a, b, reposA } = await withBusyB();
+    const before = await rowsOf(db, b.workspaceId);
+
+    // A valid job in A's own repository that only reuses B's delivery id: the answer must not be
+    // B's job. (The unique index on delivery ids is instance wide, so the insert is refused.)
+    await expect(
+      reposA.jobs.enqueue({
+        ...input(a.repository.id),
+        prNumber: 55,
+        deliveryId: "delivery-b",
+      }),
+    ).rejects.toMatchObject({ code: "SQLITE_CONSTRAINT_UNIQUE" });
+
+    expect(await rowsOf(db, b.workspaceId)).toEqual(before);
+  });
+
+  // DM-06, DM-07
+  it("does not return the job of B for the comment of B", async () => {
+    const { db, b, reposA } = await withBusyB();
+    const before = await rowsOf(db, b.workspaceId);
+
+    await expect(
+      reposA.jobs.enqueue({
+        ...input(b.repository.id),
+        prNumber: 8,
+        triggerKind: "comment",
+        commentId: "comment-b",
+      }),
+    ).rejects.toMatchObject({ code: "SQLITE_CONSTRAINT_FOREIGNKEY" });
+
+    expect(await rowsOf(db, b.workspaceId)).toEqual(before);
+    expect(
+      await db
+        .selectFrom("job_comments")
+        .select("job_id")
+        .where("comment_id", "=", "comment-b")
+        .execute(),
+    ).toEqual([{ job_id: expect.any(String) }]);
+  });
+});
+
 describe("two workspaces", () => {
   // DM-06, DM-07
   it.each(CASES.map((testCase) => [testCase.name, testCase] as const))(
