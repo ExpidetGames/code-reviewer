@@ -61,7 +61,7 @@ async function openPage(env: Record<string, string | undefined> = WORKING_ENV) {
     config: () => describeConfigStatus(env),
     installUrl: () => githubAppInstallUrl(env),
   });
-  return render(<ProjectsPageContent data={data} />);
+  return render(<ProjectsPageContent workspaceSlug="acme" data={data} />);
 }
 
 describe("the Projects page", () => {

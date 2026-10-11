@@ -7,7 +7,6 @@ import "server-only";
 import { createProjectsRepository } from "../db/repositories/projects-repository.ts";
 import { getDatabase } from "../db/startup.ts";
 import { createJobProjectHooks } from "../jobs/project-hooks.ts";
-import { inCurrentWorkspace } from "../workspaces/in-current-workspace.ts";
 import type { ProjectHooks } from "./hooks.ts";
 import { createProjectService, type ProjectService } from "./service.ts";
 
@@ -22,9 +21,4 @@ export function projectServiceFor(workspaceId: string): ProjectService {
     projects: createProjectsRepository(getDatabase(), workspaceId),
     hooks: getProjectHooks(workspaceId),
   });
-}
-
-/** The project service for the current request (the workspace the signed-in user works in). */
-export function getProjectService(): ProjectService {
-  return inCurrentWorkspace(projectServiceFor);
 }

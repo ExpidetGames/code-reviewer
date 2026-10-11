@@ -20,7 +20,6 @@ import {
   type ReconcileResult,
 } from "../../db/repositories/repositories-repository.ts";
 import type { Database } from "../../db/schema.ts";
-import { resolveDefaultWorkspaceId } from "../../workspaces/current-workspace.ts";
 import { hasSafeMessage, IntegrationError } from "../errors.ts";
 import type { IntegrationProvider } from "../provider.ts";
 import type { IntegrationRegistry } from "../registry.ts";
@@ -30,6 +29,7 @@ import type {
   Integration,
   IntegrationType,
 } from "../types.ts";
+import { resolveDefaultWorkspaceId } from "./default-workspace.ts";
 import { sharedKeyedLock, type KeyedLock } from "./keyed-lock.ts";
 
 export type SyncError = {
@@ -112,8 +112,8 @@ export type IntegrationSyncOptions = {
   log?: (line: string) => void;
   /**
    * The workspace a connection that is new to the instance is put in. TEMPORARY: the default
-   * workspace, until the installation of a connection is bound to the workspace of the person who
-   * installed it (the workspace feature). Connections that exist keep their workspace.
+   * workspace (default-workspace.ts), until the installation of a connection is bound to the workspace of
+   * the person who installed it (the GitHub installation issue). Connections that exist keep their workspace.
    */
   workspaceForNewConnection?: () => Promise<string>;
 };

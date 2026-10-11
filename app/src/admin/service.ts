@@ -17,6 +17,11 @@ import type { SecretStatus, SecretStore } from "../secrets/store.ts";
 import type { SetupIssue } from "../setup/errors.ts";
 import { parseSignUpRule } from "../setup/input.ts";
 import { CLOSED_RULE } from "../signup/rule.ts";
+import {
+  DEFAULT_MAX_WORKSPACES_PER_USER,
+  MAX_WORKSPACES_PER_USER,
+  MIN_WORKSPACES_PER_USER,
+} from "../workspaces/limits.ts";
 import { githubIdentityPasses } from "./github-identity.ts";
 import {
   checkSignInMethods,
@@ -32,10 +37,11 @@ import {
   type Tenancy,
 } from "./tenancy.ts";
 
-/** The most workspaces one user may own, when the admin never set it. */
-export const DEFAULT_MAX_WORKSPACES_PER_USER = 10;
-export const MIN_WORKSPACES_PER_USER = 1;
-export const MAX_WORKSPACES_PER_USER = 1000;
+export {
+  DEFAULT_MAX_WORKSPACES_PER_USER,
+  MAX_WORKSPACES_PER_USER,
+  MIN_WORKSPACES_PER_USER,
+};
 
 type SignUpRule = InstanceSettingValues["sign_up_rule"];
 

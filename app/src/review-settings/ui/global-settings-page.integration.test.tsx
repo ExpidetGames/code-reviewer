@@ -41,22 +41,26 @@ async function openSettings(
       ({ githubLogin: "octocat" }) as unknown as SessionUser,
     service: s.service,
   });
-  const api = createGlobalSettingsApi(async (url, init) =>
-    handlers.putGlobal(
-      new Request(`https://app.test${url}`, {
-        ...init,
-        headers: {
-          ...(init?.headers as Record<string, string>),
-          "sec-fetch-site": "same-origin",
-        },
-      }),
-    ),
+  const api = createGlobalSettingsApi(
+    async (url, init) =>
+      handlers.putGlobal(
+        new Request(`https://app.test${url}`, {
+          ...init,
+          headers: {
+            ...(init?.headers as Record<string, string>),
+            "sec-fetch-site": "same-origin",
+          },
+        }),
+      ),
+    "acme",
   );
   const data = await loadGlobalSettingsPage({
     settings: s.service,
     config: () => describeConfigStatus(env),
   });
-  const view = render(<GlobalSettingsPageContent data={data} api={api} />);
+  const view = render(
+    <GlobalSettingsPageContent workspaceSlug="acme" data={data} api={api} />,
+  );
   return { ...s, view };
 }
 

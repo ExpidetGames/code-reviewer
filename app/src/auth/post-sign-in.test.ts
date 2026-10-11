@@ -10,6 +10,7 @@ function gates(mail: boolean, workspace: boolean): AccessGates {
   return {
     verificationRequired: () => Promise.resolve(mail),
     hasWorkspace: () => Promise.resolve(workspace),
+    workspaceRole: () => Promise.resolve(workspace ? "member" : null),
   };
 }
 const PERSON = { id: "u", emailVerified: true, isInstanceAdmin: false };

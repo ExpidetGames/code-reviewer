@@ -79,7 +79,7 @@ describe("switching to single-tenant while a workspace is being created", () => 
         expect(result.tenancy).toBe("single");
         expect(result.created).toEqual({
           ok: false,
-          error: "tenancy_is_single",
+          error: "multi_tenant_required",
         });
         expect(result.workspaceCount).toBe(1);
         outcomes.add("switch first");

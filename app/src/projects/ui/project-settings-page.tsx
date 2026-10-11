@@ -5,6 +5,7 @@
 // in), `ProjectSettingsPageContent` renders it. Every repository the list shows has a settings page,
 // activated or not: the settings can be saved first and take effect once the project is switched on.
 import Link from "next/link";
+import { workspacePath } from "../../workspaces/paths.ts";
 import { ConfigNotices } from "../../config-status/notices.tsx";
 import type { ConfigStatus } from "../../config-status/status.ts";
 import { PageHeader } from "../../ui/page-header.tsx";
@@ -65,10 +66,13 @@ const STATE_TEXT: Record<ProjectRowView["status"], string> = {
 };
 
 export function ProjectSettingsPageContent({
+  workspaceSlug,
   data,
   api,
   manualReviewApi,
 }: {
+  /** The workspace of the page: every link and call stays in it. */
+  workspaceSlug: string;
   data: Extract<ProjectSettingsPageData, { kind: "ready" }>;
   /** Only tests pass this: a server component cannot hand functions to the client form. */
   api?: SettingsApi;
@@ -82,7 +86,10 @@ export function ProjectSettingsPageContent({
         title={row.fullName}
         description="Review settings of this project."
         actions={
-          <Link href="/projects" className="btn btn-secondary">
+          <Link
+            href={workspacePath(workspaceSlug, "/projects")}
+            className="btn btn-secondary"
+          >
             All projects
           </Link>
         }
@@ -94,6 +101,7 @@ export function ProjectSettingsPageContent({
       {row.status === "active" ? (
         <StartReviewPanel
           key={row.repositoryId}
+          workspaceSlug={workspaceSlug}
           repositoryId={row.repositoryId}
           {...(manualReviewApi === undefined ? {} : { api: manualReviewApi })}
         />
@@ -106,6 +114,7 @@ export function ProjectSettingsPageContent({
           when it is shown again with fresh data the form must start from that data. */}
       <SettingsForm
         key={JSON.stringify(data.model)}
+        workspaceSlug={workspaceSlug}
         initial={data.model}
         repositoryId={row.repositoryId}
         {...(api === undefined ? {} : { api })}

@@ -1,0 +1,75 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// The addresses of a workspace: which paths name a workspace, which slug they name, and that an odd spelling
+// can only fail to name one.
+import { describe, expect, it } from "vitest";
+import {
+  isWorkspaceSlug,
+  workspaceApiPath,
+  workspaceHome,
+  workspacePath,
+  workspaceSlugOfPath,
+} from "./paths.ts";
+
+describe("the slug in an address", () => {
+  it.each([
+    ["/w/acme", "acme"],
+    ["/w/acme/", "acme"],
+    ["/w/acme/projects", "acme"],
+    ["/w/team-a-2/runs/42", "team-a-2"],
+    ["/api/w/acme", "acme"],
+    ["/api/w/acme/repositories/7/project", "acme"],
+  ])("reads %s as the workspace %s", (path, slug) => {
+    expect(workspaceSlugOfPath(path)).toBe(slug);
+  });
+
+  it.each([
+    "/w/",
+    "/w/ACME",
+    "/w/-acme",
+    "/w/acme-",
+    "/w/a--b",
+    "/w/acme%2Fx",
+    "/w/..",
+    "/w/a_b",
+    `/w/${"a".repeat(49)}`,
+    "/api/w/",
+    "/api/w/Acme/runs",
+  ])(
+    "reads %s as a workspace address with a slug that cannot exist",
+    (path) => {
+      expect(workspaceSlugOfPath(path)).toBeNull();
+    },
+  );
+
+  it.each([
+    "/",
+    "/projects",
+    "/windows",
+    "/w",
+    "/api/workspaces",
+    "/api/w",
+    "/api/runs",
+    "/W/acme",
+    "/no-access",
+  ])("does not read %s as a workspace address", (path) => {
+    expect(workspaceSlugOfPath(path)).toBeUndefined();
+  });
+
+  it("knows the shape of a slug", () => {
+    expect(isWorkspaceSlug("default")).toBe(true);
+    expect(isWorkspaceSlug("a")).toBe(true);
+    expect(isWorkspaceSlug("")).toBe(false);
+    expect(isWorkspaceSlug(7)).toBe(false);
+    expect(isWorkspaceSlug("a b")).toBe(false);
+  });
+});
+
+describe("building an address", () => {
+  it("puts the slug in front of the page and of the data route", () => {
+    expect(workspacePath("acme", "/runs")).toBe("/w/acme/runs");
+    expect(workspacePath("acme")).toBe("/w/acme");
+    expect(workspaceApiPath("acme", "/runs")).toBe("/api/w/acme/runs");
+    expect(workspaceHome("acme")).toBe("/w/acme/projects");
+  });
+});

@@ -26,17 +26,38 @@ export const PUBLIC_PATHS: readonly PublicPath[] = [
   { path: "/api/password-reset", match: "exact" },
   // Signing up and verifying an address: the visitor has no session yet. The sign-up and the request for
   // a new link are rate limited per address and for the instance, and a verification link is the
-  // credential of its own route (src/signup/http.ts). `/no-access` only explains and offers sign out.
+  // credential of its own route (src/signup/http.ts).
   { path: "/sign-up", match: "exact" },
   { path: "/api/sign-up", match: "exact" },
   { path: "/verify-email", match: "exact" },
   { path: "/api/verify-email", match: "prefix" },
-  { path: "/no-access", match: "exact" },
+  // The page behind an invitation link: whoever holds the link opens it, signed in or not (the token is the
+  // credential of the page, and it only shows what the invitation is about; accepting needs a session, see
+  // src/workspaces/README.md).
+  { path: "/invitation", match: "exact" },
   // The runner authenticates with its own shared token, not with a session.
   { path: "/api/runners", match: "prefix" },
   // GitHub authenticates a webhook with its signature, not with a session.
   { path: "/api/webhooks", match: "prefix" },
 ];
+
+/**
+ * The few places a signed in account without a workspace can reach (and no others): the page that says
+ * what to do, the list of invitations waiting for it, accepting an invitation, and creating a workspace.
+ * Everything else answers a person without a workspace with the redirect to `/no-access` (a page) or
+ * 403 `no_workspace_access` (a data route). Exact paths: nothing below them is open.
+ */
+export const NO_WORKSPACE_PATHS: readonly string[] = [
+  "/no-access",
+  "/invitations",
+  "/workspaces/new",
+  "/api/invitations/accept",
+  "/api/workspaces",
+];
+
+export function isNoWorkspacePath(pathname: string): boolean {
+  return NO_WORKSPACE_PATHS.includes(pathname);
+}
 
 /**
  * `pathname` is the path of the request URL as Next.js hands it to the proxy: dot segments are

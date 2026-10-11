@@ -41,9 +41,15 @@ export const ACTIVATION_BLOCKED_TEXT =
   "The GitHub App is not configured, so projects cannot be activated yet.";
 
 export function ProjectsPageContent({
+  workspaceSlug,
+  canManage = true,
   data,
   api,
 }: {
+  /** The workspace of the page. */
+  workspaceSlug: string;
+  /** Whether the person may switch projects on and off (an Admin or an Owner). */
+  canManage?: boolean;
   data: ProjectsPageData;
   api?: ProjectsApi;
 }) {
@@ -51,6 +57,8 @@ export function ProjectsPageContent({
     <>
       <ConfigNotices status={data.config} />
       <ProjectList
+        workspaceSlug={workspaceSlug}
+        canManage={canManage}
         view={data.list}
         installUrl={data.installUrl}
         activationBlocked={

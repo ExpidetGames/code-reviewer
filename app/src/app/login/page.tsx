@@ -4,6 +4,7 @@ import { connection } from "next/server";
 import Link from "next/link";
 import { Suspense } from "react";
 import { signInWithGithub, signInWithPassword } from "@/auth/actions";
+import { invitationTokenOf, pathCarrying } from "@/auth/invitation-return";
 import { loginErrorMessage } from "@/auth/login-errors";
 import { getSignInMethods } from "@/auth/sign-in-runtime";
 import { getSignUpAvailability } from "@/signup/shared";
@@ -22,16 +23,20 @@ export default function LoginPage({ searchParams }: PageProps<"/login">) {
         {/* The ways to sign in are the admin's setting (Setup, Ways to sign in) and GitHub exists while
             it is configured: both are read at request time, behind a boundary. */}
         <Suspense fallback={null}>
-          <SignInForms />
+          <SignInForms searchParams={searchParams} />
         </Suspense>
       </div>
     </main>
   );
 }
 
-async function SignInForms() {
+async function SignInForms({
+  searchParams,
+}: Pick<PageProps<"/login">, "searchParams">) {
   // Reads the database and the environment at request time (not when the page is built).
   await connection();
+  // The invitation link the person came from, if any: carried through the sign-in.
+  const invitation = invitationTokenOf((await searchParams).invitation);
   const methods = await getSignInMethods();
   // The link to the sign-up is offered while the sign-up is open (the state of the instance).
   const signUp = methods.emailPassword
@@ -65,6 +70,9 @@ async function SignInForms() {
               required
             />
           </div>
+          {invitation !== null ? (
+            <input type="hidden" name="invitation" value={invitation} />
+          ) : null}
           <Button type="submit" className="btn-block">
             Sign in
           </Button>
@@ -72,7 +80,8 @@ async function SignInForms() {
       ) : null}
       {signUp.open ? (
         <p className="muted small">
-          No account yet? <Link href="/sign-up">Create one</Link>.
+          No account yet?{" "}
+          <Link href={pathCarrying("/sign-up", invitation)}>Create one</Link>.
         </p>
       ) : null}
       {methods.github ? (

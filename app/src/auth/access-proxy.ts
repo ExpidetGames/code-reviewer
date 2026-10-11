@@ -12,7 +12,8 @@ import {
   isInternalPortalPath,
   portalRewriteTarget,
 } from "../admin/paths.ts";
-import { decideAccess, isPublicPath } from "./access.ts";
+import { workspaceSlugOfPath } from "../workspaces/paths.ts";
+import { decideAccess, isNoWorkspacePath, isPublicPath } from "./access.ts";
 import type { AccessGates } from "./access-gates.ts";
 import type { AccessPolicy } from "./access-policy.ts";
 import type { Auth } from "./auth.ts";
@@ -112,13 +113,39 @@ export function createAccessProxy({
     // The instance admin whose address is not verified yet keeps the admin portal, so that a problem with
     // the mail server can always be repaired; everything else of the app waits for the verification
     // (src/auth/access-gates.ts). The portal's own files count, because a rewrite runs the proxy again.
+    // A person without a workspace reaches the few places made for them (access.ts, NO_WORKSPACE_PATHS) and
+    // nothing else.
     const signedIn =
       lookup.kind === "user" ||
+      (lookup.kind === "no_workspace" && isNoWorkspacePath(pathname)) ||
       (lookup.kind === "unverified" &&
         lookup.user.isInstanceAdmin &&
         (isAdminPath(pathname) || isInternalPortalPath(pathname)))
         ? lookup.user
         : null;
+
+    // A workspace address (`/w/<slug>...`, `/api/w/<slug>...`) is for the members of that workspace. For
+    // everybody else it is a path that does not exist: the same answer for a workspace that is not there and
+    // one the person does not belong to, so nothing tells them apart. (The pages and routes check the
+    // membership again themselves, src/workspaces/access.ts.)
+    const workspaceSlug = workspaceSlugOfPath(pathname);
+    if (workspaceSlug !== undefined && signedIn !== null) {
+      try {
+        const role =
+          workspaceSlug === null
+            ? null
+            : await getGates().workspaceRole(signedIn.id, workspaceSlug);
+        if (role === null) return treatAsMissing(request);
+      } catch (error) {
+        console.error(
+          `[auth] could not check the workspace: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return new NextResponse("Service unavailable", {
+          status: 503,
+          headers: { "cache-control": "no-store" },
+        });
+      }
+    }
 
     const decision = decideAccess({
       pathname,

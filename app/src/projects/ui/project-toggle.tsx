@@ -11,17 +11,26 @@ import { browserProjectsApi, type ProjectsApi } from "./api.ts";
 import { describeFailure } from "./messages.ts";
 
 export function ProjectToggle({
+  workspaceSlug,
   repositoryId,
   fullName,
   checked,
   blockedReason,
-  api = browserProjectsApi,
+  canManage = true,
+  api = browserProjectsApi(workspaceSlug),
 }: {
+  /** The workspace of the page: the call is made in it. */
+  workspaceSlug: string;
   repositoryId: string;
   fullName: string;
   checked: boolean;
   /** Why the project cannot be switched on right now; a project that is on can always be switched off. */
   blockedReason: string | null;
+  /**
+   * Whether the person may switch projects on and off (an Admin or an Owner). The switch only shows the
+   * state for a Member; the route refuses them in any case (src/workspaces/permissions.ts).
+   */
+  canManage?: boolean;
   api?: ProjectsApi;
 }) {
   const router = useRouter();
@@ -31,7 +40,7 @@ export function ProjectToggle({
   const [pending, setPending] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const on = confirmed ?? checked;
-  const blocked = !on && blockedReason !== null;
+  const blocked = (!on && blockedReason !== null) || !canManage;
 
   async function toggle() {
     if (pending || blocked) return;
@@ -68,7 +77,9 @@ export function ProjectToggle({
         </p>
       ) : blocked ? (
         <p id={messageId} className="muted small">
-          {blockedReason}
+          {canManage
+            ? blockedReason
+            : "Only Admins and Owners can switch a project on or off."}
         </p>
       ) : null}
     </div>

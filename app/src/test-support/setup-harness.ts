@@ -11,6 +11,7 @@ import { createAccessPolicy } from "../auth/access-policy.ts";
 import { parseAccessConfig } from "../auth/access-config.ts";
 import { createAuth } from "../auth/auth.ts";
 import { loadAuthConfig } from "../auth/config.ts";
+import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
 import { createSetupCodeStore } from "../setup/code-store.ts";
 import { completeSetup } from "../setup/complete.ts";
 import { createCredentialCheck } from "../setup/credential-check.ts";
@@ -123,14 +124,14 @@ function assemble(
   // switches with `gateState.mail`) and a workspace (read from the database, like the server does).
   const gates: AccessGates = {
     verificationRequired: () => Promise.resolve(gateState.mail),
-    async hasWorkspace(userId) {
-      const membership = await db
-        .selectFrom("workspace_members")
-        .select("user_id")
-        .where("user_id", "=", userId)
-        .limit(1)
-        .executeTakeFirst();
-      return membership !== undefined;
+    hasWorkspace: (userId) =>
+      createWorkspacesRepository(db).hasMembership(userId),
+    async workspaceRole(userId, slug) {
+      const membership = await createWorkspacesRepository(db).findMembership(
+        userId,
+        slug,
+      );
+      return membership?.role ?? null;
     },
   };
   // The allow list is for GitHub identities; none is configured here, and nobody signs in with GitHub.

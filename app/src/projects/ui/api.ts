@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // The calls the project list makes to the app's own routes: switch a project on or off
-// (`PUT /api/repositories/:id/project`, src/projects/http.ts) and run the sync by button
-// (`POST /api/integrations/sync`, src/integrations/sync/http.ts). Browser side; no secrets here.
+// (`PUT /api/w/:workspace/repositories/:id/project`, src/projects/http.ts) and run the sync by button
+// (`POST /api/w/:workspace/integrations/sync`, src/integrations/sync/http.ts). The workspace is the one of
+// the page that makes the call. Browser side; no secrets here.
 import type { SyncAnswer } from "../../integrations/sync/http.ts";
+import { workspaceApiPath } from "../../workspaces/paths.ts";
 import {
   requestJson,
   type FetchLike,
@@ -25,21 +27,31 @@ export type ProjectsApi = {
   sync(): Promise<RequestResult<SyncAnswer>>;
 };
 
-export function createProjectsApi(fetchImpl: FetchLike): ProjectsApi {
+export function createProjectsApi(
+  fetchImpl: FetchLike,
+  workspaceSlug: string,
+): ProjectsApi {
   return {
     setActive: (repositoryId, active) =>
       requestJson<SetActiveAnswer>(
         fetchImpl,
         "PUT",
-        `/api/repositories/${encodeURIComponent(repositoryId)}/project`,
+        workspaceApiPath(
+          workspaceSlug,
+          `/repositories/${encodeURIComponent(repositoryId)}/project`,
+        ),
         { active },
       ),
     sync: () =>
-      requestJson<SyncAnswer>(fetchImpl, "POST", "/api/integrations/sync"),
+      requestJson<SyncAnswer>(
+        fetchImpl,
+        "POST",
+        workspaceApiPath(workspaceSlug, "/integrations/sync"),
+      ),
   };
 }
 
 /** The real thing, for the components; tests hand in their own. */
-export const browserProjectsApi: ProjectsApi = createProjectsApi((url, init) =>
-  fetch(url, init),
-);
+export function browserProjectsApi(workspaceSlug: string): ProjectsApi {
+  return createProjectsApi((url, init) => fetch(url, init), workspaceSlug);
+}

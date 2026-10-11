@@ -348,24 +348,27 @@ describe("an email and password account without a workspace", () => {
   });
 });
 
-describe("an account that signs in with GitHub only", () => {
-  // #99-SR-26
-  it("is asked neither for a verified address nor for a workspace", async () => {
+describe("an account that signs in with GitHub", () => {
+  // #101-WM-02
+  it("is asked for a workspace like every account, and not for a verified address", async () => {
     const harness = await createAuthHarness();
     const { cookies } = await harness.signIn();
-    const closed = {
+    const gates = (workspace: boolean) => ({
       verificationRequired: () => Promise.resolve(true),
-      hasWorkspace: () => Promise.resolve(false),
-    };
+      hasWorkspace: () => Promise.resolve(workspace),
+      workspaceRole: () =>
+        Promise.resolve(workspace ? ("member" as const) : null),
+    });
+    const lookup = (workspace: boolean) =>
+      lookupSession(
+        harness.auth,
+        new Headers({ cookie: cookieHeader(cookies) }),
+        harness.policy,
+        gates(workspace),
+      );
 
-    const lookup = await lookupSession(
-      harness.auth,
-      new Headers({ cookie: cookieHeader(cookies) }),
-      harness.policy,
-      closed,
-    );
-
-    expect(lookup.kind).toBe("user");
+    expect((await lookup(true)).kind).toBe("user");
+    expect((await lookup(false)).kind).toBe("no_workspace");
   });
 });
 

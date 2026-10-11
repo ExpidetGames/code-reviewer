@@ -20,8 +20,9 @@ export const CREDENTIAL_PROVIDER_ID = "credential";
  * - `user`: a valid session of a user who may use the app.
  * - `unverified`: a valid session of an email and password account whose address must be verified
  *   first (a mail server is configured). Only the instance admin may still use `/admin`.
- * - `no_workspace`: a valid session of an email and password account that belongs to no workspace, so
- *   it has no access to customer data (access-gates.ts).
+ * - `no_workspace`: a valid session of an account that belongs to no workspace, so it has no access to
+ *   customer data (access-gates.ts). It can still reach the few places made for exactly this: accepting an
+ *   invitation, creating a workspace, the page that explains (`NO_WORKSPACE_PATHS`, access.ts).
  * - `none`: no valid session.
  * - `denied`: a valid session of a user who may not (any more) use the app; the reason is shown on
  *   the login page.
@@ -81,9 +82,13 @@ export async function lookupSession(
     githubLogin,
     githubId: identities.githubId,
   } satisfies GithubSessionUser);
-  return decision.allowed
-    ? { kind: "user", user }
-    : { kind: "denied", reason: decision.reason };
+  if (!decision.allowed) return { kind: "denied", reason: decision.reason };
+  // Being on the GitHub allow list admits a person to the app, it does not give them a workspace: what
+  // they see is what they are a member of. (Their address is not verified by the app, so that gate is not
+  // asked.)
+  if (!user.isInstanceAdmin && !(await gates.hasWorkspace(user.id)))
+    return { kind: "no_workspace", user };
+  return { kind: "user", user };
 }
 
 /**

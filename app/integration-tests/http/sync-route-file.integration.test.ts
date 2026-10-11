@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Pins down the real route file `POST /api/integrations/sync` with the wiring the running server
-// uses: the database opened at start, the process-wide sync service and the registry configured from
-// the environment. Only the session lookup and `connection()` are replaced (they need Next.js's
-// request scope). The behavior of the handler is in src/integrations/sync/http.integration.test.ts
+// Pins down the real route file `POST /api/w/:workspace/integrations/sync` with the wiring the running server
+// uses: the database opened at start, the process-wide sync service, the registry configured from
+// the environment and the workspace access (connections are managed by Admins and Owners). Only the
+// session lookup and `connection()` are replaced (they need Next.js's request scope). The behavior of the handler is in src/integrations/sync/http.integration.test.ts
 // and the proxy in front is in sync-route.integration.test.ts; this file proves the pieces are
 // connected, and that the route uses the shared sync service rather than a new one.
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   startGithubFake,
   type FakeGithub,
 } from "../../../fakes/github/server.ts";
-import type { SessionUser } from "../../src/auth/access-policy.ts";
+import type { SessionLookup } from "../../src/auth/session-user.ts";
 import { createRepositoriesRepository } from "../../src/db/repositories/repositories-repository.ts";
 import {
   closeDatabase,
@@ -24,6 +24,7 @@ import {
   testAppKeys,
   testGithubAppEnv,
 } from "../../src/test-support/github-app.ts";
+import { signedInMember } from "../../src/test-support/session-lookup.ts";
 import { createTestDirectory } from "../../src/test-support/test-database.ts";
 import {
   defaultWorkspaceId,
@@ -31,16 +32,15 @@ import {
 } from "../../src/test-support/workspaces.ts";
 
 const session = vi.hoisted(() => ({
-  requireUser: vi.fn<() => Promise<SessionUser>>(),
+  currentLookup: vi.fn<() => Promise<SessionLookup>>(),
 }));
-vi.mock("@/auth/session", () => ({ requireUser: session.requireUser }));
+vi.mock("@/auth/session", () => ({ currentLookup: session.currentLookup }));
 // `connection()` only works inside a Next.js request; here it just returns.
 vi.mock("next/server", async (importOriginal) => ({
   ...(await importOriginal<typeof import("next/server")>()),
   connection: async () => undefined,
 }));
 
-const USER = { id: "u1", githubLogin: "octocat" } as unknown as SessionUser;
 const fakes: FakeGithub[] = [];
 
 async function startRoute() {
@@ -59,22 +59,33 @@ async function startRoute() {
     env: { DATABASE_PATH: join(await createTestDirectory(), "app.db") },
   });
   // A deployment that is in use has been set up (the first-run setup decides about workspaces).
-  await markInstanceSetUp(getDatabase());
+  const workspaceId = await markInstanceSetUp(getDatabase());
+  session.currentLookup.mockResolvedValue(
+    await signedInMember(getDatabase(), { workspaceId, role: "admin" }),
+  );
   // The registry reads the environment on first use, so every test loads the route anew.
   vi.resetModules();
-  const route = await import("../../src/app/api/integrations/sync/route.ts");
+  const route =
+    await import("../../src/app/api/w/[workspace]/integrations/sync/route.ts");
   return { route, fake };
 }
 
-function post(route: { POST: (request: Request) => Promise<Response> }) {
+function post(
+  route: {
+    POST: (
+      request: Request,
+      context: { params: Promise<{ workspace: string }> },
+    ) => Promise<Response>;
+  },
+  workspace = "default",
+) {
   return route.POST(
-    new Request("https://app.test/api/integrations/sync", { method: "POST" }),
+    new Request(`https://app.test/api/w/${workspace}/integrations/sync`, {
+      method: "POST",
+    }),
+    { params: Promise.resolve({ workspace }) },
   );
 }
-
-beforeEach(() => {
-  session.requireUser.mockResolvedValue(USER);
-});
 
 afterEach(async () => {
   vi.unstubAllEnvs();
@@ -106,15 +117,47 @@ describe("the sync route file", () => {
     ).toEqual(["acme/widgets"]);
   });
 
-  // CR-21-T11, CR-21-T12
-  it("asks for the user before it calls GitHub, and a refusal reaches the caller", async () => {
+  // #101-WM-08
+  it("refuses a Member and does not call GitHub: connections are managed by Admins and Owners", async () => {
     const { route, fake } = await startRoute();
-    const refusal = new Error("NEXT_REDIRECT");
-    session.requireUser.mockRejectedValue(refusal);
+    session.currentLookup.mockResolvedValue(
+      await signedInMember(getDatabase(), {
+        id: "plain-member",
+        workspaceId: await defaultWorkspaceId(getDatabase()),
+        role: "member",
+      }),
+    );
 
-    await expect(post(route)).rejects.toBe(refusal);
+    const response = await post(route);
 
-    expect(session.requireUser).toHaveBeenCalled();
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: "forbidden" });
+    expect(fake.requests()).toEqual([]);
+  });
+
+  // #101-WM-06, #101-WM-07
+  it("answers a person who does not belong to the workspace like for a workspace that does not exist, and does not call GitHub", async () => {
+    const { route, fake } = await startRoute();
+    session.currentLookup.mockResolvedValue(
+      await signedInMember(getDatabase(), { id: "outsider" }),
+    );
+
+    for (const workspace of ["default", "no-such-workspace"]) {
+      const response = await post(route, workspace);
+      expect(response.status, workspace).toBe(404);
+      expect(await response.json(), workspace).toEqual({ error: "not_found" });
+    }
+    expect(fake.requests()).toEqual([]);
+  });
+
+  // CR-21-T11, CR-21-T12
+  it("asks for the session before it calls GitHub, and answers a visitor with 401", async () => {
+    const { route, fake } = await startRoute();
+    session.currentLookup.mockResolvedValue({ kind: "none" });
+
+    const response = await post(route);
+
+    expect(response.status).toBe(401);
     expect(fake.requests()).toEqual([]);
   });
 

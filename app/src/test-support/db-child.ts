@@ -13,6 +13,8 @@
 //                         {"applied":[...]} or {"error":"CODE"}
 //   set-tenancy <db> <actor id> <single|multi>
 //   create-workspace <db> <creator id> <slug>
+//   leave-workspace <db> <workspace id> <user id>
+//                         the member leaves (src/workspaces/members.ts)
 //                         each prints "ready", waits for "go <epoch ms>" like `migrate`, spins until
 //                         then, runs the change on its own connection (the admin's switch of the
 //                         tenancy, a user's creation of a workspace) and prints its result as one
@@ -24,6 +26,7 @@ import { openDatabase } from "../db/connection.ts";
 import { DatabaseError } from "../db/errors.ts";
 import { startDatabase } from "../db/startup.ts";
 import { createWorkspaceUnderTenancy } from "../workspaces/create-workspace.ts";
+import { createMembersService } from "../workspaces/members.ts";
 
 const [command, databasePath, argument, argument2] = process.argv.slice(2);
 if (!databasePath)
@@ -62,7 +65,11 @@ if (command === "hold-lock") {
       process.exit(1);
     }
   });
-} else if (command === "set-tenancy" || command === "create-workspace") {
+} else if (
+  command === "set-tenancy" ||
+  command === "create-workspace" ||
+  command === "leave-workspace"
+) {
   console.log("ready");
   const lines = createInterface({ input: process.stdin });
   lines.once("line", async (line) => {
@@ -76,11 +83,17 @@ if (command === "hold-lock") {
               actorId: argument ?? "",
               tenancy: argument2 as Tenancy,
             })
-          : await createWorkspaceUnderTenancy(db, {
-              creatorId: argument ?? "",
-              name: argument2 ?? "",
-              slug: argument2 ?? "",
-            });
+          : command === "leave-workspace"
+            ? await createMembersService({ db }).remove({
+                workspaceId: argument ?? "",
+                actorId: argument2 ?? "",
+                targetUserId: argument2 ?? "",
+              })
+            : await createWorkspaceUnderTenancy(db, {
+                creatorId: argument ?? "",
+                name: argument2 ?? "",
+                slug: argument2 ?? "",
+              });
       console.log(JSON.stringify(result));
       process.exit(0);
     } catch (error) {

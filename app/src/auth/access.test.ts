@@ -30,6 +30,12 @@ describe("which paths are public", () => {
     "/api/jobs",
     "/api/anything-new",
     "/settings",
+    "/no-access",
+    "/w/acme/projects",
+    "/api/w/acme/runs",
+    "/api/workspaces",
+    "/api/invitations/accept",
+    "/invitations",
   ])("requires a session for %s", (pathname) => {
     expect(isPublicPath(pathname)).toBe(false);
   });
@@ -69,7 +75,7 @@ describe("which paths are public", () => {
       { path: "/api/sign-up", match: "exact" },
       { path: "/verify-email", match: "exact" },
       { path: "/api/verify-email", match: "prefix" },
-      { path: "/no-access", match: "exact" },
+      { path: "/invitation", match: "exact" },
       { path: "/api/runners", match: "prefix" },
       { path: "/api/webhooks", match: "prefix" },
     ]);

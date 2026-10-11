@@ -27,9 +27,15 @@ export async function loadGlobalSettingsPage(deps: {
 }
 
 export function GlobalSettingsPageContent({
+  workspaceSlug,
+  canEdit = true,
   data,
   api,
 }: {
+  /** The workspace of the page. */
+  workspaceSlug: string;
+  /** Whether the person may change the defaults (an Admin or an Owner). */
+  canEdit?: boolean;
   data: GlobalSettingsPageData;
   api?: SettingsApi;
 }) {
@@ -49,6 +55,8 @@ export function GlobalSettingsPageContent({
         {/* Keyed on the server data, see project-settings-page.tsx. */}
         <SettingsForm
           key={JSON.stringify(data.model)}
+          workspaceSlug={workspaceSlug}
+          readOnly={!canEdit}
           initial={data.model}
           {...(api === undefined ? {} : { api })}
         />

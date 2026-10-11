@@ -22,8 +22,11 @@ function addedText(added: number): string {
 }
 
 export function SyncButton({
-  api = browserProjectsApi,
+  workspaceSlug,
+  api = browserProjectsApi(workspaceSlug),
 }: {
+  /** The workspace of the page: the call is made in it. */
+  workspaceSlug: string;
   api?: ProjectsApi;
 }) {
   const router = useRouter();

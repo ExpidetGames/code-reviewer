@@ -36,7 +36,9 @@ const PUBLIC_ROUTES = [
   "/verify-email",
   "/api/verify-email",
   "/api/verify-email/resend",
-  "/no-access",
+  // An invitation link: whoever holds it opens the page, which only shows what the invitation is about;
+  // accepting is a POST that needs a session (src/workspaces/README.md).
+  "/invitation",
   // GitHub signs its deliveries; the route checks the signature itself (src/webhooks/README.md).
   "/api/webhooks/github-app",
   // The runner sends its own shared token (src/runner-api/README.md).
@@ -53,24 +55,44 @@ const PROTECTED_ROUTES = [
   "/instance-portal/limits",
   "/instance-portal/mail",
   "/instance-portal/setup",
-  "/projects",
-  "/projects/[repositoryId]",
-  "/runs",
-  "/runs/[id]",
+  // The old addresses of the pages, which lead to the first workspace of the person.
+  "/projects/[[...rest]]",
+  "/runs/[[...rest]]",
   "/settings",
+  // A person without a workspace reaches these (src/auth/access.ts, NO_WORKSPACE_PATHS).
+  "/no-access",
+  "/invitations",
+  "/workspaces/new",
+  // The pages of a workspace: for its members only (src/workspaces/access-runtime.ts).
+  "/w/[workspace]",
+  "/w/[workspace]/members",
+  "/w/[workspace]/projects",
+  "/w/[workspace]/projects/[repositoryId]",
+  "/w/[workspace]/runs",
+  "/w/[workspace]/runs/[id]",
+  "/w/[workspace]/settings",
 ] as const;
 // Data routes: a visitor without a session gets 401 instead of a redirect.
 const PROTECTED_DATA_ROUTES = [
   "/api/instance-portal/settings",
   "/api/backup/status",
-  "/api/repositories/[repositoryId]/project",
-  "/api/repositories/[repositoryId]/project/settings",
-  "/api/repositories/[repositoryId]/pull-requests",
-  "/api/repositories/[repositoryId]/reviews",
-  "/api/review-settings",
-  "/api/integrations/sync",
-  "/api/runs",
-  "/api/runs/[id]",
+  // Not about one workspace: creating one, accepting an invitation (src/auth/access.ts, NO_WORKSPACE_PATHS).
+  "/api/workspaces",
+  "/api/invitations/accept",
+  // The data routes of a workspace: for its members only (src/workspaces/access-runtime.ts).
+  "/api/w/[workspace]",
+  "/api/w/[workspace]/integrations/sync",
+  "/api/w/[workspace]/invitations",
+  "/api/w/[workspace]/invitations/[invitationId]",
+  "/api/w/[workspace]/invitations/[invitationId]/resend",
+  "/api/w/[workspace]/members/[userId]",
+  "/api/w/[workspace]/repositories/[repositoryId]/project",
+  "/api/w/[workspace]/repositories/[repositoryId]/project/settings",
+  "/api/w/[workspace]/repositories/[repositoryId]/pull-requests",
+  "/api/w/[workspace]/repositories/[repositoryId]/reviews",
+  "/api/w/[workspace]/review-settings",
+  "/api/w/[workspace]/runs",
+  "/api/w/[workspace]/runs/[id]",
 ] as const;
 // Files the proxy matcher leaves out on purpose (src/proxy.ts), so no session rule applies to them.
 const OUTSIDE_THE_PROXY = ["/favicon.ico"] as const;
