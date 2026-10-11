@@ -19,6 +19,9 @@ import { migration as addJobsRepositoryRecentIndex } from "./20261011100000_add_
 import { migration as createWorkspaces } from "./20261011160000_create_workspaces.ts";
 import { migration as addWorkspaceToCustomerData } from "./20261011160100_add_workspace_to_customer_data.ts";
 import { migration as prepareUsersForAccounts } from "./20261011160200_prepare_users_for_accounts.ts";
+import { migration as createInstanceSettings } from "./20261011170000_create_instance_settings.ts";
+import { migration as createRateLimits } from "./20261011170100_create_rate_limits.ts";
+import { migration as addInstanceAdminFlagToUsers } from "./20261011170200_add_instance_admin_flag_to_users.ts";
 
 const migrations: Record<string, Migration> = {
   "0001_create_app_meta": createAppMeta,
@@ -38,6 +41,10 @@ const migrations: Record<string, Migration> = {
   "20261011160000_create_workspaces": createWorkspaces,
   "20261011160100_add_workspace_to_customer_data": addWorkspaceToCustomerData,
   "20261011160200_prepare_users_for_accounts": prepareUsersForAccounts,
+  "20261011170000_create_instance_settings": createInstanceSettings,
+  "20261011170100_create_rate_limits": createRateLimits,
+  "20261011170200_add_instance_admin_flag_to_users":
+    addInstanceAdminFlagToUsers,
 };
 
 export const migrationProvider: MigrationProvider = {

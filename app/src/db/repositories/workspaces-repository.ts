@@ -4,6 +4,7 @@
 import "server-only";
 import type { Kysely } from "kysely";
 import { formatTimestamp } from "../codecs.ts";
+import type { WorkspaceRole } from "../../workspaces/roles.ts";
 import type { Database, WorkspacesTable } from "../schema.ts";
 
 export type Workspace = {
@@ -29,6 +30,14 @@ export type WorkspacesRepository = {
     slug: string;
     createdBy: string | null;
   }): Promise<Workspace>;
+  /** Makes the user a member with the role. A user who is a member already keeps their role. */
+  addMember(
+    workspaceId: string,
+    userId: string,
+    role: WorkspaceRole,
+  ): Promise<void>;
+  /** Whether the workspace has at least one Owner. */
+  hasOwner(workspaceId: string): Promise<boolean>;
 };
 
 export const DEFAULT_WORKSPACE_SLUG = "default";
@@ -102,6 +111,32 @@ export function createWorkspacesRepository(
       };
       await db.insertInto("workspaces").values(row).execute();
       return toWorkspace(row);
+    },
+
+    async addMember(workspaceId, userId, role) {
+      await db
+        .insertInto("workspace_members")
+        .values({
+          workspace_id: workspaceId,
+          user_id: userId,
+          role,
+          created_at: formatTimestamp(now()),
+        })
+        .onConflict((conflict) =>
+          conflict.columns(["workspace_id", "user_id"]).doNothing(),
+        )
+        .execute();
+    },
+
+    async hasOwner(workspaceId) {
+      const row = await db
+        .selectFrom("workspace_members")
+        .select("user_id")
+        .where("workspace_id", "=", workspaceId)
+        .where("role", "=", "owner")
+        .limit(1)
+        .executeTakeFirst();
+      return row !== undefined;
     },
   };
 }

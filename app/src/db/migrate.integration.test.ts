@@ -67,6 +67,9 @@ describe("the migrations of both epics", () => {
       "20261011160000_create_workspaces",
       "20261011160100_add_workspace_to_customer_data",
       "20261011160200_prepare_users_for_accounts",
+      "20261011170000_create_instance_settings",
+      "20261011170100_create_rate_limits",
+      "20261011170200_add_instance_admin_flag_to_users",
     ]);
   });
 
@@ -108,12 +111,14 @@ describe("starting the database", () => {
       "allowed_login_pins",
       "app_meta",
       "app_settings",
+      "instance_settings",
       "integrations",
       "job_comments",
       "jobs",
       "kysely_migration",
       "kysely_migration_lock",
       "projects",
+      "rate_limits",
       "repositories",
       "sessions",
       "users",

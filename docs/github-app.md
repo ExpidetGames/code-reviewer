@@ -100,8 +100,7 @@ The *Client ID* and *client secrets* on that page are not used.
 
 ## 3. Hand the credentials to the deployment
 
-The application reads these settings (four values; the private key is given inline or as a file). In production it refuses to start without them (one log line,
-`DEPLOY_CONFIG_INVALID`, naming the variables, never their values).
+The application reads these settings (four values; the private key is given inline or as a file). They are optional for starting the instance: without them GitHub is "not configured" and no review can run, and a set that is incomplete or unusable is reported in the log at start (one `GITHUB_APP_CONFIG_INVALID` line naming the variables, never their values) while the instance still starts.
 
 | Variable | Value | Notes |
 |---|---|---|

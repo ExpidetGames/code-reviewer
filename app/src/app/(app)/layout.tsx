@@ -4,6 +4,7 @@
 // session; the pages check again.
 import { Suspense } from "react";
 import { signOut } from "@/auth/actions";
+import { actorName } from "@/auth/access-policy";
 import { requireUser } from "@/auth/session";
 import { AppShell } from "@/shell/app-shell";
 import { UserMenu } from "@/shell/user-menu";
@@ -31,7 +32,7 @@ async function CurrentUserMenu() {
     <UserMenu
       user={{
         name: user.name,
-        login: user.githubLogin,
+        login: actorName(user),
         avatarUrl: user.image ?? null,
       }}
       signOutAction={signOut}

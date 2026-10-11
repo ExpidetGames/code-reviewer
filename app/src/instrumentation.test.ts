@@ -24,6 +24,13 @@ vi.mock("./db/startup.ts", () => ({
   getDatabase: () => ({}),
   initializeDatabaseOnStart: async () => void calls.push("database"),
 }));
+// The setup code is printed once the database is ready; the real thing is tested in src/setup/.
+vi.mock("./setup/start.ts", () => ({
+  startSetupOnStart: async () => void calls.push("setup"),
+}));
+vi.mock("./setup/shared.ts", () => ({
+  getSetupCodeStore: () => ({}),
+}));
 vi.mock("./integrations/sync/startup.ts", () => ({
   runStartupSync: async () => void calls.push("sync"),
 }));
@@ -44,6 +51,8 @@ beforeEach(() => {
   vi.stubEnv("NEXT_RUNTIME", "nodejs");
   // A usable runner token, so the start has nothing to say about the runner API (CR-28).
   vi.stubEnv("RUNNER_TOKEN", "dummy-runner-token-0123456789abcdef");
+  // An instance that is connected to GitHub; the case without is tested on its own.
+  vi.stubEnv("GITHUB_APP_ID", "123456");
 });
 
 afterEach(() => {
@@ -66,6 +75,7 @@ describe("starting the server", () => {
       "backup-check",
       "database",
       "pins",
+      "setup",
       "sync",
       "backup",
     ]);
@@ -97,9 +107,33 @@ describe("starting the server", () => {
       "backup-check",
       "database",
       "pins",
+      "setup",
       "sync",
       "backup",
     ]);
+  });
+
+  // #97-SU-01
+  it("prints the setup code after the database is ready and before the repositories are synchronized", async () => {
+    vi.stubEnv("LLM_PROVIDER", "openrouter");
+    vi.stubEnv("LLM_API_KEY", "dummy-llm-key-0123456789");
+
+    await register();
+
+    expect(calls.indexOf("setup")).toBeGreaterThan(calls.indexOf("database"));
+    expect(calls.indexOf("setup")).toBeLessThan(calls.indexOf("sync"));
+  });
+
+  // #97-NOT-CONFIGURED
+  it("does not synchronize with GitHub when no GitHub App variable is set, which is the normal state of an instance that is not connected", async () => {
+    vi.stubEnv("GITHUB_APP_ID", "");
+    vi.stubEnv("LLM_PROVIDER", "openrouter");
+    vi.stubEnv("LLM_API_KEY", "dummy-llm-key-0123456789");
+
+    await register();
+
+    expect(calls).toContain("database");
+    expect(calls).not.toContain("sync");
   });
 
   // CR-40-T14

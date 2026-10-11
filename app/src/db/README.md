@@ -120,6 +120,25 @@ Migrations `20261011160000_create_workspaces`, `20261011160100_add_workspace_to_
   later change that rebuilds a table with a self-reference needs the same index. If you make the
   migration slower, say why here.
 
+### Instance settings, rate limits and the instance admin flag
+
+Migrations `20261011170000_create_instance_settings`, `20261011170100_create_rate_limits` and
+`20261011170200_add_instance_admin_flag_to_users` (docs/decisions/0001-editions-setup-and-accounts.md,
+sections 2.2, 2.3 and 2.10):
+
+- `instance_settings` (key, JSON value, `updated_by` user id or null, `updated_at`): the settings of the
+  whole instance (`instance-settings-repository.ts`, typed by key). The first-run setup state is two
+  explicit rows, `setup_completed_at` and `import_state`; a database from before them reads as null and
+  `none` (`src/setup/README.md`). `tenancy` and `sign_up_rule` are written by the setup.
+- `rate_limits` (key, `window_started_at`, `count`): shared counters with a window for the endpoints that
+  must limit the same way whichever app instance a request reaches (`rate-limits-repository.ts`, `hit` is
+  one statement, so attempts that arrive together are all counted). The email and password sign in
+  uses it (`src/auth/sign-in-limit.ts`); the setup code has its own counters in memory, by design.
+- `users.is_instance_admin` (0 or 1, default 0): set for the account the setup creates.
+
+None of these is customer data, so none is workspace scoped (`scoping.test.ts` lists them as instance
+level).
+
 ## Workspace scoping
 
 Every repository that reads or writes customer data is created for one workspace:

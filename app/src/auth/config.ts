@@ -5,6 +5,7 @@ import {
   resolveGithubEndpoint,
   testGithubEndpointsAllowed,
 } from "../github-endpoints.ts";
+import { resolveAppSecret } from "../crypto/app-secret.ts";
 import { parseAccessConfig, type AccessConfig } from "./access-config.ts";
 
 export const AUTH_ERROR_CODES = ["AUTH_CONFIG_INVALID"] as const;
@@ -21,15 +22,20 @@ export class AuthConfigError extends Error {
 
 export type AuthConfig = {
   /**
-   * Signs the session cookie and encrypts the stored GitHub access token. Rotating it signs
-   * everybody out and makes the stored tokens unreadable (they are replaced at the next sign in).
+   * The master key of the instance: `APP_SECRET`, or `BETTER_AUTH_SECRET` (its deprecated name) when
+   * that is not set. Signs the session cookie and encrypts the stored GitHub access token. Rotating
+   * it signs everybody out and makes the stored tokens unreadable (they are replaced at the next
+   * sign in).
    */
   secret: string;
   /** Origin of this app as users reach it; the GitHub OAuth callback is `<baseUrl>/api/auth/callback/github`. */
   baseUrl: string;
   github: {
-    clientId: string;
-    clientSecret: string;
+    /**
+     * The GitHub OAuth app that signs people in, or null while it is not configured. GitHub is
+     * optional: without it only email and password sign in exists.
+     */
+    oauth: { clientId: string; clientSecret: string } | null;
     /** Authorize and token endpoints live below this URL (`/login/oauth/...`). */
     oauthBaseUrl: string;
     /** `/user` and `/user/emails` live below this URL. */
@@ -44,19 +50,14 @@ export type AuthConfig = {
 export const DEFAULT_GITHUB_OAUTH_BASE_URL = "https://github.com";
 export const DEFAULT_GITHUB_API_BASE_URL = "https://api.github.com";
 
-const MIN_SECRET_LENGTH = 32;
-
 type Env = Readonly<Record<string, string | undefined>>;
 
 export function loadAuthConfig(env: Env): AuthConfig {
   const problems: string[] = [];
 
-  const secret = required(env, "BETTER_AUTH_SECRET", problems);
-  if (secret !== undefined && secret.length < MIN_SECRET_LENGTH) {
-    problems.push(
-      `BETTER_AUTH_SECRET must be at least ${MIN_SECRET_LENGTH} characters long`,
-    );
-  }
+  const resolvedSecret = resolveAppSecret(env);
+  if (!resolvedSecret.ok) problems.push(resolvedSecret.problem);
+  const secret = resolvedSecret.ok ? resolvedSecret.secret : undefined;
   const baseUrl = originOf(
     required(env, "BETTER_AUTH_URL", problems),
     "BETTER_AUTH_URL",
@@ -75,8 +76,18 @@ export function loadAuthConfig(env: Env): AuthConfig {
     );
   }
   const allowTestEndpoints = testGithubEndpointsAllowed(env);
-  const clientId = required(env, "GITHUB_OAUTH_CLIENT_ID", problems);
-  const clientSecret = required(env, "GITHUB_OAUTH_CLIENT_SECRET", problems);
+  // The GitHub OAuth app is optional (the instance can be used with email and password alone), but
+  // half of it is a mistake worth stopping for: say which half is missing.
+  const clientId = optionalValue(env, "GITHUB_OAUTH_CLIENT_ID");
+  const clientSecret = optionalValue(env, "GITHUB_OAUTH_CLIENT_SECRET");
+  if (clientId !== undefined && clientSecret === undefined)
+    problems.push(
+      "GITHUB_OAUTH_CLIENT_SECRET is not set (GITHUB_OAUTH_CLIENT_ID is; set both or neither)",
+    );
+  if (clientSecret !== undefined && clientId === undefined)
+    problems.push(
+      "GITHUB_OAUTH_CLIENT_ID is not set (GITHUB_OAUTH_CLIENT_SECRET is; set both or neither)",
+    );
   const oauthBaseUrl = optionalBaseUrl(
     env,
     "GITHUB_OAUTH_BASE_URL",
@@ -94,13 +105,7 @@ export function loadAuthConfig(env: Env): AuthConfig {
 
   const access = parseAccessConfig(env, problems);
 
-  if (
-    problems.length > 0 ||
-    secret === undefined ||
-    baseUrl === undefined ||
-    clientId === undefined ||
-    clientSecret === undefined
-  ) {
+  if (problems.length > 0 || secret === undefined || baseUrl === undefined) {
     throw new AuthConfigError(
       `The sign-in configuration is incomplete or invalid: ${problems.join("; ")}.`,
     );
@@ -109,7 +114,14 @@ export function loadAuthConfig(env: Env): AuthConfig {
   return {
     secret,
     baseUrl,
-    github: { clientId, clientSecret, oauthBaseUrl, apiBaseUrl },
+    github: {
+      oauth:
+        clientId !== undefined && clientSecret !== undefined
+          ? { clientId, clientSecret }
+          : null,
+      oauthBaseUrl,
+      apiBaseUrl,
+    },
     access,
     secureCookies: baseUrl.startsWith("https://"),
   };
@@ -124,6 +136,11 @@ function required(
   if (value) return value;
   problems.push(`${name} is not set`);
   return undefined;
+}
+
+function optionalValue(env: Env, name: string): string | undefined {
+  const value = env[name]?.trim();
+  return value ? value : undefined;
 }
 
 function parseHttpUrl(value: string): URL | undefined {

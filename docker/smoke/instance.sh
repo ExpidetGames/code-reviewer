@@ -6,6 +6,9 @@
 #   <base-url>  the address people use, for example https://reviews.example.com (no path)
 #
 # Checks (the exit code is 0 only when every one of them passes):
+#   0. the instance is set up         an instance that is not set up yet answers every request but the
+#                                     health check with 503 setup_required: finish the first-run setup
+#                                     in the browser (the setup code is in the log of the app) first
 #   1. GET  /api/health                 answers 2xx (the app is up and reads its database)
 #   2. GET  /login                      answers 2xx (the login page loads)
 #   3. POST /api/webhooks/github-app    with a wrong signature answers 401 (deliveries are verified)
@@ -66,6 +69,17 @@ expect() {
 }
 
 printf '==> smoke test of %s\n' "$base"
+
+# A fresh instance (or an update that has not been set up yet) refuses the web UI, the webhooks and the
+# runner API with 503 setup_required until the first-run setup is finished in the browser. Say so
+# instead of reporting three confusing failures.
+probe=$(curl --silent --max-time 15 --write-out '\n%{http_code}' --request POST "$base/api/runners/v1/claim" 2>/dev/null) || true
+probe_status=${probe##*$'\n'}
+if [ "$probe_status" = 503 ] && [[ "$probe" == *setup_required* ]]; then
+  printf 'FAILED  the instance is not set up yet: open %s in a browser, enter the setup code from the log of the app and finish the setup, then run this again\n' "$base" >&2
+  printf 'SMOKE TEST FAILED: %s is waiting for the first-run setup\n' "$base" >&2
+  exit 1
+fi
 
 expect "GET /api/health" 2xx "$(status "$base/api/health")"
 expect "GET /login" 2xx "$(status "$base/login")"

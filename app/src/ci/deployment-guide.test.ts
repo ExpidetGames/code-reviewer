@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
 import { DEFAULT_BACKUP_TIME } from "../backup/config.ts";
 import { DEFAULT_BUSY_TIMEOUT_MS } from "../db/config.ts";
+import { resolveAppSecret } from "../crypto/app-secret.ts";
 import { findDeploymentConfigProblems } from "../deploy/startup.ts";
 import { DEFAULT_LLM_MODEL } from "../llm/config.ts";
 
@@ -116,8 +117,8 @@ describe("the Coolify guide and the environment variables", () => {
       expect(appEnvironment[name], name).toBe(`\${${name}:-}`);
   });
 
-  // CR-39-T03
-  it("marks as optional exactly the settings the Compose file passes on with a default", () => {
+  // CR-39-T03, #97-SU-17
+  it("marks as optional, deprecated or checked by the app exactly the settings the Compose file passes on with a default", () => {
     const withDefault = [
       ...Object.entries(appEnvironment),
       ...Object.entries(coolify.services.runner?.environment ?? {}),
@@ -131,7 +132,34 @@ describe("the Coolify guide and the environment variables", () => {
           !["ALLOWED_GITHUB_LOGINS", "ALLOWED_GITHUB_ORG"].includes(name),
       );
 
-    expect(byRequirement("optional").sort()).toEqual(withDefault.sort());
+    expect(
+      [
+        ...byRequirement("optional"),
+        ...byRequirement("by the app"),
+        ...byRequirement("deprecated"),
+      ].sort(),
+    ).toEqual(withDefault.sort());
+  });
+
+  // #97-SU-17
+  it("names the master key as required by the app, which refuses to start without it, and the old name as deprecated", () => {
+    expect(byRequirement("by the app")).toEqual(["APP_SECRET"]);
+    expect(byRequirement("deprecated")).toEqual(["BETTER_AUTH_SECRET"]);
+    expect(resolveAppSecret({}).ok).toBe(false);
+    expect(resolveAppSecret({ BETTER_AUTH_SECRET: "x".repeat(32) }).ok).toBe(
+      true,
+    );
+  });
+
+  // #97-SU-17
+  it("lists no GitHub setting as required: the instance starts without any", () => {
+    const githubRows = settings.filter((row) =>
+      row.names.some((name) => name.startsWith("GITHUB_")),
+    );
+
+    expect(githubRows.length).toBeGreaterThan(0);
+    for (const row of githubRows)
+      expect(["yes", "by the app"], row.names[0]).not.toContain(row.required);
   });
 
   // CR-39-T03
@@ -173,11 +201,11 @@ describe("the Coolify guide and the environment variables", () => {
   });
 
   // CR-39-T03
-  it("states the minimum length of the runner token that the app enforces at start", async () => {
-    const short = await findDeploymentConfigProblems({
+  it("states the minimum length of the runner token that the app enforces at start", () => {
+    const short = findDeploymentConfigProblems({
       RUNNER_TOKEN: "x".repeat(31),
     });
-    const long = await findDeploymentConfigProblems({
+    const long = findDeploymentConfigProblems({
       RUNNER_TOKEN: "x".repeat(32),
     });
 
@@ -217,7 +245,7 @@ describe("the Coolify guide and the smoke test", () => {
   });
 
   // CR-39-T03
-  it("makes it prominent that one of the two allow list settings must be set", () => {
+  it("makes it prominent that one of the two allow list settings must be set for GitHub sign in", () => {
     const rows = variableRows(section("6. Environment variables")).filter(
       (row) => row.required === "one of two",
     );

@@ -58,6 +58,8 @@ describe("which paths are public", () => {
     expect(PUBLIC_PATHS).toEqual([
       { path: "/login", match: "exact" },
       { path: "/api/health", match: "exact" },
+      { path: "/setup", match: "exact" },
+      { path: "/api/setup", match: "prefix" },
       { path: "/api/auth", match: "prefix" },
       { path: "/api/runners", match: "prefix" },
       { path: "/api/webhooks", match: "prefix" },

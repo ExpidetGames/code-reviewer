@@ -17,8 +17,8 @@ import {
   createRepositoriesRepository,
   type ReconcileResult,
 } from "../../db/repositories/repositories-repository.ts";
-import { createWorkspacesRepository } from "../../db/repositories/workspaces-repository.ts";
 import type { Database } from "../../db/schema.ts";
+import { resolveDefaultWorkspaceId } from "../../workspaces/current-workspace.ts";
 import { hasSafeMessage, IntegrationError } from "../errors.ts";
 import type { IntegrationProvider } from "../provider.ts";
 import type { IntegrationRegistry } from "../registry.ts";
@@ -158,8 +158,7 @@ export function createIntegrationSync(
   const repositoriesOf = (executor: Kysely<Database>, workspaceId: string) =>
     createRepositoriesRepository(executor, workspaceId, options.now);
   const workspaceForNewConnection =
-    options.workspaceForNewConnection ??
-    (async () => (await createWorkspacesRepository(db).ensureDefault()).id);
+    options.workspaceForNewConnection ?? (() => resolveDefaultWorkspaceId(db));
   const lock = options.lock ?? sharedKeyedLock();
   const lockKey = (type: IntegrationType, externalId: string) =>
     `${type}:${externalId}`;

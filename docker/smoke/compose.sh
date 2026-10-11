@@ -5,8 +5,9 @@
 #   with `make test-compose`). Nothing is pulled or pushed.
 #
 # Works in a fresh temporary directory with a copy of compose.yml, a project name of its own and
-# dummy settings (the keys are generated here and never leave this machine; nothing in this script
-# signs in), so it never touches a real `.env`, a real stack or a real volume. It proves what a
+# dummy settings (nothing in this script talks to GitHub; the only account it makes is the admin of the
+# first-run setup, with a throwaway password), so it never touches a real `.env`, a real stack or a
+# real volume. The stack starts with no GITHUB_ variable at all. It proves what a
 # unit test on the files cannot: the settings are validated before a container exists, the runner
 # waits for a healthy app, the stack comes up with the real job loop, the database survives `down`
 # and `up`, a killed app container comes back by itself, a backup made in the running stack restores
@@ -37,7 +38,6 @@ extra_cleanup() {
 
 require_image "$app_image"
 require_image "$runner_image"
-command -v openssl >/dev/null || fail "openssl is required (it generates the dummy GitHub App key)"
 cp "$repo_root/compose.yml" "$workdir/compose.yml"
 
 # The settings of the stack: dummies that point nowhere. Every variable the compose files read is
@@ -52,15 +52,7 @@ export APP_IMAGE=$app_image
 export RUNNER_IMAGE=$runner_image
 export APP_PORT=0 # Docker picks a free port on the host
 export BETTER_AUTH_URL=http://localhost:3000
-export BETTER_AUTH_SECRET=smoke-test-secret-0123456789-0123456789-abcdef
-export GITHUB_OAUTH_CLIENT_ID=smoke-client-id
-export GITHUB_OAUTH_CLIENT_SECRET=smoke-client-secret
-export ALLOWED_GITHUB_LOGINS=smoke-user
-export GITHUB_APP_ID=1
-export GITHUB_APP_SLUG=smoke-app
-export GITHUB_APP_WEBHOOK_SECRET=smoke-webhook-secret
-GITHUB_APP_PRIVATE_KEY=$(openssl genrsa 2048 2>/dev/null)
-export GITHUB_APP_PRIVATE_KEY
+export APP_SECRET=smoke-test-secret-0123456789-0123456789-abcdef
 export RUNNER_TOKEN=smoke-runner-token-0123456789-0123456789-abcdef
 
 dc() {
@@ -188,10 +180,38 @@ step "the app answers on its published port"
 health=$(curl --silent --fail --max-time 5 "http://127.0.0.1:$port/api/health") || fail_with_logs "GET /api/health failed"
 [ "$health" = '{"status":"ok"}' ] || fail "unexpected health answer: $health"
 
+# #97-SU-01, #97-SU-03: a fresh instance prints exactly one setup code and waits for the setup: the web
+# UI shows the setup, the API, the webhooks and the runner API answer 503 setup_required, and the
+# smoke script of an instance says that the instance is not set up yet.
+step "the fresh stack prints one setup code and waits for the setup"
+base="http://127.0.0.1:$port"
+code=$(setup_code_from_log "$(dc logs --no-color app 2>&1)") || exit 1
+# (Captured first: `grep -q` ends at its first match, and under pipefail the curl it leaves behind
+# would fail the pipeline with SIGPIPE.)
+start_page=$(curl --silent --max-time 5 "$base/")
+grep -q 'Set up Code Reviewer' <<<"$start_page" || fail "the start page does not show the setup"
+grep -qF "$code" <<<"$start_page" && fail "the setup code is in the start page"
+for path in /api/projects /api/webhooks/github-app /api/runners/v1/claim; do
+  answer=$(curl --silent --max-time 5 --write-out ' %{http_code}' --request POST "$base$path")
+  [ "$answer" = '{"error":"setup_required"} 503' ] || fail "POST $path did not answer 503 setup_required (got: $answer)"
+done
+if not_set_up=$("$here/instance.sh" "$base" 2>&1); then
+  fail "docker/smoke/instance.sh passed against an instance that is not set up"
+fi
+grep -q 'not set up yet' <<<"$not_set_up" || fail "instance.sh does not say that the instance is not set up: $not_set_up"
+
+# #97-SU-11, #97-SU-14: finish the setup the way a person does (through the API here).
+step "the setup can be finished"
+complete_setup "$base" "$code"
+# The runner started while the instance was waiting for the setup and was refused with 503 until now
+# ("trying again"): that is right, and it is not what the next check is about. It looks at what the
+# runner logs from here on.
+runner_lines_before_setup_ended=$(dc logs --no-color runner 2>&1 | wc -l)
+
 # CR-39-T01, CR-51-T01: the smoke test of a running instance, here against the stack on its published
 # port, including the check that the runner API refuses a request without a token.
 step "the instance smoke test passes against the running stack"
-"$here/instance.sh" "http://127.0.0.1:$port" ||
+"$here/instance.sh" "$base" ||
   fail_with_logs "docker/smoke/instance.sh failed against the running stack"
 
 # CR-37-T02
@@ -209,7 +229,7 @@ mount=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/data"}}
 step "the runner starts its job loop and polls the app without a failure"
 wait_until "the runner to log that it started" 30 runner_has_started
 sleep 12
-runner_log=$(dc logs --no-color runner 2>&1)
+runner_log=$(dc logs --no-color runner 2>&1 | tail -n "+$((runner_lines_before_setup_ended + 1))")
 if log_has_trouble "$runner_log"; then
   printf '%s\n' "$runner_log" >&2
   fail "the runner log reports a failing connection to the app"
@@ -229,6 +249,9 @@ dc exec -T app node --no-warnings -e '
 dc down --timeout 20 >/dev/null 2>&1 || fail "docker compose down failed"
 [ -z "$(dc ps --all --quiet)" ] || fail "containers are left after down"
 dc up --detach --wait --wait-timeout "$WAIT_SECONDS" >/dev/null 2>&1 || fail_with_logs "docker compose up failed after down"
+# The setup is part of the data: a set up instance prints no setup code when it starts again.
+restarted_log=$(dc logs --no-color app 2>&1)
+[ "$(grep -c 'Setup code:' <<<"$restarted_log" || true)" = "0" ] || fail "a set up instance printed a setup code when it started again"
 kept=$(dc exec -T app node --no-warnings -e '
   const { DatabaseSync } = require("node:sqlite");
   const db = new DatabaseSync("/data/app.db", { readOnly: true });
@@ -266,7 +289,8 @@ backup_file=$(dc exec -T app sh -c 'ls /backups' | head -n 1 | tr -d '\r')
 [[ "$backup_file" =~ ^code-reviewer-[0-9]{8}T[0-9]{6}Z\.db$ ]] || fail "unexpected backup file name: '$backup_file'"
 grep -q "created /backups/$backup_file " <<<"$backup_output" || fail "the backup output does not name the file: $backup_output"
 [ "$(dc exec -T app sh -c "stat -c %a /backups/$backup_file" | tr -d '\r')" = "600" ] || fail "the backup is not readable by its owner only"
-dc exec -T app sh -c 'ls /data' | grep -q 'code-reviewer-' && fail "a backup was written into /data"
+data_listing=$(dc exec -T app sh -c 'ls /data')
+grep -q 'code-reviewer-' <<<"$data_listing" && fail "a backup was written into /data"
 backups_mount=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/backups"}}{{.Type}}{{end}}{{end}}' "$(container_of app)")
 [ "$backups_mount" = "volume" ] || fail "/backups is not a volume of the app: '$backups_mount'"
 

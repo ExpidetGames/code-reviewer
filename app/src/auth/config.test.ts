@@ -6,7 +6,7 @@ import { AuthConfigError, loadAuthConfig } from "./config.ts";
 const SECRET = "s".repeat(40);
 const CLIENT_SECRET = "dummy-client-secret-value";
 const validEnv = {
-  BETTER_AUTH_SECRET: SECRET,
+  APP_SECRET: SECRET,
   BETTER_AUTH_URL: "http://localhost:3000",
   GITHUB_OAUTH_CLIENT_ID: "dummy-client-id",
   GITHUB_OAUTH_CLIENT_SECRET: CLIENT_SECRET,
@@ -23,29 +23,66 @@ function loadError(env: Record<string, string | undefined>): AuthConfigError {
 }
 
 describe("loading the sign-in configuration", () => {
-  it("reads the four required values and points GitHub at the real endpoints by default", () => {
+  it("reads the master key, the public address and the GitHub OAuth app, and points GitHub at the real endpoints by default", () => {
     const config = loadAuthConfig(validEnv);
 
     expect(config).toMatchObject({
       secret: SECRET,
       baseUrl: "http://localhost:3000",
       github: {
-        clientId: "dummy-client-id",
-        clientSecret: CLIENT_SECRET,
+        oauth: { clientId: "dummy-client-id", clientSecret: CLIENT_SECRET },
         oauthBaseUrl: "https://github.com",
         apiBaseUrl: "https://api.github.com",
       },
     });
   });
 
-  it("names every missing variable at once, never a value", () => {
-    const error = loadError({ BETTER_AUTH_SECRET: SECRET });
+  // #97-SU-17
+  it("starts without any GitHub variable: GitHub sign in is then not configured", () => {
+    const config = loadAuthConfig({
+      APP_SECRET: SECRET,
+      BETTER_AUTH_URL: "http://localhost:3000",
+    });
+
+    expect(config.github.oauth).toBeNull();
+  });
+
+  // #97-SU-17
+  it("names every missing required variable at once, never a value", () => {
+    const error = loadError({});
 
     expect(error.code).toBe("AUTH_CONFIG_INVALID");
+    expect(error.message).toContain("APP_SECRET");
     expect(error.message).toContain("BETTER_AUTH_URL");
-    expect(error.message).toContain("GITHUB_OAUTH_CLIENT_ID");
-    expect(error.message).toContain("GITHUB_OAUTH_CLIENT_SECRET");
-    expect(error.message).not.toContain(SECRET);
+    expect(error.message).not.toContain("GITHUB");
+  });
+
+  // #97-SU-17
+  it("accepts BETTER_AUTH_SECRET in place of APP_SECRET, and prefers APP_SECRET", () => {
+    const { APP_SECRET: _unused, ...withoutSecret } = validEnv;
+    void _unused;
+    const legacy = "legacy-".padEnd(40, "l");
+
+    expect(
+      loadAuthConfig({ ...withoutSecret, BETTER_AUTH_SECRET: legacy }).secret,
+    ).toBe(legacy);
+    expect(
+      loadAuthConfig({ ...validEnv, BETTER_AUTH_SECRET: legacy }).secret,
+    ).toBe(SECRET);
+  });
+
+  it("names the missing half of the GitHub OAuth app, because half of it is a mistake", () => {
+    const { GITHUB_OAUTH_CLIENT_SECRET: _unused, ...withoutSecret } = validEnv;
+    void _unused;
+    const { GITHUB_OAUTH_CLIENT_ID: _id, ...withoutId } = validEnv;
+    void _id;
+
+    expect(loadError(withoutSecret).message).toContain(
+      "GITHUB_OAUTH_CLIENT_SECRET is not set",
+    );
+    expect(loadError(withoutId).message).toContain(
+      "GITHUB_OAUTH_CLIENT_ID is not set",
+    );
   });
 
   it("treats blank values as missing", () => {
@@ -54,10 +91,10 @@ describe("loading the sign-in configuration", () => {
     expect(error.message).toContain("GITHUB_OAUTH_CLIENT_ID");
   });
 
-  it("rejects a signing secret that is too short without echoing it", () => {
-    const error = loadError({ ...validEnv, BETTER_AUTH_SECRET: "short" });
+  it("rejects a master key that is too short without echoing it", () => {
+    const error = loadError({ ...validEnv, APP_SECRET: "short" });
 
-    expect(error.message).toContain("BETTER_AUTH_SECRET");
+    expect(error.message).toContain("APP_SECRET");
     expect(error.message).toMatch(/at least 32/);
     expect(error.message).not.toContain("short");
   });

@@ -25,10 +25,13 @@ export type {
 export type SessionUser = {
   id: string;
   name: string;
-  /** The current GitHub login (refreshed at every sign in). */
-  githubLogin: string;
-  /** The stable numeric GitHub id of the account (from its `accounts` row), as text. */
-  githubId: string;
+  email: string;
+  /** The instance admin flag (the account the first-run setup created). */
+  isInstanceAdmin: boolean;
+  /** The current GitHub login (refreshed at every sign in), or null for an account without GitHub. */
+  githubLogin: string | null;
+  /** The stable numeric GitHub id of the account (from its `accounts` row), as text, or null. */
+  githubId: string | null;
   /** The avatar address from the GitHub profile (refreshed at every sign in), if there is one. For display only. */
   image?: string | null;
   /** ISO 8601 time of the last successful organization check, or null when there was none. */
@@ -37,11 +40,24 @@ export type SessionUser = {
   orgCheckedFor: string | null;
 };
 
+/** A user who signed in with GitHub: the only kind the GitHub allow list is asked about. */
+export type GithubSessionUser = SessionUser & {
+  githubLogin: string;
+  githubId: string;
+};
+
+/** The name to show for a user, and to record as the actor of an action: the GitHub login, or the email. */
+export function actorName(
+  user: Pick<SessionUser, "githubLogin" | "email">,
+): string {
+  return user.githubLogin ?? user.email;
+}
+
 /**
  * Decides whether a signed in user may use the app. It runs on every authenticated request. A
  * denial is treated like a request without a session, and the reason is shown on the login page.
  */
-export type AccessPolicy = (user: SessionUser) => Promise<AccessDecision>;
+export type AccessPolicy = (user: GithubSessionUser) => Promise<AccessDecision>;
 
 /** How long a successful organization check is trusted. */
 export const ORG_RECHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -51,7 +67,7 @@ export const ORG_UNAVAILABLE_BACKOFF_MS = 20 * 1000;
 /** What the organization rule needs from the outside world. */
 export type OrgAccessDependencies = {
   /** Asks GitHub with the user's stored token. */
-  checkMembership: (user: SessionUser) => Promise<OrgMembership>;
+  checkMembership: (user: GithubSessionUser) => Promise<OrgMembership>;
   /** Stores the time of a successful check, and the organization it was made for, on the user. */
   recordCheck: (userId: string, at: Date, org: string) => Promise<void>;
   /** Ends every session of the user (they have lost access, or must sign in again). */
@@ -105,7 +121,7 @@ export function createAccessPolicy({
   }
 
   async function decideByOrganization(
-    user: SessionUser,
+    user: GithubSessionUser,
     orgName: string,
     deps: OrgAccessDependencies,
   ): Promise<AccessDecision> {
@@ -184,7 +200,11 @@ export function createAccessPolicy({
   };
 }
 
-function isFresh(user: SessionUser, orgName: string, current: Date): boolean {
+function isFresh(
+  user: GithubSessionUser,
+  orgName: string,
+  current: Date,
+): boolean {
   // A check made for another organization says nothing about this one.
   if (user.orgCheckedFor?.toLowerCase() !== orgName.toLowerCase()) return false;
   if (user.orgCheckedAt === null) return false;

@@ -1,9 +1,11 @@
 "use server";
-// The two buttons of the app: "Sign in with GitHub" and "Sign out". They are forms that post to
-// these server actions, so they work without client JavaScript.
+// The buttons of the app: "Sign in with GitHub", the email and password form, and "Sign out". They
+// are forms that post to these server actions, so they work without client JavaScript.
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getAuth } from "./auth.ts";
+import { signInWithPasswordChecked } from "./password-sign-in.ts";
+import { getSignInLimiter } from "./sign-in-runtime.ts";
 
 export async function signInWithGithub(): Promise<void> {
   let githubUrl: string | undefined;
@@ -25,4 +27,33 @@ export async function signInWithGithub(): Promise<void> {
 export async function signOut(): Promise<void> {
   await getAuth().api.signOut({ headers: await headers() });
   redirect("/login");
+}
+
+/**
+ * The email and password form of the login page. The attempts are counted per email address and for
+ * the whole instance (sign-in-limit.ts), and a wrong email address and a wrong password get the same
+ * answer, so the page does not tell which email addresses have an account.
+ */
+export async function signInWithPassword(formData: FormData): Promise<void> {
+  const email = formData.get("email");
+  const password = formData.get("password");
+  let error: string | null = "invalid_credentials";
+  if (typeof email === "string" && typeof password === "string") {
+    const requestHeaders = await headers();
+    const outcome = await signInWithPasswordChecked(
+      {
+        limiter: getSignInLimiter(),
+        signIn: (address, secret) =>
+          getAuth().api.signInEmail({
+            body: { email: address.trim(), password: secret },
+            headers: requestHeaders,
+          }),
+      },
+      email,
+      password,
+    );
+    error = outcome.kind === "ok" ? null : outcome.kind;
+  }
+  // redirect() works by throwing, so it stays outside the try block.
+  redirect(error === null ? "/" : `/login?error=${error}`);
 }
