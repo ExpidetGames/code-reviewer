@@ -90,17 +90,17 @@ whether a row exists:
 
 - `setup_completed_at`: null until the wizard has finished, then the time of completion. "Set up" means
   this marker is set.
-- `import_state`: `none` (no import ran or was needed), `pending` (the import of section 2.11 started and
-  has not finished) or `done`.
+- `import_state`: `none` (the import of section 2.11 has not run or was not needed) or `done`. The import
+  is one all-or-nothing transaction, so there is no state in between.
 
 Two cases are told apart at start. A database from before this milestone has neither marker, which reads
 as `setup_completed_at` null and `import_state` `none`.
 
 - **Fresh installation:** the database has no users and `import_state` is `none`.
-- **Existing installation:** the database has users, `setup_completed_at` is null and `import_state` is
-  not `done`. It gets the same setup, shortened by the automatic data import of section 2.11, which
-  runs once (it is guarded by `import_state` inside its transaction) and can be resumed after an
-  interruption.
+- **Existing installation:** the database has users and `setup_completed_at` is null, with **any**
+  `import_state`. It gets the same setup, shortened by the automatic data import of section 2.11, which
+  runs once: it runs while `import_state` is `none` and sets it to `done` in its own transaction. The
+  case "`import_state` `done`, `setup_completed_at` null" is a restart before the wizard finished.
 
 A restart before the wizard has finished prints a new code and shows the wizard again; nothing that
 was imported is imported twice.
@@ -250,17 +250,26 @@ created.
 own settings while signed in, or automatically when GitHub reports the **same verified email** and the
 existing account's email is verified too. An unverified match never links (no account takeover through
 an unverified address). Identities from the old OAuth sign-in are matched by their numeric GitHub id.
-Imported users have a placeholder (noreply) email; it is **replaced by GitHub's verified primary email
-at their next GitHub sign-in**.
+Imported users (marked by `users.imported_at`) have a placeholder (noreply) email; it is **replaced by
+GitHub's verified primary email at their next GitHub sign-in**. If that verified email already belongs
+to **another account**, the placeholder is kept and nothing is taken over or merged; a hint is shown in
+the user's profile and to the instance admin.
 
 **Merging the instance admin with an imported operator.** In an existing installation the person who
 runs the instance usually exists twice after the short setup: as an imported user (GitHub identity, no
 password) and as the instance admin (email and password). When the signed-in instance admin links a
 GitHub identity that belongs to an imported user **without any other credential** (no password), the two
 accounts are **merged**: the imported user's memberships and history move to the admin account, the
-higher role wins where both are members, and the imported user row is retired. If that GitHub identity
-belongs to a user who has **other credentials**, linking is refused with a clear message. The merge is
-what lets the admin meet the "GitHub only" guard of section 2.3.
+higher role wins where both are members, and the imported user row is retired. Conditions:
+
+- Only users **marked as imported** (`users.imported_at`, set by the import) qualify. A user created
+  later never does.
+- The admin must complete **GitHub user authorization for that identity**; that proves control of it.
+- The merge runs as **one irreversible transaction**.
+- If that GitHub identity belongs to a user who has **other credentials**, linking is refused with a
+  clear message.
+
+The merge is what lets the admin meet the "GitHub only" guard of section 2.3.
 
 ### 2.6 Accounts, workspaces, roles and invitations
 
@@ -439,7 +448,8 @@ settings row) must update without losing data and without a long new setup. On t
 new version:
 
 1. **Backup.** The existing backup module takes a backup of the SQLite file first; the import does not
-   run if that fails.
+   run if that fails. The backup lies outside the import's transaction, so if the import fails and the
+   next start runs it again, another backup may be taken. That is harmless.
 2. Migrations create the new tables.
 3. **Automatic import**, in one transaction:
    - **One default workspace** is created and receives all existing integrations, repositories,
@@ -454,6 +464,7 @@ new version:
      unreachable, stored token undecryptable) is treated as blocked and listed in the notice. The
      default workspace always ends with at least one Owner: if no user qualifies, the instance admin
      becomes Owner.
+   - Imported users are marked with `users.imported_at`.
    - No sign-up rule is derived from the allow list. The old sign-in has no verified emails, so no
      email list is built from existing users.
 4. After the import the variables are ignored and the log says so once, listing names only.
@@ -477,9 +488,9 @@ new version:
    (invite them by email), users whose check failed, and an allowed GitHub organization (see
    consequences).
 
-The import is guarded by `import_state` (`none` to `pending` to `done`), runs in one transaction and is
-idempotent: a second start does nothing, an interrupted import is resumed or rolled back as a whole. A
-failure stops the start with a readable line and changes nothing.
+The import is one all-or-nothing transaction, guarded by `import_state` (`none` to `done`). A crash or a
+failure during the import leaves no partial data: the start ends with a readable line, and the next
+start runs the import again from the beginning. Once `done`, a later start does nothing.
 
 ## 3. Alternatives considered
 
