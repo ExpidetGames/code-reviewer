@@ -265,6 +265,7 @@ describe("signing up under a rule that names addresses", () => {
     });
     await harness.signUp({ email: ADDRESS, password: SIGNUP_TEST_PASSWORD });
     await harness.flush();
+    await harness.verify({ token: harness.mail.lastToken(ADDRESS) });
 
     harness.mail.configured = false;
     const closed = await readAnswer(
@@ -331,6 +332,7 @@ describe("signing up under a rule that names addresses", () => {
     const harness = await createSignUpHarness({ mail: true });
     await harness.signUp({ email: ADDRESS, password: SIGNUP_TEST_PASSWORD });
     await harness.flush();
+    await harness.verify({ token: harness.mail.lastToken(ADDRESS) });
 
     await harness.settings.set(
       "sign_up_rule",

@@ -12,6 +12,7 @@ import { nextCookies } from "better-auth/next-js";
 import { genericOAuth } from "better-auth/plugins/generic-oauth";
 import type { Kysely } from "kysely";
 import { getDatabase } from "../db/startup.ts";
+import { getMailSender } from "../mail/shared.ts";
 import type { Database } from "../db/schema.ts";
 import { createAllowedLoginPinsRepository } from "../db/repositories/allowed-login-pins-repository.ts";
 import { loadAuthConfig, type AuthConfig } from "./config.ts";
@@ -24,6 +25,11 @@ import {
   PASSWORD_MIN_LENGTH,
 } from "./password-policy.ts";
 import { decideSignIn, readSignInAccess } from "./sign-in-access.ts";
+import { CREDENTIAL_PROVIDER_ID } from "./session-user.ts";
+import {
+  EMAIL_NOT_VERIFIED_CODE,
+  refusesUnverifiedSignIn,
+} from "./unverified-sign-in.ts";
 
 export const SESSION_LIFETIME_SECONDS = 60 * 60 * 24 * 30;
 
@@ -40,12 +46,20 @@ export type CreateAuthOptions = {
   config: AuthConfig;
   /** How long a call to GitHub may take. Only tests change the default. */
   githubRequestTimeoutMs?: number;
+  /**
+   * Whether addresses must be verified: the instance can send mail. An unverified email and password
+   * account is then refused at the sign in (the admin excepted, unverified-sign-in.ts). The running
+   * server always passes it (`getAuth`); left out, nothing is refused here, and the gate in front of
+   * every request (access-gates.ts) still keeps such an account out of the app.
+   */
+  verificationRequired?: () => Promise<boolean>;
 };
 
 export function createAuth({
   db,
   config,
   githubRequestTimeoutMs,
+  verificationRequired,
 }: CreateAuthOptions) {
   const org = config.access.org;
   const githubOAuth = config.github.oauth;
@@ -172,8 +186,53 @@ export function createAuth({
       maxPasswordLength: PASSWORD_MAX_LENGTH,
     },
     hooks: {
-      // The password rule on every endpoint that sets a password, with a stable code.
       before: createAuthMiddleware(async (ctx) => {
+        // An unverified address does not sign in while the instance can send mail. Only after the
+        // password was right (unverified-sign-in.ts), so the answer to a wrong one is unchanged.
+        if (
+          ctx.path === "/sign-in/email" &&
+          verificationRequired !== undefined
+        ) {
+          const body = ctx.body as Record<string, unknown> | undefined;
+          if (
+            typeof body?.email === "string" &&
+            typeof body.password === "string" &&
+            (await refusesUnverifiedSignIn(
+              {
+                async findUser(email) {
+                  const found =
+                    await ctx.context.internalAdapter.findUserByEmail(email, {
+                      includeAccounts: true,
+                    });
+                  if (found === null) return null;
+                  const credential = found.accounts.find(
+                    (account) =>
+                      account.providerId === CREDENTIAL_PROVIDER_ID &&
+                      account.accountId === found.user.id,
+                  );
+                  return {
+                    emailVerified: found.user.emailVerified,
+                    // The adapter's type does not list our additional fields; the value is there.
+                    isInstanceAdmin:
+                      (found.user as { isInstanceAdmin?: unknown })
+                        .isInstanceAdmin === true,
+                    passwordHash: credential?.password ?? null,
+                  };
+                },
+                verifyPassword: ctx.context.password.verify,
+                verificationRequired,
+              },
+              body.email,
+              body.password,
+            ))
+          )
+            throw new APIError("FORBIDDEN", {
+              code: EMAIL_NOT_VERIFIED_CODE,
+              message: "Verify your email address to sign in.",
+            });
+        }
+
+        // The password rule on every endpoint that sets a password, with a stable code.
         const field = PASSWORD_FIELD_BY_PATH[ctx.path];
         if (field === undefined) return;
         const body = ctx.body as Record<string, unknown> | undefined;
@@ -273,6 +332,7 @@ export function getAuth(): Auth {
   holder[globalKey] ??= createAuth({
     db: getDatabase(),
     config: loadAuthConfig(process.env),
+    verificationRequired: () => getMailSender().isConfigured(),
   });
   return holder[globalKey];
 }

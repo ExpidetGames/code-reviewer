@@ -17,6 +17,7 @@ import {
   createAuthHarness,
   type CookieJar,
 } from "../../src/test-support/auth-harness.ts";
+import { openGates } from "../../src/test-support/open-gates.ts";
 
 type Harness = Awaited<ReturnType<typeof createAuthHarness>>;
 
@@ -44,6 +45,7 @@ async function startApp() {
     const proxy = createAccessProxy({
       getAuth: () => settings.auth,
       getPolicy: () => settings.policy,
+      getGates: () => openGates,
     });
     return async function send(
       action: "list" | "start",
@@ -70,6 +72,7 @@ async function startApp() {
             settings.auth,
             headers,
             settings.policy,
+            openGates,
           );
           if (lookup.kind !== "user") throw new Error("NEXT_REDIRECT");
           return lookup.user;

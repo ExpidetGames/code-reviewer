@@ -7,7 +7,7 @@
 import { Suspense } from "react";
 import { signOut } from "@/auth/actions";
 import { actorName } from "@/auth/access-policy";
-import { requireUser } from "@/auth/session";
+import { requireSignedIn } from "@/auth/session";
 import { AppShell } from "@/shell/app-shell";
 import { UserMenu } from "@/shell/user-menu";
 
@@ -28,7 +28,9 @@ export default function AppLayout({ children }: LayoutProps<"/">) {
 }
 
 async function CurrentUserMenu() {
-  const user = await requireUser();
+  // The frame is for whoever is signed in, also the instance admin whose address is not verified yet
+  // (who is in the admin portal); the pages call requireUser() for themselves.
+  const user = await requireSignedIn();
   // Only what the menu shows goes to the browser, not the whole session user.
   return (
     <UserMenu

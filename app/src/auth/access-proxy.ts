@@ -8,10 +8,12 @@ import { randomBytes } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import {
   MISSING_PATH,
+  isAdminPath,
   isInternalPortalPath,
   portalRewriteTarget,
 } from "../admin/paths.ts";
 import { decideAccess, isPublicPath } from "./access.ts";
+import type { AccessGates } from "./access-gates.ts";
 import type { AccessPolicy } from "./access-policy.ts";
 import type { Auth } from "./auth.ts";
 import {
@@ -31,11 +33,14 @@ export type AccessProxyDependencies = {
   getAuth: () => Pick<Auth, "api" | "$context">;
   /** Called per request, so the policy is created on first use (not when the module is loaded). */
   getPolicy: () => AccessPolicy;
+  /** The verified-address and workspace gates (access-gates.ts); asked per request. */
+  getGates: () => AccessGates;
 };
 
 export function createAccessProxy({
   getAuth,
   getPolicy,
+  getGates,
 }: AccessProxyDependencies) {
   // Per proxy, not per request; a request that comes from outside cannot know it.
   const rewriteMark = randomBytes(24).toString("base64url");
@@ -50,7 +55,12 @@ export function createAccessProxy({
 
     let lookup: SessionLookup;
     try {
-      lookup = await lookupSession(getAuth(), request.headers, getPolicy());
+      lookup = await lookupSession(
+        getAuth(),
+        request.headers,
+        getPolicy(),
+        getGates(),
+      );
     } catch (error) {
       // The database or the sign in configuration is broken: refuse instead of letting it through.
       console.error(
@@ -62,9 +72,20 @@ export function createAccessProxy({
       });
     }
 
+    // The instance admin whose address is not verified yet keeps the admin portal, so that a problem with
+    // the mail server can always be repaired; everything else of the app waits for the verification
+    // (src/auth/access-gates.ts). The portal's own files count, because a rewrite runs the proxy again.
+    const signedIn =
+      lookup.kind === "user" ||
+      (lookup.kind === "unverified" &&
+        lookup.user.isInstanceAdmin &&
+        (isAdminPath(pathname) || isInternalPortalPath(pathname)))
+        ? lookup.user
+        : null;
+
     const decision = decideAccess({
       pathname,
-      authenticated: lookup.kind === "user",
+      authenticated: signedIn !== null,
     });
     switch (decision.kind) {
       case "allow": {
@@ -74,7 +95,7 @@ export function createAccessProxy({
         // everybody else the request goes on as it is and gets the answer of a path that does not
         // exist, with nothing that says the portal is there (src/admin/paths.ts). The pages and routes
         // check again themselves (src/admin/session.ts).
-        if (lookup.kind !== "user") return NextResponse.next();
+        if (signedIn === null) return NextResponse.next();
         // The files by their own address are for nobody: not even the admin comes this way. (The admin's
         // own rewrite arrives here once more, with the mark.)
         if (
@@ -82,7 +103,7 @@ export function createAccessProxy({
           request.headers.get(PORTAL_REWRITE_HEADER) !== rewriteMark
         )
           return NextResponse.rewrite(new URL(MISSING_PATH, request.url));
-        const target = lookup.user.isInstanceAdmin
+        const target = signedIn.isInstanceAdmin
           ? portalRewriteTarget(pathname)
           : null;
         if (target !== null) {
@@ -100,6 +121,17 @@ export function createAccessProxy({
         if (lookup.kind === "denied")
           return NextResponse.json(
             { error: "ACCESS_DENIED", reason: lookup.reason },
+            { status: 403, headers: { "cache-control": "no-store" } },
+          );
+        // A signed in person who has to verify the address, or has no workspace yet, is known too.
+        if (lookup.kind === "unverified")
+          return NextResponse.json(
+            { error: "email_not_verified" },
+            { status: 403, headers: { "cache-control": "no-store" } },
+          );
+        if (lookup.kind === "no_workspace")
+          return NextResponse.json(
+            { error: "no_workspace_access" },
             { status: 403, headers: { "cache-control": "no-store" } },
           );
         return NextResponse.json(

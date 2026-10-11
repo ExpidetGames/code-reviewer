@@ -24,6 +24,14 @@ export const PUBLIC_PATHS: readonly PublicPath[] = [
   // is rate limited), see src/auth/password-reset-http.ts.
   { path: "/reset-password", match: "exact" },
   { path: "/api/password-reset", match: "exact" },
+  // Signing up and verifying an address: the visitor has no session yet. The sign-up and the request for
+  // a new link are rate limited per address and for the instance, and a verification link is the
+  // credential of its own route (src/signup/http.ts). `/no-access` only explains and offers sign out.
+  { path: "/sign-up", match: "exact" },
+  { path: "/api/sign-up", match: "exact" },
+  { path: "/verify-email", match: "exact" },
+  { path: "/api/verify-email", match: "prefix" },
+  { path: "/no-access", match: "exact" },
   // The runner authenticates with its own shared token, not with a session.
   { path: "/api/runners", match: "prefix" },
   // GitHub authenticates a webhook with its signature, not with a session.

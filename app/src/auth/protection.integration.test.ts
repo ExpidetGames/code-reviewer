@@ -15,6 +15,7 @@ import {
 } from "../test-support/auth-harness.ts";
 import { concretePath, discoverRoutes } from "../test-support/routes.ts";
 import { createAccessProxy } from "./access-proxy.ts";
+import { openGates } from "../test-support/open-gates.ts";
 
 // Every route of the app and whether it needs a session. A new route must be added here.
 const PUBLIC_ROUTES = [
@@ -29,6 +30,13 @@ const PUBLIC_ROUTES = [
   // A reset link carries its own credential, the token (src/auth/password-reset-http.ts).
   "/reset-password",
   "/api/password-reset",
+  // Signing up and verifying an address: no session yet (src/signup/http.ts).
+  "/sign-up",
+  "/api/sign-up",
+  "/verify-email",
+  "/api/verify-email",
+  "/api/verify-email/resend",
+  "/no-access",
   // GitHub signs its deliveries; the route checks the signature itself (src/webhooks/README.md).
   "/api/webhooks/github-app",
   // The runner sends its own shared token (src/runner-api/README.md).
@@ -72,6 +80,7 @@ async function createGuardedApp() {
   const proxy = createAccessProxy({
     getAuth: () => harness.auth,
     getPolicy: () => harness.policy,
+    getGates: () => openGates,
   });
   function visit(path: string, cookies?: CookieJar, method = "GET") {
     const headers = new Headers();
@@ -211,6 +220,7 @@ describe("a request with a valid session", () => {
             ? { allowed: false, reason: "not_allowed" }
             : { allowed: true },
         ),
+      getGates: () => openGates,
     });
 
     const response = await refusing(
@@ -272,6 +282,7 @@ describe("a check that cannot be made", () => {
         throw new Error("the database is not initialized");
       },
       getPolicy: () => () => Promise.resolve({ allowed: true }),
+      getGates: () => openGates,
     });
     const error = vi
       .spyOn(console, "error")

@@ -44,6 +44,14 @@ export async function createSignUpHarness(options: SignUpHarnessOptions = {}) {
     await settings.set("sign_up_rule", options.rule, null);
 
   const mail = createFakeMail(options.mail ?? false);
+  // One switch for "the instance has a mail server": the sign in and the gates in front of the app ask it
+  // from the setup harness, the sign-up asks the mail double.
+  Object.defineProperty(setup.gateState, "mail", {
+    get: () => mail.configured,
+    set: (value: boolean) => {
+      mail.configured = value;
+    },
+  });
   const flags = { github: options.githubConfigured ?? false };
   const clock = { time: Date.parse("2026-10-11T09:00:00.000Z") };
   const now = () => new Date(clock.time);

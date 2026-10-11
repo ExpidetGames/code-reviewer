@@ -6,6 +6,7 @@
 // broken configuration, an unexpected exception) is the server's problem, logged under its own code
 // without the reason (it may quote the request) and shown as "unavailable", never as a wrong password.
 import type { SignInLimiter } from "./sign-in-limit.ts";
+import { EMAIL_NOT_VERIFIED_CODE } from "./unverified-sign-in.ts";
 
 /**
  * The HTTP status of an error that Better Auth threw on purpose, or null for anything else. Read by
@@ -24,9 +25,18 @@ export function apiErrorStatus(error: unknown): number | null {
     : null;
 }
 
+/** The `code` Better Auth gave the error it threw on purpose, or null. */
+function apiErrorCode(error: unknown): string | null {
+  if (typeof error !== "object" || error === null) return null;
+  const { body } = error as { body?: { code?: unknown } };
+  return typeof body?.code === "string" ? body.code : null;
+}
+
 export type PasswordSignInOutcome =
   | { kind: "ok" }
   | { kind: "invalid_credentials" }
+  /** The password was right, and the address must be verified before the account signs in. */
+  | { kind: "email_not_verified" }
   | { kind: "rate_limited"; retryAfterSeconds: number }
   | { kind: "unavailable" };
 
@@ -62,6 +72,8 @@ export async function signInWithPasswordChecked(
   } catch (error) {
     const status = apiErrorStatus(error);
     if (status === 429) return { kind: "rate_limited", retryAfterSeconds: 60 };
+    if (status === 403 && apiErrorCode(error) === EMAIL_NOT_VERIFIED_CODE)
+      return { kind: "email_not_verified" };
     if (status !== null && status >= 400 && status < 500)
       return { kind: "invalid_credentials" };
     log(

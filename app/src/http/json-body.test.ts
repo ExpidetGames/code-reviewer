@@ -10,7 +10,9 @@ function post(body: BodyInit | null, headers: Record<string, string> = {}) {
     method: "POST",
     headers: { "content-type": "application/json", ...headers },
     body,
-  });
+    // A streamed body needs it; a text body ignores it.
+    duplex: "half",
+  } as RequestInit);
 }
 
 describe("reading a JSON request", () => {
