@@ -11,12 +11,24 @@ vi.mock("./auth/startup.ts", () => ({
 vi.mock("./auth/config.ts", () => ({
   loadAuthConfig: () => ({ access: {} }),
 }));
+// Stands for the production deployment check: it needs a moment to finish, and records only then. In
+// every other environment the real check does nothing, so the stand-in records nothing either.
+vi.mock("./deploy/startup.ts", () => ({
+  checkDeploymentConfigOnStart: async () => {
+    if (process.env.NODE_ENV !== "production") return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    calls.push("deploy-check");
+  },
+}));
 vi.mock("./db/startup.ts", () => ({
   getDatabase: () => ({}),
   initializeDatabaseOnStart: async () => void calls.push("database"),
 }));
 vi.mock("./integrations/sync/startup.ts", () => ({
   runStartupSync: async () => void calls.push("sync"),
+}));
+vi.mock("./backup/startup.ts", () => ({
+  startBackupSchedulerOnStart: () => void calls.push("backup"),
 }));
 
 import { register } from "./instrumentation.ts";
@@ -43,7 +55,7 @@ describe("starting the server", () => {
 
     expect(warn).toHaveBeenCalledTimes(1);
     expect(String(warn.mock.calls[0]?.[0])).toContain("LLM_API_KEY_MISSING");
-    expect(calls).toEqual(["auth-check", "database", "pins", "sync"]);
+    expect(calls).toEqual(["auth-check", "database", "pins", "sync", "backup"]);
   });
 
   it("says nothing about the LLM when its configuration is complete", async () => {
@@ -55,5 +67,35 @@ describe("starting the server", () => {
 
     expect(warn).not.toHaveBeenCalled();
     expect(calls).toContain("database");
+  });
+
+  // CR-38 review: the check ends the process on a bad configuration, so nothing may start before it
+  // has finished (a `void` instead of an `await` would let the database open first).
+  it("finishes the deployment check in production before the database is opened", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("LLM_PROVIDER", "openrouter");
+    vi.stubEnv("LLM_API_KEY", "dummy-llm-key-0123456789");
+
+    await register();
+
+    expect(calls).toEqual([
+      "auth-check",
+      "deploy-check",
+      "database",
+      "pins",
+      "sync",
+      "backup",
+    ]);
+  });
+
+  // CR-40-T14
+  it("starts the daily backup timer once the database is ready", async () => {
+    vi.stubEnv("LLM_PROVIDER", "openrouter");
+    vi.stubEnv("LLM_API_KEY", "dummy-llm-key-0123456789");
+
+    await register();
+
+    expect(calls).toContain("backup");
+    expect(calls.indexOf("backup")).toBeGreaterThan(calls.indexOf("database"));
   });
 });

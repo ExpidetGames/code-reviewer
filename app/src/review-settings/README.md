@@ -137,8 +137,20 @@ Refusals are `{ "error": <code> }` (`errors.ts`): `400 REVIEW_SETTINGS_INVALID` 
 `"issues": [{ "field", "code" }]`), `400 REVIEW_SETTINGS_REQUEST_INVALID` (not JSON, or no `settings`
 object), `403 REVIEW_SETTINGS_CROSS_SITE_REQUEST`, `413 REVIEW_SETTINGS_BODY_TOO_LARGE`,
 `415 REVIEW_SETTINGS_CONTENT_TYPE_UNSUPPORTED`, `404 REVIEW_SETTINGS_PROJECT_NOT_FOUND` (the repository has
-no project: it was never activated). The settings page (CR-34) calls these routes, or a Server Function
-that calls the service and starts with `requireUser()`.
+no project: it was never activated). The settings pages (below) call these routes from the browser.
+
+## The pages
+
+`/settings` holds the instance state (GitHub App, LLM access) and the form for the global defaults;
+`/projects/:repositoryId` holds the same form for one project. The form (`ui/settings-form.tsx`) shows
+the value in force and where it comes from (built-in, global, this project); changing a field sets it
+for the layer, "Use default" takes it back; a save sends only the fields that are set and replaces the
+layer. `ui/form-state.ts` checks the values with `validateReviewSettingsPatch` before sending, so a
+wrong value is named next to its field with a sentence from `ui/messages.ts` (a code is never shown);
+the answer of the server is shown the same way, including `EXCEEDS_MODEL_CONTEXT`. The estimated
+cost updates while typing (`estimateReviewCost`) and shows the `above_limit` and `cost_unknown`
+warnings and a token budget above the context window; warnings never block a save. The **fallback
+model** is stored but not sent to the runner in the MVP: the form says so next to the field and the cost summary lists it as "not used yet" without an estimate or a cost warning (a context window that is too small still blocks the save, so that warning stays). A form is keyed on the server data, so a page that Next keeps mounted after a navigation starts from fresh data when it is shown again; "Use the defaults for everything" asks for a confirmation first.
 
 The claim of the runner API and the webhook intake use `service.resolveForRepository(repositoryId)`
 (`shared.ts`: `getReviewSettingsService()`), then `toRunnerSettings` and the checks above.
