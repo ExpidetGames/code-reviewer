@@ -41,6 +41,15 @@ export const FAKE_PULL_REQUEST: PullRequestRef = {
   author: { login: "alice", externalId: "1001" },
 };
 
+/** Like the real client: a signal that has fired means no request and GITHUB_APP_UNAVAILABLE. */
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted)
+    throw new GithubAppError(
+      "GITHUB_APP_UNAVAILABLE",
+      "GitHub could not be reached.",
+    );
+}
+
 export function fakeGithubAppClient(
   data: FakeGithubAppClientData = {},
 ): FakeGithubAppClient {
@@ -76,8 +85,15 @@ export function fakeGithubAppClient(
         ]
       );
     },
-    async getPullRequest(installationId, repoFullName, prNumber) {
-      record("getPullRequest", installationId, repoFullName, prNumber);
+    async getPullRequest(installationId, repoFullName, prNumber, signal) {
+      record(
+        "getPullRequest",
+        installationId,
+        repoFullName,
+        prNumber,
+        ...(signal === undefined ? [] : [signal]),
+      );
+      throwIfAborted(signal);
       if (data.getPullRequestFailure) throw data.getPullRequestFailure;
       const found = (pullRequests[repoFullName] ?? []).find(
         (pr) => pr.number === prNumber,
@@ -88,8 +104,14 @@ export function fakeGithubAppClient(
         });
       return found;
     },
-    async listOpenPullRequests(installationId, repoFullName) {
-      record("listOpenPullRequests", installationId, repoFullName);
+    async listOpenPullRequests(installationId, repoFullName, signal) {
+      record(
+        "listOpenPullRequests",
+        installationId,
+        repoFullName,
+        ...(signal === undefined ? [] : [signal]),
+      );
+      throwIfAborted(signal);
       if (data.listPullRequestsFailure) throw data.listPullRequestsFailure;
       return (pullRequests[repoFullName] ?? []).filter(
         (pr) => pr.state === "open",

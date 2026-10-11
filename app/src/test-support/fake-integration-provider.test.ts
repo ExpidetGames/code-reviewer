@@ -106,6 +106,19 @@ describe("the conformance suite", () => {
       "reports a delivery that is not relevant as ignored",
       "returns pull requests as normalized pull request references",
       "reports an unknown pull request with a stable error code",
+      "stops a pull request read when the abort signal has already fired",
+    ]);
+  });
+
+  it("fails a provider that ignores an aborted signal", async () => {
+    const deaf: IntegrationProvider = {
+      ...fakeIntegrationProvider(),
+      getPullRequest: (integration, repo, prNumber) =>
+        fakeIntegrationProvider().getPullRequest(integration, repo, prNumber),
+    };
+
+    expect(await failedChecks(deaf)).toEqual([
+      "stops a pull request read when the abort signal has already fired",
     ]);
   });
 
