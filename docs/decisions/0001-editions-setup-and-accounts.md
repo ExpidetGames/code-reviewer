@@ -184,7 +184,7 @@ identities (`provider_id`, `account_id`); `users.github_login` becomes optional.
 |---|---|
 | Member | Use the workspace: see projects, runs and settings, start reviews, change project settings |
 | Admin | Everything a Member can, plus manage connections, repositories, the BYOK LLM key, invite and remove Members and Admins |
-| Owner | Everything an Admin can, plus manage Owners and Admins, rename or delete the workspace |
+| Owner | Everything an Admin can, plus manage Owners and Admins and rename the workspace (deleting a workspace is a follow-up) |
 
 The exact permission matrix is part of the implementation issue and is tested; the principle is that
 every action needs the lowest role that is safe. **The last Owner cannot leave or be removed** (and
@@ -389,6 +389,11 @@ the start with a readable line and changes nothing.
 - **Strictness of the installation check** in section 2.9 (organization owner required). It may not be
   possible with the permissions of a GitHub App user token for every case; the implementation issue
   must document the result and the fallback.
+- **Rule choice in the wizard.** At the time of the wizard neither SMTP nor GitHub exists yet, so by
+  the rule of section 2.5 only "everyone" is selectable there; the list and domain rules are shown but
+  disabled until the admin has configured mail or GitHub-only sign-in in the portal. Decide whether the
+  wizard should instead accept a list or domain rule in a fail-closed state (new accounts refused until
+  verification is possible).
 - **Rotation of `APP_SECRET`** and a re-encryption command.
 - **Password reset** for email and password accounts is expected to ship with the mail work; if it does
   not, accounts without a second identity cannot recover a lost password until it does.
