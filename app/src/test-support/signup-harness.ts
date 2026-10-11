@@ -59,10 +59,15 @@ export async function createSignUpHarness(options: SignUpHarnessOptions = {}) {
   const pending: Promise<void>[] = [];
   const session = { userId: null as string | null };
 
+  const hash = (await auth.$context).password.hash;
+  const hashed = { count: 0 };
   const handlers = assembleSignUp({
     db,
     mail,
-    hashPassword: (await auth.$context).password.hash,
+    hashPassword: (password) => {
+      hashed.count += 1;
+      return hash(password);
+    },
     githubConfigured: () => flags.github,
     baseUrl: SIGNUP_TEST_BASE_URL,
     currentUserId: () => Promise.resolve(session.userId),
@@ -92,6 +97,8 @@ export async function createSignUpHarness(options: SignUpHarnessOptions = {}) {
     mail,
     settings,
     flags,
+    /** How many passwords the sign-up has hashed. */
+    hashed,
     logs,
     session,
     admin: SETUP_TEST_ADMIN,

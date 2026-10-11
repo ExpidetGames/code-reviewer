@@ -128,6 +128,22 @@ describe("signing up under the rule everyone", () => {
     ).rejects.toMatchObject({ statusCode: 401 });
   });
 
+  // #99-SR-14
+  it("hashes the password whether the address is new, taken or refused by the rule, so the work does not show", async () => {
+    const harness = await createSignUpHarness({
+      mail: true,
+      rule: { kind: "domains", entries: ["example.com"] },
+    });
+    const attempt = (email: string) =>
+      harness.signUp({ email, password: SIGNUP_TEST_PASSWORD });
+
+    await attempt(ADDRESS);
+    await attempt(ADDRESS);
+    await attempt("stranger@evil.example");
+
+    expect(harness.hashed.count).toBe(3);
+  });
+
   // #99-SR-09
   it("answers a sign-up with the placeholder address of a GitHub user like any other and makes no account", async () => {
     const harness = await createSignUpHarness({ mail: true });
