@@ -171,6 +171,26 @@ def label_of(model: str, pr: int, round_no: int) -> str:
     return f"{model.split('/')[1].replace('.', '_')}-pr{pr}-r{round_no}"
 
 
+def usage_figures(result: dict[str, Any]) -> dict[str, Any]:
+    """Token counts and cost of a run; None for what is unknown.
+
+    Some providers return no usage block, so `usage` may be null or missing, and a figure inside it
+    may be missing too. That is "unknown", never zero (a real cost of 0 stays 0).
+    """
+    usage = result.get("usage") or {}
+    cost = usage.get("costUsd")
+    return {
+        "promptTokens": usage.get("promptTokens"),
+        "completionTokens": usage.get("completionTokens"),
+        "costUsd": None if cost is None else float(cost),
+    }
+
+
+def show_figure(value: Any, template: str = "{}") -> str:
+    """A figure for the summary line of a run; "unknown" when there is none."""
+    return "unknown" if value is None else template.format(value)
+
+
 def run_one(args: argparse.Namespace) -> int:
     out = Path(args.out)
     records = out / "records"
@@ -203,8 +223,7 @@ def run_one(args: argparse.Namespace) -> int:
         return 1
     record = json.loads(record_path.read_text())
     result = record["result"]
-    usage = result.get("usage", {})
-    cost = float(usage.get("costUsd") or 0.0)
+    usage = usage_figures(result)
     comment_path = records / f"{label}.comment.md"
     body = comment_path.read_text() if comment_path.exists() else None
     anon_id = ""
@@ -249,10 +268,11 @@ def run_one(args: argparse.Namespace) -> int:
                 label,
                 result.get("ok"),
                 result.get("errorCode") or "",
-                cost,
+                # None (unknown) is written as an empty cell.
+                usage["costUsd"],
                 result.get("durationMs"),
-                usage.get("promptTokens"),
-                usage.get("completionTokens"),
+                usage["promptTokens"],
+                usage["completionTokens"],
                 len(body) if body is not None else "",
                 # Set by hand afterwards for a run that is replaced by a repeat (see the report).
                 "counted" if result.get("ok") and body is not None else "not_counted",
@@ -267,9 +287,10 @@ def run_one(args: argparse.Namespace) -> int:
     )
     flagged = [w for w in watched if w in log_text.lower()]
     print(
-        f"{label} id={anon_id} ok={result.get('ok')} err={result.get('errorCode')} cost={cost:.4f} "
-        f"dur_ms={result.get('durationMs')} tok={usage.get('promptTokens')}/"
-        f"{usage.get('completionTokens')} chars={len(body) if body else None} "
+        f"{label} id={anon_id} ok={result.get('ok')} err={result.get('errorCode')} "
+        f"cost={show_figure(usage['costUsd'], '{:.4f}')} dur_ms={result.get('durationMs')} "
+        f"tok={show_figure(usage['promptTokens'])}/{show_figure(usage['completionTokens'])} "
+        f"chars={len(body) if body else None} "
         f"scrubbed={scrubbed} warn={flagged} precheck_deleted={len(check['botCommentsDeleted'])}"
     )
     return 0
