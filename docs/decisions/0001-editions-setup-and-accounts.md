@@ -99,8 +99,9 @@ An instance has a state "set up" or "not set up", stored in the database. While 
    - the code stops being valid once the setup is completed, and the form is never shown again.
 3. **The wizard** asks three things, in this order:
    1. **Tenancy:** single-tenant or multi-tenant.
-   2. **Sign-up rule:** everyone, a list of emails, or allowed email domains (section 2.5 for what is
-      selectable when).
+   2. **Sign-up rule:** everyone, a list of emails, or allowed email domains. All three can be chosen
+      here; section 2.5 says what an email or domain rule does while addresses cannot be verified yet
+      (it is fail-closed).
    3. **Instance admin account:** an email and a **mandatory strong password**: at least 12 and at most
       128 characters, not on a bundled list of common passwords, and not containing the local part of
       the email address. The server checks it; the form shows the reason. There are no
@@ -156,16 +157,26 @@ described in section 2.11.
 
 ### 2.5 Verified emails and what a sign-up rule may be
 
-A sign-up rule that names emails or domains is only meaningful if the email address of a new account
-is **verified**. Therefore:
+There are exactly three sign-up rules: **everyone**, **a list of emails** and **allowed email
+domains**. There is no rule based on a GitHub organization. All three can be chosen at any time, in the
+wizard and in the admin portal.
 
-- **Everyone** is always selectable. No verification is required.
-- **A list of emails** and **allowed email domains** are selectable only when addresses can be
-  verified, that is, when **either** SMTP is configured (the app sends a verification link, and an
-  account without a verified email cannot be used) **or** sign-in is **GitHub only** (the verified
-  primary email address that GitHub reports is used).
-- If the condition stops holding later (SMTP removed while the rule is in force), the admin portal
-  refuses the change that would break it, and states which setting depends on which.
+A rule that names emails or domains is only meaningful if the email address of a new account is
+**verified**. An address can be verified when **either** SMTP is configured (the app sends a
+verification link, and an account without a verified email cannot be used) **or** sign-in is **GitHub
+only** (the verified primary email address that GitHub reports is used). Therefore:
+
+- **Everyone** needs no verification and always works.
+- **A list of emails** and **allowed email domains** are **fail-closed** while no verification path
+  exists (no SMTP, and sign-in is not GitHub only): nobody except the instance admin can sign up, and
+  no invitation can be created under the rule, because it cannot be evaluated safely. The admin portal
+  shows a clear notice on the overview and on the sign-up rule setting that says what to configure
+  (SMTP, or GitHub with email and password sign-in switched off). The rule starts working as soon as a
+  verification path exists. This is also the state right after the wizard if such a rule was chosen,
+  because neither mail nor GitHub exists yet at that point.
+- The state is evaluated when it matters, not when the rule is saved. Removing SMTP while such a rule
+  is in force is allowed; it makes the rule fail-closed again and shows the notice. Existing accounts
+  are never affected.
 - Matching is case-insensitive. A domain entry matches exactly that domain, not its subdomains. The
   rule is evaluated against the verified email when an account is created and when an invitation is
   created.
@@ -271,10 +282,15 @@ another.
 4. The app verifies the signature, the expiry and the nonce, and that the signed-in user is the one in
    the state and still Owner or Admin of that workspace.
 5. The app verifies, **with the user's own GitHub token**, that the user can access that installation
-   (it appears in the installations the user may use) and that the user may administer the account it
-   is installed on: the installation's own account for a personal account, an organization owner for
-   an organization. A user who signed in without GitHub is asked to connect their GitHub account
-   first (GitHub's user authorization, no new account is created).
+   (it appears in the installations the user may use) **and** has admin rights on the account the
+   installation belongs to: the user's own account for a personal account, an organization owner for
+   an organization. If the organization-owner check is not possible with the scopes of the token
+   (the membership role cannot be read), the fallback is that the user can access the installation
+   **and** is an admin of at least one repository the installation grants access to. The
+   implementation uses the primary check where it works, uses the fallback otherwise, and documents
+   which cases take which path; it never links on the strength of access to the installation alone.
+   A user who signed in without GitHub is asked to connect their GitHub account first (GitHub's user
+   authorization, no new account is created).
 6. Only then the app links the installation to the workspace, and the repository sync starts for it.
    An installation can be linked to **one** workspace only; a second attempt fails with a clear error.
 
@@ -326,8 +342,10 @@ setup and without data loss. On the first start of the new version:
    created user) becomes **Owner**, all others **Member**, and the Owner is also the instance admin.
 5. **The allow list becomes a sign-up rule.** The rule is the list of emails: the verified emails of
    the existing users. Allowed GitHub logins that never signed in have no known email address; the
-   admin portal lists them once with the hint to invite them by email. An allowed GitHub organization
-   has no equivalent in the new rules; the portal shows the same one-time notice (see open questions).
+   admin portal lists them once with the hint to invite them by email. An allowed **GitHub
+   organization is not migrated**: there is no organization rule. The portal shows a one-time notice
+   telling the admin to recreate that access as an email list or as allowed domains. Until then,
+   members of that organization who have not signed in before cannot sign up.
 6. The instance **counts as set up**; there is no setup code and no wizard.
 
 The import is idempotent (a second start does nothing) and runs in one transaction. A failure stops
@@ -374,26 +392,20 @@ the start with a readable line and changes nothing.
 - The Postgres port, the removal of in-process state and the migration of existing installations are
   large changes that must not break the small deployment; the existing test suites run against both
   databases once Postgres support lands.
-- The existing allow list by GitHub login and organization has no exact equivalent (section 2.11).
+- **Behavior change for existing installations that limit sign-in to a GitHub organization
+  (`ALLOWED_GITHUB_ORG`).** The new model has no organization rule and the setting is not migrated.
+  People who already have an account keep their access (their verified emails become the email list),
+  but people of that organization who never signed in can no longer sign up on their own until the
+  admin recreates the access as an email list or domains. The update notice and the upgrade guide say
+  so explicitly. Likewise, allowed logins that never signed in must be invited by email.
 - `docs/github-app.md`, the compose files and the README must be rewritten around the new setup.
 
 ## 5. Open questions
 
 - **Two-factor authentication** for the instance admin (and later for all users): later.
 - **OIDC / SSO** as a further identity: later, behind the identity model of section 2.6.
-- **GitHub organization as a sign-up rule.** Existing installations can limit sign-in to an
-  organization today. The new rules do not have it. Decide whether to add "members of a GitHub
-  organization" as a fourth rule, or to accept the one-time import notice.
 - **Existing users when the sign-up rule changes.** This record says accounts are not locked out by a
   rule change. Decide later whether the instance admin gets a "disable user" action.
-- **Strictness of the installation check** in section 2.9 (organization owner required). It may not be
-  possible with the permissions of a GitHub App user token for every case; the implementation issue
-  must document the result and the fallback.
-- **Rule choice in the wizard.** At the time of the wizard neither SMTP nor GitHub exists yet, so by
-  the rule of section 2.5 only "everyone" is selectable there; the list and domain rules are shown but
-  disabled until the admin has configured mail or GitHub-only sign-in in the portal. Decide whether the
-  wizard should instead accept a list or domain rule in a fail-closed state (new accounts refused until
-  verification is possible).
 - **Rotation of `APP_SECRET`** and a re-encryption command.
 - **Password reset** for email and password accounts is expected to ship with the mail work; if it does
   not, accounts without a second identity cannot recover a lost password until it does.
