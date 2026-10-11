@@ -71,6 +71,10 @@ make verify
 - Never skip, disable or weaken a test to make a run green, and do not raise retries to hide a
   flaky test. Report flaky tests in an issue.
 
+When the issue has a "Test cases" table, put the issue number and the case id in a comment above
+the test that proves the case (`// #123-T03`), never in the test title. That keeps a test traceable
+to its issue.
+
 While you iterate, run only the tests you touch, for example
 `pnpm --dir app exec vitest run <path>` or `uv --directory runner run pytest <path>`.
 
