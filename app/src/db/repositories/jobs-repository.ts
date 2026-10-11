@@ -25,7 +25,7 @@ import {
   type Job,
   type JobErrorCode,
 } from "../../jobs/job-types.ts";
-import { decodeJson, encodeJson, formatTimestamp } from "../codecs.ts";
+import { decodeJson, formatTimestamp } from "../codecs.ts";
 import type { Database, JobsTable } from "../schema.ts";
 import type { WorkspaceId } from "../workspace-scope.ts";
 

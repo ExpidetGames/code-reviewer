@@ -12,7 +12,6 @@
 import "server-only";
 import { isDeepStrictEqual } from "node:util";
 import type { ExpressionBuilder, Kysely } from "kysely";
-import type { JsonValue } from "../../integrations/types.ts";
 import {
   DEFAULT_JOB_QUEUE_LIMITS,
   type JobQueueLimits,
