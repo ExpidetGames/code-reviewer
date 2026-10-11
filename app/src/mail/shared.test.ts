@@ -1,73 +1,33 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Pins down which sender the running server gets: none, unless the test stack switches the file outbox on
-// with both variables. A real deployment cannot configure mail through the environment.
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+// Pins down that mail is never configured through the environment: no source file of the app reads an
+// SMTP variable or the variables of the retired test outbox.
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { mailSenderFor } from "./shared.ts";
+import { describe, expect, it } from "vitest";
 
-const directories: string[] = [];
-afterEach(async () => {
-  await Promise.all(
-    directories.splice(0).map((d) => rm(d, { recursive: true, force: true })),
-  );
-});
+const SRC = join(import.meta.dirname, "..");
 
-describe("the mail sender of the running server", () => {
-  it("is not configured by default", async () => {
-    expect(await mailSenderFor({}).isConfigured()).toBe(false);
+function sourceFiles(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory())
+      return entry.name === "node_modules" ? [] : sourceFiles(path);
+    return /\.(ts|tsx|mts)$/.test(entry.name) && !/\.test\./.test(entry.name)
+      ? [path]
+      : [];
   });
+}
 
-  // #99-SR-05
-  it.each([
-    { TEST_MAIL_OUTBOX_FILE: "/tmp/x.jsonl" },
-    { ALLOW_TEST_MAIL_OUTBOX: "true" },
-    { ALLOW_TEST_MAIL_OUTBOX: "1", TEST_MAIL_OUTBOX_FILE: "/tmp/x.jsonl" },
-    { SMTP_HOST: "smtp.example.com", SMTP_USER: "u", SMTP_PASSWORD: "p" },
-  ])(
-    "ignores the environment %j (mail is never configured there)",
-    async (env) => {
-      expect(await mailSenderFor(env).isConfigured()).toBe(false);
-    },
-  );
+describe("the environment", () => {
+  // #100-SM-08
+  it("is not read for mail by any source file of the app", () => {
+    const reading = sourceFiles(SRC).filter((file) =>
+      /\b(SMTP_(HOST|PORT|USER|USERNAME|PASSWORD|PASS|FROM|SECURE|URL|SERVER)|MAIL_(HOST|PORT|USER|PASSWORD|FROM)|ALLOW_TEST_MAIL_OUTBOX|TEST_MAIL_OUTBOX_FILE)\b/.test(
+        readFileSync(file, "utf8"),
+      ),
+    );
 
-  it("writes messages to the outbox file when the test stack switches it on", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "outbox-"));
-    directories.push(directory);
-    const file = join(directory, "outbox.jsonl");
-    const sender = mailSenderFor({
-      ALLOW_TEST_MAIL_OUTBOX: "true",
-      TEST_MAIL_OUTBOX_FILE: file,
-    });
-
-    const result = await sender.send({
-      to: "a@example.com",
-      subject: "s",
-      text: "t",
-    });
-
-    expect(await sender.isConfigured()).toBe(true);
-    expect(result).toEqual({ ok: true });
-    expect(JSON.parse((await readFile(file, "utf8")).trim())).toEqual({
-      to: "a@example.com",
-      subject: "s",
-      text: "t",
-    });
-  });
-
-  it("reports mail_failed when the outbox file cannot be written", async () => {
-    const sender = mailSenderFor({
-      ALLOW_TEST_MAIL_OUTBOX: "true",
-      TEST_MAIL_OUTBOX_FILE: "/nonexistent-directory/outbox.jsonl",
-    });
-
-    expect(
-      await sender.send({ to: "a@example.com", subject: "s", text: "t" }),
-    ).toEqual({
-      ok: false,
-      error: "mail_failed",
-    });
+    expect(reading).toEqual([]);
   });
 });

@@ -62,6 +62,8 @@ export const SMTP_ISSUE_CODES = [
   "password_conflict",
   /** A login user is set and there is no password to log in with. */
   "password_required",
+  /** A password for a server that needs no login. */
+  "user_required",
   "clear_password_invalid",
   "sender_required",
   "sender_invalid",

@@ -24,6 +24,8 @@ export const SMTP_FAILURE_CODES = [
   "recipient_rejected",
   /** The server did not answer in time. */
   "timeout",
+  /** The message was refused before it was sent (an address that is not one). */
+  "invalid_message",
   /** A login is configured and there is no password to log in with. */
   "password_missing",
   /** The stored password cannot be decrypted (another APP_SECRET): it must be entered again. */
