@@ -461,9 +461,9 @@ Do this once with the whole team in the room; it is the acceptance test of the d
 - [ ] **Install the GitHub App** on a team repository ([`github-app.md`](github-app.md), step 5). The
       `installation` delivery shows 202 under *Recent Deliveries*, and the repository appears in the app.
 - [ ] **Activate the repository as a project.** Repositories are inactive until someone activates them. Open
-      the Projects page of the app, find the repository and activate it. (The Projects page comes with the UI
-      epic; on a build without it the project lead does this with you through the API call described in
-      [`app/src/projects/README.md`](../app/src/projects/README.md), which needs a signed-in session.)
+      the **Projects** page of the app, press **Sync from GitHub** if the repository is missing, and switch the
+      repository on. (For scripts, the API call described in
+      [`app/src/projects/README.md`](../app/src/projects/README.md) does the same and needs a signed-in session.)
 - [ ] **Open a test pull request** (not a draft) in that repository. The delivery shows 2xx, the run appears
       in the app and goes from waiting to running to succeeded, and the review comment of the app appears
       on the pull request. The run's detail page shows no error code.
