@@ -31,6 +31,15 @@ export const SIGN_UP_RULE_ERROR_CODES = [
 ] as const;
 export type SignUpRuleErrorCode = (typeof SIGN_UP_RULE_ERROR_CODES)[number];
 
+/**
+ * Domains no sign-up can use, whatever the rule says. A GitHub user carries `<github id>@users.noreply.
+ * github.com` as a placeholder address (src/auth/github-provider.ts) and the column is unique, so an
+ * account made for such an address by someone else would keep the real GitHub user from ever signing in.
+ */
+export const RESERVED_EMAIL_DOMAINS: readonly string[] = [
+  "users.noreply.github.com",
+];
+
 export type RuleVerdict =
   /** `email` is the address in its canonical form: trimmed, lower case, the domain in punycode. */
   { ok: true; email: string } | { ok: false; error: SignUpRuleErrorCode };
@@ -60,8 +69,10 @@ export function evaluateSignUpRule(
 ): RuleVerdict {
   const email = canonicalEmail(raw);
   if (email === null) return { ok: false, error: "invalid_email" };
-  const wanted =
-    rule.kind === "domains" ? email.slice(email.lastIndexOf("@") + 1) : email;
+  const domain = email.slice(email.lastIndexOf("@") + 1);
+  if (RESERVED_EMAIL_DOMAINS.includes(domain))
+    return { ok: false, error: "email_not_allowed" };
+  const wanted = rule.kind === "domains" ? domain : email;
   // The entries are stored lower case; comparing lower case here makes a hand-edited row safe too.
   const allowed =
     rule.kind === "everyone" ||

@@ -64,11 +64,15 @@ export async function lookupSession(
   // GitHub allow list is about GitHub identities. Two gates stand in front of the app, though: a
   // verified address, and a workspace (access-gates.ts).
   if (identities.password) {
-    if (!session.user.emailVerified && (await gates.verificationRequired()))
-      return { kind: "unverified", user };
-    if (!user.isInstanceAdmin && !(await gates.hasWorkspace(user.id)))
-      return { kind: "no_workspace", user };
-    return { kind: "user", user };
+    const blocked = await gateOf(
+      {
+        id: user.id,
+        emailVerified: session.user.emailVerified,
+        isInstanceAdmin: user.isInstanceAdmin,
+      },
+      gates,
+    );
+    return blocked === null ? { kind: "user", user } : { kind: blocked, user };
   }
   if (githubLogin === null || identities.githubId === null)
     return { kind: "none" };
@@ -80,6 +84,22 @@ export async function lookupSession(
   return decision.allowed
     ? { kind: "user", user }
     : { kind: "denied", reason: decision.reason };
+}
+
+/**
+ * Which gate (access-gates.ts) an email and password account is stopped by, or null when it passes both:
+ * its address has to be verified while the instance can send mail, and (unless it is the instance admin)
+ * it has to belong to a workspace. The verification is asked first.
+ */
+export async function gateOf(
+  account: { id: string; emailVerified: boolean; isInstanceAdmin: boolean },
+  gates: AccessGates,
+): Promise<"unverified" | "no_workspace" | null> {
+  if (!account.emailVerified && (await gates.verificationRequired()))
+    return "unverified";
+  if (!account.isInstanceAdmin && !(await gates.hasWorkspace(account.id)))
+    return "no_workspace";
+  return null;
 }
 
 async function findIdentities(

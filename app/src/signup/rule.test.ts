@@ -26,6 +26,27 @@ describe("the sign-up rule everyone", () => {
   );
 });
 
+describe("an address that is reserved for GitHub placeholders", () => {
+  // #99-SR-09
+  it("is refused under every rule, so nobody can take the placeholder address of a GitHub user", () => {
+    const address = "583231@users.noreply.github.com";
+
+    for (const rule of [
+      EVERYONE,
+      emails(address),
+      domains("users.noreply.github.com"),
+    ])
+      expect(evaluateSignUpRule(rule, address)).toEqual({
+        ok: false,
+        error: "email_not_allowed",
+      });
+  });
+
+  it("does not keep out other addresses at github.com", () => {
+    expect(evaluateSignUpRule(EVERYONE, "someone@github.com").ok).toBe(true);
+  });
+});
+
 describe("a rule that lists email addresses", () => {
   const rule = emails("alice@example.com");
 

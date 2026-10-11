@@ -128,6 +128,27 @@ describe("signing up under the rule everyone", () => {
     ).rejects.toMatchObject({ statusCode: 401 });
   });
 
+  // #99-SR-09
+  it("answers a sign-up with the placeholder address of a GitHub user like any other and makes no account", async () => {
+    const harness = await createSignUpHarness({ mail: true });
+    const fresh = await readAnswer(
+      await harness.signUp({ email: ADDRESS, password: SIGNUP_TEST_PASSWORD }),
+    );
+
+    const reserved = await readAnswer(
+      await harness.signUp({
+        email: "583231@users.noreply.github.com",
+        password: SIGNUP_TEST_PASSWORD,
+      }),
+    );
+    await harness.flush();
+
+    expect(reserved).toEqual(fresh);
+    expect(
+      await harness.user("583231@users.noreply.github.com"),
+    ).toBeUndefined();
+  });
+
   it("makes exactly one account when two sign-ups for one address arrive together", async () => {
     const harness = await createSignUpHarness({ mail: true });
 

@@ -75,7 +75,11 @@ export function SignUpForm({
   }
 
   return (
-    <form onSubmit={(event) => void submit(event)} className="login-form">
+    <form
+      onSubmit={(event) => void submit(event)}
+      className="login-form"
+      aria-label="Sign-up form"
+    >
       {problem ? (
         <p role="alert" className="alert alert-error">
           {problem}

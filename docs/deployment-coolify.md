@@ -291,7 +291,9 @@ What to know:
   **one app instance running** ([section 10](#10-one-app-instance-only)).
 - An email or domain sign-up rule cannot be evaluated while no email can be verified (no mail server and
   GitHub is not the only sign-in method): nobody but the admin can sign up under it until a mail server is
-  configured. The wizard says so next to the choice.
+  configured. The wizard says so next to the choice. Under the rule "everyone" people can sign up at
+  `/sign-up` at once; with a mail server they have to confirm their address with a link first. A new
+  account belongs to no workspace and sees no data until an admin invites it.
 - If `GITHUB_APP_*` is set, the synchronization with GitHub that ran at start could not put a new
   installation into a workspace while the setup was open (its log line says `WORKSPACE_NOT_AVAILABLE`); it
   runs again when the setup is finished, and a webhook about a new installation in that window answers 503,
