@@ -47,7 +47,8 @@ match the license shipped in the new release.
 
 Last review: 2026-10-11, against `app/pnpm-lock.yaml` (pnpm 10) and `runner/uv.lock` (pr-agent 0.47.0).
 The licenses were read from the package metadata that pnpm and uv install. A scan in CI is not set up
-yet.
+yet; it is tracked in [#118](https://github.com/ExpidetGames/code-reviewer/issues/118), together with SPDX
+headers and the license files in the images.
 
 ### App (`app/`)
 
@@ -55,9 +56,9 @@ The dependency tree of the app (production and development) uses these licenses:
 
 | License | Packages | Note |
 |---|---|---|
-| MIT, MIT-0, ISC, BSD-2-Clause, BSD-3-Clause, 0BSD, BlueOak-1.0.0, CC0-1.0, Apache-2.0 | the large majority | Permissive, compatible with Apache-2.0 |
+| MIT, MIT-0, ISC, BSD-2-Clause, BSD-3-Clause, 0BSD, BlueOak-1.0.0, CC0-1.0, Python-2.0, Apache-2.0 | the large majority | Permissive, compatible with Apache-2.0 |
 | MPL-2.0 | `lightningcss` (a build tool of Next.js), `axe-core` (test tooling only) | File level copyleft. Used unmodified as tools, nothing of them is part of our source |
-| LGPL-3.0-or-later | `@img/sharp-libvips-*` (prebuilt binary of libvips, an optional dependency of `sharp`, which Next.js uses for image optimization) | Used unmodified and dynamically loaded as a separate binary, not linked into our code |
+| LGPL-3.0-or-later | All `@img/sharp-libvips-*` packages and the prebuilt `@img/sharp-*` binaries for every platform (including win32 and the wasm builds): prebuilt libvips, optional dependencies of `sharp`, which Next.js uses for image optimization | Used unmodified and dynamically loaded as a separate binary, not linked into our code |
 | CC-BY-4.0 | `caniuse-lite` (browser support data used by the build tooling) | Data, not code. Attribution: Alexis Deveria and contributors, https://github.com/browserslist/caniuse-lite |
 
 No package of the app uses a license that conflicts with distributing this project under Apache-2.0.
@@ -76,11 +77,15 @@ are MIT, BSD, Apache-2.0, ISC or PSF licensed. These are the exceptions:
 | `giteapy` 1.0.8 | none declared in the package metadata | Required by PR-Agent, never used by our runner |
 
 Our own source code stays under Apache-2.0: Apache-2.0 is compatible with the GPL-3.0 in one
-direction, and we do not copy or modify any of these packages. Anyone who redistributes a built
-runner image that contains `html2text` has to meet the terms of the GPL-3.0 for that package
-(the corresponding source is the unmodified release on PyPI, linked above). Whether this needs more
-than a note here, for example a source offer next to the published images, is an open question for
-the maintainers.
+direction, and we do not copy or modify any of these packages.
+
+`html2text` 2024.2.26 (GPL-3.0, https://github.com/Alir3z4/html2text) is installed unmodified from
+PyPI into the runner image. It is pure Python (a `py3-none-any` wheel), so its complete source code
+is included in the image as installed, in `/opt/venv/lib/python3.13/site-packages/html2text/`. The
+GPL-3.0 text is in the same environment, in
+`/opt/venv/lib/python3.13/site-packages/html2text-2024.2.26.dist-info/licenses/COPYING`. Because the
+source travels with the image, no separate written offer is needed. If the version changes, update
+the version and the paths here.
 
 ## Updating this file
 

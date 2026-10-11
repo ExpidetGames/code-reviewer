@@ -36,7 +36,9 @@ describe("NOTICE", () => {
 
   it("names the project and its copyright holder", () => {
     expect(notice).toMatch(/^code-review\.com\n/);
-    expect(notice).toMatch(/Copyright 20\d{2} .+/);
+    expect(notice).toContain(
+      "Copyright 2026 Itegro GmbH and the code-review.com contributors",
+    );
   });
 
   it("points to the third party licenses file", () => {
@@ -47,15 +49,32 @@ describe("NOTICE", () => {
 describe("THIRD_PARTY_LICENSES.md", () => {
   const licenses = read("THIRD_PARTY_LICENSES.md");
 
-  it("preserves the MIT permission text and copyright notice of PR-Agent", () => {
-    expect(licenses).toContain("PR-Agent");
-    expect(licenses).toContain("Copyright (c) 2026 The PR Agent");
-    expect(licenses).toContain(
+  it("preserves the complete MIT license text of PR-Agent as one block", () => {
+    const mit = [
+      "MIT License",
+      "",
+      "Copyright (c) 2026 The PR Agent",
+      "",
       "Permission is hereby granted, free of charge, to any person obtaining a copy",
-    );
-    expect(licenses).toContain(
+      'of this software and associated documentation files (the "Software"), to deal',
+      "in the Software without restriction, including without limitation the rights",
+      "to use, copy, modify, merge, publish, distribute, sublicense, and/or sell",
+      "copies of the Software, and to permit persons to whom the Software is",
+      "furnished to do so, subject to the following conditions:",
+      "",
       "The above copyright notice and this permission notice shall be included in all",
-    );
+      "copies or substantial portions of the Software.",
+      "",
+      'THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR',
+      "IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,",
+      "FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE",
+      "AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER",
+      "LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,",
+      "OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE",
+      "SOFTWARE.",
+    ].join("\n");
+
+    expect(licenses).toContain(mit);
   });
 
   it("states the pinned PR-Agent version that the notice belongs to", () => {
@@ -63,6 +82,16 @@ describe("THIRD_PARTY_LICENSES.md", () => {
 
     expect(pinned).not.toBeNull();
     expect(licenses).toContain(`pr-agent ${pinned?.[1]}`);
+  });
+
+  it("names the html2text version that the runner lockfile pins", () => {
+    const locked = /name = "html2text"\nversion = "([0-9.]+)"/.exec(
+      read("runner/uv.lock"),
+    );
+
+    expect(locked).not.toBeNull();
+    expect(licenses).toContain(`\`html2text\` ${locked?.[1]}`);
+    expect(licenses).toContain(`html2text-${locked?.[1]}.dist-info`);
   });
 });
 
