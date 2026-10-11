@@ -126,6 +126,10 @@ observes while the command runs:
 - `logTail`: the runner's own redacting sink, newest lines, warnings and errors first, at most 4 KB,
   escape sequences removed, control characters turned into spaces, then redacted.
 
+A review that PR-Agent shortened to fit GitHub's comment limit is a failure too, even though a
+comment is on the pull request: see "The review comment size limit" below. Such a result keeps its
+`commentUrl` when the comment can be found.
+
 When there is no comment link: `review` reports `ok: false` with `review_not_published` (a review
 that posted nothing, or only a standalone comment, is a failure the caller must see). `improve`, `ask` and `describe` keep
 `ok: true` with `commentUrl: null` (nothing to suggest is a valid outcome; `describe` edits the pull
@@ -145,6 +149,8 @@ and the enum agree. Callers branch on the code, never on the text.
 | `runner_error` | A failure inside the runner itself (also reported by the job loop for a process that ended without a result) |
 | `command_failed` | PR-Agent reported a failure it handled itself (failure comment, failed flag) and nothing more specific is known |
 | `review_not_published` | `review` returned normally but no review comment was recorded (for example an identity problem) |
+| `review_state_truncated` | `review` hit GitHub's comment size limit and PR-Agent's hidden record of findings no longer fits: it is not advanced any more, so findings are forgotten (the review is posted with the old record, or as a standalone copy). `commentUrl` is set when the review comment can be found |
+| `review_text_truncated` | `review` hit GitHub's comment size limit and part of the visible review was cut off; the record of findings still fits. `commentUrl` is set when the review comment can be found |
 | `pr_not_found` | GitHub answered 404 for the pull request |
 | `git_auth` | GitHub rejected the token (401) |
 | `git_forbidden` | GitHub refused the request (403) |
@@ -162,6 +168,37 @@ and the enum agree. Callers branch on the code, never on the text.
 | `model_unknown` | PR-Agent does not know the model (set `llm.maxTokens`) or the provider has no such model |
 | `timeout` | The command did not finish within `RUNNER_JOB_TIMEOUT_SECONDS` (also reported by the job loop for a process it had to end) |
 | `unknown` | Something failed that no rule recognises |
+
+## The review comment size limit
+
+PR-Agent keeps one persistent review comment per pull request and hides a record of every finding it
+has seen in it (`<!-- pr-agent-review-state ... -->`), so that a later run recognises earlier findings.
+GitHub accepts at most 65,536 characters per comment (PR-Agent cuts at 65,000). The record grows with
+every run, and in a long-lived pull request it fills the comment. PR-Agent 0.47.0 then keeps going
+without failing: it cuts the visible review to make room for the record (no log line), or, when the
+record alone does not fit, logs "Persistent review state did not fit the provider comment limit",
+stops advancing the record and posts the old record or a "Standalone PR Review" without a marker.
+
+The runner turns this into a result instead of a success (`review_state_watch.py` wraps the one
+function that shortens the comment, `comment_recorder.py` notes a body that was longer than the
+provider takes):
+
+| What happened | Code | `commentUrl` |
+|---|---|---|
+| The record did not fit (also when a standalone copy was posted) | `review_state_truncated` | the review comment if it carries the marker, else `null` |
+| The visible review was cut so the record fits, or the provider cut the comment | `review_text_truncated` | the review comment if it carries the marker |
+
+Only `review` is checked. A failure comment or a failure of the command takes precedence.
+
+**Bounding the record: not done.** The data of the CR-48 comparison and PR-Agent's code (pinned by `tests/unit/test_review_state_growth.py`) show why it is not safe
+as a runner-side change. PR-Agent keeps at most 20 resolved findings (`DEFAULT_MAX_RESOLVED_FINDINGS`,
+a default argument of `reconcile_review_findings`, not a setting) but every active finding without
+limit, and in the CR-48 comparison all of the 93 records of the full comment were active (about 690
+characters each, the record and the visible review list the same text). Dropping active findings would
+make the next run treat them as new (the loss CR-11 recognition is meant to prevent) and needs a second
+private PR-Agent function patched; shortening stored bodies has the same cost. The levers that exist
+today are `pr_reviewer.num_max_findings` (default 3 per run, a project setting) and the fact that a
+complete run resolves findings that are gone. Compacting the record is CR-52; the detection above keeps the loss visible until then.
 
 ## Settings policy
 
@@ -253,7 +290,9 @@ protect it:
   job against the real, pinned PR-Agent (no network). They fail when the pin, the lock file, the
   installed package and `PATCHED_FOR_VERSION` disagree, when the methods the patch relies on are
   gone or changed, or when the fingerprint of one of them (a hash of its syntax tree) differs from
-  the one recorded for 0.47.0. A PR that bumps `pr-agent` therefore turns the check
+  the one recorded for 0.47.0. The same file also records the fingerprint of
+  `append_review_state`, the function the review state watch wraps (see "The review comment size
+  limit"): read what it cuts and when before updating that fingerprint. A PR that bumps `pr-agent` therefore turns the check
   `All checks passed?` red until someone has read the release diff and updated the recorded
   fingerprints and `PATCHED_FOR_VERSION` together with the pin. The fingerprints are hashes of
   the syntax tree and were recorded on Python 3.13 (the version of `.python-version` and the

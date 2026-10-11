@@ -425,10 +425,19 @@ describe("CI workflow installation and runtimes", () => {
   });
 
   // CR-16-T07
+  it("calls a reusable workflow only from the engine job, the one job exempt from its own time limit", () => {
+    expect(
+      jobs.filter(([, job]) => job.uses).map(([id, job]) => [id, job.uses]),
+    ).toEqual([["engine", "./.github/workflows/engine.yml"]]);
+  });
+
+  // CR-16-T07
   it("limits the run time of every job", () => {
-    // A job that calls a reusable workflow cannot have its own limit; the called workflow has one
-    // (engine-workflow.test.ts).
-    for (const [id, job] of jobs.filter(([, job]) => !job.uses)) {
+    // Only the job that calls the engine workflow is exempt: a job that calls a reusable workflow
+    // cannot have its own limit, and the called workflow has one (engine-workflow.test.ts). Any
+    // other job still needs a limit of its own.
+    const exempt = (job: Job) => job.uses === "./.github/workflows/engine.yml";
+    for (const [id, job] of jobs.filter(([, job]) => !exempt(job))) {
       expect(job["timeout-minutes"], `${id} timeout`).toBeGreaterThan(0);
       expect(job["timeout-minutes"], `${id} timeout`).toBeLessThanOrEqual(30);
     }
