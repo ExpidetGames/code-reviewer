@@ -170,11 +170,11 @@ Open **Environment Variables** of the application. Coolify lists every variable 
 The file [`.env.example`](../.env.example) explains each setting in detail and is the master list: this
 table is checked against it and against the Compose file by a test.
 
-Generate random values on any machine with `openssl rand -base64 32`. Never reuse a value between
+Generate random values on any machine with the `openssl rand` command given for them in the table. Never reuse a value between
 environments. Put every secret into the team's password manager first. Coolify expands `$` references in
 values unless the variable's *Interpolation* is set to **Literal (keep $ characters as-is)**
 ([Coolify: multiline and literal values](https://coolify.io/docs/applications/configuration/environment-variables#multiline-and-literal-values)).
-The values from `openssl rand -base64 32` contain no `$`; for any secret that does (a password manager
+The values from `openssl rand` contain no `$`; for any secret that does (a password manager
 value), set Literal.
 
 | Variable | Required | Where the value comes from | Notes |
@@ -189,7 +189,7 @@ value), set Literal.
 | `GITHUB_APP_SLUG` | yes | The last part of `github.com/apps/<slug>` | |
 | `GITHUB_APP_WEBHOOK_SECRET` | yes | The secret entered in the GitHub App's webhook settings | Secret. Byte for byte: no trailing space or line break. |
 | `GITHUB_APP_PRIVATE_KEY` | yes | The `.pem` file generated on the GitHub App's settings page | Secret. In Coolify choose the value type **Multiline** and paste the key with its line breaks, or paste it on one line with the breaks written as `\n`; both give the same key ([`github-app.md`](github-app.md), section 3). The key is parsed at start; an unusable one stops the start and the log names the variable. |
-| `RUNNER_TOKEN` | yes | `openssl rand -base64 32` | At least 32 characters. Secret shared by the app and the runner; both read this one variable. |
+| `RUNNER_TOKEN` | yes | `openssl rand -hex 32` | At least 32 characters. Secret shared by the app and the runner; both read this one variable. |
 | `LLM_API_KEY` | optional | The OpenRouter API key | Secret. Without it the app starts and shows a configuration error, and every review fails with `llm_not_configured`: set it before the first review. |
 | `LLM_PROVIDER` | optional | `openrouter` | The only provider for now; this is the default. |
 | `LLM_MODEL` | optional | An OpenRouter model name | Default `anthropic/claude-haiku-5.5`. The review settings in the UI can choose another model per project. |
@@ -197,6 +197,11 @@ value), set Literal.
 | `REVIEW_DEBOUNCE_SECONDS` | optional | A number from 0 to 600 | How long a push to a pull request waits before its automatic review starts. Empty: 90. |
 | `DATABASE_BUSY_TIMEOUT_MS` | optional | A number of milliseconds | How long a database write waits for a lock. Empty: 5000. |
 | `BACKUP_TIME` | optional | `HH:MM` in UTC, or `off` | When the app backs up the database every day. Empty: `02:30`. Use `off` only together with a Coolify scheduled task, [section 8](#8-storage-and-backups). |
+| `RUNNER_CONCURRENCY` | optional | A whole number from 1 to 32 | How many reviews the runner runs at once, [section 9](#9-runner-sizing-and-runner_concurrency). Empty: 3 (right for the runner's 2 GiB). Raise it only together with `RUNNER_MEMORY_LIMIT`. |
+| `RUNNER_MEMORY_LIMIT` | optional | A Docker memory size such as `3g` or `1536m` | The memory the runner container may use. Empty: 2g. Change it together with `RUNNER_CONCURRENCY`, the pairs are in [section 9](#9-runner-sizing-and-runner_concurrency). |
+| `RUNNER_JOB_TIMEOUT_SECONDS` | optional | A number of seconds | Hard timeout of one review; the runner ends a longer one and reports `timeout`. Empty: 1200 (20 minutes). |
+| `RUNNER_POLL_INTERVAL_SECONDS` | optional | A number of seconds | How long the runner waits between two requests for work when nothing is waiting. Empty: 5. |
+| `RUNNER_ID` | optional | A name | Shown in the app's logs as the name of this runner (letters, digits and `._:@-`). Empty: `runner-<container host name>`. |
 
 Variables that exist in `.env.example` but that you **do not set on Coolify**:
 
@@ -207,12 +212,9 @@ Variables that exist in `.env.example` but that you **do not set on Coolify**:
 | `GITHUB_APP_PRIVATE_KEY_PATH` | not used | The Compose file mounts no key file; use `GITHUB_APP_PRIVATE_KEY`. |
 | `BACKUP_DIR` | not used | The image fixes it to `/backups`, the mount point of the backup volume. |
 | `ALLOW_TEST_GITHUB_ENDPOINTS`, `GITHUB_OAUTH_BASE_URL`, `GITHUB_API_BASE_URL` | not used | For the test stack with a fake GitHub only. Never set them in a real deployment. |
-
-Settings that arrive with later work and that this Compose file does not pass on yet:
-
-| Variable | Required | What it will do |
-|---|---|---|
-| `RUNNER_CONCURRENCY` | planned | How many reviews the runner runs at once, [section 9](#9-runner-sizing-and-runner_concurrency). Introduced with the runner's job loop (CR-29), which adds it to the Compose files and to `.env.example`. |
+| `RUNNER_API_URL` | fixed | The Compose file sets it to `http://app:3000`, the app over the Docker network. It is not a setting. |
+| `RUNNER_SHUTDOWN_GRACE_SECONDS` | not used | How long running reviews may finish after a stop. The Compose file leaves the runner's 60 seconds and gives the runner `stop_grace_period: 90s` for it ([section 9](#stopping-the-runner)); the two belong together. |
+| `PR_AGENT_COMMAND` | not used | Replaces PR-Agent by another command, for test stacks with a fake. The runner would hand that command every job with its GitHub token and LLM key. The Compose files never pass it on; never set it. |
 
 After changing a variable, save and **Restart** (only runtime values changed) or **Redeploy**
 ([Coolify: apply changes](https://coolify.io/docs/applications/configuration/environment-variables#apply-changes)).
@@ -221,7 +223,9 @@ After changing a variable, save and **Restart** (only runtime values changed) or
 
 1. Press **Deploy** and follow **Deployment Logs**: both images are built, then the stack starts. The
    runner starts only after the app reports healthy.
-2. In Coolify, `app` must show **healthy** and `runner` **running**. The app's health check is
+2. In Coolify, `app` must show **healthy** and `runner` **running**. The log of the `runner` has a line like
+   `runner runner-3f2a started: 3 slots` and, after that, no `trying again in ...` warning: those mean that
+   the app cannot be reached or refuses the runner's token. The app's health check is
    `GET /api/health` inside the container; it reads the database. If the app never becomes healthy,
    open its logs and read the last lines first: a missing or invalid setting stops the start with one
    line that names the variable (for example `[deploy] DEPLOY_CONFIG_INVALID` or an `[auth]` line),
@@ -235,13 +239,7 @@ After changing a variable, save and **Restart** (only runtime values changed) or
 
    It checks that `/api/health` and `/login` answer 2xx, that a webhook delivery with a wrong signature
    gets 401, and that the runner API refuses a request without a token with 401. Any deviation makes
-   the exit code non-zero and names the check.
-
-   **Until the runner API is part of the release** (it is not yet on every branch, see
-   [What is verified](#what-is-verified)) the last check fails with 404. Only then, run
-   `docker/smoke/instance.sh --skip-runner-endpoint https://<domain>`; the script prints that it skipped
-   the check and ends with "smoke test passed (runner API check skipped)". Do not use the option once the
-   runner API is in: it would hide an open runner API.
+   the exit code non-zero and names the check. There is no option to leave a check out.
 5. Compare the variables in Coolify with the table in [section 6](#6-environment-variables), and check that
    **at least one of `ALLOWED_GITHUB_LOGINS` and `ALLOWED_GITHUB_ORG` is set**: neither Coolify nor the health
    check notices when both are empty. Where the app
@@ -338,15 +336,17 @@ RUNNER_CONCURRENCY = floor( (runner memory in MiB - 256) / (321 x 1.5) )
 ```
 
 256 MiB is reserved for the runner's own loop; 321 MiB is the measured peak of one process, 1.5 is a safety
-factor. The runner container in `compose.coolify.yml` is limited to **2 GiB** (`mem_limit: 2g`), which gives
-**3** parallel reviews, about 1.5 per GiB. Use this table if you change the limit:
+factor. The runner container in `compose.coolify.yml` is limited to **2 GiB** (`2g`, the default of the
+variable `RUNNER_MEMORY_LIMIT`), which gives **3** parallel reviews, about 1.5 per GiB. To run more, set the
+two variables as a pair in Coolify's *Environment Variables* and redeploy; no change to the tracked Compose
+file is needed. Pairs that follow the formula:
 
-| Runner memory (MiB) | `RUNNER_CONCURRENCY` |
-|---|---|
-| 1024 | 1 |
-| 2048 | 3 |
-| 3072 | 5 |
-| 4096 | 7 |
+| Runner memory (MiB) | `RUNNER_MEMORY_LIMIT` | `RUNNER_CONCURRENCY` |
+|---|---|---|
+| 1024 | `1g` | 1 |
+| 2048 | `2g` | 3 |
+| 3072 | `3g` | 5 |
+| 4096 | `4g` | 7 |
 
 The limit and the number belong together: more parallel reviews than the memory allows get processes
 killed, and a reviewer sees a failed run. Other limits can apply before memory does: the model provider's
@@ -356,8 +356,50 @@ Server size (CR-13, `docs/spike/cr-13-measurements.md`): operating system 0.3 GB
 about 1 GB, app 0.5 GB, runner 1 GB with three busy slots, 25 percent headroom: **3.9 GB**, so 4 GB is the
 calculated minimum. **Recommended: 8 GB RAM and 4 vCPU**, because Coolify's share and the operating system
 are estimates, a deployment builds the images on the same machine, and a redeploy briefly runs more
-containers. On a 4 GB server use `RUNNER_CONCURRENCY=2` and a runner limit of 1.5 GiB. Disk: the images
+containers. On a 4 GB server use `RUNNER_CONCURRENCY=2` and `RUNNER_MEMORY_LIMIT=1536m`. Disk: the images
 need about 1 GB, Docker's build cache more.
+
+### Stopping the runner
+
+A stop (`docker compose stop`, and in the same way a redeploy that replaces the container) sends the runner
+`SIGTERM`. The loop then claims nothing more, gives the reviews that are running up to 60 seconds to finish,
+and reports the ones that are still running as failed with the code `runner_shutdown`; the app puts such a
+job back into the queue, so the review is run again by the next runner. The Compose files give the container
+`stop_grace_period: 90s`, 90 seconds (the 60, five more between the polite and the hard kill of a stuck
+review, up to ten to send the report, and some margin), because Docker's default of 10 seconds would kill the
+runner before it has reported anything. The runner's image starts it behind `tini`, which passes the signal
+on, so no `init: true` is needed. `docker/smoke/compose.sh` proves that Docker waits for the runner's report instead of killing it after 10 seconds (with a fake review and a shortened grace period of 20 seconds; the 60 + 5 + 10 arithmetic is pinned by unit tests). Do not stop the
+runner with `docker kill`. Whether Coolify waits for `stop_grace_period` when it redeploys is not verified
+(see [What is verified](#what-is-verified)); the worst case is a job that is taken back when its lease runs out
+two minutes later.
+
+### Restrict what the runner can reach
+
+The runner is the one component that handles text an outsider wrote (the title, description, diff and
+comments of a pull request) and passes it to a model, with a GitHub token and the LLM key in the process.
+The app filters what it can (for example image links in `/ask` questions, which PR-Agent would fetch from the
+runner), but the network is the second line: **the runner needs to reach only three things**,
+
+- `api.github.com`, HTTPS port 443 (GitHub's API; GitHub Enterprise Server would be its own host),
+- `openrouter.ai`, HTTPS port 443 (the models),
+- the `app` container on the Docker network, `app:3000` (the runner API),
+
+plus DNS. The Compose files do not enforce this, because Docker has no switch for it and the allowed
+addresses of GitHub and OpenRouter change. Two ways to enforce it on the server, to be chosen and set up
+by whoever runs it (neither is part of the shipped files nor tested):
+
+1. **Firewall on the host.** Docker evaluates rules in the `DOCKER-USER` chain before its own: for the
+   source address range of the runner's container network, accept established traffic, DNS and the app's
+   network, accept HTTPS to the addresses of the two hosts above, and drop the rest. Because the addresses
+   change, refresh the list on a schedule, or use a firewall that can filter by name.
+2. **A filtering proxy.** Put a forward proxy that only allows the two host names next to the runner,
+   set `HTTPS_PROXY` (and `NO_PROXY=app`, so that the calls to the app stay direct) for the runner (the loop passes proxy settings on to its review processes), and put the
+   runner on a Docker network without a route to the internet, so that the proxy is its only way out.
+   This needs a change of the Compose file, which Coolify's tracked file should keep (the tests pin its
+   shape): do it in a fork or ask for a change in the repository.
+
+After either, run a review (`/review` on a test pull request) and check the runner log for
+`no answer from the app` or model and GitHub errors (`git_unavailable`, `llm_unavailable`).
 
 ## 10. One app instance only
 
@@ -412,8 +454,7 @@ written since that backup is lost.
 
 Do this once with the whole team in the room; it is the acceptance test of the deployment.
 
-- [ ] `docker/smoke/instance.sh https://<domain>` passes (with `--skip-runner-endpoint` only until the runner
-      API is part of the release, [section 7](#7-deploy-and-check-the-instance), step 4).
+- [ ] `docker/smoke/instance.sh https://<domain>` passes ([section 7](#7-deploy-and-check-the-instance), step 4).
 - [ ] **Sign in.** A team member opens `https://<domain>` and signs in with GitHub. A GitHub account that is
       not on the list is turned away ("Your GitHub account is not allowed to use this Code Reviewer
       instance.") and sees no project or run data.
@@ -465,7 +506,9 @@ Do this once with the whole team in the room; it is the acceptance test of the d
   update and rollback paths, the behaviour after a server restart, the real review and the checks that no
   secret appears in a log. The steps and wording of Coolify's screens come from Coolify's documentation, not
   from a run.
-- Until the runner's job loop and runner API (CR-28, CR-29) are part of the release, the runner container runs
-  a placeholder that only logs whether it can reach the app, reviews cannot run, and the runner check of the smoke
-  script fails with 404. Until then run the script with `--skip-runner-endpoint`, which is also what the
-  compose smoke test in CI does; the option goes away from CI once the runner API is on the branch.
+- The Docker Compose stack, with the same runner settings as `compose.coolify.yml`, is started in CI by
+  `docker/smoke/compose.sh`, including this: the runner's job loop starts and polls the app without a
+  failure, and a `docker compose stop` while a review is running (a fake PR-Agent) ends with the runner
+  reporting that review as `runner_shutdown` and exiting with status 0, not killed. That the runner
+  really reaches GitHub and OpenRouter, and how Coolify itself stops containers, is part of the first
+  deployment.

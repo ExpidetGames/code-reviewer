@@ -26,6 +26,8 @@ type Service = {
   depends_on?: Record<string, { condition?: string }>;
   healthcheck?: Record<string, unknown>;
   entrypoint?: string[];
+  command?: string[] | string;
+  stop_grace_period?: string;
   mem_limit?: string;
 };
 type Compose = {
@@ -134,20 +136,64 @@ describe("compose.coolify.yml services", () => {
     const runner = service(coolify, "runner");
 
     expect(runner.depends_on?.app?.condition).toBe("service_healthy");
-    expect(runner.environment?.APP_URL).toBe("http://app:3000");
+    expect(runner.environment?.RUNNER_API_URL).toBe("http://app:3000");
   });
 
   // CR-39-T12
   it("limits the memory of the runner to the 2 GiB its number of parallel reviews is calculated for, as compose.yml does", () => {
-    expect(service(coolify, "runner").mem_limit).toBe("2g");
-    expect(service(plain, "runner").mem_limit).toBe("2g");
+    // Overridable (RUNNER_MEMORY_LIMIT) because the tracked file cannot be edited on Coolify; the
+    // default is the 2 GiB the default concurrency is calculated for.
+    expect(service(coolify, "runner").mem_limit).toBe(
+      "${RUNNER_MEMORY_LIMIT:-2g}",
+    );
+    expect(service(plain, "runner").mem_limit).toBe(
+      "${RUNNER_MEMORY_LIMIT:-2g}",
+    );
     expect(service(coolify, "app")).not.toHaveProperty("mem_limit");
   });
 
-  it("carries the same runner entry point as compose.yml, so the job loop ticket removes both", () => {
-    expect(service(coolify, "runner").entrypoint).toEqual(
-      service(plain, "runner").entrypoint,
-    );
+  // CR-51-T01
+  it("runs the job loop of the runner image, with no entry point or command of its own", () => {
+    const runner = service(coolify, "runner");
+
+    expect(runner).not.toHaveProperty("entrypoint");
+    expect(runner).not.toHaveProperty("command");
+    expect(coolifySource).not.toMatch(/placeholder/i);
+  });
+
+  // CR-51-T04
+  it("leaves the runner 90 seconds to stop, as compose.yml does", () => {
+    expect(service(coolify, "runner").stop_grace_period).toBe("90s");
+    expect(service(plain, "runner").stop_grace_period).toBe("90s");
+  });
+
+  // CR-51-T02
+  it("is compose.yml except for the documented differences: where the images come from, the published port, the address and the project name", () => {
+    const rest = (compose: Compose): unknown => {
+      const copy = JSON.parse(JSON.stringify(compose)) as Compose & {
+        name?: string;
+      };
+      // Coolify names the project itself.
+      delete copy.name;
+      for (const definition of Object.values(copy.services)) {
+        delete definition.image;
+        delete definition.build;
+        delete definition.ports;
+        delete definition.expose;
+      }
+      const environment = copy.services.app?.environment;
+      if (environment) delete environment[DIFFERS];
+      for (const definition of Object.values(copy.services))
+        definition.environment = normalized(definition.environment);
+      return copy;
+    };
+
+    expect(rest(coolify)).toEqual(rest(plain));
+  });
+
+  // CR-51-T05
+  it("does not know PR_AGENT_COMMAND, which would send the credentials of every job to another command", () => {
+    expect(coolifySource).not.toContain("PR_AGENT_COMMAND");
   });
 });
 
