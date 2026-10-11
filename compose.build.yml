@@ -1,0 +1,12 @@
+# Builds both images from this checkout instead of pulling them from GHCR:
+#   docker compose -f compose.yml -f compose.build.yml up -d --build --wait
+# The images are tagged locally; nothing is pushed.
+services:
+  app:
+    image: code-reviewer-app:local
+    build:
+      context: app
+  runner:
+    image: code-reviewer-runner:local
+    build:
+      context: runner

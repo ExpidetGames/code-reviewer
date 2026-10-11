@@ -8,12 +8,43 @@ import { createHash, timingSafeEqual } from "node:crypto";
  */
 export const MIN_RUNNER_TOKEN_LENGTH = 32;
 
-/** The configured token as it is used: surrounding white space (a trailing newline) is not part of it. */
-export function configuredRunnerToken(
-  env: Readonly<Record<string, string | undefined>>,
-): string | undefined {
+// Same rule as the runner's own settings (runner/.../job_loop/settings.py): a token with white space or
+// a non-printable character inside is refused there, so it must not count as usable here either, or
+// the app would start and the runner would crash-loop. (Python's isprintable is false for the
+// categories C and Z, except the plain space, which is white space anyway.)
+const UNUSABLE_CHARACTER = /[\s\p{C}\p{Z}]/u;
+
+type Env = Readonly<Record<string, string | undefined>>;
+
+function trimmedToken(env: Env): string | undefined {
   const token = env.RUNNER_TOKEN?.trim();
   return token === undefined || token === "" ? undefined : token;
+}
+
+/**
+ * What is wrong with the configured `RUNNER_TOKEN`, as a phrase that follows its name ("RUNNER_TOKEN
+ * is not set"), or null when it is usable. The one judgement of the start checks (deploy/startup.ts
+ * and runner-api/startup.ts) and of {@link configuredRunnerToken}.
+ */
+export function runnerTokenProblem(env: Env): string | null {
+  const token = trimmedToken(env);
+  if (token === undefined) return "is not set";
+  if (UNUSABLE_CHARACTER.test(token))
+    return "must not contain white space or control characters";
+  if (token.length < MIN_RUNNER_TOKEN_LENGTH)
+    return `must be at least ${String(MIN_RUNNER_TOKEN_LENGTH)} characters long`;
+  return null;
+}
+
+/**
+ * The configured token as it is used: surrounding white space (a trailing newline) is not part of it,
+ * and a token the runner would refuse (white space or control characters inside) counts as not set.
+ */
+export function configuredRunnerToken(env: Env): string | undefined {
+  const token = trimmedToken(env);
+  return token === undefined || UNUSABLE_CHARACTER.test(token)
+    ? undefined
+    : token;
 }
 
 /**

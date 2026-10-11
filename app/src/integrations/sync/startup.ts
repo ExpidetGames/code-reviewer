@@ -1,6 +1,7 @@
 // The synchronization that runs when the server starts. It must never stop the start: a platform
 // that is down, or settings that are missing, are reported in the log and the app serves requests
-// anyway. (Refusing to start without the GitHub App settings is a deployment concern.)
+// anyway. (Refusing to start without the GitHub App settings is a deployment concern: see
+// src/deploy/startup.ts, which asks the same loader.)
 import "server-only";
 import type { Kysely } from "kysely";
 import type { Database } from "../../db/schema.ts";

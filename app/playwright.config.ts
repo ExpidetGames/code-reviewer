@@ -8,7 +8,8 @@ const baseURL = e2eEnv.appUrl;
 
 // A throwaway key for the GitHub App settings of the app under test, new for every run and never
 // written anywhere. No journey asks GitHub for a token, so the key is only there to make the
-// settings complete (the webhook route verifies deliveries only with complete settings).
+// settings complete (the webhook route verifies deliveries only with complete settings, and the
+// production server refuses to start with an unusable key).
 const githubAppPrivateKey = generateKeyPairSync("rsa", {
   modulusLength: 2048,
   privateKeyEncoding: { type: "pkcs1", format: "pem" },
@@ -73,6 +74,7 @@ export default defineConfig({
         GITHUB_APP_WEBHOOK_SECRET: e2eEnv.githubAppWebhookSecret,
         GITHUB_APP_PRIVATE_KEY: githubAppPrivateKey,
         ALLOWED_GITHUB_LOGINS: e2eEnv.allowedLogins,
+        RUNNER_TOKEN: e2eEnv.runnerToken,
         // Without this flag the server refuses the two overrides above.
         ALLOW_TEST_GITHUB_ENDPOINTS: "true",
       },

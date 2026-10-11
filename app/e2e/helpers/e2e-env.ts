@@ -22,6 +22,9 @@ export const e2eEnv = {
   // listed are refused (see e2e/auth/allow-list.e2e.ts).
   allowedLogins: ["login-journey"].join(","),
   authSecret: "e2e-auth-secret-0123456789-0123456789-abcdef",
+  // The production server refuses to start without the runner token. A dummy: nothing in the
+  // journeys talks to the runner API.
+  runnerToken: "e2e-runner-token-0123456789-0123456789-abcdef",
   // The GitHub App of the app under test. Only the webhook secret matters to the journeys (they
   // sign deliveries with it); the private key is generated for each run in playwright.config.ts.
   githubAppId: "424242",
