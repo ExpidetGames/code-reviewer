@@ -3,7 +3,8 @@
 // composition rules ("one digit, one symbol"): length and an unguessable choice are what protect an
 // account, and a rule about character classes makes people write `Password1!`. The server checks it
 // wherever a password is set; the form shows the reason. Characters are counted as Unicode code
-// points, so twelve letters of any script are twelve characters.
+// points, so twelve letters of any script are twelve characters; the upper bound must hold for the
+// UTF-16 length too, which is how Better Auth counts it.
 import { COMMON_BASES, COMMON_PASSWORDS } from "./common-passwords.ts";
 
 export const PASSWORD_MIN_LENGTH = 12;
@@ -48,7 +49,10 @@ export function checkPassword(password: string): PasswordCheck {
   const length = Array.from(password).length;
   if (length < PASSWORD_MIN_LENGTH)
     return { ok: false, code: "password_too_short" };
-  if (length > PASSWORD_MAX_LENGTH)
+  // Better Auth counts UTF-16 units (`password.length`) when it checks a password on sign in. A
+  // password of astral characters (emoji, some scripts) is longer by that count than by ours, and
+  // one that passes only ours could be set but never used to sign in. Both counts must be in range.
+  if (length > PASSWORD_MAX_LENGTH || password.length > PASSWORD_MAX_LENGTH)
     return { ok: false, code: "password_too_long" };
   if (isCommonPassword(password))
     return { ok: false, code: "password_too_common" };

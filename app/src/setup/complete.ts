@@ -12,6 +12,7 @@ import { createInstanceSettingsRepository } from "../db/repositories/instance-se
 import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
 import { formatTimestamp } from "../db/codecs.ts";
 import type { Database } from "../db/schema.ts";
+import { CREDENTIAL_PROVIDER_ID } from "../auth/session-user.ts";
 import { SetupError } from "./errors.ts";
 import type { SetupInput } from "./input.ts";
 
@@ -19,6 +20,16 @@ export type CompleteSetupDependencies = {
   db: Kysely<Database>;
   /** Better Auth's password hash (`context.password.hash`). */
   hashPassword: (password: string) => Promise<string>;
+  /**
+   * Whether the sign in would accept this admin: the address and the password pass the rules of
+   * Better Auth's sign in, and the hash verifies. Asked before anything is written, so an admin who
+   * could never sign in is not created on an instance whose setup is then over.
+   */
+  checkCredential: (credential: {
+    email: string;
+    password: string;
+    hash: string;
+  }) => Promise<boolean>;
   now?: () => Date;
   newId?: () => string;
 };
@@ -29,19 +40,25 @@ export type CompletedSetup = {
   workspaceId: string | null;
 };
 
-/** The `accounts.provider_id` of an email and password identity (Better Auth's name for it). */
-const CREDENTIAL_PROVIDER = "credential";
-
 export async function completeSetup(
   {
     db,
     hashPassword,
+    checkCredential,
     now = () => new Date(),
     newId = () => crypto.randomUUID(),
   }: CompleteSetupDependencies,
   input: SetupInput,
 ): Promise<CompletedSetup> {
   const passwordHash = await hashPassword(input.admin.password);
+  if (
+    !(await checkCredential({
+      email: input.admin.email,
+      password: input.admin.password,
+      hash: passwordHash,
+    }))
+  )
+    throw new SetupError("admin_unusable");
 
   return db.transaction().execute(async (trx) => {
     const at = now();
@@ -86,7 +103,7 @@ export async function completeSetup(
         id: newId(),
         // Better Auth's credential account: the account id is the user id.
         account_id: userId,
-        provider_id: CREDENTIAL_PROVIDER,
+        provider_id: CREDENTIAL_PROVIDER_ID,
         user_id: userId,
         access_token: null,
         refresh_token: null,

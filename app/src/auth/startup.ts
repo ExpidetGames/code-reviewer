@@ -1,7 +1,10 @@
 // What the server checks about sign in when it starts: the settings must be complete, otherwise
 // every page would fail later with a less helpful message. Called from `src/instrumentation.ts`.
 import type { Kysely } from "kysely";
-import { legacyAppSecretWarning } from "../crypto/app-secret.ts";
+import {
+  conflictingAppSecretWarning,
+  legacyAppSecretWarning,
+} from "../crypto/app-secret.ts";
 import { createAllowedLoginPinsRepository } from "../db/repositories/allowed-login-pins-repository.ts";
 import type { Database } from "../db/schema.ts";
 import { isAccessConfigured, type AccessConfig } from "./access-config.ts";
@@ -59,6 +62,8 @@ export function checkAuthConfigOnStart({
     // The old name of the master key still works; say once that it is on its way out.
     const deprecated = legacyAppSecretWarning(env);
     if (deprecated !== null) warn(deprecated);
+    const conflict = conflictingAppSecretWarning(env);
+    if (conflict !== null) warn(conflict);
     // The allow list is about GitHub identities: it only matters while GitHub sign in is configured.
     if (config.github.oauth !== null) {
       if (!isAccessConfigured(config.access)) warn(NOBODY_ALLOWED_WARNING);

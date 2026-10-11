@@ -286,6 +286,11 @@ What to know:
 - An email or domain sign-up rule cannot be evaluated while no email can be verified (no mail server and
   GitHub is not the only sign-in method): nobody but the admin can sign up under it until a mail server is
   configured. The wizard says so next to the choice.
+- If `GITHUB_APP_*` is set, the synchronization with GitHub that ran at start could not put a new
+  installation into a workspace while the setup was open (its log line says `WORKSPACE_NOT_AVAILABLE`); it
+  runs again when the setup is finished, and a webhook about a new installation in that window answers 503,
+  so GitHub's "Redeliver" handles it later. With no `GITHUB_APP_*` variable nothing is attempted: GitHub is
+  simply not configured.
 - An existing deployment that updates to this version also gets the code and the wizard (the data it has is
   kept). Until the wizard is finished only the web UI waits: the webhooks and the runner API keep working, so
   reviews do not stop.
@@ -533,6 +538,7 @@ Do this once with the whole team in the room; it is the acceptance test of the d
 |---|---|
 | Coolify refuses to deploy and highlights a variable | A required variable ([section 6](#6-environment-variables)) is empty. Enter it. |
 | The page asks for a setup code | The instance is not set up yet ([section 7](#the-first-run-setup)). Read the code in the `app` log. |
+| Sign in says "Too many sign-in attempts" | The email and password sign in allows about 5 attempts per 15 minutes per email address (and 100 per minute for the whole instance). Wait; a correct sign in starts the count again. Someone guessing against the admin address can keep it locked, which only costs them requests. |
 | The setup says it is locked, or the code expired | Restart the app in Coolify: it prints a new code ([section 7](#the-first-run-setup)). |
 | `app` restarts in a loop, the log has one `[deploy]` or `[auth]` line | A setting is missing or invalid; the line names the variable. Typical: `APP_SECRET` (or `BETTER_AUTH_SECRET`) missing or shorter than 32 characters, `RUNNER_TOKEN` shorter than 32 characters, `BETTER_AUTH_URL` with `http://`. An unusable `GITHUB_APP_PRIVATE_KEY` does not stop the start; the log has a `GITHUB_APP_CONFIG_INVALID` line. |
 | The domain shows "No Available Server" or a 404 from the proxy | `app` is not healthy yet, or the domain lacks `:3000` or is attached to the wrong service ([Coolify: troubleshooting](https://coolify.io/docs/applications/builds/docker-compose#troubleshoot-an-unavailable-domain)). |

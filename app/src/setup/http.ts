@@ -52,6 +52,12 @@ export type SetupRouteDependencies = {
     password: string,
     requestHeaders: Headers,
   ) => Promise<string[] | null>;
+  /**
+   * Runs once, after the setup is complete and the admin is signed in. The synchronization with
+   * GitHub that ran at start could not put a new connection into a workspace while the instance was
+   * not set up; this runs it again. Must not throw or wait (the answer does not depend on it).
+   */
+  afterCompleted?: () => void;
   now?: () => number;
   log?: (message: string) => void;
 };
@@ -193,6 +199,13 @@ export function createSetupRouteHandlers(
         // Never the reason: it could quote the request.
         log(
           "[setup] SETUP_SIGN_IN_FAILED: the new admin could not be signed in automatically.",
+        );
+      }
+      try {
+        deps.afterCompleted?.();
+      } catch {
+        log(
+          "[setup] SETUP_AFTER_COMPLETED_FAILED: a follow-up step after the setup failed.",
         );
       }
       return Response.json(

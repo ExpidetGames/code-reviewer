@@ -27,6 +27,8 @@ export const SETUP_ERROR_CODES = [
   "invalid_input",
   /** An account with the admin's email address exists already. */
   "email_in_use",
+  /** The sign in would not accept the admin's email address or password; nothing was created. */
+  "admin_unusable",
   /** The request does not come from this site. */
   "cross_site_request",
   /** The body must be application/json. */
@@ -51,6 +53,7 @@ export const SETUP_ERROR_STATUS: Record<SetupErrorCode, number> = {
   already_set_up: 409,
   invalid_input: 422,
   email_in_use: 409,
+  admin_unusable: 422,
   cross_site_request: 403,
   unsupported_content_type: 415,
   body_too_large: 413,

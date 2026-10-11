@@ -218,6 +218,35 @@ describe("the webhook route file", () => {
     expect(logged[0]).toContain("GITHUB_APP_WEBHOOK_SECRET");
   });
 
+  // #97-NOT-CONFIGURED
+  it("refuses deliveries and logs no error when no GitHub App variable is set at all, which is the normal state of an instance that is not connected", async () => {
+    const { route } = await startRoute({
+      GITHUB_APP_ID: undefined,
+      GITHUB_APP_SLUG: undefined,
+      GITHUB_APP_WEBHOOK_SECRET: undefined,
+      GITHUB_APP_PRIVATE_KEY: undefined,
+      GITHUB_APP_PRIVATE_KEY_PATH: undefined,
+    });
+    const error = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+
+    const response = await route.POST(
+      webhookDelivery({
+        event: "pull_request",
+        payload: webhookFixture("pull_request.opened"),
+        secret: TEST_WEBHOOK_SECRET,
+      }),
+    );
+
+    expect(response.status).toBe(401);
+    expect(
+      error.mock.calls.filter((call) =>
+        String(call[0]).includes("cannot be verified"),
+      ),
+    ).toEqual([]);
+  });
+
   it("exports only the POST method", async () => {
     const { route } = await startRoute();
 

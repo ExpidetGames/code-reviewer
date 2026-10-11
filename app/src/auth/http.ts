@@ -3,7 +3,9 @@
 // wants reachable: some would reveal the session token or let a user rewrite their own profile.
 // Only the calls of the sign in are passed on (email with password, and the three of the GitHub sign
 // in while that is configured), everything else is a 404.
+import { readLimitedBody } from "../webhooks/limited-body.ts";
 import type { Auth } from "./auth.ts";
+import type { SignInLimiter, SignInPermission } from "./sign-in-limit.ts";
 
 const AUTH_BASE_PATH = "/api/auth";
 
@@ -30,14 +32,76 @@ export function isAuthEndpointAllowed(
   );
 }
 
-export function handleAuthRequest(
+const SIGN_IN_EMAIL_PATH = `${AUTH_BASE_PATH}/sign-in/email`;
+const SIGN_IN_BODY_MAX_BYTES = 8 * 1024;
+
+/** The email address of a sign in request, as typed; "" when the body is not what a sign in sends. */
+async function typedEmail(request: Request): Promise<string> {
+  const body = await readLimitedBody(request.clone(), SIGN_IN_BODY_MAX_BYTES);
+  if (!body.ok) return "";
+  try {
+    const parsed: unknown = JSON.parse(body.text);
+    const email =
+      typeof parsed === "object" && parsed !== null
+        ? (parsed as { email?: unknown }).email
+        : undefined;
+    return typeof email === "string" ? email : "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Passes a request on to Better Auth when it is one of the allowed calls. The sign in with email and
+ * password is counted first, with the same shared counters as the login form (sign-in-limit.ts): a
+ * refused attempt is answered `429 rate_limited` with `Retry-After` and never reaches Better Auth.
+ * Better Auth's own limiter is off (auth.ts) because it keys on a client address that this app cannot
+ * trust.
+ */
+export async function handleAuthRequest(
   auth: Pick<Auth, "handler">,
   request: Request,
+  limiter: SignInLimiter,
 ): Promise<Response> {
   const { pathname } = new URL(request.url);
   if (!isAuthEndpointAllowed(request.method, pathname))
-    return Promise.resolve(
-      Response.json({ error: "NOT_FOUND" }, { status: 404 }),
+    return Response.json({ error: "NOT_FOUND" }, { status: 404 });
+  if (pathname !== SIGN_IN_EMAIL_PATH) return auth.handler(request);
+
+  const email = await typedEmail(request);
+  let permission: SignInPermission;
+  try {
+    permission = await limiter.check(email);
+  } catch {
+    console.error(
+      "[auth] SIGN_IN_LIMIT_UNAVAILABLE: the sign in attempts could not be counted.",
     );
-  return auth.handler(request);
+    return Response.json(
+      { error: "sign_in_unavailable" },
+      { status: 503, headers: { "cache-control": "no-store" } },
+    );
+  }
+  if (!permission.allowed)
+    return Response.json(
+      { error: "rate_limited" },
+      {
+        status: 429,
+        headers: {
+          "cache-control": "no-store",
+          "retry-after": String(permission.retryAfterSeconds),
+        },
+      },
+    );
+
+  const response = await auth.handler(request);
+  if (response.ok) {
+    try {
+      await limiter.succeeded(email);
+    } catch {
+      console.error(
+        "[auth] SIGN_IN_LIMIT_UNAVAILABLE: the sign in attempts could not be reset.",
+      );
+    }
+  }
+  return response;
 }

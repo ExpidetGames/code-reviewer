@@ -38,8 +38,14 @@ export async function register(): Promise<void> {
   warnAboutRunnerToken(process.env);
   const { warnAboutDebounce } = await import("./webhooks/debounce-config.ts");
   warnAboutDebounce(process.env);
-  const { runStartupSync } = await import("./integrations/sync/startup.ts");
-  void runStartupSync();
+  // Without any GitHub App variable the instance is simply not connected to GitHub (yet): there is
+  // nothing to read, so nothing is attempted and nothing is reported as failed.
+  const { anyGithubAppVariableSet } =
+    await import("./integrations/providers/github-app/configured.ts");
+  if (anyGithubAppVariableSet(process.env)) {
+    const { runStartupSync } = await import("./integrations/sync/startup.ts");
+    void runStartupSync();
+  }
   // Last: the daily backup timer (production only). It needs nothing from the app's own connection,
   // and a problem with it never stops the app from serving.
   startBackupSchedulerOnStart();

@@ -221,6 +221,15 @@ export function createAuth({
       nextCookies(),
     ],
 
+    // Better Auth's own limiter is off. It counts per client address, and an address is only as
+    // trustworthy as the proxy in front of the app: a spoofable header lets a guesser start again with
+    // every request, and without one every client shares a single bucket. The one endpoint where
+    // guessing matters, the sign in with email and password, is limited by the app itself in the
+    // shared `rate_limits` table, per email address and for the whole instance, on both the login form
+    // and the HTTP endpoint (sign-in-limit.ts, http.ts). The other allowed endpoints (starting the
+    // GitHub sign in, its callback, sign out) hold nothing that can be guessed.
+    rateLimit: { enabled: false },
+
     // Only the sign in exists. Whatever could change who a user is, or add another way in, is
     // switched off: `update-user` would let a user write their own `githubLogin`, and nobody signs
     // up through Better Auth.

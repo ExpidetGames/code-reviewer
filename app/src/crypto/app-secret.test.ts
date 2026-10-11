@@ -1,7 +1,11 @@
 // Pins down how the master key is read: APP_SECRET first, the old BETTER_AUTH_SECRET as a fallback
 // that is reported as deprecated, and a problem that names the variable otherwise.
 import { describe, expect, it } from "vitest";
-import { legacyAppSecretWarning, resolveAppSecret } from "./app-secret.ts";
+import {
+  conflictingAppSecretWarning,
+  legacyAppSecretWarning,
+  resolveAppSecret,
+} from "./app-secret.ts";
 
 const SECRET = "app-secret-0123456789-0123456789-abcdef";
 const OLD = "legacy-secret-0123456789-0123456789-abc";
@@ -72,5 +76,38 @@ describe("legacyAppSecretWarning", () => {
     expect(legacyAppSecretWarning({ BETTER_AUTH_SECRET: OLD })).not.toContain(
       OLD,
     );
+  });
+});
+
+describe("conflictingAppSecretWarning", () => {
+  // #97-SU-17
+  it("warns, naming both variables and no value, when both are set and differ", () => {
+    const line = conflictingAppSecretWarning({
+      APP_SECRET: SECRET,
+      BETTER_AUTH_SECRET: OLD,
+    });
+
+    expect(line).toContain("APP_SECRET");
+    expect(line).toContain("BETTER_AUTH_SECRET");
+    expect(line).not.toContain(SECRET);
+    expect(line).not.toContain(OLD);
+    expect(line).not.toContain("\n");
+  });
+
+  it("says nothing when only one is set, when both are the same, or when one is blank", () => {
+    expect(conflictingAppSecretWarning({ APP_SECRET: SECRET })).toBeNull();
+    expect(conflictingAppSecretWarning({ BETTER_AUTH_SECRET: OLD })).toBeNull();
+    expect(
+      conflictingAppSecretWarning({
+        APP_SECRET: SECRET,
+        BETTER_AUTH_SECRET: ` ${SECRET} `,
+      }),
+    ).toBeNull();
+    expect(
+      conflictingAppSecretWarning({
+        APP_SECRET: SECRET,
+        BETTER_AUTH_SECRET: "  ",
+      }),
+    ).toBeNull();
   });
 });

@@ -6,7 +6,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
-import { handleAuthRequest } from "../auth/http.ts";
+import { handleAuth } from "../test-support/sign-in-limiter.ts";
 import { cookieHeader, type CookieJar } from "../test-support/auth-harness.ts";
 import {
   createSetupHarness,
@@ -393,6 +393,53 @@ describe("the wizard", () => {
     expect(await protectedPage.text()).toBe("reached");
   });
 
+  // #97-NOT-SET-UP
+  it("runs the follow-up step once after a completed setup, and not after a refused one", async () => {
+    const { harness } = await started();
+    const cookies = await enterCode(harness);
+
+    await harness.complete(cookies, {
+      ...WIZARD_BODY,
+      admin: { email: "john..doe@example.com", password: "x7Kq-m2Vd9Lw" },
+    });
+    expect(harness.afterCompletedCount()).toBe(0);
+
+    await harness.complete(cookies);
+    await harness.complete(cookies);
+
+    expect(harness.afterCompletedCount()).toBe(1);
+  });
+
+  // #97-EMAIL
+  it("refuses an admin email address or password that the sign in would refuse, and creates nothing", async () => {
+    const { harness } = await started();
+    const cookies = await enterCode(harness);
+
+    for (const admin of [
+      { email: "john..doe@example.com", password: "x7Kq-m2Vd9Lw" },
+      { email: "admin@corp.c", password: "x7Kq-m2Vd9Lw" },
+      { email: "o'brien@my_host.com", password: "x7Kq-m2Vd9Lw" },
+      { email: "admin@example.com", password: "🔑".repeat(70) },
+    ]) {
+      const response = await harness.complete(cookies, {
+        ...WIZARD_BODY,
+        admin,
+      });
+      expect(response.status).toBe(422);
+    }
+
+    expect(await harness.db.selectFrom("users").select("id").execute()).toEqual(
+      [],
+    );
+    expect(
+      await createInstanceSettingsRepository(harness.db).get(
+        "setup_completed_at",
+      ),
+    ).toBeUndefined();
+    // The setup is still open: a good admin finishes it.
+    expect((await harness.complete(cookies)).status).toBe(200);
+  });
+
   // #97-SU-12
   it("creates the admin but no workspace as multi-tenant", async () => {
     const { harness } = await started();
@@ -417,7 +464,7 @@ describe("the wizard", () => {
     await harness.complete(await enterCode(harness));
 
     const signIn = (password: string) =>
-      handleAuthRequest(
+      handleAuth(
         harness.auth,
         new Request(`${SETUP_TEST_BASE_URL}/api/auth/sign-in/email`, {
           method: "POST",
@@ -474,7 +521,7 @@ describe("the wizard", () => {
       expect(
         await createInstanceSettingsRepository(harness.db).get("sign_up_rule"),
       ).toEqual(signUp);
-      const signUpRequest = await handleAuthRequest(
+      const signUpRequest = await handleAuth(
         harness.auth,
         new Request(`${SETUP_TEST_BASE_URL}/api/auth/sign-up/email`, {
           method: "POST",

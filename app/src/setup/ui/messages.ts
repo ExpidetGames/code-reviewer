@@ -26,6 +26,8 @@ const FAILURE_COPY: Record<string, string> = {
   setup_session_expired: `The setup session ended after 30 minutes. ${RESTART}`,
   already_set_up: "This instance is already set up. Reload the page.",
   email_in_use: "An account with this email address exists already.",
+  admin_unusable:
+    "This email address or password cannot be used to sign in. Nothing was created: change them and try again.",
   cross_site_request: "The request did not come from this page. Reload it.",
 };
 

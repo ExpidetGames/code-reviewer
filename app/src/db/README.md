@@ -132,8 +132,8 @@ sections 2.2, 2.3 and 2.10):
   `none` (`src/setup/README.md`). `tenancy` and `sign_up_rule` are written by the setup.
 - `rate_limits` (key, `window_started_at`, `count`): shared counters with a window for the endpoints that
   must limit the same way whichever app instance a request reaches (`rate-limits-repository.ts`, `hit` is
-  one statement, so attempts that arrive together are all counted). No endpoint uses it yet; the setup
-  code has its own counters in memory, by design.
+  one statement, so attempts that arrive together are all counted). The email and password sign in
+  uses it (`src/auth/sign-in-limit.ts`); the setup code has its own counters in memory, by design.
 - `users.is_instance_admin` (0 or 1, default 0): set for the account the setup creates.
 
 None of these is customer data, so none is workspace scoped (`scoping.test.ts` lists them as instance

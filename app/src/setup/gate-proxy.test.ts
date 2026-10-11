@@ -65,6 +65,15 @@ describe("the setup gate as a proxy step", () => {
     expect(await api?.json()).toEqual({ error: "not_found" });
   });
 
+  it("lets the health check and the framework files through without reading the state", async () => {
+    const readState = vi.fn(() => Promise.reject(new Error("locked")));
+    const gate = createSetupGate({ readState });
+
+    expect(await gate(request("/api/health"))).toBeUndefined();
+    expect(await gate(request("/_next/static/chunks/a.js"))).toBeUndefined();
+    expect(readState).not.toHaveBeenCalled();
+  });
+
   it("refuses the request, and says nothing about the reason, when the state cannot be read", async () => {
     const error = vi
       .spyOn(console, "error")

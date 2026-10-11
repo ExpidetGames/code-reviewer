@@ -2,7 +2,8 @@
 // and password and the three of the GitHub sign in. Everything else, including endpoints that exist
 // in Better Auth (the sign-up among them), is answered with 404 without reaching it.
 import { describe, expect, it, vi } from "vitest";
-import { handleAuthRequest, isAuthEndpointAllowed } from "./http.ts";
+import { isAuthEndpointAllowed } from "./http.ts";
+import { handleAuth } from "../test-support/sign-in-limiter.ts";
 
 describe("which Better Auth calls are reachable over HTTP", () => {
   it.each([
@@ -38,7 +39,7 @@ describe("which Better Auth calls are reachable over HTTP", () => {
   ])("answers %s %s with 404", async (method, pathname) => {
     const handler = vi.fn();
 
-    const response = await handleAuthRequest(
+    const response = await handleAuth(
       { handler },
       new Request(`http://localhost:3000${pathname}`, { method }),
     );

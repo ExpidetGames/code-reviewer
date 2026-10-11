@@ -21,6 +21,8 @@ export const WORKSPACE_ERROR_CODES = ["WORKSPACE_NOT_AVAILABLE"] as const;
 /** There is no workspace and the setup, which decides whether there is one, has not run. */
 export class WorkspaceUnavailableError extends Error {
   readonly code = "WORKSPACE_NOT_AVAILABLE";
+  // Its message names no secret, so the synchronization may log it as it is.
+  readonly safeMessage = true as const;
 
   constructor() {
     super("The instance has no workspace yet: finish the first-run setup.");

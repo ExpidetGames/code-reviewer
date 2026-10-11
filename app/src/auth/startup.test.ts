@@ -72,6 +72,28 @@ describe("checking the sign in configuration when the server starts", () => {
   });
 
   // #97-SU-17
+  it("warns once, naming both variables and no value, when APP_SECRET and BETTER_AUTH_SECRET differ", () => {
+    const warn = vi.fn();
+    const exit = vi.fn();
+    const other = "other-".padEnd(40, "o");
+
+    checkAuthConfigOnStart({
+      env: { ...validEnv, BETTER_AUTH_SECRET: other },
+      log: vi.fn(),
+      warn,
+      exit,
+    });
+
+    expect(exit).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledTimes(1);
+    const line = String(warn.mock.calls[0]?.[0]);
+    expect(line).toContain("APP_SECRET");
+    expect(line).toContain("BETTER_AUTH_SECRET");
+    expect(line).not.toContain(other);
+    expect(line).not.toContain("x".repeat(40));
+  });
+
+  // #97-SU-17
   it("starts with only BETTER_AUTH_SECRET and logs the deprecation once, without the value", () => {
     const exit = vi.fn();
     const warn = vi.fn();

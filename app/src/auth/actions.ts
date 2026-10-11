@@ -1,10 +1,11 @@
 "use server";
 // The buttons of the app: "Sign in with GitHub", the email and password form, and "Sign out". They
 // are forms that post to these server actions, so they work without client JavaScript.
-import { APIError } from "better-auth/api";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getAuth } from "./auth.ts";
+import { signInWithPasswordChecked } from "./password-sign-in.ts";
+import { getSignInLimiter } from "./sign-in-runtime.ts";
 
 export async function signInWithGithub(): Promise<void> {
   let githubUrl: string | undefined;
@@ -29,31 +30,29 @@ export async function signOut(): Promise<void> {
 }
 
 /**
- * The email and password form of the login page. A wrong email address and a wrong password get the
- * same answer, so the page does not tell which email addresses have an account.
+ * The email and password form of the login page. The attempts are counted per email address and for
+ * the whole instance (sign-in-limit.ts), and a wrong email address and a wrong password get the same
+ * answer, so the page does not tell which email addresses have an account.
  */
 export async function signInWithPassword(formData: FormData): Promise<void> {
   const email = formData.get("email");
   const password = formData.get("password");
-  let error: string | null = null;
-  if (typeof email !== "string" || typeof password !== "string") {
-    error = "invalid_credentials";
-  } else {
-    try {
-      await getAuth().api.signInEmail({
-        body: { email: email.trim(), password },
-        headers: await headers(),
-      });
-    } catch (cause) {
-      error =
-        cause instanceof APIError && cause.statusCode === 429
-          ? "rate_limited"
-          : "invalid_credentials";
-      // Never the reason: it may quote the request.
-      console.error(
-        `[auth] email sign in refused (${error === "rate_limited" ? "rate limited" : "not accepted"}).`,
-      );
-    }
+  let error: string | null = "invalid_credentials";
+  if (typeof email === "string" && typeof password === "string") {
+    const requestHeaders = await headers();
+    const outcome = await signInWithPasswordChecked(
+      {
+        limiter: getSignInLimiter(),
+        signIn: (address, secret) =>
+          getAuth().api.signInEmail({
+            body: { email: address.trim(), password: secret },
+            headers: requestHeaders,
+          }),
+      },
+      email,
+      password,
+    );
+    error = outcome.kind === "ok" ? null : outcome.kind;
   }
   // redirect() works by throwing, so it stays outside the try block.
   redirect(error === null ? "/" : `/login?error=${error}`);

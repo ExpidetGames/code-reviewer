@@ -3,12 +3,14 @@
 // modules), the state reader on the server's database, and the route handlers with the real hash and
 // the real sign in.
 import "server-only";
+import { anyGithubAppVariableSet } from "../integrations/providers/github-app/configured.ts";
 import { loadAuthConfig } from "../auth/config.ts";
 import { getAuth } from "../auth/auth.ts";
 import { getDatabase } from "../db/startup.ts";
 import { checkSetupSession, type SetupSessionCheck } from "./setup-session.ts";
 import { createSetupCodeStore, type SetupCodeStore } from "./code-store.ts";
 import { completeSetup } from "./complete.ts";
+import { createCredentialCheck } from "./credential-check.ts";
 import { createSetupRouteHandlers, type SetupRouteHandlers } from "./http.ts";
 import {
   createSetupStateReader,
@@ -48,11 +50,16 @@ export function getSetupRouteHandlers(): SetupRouteHandlers {
     secureCookies: config.secureCookies,
     store: getSetupCodeStore(),
     readState: getSetupStateReader(),
+    afterCompleted: runSyncAfterSetup,
     async complete(input) {
       const auth = getAuth();
       const context = await auth.$context;
       return completeSetup(
-        { db: getDatabase(), hashPassword: context.password.hash },
+        {
+          db: getDatabase(),
+          hashPassword: context.password.hash,
+          checkCredential: createCredentialCheck(context.password.verify),
+        },
         input,
       );
     },
@@ -82,5 +89,18 @@ export function checkCurrentSetupSession(
     cookieValue,
     getSetupCodeStore().currentIssueId(),
     Date.now(),
+  );
+}
+
+/**
+ * The synchronization with GitHub that ran when the server started could not put a connection that is
+ * new to the instance into a workspace while the setup was open (there was none to put it in). Now
+ * there is one, so it runs again, in the background. Not when no GitHub App variable is set: then
+ * there is nothing to read.
+ */
+function runSyncAfterSetup(): void {
+  if (!anyGithubAppVariableSet(process.env)) return;
+  void import("../integrations/sync/startup.ts").then(({ runStartupSync }) =>
+    runStartupSync(),
   );
 }

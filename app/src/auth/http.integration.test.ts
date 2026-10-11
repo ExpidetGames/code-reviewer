@@ -3,7 +3,7 @@
 // claim another GitHub login), cannot read their session token, and there is no second way in.
 import { describe, expect, it } from "vitest";
 import { createAuthHarness } from "../test-support/auth-harness.ts";
-import { handleAuthRequest } from "./http.ts";
+import { handleAuth } from "../test-support/sign-in-limiter.ts";
 
 describe("the HTTP interface of Better Auth", () => {
   // CR-18-T14
@@ -28,7 +28,7 @@ describe("the HTTP interface of Better Auth", () => {
     // The test calls the auth handler directly, as `handleAuthRequest` does after its own check.
     expect([update.status, session.status, sessions.status]).not.toContain(500);
     const guarded = (path: string, method: string) =>
-      handleAuthRequest(
+      handleAuth(
         harness.auth,
         new Request(`http://localhost:3000${path}`, {
           method,
@@ -54,7 +54,7 @@ describe("the HTTP interface of Better Auth", () => {
   it("offers no sign in with an email address", async () => {
     const harness = await createAuthHarness();
 
-    const signUp = await handleAuthRequest(
+    const signUp = await handleAuth(
       harness.auth,
       new Request("http://localhost:3000/api/auth/sign-up/email", {
         method: "POST",

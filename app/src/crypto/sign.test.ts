@@ -45,6 +45,30 @@ describe("signValue and verifySignedValue", () => {
     ).toBeNull();
   });
 
+  // #97-SU-18
+  it("refuses a signature or payload with characters added that decoding would skip", () => {
+    const token = signValue(SECRET, "state-signing", "value");
+    const [payload = "", signature = ""] = token.split(".");
+
+    expect(verifySignedValue(SECRET, "state-signing", token)).toBe("value");
+    expect(
+      verifySignedValue(SECRET, "state-signing", `${payload}.${signature}!!`),
+    ).toBeNull();
+    expect(
+      verifySignedValue(SECRET, "state-signing", `${payload}.${signature}=`),
+    ).toBeNull();
+    expect(
+      verifySignedValue(SECRET, "state-signing", `${payload}*.${signature}`),
+    ).toBeNull();
+    expect(
+      verifySignedValue(
+        SECRET,
+        "state-signing",
+        `${payload}.${signature.slice(0, 20)}*${signature.slice(20)}`,
+      ),
+    ).toBeNull();
+  });
+
   it.each(["", ".", "abc", "a.b.c", "payload.", ".signature", "x.y"])(
     "refuses the malformed token %j without throwing",
     (token) => {

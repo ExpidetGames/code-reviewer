@@ -9,6 +9,7 @@
 // a value (they are secrets), judged by the same loader the provider uses
 // (src/integrations/providers/github-app/config.ts, reached through the registry).
 
+import { anyGithubAppVariableSet } from "../integrations/providers/github-app/configured.ts";
 import { runnerTokenProblem } from "../runner-api/token-auth.ts";
 
 export const DEPLOY_ERROR_CODES = ["DEPLOY_CONFIG_INVALID"] as const;
@@ -34,23 +35,12 @@ export function findDeploymentConfigProblems(env: Env): string[] {
   return problems;
 }
 
-const GITHUB_APP_VARIABLES = [
-  "GITHUB_APP_ID",
-  "GITHUB_APP_SLUG",
-  "GITHUB_APP_WEBHOOK_SECRET",
-  "GITHUB_APP_PRIVATE_KEY",
-  "GITHUB_APP_PRIVATE_KEY_PATH",
-] as const;
-
 /**
  * A warning line when some GitHub App variable is set but the settings are not usable, or null when
  * none is set (GitHub is simply not configured) or all are fine. Names variables, never values.
  */
 export async function githubAppConfigWarning(env: Env): Promise<string | null> {
-  const anySet = GITHUB_APP_VARIABLES.some(
-    (name) => (env[name] ?? "").trim() !== "",
-  );
-  if (!anySet) return null;
+  if (!anyGithubAppVariableSet(env)) return null;
   // Imported here, not at the top: only a production start needs the provider code.
   const { findGithubAppConfigProblem } =
     await import("../integrations/registry.ts");

@@ -33,6 +33,11 @@ export function verifySignedValue(
   if (payload === "" || signature === "") return null;
   const given = Buffer.from(signature, "base64url");
   if (given.length !== MAC_LENGTH) return null;
+  // Decoding skips characters that are not base64url, so a signature (or payload) with junk added
+  // would decode to the same bytes. Only the canonical spelling counts.
+  if (given.toString("base64url") !== signature) return null;
+  if (Buffer.from(payload, "base64url").toString("base64url") !== payload)
+    return null;
   if (!timingSafeEqual(given, mac(appSecret, purpose, payload))) return null;
   return Buffer.from(payload, "base64url").toString("utf8");
 }

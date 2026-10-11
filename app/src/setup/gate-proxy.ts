@@ -22,6 +22,10 @@ export function createSetupGate({
     request: NextRequest,
   ): Promise<NextResponse | undefined> {
     const { pathname } = request.nextUrl;
+    // The health check and the framework's files are decided without the state (they pass whatever
+    // it is), so a hiccup of the database cannot turn the health check into the gate's 503.
+    if (pathname === "/api/health" || pathname.startsWith("/_next/"))
+      return undefined;
     let decision;
     try {
       decision = decideSetupGate({

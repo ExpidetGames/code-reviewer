@@ -4,7 +4,7 @@
 // owner), the instance is marked as set up, and two completions at the same moment end with exactly
 // one winner.
 import { sql } from "kysely";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
 import { createTestDatabase } from "../test-support/test-database.ts";
@@ -27,7 +27,10 @@ async function fixture() {
   return {
     db,
     complete: (input: SetupInput = INPUT) =>
-      completeSetup({ db, hashPassword }, input),
+      completeSetup(
+        { db, hashPassword, checkCredential: () => Promise.resolve(true) },
+        input,
+      ),
   };
 }
 
@@ -334,6 +337,40 @@ describe("completing the setup twice", () => {
     expect(await db.selectFrom("workspaces").select("id").execute()).toEqual(
       [],
     );
+  });
+
+  // #97-EMAIL
+  it("creates nothing and does not mark the setup done when the sign in would not accept the admin", async () => {
+    const { db } = await fixture();
+
+    await expect(
+      completeSetup(
+        { db, hashPassword, checkCredential: () => Promise.resolve(false) },
+        INPUT,
+      ),
+    ).rejects.toMatchObject({ code: "admin_unusable" });
+
+    expect(await db.selectFrom("users").select("id").execute()).toEqual([]);
+    expect(await db.selectFrom("accounts").select("id").execute()).toEqual([]);
+    expect(await db.selectFrom("workspaces").select("id").execute()).toEqual(
+      [],
+    );
+    expect(
+      await db.selectFrom("instance_settings").select("key").execute(),
+    ).toEqual([]);
+  });
+
+  it("asks the check about the address, the password and the hash it made", async () => {
+    const { db } = await fixture();
+    const checkCredential = vi.fn(() => Promise.resolve(true));
+
+    await completeSetup({ db, hashPassword, checkCredential }, INPUT);
+
+    expect(checkCredential).toHaveBeenCalledWith({
+      email: INPUT.admin.email,
+      password: INPUT.admin.password,
+      hash: await hashPassword(INPUT.admin.password),
+    });
   });
 
   it("writes nothing when the transaction fails halfway", async () => {

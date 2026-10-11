@@ -21,6 +21,19 @@ describe("checkPassword", () => {
     expect(checkPassword("x7Kq-m2Vd9Lw")).toEqual({ ok: true });
   });
 
+  // #97-PASSWORD-LENGTH
+  it("refuses a password of astral characters that is longer than 128 UTF-16 units, which Better Auth would refuse on sign in", () => {
+    const astral = "🔑".repeat(70);
+
+    expect(Array.from(astral)).toHaveLength(70);
+    expect(astral.length).toBe(140);
+    expect(checkPassword(astral)).toEqual({
+      ok: false,
+      code: "password_too_long",
+    });
+    expect(checkPassword("🔑🌲".repeat(32))).toEqual({ ok: true });
+  });
+
   // #97-SU-10
   it("refuses 129 characters with password_too_long and accepts 128", () => {
     expect(checkPassword("k".repeat(64) + "m".repeat(65))).toEqual({

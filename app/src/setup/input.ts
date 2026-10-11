@@ -2,6 +2,7 @@
 // account. The server is the only judge (the form shows the reasons it gets back). Problems are
 // reported per field with a stable code and never contain the value: a password must not end up in
 // an answer or a log.
+import { z } from "zod";
 import { checkPassword } from "../auth/password-policy.ts";
 import type { InstanceSettingValues } from "../db/repositories/instance-settings-repository.ts";
 import type { SetupIssue } from "./errors.ts";
@@ -18,9 +19,11 @@ export type SetupInput = {
 export const MAX_RULE_ENTRIES = 500;
 const MAX_EMAIL_LENGTH = 254;
 
-// One @, something on both sides, a dot in the domain, no spaces. Whether the address really exists
-// is for the mail verification (a later issue) to find out.
-const EMAIL = /^[^\s@]+@[^\s@.][^\s@]*\.[^\s@.]+$/;
+// The very rule Better Auth applies to the email address of every sign in (`z.email()` of the zod it
+// uses, the same version, pinned in package.json; email-agreement.integration.test.ts proves they agree), not a looser look-alike: an address the setup accepts but the sign in rejects would
+// make an admin who can never sign in, on an instance whose setup is over. Whether the address really
+// exists is for the mail verification (a later issue) to find out.
+const emailSchema = z.email();
 // ASCII domain names only (internationalized ones are written in their xn-- form).
 const DOMAIN =
   /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$/;
@@ -30,7 +33,9 @@ export function normalizeEmail(value: string): string {
 }
 
 export function isValidEmail(value: string): boolean {
-  return value.length <= MAX_EMAIL_LENGTH && EMAIL.test(value);
+  return (
+    value.length <= MAX_EMAIL_LENGTH && emailSchema.safeParse(value).success
+  );
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

@@ -49,3 +49,16 @@ export function legacyAppSecretWarning(env: Env): string | null {
     return null;
   return `[config] APP_SECRET_FROM_LEGACY_VARIABLE: ${LEGACY_APP_SECRET_VARIABLE} is deprecated and is used as ${APP_SECRET_VARIABLE} because ${APP_SECRET_VARIABLE} is not set. Set ${APP_SECRET_VARIABLE} to the same value and remove ${LEGACY_APP_SECRET_VARIABLE}.`;
 }
+
+/**
+ * The line for the log when both variables are set to different values: APP_SECRET wins, and
+ * everything made with the other one (sessions, stored GitHub tokens) stops working. Names both
+ * variables, never a value; null otherwise.
+ */
+export function conflictingAppSecretWarning(env: Env): string | null {
+  const current = clean(env.APP_SECRET);
+  const legacy = clean(env.BETTER_AUTH_SECRET);
+  if (current === undefined || legacy === undefined || current === legacy)
+    return null;
+  return `[config] APP_SECRET_DIFFERS_FROM_LEGACY_VARIABLE: ${APP_SECRET_VARIABLE} and ${LEGACY_APP_SECRET_VARIABLE} are both set and differ. ${APP_SECRET_VARIABLE} is used; sessions and stored tokens made with ${LEGACY_APP_SECRET_VARIABLE} stop working. To keep them, set ${APP_SECRET_VARIABLE} to the value of ${LEGACY_APP_SECRET_VARIABLE}; then remove ${LEGACY_APP_SECRET_VARIABLE}.`;
+}

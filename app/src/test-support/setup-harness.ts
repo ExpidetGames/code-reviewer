@@ -10,6 +10,7 @@ import { createAuth } from "../auth/auth.ts";
 import { loadAuthConfig } from "../auth/config.ts";
 import { createSetupCodeStore } from "../setup/code-store.ts";
 import { completeSetup } from "../setup/complete.ts";
+import { createCredentialCheck } from "../setup/credential-check.ts";
 import { createSetupGate } from "../setup/gate-proxy.ts";
 import { createSetupRouteHandlers } from "../setup/http.ts";
 import { createSetupStateReader, readSetupState } from "../setup/state.ts";
@@ -71,6 +72,7 @@ function assemble(
   });
   const readState = createSetupStateReader(() => readSetupState(db));
   const logs: string[] = [];
+  let afterCompletedCalls = 0;
 
   const handlers = createSetupRouteHandlers({
     appSecret: config.secret,
@@ -79,9 +81,19 @@ function assemble(
     readState,
     now: () => time,
     log: (line) => logs.push(line),
+    afterCompleted: () => {
+      afterCompletedCalls += 1;
+    },
     async complete(input) {
       const context = await auth.$context;
-      return completeSetup({ db, hashPassword: context.password.hash }, input);
+      return completeSetup(
+        {
+          db,
+          hashPassword: context.password.hash,
+          checkCredential: createCredentialCheck(context.password.verify),
+        },
+        input,
+      );
     },
     async signInAdmin(email, password, requestHeaders) {
       const headers = new Headers();
@@ -169,6 +181,8 @@ function assemble(
     config,
     store,
     logs,
+    /** How many times the follow-up step after a completed setup ran. */
+    afterCompletedCount: () => afterCompletedCalls,
     visit,
     /** What the server does at start: reads the state and prints the code (to `logs`). */
     async start() {
