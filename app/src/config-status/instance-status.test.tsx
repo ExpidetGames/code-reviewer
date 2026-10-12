@@ -19,7 +19,7 @@ const LLM_KEY = "dummy-llm-key-0123456789";
 const MISSING_GITHUB: GithubAppStatus = {
   configured: false,
   kind: "missing",
-  variables: ["GITHUB_APP_ID"],
+  variables: ["app_id"],
   slug: null,
 };
 
@@ -33,7 +33,7 @@ describe("the instance status", () => {
       />,
     );
 
-    expect(container.textContent).toMatch(/Missing:.*GITHUB_APP_ID/);
+    expect(container.textContent).toMatch(/Missing:.*app_id/);
     expect(container.textContent).not.toMatch(/LLM/);
   });
 
