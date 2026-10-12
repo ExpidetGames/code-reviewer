@@ -225,6 +225,7 @@ describe("the cleanup of old rows", () => {
 
     expect(await cleanUpExpiredRows(db, now)).toEqual({
       rateLimits: 0,
+      unverifiedAccounts: 0,
       verificationTokens: 0,
       passwordResetTokens: 0,
     });

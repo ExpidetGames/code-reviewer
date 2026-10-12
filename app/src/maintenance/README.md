@@ -7,3 +7,14 @@ used more than a week ago (a week, so that someone who holds a link and its pass
 "expired"), and the password reset links the same way. A signed state (the single-use side of a round trip through GitHub, `src/signed-state/`) is removed once it has expired. `startup.ts` runs it when the production server starts and then every hour, from
 `src/instrumentation.ts`, like the backup timer (no timer in other environments); a failing run is logged by its
 code and tried again at the next hour.
+
+## Sign-ups that never verified
+
+A pending email and password sign-up is removed a week after it was made (`UNVERIFIED_ACCOUNT_KEEP_MS`, pinned by a test), together with its
+password account and its links, so a stranger cannot leave addresses waiting forever and the table does not grow without bound. The address
+is free again: a new sign-up for it is an ordinary one (new account, new link, the old link no longer works). Only a plain pending sign-up
+qualifies: not verified, not the instance admin, not imported, a password account and no other identity (no GitHub), no workspace
+membership, no session, and at least one verification link made for it (so an account that was never asked to verify is left alone), the
+latest one more than a week ago (so an account that is asked to verify now gets the whole week). It runs only while the instance has a mail
+server: without one nothing can be verified and every email and password account is usable unverified, so none is removed. The same applies
+if the mail settings cannot be read. The removal runs before the links are cleaned up, because the links are the evidence.
