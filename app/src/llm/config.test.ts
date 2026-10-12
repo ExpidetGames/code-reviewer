@@ -240,6 +240,7 @@ describe("the model of the instance", () => {
     ).toBe("qwen/qwen3-coder");
   });
 
+  // #104-LK-10 (the model of a workspace key is the same built-in value)
   it("is the default model when LLM_MODEL is missing, blank or invalid", () => {
     for (const value of [undefined, "", "  ", "bad model"])
       expect(configuredLlmModel({ LLM_MODEL: value })).toBe(DEFAULT_LLM_MODEL);

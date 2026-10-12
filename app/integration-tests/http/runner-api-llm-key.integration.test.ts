@@ -181,6 +181,20 @@ describe("the key a claim hands out", () => {
     });
   });
 
+  // #104-LK-10
+  it("uses the built-in default model for a workspace key when the instance's model name is invalid", async () => {
+    const h = await startRunnerApiHarness({
+      env: { ...NO_LEGACY_KEY, LLM_MODEL: "not a model name" },
+    });
+    const job = await h.enqueueNew();
+    await saveKey(h, job.workspaceId, KEY_A);
+
+    const claimed = await h.claimed();
+
+    expect(claimed.job.input.llm.model).toBe("anthropic/claude-haiku-5.5");
+    expect(claimed.job.input.llm.apiKey).toBe(KEY_A);
+  });
+
   // #104-LK-12
   it("still works with only the legacy variables, and a workspace key overrides them", async () => {
     const h = await startRunnerApiHarness();
