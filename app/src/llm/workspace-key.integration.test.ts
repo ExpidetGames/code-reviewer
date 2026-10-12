@@ -11,8 +11,8 @@ import { addWorkspace } from "../test-support/workspaces.ts";
 import { createWorkspaceLlmKeyService } from "./workspace-key.ts";
 
 const APP_SECRET = "llm-key-test-app-secret-0123456789-012345";
-const KEY = "sk-or-v1-0123456789abcdef0123456789abcdef";
-const OTHER_KEY = "sk-or-v1-fedcba9876543210fedcba9876543210";
+const KEY = "sk-or-v1-dummy-0123456789abcdef0123456789abcdef";
+const OTHER_KEY = "sk-or-v1-dummy-fedcba9876543210fedcba9876543210";
 
 async function start() {
   const { db } = await createTestDatabase();

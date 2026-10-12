@@ -25,7 +25,7 @@ afterEach(() => {
   navigation.refresh.mockClear();
 });
 
-const KEY = "sk-or-v1-0123456789abcdef0123456789abcdef";
+const KEY = "sk-or-v1-dummy-0123456789abcdef0123456789abcdef";
 
 const NONE: WorkspaceLlmKeyStatus = { state: "not_configured" };
 const CONFIGURED: WorkspaceLlmKeyStatus = {

@@ -32,8 +32,8 @@ vi.mock("next/server", async (importOriginal) => ({
   connection: async () => undefined,
 }));
 
-const KEY = "sk-or-v1-0123456789abcdef0123456789abcdef";
-const OTHER_KEY = "sk-or-v1-fedcba9876543210fedcba9876543210";
+const KEY = "sk-or-v1-dummy-0123456789abcdef0123456789abcdef";
+const OTHER_KEY = "sk-or-v1-dummy-fedcba9876543210fedcba9876543210";
 const KEY_OF_BETA = "sk-or-v1-sentinel-key-of-beta-9999999999";
 const APP_SECRET = "llm-route-test-secret-0123456789-0123456789";
 

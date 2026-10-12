@@ -12,7 +12,7 @@ import { addWorkspace } from "../test-support/workspaces.ts";
 import { createWorkspaceSecretStore } from "./workspace-store.ts";
 
 const APP_SECRET = "workspace-store-app-secret-0123456789-01234";
-const KEY = "sk-or-v1-0123456789abcdef0123456789abcdef";
+const KEY = "sk-or-v1-dummy-0123456789abcdef0123456789abcdef";
 
 async function start() {
   const { db } = await createTestDatabase();

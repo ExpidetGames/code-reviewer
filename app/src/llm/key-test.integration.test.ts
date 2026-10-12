@@ -19,7 +19,7 @@ import {
   KEY_TEST_WORKSPACE_MAX,
 } from "./key-test.ts";
 
-const KEY = "sk-or-v1-0123456789abcdef0123456789abcdef";
+const KEY = "sk-or-v1-dummy-0123456789abcdef0123456789abcdef";
 
 async function setup() {
   const fake = await startLlmFake();

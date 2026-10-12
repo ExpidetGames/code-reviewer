@@ -11,7 +11,6 @@ import { resolveGithubEndpoint } from "../github-endpoints.ts";
 import type { LlmProvider } from "./config.ts";
 
 export const ALLOW_TEST_LLM_ENDPOINTS_FLAG = "ALLOW_TEST_LLM_ENDPOINTS";
-export const LLM_API_BASE_URL_VARIABLE = "LLM_API_BASE_URL";
 
 /** The real API address of each provider. */
 export const PROVIDER_API_BASE_URL: Record<LlmProvider, string> = {
@@ -29,7 +28,7 @@ export type LlmEndpoint = {
 export function llmApiBaseUrl(env: Env, provider: LlmProvider): LlmEndpoint {
   const fallback = PROVIDER_API_BASE_URL[provider];
   const resolved = resolveGithubEndpoint(
-    env[LLM_API_BASE_URL_VARIABLE],
+    env.LLM_API_BASE_URL,
     fallback,
     env[ALLOW_TEST_LLM_ENDPOINTS_FLAG]?.trim() === "true",
   );
