@@ -43,6 +43,13 @@ export interface IntegrationProvider {
    */
   findConnection?(externalId: string): Promise<DiscoveredConnection | null>;
 
+  /**
+   * Only where the platform has an account that the app itself belongs to (GitHub App: its owner): the id and
+   * the name of that account, as the platform reports them for the app's own credentials, or null when it does
+   * not say. A connection on that account is the app's "own" (the single-tenant auto-attach asks).
+   */
+  ownerAccount?(): Promise<{ externalId: string; login: string } | null>;
+
   /** Every repository of the connection the app may see. Rejects when it cannot list all of them. */
   listRepositories(integration: Integration): Promise<RepoRef[]>;
 

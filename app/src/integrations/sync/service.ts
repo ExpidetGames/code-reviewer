@@ -9,12 +9,24 @@
 // what disappears becomes inactive (a repository) or disabled (an integration).
 //
 // Triggers: the start of the app, a delivery about an installation (`handleInstallationChange`, which
-// the webhook route calls) and a button (`syncAll`). They all end in the same reconciliation against
-// the platform's current state, so repeating or overlapping them is harmless.
+// the webhook route calls), the instance admin's button (`syncAll`) and the button of a workspace
+// (`syncWorkspace`). They all end in the same reconciliation against the platform's current state, so
+// repeating or overlapping them is harmless.
+//
+// An installation that no workspace has linked is never made into a connection here: the App is installed
+// by anybody, and a connection gives a workspace the repositories of an account (docs/decisions/0001-
+// editions-setup-and-accounts.md, section 2.9). What happens to a new one is decided by `placeNewConnection`
+// (src/installation-binding/placement.ts): a workspace in the one case the decision record allows
+// (single-tenant, a private App, the App's own account), otherwise none, and the installation is noted as
+// unclaimed. Linking is the job of the binding flow of a person who administers the account.
 import "server-only";
 import type { Kysely } from "kysely";
 import { createIntegrationDirectory } from "../../db/repositories/integration-directory-repository.ts";
 import { createIntegrationsRepository } from "../../db/repositories/integrations-repository.ts";
+import {
+  createUnclaimedInstallationsRepository,
+  type UnclaimedSource,
+} from "../../db/repositories/unclaimed-installations-repository.ts";
 import {
   createRepositoriesRepository,
   type ReconcileResult,
@@ -29,7 +41,6 @@ import type {
   Integration,
   IntegrationType,
 } from "../types.ts";
-import { resolveDefaultWorkspaceId } from "./default-workspace.ts";
 import { sharedKeyedLock, type KeyedLock } from "./keyed-lock.ts";
 
 export type SyncError = {
@@ -61,6 +72,8 @@ export const INSTALLATION_CHANGE_OUTCOMES = [
   "disabled",
   /** The integration is disabled and all its repositories are inactive. */
   "deactivated",
+  /** No workspace may have the installation (it is not linked): it is noted as unclaimed and nothing else changes. */
+  "unclaimed",
   /** The delivery names an installation we have no row for and need none (for example a deletion). */
   "unknown_installation",
   /** GitHub does not know the installation the delivery names: nothing was created. */
@@ -84,6 +97,12 @@ export type IntegrationSyncService = {
    * rejects because of the platform: failures are in `errors`.
    */
   syncAll(): Promise<SyncSummary>;
+  /**
+   * The same for the connections of ONE workspace: it asks the platform about each of them and reads their
+   * repositories, and finds no new connection (a connection is linked by a person, not discovered). The summary
+   * and its errors only concern the workspace's own connections.
+   */
+  syncWorkspace(workspaceId: string): Promise<SyncSummary>;
   /** Reads and reconciles the repositories of one integration. */
   syncIntegration(integrationId: string): Promise<SyncSummary>;
   /**
@@ -111,11 +130,12 @@ export type IntegrationSyncOptions = {
   /** Receives one line per failure. Default: console.error. */
   log?: (line: string) => void;
   /**
-   * The workspace a connection that is new to the instance is put in. TEMPORARY: the default
-   * workspace (default-workspace.ts), until the installation of a connection is bound to the workspace of
-   * the person who installed it (the GitHub installation issue). Connections that exist keep their workspace.
+   * The workspace a connection that is new to the instance is put in, or null for none (the default): the
+   * installation is then noted as unclaimed. Connections that exist keep their workspace.
    */
-  workspaceForNewConnection?: () => Promise<string>;
+  placeNewConnection?: (
+    connection: DiscoveredConnection,
+  ) => Promise<string | null>;
 };
 
 function emptySummary(): SyncSummary {
@@ -159,8 +179,8 @@ export function createIntegrationSync(
     createIntegrationsRepository(executor, workspaceId, options.now);
   const repositoriesOf = (executor: Kysely<Database>, workspaceId: string) =>
     createRepositoriesRepository(executor, workspaceId, options.now);
-  const workspaceForNewConnection =
-    options.workspaceForNewConnection ?? (() => resolveDefaultWorkspaceId(db));
+  const placeNewConnection = options.placeNewConnection ?? (async () => null);
+  const unclaimed = createUnclaimedInstallationsRepository(db, options.now);
   const lock = options.lock ?? sharedKeyedLock();
   const lockKey = (type: IntegrationType, externalId: string) =>
     `${type}:${externalId}`;
@@ -192,7 +212,11 @@ export function createIntegrationSync(
     summary: SyncSummary,
   ): Promise<void> {
     await db.transaction().execute(async (trx) => {
-      if (integration.status !== "disabled") {
+      // A connection that a person ended stays ended: it is not "gone", it is not ours to turn into one.
+      if (
+        integration.status !== "disabled" &&
+        integration.status !== "disconnected"
+      ) {
         await integrationsOf(trx, integration.workspaceId).setStatus(
           integration.id,
           "disabled",
@@ -207,10 +231,15 @@ export function createIntegrationSync(
     });
   }
 
+  /**
+   * Makes the connection a row in the workspace `placeNewConnection` names. With no workspace nothing is
+   * created: the installation is noted as unclaimed (and the call answers undefined).
+   */
   async function createFromConnection(
     provider: IntegrationProvider,
     connection: DiscoveredConnection,
     summary: SyncSummary,
+    source: UnclaimedSource,
   ): Promise<Integration | undefined> {
     const validated = provider.validateConfig(connection.config);
     if (!validated.ok)
@@ -218,11 +247,21 @@ export function createIntegrationSync(
         "INTEGRATION_CONFIG_INVALID",
         `The platform's description of connection ${connection.externalId} is not a valid config.`,
       );
+    const workspaceId = await placeNewConnection(connection);
+    if (workspaceId === null) {
+      await unclaimed.record({
+        installationId: connection.externalId,
+        accountLogin: connection.displayName,
+        accountType:
+          typeof connection.config.accountType === "string"
+            ? connection.config.accountType
+            : "",
+        source,
+      });
+      return undefined;
+    }
     try {
-      const created = await integrationsOf(
-        db,
-        await workspaceForNewConnection(),
-      ).create({
+      const created = await integrationsOf(db, workspaceId).create({
         type: provider.type,
         displayName: connection.displayName,
         externalId: connection.externalId,
@@ -230,6 +269,7 @@ export function createIntegrationSync(
         status: connection.suspended ? "disabled" : "active",
       });
       summary.integrations.created += 1;
+      await unclaimed.forget(connection.externalId);
       return created;
     } catch (error) {
       // Another sync created it a moment ago.
@@ -255,6 +295,8 @@ export function createIntegrationSync(
     summary: SyncSummary,
     confirmed: boolean,
   ): Promise<Integration> {
+    // A person ended this connection: the platform's view of it changes nothing here.
+    if (existing.status === "disconnected") return existing;
     let effective = connection;
     const statusWouldChange =
       (connection.suspended && existing.status === "active") ||
@@ -351,7 +393,7 @@ export function createIntegrationSync(
             );
             integrationId = existing?.id ?? null;
             if (existing === undefined)
-              await createFromConnection(provider, connection, summary);
+              await createFromConnection(provider, connection, summary, "sync");
             else
               await applyConnection(
                 provider,
@@ -366,6 +408,12 @@ export function createIntegrationSync(
         },
       );
     }
+
+    // An installation that was noted as unclaimed and is not listed any more is gone (the listing was read
+    // completely, or this point is not reached).
+    for (const entry of await unclaimed.list())
+      if (!seen.has(entry.installationId))
+        await unclaimed.forget(entry.installationId);
 
     // A row the list does not mention is not necessarily gone: it may have been created by a
     // delivery after the list was read. Only the platform's own answer about that one connection,
@@ -416,6 +464,45 @@ export function createIntegrationSync(
       return summary;
     },
 
+    async syncWorkspace(workspaceId) {
+      const summary = emptySummary();
+      for (const own of await integrationsOf(db, workspaceId).list()) {
+        // Ended by a person of the workspace: nothing to read.
+        if (own.status === "disconnected") continue;
+        await lock.run(lockKey(own.type, own.externalId), async () => {
+          try {
+            const provider = registry.resolve(own.type);
+            const current = await integrationsOf(db, workspaceId).get(own.id);
+            if (current === undefined || current.status === "disconnected")
+              return;
+            // The platform's current answer about this one connection decides whether it is suspended or gone.
+            let latest = current;
+            if (provider.findConnection !== undefined) {
+              const connection = await provider.findConnection(
+                current.externalId,
+              );
+              if (connection === null) {
+                await disableAndDeactivate(current, summary);
+                return;
+              }
+              latest = await applyConnection(
+                provider,
+                current,
+                connection,
+                summary,
+                true,
+              );
+            }
+            if (latest.status === "active")
+              await syncRepositories(provider, latest.id, summary);
+          } catch (error) {
+            recordFailure(summary, "connection", own.id, error);
+          }
+        });
+      }
+      return summary;
+    },
+
     async syncIntegration(integrationId) {
       const summary = emptySummary();
       const integration = await directory.get(integrationId);
@@ -444,7 +531,10 @@ export function createIntegrationSync(
             );
 
             if (action === "deleted") {
-              if (integration === undefined) return "unknown_installation";
+              if (integration === undefined) {
+                await unclaimed.forget(externalId);
+                return "unknown_installation";
+              }
               await disableAndDeactivate(integration, summary);
               return "deactivated";
             }
@@ -453,15 +543,17 @@ export function createIntegrationSync(
               if (provider.findConnection === undefined)
                 return "unknown_installation";
               // The delivery is signed, but a row is only created for an installation that GitHub
-              // itself confirms to the app.
+              // itself confirms to the app, and only where a workspace may have it.
               const connection = await provider.findConnection(externalId);
               if (connection === null) return "installation_not_found";
               integration = await createFromConnection(
                 provider,
                 connection,
                 summary,
+                "webhook",
               );
-              if (integration === undefined) return "failed";
+              if (integration === undefined)
+                return summary.errors.length > 0 ? "failed" : "unclaimed";
               const created = summary.integrations.created > 0;
               if (integration.status !== "active") return "disabled";
               await syncRepositories(provider, integration.id, summary);

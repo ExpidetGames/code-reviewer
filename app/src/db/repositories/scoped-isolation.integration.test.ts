@@ -14,6 +14,7 @@ import {
 } from "../../test-support/workspaces.ts";
 import type { Database } from "../schema.ts";
 import { createAppSettingsRepository } from "./app-settings-repository.ts";
+import { createInstallationLinkRequestsRepository } from "./installation-link-requests-repository.ts";
 import { createIntegrationsRepository } from "./integrations-repository.ts";
 import { createInvitationsRepository } from "./invitations-repository.ts";
 import { createWorkspaceMembersRepository } from "./workspace-members-repository.ts";
@@ -34,6 +35,7 @@ function reposOf(db: Kysely<Database>, workspaceId: string) {
     runs: createRunsRepository(db, workspaceId),
     members: createWorkspaceMembersRepository(db, workspaceId),
     invitations: createInvitationsRepository(db, workspaceId),
+    linkRequests: createInstallationLinkRequestsRepository(db, workspaceId),
   };
 }
 type Repos = ReturnType<typeof reposOf>;
@@ -100,10 +102,24 @@ async function seed(db: Kysely<Database>, workspaceId: string, tag: string) {
     tokenHash: `hash-${tag}`,
     expiresAt: new Date("2099-01-01T00:00:00.000Z"),
   });
+  const linkRequest = await repos.linkRequests.createPending({
+    requestedBy: `user-${tag}`,
+    requesterGithubLogin: `login-${tag}`,
+    installationId: `installation-${tag}`,
+    accountLogin: `acme-${tag}`,
+    accountType: "Organization",
+    accountId: `account-${tag}`,
+    evidence: {
+      tokenCanAccess: true,
+      roleResult: "unreadable",
+      roleDetail: "forbidden",
+    },
+  });
   return {
     workspaceId,
     userId: `user-${tag}`,
     invitation,
+    linkRequest,
     integration,
     repository,
     job: enqueued.job,
@@ -141,6 +157,12 @@ async function rowsOf(db: Kysely<Database>, workspaceId: string) {
       .execute(),
     invitations: await db
       .selectFrom("invitations")
+      .selectAll()
+      .where("workspace_id", "=", workspaceId)
+      .orderBy("id")
+      .execute(),
+    linkRequests: await db
+      .selectFrom("installation_link_requests")
       .selectAll()
       .where("workspace_id", "=", workspaceId)
       .orderBy("id")
@@ -495,6 +517,53 @@ const CASES: Case[] = [
     name: "invitations.markAccepted",
     run: (a, b) => a.invitations.markAccepted(b.invitation.id, "user-a"),
     expectAnswer: (answer) => expect(answer).toBe(false),
+  },
+  // installation link requests
+  {
+    name: "linkRequests.createPending",
+    run: (a, b) =>
+      a.linkRequests.createPending({
+        requestedBy: "user-a",
+        requesterGithubLogin: "login-a",
+        // The same installation as B's pending request: A's request is A's own, B's is not touched.
+        installationId: b.linkRequest.installationId,
+        accountLogin: "acme-b",
+        accountType: "Organization",
+        accountId: "account-b",
+        evidence: {
+          tokenCanAccess: false,
+          roleResult: "unreadable",
+          roleDetail: "forbidden",
+        },
+      }),
+    expectAnswer: (answer, a, b) =>
+      expect(answer).toMatchObject({
+        workspaceId: a.workspaceId,
+        id: expect.not.stringMatching(b.linkRequest.id),
+      }),
+  },
+  {
+    name: "linkRequests.get",
+    run: (a, b) => a.linkRequests.get(b.linkRequest.id),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "linkRequests.findPending",
+    run: (a, b) => a.linkRequests.findPending(b.linkRequest.installationId),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "linkRequests.list",
+    run: (a) => a.linkRequests.list(),
+    expectAnswer: (answer, a) =>
+      expect(answer).toEqual([
+        expect.objectContaining({ id: a.linkRequest.id }),
+      ]),
+  },
+  {
+    name: "linkRequests.withdrawPending",
+    run: (a, b) => a.linkRequests.withdrawPending(b.linkRequest.installationId),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
   },
   // runs
   {

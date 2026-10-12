@@ -31,6 +31,7 @@ import { migration as createInvitations } from "./20261012100000_create_invitati
 import { migration as createSignedStates } from "./20261012120000_create_signed_states.ts";
 import { migration as addUsersEmailConflict } from "./20261012120100_add_users_email_conflict.ts";
 import { migration as uniqueAccounts } from "./20261012120200_unique_accounts.ts";
+import { migration as createInstallationBinding } from "./20261012150000_create_installation_binding.ts";
 
 const migrations: Record<string, Migration> = {
   "0001_create_app_meta": createAppMeta,
@@ -62,6 +63,7 @@ const migrations: Record<string, Migration> = {
   "20261012120000_create_signed_states": createSignedStates,
   "20261012120100_add_users_email_conflict": addUsersEmailConflict,
   "20261012120200_unique_accounts": uniqueAccounts,
+  "20261012150000_create_installation_binding": createInstallationBinding,
 };
 
 export const migrationProvider: MigrationProvider = {

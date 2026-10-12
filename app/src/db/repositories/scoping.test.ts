@@ -20,6 +20,7 @@ import { describe, expect, it } from "vitest";
 /** Repositories of customer data: created for one workspace, every query filters by it. */
 const SCOPED = [
   "app-settings-repository.ts",
+  "installation-link-requests-repository.ts",
   "integrations-repository.ts",
   "invitations-repository.ts",
   "jobs-repository.ts",
@@ -38,12 +39,18 @@ const SCOPED = [
  * - invitation-directory: a person who opens an invitation link holds only the token, and the list of the
  *   invitations that wait for an address spans workspaces; it only reads and every answer names the
  *   workspace, and whatever is done next goes through the scoped invitations repository;
+ * - installation-link-request-directory: the instance admin decides the requests of every workspace to link
+ *   an installation; it reads with the workspace and requester names, and its one write is the decision
+ *   (a guarded statement on a request that still waits). Asking, refreshing and withdrawing go through the
+ *   scoped installation-link-requests repository;
+ * - unclaimed-installations: installations that no workspace has linked belong to no workspace by definition;
  * - runner-jobs: runners serve the whole instance, every statement is fenced by the lease token;
  * - jobs-claim: the one SQL statement of the runner side, not a repository.
  */
 const INSTANCE_LEVEL = [
   "allowed-login-pins-repository.ts",
   "app-meta-repository.ts",
+  "installation-link-request-directory-repository.ts",
   "instance-settings-repository.ts",
   "integration-directory-repository.ts",
   "invitation-directory-repository.ts",
@@ -51,6 +58,7 @@ const INSTANCE_LEVEL = [
   "rate-limits-repository.ts",
   "runner-jobs-repository.ts",
   "secrets-repository.ts",
+  "unclaimed-installations-repository.ts",
   "webhook-deliveries-repository.ts",
   "workspaces-repository.ts",
 ] as const;

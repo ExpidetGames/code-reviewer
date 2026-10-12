@@ -34,6 +34,8 @@ export type RemoteApp = {
   /** The app id as text. */
   id: string;
   slug: string;
+  /** The account the App belongs to (`owner` of `GET /app`), or null when GitHub does not say. */
+  owner: { id: number; login: string } | null;
   /** The permissions the App holds, by API name (`pull_requests`, `emails`, `members`, ...). */
   permissions: Record<string, string>;
 };
@@ -525,7 +527,18 @@ export function createGithubAppClient(
       if (isRecord(json.permissions))
         for (const [name, level] of Object.entries(json.permissions))
           if (typeof level === "string") permissions[name] = level;
-      return { id: String(json.id), slug: json.slug, permissions };
+      const owner = json.owner;
+      return {
+        id: String(json.id),
+        slug: json.slug,
+        owner:
+          isRecord(owner) &&
+          typeof owner.id === "number" &&
+          typeof owner.login === "string"
+            ? { id: owner.id, login: owner.login }
+            : null,
+        permissions,
+      };
     },
 
     listInstallations() {

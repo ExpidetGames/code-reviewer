@@ -47,7 +47,17 @@ export const INTEGRATION_SECRET_STORAGE: Record<
   github_app: { credentials: false, webhookSecret: false },
 };
 
-export const INTEGRATION_STATUSES = ["active", "disabled"] as const;
+/**
+ * `active`: in use. `disabled`: suspended or gone on the platform (a full sync resumes it when the platform
+ * lists it as active again). `disconnected`: a person of the workspace ended the connection (the installation
+ * is still the workspace's, projects and runs are kept); only linking it again from the same workspace
+ * brings it back, and the synchronization never touches it.
+ */
+export const INTEGRATION_STATUSES = [
+  "active",
+  "disabled",
+  "disconnected",
+] as const;
 export type IntegrationStatus = (typeof INTEGRATION_STATUSES)[number];
 
 /** A configured connection to a git platform, as stored in the `integrations` table. */

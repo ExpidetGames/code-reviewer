@@ -364,6 +364,53 @@ export interface InvitationsTable {
   revoked_at: string | null;
 }
 
+/**
+ * A request to link a GitHub App installation that the instance admin decides, because the role of the
+ * requester's GitHub account could not be read (src/installation-binding/). Keeps the evidence, never a token.
+ */
+export interface InstallationLinkRequestsTable {
+  id: string;
+  workspace_id: string;
+  /** The user who asked, or null once the user is gone. */
+  requested_by: string | null;
+  /** The login of the GitHub account the requester proved control of, or null. */
+  requester_github_login: string | null;
+  /** The platform's id of the installation, as text. */
+  installation_id: string;
+  account_login: string;
+  /** `User` or `Organization`, as GitHub says. */
+  account_type: string;
+  /** The numeric id of the installation's account, as text. */
+  account_id: string;
+  /** An InstallationLinkRequestStatus (src/installation-binding/requests.ts). */
+  status: string;
+  /** 1 when the requester's token lists the installation, 0 when it does not, null when it could not be asked. */
+  token_can_access: number | null;
+  /** A RoleResult (src/installation-binding/github-user.ts). */
+  role_result: string;
+  /** A stable code that says why the role could not be read, or null. */
+  role_detail: string | null;
+  /** ISO 8601 text in UTC. */
+  created_at: string;
+  /** ISO 8601 text in UTC, or null while the request is pending. */
+  decided_at: string | null;
+  decided_by: string | null;
+}
+
+/** An installation of the GitHub App that no workspace has linked (src/db/repositories/unclaimed-installations-repository.ts). */
+export interface UnclaimedInstallationsTable {
+  /** The platform's id of the installation, as text. */
+  installation_id: string;
+  account_login: string;
+  account_type: string;
+  /** ISO 8601 text in UTC. */
+  first_seen_at: string;
+  /** ISO 8601 text in UTC. */
+  last_seen_at: string;
+  /** `webhook` or `sync`. */
+  source: string;
+}
+
 export interface Database {
   app_meta: AppMetaTable;
   users: UsersTable;
@@ -387,4 +434,6 @@ export interface Database {
   email_verification_tokens: EmailVerificationTokensTable;
   signed_states: SignedStatesTable;
   invitations: InvitationsTable;
+  installation_link_requests: InstallationLinkRequestsTable;
+  unclaimed_installations: UnclaimedInstallationsTable;
 }
