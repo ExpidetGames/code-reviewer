@@ -75,9 +75,9 @@ describe("the migrations of both epics", () => {
       "20261011200000_create_secrets",
       "20261011200100_create_password_reset_tokens",
       "20261011210000_create_email_verification_tokens",
-      "20261012100000_create_signed_states",
-      "20261012100100_add_users_email_conflict",
-      "20261012100200_unique_accounts",
+      "20261012120000_create_signed_states",
+      "20261012120100_add_users_email_conflict",
+      "20261012120200_unique_accounts",
     ]);
   });
 

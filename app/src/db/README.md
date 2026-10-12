@@ -162,8 +162,8 @@ and 2.7):
 
 ### Signed states, the address conflict and the accounts indexes
 
-Migrations `20261012100000_create_signed_states`, `20261012100100_add_users_email_conflict` and
-`20261012100200_unique_accounts` (sections 2.4, 2.5 and 2.9):
+Migrations `20261012120000_create_signed_states`, `20261012120100_add_users_email_conflict` and
+`20261012120200_unique_accounts` (sections 2.4, 2.5 and 2.9):
 
 - `signed_states` (`id` = the nonce, `purpose`, `user_id`, `session_hash`, `code_verifier`, `data`, `created_at`,
   `expires_at`, `used_at`): the single-use side of the signed `state` values of the round trips through GitHub (the
