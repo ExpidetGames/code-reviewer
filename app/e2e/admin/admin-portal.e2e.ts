@@ -161,11 +161,13 @@ test.describe("the admin portal", () => {
     await expect(
       sections.getByRole("link", { name: "Overview" }),
     ).toHaveAttribute("aria-current", "page");
-    const checklist = page.getByRole("region", { name: "Checklist" });
-    await expect(checklist.getByText("Mail server")).toBeVisible();
-    await expect(checklist.getByText("GitHub", { exact: true })).toBeVisible();
-    await expect(checklist.getByText("Tenancy")).toBeVisible();
-    await expect(checklist.getByText("Sign-up rule")).toBeVisible();
+    const setup = page.getByRole("region", { name: "Setup" });
+    await expect(setup.getByText("Mail server")).toBeVisible();
+    await expect(setup.getByText("GitHub", { exact: true })).toBeVisible();
+    await expect(setup.getByText("Tenancy")).toBeVisible();
+    await expect(setup.getByText("Sign-up rule")).toBeVisible();
+    await expect(setup.getByText("Ways to sign in")).toBeVisible();
+    await expect(setup.getByRole("link", { name: "Configure" })).toHaveCount(5);
   });
 
   // #168-T05

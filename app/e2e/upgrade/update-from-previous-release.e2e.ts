@@ -450,9 +450,8 @@ test.describe(
       await expect(notice).toContainText("GITHUB_OAUTH_CLIENT_SECRET");
       await expect(notice).toContainText("3 people are a member");
       // The App is the one of the old environment, and the sign in with GitHub waits for the admin.
-      await expect(page.getByText("is configured.")).toContainText(
-        e2eEnv.githubAppSlug,
-      );
+      const setup = page.getByRole("region", { name: "Setup" });
+      await expect(setup.getByText(e2eEnv.githubAppSlug)).toBeVisible();
       await expect(
         page.getByText("Signing in with GitHub is not enabled yet"),
       ).toBeVisible();

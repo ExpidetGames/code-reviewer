@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // @vitest-environment jsdom
-// The notice that the import of an existing installation leaves on the overview: it says what could not be
-// migrated in words, names variables and never values, says that the organization is not migrated into a rule,
-// and the admin can hide it.
+// The notice that the import of an existing installation leaves on the overview (#180): one line of
+// summary with the details behind a disclosure, the details in words (variables, never values), and the
+// admin can hide it.
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -111,6 +111,28 @@ describe("the notice of the import", () => {
 
     expect(container.querySelectorAll("li")).toHaveLength(0);
     expect(container.textContent).toContain("1 person is a member");
+  });
+
+  // #180-T03
+  it("shows one line of summary with the details behind a disclosure", async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <ImportNotice notice={NOTICE} api={api().api} />,
+    );
+
+    expect(container.textContent).toContain(
+      "imported into the default workspace",
+    );
+    const trigger = screen.getByRole("button", { name: "Details" });
+    const content = document.getElementById(
+      trigger.getAttribute("aria-controls")!,
+    );
+    expect(content?.hasAttribute("hidden")).toBe(true);
+    expect(content?.textContent).toContain("dave");
+
+    await user.click(trigger);
+
+    expect(content?.hasAttribute("hidden")).toBe(false);
   });
 
   // #106-IM-07

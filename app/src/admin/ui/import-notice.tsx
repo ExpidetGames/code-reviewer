@@ -1,11 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 "use client";
-// The one-time notice that the import of an existing installation leaves on the overview (docs/decisions/
-// 0001-editions-setup-and-accounts.md, section 2.11, point 7): who did not become a member and why, the logins
-// that never signed in (invite them by email), the allowed organization that is NOT migrated into a rule, what
-// could not be imported (variable names only), and the OAuth app that is no longer used. The admin dismisses it.
-import { Button } from "../../ui/button.tsx";
+// The one-time notice that the import of an existing installation leaves on the overview (#180,
+// docs/decisions/0001-editions-setup-and-accounts.md, section 2.11, point 7): one line of summary with
+// the details behind a disclosure (who did not become a member and why, the logins that never signed
+// in, the allowed organization that is NOT migrated into a rule, what could not be imported — variable
+// names only — and the OAuth app that is no longer used). The admin dismisses it.
+import { Button } from "../../components/button.tsx";
+import { HelpDisclosure } from "../../components/help-disclosure.tsx";
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "../../components/ui/alert.tsx";
 import type { BlockReason } from "../../legacy-import/members.ts";
 import type {
   ImportNotice as ImportNoticeValue,
@@ -46,90 +53,110 @@ export function ImportNotice({
   api?: AdminApi;
 }) {
   const { pending, status, save } = useSave(api);
+  const hasDetails =
+    notice.notMembers.length > 0 ||
+    notice.neverSignedIn.length > 0 ||
+    notice.organization !== null ||
+    notice.notImported.length > 0 ||
+    notice.oauthApp ||
+    notice.invalidLoginEntries > 0;
   return (
-    <section
+    <Alert
+      variant="warning"
       role="note"
-      className="alert alert-warning"
       aria-labelledby="import-notice-heading"
     >
-      <h2 id="import-notice-heading">
-        This installation was updated: please read what changed
-      </h2>
-      <p>
-        Your data and settings were imported into the default workspace.{" "}
-        {String(notice.memberCount)}{" "}
-        {notice.memberCount === 1 ? "person is" : "people are"} a member of it.
-        Signing in is by email and password until you enable sign-in with GitHub
-        under Integrations; people who used GitHub before then sign in with it
-        again and are recognised.
-      </p>
-      <ul>
-        {notice.notMembers.length > 0 ? (
-          <li>
-            <strong>Not made members:</strong>{" "}
-            {notice.notMembers.map((entry, index) => (
-              <span key={`${entry.login ?? "unknown"}-${String(index)}`}>
-                {index > 0 ? "; " : ""}
-                {entry.login ?? "an account"} {REASON_COPY[entry.reason]}
-              </span>
-            ))}
-            {more(notice.notMembersTotal, notice.notMembers.length)}. They can
-            be invited by email.
-          </li>
+      <AlertTitle id="import-notice-heading">
+        This installation was updated
+      </AlertTitle>
+      <AlertDescription>
+        <p>
+          Your data and settings were imported into the default workspace.{" "}
+          {String(notice.memberCount)}{" "}
+          {notice.memberCount === 1 ? "person is" : "people are"} a member of
+          it.
+        </p>
+        {hasDetails ? (
+          <HelpDisclosure label="Details">
+            <p className="pb-2">
+              Signing in is by email and password until you enable sign-in with
+              GitHub under Integrations; people who used GitHub before then sign
+              in with it again and are recognised.
+            </p>
+            <ul className="flex flex-col gap-1">
+              {notice.notMembers.length > 0 ? (
+                <li>
+                  <strong>Not made members:</strong>{" "}
+                  {notice.notMembers.map((entry, index) => (
+                    <span key={`${entry.login ?? "unknown"}-${String(index)}`}>
+                      {index > 0 ? "; " : ""}
+                      {entry.login ?? "an account"} {REASON_COPY[entry.reason]}
+                    </span>
+                  ))}
+                  {more(notice.notMembersTotal, notice.notMembers.length)}. They
+                  can be invited by email.
+                </li>
+              ) : null}
+              {notice.neverSignedIn.length > 0 ? (
+                <li>
+                  <strong>Allowed logins that never signed in:</strong>{" "}
+                  {notice.neverSignedIn.join(", ")}
+                  {more(notice.neverSignedInTotal, notice.neverSignedIn.length)}
+                  . Invite them by email from the workspace&apos;s members page.
+                </li>
+              ) : null}
+              {notice.organization !== null ? (
+                <li>
+                  <strong>
+                    The allowed GitHub organization is not migrated.
+                  </strong>{" "}
+                  There is no sign-up rule for an organization. Members of{" "}
+                  {notice.organization} who passed the check are members now;
+                  others can only sign up again when you recreate that access as
+                  an email list or as allowed domains (Setup).
+                </li>
+              ) : null}
+              {notice.notImported.map((entry) => (
+                <li key={entry.group}>
+                  <strong>Not imported:</strong> {GROUP_COPY[entry.group]}{" "}
+                  {entry.variables.length > 0
+                    ? `Variables: ${entry.variables.join(", ")}.`
+                    : null}
+                </li>
+              ))}
+              {notice.oauthApp ? (
+                <li>
+                  <strong>The GitHub OAuth app is no longer used.</strong>{" "}
+                  GITHUB_OAUTH_CLIENT_ID and GITHUB_OAUTH_CLIENT_SECRET are not
+                  imported. Sign-in with GitHub uses the client id and secret of
+                  the GitHub App (Integrations).
+                </li>
+              ) : null}
+              {notice.invalidLoginEntries > 0 ? (
+                <li>
+                  <strong>
+                    {String(notice.invalidLoginEntries)} entries of the list of
+                    allowed logins were not valid
+                  </strong>{" "}
+                  and admitted nobody.
+                </li>
+              ) : null}
+            </ul>
+          </HelpDisclosure>
         ) : null}
-        {notice.neverSignedIn.length > 0 ? (
-          <li>
-            <strong>Allowed logins that never signed in:</strong>{" "}
-            {notice.neverSignedIn.join(", ")}
-            {more(notice.neverSignedInTotal, notice.neverSignedIn.length)}.
-            Invite them by email from the workspace&apos;s members page.
-          </li>
-        ) : null}
-        {notice.organization !== null ? (
-          <li>
-            <strong>The allowed GitHub organization is not migrated.</strong>{" "}
-            There is no sign-up rule for an organization. Members of{" "}
-            {notice.organization} who passed the check are members now; others
-            can only sign up again when you recreate that access as an email
-            list or as allowed domains (Setup).
-          </li>
-        ) : null}
-        {notice.notImported.map((entry) => (
-          <li key={entry.group}>
-            <strong>Not imported:</strong> {GROUP_COPY[entry.group]}{" "}
-            {entry.variables.length > 0
-              ? `Variables: ${entry.variables.join(", ")}.`
-              : null}
-          </li>
-        ))}
-        {notice.oauthApp ? (
-          <li>
-            <strong>The GitHub OAuth app is no longer used.</strong>{" "}
-            GITHUB_OAUTH_CLIENT_ID and GITHUB_OAUTH_CLIENT_SECRET are not
-            imported. Sign-in with GitHub uses the client id and secret of the
-            GitHub App (Integrations).
-          </li>
-        ) : null}
-        {notice.invalidLoginEntries > 0 ? (
-          <li>
-            <strong>
-              {String(notice.invalidLoginEntries)} entries of the list of
-              allowed logins were not valid
-            </strong>{" "}
-            and admitted nobody.
-          </li>
-        ) : null}
-      </ul>
-      <div className="form-actions">
-        <Button
-          type="button"
-          disabled={pending}
-          onClick={() => void save({ importNotice: { dismiss: true } })}
-        >
-          {pending ? "Hiding..." : "Hide this notice"}
-        </Button>
-        <SaveResult status={status} />
-      </div>
-    </section>
+        <div className="flex items-center gap-3 pt-1">
+          <Button
+            variant="secondary"
+            size="sm"
+            type="button"
+            disabled={pending}
+            onClick={() => void save({ importNotice: { dismiss: true } })}
+          >
+            {pending ? "Hiding..." : "Hide this notice"}
+          </Button>
+          <SaveResult status={status} />
+        </div>
+      </AlertDescription>
+    </Alert>
   );
 }

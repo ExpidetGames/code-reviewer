@@ -131,7 +131,9 @@ test.describe("the first-run setup", () => {
 
     await expect(page).toHaveURL(/\/admin$/);
     await expect(page.getByRole("heading", { name: "Admin" })).toBeVisible();
-    await expect(page.getByText(e2eEnv.adminEmail).first()).toBeVisible();
+    // Signed in as the address the wizard used: the header menu names the account.
+    await page.getByRole("button", { name: "admin", exact: true }).click();
+    await expect(page.getByText(e2eEnv.adminEmail)).toBeVisible();
 
     // The setup is gone: a second visit is a 404, and so is the code form's route.
     const again = await page.goto("/setup");
