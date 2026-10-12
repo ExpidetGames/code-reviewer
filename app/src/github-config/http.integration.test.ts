@@ -374,6 +374,28 @@ describe("the check of the permissions through the route", () => {
     });
   });
 
+  // #102-GH-08
+  it.each(["/api/admin/github/check", "/api/admin/github/link"])(
+    "only takes a JSON object: %s refuses form data and plain text with 415 and does nothing",
+    async (path) => {
+      const { portal } = await start();
+
+      for (const type of ["application/x-www-form-urlencoded", "text/plain"]) {
+        const response = await portal.visit(path, {
+          method: "POST",
+          cookies: portal.adminCookies,
+          headers: { "content-type": type },
+          body: "a=b",
+        });
+
+        expect(response.status).toBe(415);
+        expect(await response.json()).toEqual({
+          error: "unsupported_content_type",
+        });
+      }
+    },
+  );
+
   it("says that there is nothing to ask before an App is configured", async () => {
     const { portal } = await start();
 

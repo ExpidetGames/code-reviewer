@@ -46,7 +46,7 @@ The provider that talks to GitHub is `src/auth/github-provider.ts`; Better Auth 
 
 `POST /api/account/github/link` (the account page) and `POST /api/admin/github/link` (the portal) start it: a signed state
 (HMAC, purpose `github-link`, bound to the person and the session, single use, 10 minutes, the page it returns to) and PKCE;
-10 starts per person and 100 for the instance in 10 minutes (`rate_limits`). GitHub sends the browser back to the same callback
+10 starts per person and 2000 for the instance (a flood backstop) in 10 minutes (`rate_limits`). GitHub sends the browser back to the same callback
 address as the sign in (`/api/auth/callback/github`); a state that is one of ours (it contains a dot; Better Auth's does not)
 is taken by `link-http.ts`, everything else goes to Better Auth. The callback must come from the session that started it. It
 uses the state up, trades the code for the user token once, and asks `GET /user` with it: that answer is the proof of control.

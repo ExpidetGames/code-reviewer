@@ -14,8 +14,7 @@
 // Every answer is `Cache-Control: no-store`; the callback sends `Referrer-Policy: no-referrer` so the code
 // and the state in its address never travel in a header.
 import type { SessionUser } from "../auth/access-policy.ts";
-import { isCrossSite, isJsonRequest } from "../http/request-checks.ts";
-import { readLimitedBody } from "../webhooks/limited-body.ts";
+import { JSON_BODY_ERROR_STATUS, readJsonObject } from "../http/json-body.ts";
 import {
   LINK_ERROR_CODES,
   LINK_RETURN_PAGES,
@@ -69,11 +68,9 @@ export function createStartLinkHandler({
 }: StartLinkHandlerDependencies): (request: Request) => Promise<Response> {
   return async (request) => {
     const user = await requireUser();
-    if (isCrossSite(request)) return refusal("cross_site_request", 403);
-    if (isJsonRequest(request)) {
-      const body = await readLimitedBody(request, REQUEST_MAX_BYTES);
-      if (!body.ok) return refusal("body_too_large", 413);
-    }
+    const body = await readJsonObject(request, REQUEST_MAX_BYTES);
+    if (!body.ok)
+      return refusal(body.error, JSON_BODY_ERROR_STATUS[body.error]);
     const session = await sessionId();
     if (session === null) return refusal("session_required", 401);
     try {

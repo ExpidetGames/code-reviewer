@@ -181,8 +181,23 @@ export function createAuth({
       // Better Auth's own endpoints for linking and unlinking stay switched off (`disabledPaths`): linking
       // from an account's settings is ours (src/github-signin/link.ts).
       accountLinking: { enabled: true },
-      // The GitHub token is kept, encrypted with the secret.
+      // Whatever is stored is encrypted with the secret. (Nothing is: see `databaseHooks` below.)
       encryptOAuthTokens: true,
+    },
+    // The GitHub user token is not kept. The sign in needs it for the profile and the verified address only,
+    // and nothing reads it afterwards (no organization check, no call on the person's behalf), so a database
+    // copy would be a credential for nothing. Applies to a new account row and to every later sign in.
+    databaseHooks: {
+      account: {
+        create: {
+          before: (account) =>
+            Promise.resolve({ data: withoutTokens(account) }),
+        },
+        update: {
+          before: (account) =>
+            Promise.resolve({ data: withoutTokens(account) }),
+        },
+      },
     },
     verification: {
       modelName: "verifications",
@@ -350,4 +365,16 @@ export function getAuth(): Auth {
     verificationRequired: () => getMailSender().isConfigured(),
   });
   return holder[globalKey];
+}
+
+/** The fields of an account row that hold the GitHub tokens, emptied. */
+function withoutTokens<T extends Record<string, unknown>>(account: T): T {
+  return {
+    ...account,
+    accessToken: null,
+    refreshToken: null,
+    idToken: null,
+    accessTokenExpiresAt: null,
+    refreshTokenExpiresAt: null,
+  };
 }

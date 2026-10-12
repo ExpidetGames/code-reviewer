@@ -77,6 +77,7 @@ afterEach(async () => {
   await Promise.all(fakes.splice(0).map((fake) => fake.close()));
 });
 
+// #102-GH-10: unchanged by the move of the webhook secret into the database; the secret is read from the store.
 describe("the webhook route file", () => {
   it("creates the integration of a new installation and remembers the delivery", async () => {
     const { route, github } = await startRoute();

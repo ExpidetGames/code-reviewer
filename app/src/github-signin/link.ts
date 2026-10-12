@@ -48,7 +48,9 @@ export const LINK_RETURN_PAGES: Record<LinkSurface, string> = {
 
 export const LINK_WINDOW_MS = 10 * 60 * 1000;
 export const LINK_USER_MAX = 10;
-export const LINK_GLOBAL_MAX = 100;
+// Only a backstop against a flood from many accounts: the allowance of each person is LINK_USER_MAX, so a few
+// people cannot use up the instance's budget for everybody (it is well above what any real instance needs).
+export const LINK_GLOBAL_MAX = 2000;
 
 export function linkUserKey(userId: string): string {
   return `github-link:user:${userId}`;

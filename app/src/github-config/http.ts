@@ -26,6 +26,7 @@
 // stable code from errors.ts, every answer is `Cache-Control: no-store`.
 import type { SessionUser } from "../auth/access-policy.ts";
 import type { AdminAccess } from "../admin/access.ts";
+import { readJsonObject } from "../http/json-body.ts";
 import { isCrossSite, isJsonRequest } from "../http/request-checks.ts";
 import type { GithubLinkService } from "../github-signin/link.ts";
 import { readLimitedBody } from "../webhooks/limited-body.ts";
@@ -248,7 +249,9 @@ export function createGithubRouteHandlers({
     async startLink(request) {
       const who = await admin();
       if (who instanceof Response) return who;
-      if (isCrossSite(request)) return refusal("cross_site_request");
+      // A JSON object from this site, like every other POST of the portal (the shared reader).
+      const body = await readJsonObject(request, GITHUB_REQUEST_MAX_BYTES);
+      if (!body.ok) return refusal(body.error);
       const session = await sessionId();
       if (session === null) return refusal("session_required");
       if (link === undefined) return refusal("unavailable");
@@ -266,7 +269,8 @@ export function createGithubRouteHandlers({
     async check(request) {
       const who = await admin();
       if (who instanceof Response) return who;
-      if (isCrossSite(request)) return refusal("cross_site_request");
+      const body = await readJsonObject(request, GITHUB_REQUEST_MAX_BYTES);
+      if (!body.ok) return refusal(body.error);
       const result = await guarded(() => service.checkPermissions(who.id));
       if (result instanceof Response) return result;
       if (!result.ok) return fromServiceFailure(result);

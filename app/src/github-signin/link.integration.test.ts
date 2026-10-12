@@ -628,6 +628,25 @@ describe("the state of the linking", () => {
     expect(results.at(-1)).toMatchObject({ ok: false, error: "rate_limited" });
   });
 
+  it("lets a dozen people each use their own allowance without running into the instance limit", async () => {
+    const ctx = await setup();
+
+    const results = [];
+    for (let person = 0; person < 12; person += 1) {
+      const id = `person-${String(person)}`;
+      await insertUser(ctx.db, { id, passwordHash: "h" });
+      for (let i = 0; i < LINK_USER_MAX; i += 1)
+        results.push(
+          await ctx.service.start(
+            { id, sessionId: `s-${id}` },
+            { surface: "account" },
+          ),
+        );
+    }
+
+    expect(results.every((r) => r.ok)).toBe(true);
+  });
+
   it("refuses a start that names no known page, and one while the user authorization is not configured", async () => {
     const ctx = await setup();
     const none = createGithubLinkService({
@@ -735,7 +754,6 @@ describe("the handlers of the linking", () => {
     expect(otherPath).toBeNull();
   });
 
-  // #102-IB-16
   it("sends the person to a fixed page with a code from its own list, whatever extra parameters the address carries", async () => {
     const { ctx, callback } = await handlers();
     const actor: LinkActor = { id: "person", sessionId: "s1" };

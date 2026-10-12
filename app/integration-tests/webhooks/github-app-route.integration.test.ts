@@ -45,6 +45,7 @@ function addOpenPullRequest(h: WebhookHarness) {
   });
 }
 
+// #102-GH-10: unchanged by the move of the webhook secret into the database; the secret is read from the store.
 describe("a pull request delivery", () => {
   // CR-22-T01
   it("hands one review trigger for the head commit to the intake and answers 202", async () => {
