@@ -12,14 +12,15 @@ import {
   type FetchLike,
   type RequestIssue,
 } from "../../ui/json-request.ts";
+import { CROSS_SITE_REQUEST } from "../../copy/messages.ts";
 import {
   describeTransportFailure,
   GENERIC_FAILURE,
 } from "../../ui/transport-messages.ts";
 import {
   PASSWORD_ERROR_COPY,
-  PASSWORD_MAX_LENGTH,
-  PASSWORD_MIN_LENGTH,
+  PASSWORD_RULE_HINT,
+  PASSWORDS_DO_NOT_MATCH,
   type PasswordErrorCode,
 } from "../password-policy.ts";
 
@@ -28,7 +29,7 @@ const FAILURE_COPY: Record<string, string> = {
     'This link is not valid any more. It was used already, or it expired after 30 minutes, or it is not complete. Ask for a new one with "Forgot your password?" on the sign-in page (if this instance sends mail), or ask the operator of this instance, who can run `admin reset-password` on the server.',
   rate_limited:
     "Too many attempts in a short time. Wait a minute and try again.",
-  cross_site_request: "The request did not come from this page. Reload it.",
+  cross_site_request: CROSS_SITE_REQUEST,
 };
 
 function describe(code: string, issues: RequestIssue[]): string {
@@ -80,7 +81,7 @@ export function ResetPasswordForm({
     event.preventDefault();
     setProblem(null);
     if (password !== repeat) {
-      setProblem("The two passwords are not the same.");
+      setProblem(PASSWORDS_DO_NOT_MATCH);
       return;
     }
     setPending(true);
@@ -117,10 +118,7 @@ export function ResetPasswordForm({
           value={password}
           onChange={(event) => setPassword(event.target.value)}
         />
-        <p className="muted small">
-          At least {String(PASSWORD_MIN_LENGTH)} and at most{" "}
-          {String(PASSWORD_MAX_LENGTH)} characters, and not a common password.
-        </p>
+        <p className="muted small">{PASSWORD_RULE_HINT}</p>
       </div>
       <div className="field">
         <label htmlFor={`${ids}-repeat`} className="field-label">

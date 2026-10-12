@@ -5,28 +5,40 @@
 // contract, these sentences are only what the page shows.
 import type { RequestIssue } from "../../ui/json-request.ts";
 import {
+  CROSS_SITE_REQUEST,
+  INVALID_VALUES,
+  SESSION_ENDED,
+  UNAVAILABLE,
+} from "../../copy/messages.ts";
+import {
   describeTransportFailure,
   GENERIC_FAILURE,
 } from "../../ui/transport-messages.ts";
 
+/** The one owner of the two "sign in with GitHub" facts and of the App's placement question (#169). */
+export const GITHUB_SIGN_IN_NOT_ENABLED =
+  "Signing in with GitHub is not enabled yet: the client id and secret of the App are missing.";
+export const GITHUB_SIGN_IN_NOT_CONFIGURED =
+  "Sign in with GitHub is not configured yet. Enter the client id and secret of the App first.";
+export const PRIVATE_APP_WHERE_HINT = `Look at "Where can this GitHub App be installed?" in the App's settings.`;
+
 const FAILURE_COPY: Record<string, string> = {
-  cross_site_request: "The request did not come from this page. Reload it.",
-  invalid_input: "Some of the values are not valid. Check the fields.",
+  cross_site_request: CROSS_SITE_REQUEST,
+  invalid_input: INVALID_VALUES,
   already_configured:
     "A GitHub App is configured already. Tick the box to replace it.",
   app_not_in_database:
     "This App is still configured with environment variables. Enter it in the form below to move it into the portal.",
   rate_limited:
     "Too many requests in a short time. Wait a few minutes and try again.",
-  unavailable: "This is not available right now. Please try again later.",
-  session_required: "Your session has ended. Sign in again.",
+  unavailable: UNAVAILABLE,
+  session_required: SESSION_ENDED,
   not_configured: "There is no GitHub App to ask yet.",
   app_auth_failed:
     "GitHub refused the key of the App. The key does not belong to this App id.",
   github_unreachable:
     "GitHub could not be reached. Nothing was saved. Try again later.",
-  github_not_configured:
-    "Sign in with GitHub is not set up yet. Enter the client id and secret of the App first.",
+  github_not_configured: GITHUB_SIGN_IN_NOT_CONFIGURED,
   private_app_invalid: "Choose one of the two answers.",
 };
 
@@ -104,9 +116,8 @@ const OUTCOME_ERRORS: Record<string, string> = {
     "That GitHub account belongs to another user of this instance. Nothing changed.",
   identity_has_other_credentials:
     "That GitHub account belongs to a user who can also sign in with a password, so the two accounts are not joined. Nothing changed. Sign in as that user instead.",
-  github_not_configured:
-    "Sign in with GitHub is not set up yet. Enter the client id and secret of the App first.",
-  unavailable: "This is not available right now. Please try again later.",
+  github_not_configured: GITHUB_SIGN_IN_NOT_CONFIGURED,
+  unavailable: UNAVAILABLE,
 };
 
 export function describeGithubOutcomeError(code: string): string {

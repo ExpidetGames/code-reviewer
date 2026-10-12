@@ -6,28 +6,49 @@
 // gets a generic one.
 import type { SyncErrorCode } from "../../integrations/sync/errors.ts";
 import {
+  CROSS_SITE_REQUEST_RELOAD_PAGE,
+  REQUEST_NOT_UNDERSTOOD,
+} from "../../copy/messages.ts";
+import {
   describeTransportFailure,
   GENERIC_FAILURE,
 } from "../../ui/transport-messages.ts";
 import type { ProjectErrorCode } from "../errors.ts";
 
+/** The one owner of the two project state wordings (#169): the list badge and the settings page. */
+export const PROJECT_STATE_LABEL: Record<
+  "active" | "inactive" | "unavailable",
+  string
+> = {
+  active: "Active",
+  inactive: "Inactive",
+  unavailable: "Unavailable",
+};
+
+export const PROJECT_STATE_TEXT: Record<
+  "active" | "inactive" | "unavailable",
+  string
+> = {
+  active: "Active: new pull requests are reviewed.",
+  inactive:
+    "Inactive: no reviews run until the project is activated. You can save settings now; they apply once it is switched on.",
+  unavailable:
+    "Unavailable: the GitHub App can no longer read this repository. Its settings are kept.",
+};
+
 const FAILURE_COPY: Record<ProjectErrorCode | SyncErrorCode, string> = {
-  PROJECT_REQUEST_INVALID:
-    "The request was not understood. Reload the page and try again.",
-  PROJECT_CROSS_SITE_REQUEST:
-    "The request did not come from this page. Reload the page and try again.",
+  PROJECT_REQUEST_INVALID: REQUEST_NOT_UNDERSTOOD,
+  PROJECT_CROSS_SITE_REQUEST: CROSS_SITE_REQUEST_RELOAD_PAGE,
   PROJECT_BODY_TOO_LARGE:
     "The request was too large. Reload the page and try again.",
-  PROJECT_CONTENT_TYPE_UNSUPPORTED:
-    "The request was not understood. Reload the page and try again.",
+  PROJECT_CONTENT_TYPE_UNSUPPORTED: REQUEST_NOT_UNDERSTOOD,
   PROJECT_REPOSITORY_NOT_FOUND:
     "This repository does not exist any more. Reload the page.",
   PROJECT_REPOSITORY_UNAVAILABLE:
     "This repository is no longer available to the GitHub App, so it cannot be activated.",
   PROJECT_INTEGRATION_UNAVAILABLE:
     "The GitHub App installation of this repository is suspended or removed, so the repository cannot be activated.",
-  SYNC_CROSS_SITE_REQUEST:
-    "The request did not come from this page. Reload the page and try again.",
+  SYNC_CROSS_SITE_REQUEST: CROSS_SITE_REQUEST_RELOAD_PAGE,
 };
 
 function hasCopy(code: string): code is keyof typeof FAILURE_COPY {

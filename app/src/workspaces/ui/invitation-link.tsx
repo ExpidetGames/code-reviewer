@@ -7,6 +7,7 @@
 // (or, with a mail server, a resend).
 import { useId, useState } from "react";
 import { Button } from "../../ui/button.tsx";
+import { INVITATION_LINK_LIFETIME } from "./messages.ts";
 import type { InvitationDelivery } from "../invitations.ts";
 
 export type ShownInvitation = { email: string; delivery: InvitationDelivery };
@@ -19,8 +20,7 @@ export function InvitationLink({ shown }: { shown: ShownInvitation }) {
   if (delivery.kind === "mailed")
     return (
       <p role="status" className="alert alert-success">
-        The invitation was sent to {shown.email}. The link works once and for 7
-        days.
+        The invitation was sent to {shown.email}. {INVITATION_LINK_LIFETIME}
       </p>
     );
 
@@ -41,7 +41,7 @@ export function InvitationLink({ shown }: { shown: ShownInvitation }) {
         {delivery.reason === "no_mail_server"
           ? `This instance cannot send mail. Send this link to ${shown.email} yourself.`
           : `The mail server did not accept the message. Send this link to ${shown.email} yourself, or revoke the invitation and try again.`}{" "}
-        It is shown only now and works once, for 7 days, for that address.
+        It is shown only now. {INVITATION_LINK_LIFETIME}
       </p>
       <div className="field">
         <label htmlFor={id} className="field-label">

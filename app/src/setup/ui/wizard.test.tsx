@@ -171,6 +171,8 @@ describe("the wizard", () => {
       screen.getByRole("radio", { name: /list of email addresses/i }),
     );
     expect(screen.getByText(/nobody except you can sign up/)).toBeTruthy();
+    // The remedy comes from the shared owner so the wizard and the portal say the same thing (#169).
+    expect(screen.getByText(/mail server or GitHub/)).toBeTruthy();
     await user.type(
       screen.getByLabelText("Email addresses"),
       "anna@example.com, bob@example.org",
