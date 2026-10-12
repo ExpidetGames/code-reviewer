@@ -65,10 +65,23 @@ describe("the sign-up form", () => {
     await waitFor(() =>
       expect(
         screen
-          .getByRole("link", { name: "Go to the sign-in" })
+          .getByRole("link", { name: "Back to sign in" })
           .getAttribute("href"),
       ).toBe("/login"),
     );
+  });
+
+  // #170-T03
+  it("shows one success card and a single sign-in link after the sign-up", async () => {
+    await fillSignUp(answer(200, { ok: true, next: "verify_email" }));
+
+    await waitFor(() => expect(screen.getByRole("status")).toBeTruthy());
+
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+    const links = screen.getAllByRole("link");
+    expect(links).toHaveLength(1);
+    expect(links[0]?.getAttribute("href")).toBe("/login");
+    expect(links[0]?.textContent).toMatch(/back to sign in/i);
   });
 
   // #99-SR-09
