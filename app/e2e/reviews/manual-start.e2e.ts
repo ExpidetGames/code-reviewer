@@ -64,9 +64,7 @@ test.describe("starting a review by hand", () => {
   async function openProject(page: import("@playwright/test").Page) {
     await syncFromGithubAsAdmin(e2eEnv.appUrl);
     await signInThroughTheForm(page, account);
-    const row = page
-      .getByRole("listitem")
-      .filter({ hasText: WIDGETS.fullName });
+    const row = page.getByRole("row").filter({ hasText: WIDGETS.fullName });
     await row
       .getByRole("switch", { name: `Review ${WIDGETS.fullName}` })
       .click();

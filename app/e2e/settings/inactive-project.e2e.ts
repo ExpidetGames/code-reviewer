@@ -42,7 +42,7 @@ test.describe("the settings of an inactive project", () => {
   }) => {
     await syncFromGithubAsAdmin(e2eEnv.appUrl);
     await signInThroughTheForm(page, account);
-    const row = page.getByRole("listitem").filter({ hasText: REPOSITORY });
+    const row = page.getByRole("row").filter({ hasText: REPOSITORY });
     await expect(row.getByText("Inactive", { exact: true })).toBeVisible();
 
     await row.getByRole("link", { name: REPOSITORY, exact: true }).click();
@@ -64,7 +64,7 @@ test.describe("the settings of an inactive project", () => {
 
     // Saving did not switch the repository on.
     await page.getByRole("link", { name: "All projects" }).click();
-    const again = page.getByRole("listitem").filter({ hasText: REPOSITORY });
+    const again = page.getByRole("row").filter({ hasText: REPOSITORY });
     await expect(again.getByText("Inactive", { exact: true })).toBeVisible();
     await expect(
       again.getByRole("switch", { name: `Review ${REPOSITORY}` }),
