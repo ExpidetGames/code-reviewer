@@ -345,8 +345,8 @@ export function Wizard({
         className="flex flex-col gap-4"
       >
         <p className="text-sm text-muted-foreground">
-          The admin runs this instance: settings, integrations and mail. You
-          sign in with this email address and password.
+          The admin runs this instance and signs in with this email address and
+          password.
         </p>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor={`${ids}-email`}>Email address</Label>

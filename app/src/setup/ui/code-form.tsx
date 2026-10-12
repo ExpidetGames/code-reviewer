@@ -57,8 +57,8 @@ export function CodeForm({
       {existingInstallation ? (
         <Alert variant="warning">
           <AlertDescription>
-            This instance has data from before the setup existed. It is kept,
-            and reviews keep running while you set up.
+            The data from before the setup existed is kept, and reviews keep
+            running while you set up.
           </AlertDescription>
         </Alert>
       ) : null}
