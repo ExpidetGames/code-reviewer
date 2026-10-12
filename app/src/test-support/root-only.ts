@@ -7,8 +7,7 @@
 // the check silently.
 import { it } from "vitest";
 
-export const NEEDS_NON_ROOT_REASON =
-  "needs a non-root user, enforced in CI" as const;
+export const NEEDS_NON_ROOT_REASON = "needs a non-root user, enforced in CI";
 
 /** The part of a test context the helper uses; the test body may use the rest of it as well. */
 export type SkipContext = {
