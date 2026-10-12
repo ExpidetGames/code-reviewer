@@ -8,7 +8,6 @@
 import { NextRequest } from "next/server";
 import { describe, expect, it, vi } from "vitest";
 import { PORTAL_DENIED_HEADER } from "../admin/paths.ts";
-import type { AccessPolicy } from "./access-policy.ts";
 import { PORTAL_REWRITE_HEADER, createAccessProxy } from "./access-proxy.ts";
 import type { SessionLookup } from "./session-user.ts";
 

@@ -38,14 +38,6 @@ async function start() {
   return { portal, memberCookies };
 }
 
-function json(
-  portal: Portal,
-  path: string,
-  init: Parameters<Portal["visit"]>[1] = {},
-) {
-  return portal.visit(path, init);
-}
-
 const ROUTES: Array<[string, string]> = [
   ["GET", "/api/admin/github"],
   ["PUT", "/api/admin/github"],

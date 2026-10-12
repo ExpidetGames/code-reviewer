@@ -30,11 +30,7 @@ import { createGithubConfigService } from "../github-config/service.ts";
 import { createGithubLinkService } from "../github-signin/link.ts";
 import { createSignedStates } from "../signed-state/state.ts";
 import { TEST_APP_SLUG } from "./github-app.ts";
-import {
-  startTestGithub,
-  TEST_CLIENT_ID,
-  TEST_CLIENT_SECRET,
-} from "./github-fake.ts";
+import { startTestGithub } from "./github-fake.ts";
 import { lookupSession } from "../auth/session-user.ts";
 import { cookieHeader, remember, type CookieJar } from "./auth-harness.ts";
 import {
