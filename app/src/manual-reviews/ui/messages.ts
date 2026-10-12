@@ -5,6 +5,10 @@
 // translates codes, never the other way round). Nothing a response carried (a raw answer of GitHub,
 // a token) is ever put into a sentence: the sentences are fixed. An unknown code gets a generic one.
 import { ASK_QUESTION_MAX_CHARS } from "../../integrations/comment-command.ts";
+import {
+  CROSS_SITE_REQUEST_RELOAD_PAGE,
+  REQUEST_NOT_UNDERSTOOD,
+} from "../../copy/messages.ts";
 import type { ManualReviewErrorCode } from "../errors.ts";
 import {
   describeTransportFailure,
@@ -12,14 +16,11 @@ import {
 } from "../../ui/transport-messages.ts";
 
 const FAILURE_COPY: Record<ManualReviewErrorCode, string> = {
-  MANUAL_REVIEW_REQUEST_INVALID:
-    "The request was not understood. Reload the page and try again.",
-  MANUAL_REVIEW_CROSS_SITE_REQUEST:
-    "The request did not come from this page. Reload the page and try again.",
+  MANUAL_REVIEW_REQUEST_INVALID: REQUEST_NOT_UNDERSTOOD,
+  MANUAL_REVIEW_CROSS_SITE_REQUEST: CROSS_SITE_REQUEST_RELOAD_PAGE,
   MANUAL_REVIEW_BODY_TOO_LARGE:
     "The request was too large. Shorten the question and try again.",
-  MANUAL_REVIEW_CONTENT_TYPE_UNSUPPORTED:
-    "The request was not understood. Reload the page and try again.",
+  MANUAL_REVIEW_CONTENT_TYPE_UNSUPPORTED: REQUEST_NOT_UNDERSTOOD,
   MANUAL_REVIEW_PROJECT_NOT_FOUND:
     "This repository is not an active project. Switch it on in the project list first.",
   MANUAL_REVIEW_PULL_REQUEST_NOT_FOUND:

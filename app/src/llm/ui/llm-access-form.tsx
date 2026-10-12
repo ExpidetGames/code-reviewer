@@ -8,6 +8,8 @@
 import { useRouter } from "next/navigation";
 import { useId, useState, type FormEvent } from "react";
 import { Button } from "../../ui/button.tsx";
+import { InfoHint } from "../../components/info-hint.tsx";
+import { UNREADABLE_SECRET_CAUSE } from "../../secrets/messages.ts";
 import { LLM_PROVIDERS } from "../config.ts";
 import type { WorkspaceLlmKeyStatus } from "../workspace-key.ts";
 import { browserLlmKeyApi, type LlmKeyApi } from "./api.ts";
@@ -139,9 +141,9 @@ export function LlmAccessForm({
     >
       {keyStatus.state === "unreadable" ? (
         <p role="alert" className="alert alert-error">
-          <strong>The saved key cannot be read.</strong> It was saved with
-          another APP_SECRET, or the stored value was changed. Enter the key
-          again and save. Until then reviews of this workspace cannot run.
+          <strong>The saved key cannot be read.</strong>{" "}
+          {UNREADABLE_SECRET_CAUSE} Enter the key again and save. Until then
+          reviews of this workspace cannot run.
         </p>
       ) : null}
       <div className="field">
@@ -169,9 +171,17 @@ export function LlmAccessForm({
         ) : null}
       </div>
       <div className="field">
-        <label htmlFor={`${ids}-key`} className="field-label">
-          API key
-        </label>
+        <div className="field-head">
+          <label htmlFor={`${ids}-key`} className="field-label">
+            API key
+          </label>
+          {keyStatus.state === "configured" && !changedProvider ? (
+            <InfoHint label="About the saved key">
+              Leave the field empty to keep the saved key, or enter a new one to
+              replace it.
+            </InfoHint>
+          ) : null}
+        </div>
         <input
           id={`${ids}-key`}
           type="password"
@@ -186,11 +196,10 @@ export function LlmAccessForm({
           {stored === null
             ? "No key is saved."
             : changedProvider
-              ? "The saved key was made for another provider and is not carried over: enter the key for this provider."
+              ? "The saved key was made for another provider and is not carried over; enter the key for this provider."
               : keyStatus.state === "unreadable"
-                ? "The saved key cannot be read. Enter it again."
-                : `A key is saved${keyStatus.state === "configured" && keyStatus.lastFour !== null ? ` (ends in ${keyStatus.lastFour})` : ""}. Leave the field empty to keep it, or enter a new one to replace it.`}{" "}
-          It is stored encrypted and is never shown again.
+                ? "The saved key cannot be read; enter it again."
+                : `A key is saved${keyStatus.state === "configured" && keyStatus.lastFour !== null ? ` (ends in ${keyStatus.lastFour})` : ""}.`}
         </p>
         {keyIssue ? (
           <p id={`${ids}-key-error`} className="field-error">

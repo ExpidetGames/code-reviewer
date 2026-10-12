@@ -6,6 +6,7 @@ import {
   describeTransportFailure,
   GENERIC_FAILURE,
 } from "../../ui/transport-messages.ts";
+import { NOT_AVAILABLE_TO_YOU } from "../../copy/messages.ts";
 import type { LlmKeyIssueCode } from "../workspace-key.ts";
 
 const ISSUE_COPY: Record<LlmKeyIssueCode, string> = {
@@ -25,7 +26,7 @@ export function describeLlmKeyIssue(code: string): string {
 
 const FAILURE_COPY: Record<string, string> = {
   forbidden: "Only an Admin or an Owner of this workspace can change the key.",
-  not_found: "That is not available to you.",
+  not_found: NOT_AVAILABLE_TO_YOU,
   cross_site_request:
     "The request did not come from this page. Reload it and try again.",
   unsupported_content_type: GENERIC_FAILURE,

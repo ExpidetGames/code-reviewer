@@ -7,18 +7,23 @@ import { useId, useState, type FormEvent } from "react";
 import { Button } from "../../ui/button.tsx";
 import { requestJson, type FetchLike } from "../../ui/json-request.ts";
 import {
+  CROSS_SITE_REQUEST,
+  INVALID_EMAIL,
+  UNAVAILABLE,
+} from "../../copy/messages.ts";
+import {
   describeTransportFailure,
   GENERIC_FAILURE,
 } from "../../ui/transport-messages.ts";
 
 const FAILURE_COPY: Record<string, string> = {
-  invalid_input: "Enter a valid email address.",
+  invalid_input: INVALID_EMAIL,
   rate_limited:
     "Too many requests for this address. Wait a while and try again.",
   not_available:
     "Resetting a password by mail is not available on this instance. Ask the operator.",
-  unavailable: "This is not available right now. Please try again later.",
-  cross_site_request: "The request did not come from this page. Reload it.",
+  unavailable: UNAVAILABLE,
+  cross_site_request: CROSS_SITE_REQUEST,
 };
 
 export function describeForgotPasswordFailure(code: string): string {

@@ -4,6 +4,7 @@
 // `loadProjectsPage` gathers the data from the services (passed in, so a test uses real ones against
 // a test database), `ProjectsPageContent` renders it. The page file only wires the real services.
 import { ConfigNotices } from "../../config-status/notices.tsx";
+import { GITHUB_NOT_CONFIGURED_COPY } from "../../config-status/notices.ts";
 import type {
   ConfigAudience,
   ConfigStatus,
@@ -39,8 +40,7 @@ export async function loadProjectsPage(deps: {
 export const ACTIVATION_BLOCKED_TEXT =
   "The GitHub App is not configured, so projects cannot be activated yet.";
 /** The same for a member of a workspace, who is not the one to configure it. */
-export const ACTIVATION_BLOCKED_TEXT_FOR_MEMBERS =
-  "GitHub is not set up yet, so projects cannot be activated. Ask your instance admin.";
+export const ACTIVATION_BLOCKED_TEXT_FOR_MEMBERS = `${GITHUB_NOT_CONFIGURED_COPY} Projects cannot be activated until then.`;
 
 export function ProjectsPageContent({
   workspaceSlug,

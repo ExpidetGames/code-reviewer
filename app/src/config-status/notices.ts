@@ -13,6 +13,11 @@ export type ConfigNotice = {
   detail: string;
 };
 
+/** The one owner of the "GitHub is not set up" fact (#169); every screen that needs it imports it. */
+export const GITHUB_NOT_CONFIGURED_TITLE = "GitHub is not set up yet";
+export const GITHUB_NOT_CONFIGURED_COPY =
+  "The GitHub App of this instance is not set up yet. Ask your instance admin to set it up.";
+
 export const LLM_ISSUE_COPY: Record<
   LlmConfigIssueCode,
   {
@@ -56,9 +61,8 @@ function describeNoticesForMembers(status: ConfigStatus): ConfigNotice[] {
     notices.push({
       id: "github_app",
       severity: "error",
-      title: "GitHub is not set up yet",
-      detail:
-        "Ask your instance admin to set it up. Repositories cannot be read from GitHub and projects cannot be activated until then.",
+      title: GITHUB_NOT_CONFIGURED_TITLE,
+      detail: `${GITHUB_NOT_CONFIGURED_COPY} Repositories cannot be read from GitHub and projects cannot be activated until then.`,
     });
   return notices;
 }

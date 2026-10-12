@@ -11,6 +11,7 @@ import type { WorkspaceRole } from "../roles.ts";
 import type { WorkspaceApi } from "./api.ts";
 import { InvitationList } from "./invitation-list.tsx";
 import { InviteForm } from "./invite-form.tsx";
+import { INVITATION_LINK_LIFETIME } from "./messages.ts";
 import { MemberList } from "./member-list.tsx";
 import { ROLE_HELP, ROLE_LABEL } from "./role-copy.ts";
 
@@ -82,8 +83,7 @@ export function MembersPageContent({
             {viewerRole === "owner"
               ? "Owners can invite people with any role."
               : "Admins can invite Members."}{" "}
-            An invitation is a link that works once, for 7 days, for the address
-            it is made for.{" "}
+            {INVITATION_LINK_LIFETIME}{" "}
             {data.mailConfigured
               ? "It is sent by mail."
               : "This instance cannot send mail, so the link is shown once for you to send."}
