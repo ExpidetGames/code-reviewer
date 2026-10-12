@@ -2,25 +2,29 @@
 
 The fake GitHub: one HTTP server that speaks every part of GitHub that Code Reviewer talks to, so the
 sign in tests and the GitHub integration tests share one fake and one address. The app is pointed at
-it with `GITHUB_OAUTH_BASE_URL` and `GITHUB_API_BASE_URL` (both set to the fake's address; they
-default to the real GitHub). The app refuses both unless `ALLOW_TEST_GITHUB_ENDPOINTS=true` is set as
+it with `GITHUB_OAUTH_BASE_URL` (GitHub's web pages: the authorization and the creation of an App) and
+`GITHUB_API_BASE_URL` (both set to the fake's address; they default to the real GitHub). The app refuses both unless `ALLOW_TEST_GITHUB_ENDPOINTS=true` is set as
 well, because the client secret, the App JWT and the tokens are sent to that address. State is in
 memory. Dummy values only.
 
-| File            | Part                                                                                           |
-| --------------- | ---------------------------------------------------------------------------------------------- |
-| `server.ts`     | The server (`startGithubFake`), the request log, failure injection, the control endpoints.     |
-| `oauth.ts`      | Sign in: OAuth authorize and token endpoints, the user, e-mail and organization membership.    |
-| `app-api.ts`    | The REST API as the GitHub App uses it: installations, tokens, repositories, pull requests.    |
-| `review-api.ts` | What a reviewer reads and writes: diff, commits, file contents and comments of a pull request. |
-| `webhooks.ts`   | Signed webhook deliveries, `webhookFixture(name)` loads a payload from `../fixtures`.          |
-| `http.ts`       | Small helpers for answering and reading HTTP messages.                                         |
-| `main.ts`       | Starts the sign in part as its own process (Playwright).                                       |
+| File            | Part                                                                                                               |
+| --------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `server.ts`     | The server (`startGithubFake`), the request log, failure injection, the control endpoints.                         |
+| `oauth.ts`      | Sign in: OAuth authorize and token endpoints, the user, e-mail and organization membership.                        |
+| `manifest.ts`   | The GitHub App manifest flow: the creation page, the one-time code, the conversion.                                |
+| `registry.ts`   | The Apps the fake knows (the one registered at start and the ones the manifest flow created), shared by the parts. |
+| `app-api.ts`    | The REST API as the GitHub App uses it: installations, tokens, repositories, pull requests.                        |
+| `review-api.ts` | What a reviewer reads and writes: diff, commits, file contents and comments of a pull request.                     |
+| `webhooks.ts`   | Signed webhook deliveries, `webhookFixture(name)` loads a payload from `../fixtures`.                              |
+| `http.ts`       | Small helpers for answering and reading HTTP messages.                                                             |
+| `main.ts`       | Starts the sign in part as its own process (Playwright).                                                           |
 
 A part is switched on by its options. `clientId` and `clientSecret` give the sign in; `appId` and
-`publicKeyPem` give the GitHub App API (give both options of a part or neither). A part that is not
+`publicKeyPem` give the GitHub App API (give both options of a part or neither); `manifestFlow: true`
+(`GITHUB_FAKE_MANIFEST_FLOW=true`) lets apps be created through the manifest flow and switches the sign in and
+the GitHub App API on for them even without a first app. A part that is not
 switched on answers 404, and its controls (`addUser`, `addInstallation`, ...) are not there. In the
-app's tests `startTestGithub()` (`app/src/test-support/github-fake.ts`) starts it with both parts.
+app's tests `startTestGithub()` (`app/src/test-support/github-fake.ts`) starts it with all three parts.
 
 ## Sign in
 
@@ -34,8 +38,28 @@ app's tests `startTestGithub()` (`app/src/test-support/github-fake.ts`) starts i
 | `GET /user/memberships/orgs/:org`                                                            | The signed in account's own membership in an organization, like GitHub: needs the `read:org` scope (else 403), 401 for an unknown or revoked token, 404 when not a member, otherwise 200 with `state` (`active` or `pending`), `role` and `organization.login`. |
 | `GET /__fake/health`, `POST /__fake/users`, `POST /__fake/org-members`, `POST /__fake/reset` | Control endpoints for tests that run the fake as its own process (Playwright). `POST /__fake/users` takes a JSON `FakeGithubUser`; `POST /__fake/org-members` takes `{ org, login, state? }`.                                                                   |
 
-The app does not call `/user/emails` (it stores a noreply address); the endpoint is there for tickets
-that may need it.
+The app reads `/user/emails` to get the verified primary address (the account permission "Email addresses"): like
+GitHub, the endpoint answers for the user token of a GitHub App only when the app holds that permission (the app
+registered at start holds it unless a test calls `setAppAccountPermissions({})`), or, for an OAuth app, with the
+`user:email` scope. A client id that was created by the manifest flow only accepts the callback addresses of its
+manifest as `redirect_uri`, like GitHub.
+
+| Endpoint                              | Behavior                                                                                                                                                                                                                      |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /applications/:client_id/token` | "Check a token" with the client credentials as basic authentication: 404 for a token that does not exist when the pair is right, 401 when it is not. This is how the app asks whether a client id and secret belong together. |
+
+## The manifest flow
+
+| Endpoint                                                                              | Behavior                                                                                                                                                                                                                                                                                             |
+| ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /settings/apps/new?state=`, `POST /organizations/:org/settings/apps/new?state=` | The creation page GitHub shows after the browser posts a `manifest` form field: the manifest's name and a "Create GitHub App" button. 422 for a manifest that is not JSON with a `redirect_url`.                                                                                                     |
+| `POST /settings/apps/new/confirm`                                                     | What the button posts. Remembers the manifest under a one-time `code` and redirects to the manifest's `redirect_url` with `code` and the `state` it was given.                                                                                                                                       |
+| `POST /app-manifests/:code/conversions`                                               | Trades the code for the new App's credentials, once (404 afterwards): id, slug, `client_id`, `client_secret`, `webhook_secret` and `pem`, a real RSA key pair made for the App. The App is registered: its JWTs are accepted by the GitHub App API part, its client credentials by the sign in part. |
+| `GET /app`                                                                            | The App named by a valid App JWT: id, slug, owner, permissions and events (the permissions the manifest asked for; the app registered at start reports `setAppPermissions` and its account permissions).                                                                                             |
+
+`github.confirmManifest(postUrl, manifest)` does what the person does (posts the form, presses the button) and resolves
+to the address the browser is sent back to; `postedManifests()`, `conversionCodes()` and `registeredApps()` read what
+happened. Failures are injected like everywhere (`fail({ pathIncludes: "/app-manifests/", status: 404 })`, `delayMs`).
 
 ## The GitHub App API
 
@@ -161,8 +185,9 @@ GITHUB_FAKE_CLIENT_ID=id GITHUB_FAKE_CLIENT_SECRET=secret GITHUB_FAKE_PORT=4010 
 ```
 
 `app/playwright.config.ts` starts it next to the app with fixed dummy credentials, including the
-public half of the throwaway GitHub App key it gives the app (`GITHUB_FAKE_APP_ID`,
-`GITHUB_FAKE_APP_PUBLIC_KEY`), so the process serves the sign in and the GitHub App API. Each journey
+public half of the throwaway GitHub App key (`GITHUB_FAKE_APP_ID`, `GITHUB_FAKE_APP_PUBLIC_KEY`; the run enters
+the App with its private half in the admin portal of the apps, `e2e/setup/prepare-apps.e2e.ts`) and
+`GITHUB_FAKE_MANIFEST_FLOW=true`, so the process serves the sign in, the GitHub App API and the manifest flow. Each journey
 adds the accounts and installations it needs (`app/e2e/helpers/github-fake.ts`: `POST /__fake/users`,
 `POST /__fake/installations` with `{ installation, repositories }`) and never resets the fake, because
 other spec files run at the same time.

@@ -14,6 +14,7 @@ the first-run setup that creates the admin is `src/setup/`.
 | `sign-up-rule-state.ts`             | Whether an email or domain rule is fail-closed right now (no mail server, and sign-in is not GitHub only), and whether the instance can verify addresses at all; the sign-up reads the same functions (`src/signup/availability.ts`) |
 | `http.ts`, `errors.ts`, `shared.ts` | The handlers of `GET\|PUT /api/admin/settings` and `POST /api/admin/mail/test`, their stable error codes, and the wiring of the running server                                                                                       |
 | `ui/`                               | The pages' building blocks: navigation, overview, the forms (tenancy, sign-up rule, ways to sign in, limits, mail server with the test mail button), the copy for the error codes. Pages: `src/app/(app)/instance-portal/`           |
+| GitHub                              | The Integrations page (the GitHub App, the one-click and the manual way, the sign in with GitHub, the admin's own GitHub account) is `src/github-config/`; its data routes are below `/api/admin/github`                             |
 
 The command line for a lost admin password is `src/admin-cli/` (below).
 
@@ -46,7 +47,7 @@ The command line for a lost admin password is `src/admin-cli/` (below).
 
 The proxy is not the only guard. Every page and the layout call `requireAdmin()` (a person who is not an
 admin gets `notFound()`, `session.test.ts` runs every page as such a person), every data route hands
-`lookupAdmin` to `createAdminRouteHandlers`, which checks it before anything is read (401 for nobody, the
+`lookupAdmin` to `createAdminRouteHandlers` (or `createGithubRouteHandlers`, `src/github-config/http.ts`), which checks it before anything is read (401 for nobody, the
 Next.js `notFound()` for somebody who is not an admin). `portal-guards.test.ts` fails for a page or route
 that forgot it, and for a file of Server Functions inside the portal's folders (the portal has none: its
 forms call the data route, which is also where the cross-site check lives).
@@ -81,8 +82,10 @@ A Postgres port needs a row lock on the tenancy setting in both places.
 `effectiveSignInMethods` is what is actually on. Nothing saved: email with password, and GitHub where it is
 configured. GitHub that is switched on but not configured offers nothing. If that would leave no way in
 (a saved GitHub only whose configuration is gone), email with password stays on, so nobody is locked out.
-"GitHub is configured" is the GitHub OAuth app of the environment today (`src/auth/sign-in-methods.ts`); the
-GitHub issue of the portal moves it into the database and changes only `getAdminService()`.
+"GitHub is configured" means the GitHub App's user authorization (client id and a secret that can be read) is saved in the
+database (`isGithubSignInConfigured` in `src/github-config/shared.ts`, read on every call). "GitHub only" asks for a GitHub
+identity linked to the acting admin (`github-identity.ts`: a row in `accounts`), which the admin links under Integrations
+(`src/github-signin/README.md`).
 
 ## The secret store
 
@@ -100,7 +103,7 @@ GitHub issue of the portal moves it into the database and changes only `getAdmin
 - A secret that cannot be decrypted (a changed row, another `APP_SECRET`, an unknown key version) is the
   state `undecryptable` with the code `secret_undecryptable` or `secret_key_version_unknown`. Nothing throws
   and nothing logs; the overview tells the admin to enter it again.
-- The mail form saves the SMTP password through `PUT /api/admin/settings` (`{ "smtp": { ..., "password": "..." } }`); an empty or missing password keeps the stored one only while host, port, user and security are unchanged (otherwise `password_required_for_new_server`), `clearPassword` removes it, and the answer, the settings read back and every log line say only that one is set (`configured`), cannot be read (`unreadable`) or is missing (`none`). The GitHub form of the next issue uses the store the same way.
+- The mail form saves the SMTP password through `PUT /api/admin/settings` (`{ "smtp": { ..., "password": "..." } }`); an empty or missing password keeps the stored one only while host, port, user and security are unchanged (otherwise `password_required_for_new_server`), `clearPassword` removes it, and the answer, the settings read back and every log line say only that one is set (`configured`), cannot be read (`unreadable`) or is missing (`none`). The GitHub App (private key, webhook secret, client secret) uses the store the same way: `src/github-config/README.md`.
 
 ## A lost admin password
 
