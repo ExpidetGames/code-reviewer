@@ -7,6 +7,7 @@
 // whether the instance is set up must not open.
 import { NextResponse, type NextRequest } from "next/server";
 import { decideSetupGate } from "./gate.ts";
+import { SETUP_REWRITE_HEADER } from "./paths.ts";
 import type { SetupStateReader } from "./state.ts";
 
 const NO_STORE = { "cache-control": "no-store" };
@@ -53,10 +54,16 @@ export function createSetupGate({
           { error: "setup_required" },
           { status: 503, headers: NO_STORE },
         );
-      case "show_setup":
-        return NextResponse.rewrite(new URL("/setup", request.url), {
-          headers: NO_STORE,
-        });
+      case "show_setup": {
+        // The proxy builds no address for the setup page (src/setup/paths.ts): a rewrite to
+        // `request.url` would carry the protocol and host Next.js made of the request, a client's
+        // `X-Forwarded-Proto` included, and Next.js forwards a rewrite to another origin to that
+        // server, which answered 500 (#155, the same fix as #146 for the admin portal). The request
+        // goes on marked and `next.config.ts` serves it from the setup page.
+        const headers = new Headers(request.headers);
+        headers.set(SETUP_REWRITE_HEADER, "1");
+        return NextResponse.next({ request: { headers }, headers: NO_STORE });
+      }
       case "not_found":
         return isApiPath(pathname)
           ? NextResponse.json(
