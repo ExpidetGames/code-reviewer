@@ -10,6 +10,8 @@ import {
 import { createIntegrationDirectory } from "../db/repositories/integration-directory-repository.ts";
 import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
+import { createGithubCredentialStore } from "../github-config/credentials.ts";
+import type { GithubAppConfig } from "../integrations/providers/github-app/config.ts";
 import { createDefaultIntegrationRegistry } from "../integrations/registry.ts";
 import {
   createIntegrationSync,
@@ -19,19 +21,63 @@ import { TEST_WEBHOOK_SECRET } from "./github-app.ts";
 import { defaultWorkspaceId } from "./workspaces.ts";
 import { startGithubAppHarness } from "./github-app-harness.ts";
 import { createTestDatabase } from "./test-database.ts";
+import { insertUser } from "./users.ts";
 
 export async function startSyncHarness(
   options: {
     requestTimeoutMs?: number;
     /** Replaces or (with undefined) removes GitHub App variables. */
     env?: Record<string, string | undefined>;
+    /**
+     * Keeps the GitHub App only in the database, as the admin portal saves it (the encrypted secret store and
+     * the settings), and removes every GitHub App variable: the provider then reads what the running server
+     * reads, per request, from the credential store.
+     */
+    credentialsFromDatabase?: boolean;
   } = {},
 ) {
   const github = await startGithubAppHarness();
   Object.assign(github.env, options.env);
   const { db } = await createTestDatabase();
+  let loadConfig: (() => Promise<GithubAppConfig>) | undefined;
+  if (options.credentialsFromDatabase === true) {
+    const appEnv = { ...github.env };
+    for (const name of [
+      "GITHUB_APP_ID",
+      "GITHUB_APP_SLUG",
+      "GITHUB_APP_PRIVATE_KEY",
+      "GITHUB_APP_PRIVATE_KEY_PATH",
+      "GITHUB_APP_WEBHOOK_SECRET",
+    ])
+      delete github.env[name];
+    await insertUser(db, { id: "portal-admin", isInstanceAdmin: true });
+    const store = createGithubCredentialStore({
+      db,
+      appSecret: appEnv.APP_SECRET ?? "",
+      env: github.env,
+    });
+    await store.persistApp({
+      actorId: "portal-admin",
+      stored: {
+        appId: appEnv.GITHUB_APP_ID ?? "",
+        slug: appEnv.GITHUB_APP_SLUG ?? "",
+        clientId: null,
+        privateApp: true,
+        origin: "manual",
+      },
+      privateKey: appEnv.GITHUB_APP_PRIVATE_KEY ?? "",
+      webhookSecret: appEnv.GITHUB_APP_WEBHOOK_SECRET ?? "",
+      clientSecret: { kind: "keep" },
+    });
+    loadConfig = async () => {
+      const loaded = await store.load();
+      if (!loaded.app.ok) throw new Error("The GitHub App is not configured.");
+      return loaded.app.config;
+    };
+  }
   const registry = createDefaultIntegrationRegistry({
     env: github.env,
+    ...(loadConfig === undefined ? {} : { loadConfig }),
     githubClient: {
       now: github.clock.now,
       requestTimeoutMs: options.requestTimeoutMs ?? 5000,

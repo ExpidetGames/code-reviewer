@@ -45,7 +45,7 @@ function addOpenPullRequest(h: WebhookHarness) {
   });
 }
 
-// #102-GH-10: unchanged by the move of the webhook secret into the database; the secret is read from the store.
+// #102-GH-10: these tests pass unchanged; the route also works with the App only in the database (see the last describe of github-app-route.integration.test.ts).
 describe("a pull request delivery", () => {
   // CR-22-T01
   it("hands one review trigger for the head commit to the intake and answers 202", async () => {
@@ -886,5 +886,35 @@ describe("what the route lets out", () => {
       expect(everything).not.toContain(secret);
     expect(responses.map((r) => r.status)).toEqual([500, 401, 401, 401, 500]);
     expect(h.logLines().length).toBeGreaterThan(0);
+  });
+});
+
+describe("a delivery while the GitHub App is only in the database", () => {
+  // #102-GH-10
+  it("is verified with the webhook secret from the secret store and handed over as before", async () => {
+    const h = await startWebhookHarness({ credentialsFromDatabase: true });
+    await h.seedInstallation();
+
+    const response = await h.deliver("pull_request.opened");
+
+    expect(response.status).toBe(202);
+    expect(await json(response)).toEqual({
+      status: "accepted",
+      outcome: "trigger_enqueued",
+    });
+    expect(h.intake.triggers).toHaveLength(1);
+  });
+
+  // #102-GH-10
+  it("refuses a delivery signed with a secret the store does not hold", async () => {
+    const h = await startWebhookHarness({ credentialsFromDatabase: true });
+    await h.seedInstallation();
+
+    const response = await h.deliver("pull_request.opened", {
+      secret: "a-secret-from-an-old-installation",
+    });
+
+    expect(response.status).toBe(401);
+    expect(h.intake.triggers).toHaveLength(0);
   });
 });
