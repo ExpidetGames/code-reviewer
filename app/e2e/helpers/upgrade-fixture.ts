@@ -8,13 +8,13 @@ import type { LegacySeed } from "../../src/test-support/legacy-installation";
 
 /** The GitHub organization of the allow list and of the installation. */
 export const UPGRADE_ORG = { login: "upgrade-org", id: 7790001 } as const;
-export const UPGRADE_INSTALLATION_ID = 9700001;
+export const UPGRADE_INSTALLATION_ID = 9720001;
 export const UPGRADE_WIDGETS = {
-  id: 9800001,
+  id: 9820001,
   fullName: "upgrade-org/widgets",
 };
 export const UPGRADE_GADGETS = {
-  id: 9800002,
+  id: 9820002,
   fullName: "upgrade-org/gadgets",
 };
 
