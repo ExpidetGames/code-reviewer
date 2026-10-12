@@ -449,6 +449,67 @@ test.describe(
       ).toBe('{"emailPassword":true,"github":false}');
     });
 
+    // #203-T17
+    test("a historical run of a removed command stays readable in the browser and Review now starts a fresh review", async ({
+      page,
+    }) => {
+      test.setTimeout(180_000);
+      await signInAsOperator(page);
+
+      await page.getByRole("link", { name: "Runs", exact: true }).click();
+      await expect(
+        page.getByRole("heading", { level: 1, name: "Runs" }),
+      ).toBeVisible();
+      // The seeded `/ask` run (PR #4 of the widgets project) is in the list with its old command.
+      const historical = page
+        .getByRole("listitem")
+        .filter({ hasText: `${UPGRADE_WIDGETS.fullName} #4` });
+      await expect(historical).toContainText("/ask");
+      await historical
+        .getByRole("link", { name: `${UPGRADE_WIDGETS.fullName} #4` })
+        .click();
+      await expect(
+        page.getByRole("heading", {
+          level: 1,
+          name: `${UPGRADE_WIDGETS.fullName} #4`,
+        }),
+      ).toBeVisible();
+      await expect(page.getByText("/ask", { exact: true })).toBeVisible();
+      // The historical question is read-only text and escaped (never rendered as HTML).
+      await expect(page.locator(".run-question")).toContainText(
+        "<img src=x onerror=alert(1)> a historical question",
+      );
+      await expect(page.locator(".run-question img")).toHaveCount(0);
+
+      // Review now works on the upgraded installation and the real runner finishes the new run.
+      await page.getByRole("link", { name: "Projects", exact: true }).click();
+      await page
+        .getByRole("link", { name: UPGRADE_WIDGETS.fullName, exact: true })
+        .click();
+      await expect(
+        page.getByRole("heading", {
+          level: 1,
+          name: UPGRADE_WIDGETS.fullName,
+        }),
+      ).toBeVisible();
+      await page.getByRole("radio").first().check();
+      await page.getByRole("button", { name: "Review now" }).click();
+      await expect(page.getByRole("status")).toContainText(
+        "Started: review for pull request",
+      );
+      await page
+        .getByRole("status")
+        .getByRole("link", { name: "View the run" })
+        .click();
+      await expect(page.getByRole("heading", { level: 1 })).toContainText(
+        UPGRADE_WIDGETS.fullName,
+      );
+      await expect(page.getByText("/review", { exact: true })).toBeVisible();
+      await expect(page.getByText("Succeeded")).toBeVisible({
+        timeout: RUN_TIMEOUT,
+      });
+    });
+
     // #106-IM-07
     test("the admin reads what changed: who was not made a member, the logins that never signed in, the organization that is not migrated", async ({
       page,

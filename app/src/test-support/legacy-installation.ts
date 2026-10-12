@@ -278,7 +278,10 @@ async function seedLegacyRows(db: OldDb, seed: LegacySeed): Promise<void> {
             pr_url: `https://github.test/${repository.fullName}/pull/${String(number)}`,
             head_sha: String(number).repeat(40).slice(0, 40),
             command: run.command,
-            args: run.command === "ask" ? "a historical question" : "",
+            args:
+              run.command === "ask"
+                ? "<img src=x onerror=alert(1)> a historical question"
+                : "",
             trigger_kind: "comment",
             actor_login: seed.users[0]?.login ?? "someone",
             delivery_id: null,
