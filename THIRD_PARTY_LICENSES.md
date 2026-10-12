@@ -54,9 +54,22 @@ match the license shipped in the new release.
   repository** under `app/src/components/ui/` (that is how shadcn/ui is used), so the MIT notice
   must travel with them. Each copied file keeps a `// SPDX-License-Identifier: MIT` header with a
   provenance line; every other source file stays Apache-2.0 (`app/src/ci/spdx-headers/rules.ts`).
-- Components copied so far: none. The component-kit issue (#167) and the screen issues copy the
-  first ones; this section lists them as they arrive. `app/src/lib/utils.ts` (`cn`) follows
-  shadcn/ui's helper but is a two-line composition and stays Apache-2.0.
+- Components copied so far (27, all under `app/src/components/ui/`): `alert`, `alert-dialog`,
+  `avatar`, `badge`, `breadcrumb`, `button`, `card`, `checkbox`, `collapsible`, `dialog`,
+  `dropdown-menu`, `empty`, `field`, `input`, `label`, `progress`, `radio-group`, `select`,
+  `separator`, `sheet`, `sidebar`, `skeleton`, `switch`, `table`, `tabs`, `textarea`, `tooltip`.
+  They use the Radix UI primitives through the unified `radix-ui` package (the primitive set the
+  current shadcn registry ships for Tailwind v4), which is a normal dependency and MIT-licensed.
+- A few of the copies carry a small local adaptation; a re-copy has to re-apply it (the file keeps
+  the MIT header and the provenance line): the application `button`, `badge` and `alert` add this
+  project's variants and the button a native-control reset (Tailwind's preflight reset is only
+  enabled with the legacy-CSS cleanup, #185); the `dialog`, `alert-dialog` and `sheet` overlays use
+  the `--overlay` token instead of `bg-black`; `progress` passes `value` to the Radix root so it
+  exposes `aria-valuenow`; `sidebar`'s `SidebarMenuSkeleton` derives a stable width from `useId`
+  (the React compiler rejects `Math.random` during render).
+- `app/src/lib/utils.ts` (`cn`) and `app/src/hooks/use-mobile.ts` (`useIsMobile`) follow shadcn/ui's
+  helpers but are short compositions of our own that stay Apache-2.0; they are not copied
+  components.
 
 ```text
 MIT License
@@ -84,7 +97,7 @@ SOFTWARE.
 
 The Tailwind CSS v4 packages the app installs (`tailwindcss`, `@tailwindcss/postcss`) and the
 shadcn runtime dependencies (`clsx`, `tailwind-merge`, `class-variance-authority`, `lucide-react`,
-`tw-animate-css`) are MIT/Apache-2.0/ISC and need no exception.
+`tw-animate-css`, `radix-ui`) are MIT/Apache-2.0/ISC and need no exception.
 
 ## Dependency license review
 
