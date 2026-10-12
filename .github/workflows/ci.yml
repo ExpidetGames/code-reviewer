@@ -68,6 +68,23 @@ jobs:
     if: ${{ github.event_name == 'push' || github.base_ref == 'main' || needs.changes.outputs.app == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    # The database integration tests run against both SQLite (the default of the test suite) and this
+    # Postgres service container; TEST_DATABASE_URL turns the Postgres tests on (they skip without
+    # it). The credentials are throwaway: CI uses no repository secret.
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     defaults:
       run:
         working-directory: app
@@ -92,6 +109,9 @@ jobs:
       - name: Unit tests
         run: pnpm test
       - name: Integration tests on the host
+        # SQLite plus the Postgres service container above.
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
         run: pnpm test:int
       - name: Build
         # Placeholder environment for the production build. Required settings get a dummy value

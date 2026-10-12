@@ -101,6 +101,18 @@ describe("CI workflow triggers and jobs", () => {
     }
   });
 
+  // #105-PG-04
+  it("runs the database integration tests against a Postgres service container as well as SQLite", () => {
+    const job = jobNamed("app-fast");
+    const services = job.services as
+      Record<string, { image?: string }> | undefined;
+    const integration = steps(job).find((step) => step.run === "pnpm test:int");
+    const environment = integration?.env as Record<string, string> | undefined;
+
+    expect(services?.postgres?.image).toMatch(/^postgres:/);
+    expect(environment?.TEST_DATABASE_URL).toMatch(/^postgres:\/\//);
+  });
+
   // CR-16-T01
   it("checks lint, formatting, types and the unit, integration and contract tests of the runner", () => {
     const lines = commandLines(jobNamed("runner-fast"));

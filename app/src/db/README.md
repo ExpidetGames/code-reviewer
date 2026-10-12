@@ -4,18 +4,20 @@ Kysely on SQLite (better-sqlite3). The whole layer lives in this folder; nothing
 opens a database or writes SQL. The one exception is `src/backup/` (backup and restore: `VACUUM INTO`,
 `integrity_check`, a command line that runs without Next.js; see its README).
 
-| File                        | Role                                                                                                                                                                         |
-| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `config.ts`                 | Reads `DATABASE_PATH` and `DATABASE_BUSY_TIMEOUT_MS` from the environment                                                                                                    |
-| `connection.ts`             | `openDatabase(config)`: checks the directory, opens the file, sets the pragmas                                                                                               |
-| `dialect.ts`                | Kysely's SQLite dialect with `begin immediate` transactions and transactional DDL                                                                                            |
-| `migrate.ts`, `migrations/` | `migrateToLatest(db)` and the ordered list of migrations                                                                                                                     |
-| `startup.ts`                | What the server does on start; `getDatabase()` hands the connection out                                                                                                      |
-| `schema.ts`                 | Row types of every table (`Database`)                                                                                                                                        |
-| `codecs.ts`                 | The only code that knows how JSON, booleans and timestamps are stored                                                                                                        |
-| `repositories/`             | One small module per table (or aggregate); the only code that queries it. Exception: `users`, `sessions`, `accounts` and `verifications` belong to Better Auth (`src/auth/`) |
-| `workspace-scope.ts`        | `WorkspaceId`, the type of the workspace parameter every scoped repository takes (see "Workspace scoping")                                                                   |
-| `errors.ts`                 | `DatabaseError` with stable codes (`DATABASE_CONFIG_INVALID`, `DATABASE_DIRECTORY_UNAVAILABLE`, `DATABASE_OPEN_FAILED`, `DATABASE_LOCKED`, `MIGRATION_FAILED`)               |
+| File                        | Role                                                                                                                                                                                           |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `config.ts`                 | Reads `DATABASE_URL` (SQLite or Postgres), `DATABASE_PATH` and `DATABASE_BUSY_TIMEOUT_MS` / `DATABASE_POOL_MAX` from the environment; `describeDatabaseTarget` is the safe form for a log line |
+| `connection.ts`             | `openDatabase(config)`: SQLite (checks the directory, opens the file, sets the pragmas) or Postgres (`postgres.ts`)                                                                            |
+| `postgres.ts`               | Kysely's Postgres dialect over the `pg` driver's pool, and the startup reachability check (`assertPostgresReachable`)                                                                          |
+| `driver.ts`                 | `databaseDriver(db)`: which engine a connection speaks, for the one dialect-specific statement (the claim)                                                                                     |
+| `dialect.ts`                | Kysely's SQLite dialect with `begin immediate` transactions and transactional DDL                                                                                                              |
+| `migrate.ts`, `migrations/` | `migrateToLatest(db)` and the ordered list of migrations                                                                                                                                       |
+| `startup.ts`                | What the server does on start; `getDatabase()` hands the connection out                                                                                                                        |
+| `schema.ts`                 | Row types of every table (`Database`)                                                                                                                                                          |
+| `codecs.ts`                 | The only code that knows how JSON, booleans and timestamps are stored                                                                                                                          |
+| `repositories/`             | One small module per table (or aggregate); the only code that queries it. Exception: `users`, `sessions`, `accounts` and `verifications` belong to Better Auth (`src/auth/`)                   |
+| `workspace-scope.ts`        | `WorkspaceId`, the type of the workspace parameter every scoped repository takes (see "Workspace scoping")                                                                                     |
+| `errors.ts`                 | `DatabaseError` with stable codes (`DATABASE_CONFIG_INVALID`, `DATABASE_DIRECTORY_UNAVAILABLE`, `DATABASE_OPEN_FAILED`, `DATABASE_LOCKED`, `MIGRATION_FAILED`)                                 |
 
 ## Why better-sqlite3
 
@@ -27,7 +29,29 @@ configuration. The alternative, Node's built-in `node:sqlite`, has no Kysely dia
 `pnpm-workspace.yaml` allows its install script (`onlyBuiltDependencies`) so the native binary is
 available after `pnpm install --frozen-lockfile`.
 
-## Connection settings
+## SQLite and Postgres
+
+`DATABASE_URL` selects the engine (docs/decisions/0001-editions-setup-and-accounts.md, section 2.1;
+docs/deployment-large.md): empty, a path or a `sqlite:` URL means SQLite (the default file stays
+`/data/app.db`), `postgres://` or `postgresql://` means an external Postgres. `DATABASE_PATH` keeps
+working for installations that never set `DATABASE_URL`. An invalid value stops the start with
+`DATABASE_CONFIG_INVALID`; the message never repeats the URL (a Postgres URL carries the password).
+
+The schema, the migrations, the codecs and the query builder are the same on both. A schema parity
+test (`postgres.integration.test.ts`) compares the tables, columns, nullability and mapped types of
+the two. What differs, and why:
+
+- The **claim** of a job (`repositories/jobs-claim.ts`): SQLite relies on its single write lock and
+  `begin immediate`, Postgres on `FOR UPDATE SKIP LOCKED` plus the partial unique index
+  `jobs_one_running_per_pull_request_unique` (present on both) and a savepoint retry when a
+  concurrent claim is rejected by it.
+- **Migrations** run behind Postgres' advisory lock (Kysely's own), so several instances starting at
+  once take turns and each migration is applied once; a failure rolls the whole batch back
+  (transactional DDL). SQLite's equivalent is its write lock (see "Migrations").
+- The **backup scheduler** starts only for SQLite. With Postgres the operator backs up the database,
+  one log line says so, and `/api/backup/status` reports backups as not applicable (`src/backup/`).
+
+## SQLite: connection settings
 
 Applied by `openDatabase` on every connection: `busy_timeout` from the configuration (default
 5000 ms, set before anything else so even the switch to WAL waits for a lock), `journal_mode = WAL`,
@@ -282,7 +306,8 @@ redelivery produces no second trigger; rows are pruned after 7 days; see `src/we
 `jobs` (migration `20261010191500_create_jobs`, rebuilt by `20261011160100_add_workspace_to_customer_data`;
 the scoped repository `jobs-repository.ts` creates, drops and reads jobs, the instance level
 `runner-jobs-repository.ts` with the claim in `jobs-claim.ts` hands them to runners) is the job queue (the index `jobs_repository_recent`, migration `20261011100000_add_jobs_repository_recent_index`, serves the runs pages: newest job of a repository, `runs-repository.ts`); the rules (dedupe, supersession, leases, attempts, timeouts) are
-in `src/jobs/README.md`. `jobs-claim.ts` holds the one statement written for SQLite (see its head
+in `src/jobs/README.md`. `jobs-claim.ts` holds the one statement written for a dialect (SQLite's
+single write lock or Postgres' `FOR UPDATE SKIP LOCKED` plus a savepoint retry; see its head
 comment); everything else is query builder code.
 
 `app_settings` (migration `20261010201500_create_app_settings`, rebuilt per workspace by
@@ -331,3 +356,9 @@ Anything that touches this layer is an `*.integration.test.ts` against a real SQ
 `createTestDatabase()` copies it into a fresh temporary directory for each test and removes it
 afterwards, so workers never share data. Tests that need a second connection or a second app
 instance use a real child process (`db-process.ts`, `db-child.ts`).
+
+Postgres tests run only when `TEST_DATABASE_URL` points at a Postgres server (CI provides a service
+container; a developer starts a throwaway `postgres:18`). `src/test-support/postgres-test-database.ts`
+creates one database per test (`createPostgresTestDatabase`), migrated to the latest schema and
+dropped afterwards; `connectPostgres` opens a second connection to the same database for
+two-instance tests. `pg` is the Postgres driver, in the app image next to `better-sqlite3`.
