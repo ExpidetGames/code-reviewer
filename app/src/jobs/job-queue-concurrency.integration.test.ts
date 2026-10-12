@@ -84,8 +84,16 @@ describe("claiming from two processes", () => {
 
   it("never runs two jobs of one pull request, even when two runners claim at the same moment", async () => {
     const fixture = await createJobQueueFixture();
-    await fixture.enqueueNew({ headSha: sha("a") });
-    await fixture.enqueueNew({ headSha: sha("b"), command: "improve" });
+    await fixture.enqueueNew({
+      headSha: sha("a"),
+      triggerKind: "comment",
+      args: "first",
+    });
+    await fixture.enqueueNew({
+      headSha: sha("b"),
+      triggerKind: "comment",
+      args: "second",
+    });
 
     const answers = await runTogether<{
       job: Job | null;

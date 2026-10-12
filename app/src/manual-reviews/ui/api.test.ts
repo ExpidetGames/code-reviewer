@@ -35,15 +35,14 @@ describe("the manual start API", () => {
 
     await createManualReviewApi(fetchImpl, "acme").startReview("repo-1", {
       prNumber: 7,
-      command: "ask",
-      question: "Why?",
+      command: "review",
     });
 
     expect(fetchImpl).toHaveBeenCalledWith(
       "/api/w/acme/repositories/repo-1/reviews",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ prNumber: 7, command: "ask", question: "Why?" }),
+        body: JSON.stringify({ prNumber: 7, command: "review" }),
       }),
     );
   });

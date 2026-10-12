@@ -20,6 +20,8 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
     "The pull request was closed before this run could start.",
   pull_request_draft:
     "The pull request was turned into a draft before this run could start.",
+  command_removed:
+    "This command was removed from the product, so the waiting run was cancelled.",
 
   // The claim of the runner API
   llm_not_configured:
@@ -36,8 +38,7 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
   git_access_failed:
     "The server could not get access to the repository on GitHub.",
   pr_not_found: "The pull request could not be found on GitHub.",
-  job_args_invalid:
-    "The question or arguments of this command could not be used.",
+  job_args_invalid: "The command or arguments of this run could not be used.",
   job_env_invalid:
     "The review settings of this project could not be used for this run. Check them on the project page.",
   job_llm_options_invalid:

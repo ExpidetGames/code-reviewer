@@ -1,35 +1,41 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Pins down which bodies may start a review by hand: the pull request number, the command and, for
-// `ask`, a question. Every problem is reported per field, and a question is cleaned like one written
-// in a comment (no image links).
+// Pins down which bodies may start a review by hand: since #203 the only command is `/review`, and
+// it takes no text. Every problem is reported per field, and a supplied question is refused (not
+// ignored) with a value-free code.
 import { describe, expect, it } from "vitest";
-import {
-  ASK_QUESTION_MAX_CHARS,
-  ASK_QUESTION_RAW_MAX_CHARS,
-} from "../integrations/comment-command.ts";
 import { validateStartInput } from "./start-input.ts";
 
 describe("the body that starts a review", () => {
-  it("accepts a command without a question and ignores a question that was sent along", () => {
-    expect(
-      validateStartInput({ prNumber: 7, command: "review", question: "why?" }),
-    ).toEqual({
+  // #203-T05
+  it("accepts /review without any question", () => {
+    expect(validateStartInput({ prNumber: 7, command: "review" })).toEqual({
       ok: true,
-      value: { prNumber: 7, command: "review", question: "" },
+      value: { prNumber: 7, command: "review" },
     });
   });
 
-  it.each(["review", "improve", "describe", "ask"])(
-    "knows the command %s",
-    (command) => {
-      const result = validateStartInput({
-        prNumber: 1,
-        command,
-        question: "How does this work?",
+  // #203-T05
+  it("refuses a supplied question, whatever it holds", () => {
+    for (const question of ["why?", "", "   ", 5, null]) {
+      expect(
+        validateStartInput({ prNumber: 7, command: "review", question }),
+        String(question),
+      ).toEqual({
+        ok: false,
+        issues: [{ field: "question", code: "invalid" }],
       });
+    }
+  });
 
-      expect(result.ok).toBe(true);
+  // #203-T05
+  it.each(["ask", "improve", "describe"])(
+    "refuses the removed command %s",
+    (command) => {
+      expect(validateStartInput({ prNumber: 7, command })).toEqual({
+        ok: false,
+        issues: [{ field: "command", code: "invalid" }],
+      });
     },
   );
 
@@ -69,13 +75,18 @@ describe("the body that starts a review", () => {
   });
 
   it("reports every unusable field at once", () => {
-    const result = validateStartInput({ prNumber: "abc", command: "deploy" });
+    const result = validateStartInput({
+      prNumber: "abc",
+      command: "ask",
+      question: "why?",
+    });
 
     expect(result).toEqual({
       ok: false,
       issues: [
         { field: "prNumber", code: "invalid" },
         { field: "command", code: "invalid" },
+        { field: "question", code: "invalid" },
       ],
     });
   });
@@ -86,129 +97,4 @@ describe("the body that starts a review", () => {
       expect(validateStartInput(body)).toMatchObject({ ok: false });
     },
   );
-
-  // CR-33-T06
-  it.each([undefined, "", "   ", "\n\t "])(
-    "refuses an ask without a question (%j)",
-    (question) => {
-      const result = validateStartInput({
-        prNumber: 7,
-        command: "ask",
-        question,
-      });
-
-      expect(result).toEqual({
-        ok: false,
-        issues: [{ field: "question", code: "required" }],
-      });
-    },
-  );
-
-  it("refuses a question that is not text", () => {
-    const result = validateStartInput({
-      prNumber: 7,
-      command: "ask",
-      question: 5,
-    });
-
-    expect(result).toEqual({
-      ok: false,
-      issues: [{ field: "question", code: "invalid" }],
-    });
-  });
-
-  it("refuses a question over the limit instead of cutting it", () => {
-    const result = validateStartInput({
-      prNumber: 7,
-      command: "ask",
-      question: "x".repeat(ASK_QUESTION_MAX_CHARS + 1),
-    });
-
-    expect(result).toEqual({
-      ok: false,
-      issues: [{ field: "question", code: "too_long" }],
-    });
-  });
-
-  it("refuses a question that is within the limit as written but grows past it once its image links are replaced", () => {
-    const written = "![]".repeat(666);
-    expect(written.length).toBeLessThanOrEqual(ASK_QUESTION_MAX_CHARS);
-
-    const result = validateStartInput({
-      prNumber: 7,
-      command: "ask",
-      question: written,
-    });
-
-    expect(result).toEqual({
-      ok: false,
-      issues: [{ field: "question", code: "too_long" }],
-    });
-  });
-
-  it("keeps a question that shrinks below the limit once its long image links are replaced", () => {
-    const written = `Is https://evil.test/${"a".repeat(2500)}.png fine?`;
-
-    const result = validateStartInput({
-      prNumber: 7,
-      command: "ask",
-      question: written,
-    });
-
-    expect(result).toEqual({
-      ok: true,
-      value: {
-        prNumber: 7,
-        command: "ask",
-        question: "Is [image link removed] fine?",
-      },
-    });
-  });
-
-  it("refuses a question far over the limit without looking at it", () => {
-    const result = validateStartInput({
-      prNumber: 7,
-      command: "ask",
-      question: "x".repeat(ASK_QUESTION_RAW_MAX_CHARS + 1),
-    });
-
-    expect(result).toEqual({
-      ok: false,
-      issues: [{ field: "question", code: "too_long" }],
-    });
-  });
-
-  it("trims a question and keeps one of exactly the limit", () => {
-    const result = validateStartInput({
-      prNumber: 7,
-      command: "ask",
-      question: `  ${"x".repeat(ASK_QUESTION_MAX_CHARS)}  `,
-    });
-
-    expect(result).toEqual({
-      ok: true,
-      value: {
-        prNumber: 7,
-        command: "ask",
-        question: "x".repeat(ASK_QUESTION_MAX_CHARS),
-      },
-    });
-  });
-
-  it("replaces image links in a question, so the runner is never made to fetch them", () => {
-    const result = validateStartInput({
-      prNumber: 7,
-      command: "ask",
-      question: "Is ![x](http://169.254.169.254/latest/) fine?",
-    });
-
-    expect(result).toEqual({
-      ok: true,
-      value: {
-        prNumber: 7,
-        command: "ask",
-        question: "Is [image link removed] fine?",
-      },
-    });
-  });
 });

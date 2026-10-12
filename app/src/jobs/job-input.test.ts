@@ -63,10 +63,13 @@ describe("validating a job to enqueue", () => {
     expect(result).toMatchObject({ ok: true, value: { headSha: SHA } });
   });
 
-  // CR-27-T12
+  // CR-27-T12, #203-T02
   it.each([
     ["empty", "", "required"],
     ["unknown", "deploy", "invalid"],
+    ["the removed ask command", "ask", "invalid"],
+    ["the removed improve command", "improve", "invalid"],
+    ["the removed describe command", "describe", "invalid"],
     ["wrongly cased", "Review", "invalid"],
     ["missing", undefined, "required"],
   ])("refuses a command that is %s", (_name, command, code) => {

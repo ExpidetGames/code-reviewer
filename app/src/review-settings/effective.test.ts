@@ -37,7 +37,7 @@ describe("the built-in review settings", () => {
       inlineKeyIssues: false,
       autoReviewOnOpen: true,
       autoReviewOnPush: true,
-      allowedCommands: ["review", "improve", "describe", "ask"],
+      allowedCommands: ["review"],
     });
   });
 });
@@ -101,7 +101,7 @@ describe("resolving the settings of a project", () => {
         largePrChunking: true,
         fallbackModel: "qwen/qwen3-coder",
         extraInstructions: "Be strict.",
-        allowedCommands: ["review", "ask"],
+        allowedCommands: ["review"],
       },
       project: {
         largePrChunking: false,
@@ -120,18 +120,13 @@ describe("resolving the settings of a project", () => {
   });
 
   it("shares no list with the layers it was made from", () => {
-    const global: ReviewSettingsOverrides = { allowedCommands: ["review"] };
+    const global: ReviewSettingsOverrides = { allowedCommands: [] };
 
     const { settings } = resolveReviewSettings({ builtIn, global });
-    settings.allowedCommands.push("ask");
+    settings.allowedCommands.push("review");
 
-    expect(global.allowedCommands).toEqual(["review"]);
-    expect(builtIn.allowedCommands).toEqual([
-      "review",
-      "improve",
-      "describe",
-      "ask",
-    ]);
+    expect(global.allowedCommands).toEqual([]);
+    expect(builtIn.allowedCommands).toEqual(["review"]);
   });
 });
 
@@ -153,17 +148,14 @@ describe("automatic reviews and commands", () => {
     },
   );
 
-  // CR-25-T04
-  it("allows exactly the commands on the list", () => {
+  // CR-25-T04, #203-T07
+  it("allows review only when the list holds it", () => {
     const settings: ReviewSettings = {
       ...builtIn,
-      allowedCommands: ["review", "ask"],
+      allowedCommands: ["review"],
     };
 
     expect(isCommandAllowed(settings, "review")).toBe(true);
-    expect(isCommandAllowed(settings, "ask")).toBe(true);
-    expect(isCommandAllowed(settings, "improve")).toBe(false);
-    expect(isCommandAllowed(settings, "describe")).toBe(false);
     expect(
       isCommandAllowed({ ...builtIn, allowedCommands: [] }, "review"),
     ).toBe(false);

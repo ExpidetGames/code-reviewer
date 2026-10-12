@@ -448,13 +448,24 @@ describe("the contract file and the options the app sends", () => {
     expect(contract.check("JobEnv", { [key]: "x" }).valid).toBe(false);
   });
 
+  it.each(["PR_REVIEWER__NUM_MAX_FINDINGS", "PR_REVIEWER__EXTRA_INSTRUCTIONS"])(
+    "accepts the key %s in the contract and in the app",
+    (key) => {
+      expect(RUNNER_ENV_KEY_PATTERN.test(key)).toBe(true);
+      expect(contract.check("JobEnv", { [key]: "x" }).valid).toBe(true);
+    },
+  );
+
   it.each([
-    "PR_REVIEWER__NUM_MAX_FINDINGS",
     "PR_QUESTIONS__EXTRA_INSTRUCTIONS",
-  ])("accepts the key %s in the contract and in the app", (key) => {
-    expect(RUNNER_ENV_KEY_PATTERN.test(key)).toBe(true);
-    expect(contract.check("JobEnv", { [key]: "x" }).valid).toBe(true);
-  });
+    "PR_DESCRIPTION__EXTRA_INSTRUCTIONS",
+  ])(
+    "refuses the removed tool's key %s in the contract and in the app",
+    (key) => {
+      expect(RUNNER_ENV_KEY_PATTERN.test(key)).toBe(false);
+      expect(contract.check("JobEnv", { [key]: "x" }).valid).toBe(false);
+    },
+  );
 
   // CR-46-T06
   it("describes the optional llm fields the runner accepts", () => {

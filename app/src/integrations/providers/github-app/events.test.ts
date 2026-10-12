@@ -232,7 +232,7 @@ describe("the order in which a comment is looked at", () => {
   it("is quick for a hostile comment of a commenter who cannot have write access", async () => {
     const start = performance.now();
     await commentEvent({
-      body: `/ask ${"![".repeat(32_000)}`,
+      body: `/review ${"![".repeat(32_000)}`,
       association: "NONE",
     });
 

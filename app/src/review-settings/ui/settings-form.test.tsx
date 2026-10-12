@@ -205,8 +205,8 @@ describe("the settings form", () => {
     expect(screen.getByText(/Use at most 4,000 characters/)).toBeTruthy();
   });
 
-  // CR-34-T06 (an unknown command cannot be typed: the form offers exactly the four that exist)
-  it("offers exactly the four comment commands", () => {
+  // CR-34-T06, #203 (an unknown command cannot be typed: the form offers exactly the one that exists)
+  it("offers exactly the one comment command that exists", () => {
     render(
       <SettingsForm
         workspaceSlug="acme"
@@ -219,7 +219,7 @@ describe("the settings form", () => {
       screen
         .getAllByRole("checkbox", { name: /^\/[a-z]+$/ })
         .map((box) => box.parentElement?.textContent),
-    ).toEqual(["/review", "/improve", "/describe", "/ask"]);
+    ).toEqual(["/review"]);
   });
 
   // CR-34-T05

@@ -96,14 +96,31 @@ export type RepoRef = {
 export const REVIEW_TRIGGER_KINDS = ["opened", "updated", "command"] as const;
 export type ReviewTriggerKind = (typeof REVIEW_TRIGGER_KINDS)[number];
 
-/** The commands a comment can trigger; the same set the runner accepts. */
-export const REVIEW_COMMANDS = [
+/**
+ * The commands the product executes today: only `/review` (#203). The same set the runner accepts;
+ * a comment that starts with a removed command is an ordinary comment (the parser returns null).
+ */
+export const REVIEW_COMMANDS = ["review"] as const;
+export type ReviewCommand = (typeof REVIEW_COMMANDS)[number];
+
+/**
+ * The commands that may still appear in stored history: the queue used to run `/improve`,
+ * `/describe` and `/ask`, and their runs stay readable. They are never executable again: no new
+ * trigger, enqueue or claim may carry one. The decoder uses this set, so an old row does not throw.
+ */
+export const STORED_REVIEW_COMMANDS = [
   "review",
   "improve",
   "describe",
   "ask",
 ] as const;
-export type ReviewCommand = (typeof REVIEW_COMMANDS)[number];
+export type StoredReviewCommand = (typeof STORED_REVIEW_COMMANDS)[number];
+
+export function isStoredReviewCommand(
+  value: unknown,
+): value is StoredReviewCommand {
+  return STORED_REVIEW_COMMANDS.some((command) => command === value);
+}
 
 /** The person or bot that caused the event. */
 export type TriggerActor = {

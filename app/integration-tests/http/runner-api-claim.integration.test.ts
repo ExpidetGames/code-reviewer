@@ -108,35 +108,16 @@ describe("claiming a job", () => {
     );
   });
 
-  it("hands the question of an ask job to the runner as its only argument", async () => {
+  // #203-T13
+  it("hands a review job the review command and no arguments, whatever text the comment had", async () => {
     const h = await startRunnerApiHarness();
-    await h.enqueueNew({ command: "ask", args: "  Why is this lock needed? " });
+    await h.enqueueNew({
+      args: 'please be nice"; rm -rf / #$(id)\n/review --a=b',
+    });
 
     const body = await h.claimed();
 
-    expect(body.job.input.command).toBe("ask");
-    expect(body.job.input.args).toStrictEqual(["Why is this lock needed?"]);
-  });
-
-  // CR-32-T14
-  it("hands a question with quotes, shell syntax and line breaks over unchanged, as one argument, and the command stays ask", async () => {
-    const h = await startRunnerApiHarness();
-    const question = 'x"; rm -rf / #$(id)\n/review --a=b\r\n`reboot`';
-    await h.enqueueNew({ command: "ask", args: question });
-
-    const body = await h.claimed();
-
-    expect(body.job.input.command).toBe("ask");
-    expect(body.job.input.args).toStrictEqual([question]);
-  });
-
-  it("hands no arguments for a command that takes none, even if the comment had text", async () => {
-    const h = await startRunnerApiHarness();
-    await h.enqueueNew({ command: "improve", args: "please be nice" });
-
-    const body = await h.claimed();
-
-    expect(body.job.input.command).toBe("improve");
+    expect(body.job.input.command).toBe("review");
     expect(body.job.input).not.toHaveProperty("args");
   });
 
@@ -487,16 +468,23 @@ describe("a job that cannot be handed out", () => {
     expect(h.issuedJobTokens()).toStrictEqual([]);
   });
 
-  it("fails an ask job without a question, so the runner is not handed a job it must refuse", async () => {
+  // #203-T10
+  it("cancels a waiting job of a removed command at claim, so no runner is handed it", async () => {
     const h = await startRunnerApiHarness();
-    const job = await h.enqueueNew({ command: "ask", args: "   " });
-
-    await h.claim();
-
-    expect(await h.queue.get(job.id)).toMatchObject({
-      status: "failed",
-      errorCode: "job_args_invalid",
+    const job = await h.seedHistoricalJob({
+      command: "ask",
+      status: "queued",
+      args: "why?",
     });
+
+    const response = await h.claim();
+
+    expect(response.status).toBe(204);
+    expect(await h.queue.get(job.id)).toMatchObject({
+      status: "cancelled",
+      errorCode: "command_removed",
+    });
+    expect(h.issuedJobTokens()).toStrictEqual([]);
   });
 
   it.each([

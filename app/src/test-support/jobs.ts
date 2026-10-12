@@ -3,12 +3,19 @@
 // Fixtures for the job queue tests: a migrated database with one integration and a few repositories,
 // a clock the test moves by hand, and a way to enqueue with sensible defaults.
 import type { Kysely } from "kysely";
+import { formatTimestamp } from "../db/codecs.ts";
 import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
+import { toJob } from "../db/repositories/jobs-repository.ts";
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
 import type { Database } from "../db/schema.ts";
 import { createJobQueue, type JobQueue } from "../jobs/job-queue.ts";
 import { createRunnerQueue, type RunnerQueue } from "../jobs/runner-queue.ts";
-import type { EnqueueJobInput, Job } from "../jobs/job-types.ts";
+import type {
+  EnqueueJobInput,
+  Job,
+  JobTriggerKind,
+} from "../jobs/job-types.ts";
+import type { JobStatus } from "../jobs/job-status.ts";
 import type { JobQueueLimits } from "../jobs/job-limits.ts";
 import { createTestDatabase } from "./test-database.ts";
 import { defaultWorkspaceId } from "./workspaces.ts";
@@ -77,6 +84,22 @@ export type JobQueueFixture = {
   tokenOf(jobId: string): Promise<string>;
   /** Enqueues, expects a new job, and returns it. */
   enqueueNew(overrides?: Partial<EnqueueJobInput>): Promise<Job>;
+  /**
+   * Inserts a job row directly, for history tests only (#203): the queue cannot create a removed
+   * command any more, but a database from before the upgrade still holds such rows.
+   */
+  seedHistoricalJob(overrides: {
+    command: "review" | "improve" | "describe" | "ask";
+    repositoryId?: string;
+    prNumber?: number;
+    /** Defaults to a finished, succeeded review. */
+    status?: JobStatus;
+    triggerKind?: JobTriggerKind;
+    args?: string;
+    result?: unknown;
+    errorCode?: string | null;
+    actorLogin?: string;
+  }): Promise<Job>;
 };
 
 export async function createJobQueueFixture(
@@ -170,6 +193,51 @@ export async function createJobQueueFixture(
       if (result.status !== "created")
         throw new Error(`Expected a new job, got: ${result.reason}`);
       return result.job;
+    },
+    async seedHistoricalJob(overrides) {
+      const status = overrides.status ?? "succeeded";
+      const timestamp = formatTimestamp(clock.now());
+      const id = crypto.randomUUID();
+      await db
+        .insertInto("jobs")
+        .values({
+          id,
+          workspace_id: workspaceId,
+          repository_id: overrides.repositoryId ?? first.id,
+          pr_number: overrides.prNumber ?? 7,
+          pr_url: "https://github.test/acme/widgets/pull/7",
+          head_sha: sha("a"),
+          command: overrides.command,
+          args: overrides.args ?? "",
+          trigger_kind: overrides.triggerKind ?? "comment",
+          actor_login: overrides.actorLogin ?? "octocat",
+          delivery_id: null,
+          status,
+          run_after: timestamp,
+          attempts: 0,
+          runner_id: null,
+          lease_token: null,
+          claimed_at: null,
+          heartbeat_at: null,
+          lease_expires_at: null,
+          result:
+            overrides.result === undefined
+              ? null
+              : JSON.stringify(overrides.result),
+          error_code: overrides.errorCode ?? null,
+          superseded_by: null,
+          created_at: timestamp,
+          updated_at: timestamp,
+          finished_at:
+            status === "queued" || status === "running" ? null : timestamp,
+        })
+        .execute();
+      const row = await db
+        .selectFrom("jobs")
+        .selectAll()
+        .where("id", "=", id)
+        .executeTakeFirstOrThrow();
+      return toJob(row);
     },
   };
 }

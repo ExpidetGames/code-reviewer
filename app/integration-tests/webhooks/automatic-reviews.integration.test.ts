@@ -667,7 +667,19 @@ describe("a draft pull request", () => {
     const t = await startHarness();
     t.h.fake.setCollaboratorPermission("acme/widgets", "bob", "write");
     await t.send("pull_request.synchronize");
-    await t.send("issue_comment.created.ask");
+    // A person job with its own arguments, so it is not the automatic job of the same pull request.
+    const person = await t.queue.enqueue({
+      repositoryId: t.repository.id,
+      prNumber: 7,
+      prUrl: "https://github.test/acme/widgets/pull/7",
+      headSha: HEAD_1,
+      command: "review",
+      args: "please",
+      triggerKind: "comment",
+      actorLogin: "bob",
+    });
+    if (person.status !== "created")
+      throw new Error("The person job was not created.");
     expect(await t.jobs()).toHaveLength(2);
 
     const response = await t.send("pull_request.converted_to_draft");
@@ -677,13 +689,13 @@ describe("a draft pull request", () => {
       outcome: "waiting_jobs_discarded",
     });
     const jobs = await t.jobs();
-    expect(jobs.find((job) => job.command === "review")).toMatchObject({
+    expect(jobs.find((job) => job.triggerKind === "webhook")).toMatchObject({
       status: "cancelled",
       errorCode: "pull_request_draft",
     });
-    expect(jobs.find((job) => job.command === "ask")?.status).toBe("queued");
+    expect((await t.queue.get(person.job.id))?.status).toBe("queued");
     t.advance(AUTOMATIC_REVIEW_DEBOUNCE_MS * 2);
-    expect((await t.queue.claimNext("runner-1"))?.job.command).toBe("ask");
+    expect((await t.queue.claimNext("runner-1"))?.job.id).toBe(person.job.id);
     expect(await t.queue.claimNext("runner-1")).toBeNull();
   });
 

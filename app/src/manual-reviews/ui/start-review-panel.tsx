@@ -2,13 +2,15 @@
 
 "use client";
 // The "Review now" panel of a project: it loads the open pull requests of the repository, lets a
-// person pick one and a command, and starts it. Everything it knows about pull requests comes from
-// the route; what it shows after a start is the answer of the route (a new run, or the run that was
-// already waiting or running), with a link to it. State is tied to the server's data in the two
-// ways that matter with Cache Components, which keeps a page that was left mounted but hidden:
-// the panel is keyed on its repository by the page, and the list is loaded in an effect, which a
-// hidden page cleans up and runs again when it is shown, so a person who comes back sees fresh
-// pull requests, not the ones from when they left.
+// person pick one and starts a review. Everything it knows about pull requests comes from the route;
+// what it shows after a start is the answer of the route (a new run, or the run that was already
+// waiting or running), with a link to it. Since #203 there is no command selector and no question:
+// the only command is `/review`, and whether a project allows it is the `allowedCommands` list.
+//
+// State is tied to the server's data in the two ways that matter with Cache Components, which keeps
+// a page that was left mounted but hidden: the panel is keyed on its repository by the page, and the
+// list is loaded in an effect, which a hidden page cleans up and runs again when it is shown, so a
+// person who comes back sees fresh pull requests, not the ones from when they left.
 import Link from "next/link";
 import {
   useCallback,
@@ -18,21 +20,17 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import type { ReviewCommand } from "../../integrations/types.ts";
 import { Button } from "../../ui/button.tsx";
 import { workspacePath } from "../../workspaces/paths.ts";
 import type { OpenPullRequests, StartedReview } from "../service.ts";
 import { browserManualReviewApi, type ManualReviewApi } from "./api.ts";
-import { CommandFields } from "./command-fields.tsx";
-import {
-  describeManualReviewFailure,
-  describeQuestionIssue,
-  QUESTION_REQUIRED_COPY,
-  staleListFailure,
-} from "./messages.ts";
+import { describeManualReviewFailure, staleListFailure } from "./messages.ts";
 import { PullRequestList } from "./pull-request-list.tsx";
 
 type Outcome = { run: StartedReview } | { problem: string } | null;
+
+/** The one command this panel starts; only `/review` exists (#203). */
+const COMMAND = "review" as const;
 
 export function StartReviewPanel({
   workspaceSlug,
@@ -52,16 +50,13 @@ export function StartReviewPanel({
   );
   const api = apiProp ?? defaultApi;
   const groupName = useId();
-  // The last list that arrived, kept when a later load fails: a typed question and the sentence about
-  // a pull request that was closed stay on screen, the failure is shown beside them.
+  // The last list that arrived, kept when a later load fails: the sentence about a pull request that
+  // was closed stays on screen, the failure is shown beside it.
   const [ready, setReady] = useState<OpenPullRequests | null>(null);
   const [loadFailure, setLoadFailure] = useState<string | null>(null);
   // Bumping it loads the list again ("Try again", "Refresh", a stale pull request).
   const [loadCount, setLoadCount] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
-  const [command, setCommand] = useState<ReviewCommand>("review");
-  const [question, setQuestion] = useState("");
-  const [questionError, setQuestionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<Outcome>(null);
   const reload = useCallback(() => {
@@ -79,17 +74,11 @@ export function StartReviewPanel({
       }
       setLoadFailure(null);
       setReady(result.data);
-      // A pick that is no longer in the list (closed meanwhile) is dropped; so is a command that
-      // the project switched off meanwhile.
+      // A pick that is no longer in the list (closed meanwhile) is dropped.
       setSelected((picked) =>
         result.data.pullRequests.some((pr) => pr.number === picked)
           ? picked
           : null,
-      );
-      setCommand((picked) =>
-        result.data.allowedCommands.includes(picked)
-          ? picked
-          : (result.data.allowedCommands[0] ?? picked),
       );
     });
     return () => {
@@ -101,26 +90,13 @@ export function StartReviewPanel({
     event.preventDefault();
     if (busy || ready === null || selected === null) return;
     setOutcome(null);
-    if (command === "ask" && question.trim() === "") {
-      setQuestionError(QUESTION_REQUIRED_COPY);
-      return;
-    }
-    setQuestionError(null);
     setBusy(true);
     const result = await api.startReview(repositoryId, {
       prNumber: selected,
-      command,
-      ...(command === "ask" ? { question } : {}),
+      command: COMMAND,
     });
     setBusy(false);
     if (!result.ok) {
-      // The route refused the question itself (for example it grew past the limit once its image
-      // links were replaced): say so at the question, not as a general failure.
-      const questionProblem = describeQuestionIssue(result.issues);
-      if (questionProblem !== null) {
-        setQuestionError(questionProblem);
-        return;
-      }
       setOutcome({ problem: describeManualReviewFailure(result.code) });
       if (staleListFailure(result.code)) reload();
       return;
@@ -132,7 +108,7 @@ export function StartReviewPanel({
   const canStart =
     ready !== null &&
     selected !== null &&
-    ready.allowedCommands.includes(command) &&
+    ready.allowedCommands.includes(COMMAND) &&
     !busy;
 
   return (
@@ -142,7 +118,7 @@ export function StartReviewPanel({
     >
       <h2 id={`${groupName}-title`}>Review now</h2>
       <p className="muted">
-        Start a command for an open pull request by hand. It does not wait for
+        Start a review for an open pull request by hand. It does not wait for
         new commits and works for drafts too.
       </p>
       {loading ? (
@@ -172,25 +148,9 @@ export function StartReviewPanel({
             }}
             name={groupName}
           />
-          <CommandFields
-            command={command}
-            onCommand={(next) => {
-              setCommand(next);
-              setQuestionError(null);
-              setOutcome(null);
-            }}
-            question={question}
-            onQuestion={(next) => {
-              setQuestion(next);
-              setQuestionError(null);
-            }}
-            questionError={questionError}
-            allowedCommands={ready.allowedCommands}
-            disabled={busy}
-          />
           {ready.allowedCommands.length === 0 ? (
             <p className="muted small">
-              Every command is switched off in the settings of this project.
+              Review is switched off in the settings of this project.
             </p>
           ) : null}
           <div className="form-actions">

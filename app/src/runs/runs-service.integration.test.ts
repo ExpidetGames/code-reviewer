@@ -16,10 +16,15 @@ describe("the runs list", () => {
       ok: true,
       result: { ok: true, commentUrl: null, logTail: "" },
     });
-    const second = await f.finished(
-      { ok: false, errorCode: "timeout" },
-      { repositoryId: f.otherRepositoryId, command: "improve" },
-    );
+    f.clock.advance(1000);
+    // A historical run of a removed command (#203): seeded directly, since the queue cannot create
+    // one any more. It must stay readable with its original command and status.
+    const second = await f.seedHistoricalJob({
+      command: "improve",
+      repositoryId: f.otherRepositoryId,
+      status: "failed",
+      errorCode: "timeout",
+    });
     const third = await f.running({ triggerKind: "manual" });
     const fourth = await f.waiting({ repositoryId: f.otherRepositoryId });
 

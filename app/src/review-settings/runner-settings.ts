@@ -4,10 +4,10 @@
 // `llm` fields, the `env` and the fallback models come out, and nothing else.
 //
 // What the runner accepts (runner/README.md, the job): `llm.model`, `llm.maxTokens` and an `env` of
-// strings that may only hold options of the four tools, `PR_REVIEWER__*`, `PR_DESCRIPTION__*`,
-// `PR_CODE_SUGGESTIONS__*` and `PR_QUESTIONS__*`. Anything that decides where a credential or a
-// request goes (the LLM key, the token of GitHub, endpoints) has its own field of the job or is
-// pinned by the runner, so it can never come out of here: this function does not even receive it.
+// strings that may only hold options of the review tool, `PR_REVIEWER__*`. Anything that decides
+// where a credential or a request goes (the LLM key, the token of GitHub, endpoints) has its own
+// field of the job or is pinned by the runner, so it can never come out of here: this function does
+// not even receive it.
 //
 // The names below are PR-Agent 0.47.0's settings (`pr_agent/settings/configuration.toml`), checked
 // by `runner-settings.test.ts` against `fixtures/pr-agent-0.47.0-configuration.excerpt.toml`.
@@ -16,7 +16,7 @@ import type { ReviewSettings } from "./settings.ts";
 export type RunnerSettings = {
   /** `llm.model` and `llm.maxTokens` of the job. The provider and the key come from the LLM configuration. */
   llm: { model: string; maxTokens: number };
-  /** `env` of the job: only the options of the four tools, as strings. */
+  /** `env` of the job: only the options of the review tool, as strings. */
   env: Record<string, string>;
   /**
    * The fallback models, in order (none or one today). The contract has the field
@@ -27,13 +27,8 @@ export type RunnerSettings = {
   fallbackModels: string[];
 };
 
-/** The tools that take project rules. */
-const INSTRUCTION_VARIABLES = [
-  "PR_REVIEWER__EXTRA_INSTRUCTIONS",
-  "PR_DESCRIPTION__EXTRA_INSTRUCTIONS",
-  "PR_CODE_SUGGESTIONS__EXTRA_INSTRUCTIONS",
-  "PR_QUESTIONS__EXTRA_INSTRUCTIONS",
-] as const;
+/** The tools that take project rules. Since #203 only the review tool exists. */
+const INSTRUCTION_VARIABLES = ["PR_REVIEWER__EXTRA_INSTRUCTIONS"] as const;
 
 export const MAX_FINDINGS_VARIABLE = "PR_REVIEWER__NUM_MAX_FINDINGS";
 export const LARGE_PR_CHUNKING_VARIABLE =

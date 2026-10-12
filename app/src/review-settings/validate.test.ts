@@ -29,7 +29,7 @@ describe("validating review settings", () => {
       inlineKeyIssues: true,
       autoReviewOnOpen: false,
       autoReviewOnPush: true,
-      allowedCommands: ["ask", "review"],
+      allowedCommands: ["review"],
     });
 
     expect(result).toEqual({
@@ -44,7 +44,7 @@ describe("validating review settings", () => {
         inlineKeyIssues: true,
         autoReviewOnOpen: false,
         autoReviewOnPush: true,
-        allowedCommands: ["review", "ask"],
+        allowedCommands: ["review"],
       },
     });
   });

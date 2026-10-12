@@ -58,20 +58,18 @@ describe("enqueueing a job", () => {
     });
   });
 
-  it("keeps the arguments of a comment command and a later run-after time", async () => {
+  it("keeps a comment job's run-after time and stores no arguments for /review", async () => {
     const fixture = await createJobQueueFixture();
     const runAfter = new Date(T0.getTime() + 90 * SECOND);
 
     const job = await fixture.enqueueNew({
       triggerKind: "comment",
-      command: "ask",
-      args: "why is this loop quadratic?",
       runAfter,
     });
 
     expect(job).toMatchObject({
-      command: "ask",
-      args: "why is this loop quadratic?",
+      command: "review",
+      args: "",
       triggerKind: "comment",
       runAfter: runAfter.toISOString(),
     });
@@ -246,25 +244,20 @@ describe("replacing and deduplicating jobs", () => {
     expect(await fixture.queue.claimNext("runner-b")).toBeNull();
   });
 
-  it("replaces only waiting jobs of the same command on the same pull request", async () => {
+  it("replaces only waiting automatic jobs of the same pull request, whatever else waits", async () => {
     const fixture = await createJobQueueFixture();
     const otherPr = await fixture.enqueueNew({ prNumber: 8 });
     const otherRepository = await fixture.enqueueNew({
       repositoryId: fixture.otherRepositoryId,
     });
-    const otherCommand = await fixture.enqueueNew({
-      triggerKind: "comment",
-      command: "improve",
-    });
-    const asked = await fixture.enqueueNew({
-      triggerKind: "comment",
-      command: "ask",
-      args: "what?",
+    const manual = await fixture.enqueueNew({
+      triggerKind: "manual",
+      args: "please",
     });
 
     await fixture.enqueueNew({ headSha: sha("b") });
 
-    for (const job of [otherPr, otherRepository, otherCommand, asked])
+    for (const job of [otherPr, otherRepository, manual])
       expect((await fixture.queue.get(job.id))?.status).toBe("queued");
   });
 
@@ -327,14 +320,17 @@ describe("replacing and deduplicating jobs", () => {
     expect(afterClose.status).toBe("created");
   });
 
-  // CR-27-T09
-  it("creates a job for another command on the same head commit", async () => {
+  // CR-27-T09, #203
+  it("creates a comment job for a pull request whose automatic review is still waiting", async () => {
     const fixture = await createJobQueueFixture();
     await fixture.enqueueNew({ command: "review", prNumber: 7 });
 
+    // A comment job is exempt from the head-commit rule; with a different pull request it is its own
+    // job (a second `/review` on the same pull request is the already_active rule instead).
     const result = await fixture.enqueue({
-      command: "improve",
-      triggerKind: "webhook",
+      triggerKind: "comment",
+      prNumber: 8,
+      deliveryId: "delivery-8",
     });
 
     expect(result.status).toBe("created");
@@ -407,28 +403,25 @@ describe("replacing and deduplicating jobs", () => {
     expect(manual.runAfter).toBe(T0.toISOString());
     const next = await fixture.enqueue({
       triggerKind: "manual",
-      command: "improve",
+      prNumber: 8,
     });
     expect(next).toMatchObject({ status: "created", supersededJobIds: [] });
   });
 
-  it("treats different questions to /ask as different jobs", async () => {
+  it("treats person jobs with different arguments as different jobs", async () => {
     const fixture = await createJobQueueFixture();
     const first = await fixture.enqueueNew({
       triggerKind: "comment",
-      command: "ask",
-      args: "why?",
+      args: "first",
     });
 
     const other = await fixture.enqueue({
       triggerKind: "comment",
-      command: "ask",
-      args: "how?",
+      args: "second",
     });
     const same = await fixture.enqueue({
       triggerKind: "comment",
-      command: "ask",
-      args: "why?",
+      args: "first",
     });
 
     expect(other.status).toBe("created");
@@ -873,7 +866,6 @@ describe("dropping waiting jobs", () => {
     });
     const asked = await fixture.enqueueNew({
       prNumber: 7,
-      command: "ask",
       args: "why?",
       triggerKind: "comment",
     });
@@ -909,9 +901,9 @@ describe("dropping waiting jobs", () => {
       prNumber: 7,
       headSha: sha("b"),
     });
-    const improve = await fixture.enqueueNew({
+    const asked = await fixture.enqueueNew({
       prNumber: 7,
-      command: "improve",
+      args: "why?",
       triggerKind: "comment",
     });
     const other = await fixture.enqueueNew({ prNumber: 8 });
@@ -923,7 +915,7 @@ describe("dropping waiting jobs", () => {
 
     expect(discarded).toBe(2);
     expect((await fixture.queue.get(running.id))?.status).toBe("running");
-    for (const job of [waiting, improve])
+    for (const job of [waiting, asked])
       expect(await fixture.queue.get(job.id)).toMatchObject({
         status: "cancelled",
         errorCode: "pull_request_closed",
@@ -1257,9 +1249,9 @@ describe("jobs a person asked for", () => {
       triggerKind: "comment",
       headSha: sha("a"),
     });
-    const manualImprove = await fixture.enqueueNew({
+    const manual = await fixture.enqueueNew({
       triggerKind: "manual",
-      command: "improve",
+      args: "please",
     });
 
     const automatic = await fixture.enqueue({ headSha: sha("b") });
@@ -1269,7 +1261,7 @@ describe("jobs a person asked for", () => {
       supersededJobIds: [],
     });
     expect((await fixture.queue.get(comment.id))?.status).toBe("queued");
-    expect((await fixture.queue.get(manualImprove.id))?.status).toBe("queued");
+    expect((await fixture.queue.get(manual.id))?.status).toBe("queued");
   });
 
   it("pull a waiting job that is held back by a debounce forward to now", async () => {

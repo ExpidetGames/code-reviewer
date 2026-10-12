@@ -10,7 +10,7 @@ import {
   type JobTriggerKind,
 } from "./job-types.ts";
 
-/** More than a comment command can sensibly carry; the comment ticket truncates long questions earlier. */
+/** More than a job could sensibly carry. `/review` takes no text; this bounds a hostile body. */
 export const JOB_ARGS_MAX_LENGTH = 10_000;
 
 const HEAD_SHA = /^[0-9a-f]{40}$/i;
