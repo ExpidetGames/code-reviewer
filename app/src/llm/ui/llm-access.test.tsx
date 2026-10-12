@@ -163,6 +163,41 @@ describe("the LLM access section for an Admin or an Owner", () => {
     expect(screen.getByText(/and is not carried over/)).toBeTruthy();
   });
 
+  // #169: the "leave the field empty to keep it" hint only makes sense while the key can be kept.
+  it("offers the keep-the-key hint only while the saved key can be kept", () => {
+    const kept = section({ keyStatus: CONFIGURED, summary: WORKS });
+    expect(
+      screen.getByRole("button", { name: "About the saved key" }),
+    ).toBeTruthy();
+    kept.unmount();
+
+    // A key of a provider that is no longer offered is not carried over: the field must be filled.
+    section({
+      keyStatus: { ...CONFIGURED, provider: "openai" as never },
+      summary: WORKS,
+    });
+
+    expect(
+      screen.queryByRole("button", { name: "About the saved key" }),
+    ).toBeNull();
+  });
+
+  it("offers no keep-the-key hint for a key that cannot be read", () => {
+    section({
+      keyStatus: {
+        state: "unreadable",
+        provider: "openrouter",
+        updatedAt: "2026-10-12T08:00:00.000Z",
+        updatedBy: null,
+      },
+      summary: WORKS,
+    });
+
+    expect(
+      screen.queryByRole("button", { name: "About the saved key" }),
+    ).toBeNull();
+  });
+
   it("shows the reason the server gave for a key it refused, next to the field", async () => {
     const user = userEvent.setup();
     const api = fakeApi({

@@ -175,7 +175,7 @@ export function LlmAccessForm({
           <label htmlFor={`${ids}-key`} className="field-label">
             API key
           </label>
-          {stored !== null ? (
+          {keyStatus.state === "configured" && !changedProvider ? (
             <InfoHint label="About the saved key">
               Leave the field empty to keep the saved key, or enter a new one to
               replace it.
