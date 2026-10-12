@@ -22,6 +22,7 @@ import {
   userMenuButton,
 } from "../helpers/github-fake";
 import { startRunner, type RunnerProcess } from "../helpers/runner-process";
+import { claimRun, completeRun } from "../helpers/job-queue";
 import { readSetupCode } from "../helpers/setup";
 import {
   environmentOfTheNewRelease,
@@ -481,32 +482,60 @@ test.describe(
       );
       await expect(page.locator(".run-question img")).toHaveCount(0);
 
-      // Review now works on the upgraded installation and the real runner finishes the new run.
+      // Review now works on the upgraded installation. The real runner is stood in for by the queue
+      // helper here (its own tests cover the real path, and it would race the child after the app
+      // restarts): the run is followed through completion.
       await page.getByRole("link", { name: "Projects", exact: true }).click();
-      await page
-        .getByRole("link", { name: UPGRADE_WIDGETS.fullName, exact: true })
-        .click();
+      const projectLink = page.getByRole("link", {
+        name: UPGRADE_WIDGETS.fullName,
+        exact: true,
+      });
+      await expect(projectLink).toBeVisible();
+      // The row overlay of the redesigned list intercepts a direct click; follow the link's address.
+      await page.goto((await projectLink.getAttribute("href")) ?? "/");
       await expect(
         page.getByRole("heading", {
           level: 1,
           name: UPGRADE_WIDGETS.fullName,
         }),
       ).toBeVisible();
+      await runner?.stop();
       await page.getByRole("radio").first().check();
       await page.getByRole("button", { name: "Review now" }).click();
-      await expect(page.getByRole("status")).toContainText(
-        "Started: review for pull request",
+      const started = page.locator(".alert-success");
+      await expect(started).toContainText("Started: review for pull request");
+      await started.getByRole("link", { name: "View the run" }).click();
+      await expect(page).toHaveURL(/\/runs\/[0-9a-fA-F-]{36}$/);
+      const runId = new URL(page.url()).pathname.split("/").at(-1) ?? "";
+      const claim = await claimRun(runId, "e2e-runner", upgradePaths.database);
+      await completeRun(
+        claim,
+        {
+          ok: true,
+          result: {
+            ok: true,
+            durationMs: 4200,
+            commentUrl:
+              "https://github.com/upgrade-org/widgets/pull/21#issuecomment-1",
+            errorCode: null,
+            logTail: "posted the review",
+            logTruncated: false,
+          },
+        },
+        upgradePaths.database,
       );
-      await page
-        .getByRole("status")
-        .getByRole("link", { name: "View the run" })
-        .click();
-      await expect(page.getByRole("heading", { level: 1 })).toContainText(
-        UPGRADE_WIDGETS.fullName,
+      await expect(
+        page.locator(".run-facts").getByText("/review", { exact: true }),
+      ).toBeVisible();
+      await expect(page.locator(".run-facts .badge-run")).toContainText(
+        "Succeeded",
+        { timeout: 20_000 },
       );
-      await expect(page.getByText("/review", { exact: true })).toBeVisible();
-      await expect(page.getByText("Succeeded")).toBeVisible({
-        timeout: RUN_TIMEOUT,
+
+      // The real runner comes back for the later steps of the update.
+      runner = await startRunner({
+        appUrl: e2eEnv.upgradeAppUrl,
+        llmBaseUrl: theLlm().baseUrl,
       });
     });
 

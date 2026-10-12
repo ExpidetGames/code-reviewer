@@ -11,6 +11,7 @@
 // Used by the integration tests of the import, by the journey of the update (e2e/upgrade/) and by the smoke test
 // of the image (docker/smoke/upgrade.sh, through legacy-installation-cli.ts). No `vitest` import: the programs
 // run it with plain Node.
+import { randomUUID } from "node:crypto";
 import { symmetricEncrypt } from "better-auth/crypto";
 import type { Kysely } from "kysely";
 import type { MigrationProvider } from "kysely/migration";
@@ -218,7 +219,7 @@ async function seedLegacyRows(db: OldDb, seed: LegacySeed): Promise<void> {
         })
         .execute();
       for (let n = 1; n <= jobsPerProject; n += 1) {
-        const jobId = `legacy-job-${String(repository.id)}-${String(n)}`;
+        const jobId = randomUUID();
         await db
           .insertInto("jobs")
           .values({
@@ -272,7 +273,7 @@ async function seedLegacyRows(db: OldDb, seed: LegacySeed): Promise<void> {
         await db
           .insertInto("jobs")
           .values({
-            id: `legacy-job-${String(repository.id)}-history-${String(index)}`,
+            id: randomUUID(),
             repository_id: repositoryId,
             pr_number: number,
             pr_url: `https://github.test/${repository.fullName}/pull/${String(number)}`,
