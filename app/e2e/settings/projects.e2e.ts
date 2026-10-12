@@ -74,10 +74,7 @@ test.describe("the project list and the settings pages", () => {
     await expect(row.getByText("Active", { exact: true })).toBeVisible();
     await page.reload();
     await expect(
-      page
-        .getByRole("row")
-        .filter({ hasText: REPOSITORY })
-        .getByRole("switch"),
+      page.getByRole("row").filter({ hasText: REPOSITORY }).getByRole("switch"),
     ).toHaveAttribute("aria-checked", "true");
 
     await page.getByRole("link", { name: REPOSITORY, exact: true }).click();

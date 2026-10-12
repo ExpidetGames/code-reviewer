@@ -131,9 +131,7 @@ test.describe("the runs pages", () => {
   }) => {
     await syncFromGithubAsAdmin(e2eEnv.appUrl);
     await signInThroughTheForm(page, account);
-    const row = page
-      .getByRole("listitem")
-      .filter({ hasText: WIDGETS.fullName });
+    const row = page.getByRole("row").filter({ hasText: WIDGETS.fullName });
     await row
       .getByRole("switch", { name: `Review ${WIDGETS.fullName}` })
       .click();
@@ -212,9 +210,7 @@ test.describe("the runs pages", () => {
   }) => {
     await signInThroughTheForm(page, account);
     // The filter offers the repositories that are projects: switch the second one on too.
-    const gadgets = page
-      .getByRole("listitem")
-      .filter({ hasText: GADGETS.fullName });
+    const gadgets = page.getByRole("row").filter({ hasText: GADGETS.fullName });
     await gadgets
       .getByRole("switch", { name: `Review ${GADGETS.fullName}` })
       .click();

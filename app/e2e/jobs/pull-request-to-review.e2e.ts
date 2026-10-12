@@ -89,9 +89,7 @@ test.describe("a pull request on its way to a review comment", () => {
     // The LLM key of the workspace, saved the way an Owner does it in the settings (the server has none in its
     // environment). The last journey of the group replaces it and puts this one back.
     await saveWorkspaceKey(page, llmEnv.apiKey);
-    const row = page
-      .getByRole("row")
-      .filter({ hasText: WIDGETS.fullName });
+    const row = page.getByRole("row").filter({ hasText: WIDGETS.fullName });
     await expect(row).toBeVisible();
     // A retry finds the project switched on already: clicking the switch again would turn it off.
     if ((await row.getByText("Active", { exact: true }).count()) === 0)
