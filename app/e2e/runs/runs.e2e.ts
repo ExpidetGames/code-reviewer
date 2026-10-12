@@ -193,10 +193,10 @@ test.describe("the runs pages", () => {
     // The Projects page shows the status of the same run as the last run of the repository.
     await page.getByRole("link", { name: "Projects", exact: true }).click();
     const project = page
-      .getByRole("listitem")
+      .getByRole("row")
       .filter({ hasText: WIDGETS.fullName })
       .filter({ visible: true });
-    await expect(project.getByText(/Last run: Succeeded/)).toBeVisible();
+    await expect(project.getByText(/Succeeded/)).toBeVisible();
     await project.getByRole("link", { name: "All runs" }).click();
     await expect(page).toHaveURL(/\/w\/default\/runs\?repository=/);
     await expect(
