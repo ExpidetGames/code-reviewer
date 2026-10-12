@@ -6,12 +6,11 @@
 //   1. the workspace's own key (BYOK), entered by an Owner or an Admin;
 //   2. the operator's key, if the operator offers "included" usage (a stub that is OFF, for now: the pricing
 //      phase fills it; `operator` is always null on the running server);
-//   3. the legacy `LLM_*` variables, until the import of an existing installation moves them into the default
-//      workspace (#106). Only on a single-tenant instance, where "the instance" and "the workspace" are the
-//      same thing: on a multi-tenant instance a shared key from the environment would be spent by every
-//      workspace that has not brought its own, which the decision record does not intend (a workspace without
-//      a key fails with `llm_not_configured`);
-//   4. otherwise `llm_not_configured`.
+//   3. otherwise `llm_not_configured`.
+//
+// The legacy `LLM_PROVIDER` / `LLM_API_KEY` variables are not a step any more: the import of an existing
+// installation (src/legacy-import/) moved the key into the default workspace once, and nothing reads the
+// variables afterwards.
 //
 // Pure: the pieces are looked up by the caller (src/llm/shared.ts), so the order is testable on its own.
 //
@@ -22,17 +21,10 @@
 import {
   createLlmAccess,
   LLM_NOT_CONFIGURED_ERROR,
-  resolveLlmAccess,
   type LlmAccess,
   type LlmAccessResult,
 } from "./access.ts";
-import {
-  legacyConfigIsAbsent,
-  LLM_PROVIDERS,
-  type LlmConfigState,
-  type LlmDefaults,
-  type LlmProvider,
-} from "./config.ts";
+import { LLM_PROVIDERS, type LlmDefaults, type LlmProvider } from "./config.ts";
 
 /** What the workspace has stored, as the resolver needs it. */
 export type WorkspaceKeyForJob =
@@ -49,11 +41,6 @@ export type ResolveLlmInput = {
   key: WorkspaceKeyForJob;
   /** The operator's access when "included" usage is offered; null while it is not (always, for now). */
   operator: LlmAccess | null;
-  environment: {
-    /** True on a single-tenant instance only (see the header). */
-    allowed: boolean;
-    state: LlmConfigState;
-  };
   /** The model and the context window the instance suggests (from `LLM_MODEL` and `LLM_MAX_TOKENS`). */
   defaults: Pick<LlmDefaults, "model" | "contextWindowTokens">;
 };
@@ -65,7 +52,7 @@ function knownProvider(binding: string): LlmProvider | undefined {
 export function resolveWorkspaceLlmAccess(
   input: ResolveLlmInput,
 ): LlmAccessResult {
-  const { key, operator, environment, defaults } = input;
+  const { key, operator, defaults } = input;
   const failure = (
     reason: "no_key" | "key_unreadable" | "key_binding_mismatch",
   ) =>
@@ -95,12 +82,5 @@ export function resolveWorkspaceLlmAccess(
   if (operator !== null)
     return { ok: true, source: "operator", access: operator };
 
-  if (environment.allowed) {
-    const legacy = resolveLlmAccess(environment.state);
-    if (legacy.ok) return legacy;
-    // A legacy configuration that is simply absent (neither the provider nor the key is set) is "no key"; one
-    // that is set but wrong, or half set, is reported as such (names and codes of the variables only).
-    return legacyConfigIsAbsent(legacy.issues) ? failure("no_key") : legacy;
-  }
   return failure("no_key");
 }

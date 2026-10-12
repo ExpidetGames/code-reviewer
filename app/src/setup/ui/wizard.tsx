@@ -28,9 +28,17 @@ const FAIL_CLOSED_HINT =
   "Until emails can be verified, nobody except you can sign up under this rule. A mail server or GitHub as the only sign-in method makes it work; you set either up in the admin area after the setup. The entries are saved now.";
 
 export function Wizard({
+  existingInstallation = false,
   api = browserSetupApi,
   onDone = (redirectTo: string) => window.location.assign(redirectTo),
 }: {
+  /**
+   * An update of an installation from before accounts. The list of allowed logins and the organization of the
+   * earlier version are not carried over as a rule, so "everyone" would be a bigger opening than the instance
+   * had: the rule starts on "a list of email addresses" (fail-closed until addresses can be verified). All
+   * three stay selectable.
+   */
+  existingInstallation?: boolean;
   /** Only tests pass these two. */
   api?: SetupApi;
   onDone?: (redirectTo: string) => void;
@@ -38,7 +46,9 @@ export function Wizard({
   const ids = useId();
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [tenancy, setTenancy] = useState<"single" | "multi">("single");
-  const [ruleKind, setRuleKind] = useState<RuleKind>("everyone");
+  const [ruleKind, setRuleKind] = useState<RuleKind>(
+    existingInstallation ? "emails" : "everyone",
+  );
   const [entriesText, setEntriesText] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -165,6 +175,14 @@ export function Wizard({
       <div className="setup-form">
         <h1>Who may sign up?</h1>
         {heading}
+        {existingInstallation ? (
+          <p className="muted">
+            The list of allowed GitHub logins and the organization of the
+            earlier version are not carried over as a rule: the people who
+            passed them became members, and you can invite the others. Choose
+            who may create an account from now on.
+          </p>
+        ) : null}
         <fieldset className="setup-options">
           <legend className="sr-only">Sign-up rule</legend>
           {(

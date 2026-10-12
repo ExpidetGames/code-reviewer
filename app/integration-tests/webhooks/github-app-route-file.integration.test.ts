@@ -24,6 +24,7 @@ import {
   testAppKeys,
   testGithubAppEnv,
 } from "../../src/test-support/github-app.ts";
+import { saveGithubAppFromEnv } from "../../src/test-support/server-credentials.ts";
 import { createTestDirectory } from "../../src/test-support/test-database.ts";
 import {
   defaultWorkspaceId,
@@ -60,7 +61,8 @@ async function startRoute(
   });
   // A deployment that is in use has been set up (the first-run setup decides about workspaces).
   await markInstanceSetUp(getDatabase());
-  // The registry reads the environment on first use, so every test loads the route anew.
+  await saveGithubAppFromEnv(getDatabase(), env);
+  // The registry reads the credentials on first use, so every test loads the route anew.
   vi.resetModules();
   return {
     route: await import("../../src/app/api/webhooks/github-app/route.ts"),
@@ -234,7 +236,7 @@ describe("the webhook route file", () => {
       .map((call) => String(call[0]))
       .filter((line) => line.includes("deliveries cannot be verified"));
     expect(logged).toHaveLength(1);
-    expect(logged[0]).toContain("GITHUB_APP_WEBHOOK_SECRET");
+    expect(logged[0]).toContain("github_app_webhook_secret");
   });
 
   // #97-NOT-CONFIGURED

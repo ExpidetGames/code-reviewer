@@ -7,6 +7,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import type { GithubConfigView } from "../../github-config/service.ts";
 import type { AdminSettingsView } from "../service.ts";
+import { ImportNotice } from "./import-notice.tsx";
 import { FailClosedNotice } from "./notices.tsx";
 
 function describeRule(rule: AdminSettingsView["signUpRule"]["value"]): string {
@@ -112,6 +113,9 @@ export function Overview({
   );
   return (
     <>
+      {settings.importNotice !== null ? (
+        <ImportNotice notice={settings.importNotice} />
+      ) : null}
       {settings.signUpRuleState.failClosed ? <FailClosedNotice /> : null}
       {emailConflictCount > 0 ? (
         <p role="note" className="alert alert-warning">

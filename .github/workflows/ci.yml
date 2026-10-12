@@ -343,6 +343,9 @@ jobs:
           cache-to: type=gha,mode=max,scope=runner
       - name: Smoke test the stack
         run: docker/smoke/compose.sh code-reviewer-app:ci code-reviewer-runner:ci
+      # The database and the environment of the previous release, started with the image just built.
+      - name: Smoke test the update from the previous release
+        run: docker/smoke/upgrade.sh code-reviewer-app:ci
 
   actionlint:
     name: Lint workflow files

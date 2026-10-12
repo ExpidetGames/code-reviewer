@@ -259,10 +259,18 @@ it reads the workspace's own connections) if the repository is missing, and swit
 ## Older installations
 
 An installation that still has `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_WEBHOOK_SECRET` and
-`GITHUB_APP_PRIVATE_KEY` (or `GITHUB_APP_PRIVATE_KEY_PATH`) in its environment keeps working: they are read as
-long as the database holds no GitHub App, and the update to accounts imports them once. As soon as the App is
-saved in the portal, the database wins and the variables are ignored. `GITHUB_OAUTH_CLIENT_ID` and
-`GITHUB_OAUTH_CLIENT_SECRET` (the separate OAuth app of the earlier sign in) are not used any more.
+`GITHUB_APP_PRIVATE_KEY` (or `GITHUB_APP_PRIVATE_KEY_PATH`) in its environment keeps working through the
+update to accounts: on its first start the app imports them **once** into the encrypted store (after a backup
+of the database, in one transaction), and from then on the database is the only source and the variables are
+ignored (the log lists their names). A value that is missing or unusable (a private key that is not an RSA key, a
+slug with a space) is not imported: the log and the notice in the admin portal name the variable, the Integrations
+tile says GitHub is not configured, and you enter the App in the portal. The imported App has no user
+authorization and no "private app" flag yet: the Integrations page asks for the client id and secret of the App
+(to switch on sign in with GitHub) and whether the App can only be installed on its own account, and its
+**Check permissions** button says which of the two permissions "Email addresses" and "Members" (read-only) the App
+lacks. `GITHUB_OAUTH_CLIENT_ID` and `GITHUB_OAUTH_CLIENT_SECRET` (the separate OAuth app of the earlier sign in) are
+not used any more and not imported. The steps of the update are in
+[`deployment-coolify.md`](deployment-coolify.md), "Updating an installation from before accounts".
 
 ## Checklist for whoever sets it up
 

@@ -137,7 +137,7 @@ installation (`..._CONNECTION_GONE`). A page never has to know a platform's own 
     needs its own default `Retry-After` for that case (for example 30 seconds).
 - `credentials` and `webhook_secret` in the table are reserved for token integrations. A GitHub App
   keeps neither there: they are instance level, in the encrypted secret store (`src/github-config/`), and
-  the environment is only the fallback of an installation that was not imported. `INTEGRATION_SECRET_STORAGE` in
+  the variables of an installation from before accounts were imported into it once (`src/legacy-import/`). `INTEGRATION_SECRET_STORAGE` in
   `types.ts` says what a type may store, and the repository refuses the rest. **A type may only be
   set to store credentials once they are encrypted** (planned with the first token integration).
 - A `config` holds settings only. The per-type schema (known fields only, `unknown_field` for the
@@ -166,8 +166,8 @@ integration (`external_id` is the installation id).
 | `errors.ts`                                              | `GithubAppError` and its stable codes (`GITHUB_APP_CONFIG_INVALID`, `_AUTH_FAILED`, `_FORBIDDEN`, `_NOT_FOUND`, `_RATE_LIMITED`, `_UNAVAILABLE`, `_REQUEST_FAILED`)                                                                                                                                                                                                                                                                                |
 | `fake-client.ts`                                         | In-memory client for the provider's unit tests                                                                                                                                                                                                                                                                                                                                                                                                     |
 
-Settings come from the database (the admin portal's GitHub integration, `src/github-config/`), or from the
-environment (see `.env.example`) of an installation that was not imported. Missing or invalid values fail with
+Settings come from the database (the admin portal's GitHub integration, `src/github-config/`; the variables of an
+installation from before accounts were imported into it once). Missing or invalid values fail with
 `GITHUB_APP_CONFIG_INVALID` and an error that names the fields or variables, never their values. The provider is
 created when the app loads but reads the settings **on every call** and remembers none (only the HTTP client is
 kept, for the key and App id it was made for), so a missing setting breaks only the calls that need GitHub and a

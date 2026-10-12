@@ -39,6 +39,79 @@ async function fillAdmin(
   await user.type(screen.getByLabelText("Repeat the password"), repeat);
 }
 
+describe("the wizard of an update from before accounts", () => {
+  // #106-IM-07
+  it("preselects a list of email addresses, says the old list is not carried over, and keeps every rule selectable", async () => {
+    const user = userEvent.setup();
+    render(
+      <Wizard
+        existingInstallation
+        api={{ submitCode: vi.fn(), complete: vi.fn() }}
+        onDone={vi.fn()}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Next" }));
+
+    expect(
+      (
+        screen.getByRole("radio", {
+          name: /A list of email addresses/,
+        }) as HTMLInputElement
+      ).checked,
+    ).toBe(true);
+    expect(
+      (screen.getByRole("radio", { name: /Everyone/ }) as HTMLInputElement)
+        .checked,
+    ).toBe(false);
+    expect(screen.getByText(/are not carried over as a rule/)).toBeTruthy();
+    await user.click(screen.getByRole("radio", { name: /Everyone/ }));
+    expect(
+      (screen.getByRole("radio", { name: /Everyone/ }) as HTMLInputElement)
+        .checked,
+    ).toBe(true);
+    await user.click(
+      screen.getByRole("radio", { name: /Allowed email domains/ }),
+    );
+    expect(screen.getByLabelText("Domains")).toBeTruthy();
+  });
+
+  // #106-IM-07
+  it("needs addresses for the preselected rule before it goes on", async () => {
+    const user = userEvent.setup();
+    render(
+      <Wizard
+        existingInstallation
+        api={{ submitCode: vi.fn(), complete: vi.fn() }}
+        onDone={vi.fn()}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Next" }));
+
+    await user.click(screen.getByRole("button", { name: "Next" }));
+
+    expect(screen.getByRole("heading").textContent).toMatch(/Who may sign up/);
+    expect(screen.getByRole("alert")).toBeTruthy();
+  });
+
+  // #106-IM-07
+  it("is not what a new instance gets: that starts on everyone, without the sentence", async () => {
+    const user = userEvent.setup();
+    render(
+      <Wizard
+        api={{ submitCode: vi.fn(), complete: vi.fn() }}
+        onDone={vi.fn()}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Next" }));
+
+    expect(
+      (screen.getByRole("radio", { name: /Everyone/ }) as HTMLInputElement)
+        .checked,
+    ).toBe(true);
+    expect(screen.queryByText(/not carried over/)).toBeNull();
+  });
+});
+
 describe("the wizard", () => {
   it("asks the three questions in order", async () => {
     const { user } = renderWizard();

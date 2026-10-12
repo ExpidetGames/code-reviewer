@@ -210,10 +210,10 @@ describe("loading the allow list as part of the sign-in configuration", () => {
     expect(config.access.org).toBeNull();
   });
 
-  it("refuses an organization name that is not one, by variable name only", () => {
-    const error = loadError({ ...validEnv, ALLOWED_GITHUB_ORG: "a/b" });
+  // #106-IM-14
+  it("does not refuse to start for an organization name that is not one, because nothing enforces the allow list any more", () => {
+    const config = loadAuthConfig({ ...validEnv, ALLOWED_GITHUB_ORG: "a/b" });
 
-    expect(error.message).toContain("ALLOWED_GITHUB_ORG");
-    expect(error.message).not.toContain("a/b");
+    expect(config.access.org).toBeNull();
   });
 });

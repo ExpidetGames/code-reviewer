@@ -62,6 +62,8 @@ forms call the data route, which is also where the cross-site check lives).
 
 ## The settings
 
+The overview also shows the **notice of the import** (`import_notice`, `src/legacy-import/notice.ts`) of an installation that was updated from the release before accounts, until the admin hides it (`{ "importNotice": { "dismiss": true } }` on the settings route): who was not made a member and why, the allowed logins that never signed in, the organization that is not migrated into a rule, what could not be imported (variable names only).
+
 Stored in `instance_settings` (JSON values; `updated_by` and `updated_at` on every row, shown under each
 setting). Nothing saved reads as the default.
 

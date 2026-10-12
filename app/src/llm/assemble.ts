@@ -4,7 +4,6 @@
 // job of the workspace gets (src/llm/resolve.ts) and what the pages may show. The same code serves the running
 // server (shared.ts) and the tests, which build it over a test database and a chosen environment.
 import type { Kysely } from "kysely";
-import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import type { Database } from "../db/schema.ts";
 import { createWorkspaceSecretStore } from "../secrets/workspace-store.ts";
 import {
@@ -12,7 +11,7 @@ import {
   type LlmAccessSource,
   type LlmNotConfiguredReason,
 } from "./access.ts";
-import { loadLlmConfig, readLlmDefaults } from "./config.ts";
+import { readLlmDefaults } from "./config.ts";
 import { resolveWorkspaceLlmAccess } from "./resolve.ts";
 import {
   createWorkspaceLlmKeyService,
@@ -41,8 +40,7 @@ export type WorkspaceLlmAssembly = {
   summaryFor(workspaceId: string): Promise<WorkspaceLlmSummary>;
   /**
    * The LLM keys that are current for this workspace right now, to mask in the result of one of its jobs: its
-   * own key, and the key of the legacy variable where that applies. Best effort: a key that cannot be read is
-   * left out.
+   * own key. Best effort: a key that cannot be read is left out.
    */
   currentKeysFor(workspaceId: string): Promise<string[]>;
 };
@@ -74,18 +72,12 @@ export function createWorkspaceLlm({
     });
 
   async function accessFor(workspaceId: string): Promise<LlmAccessResult> {
-    const current = env();
-    // The legacy variables stand for "the instance's key" only where the instance is one workspace.
-    const tenancy = await createInstanceSettingsRepository(db).get("tenancy");
     return resolveWorkspaceLlmAccess({
       key: await keyServiceFor(workspaceId).forJob(),
       // The operator's "included" usage is a stub that is off until the pricing phase (section 2.8).
       operator: null,
-      environment: {
-        allowed: tenancy !== "multi",
-        state: loadLlmConfig(current),
-      },
-      defaults: readLlmDefaults(current),
+      // The model and the context window of the instance; the key is only ever the workspace's own.
+      defaults: readLlmDefaults(env()),
     });
   }
 
@@ -99,10 +91,6 @@ export function createWorkspaceLlm({
       const keys: string[] = [];
       const own = await keyServiceFor(workspaceId).forJob();
       if (own.state === "key") keys.push(own.apiKey);
-      const tenancy = await createInstanceSettingsRepository(db).get("tenancy");
-      const legacy = loadLlmConfig(env());
-      if (tenancy !== "multi" && legacy.status === "configured")
-        keys.push(legacy.config.apiKey);
       return keys;
     },
   };

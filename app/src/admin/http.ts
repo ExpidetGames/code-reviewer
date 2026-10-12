@@ -14,6 +14,8 @@
 //                                         senderAddress, senderName, allowSelfSigned } | null }
 //                             (the password is write-only: an empty one keeps the stored one, and no
 //                             answer ever contains it; null removes the mail server)
+//                             { "importNotice": { "dismiss": true } }   hides the notice that the import of an
+//                             existing installation left (src/legacy-import/)
 //   POST /api/admin/mail/test sends a test mail to the admin's own address with the saved settings;
 //                             answers { "ok": true } or { "ok": false, "error": <class>, "detail" }
 //   POST /api/admin/integrations/sync  reads the installations and repositories from GitHub now (every
@@ -99,6 +101,7 @@ const SETTING_KEYS = [
   "signInMethods",
   "limits",
   "smtp",
+  "importNotice",
 ] as const;
 
 export function createAdminRouteHandlers({
@@ -163,6 +166,20 @@ export function createAdminRouteHandlers({
             return service.changeSignInMethods(who.id, fields.signInMethods);
           case "smtp":
             return service.changeSmtp(who.id, fields.smtp);
+          case "importNotice": {
+            const change = fields.importNotice;
+            if (
+              typeof change !== "object" ||
+              change === null ||
+              (change as Record<string, unknown>).dismiss !== true
+            )
+              return {
+                ok: false,
+                error: "invalid_input",
+                issues: [{ field: "importNotice", code: "body_invalid" }],
+              } as const;
+            return service.dismissImportNotice(who.id);
+          }
           default: {
             const limits = fields.limits;
             if (

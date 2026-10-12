@@ -104,7 +104,8 @@ Migrations `20261011160000_create_workspaces`, `20261011160100_add_workspace_to_
   `jobs` or `app_settings`) gets one workspace, "Default workspace" (slug `default`), and every row of
   the four tables moves into it; no row is lost or changed otherwise. A database without data gets no
   workspace: the first-run setup makes it. **The migration creates no membership**; who becomes a member
-  is decided by the import of an existing installation (it looks at the allow list of that day).
+  is decided by the import of an existing installation (`src/legacy-import/`, it looks at the allow list of that
+  day).
 - **How the tables are rebuilt.** SQLite cannot add a NOT NULL column that references another table,
   and the usual rebuild recipe needs `PRAGMA foreign_keys = OFF`, which does nothing inside the
   migration transaction. So the chain `integrations`, `repositories`, `projects`, `jobs`, `job_comments`
@@ -129,7 +130,9 @@ sections 2.2, 2.3 and 2.10):
 - `instance_settings` (key, JSON value, `updated_by` user id or null, `updated_at`): the settings of the
   whole instance (`instance-settings-repository.ts`, typed by key). The first-run setup state is two
   explicit rows, `setup_completed_at` and `import_state`; a database from before them reads as null and
-  `none` (`src/setup/README.md`). `tenancy` and `sign_up_rule` are written by the setup.
+  `none` (`src/setup/README.md`). `tenancy` and `sign_up_rule` are written by the setup; `import_state`, `github_app`,
+  `sign_in_methods` and `import_notice` (what the import could not migrate, for the admin portal) by the import of an
+  existing installation (`src/legacy-import/`).
 - `rate_limits` (key, `window_started_at`, `count`): shared counters with a window for the endpoints that
   must limit the same way whichever app instance a request reaches (`rate-limits-repository.ts`, `hit` is
   one statement, so attempts that arrive together are all counted). The email and password sign in

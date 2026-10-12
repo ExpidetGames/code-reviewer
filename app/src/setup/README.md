@@ -27,7 +27,8 @@ implementation.
 
 The state is never inferred from whether a row exists: a database from before the markers reads as
 `setup_completed_at` null and `import_state` `none`. `import_state` is written by the import of an existing
-installation (a later issue), never by the setup.
+installation (`src/legacy-import/`, which runs right after the migrations, before the code is printed), never by the
+setup.
 
 ## The code
 

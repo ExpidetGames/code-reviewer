@@ -2,9 +2,9 @@
 
 Every workspace brings its own LLM key (bring your own key, BYOK; `docs/decisions/0001-editions-setup-and-accounts.md`,
 sections 2.7 and 2.8). An Admin or an Owner enters it under **Settings, LLM access** of the workspace; the app
-hands the key of the job's own workspace to the runner with every job. The legacy environment variables below are a
-fallback for a single-tenant instance until the import of an existing installation (#106) moves them into the
-default workspace.
+hands the key of the job's own workspace to the runner with every job. The legacy `LLM_PROVIDER` and `LLM_API_KEY`
+were imported once into the default workspace by the update of an existing installation (`src/legacy-import/`) and
+are not read any more; `LLM_MODEL` and `LLM_MAX_TOKENS` are instance settings.
 
 ## Which key a job gets
 
@@ -14,12 +14,11 @@ applies wins:
 1. **The workspace's own key.** Stored encrypted (below), bound to the provider it was entered for.
 2. **The operator's key**, if the operator offers "included" usage. A stub that is **off**: the pricing phase fills
    it, the order and the data model leave room for it (`operator` is always `null` on the running server).
-3. **The legacy `LLM_*` variables**, only where the instance is single-tenant (`tenancy` is not `multi`). On a
-   multi-tenant instance a key in the environment would be spent by every workspace that has not brought its own,
-   so it is ignored there and a workspace without a key fails. (The decision record leaves this case open; this is
-   the safer reading.)
-4. Otherwise the job fails with `llm_not_configured` and a reason (`no_key`, `key_unreadable`,
-   `key_binding_mismatch`, `environment_misconfigured`).
+3. Otherwise the job fails with `llm_not_configured` and a reason (`no_key`, `key_unreadable`,
+   `key_binding_mismatch`).
+
+There is no step for a key in the environment: a key in `LLM_API_KEY` would be spent by every workspace that has not
+brought its own. The instance that is updated gets its key into the default workspace by the import instead.
 
 Two cases **fail closed** instead of falling through to the next step: a workspace key that exists but cannot be
 read (another `APP_SECRET`, a changed row), and one that was entered for another provider than the one it would be
@@ -69,9 +68,14 @@ runner-api-llm-key.integration.test.ts`).
   default is used). **That built-in model name is visible to every member** in the model setting of the review
   defaults, as intended: a model name is no secret (decided with #144).
 
-## The legacy variables
+## The variables
 
-They configure the fallback of a single-tenant instance (step 3 above) and the built-in model.
+`LLM_PROVIDER` and `LLM_API_KEY` are **legacy**: the update of an existing installation reads them once
+(`src/legacy-import/environment.ts`, through `checkLlmApiKey` and the same provider list) and saves the key as the default
+workspace's key, bound to the provider; a new instance ignores them, and nothing reads them afterwards. `LLM_MODEL` and
+`LLM_MAX_TOKENS` configure the built-in model and the context window of the instance; the import also copies a
+`LLM_MODEL` that differs from the default into the review defaults of the default workspace (unless the team chose a
+model), so the model survives the removal of the variable.
 
 | Variable         | Meaning                                                                                                                                                                                                                                               |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -84,16 +88,16 @@ The limits are the ones the runner enforces on `llm.*` of a job (`runner/README.
 runner would refuse shows up as a configuration error or warning instead of as a failed job. They are copied by
 hand; a contract test belongs to the runner API contracts (CR-28).
 
-Only the provider and the key can break the legacy configuration. **A wrong optional variable** (`LLM_MODEL` that is
+**A wrong optional variable** (`LLM_MODEL` that is
 no model name, `LLM_MAX_TOKENS` that is no number in range) does not stop the reviews: it is ignored, the default is
 used, and it is reported as a _warning_ (`LLM_MODEL_INVALID`, `LLM_MAX_TOKENS_INVALID`).
 
-| File         | Role                                                                                                                                                                                                                                              |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `config.ts`  | `loadLlmConfig(env)`: the only place that knows the variable names; `checkLlmApiKey` (the one rule for a key), `readLlmDefaults` (model and context window without a key). Returns a state, never throws.                                         |
-| `access.ts`  | `LlmAccessResult` (with its `source` or its `reason`), `resolveLlmAccess(state)` (the legacy variables), `revealLlmAccess` (the one way to get the key out, `LLM_ACCESS_HAS_NO_KEY` without a key), `maskSecretInText` (masks secrets in a text). |
-| `status.ts`  | `describeLlmStatus(state)`: what the UI may know about the legacy configuration.                                                                                                                                                                  |
-| `startup.ts` | `checkLlmConfigOnStart`: one warning for a legacy variable that is **set but wrong** (an unset one is normal now) and one for an ignored optional one. Never stops the start.                                                                     |
+| File         | Role                                                                                                                                                                                                                                                    |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `config.ts`  | `loadLlmConfig(env)`: the only place that knows the variable names (the import reads the legacy ones through it); `checkLlmApiKey` (the one rule for a key), `readLlmDefaults` (model and context window without a key). Returns a state, never throws. |
+| `access.ts`  | `LlmAccessResult` (with its `source` or its `reason`), `revealLlmAccess` (the one way to get the key out, `LLM_ACCESS_HAS_NO_KEY` without a key), `maskSecretInText` (masks secrets in a text).                                                         |
+| `status.ts`  | `describeLlmStatus(state)`: what the UI may know about a configuration (the instance status reports the model options only).                                                                                                                            |
+| `startup.ts` | `checkLlmConfigOnStart`: one warning for an optional variable that is ignored (`LLM_MODEL`, `LLM_MAX_TOKENS`) and the notes on the test endpoints. Says nothing about `LLM_PROVIDER` and `LLM_API_KEY`. Never stops the start.                          |
 
 ## Rules
 
@@ -122,6 +126,6 @@ claimed-keys.ts`) and not in memory, so any app instance can mask a result after
 `key-test.integration.test.ts` (real SQLite, the fake LLM over real HTTP); `ui/*.test.tsx`;
 `integration-tests/http/llm-key-route.integration.test.ts` (the real route files: roles, isolation, the request,
 the test button, no key in any answer or log), `integration-tests/http/runner-api-llm-key.integration.test.ts` (the
-claim: each workspace's own key, no borrowing, the legacy fallback, removal, masking across instances) and the
+claim: each workspace's own key, no borrowing, no key from the environment, removal, masking across instances) and the
 rows for the routes in `workspace-isolation.integration.test.ts`. Journey: `e2e/settings/llm-key.e2e.ts`, and the
 review with the workspace key in `e2e/jobs/pull-request-to-review.e2e.ts`.

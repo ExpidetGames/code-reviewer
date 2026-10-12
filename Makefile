@@ -82,6 +82,7 @@ test-images:
 	docker build --file app/Dockerfile --tag code-reviewer-app:local .
 	docker build --file runner/Dockerfile --tag code-reviewer-runner:local .
 	docker/smoke/app.sh code-reviewer-app:local
+	docker/smoke/upgrade.sh code-reviewer-app:local
 	docker/smoke/runner.sh code-reviewer-runner:local
 
 # Builds both images (under tags of their own, so images of other work stay untouched) and runs

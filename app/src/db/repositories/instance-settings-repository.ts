@@ -8,6 +8,7 @@ import "server-only";
 import type { Kysely } from "kysely";
 import { decodeJson, encodeJson, formatTimestamp } from "../codecs.ts";
 import type { StoredGithubApp } from "../../github-config/settings.ts";
+import type { ImportNotice } from "../../legacy-import/notice.ts";
 import type { SmtpSettings } from "../../mail/smtp-settings.ts";
 import type { Database } from "../schema.ts";
 
@@ -45,6 +46,11 @@ export type InstanceSettingValues = {
    * environment of an installation that was not imported yet is the fallback).
    */
   github_app: StoredGithubApp;
+  /**
+   * What the import of an existing installation could not migrate (src/legacy-import/notice.ts); shown on the
+   * overview of the admin portal until the admin dismisses it. No row: nothing to tell.
+   */
+  import_notice: ImportNotice;
 };
 export type InstanceSettingKey = keyof InstanceSettingValues;
 

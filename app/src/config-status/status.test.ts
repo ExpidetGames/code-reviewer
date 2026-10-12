@@ -102,16 +102,27 @@ describe("describing the configuration for the pages", () => {
     }
   });
 
-  // CR-34-T09
-  it("reports a missing LLM key with the variable name", () => {
+  // #106-IM-01
+  it("reports nothing about an LLM key: it is a matter of each workspace, and the variables are not read", () => {
     const status = describeConfigStatus({
       ...COMPLETE,
       LLM_API_KEY: undefined,
+      LLM_PROVIDER: undefined,
+    });
+
+    expect(status.llm).toMatchObject({ configured: true, warnings: [] });
+  });
+
+  // CR-34-T09 (a wrong option is still a warning)
+  it("reports a wrong model option as a warning with the variable name", () => {
+    const status = describeConfigStatus({
+      ...COMPLETE,
+      LLM_MODEL: "not a model",
     });
 
     expect(status.llm).toMatchObject({
-      configured: false,
-      issues: [{ code: "LLM_API_KEY_MISSING", variable: "LLM_API_KEY" }],
+      configured: true,
+      warnings: [{ code: "LLM_MODEL_INVALID", variable: "LLM_MODEL" }],
     });
   });
 
@@ -165,7 +176,12 @@ describe("the status for members", () => {
         variables: [],
         slug: null,
       },
-      llm: { configured: false, issues: [], warnings: [] },
+      llm: {
+        configured: true,
+        provider: "openrouter",
+        model: "",
+        warnings: [],
+      },
     });
     const shown = statusForMembers(working);
     expect(shown.githubApp.configured).toBe(true);
