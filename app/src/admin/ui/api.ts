@@ -38,7 +38,9 @@ export type SettingChange =
   | { signInMethods: { emailPassword: boolean; github: boolean } }
   | { limits: { maxWorkspacesPerUser: number } }
   /** `null` removes the mail server. */
-  | { smtp: SmtpChange | null };
+  | { smtp: SmtpChange | null }
+  /** Hides the notice that the import of an existing installation left. */
+  | { importNotice: { dismiss: true } };
 
 export type AdminApi = {
   change(

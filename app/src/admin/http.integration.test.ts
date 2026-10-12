@@ -4,6 +4,7 @@
 // a change does and what it answers when a change is refused, that a request from another site is
 // refused, and that a saved secret is nowhere in an answer or a log line.
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import {
   createAdminHarness,
   type AdminHarness,
@@ -152,6 +153,44 @@ describe("changing a setting", () => {
       ok: true,
       settings: { maxWorkspacesPerUser: { value: 4 } },
     });
+  });
+
+  // #106-IM-07
+  it("hides the notice of the import for good, and refuses a request that is not a dismissal", async () => {
+    const portal = await startPortal();
+    await createInstanceSettingsRepository(portal.db).set(
+      "import_notice",
+      {
+        createdAt: "2026-10-12T08:00:00.000Z",
+        dismissedAt: null,
+        memberCount: 1,
+        notMembers: [],
+        notMembersTotal: 0,
+        neverSignedIn: ["gina"],
+        neverSignedInTotal: 1,
+        organization: null,
+        notImported: [],
+        oauthApp: false,
+        invalidLoginEntries: 0,
+      },
+      null,
+    );
+    const read = async () =>
+      (await (
+        await portal.visit("/api/admin/settings", {
+          cookies: portal.adminCookies,
+        })
+      ).json()) as { importNotice: unknown };
+
+    const before = await read();
+    const refused = await put(portal, { importNotice: { dismiss: false } });
+    const hidden = await put(portal, { importNotice: { dismiss: true } });
+    const after = await read();
+
+    expect(before.importNotice).toMatchObject({ neverSignedIn: ["gina"] });
+    expect(refused.status).toBe(422);
+    expect(hidden.status).toBe(200);
+    expect(after.importNotice).toBeNull();
   });
 
   it("changes the tenancy and refuses the change to single-tenant with the number of workspaces", async () => {

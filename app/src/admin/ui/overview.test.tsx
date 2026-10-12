@@ -30,6 +30,7 @@ function view(overrides: Partial<AdminSettingsView> = {}): AdminSettingsView {
     signUpRuleState: { failClosed: false },
     secrets: [],
     setupCompletedAt: "2026-10-11T08:00:00.000Z",
+    importNotice: null,
     ...overrides,
   };
 }
