@@ -18,7 +18,9 @@
 // "An installation of the previous release" is: users exist and the table `workspaces` does not. A database with
 // no users (a fresh installation, or no file at all) needs no backup.
 //
-// No `server-only` import: the check is plain better-sqlite3, like the rest of src/backup/.
+// No `server-only` import: the check is plain better-sqlite3, like the rest of src/backup/. The file system calls
+// with a path that is only known at run time carry `turbopackIgnore`, like the ones in src/backup/create-backup.ts:
+// without it Turbopack traces the whole project into the standalone output of the image.
 import BetterSqlite3 from "better-sqlite3";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -74,8 +76,8 @@ export function holdsDatabaseOfThePreviousRelease(
 function lastWritten(databasePath: string): number {
   return Math.max(
     ...[databasePath, `${databasePath}-wal`]
-      .filter((path) => existsSync(path))
-      .map((path) => statSync(path).mtimeMs),
+      .filter((path) => existsSync(/* turbopackIgnore: true */ path))
+      .map((path) => statSync(/* turbopackIgnore: true */ path).mtimeMs),
   );
 }
 
@@ -86,14 +88,19 @@ function keptBackupOfThisUpdate(
 ): string | null {
   let names: string[];
   try {
-    names = readdirSync(backupDir).filter(isBeforeUpdateBackupName);
+    names = readdirSync(/* turbopackIgnore: true */ backupDir).filter(
+      isBeforeUpdateBackupName,
+    );
   } catch {
     return null;
   }
   const written = lastWritten(databasePath);
   return (
-    names.find((name) => statSync(join(backupDir, name)).mtimeMs >= written) ??
-    null
+    names.find(
+      (name) =>
+        statSync(/* turbopackIgnore: true */ join(backupDir, name)).mtimeMs >=
+        written,
+    ) ?? null
   );
 }
 
@@ -126,7 +133,7 @@ export function backupBeforeUpdateOnStart({
   const kept = keptBackupOfThisUpdate(databasePath, backupDir);
   if (kept !== null) {
     log.info(
-      `[update] BACKUP_BEFORE_UPDATE_KEPT: the backup of this update, ${join(backupDir, kept)}, is newer than the database, so no second one is taken.`,
+      `[update] BACKUP_BEFORE_UPDATE_KEPT: the backup of this update, ${backupDir}/${kept}, is newer than the database, so no second one is taken.`,
     );
     return false;
   }
