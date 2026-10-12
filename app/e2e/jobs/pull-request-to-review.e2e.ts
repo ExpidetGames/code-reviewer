@@ -90,7 +90,7 @@ test.describe("a pull request on its way to a review comment", () => {
     // environment). The last journey of the group replaces it and puts this one back.
     await saveWorkspaceKey(page, llmEnv.apiKey);
     const row = page
-      .getByRole("listitem")
+      .getByRole("row")
       .filter({ hasText: WIDGETS.fullName });
     await expect(row).toBeVisible();
     // A retry finds the project switched on already: clicking the switch again would turn it off.
@@ -101,7 +101,7 @@ test.describe("a pull request on its way to a review comment", () => {
     await expect(row.getByText("Active", { exact: true })).toBeVisible();
     await expect(
       page
-        .getByRole("listitem")
+        .getByRole("row")
         .filter({ hasText: DORMANT.fullName })
         .getByText("Active", { exact: true }),
     ).toHaveCount(0);

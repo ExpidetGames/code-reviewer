@@ -67,7 +67,7 @@ test.describe("the project list and the settings pages", () => {
       page.getByRole("button", { name: "Sync from GitHub" }),
     ).toBeVisible();
 
-    const row = page.getByRole("listitem").filter({ hasText: REPOSITORY });
+    const row = page.getByRole("row").filter({ hasText: REPOSITORY });
     await expect(row.getByText("Inactive")).toBeVisible();
 
     await row.getByRole("switch", { name: `Review ${REPOSITORY}` }).click();
@@ -75,7 +75,7 @@ test.describe("the project list and the settings pages", () => {
     await page.reload();
     await expect(
       page
-        .getByRole("listitem")
+        .getByRole("row")
         .filter({ hasText: REPOSITORY })
         .getByRole("switch"),
     ).toHaveAttribute("aria-checked", "true");
@@ -95,13 +95,13 @@ test.describe("the project list and the settings pages", () => {
     ).toHaveValue("12");
 
     await page.getByRole("link", { name: "All projects" }).click();
-    const again = page.getByRole("listitem").filter({ hasText: REPOSITORY });
+    const again = page.getByRole("row").filter({ hasText: REPOSITORY });
     await again.getByRole("switch", { name: `Review ${REPOSITORY}` }).click();
     await expect(again.getByText("Inactive")).toBeVisible();
     await page.reload();
     await expect(
       page
-        .getByRole("listitem")
+        .getByRole("row")
         .filter({ hasText: REPOSITORY })
         .getByText("Inactive"),
     ).toBeVisible();
@@ -119,7 +119,7 @@ test.describe("the project list and the settings pages", () => {
       "No new repositories.",
     );
     await expect(
-      page.getByRole("listitem").filter({ hasText: REPOSITORY }),
+      page.getByRole("row").filter({ hasText: REPOSITORY }),
     ).toBeVisible();
   });
 
@@ -244,7 +244,7 @@ test.describe("the project list and the settings pages", () => {
     }) => {
       await signInThroughTheForm(page, account);
       await expect(
-        page.getByRole("listitem").filter({ hasText: REPOSITORY }),
+        page.getByRole("row").filter({ hasText: REPOSITORY }),
       ).toBeVisible();
       const overflow = () =>
         page.evaluate(

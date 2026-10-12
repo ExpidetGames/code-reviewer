@@ -65,7 +65,7 @@ test.describe("starting a review by hand", () => {
     await syncFromGithubAsAdmin(e2eEnv.appUrl);
     await signInThroughTheForm(page, account);
     const row = page
-      .getByRole("listitem")
+      .getByRole("row")
       .filter({ hasText: WIDGETS.fullName });
     await row
       .getByRole("switch", { name: `Review ${WIDGETS.fullName}` })
