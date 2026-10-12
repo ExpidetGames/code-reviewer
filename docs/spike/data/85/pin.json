@@ -1,0 +1,12 @@
+{
+  "repository": "https://github.com/anomalyco/opencode",
+  "version": "1.19.0",
+  "commit": "733b2c627e5aec39cb33cc22373bdce33053ef2c",
+  "asset": "opencode-linux-x64.tar.gz",
+  "url": "https://github.com/anomalyco/opencode/releases/download/v1.19.0/opencode-linux-x64.tar.gz",
+  "sha256": "7bb9e61ad6feacf2e89c10a6a2c1840e3de4220bb50ba1fc7110f31806076aec",
+  "archiveBytes": 60685698,
+  "executableBytes": 185747584,
+  "upstreamLicense": "MIT",
+  "status": "integration candidate; review-mode patch required before activation"
+}

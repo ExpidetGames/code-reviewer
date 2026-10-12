@@ -1,0 +1,49 @@
+{
+  "uid": 10001,
+  "sandbox_write_denied": true,
+  "sandbox_host_path_absent": true,
+  "sandbox_parent_pid_absent": true,
+  "diagnostic_supervisor_uid": 0,
+  "unprivileged_userns_proved": false,
+  "engine_in_bwrap": true,
+  "engine_version": "1.19.0",
+  "model_calls": 11,
+  "tool_calls": 11,
+  "message_list_error": "OutputFormatJsonSchema response encoding",
+  "steps_configured": 2,
+  "main_calls": 11,
+  "offered_tools": [
+    "StructuredOutput",
+    "glob",
+    "grep",
+    "read"
+  ],
+  "explicit_rule_read": true,
+  "nested_rule_injected": true,
+  "root_rule_injected": false,
+  "directory_read": true,
+  "external_read_denied": true,
+  "all_forbidden_calls_failed": true,
+  "forbidden_attempts": [
+    "bash",
+    "shell",
+    "write",
+    "webfetch",
+    "task",
+    "invented_tool"
+  ],
+  "plugin_executed": true,
+  "checkout_unchanged": true,
+  "structured_output": true,
+  "peak_engine_rss_mib": 596.57,
+  "elapsed_seconds": 5.81,
+  "engine_reaped": true,
+  "observed_date": "2026-10-12",
+  "network_guard": "Docker --network none; loopback fake inside same outer namespace",
+  "scope": "root diagnostic supervisor; non-root engine; unprivileged user-namespace deployment NOT proved",
+  "test_outcome": {
+    "passed": 3,
+    "failed": 1,
+    "failure": "stock engine executes discovered plugin despite disable flags; safety assertion preserved"
+  }
+}

@@ -118,6 +118,18 @@ contracts/                         runner API schema (runner-api.v1.json) and on
   function-scoped by default). Use `vi.mock` or monkeypatching only for your own collaborators in unit
   tests.
 
+Research artifacts for #85 live under `docs/spike/data/85/`, following the earlier fair model
+comparison in `docs/spike/`.
+They are separate, explicitly invoked experiments, not an additional production test level and
+not collected by `make verify` or CI: pytest collects `runner/tests/`, Vitest collects the app's
+configured TypeScript test globs, and Playwright collects `app/e2e/`. The plugin safety assertion
+remains a failing manual probe until the upstream discovery gap is fixed; it is not skipped or
+marked as an expected failure. Git/plan checks are offline. The real OpenCode component probe
+runs only in its disposable Docker `--network none` namespace with a loopback scripted model;
+it fails loudly on missing infrastructure. Its diagnostic root supervisor is not a supported
+production sandbox. #196/#197 move shared fakes and required acceptance tests into the existing
+runner levels, with an OS guard that also covers non-Python children.
+
 ## 5. Fakes and the network guard
 
 Principle: fake at the process boundary with a real server speaking the real protocol, so the
