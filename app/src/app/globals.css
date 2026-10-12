@@ -12,66 +12,79 @@
  * data-theme="light" or "dark" on <html> (src/theme/theme.ts), which pins color-scheme; without the
  * attribute the system decides.
  */
-:root {
-  color-scheme: light dark;
+/*
+ * Cascade layers. Tailwind's utilities live in `@layer utilities`; an unlayered element rule beats
+ * every layer, which is how `a { color }` and `button { font }` used to override a kit button. The
+ * element-level base rules below therefore live in `@layer base` (the order is declared here, and
+ * again in `theme.css`, before either file uses a layer). The legacy class rules (`.btn`, `.card`,
+ * ...) stay unlayered on purpose: they must keep winning until their screens move to the kit
+ * (#165), and the cleanup (#185) deletes them together with this file.
+ * `src/app/globals-layers.test.ts` guards the rule.
+ */
+@layer theme, base, components, utilities;
 
-  --header-height: 3.5rem;
-  --content-width: 72rem;
-  --gutter: 1rem;
-}
+@layer base {
+  :root {
+    color-scheme: light dark;
 
-:root[data-theme="light"] {
-  color-scheme: light;
-}
+    --header-height: 3.5rem;
+    --content-width: 72rem;
+    --gutter: 1rem;
+  }
 
-:root[data-theme="dark"] {
-  color-scheme: dark;
-}
+  :root[data-theme="light"] {
+    color-scheme: light;
+  }
 
-/* Base */
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+  }
 
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
-}
+  /* Base */
 
-html {
-  -webkit-text-size-adjust: 100%;
-}
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
 
-body {
-  margin: 0;
-  color: var(--foreground);
-  background: var(--background);
-  font-family: var(--font-sans);
-  font-size: 1rem;
-  line-height: 1.5;
-}
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
 
-h1,
-h2,
-h3 {
-  margin: 0;
-  line-height: 1.25;
-}
+  body {
+    margin: 0;
+    color: var(--foreground);
+    background: var(--background);
+    font-family: var(--font-sans);
+    font-size: 1rem;
+    line-height: 1.5;
+  }
 
-p {
-  margin: 0;
-}
+  h1,
+  h2,
+  h3 {
+    margin: 0;
+    line-height: 1.25;
+  }
 
-a {
-  color: var(--primary);
-}
+  p {
+    margin: 0;
+  }
 
-button {
-  font: inherit;
-  color: inherit;
-}
+  a {
+    color: var(--primary);
+  }
 
-:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
+  button {
+    font: inherit;
+    color: inherit;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
 }
 
 .muted {
