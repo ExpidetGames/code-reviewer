@@ -14,7 +14,7 @@
 //   POST /api/admin/github/manifest           starts the manifest flow: answers { postUrl, manifest }, which the
 //                                             browser posts to GitHub (the state is in postUrl)
 //   GET  /api/admin/github/manifest/callback  where GitHub sends the browser back (code and state); answers a
-//                                             redirect to the integrations page, with the result in the query
+//                                             redirect to the GitHub App page, with the result in the query
 //   POST /api/admin/github/check              asks GitHub what the App is granted and says what is missing
 //   POST /api/admin/github/link               starts the linking of the admin's own GitHub account (and so the
 //                                             merge with an imported operator): answers { url }, the address
@@ -40,7 +40,7 @@ import { GITHUB_ERROR_STATUS, type GithubErrorCode } from "./errors.ts";
 export const GITHUB_REQUEST_MAX_BYTES = 64 * 1024;
 
 /** Where the person lands after the manifest flow: a fixed path, never one taken from the request. */
-export const INTEGRATIONS_PAGE = "/admin/integrations";
+export const GITHUB_APP_PAGE = "/admin/integrations/github";
 
 export type GithubRouteDependencies = {
   /** Who the request is: called first, on every request. */
@@ -239,7 +239,7 @@ export function createGithubRouteHandlers({
       return new Response(null, {
         status: 302,
         headers: {
-          location: `${INTEGRATIONS_PAGE}?${query}`,
+          location: `${GITHUB_APP_PAGE}?${query}`,
           "referrer-policy": "no-referrer",
           ...NO_STORE,
         },

@@ -202,7 +202,7 @@ describe("the manifest flow through the routes", () => {
   }
 
   // #102-GH-19
-  it("creates the App from the first click to the stored credentials, and lands on the integrations page", async () => {
+  it("creates the App from the first click to the stored credentials, and lands on the GitHub App page", async () => {
     const { portal } = await start();
     const started = await startFlow(portal);
     const { postUrl, manifest } = (await started.json()) as {
@@ -220,7 +220,7 @@ describe("the manifest flow through the routes", () => {
     expect(started.status).toBe(200);
     expect(callback.status).toBe(302);
     expect(callback.headers.get("location")).toBe(
-      "/admin/integrations?github=created",
+      "/admin/integrations/github?github=created",
     );
     expect(callback.headers.get("referrer-policy")).toBe("no-referrer");
     const view = await portal.visit("/api/admin/github", {
@@ -299,7 +299,7 @@ describe("the manifest flow through the routes", () => {
 
     expect(callback.status).toBe(302);
     expect(callback.headers.get("location")).toBe(
-      "/admin/integrations?github_error=state_invalid",
+      "/admin/integrations/github?github_error=state_invalid",
     );
     expect(fake.conversionCodes()).toEqual([]);
     expect((await portal.credentials.load()).source).toBe("none");

@@ -56,6 +56,7 @@ const PROTECTED_ROUTES = [
   "/instance-portal",
   "/instance-portal/approvals",
   "/instance-portal/integrations",
+  "/instance-portal/integrations/github",
   "/instance-portal/limits",
   "/instance-portal/mail",
   "/instance-portal/setup",

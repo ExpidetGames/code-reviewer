@@ -4,9 +4,10 @@
 // What an App that was imported or made by hand may lack: the account permission "Email addresses" (the
 // verified primary email of a GitHub sign in) and the organization permission "Members" (a person's role
 // when an installation is bound to a workspace). The list is always shown; the button asks GitHub which of
-// them this App really lacks.
-import { useId, useState } from "react";
-import { Button } from "../../ui/button.tsx";
+// them this App really lacks. It sits behind the "Permissions GitHub granted" disclosure of the page.
+import { useState } from "react";
+import { Button } from "../../components/button.tsx";
+import { Alert, AlertDescription } from "../../components/ui/alert.tsx";
 import { browserGithubApi, type GithubApi } from "./api.ts";
 import { describeGithubFailure, PERMISSION_LABELS } from "./messages.ts";
 
@@ -21,7 +22,6 @@ export function PermissionsCheck({
   /** Only tests pass this. */
   api?: GithubApi;
 }) {
-  const ids = useId();
   const [pending, setPending] = useState(false);
   const [outcome, setOutcome] = useState<Outcome>(null);
 
@@ -38,47 +38,52 @@ export function PermissionsCheck({
   }
 
   return (
-    <section className="settings-form" aria-labelledby={ids}>
-      <h3 id={ids}>Permissions of this App</h3>
-      <p className="muted">
+    <div className="flex flex-col gap-3 pt-2">
+      <p className="text-sm text-muted-foreground">
         An App that was imported or made by hand may lack two permissions that
         the one-click flow asks for. Add them in the App&apos;s settings on
         GitHub (Permissions &amp; events), then accept the changed permissions
         on each installation when GitHub asks:
       </p>
-      <ul className="muted">
+      <ul className="list-disc pl-5 text-sm text-muted-foreground">
         <li>{PERMISSION_LABELS.emails}</li>
         <li>{PERMISSION_LABELS.members}</li>
       </ul>
-      <div className="form-actions">
-        <Button disabled={pending} onClick={() => void check()}>
-          {pending ? "Asking GitHub..." : "Check the permissions"}
+      <div>
+        <Button
+          loading={pending}
+          loadingLabel="Asking GitHub"
+          onClick={() => void check()}
+        >
+          Check the permissions
         </Button>
       </div>
-      <div role="status" aria-live="polite">
+      <div aria-live="polite">
         {outcome?.kind === "missing" && outcome.missing.length === 0 ? (
-          <p className="alert alert-success">
-            The App has every permission Code Reviewer asks for.
-          </p>
+          <Alert variant="success">
+            <AlertDescription>
+              The App has every permission Code Reviewer asks for.
+            </AlertDescription>
+          </Alert>
         ) : null}
         {outcome?.kind === "missing" && outcome.missing.length > 0 ? (
-          <div className="alert alert-warning">
-            <p>
-              <strong>The App lacks:</strong>
-            </p>
-            <ul>
-              {outcome.missing.map((name) => (
-                <li key={name}>{PERMISSION_LABELS[name] ?? name}</li>
-              ))}
-            </ul>
-          </div>
+          <Alert variant="warning">
+            <AlertDescription>
+              <p>The App lacks:</p>
+              <ul className="list-disc pl-5">
+                {outcome.missing.map((name) => (
+                  <li key={name}>{PERMISSION_LABELS[name] ?? name}</li>
+                ))}
+              </ul>
+            </AlertDescription>
+          </Alert>
         ) : null}
         {outcome?.kind === "failed" ? (
-          <p className="alert alert-error" role="alert">
-            {outcome.text}
-          </p>
+          <Alert variant="destructive">
+            <AlertDescription>{outcome.text}</AlertDescription>
+          </Alert>
         ) : null}
       </div>
-    </section>
+    </div>
   );
 }
