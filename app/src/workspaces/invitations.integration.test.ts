@@ -869,6 +869,31 @@ describe("accepting an invitation by its link", () => {
   });
 
   // #101-WM-18
+  // #101-WM-12
+  it("keeps working when the person who invited has left the workspace: the invitation belongs to the workspace", async () => {
+    const { h, workspace, owner, admin } = await setup();
+    const person = await h.addUser("person", { email: "person@example.test" });
+    const { token } = await inviteForToken(
+      h,
+      workspace,
+      admin.id,
+      person.email,
+    );
+    expect(
+      await h.members.remove({
+        workspaceId: workspace.id,
+        actorId: owner.id,
+        targetUserId: admin.id,
+      }),
+    ).toMatchObject({ ok: true });
+
+    expect(await h.invitations.preview(token)).toMatchObject({ ok: true });
+    expect(await h.invitations.accept({ token }, person)).toMatchObject({
+      ok: true,
+      role: "member",
+    });
+  });
+
   it("works once: the second attempt is invitation_used and the first member keeps the role", async () => {
     const { h, workspace, owner } = await setup();
     const person = await h.addUser("person", { email: "person@example.test" });

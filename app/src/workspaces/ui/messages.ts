@@ -18,9 +18,9 @@ const FAILURE_COPY: Record<string, string> = {
   invalid_request:
     "The request was not complete. Reload the page and try again.",
   email_not_allowed:
-    "The sign-up rule of this instance does not let that address in, so it cannot be invited. An admin of the instance can change the rule.",
+    "The sign-up rule of this instance does not let that address in, so it can neither be invited nor accept an invitation. An admin of the instance can change the rule.",
   signup_closed:
-    "Invitations are closed on this instance right now: the sign-up rule names addresses, and nothing can verify them yet. Ask the person who runs it.",
+    "Invitations are closed on this instance right now: the sign-up rule names addresses, and nothing can verify them yet. Ask the person who runs the instance.",
   already_member: "That address belongs to a member of this workspace already.",
   already_invited:
     "That address has an invitation already. Revoke it first, or send it again.",

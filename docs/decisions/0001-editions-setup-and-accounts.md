@@ -315,7 +315,11 @@ must first make somebody else an Owner.
 
 - **The sign-up rule applies to invitations.** Only emails that the current sign-up rule allows can be
   invited; an invitation does not override the rule. (An email list rule therefore needs the address
-  on the list first.)
+  on the list first.) The rule is evaluated **again when the invitation is accepted** and when it is sent
+  again, not only when it is made: an invitation made under "everyone" does not bring in an address that
+  a tightened rule refuses (`email_not_allowed`, or `signup_closed` while the rule names addresses and
+  nothing can verify them). The instance admin is exempt, as from the sign-up itself, and a membership
+  that exists is never touched by a rule change. An invitation can still be revoked.
 - An invitation is a **single-use link bound to that email address**. It expires after **7 days** and
   can be revoked by an Owner, or by an Admin for Member invitations. The token is random with 256 bits;
   only its hash is stored.
@@ -593,9 +597,6 @@ start runs the import again from the beginning. Once `done`, a later start does 
 - **OIDC / SSO** as a further identity: later, behind the identity model of section 2.6.
 - **Existing users when the sign-up rule changes.** This record says accounts are not locked out by a
   rule change. Decide later whether the instance admin gets a "disable user" action.
-- **Inviting an account the rule no longer allows.** After the rule is tightened, an existing account
-  may no longer pass the rule. Decide whether it can still be invited to (or stay in) further
-  workspaces. Until decided, existing accounts are never affected and new accounts must pass the rule.
 - **Unlinking an installation after a disconnect.** Decide who may link an installation again after
   its workspace disconnected it, and whether a disconnect releases the one-workspace lock at once.
 - **Moving from SQLite to Postgres.** There is no migration tool in this milestone. Decide whether to

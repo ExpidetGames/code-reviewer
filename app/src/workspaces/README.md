@@ -97,6 +97,13 @@ characters without control or formatting characters (they end up in mails and pa
   refuses, the link is in the answer **once** for the person who invited to copy. A new link then needs a
   revoke and a new invitation; with a mail server the same invitation can be sent again (a resend replaces the
   token, which stops the old link).
+- The rule is evaluated **again at accept** and at resend (`email_not_allowed`, `signup_closed`): an invitation
+  made under "everyone" does not bring in an address that a tightened rule refuses, and it stays open for a
+  rule that lets the address in again. The instance admin is exempt, as from the sign-up itself. An existing
+  membership is never touched by a change of the rule.
+- An invitation belongs to the workspace, not to the person who made it: when that person leaves or is removed
+  the invitation stays open and works (`invited_by` is only set to empty when their account is deleted). An
+  Owner can revoke it from the list.
 - An address that is a member already is `already_member`, one with an open invitation `already_invited`
   (an expired one is ended and replaced). An address that has an account but is no member gets exactly the
   answer of one that has none, so the form tells an Admin nothing they cannot see on the lists.
