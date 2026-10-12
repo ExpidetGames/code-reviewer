@@ -107,7 +107,7 @@ describe("the LLM access section for an Admin or an Owner", () => {
     expect((screen.getByLabelText("API key") as HTMLInputElement).value).toBe(
       "",
     );
-    expect(container.textContent).toMatch(/A key is saved/);
+    expect(container.textContent).toMatch(/A key is saved \(ends in cdef\)/);
     expect(container.textContent).not.toContain(KEY);
   });
 

@@ -196,7 +196,7 @@ value), set Literal.
 | `GITHUB_APP_WEBHOOK_SECRET` | optional | The secret entered in the GitHub App's webhook settings | Secret. Byte for byte: no trailing space or line break. |
 | `GITHUB_APP_PRIVATE_KEY` | optional | The `.pem` file generated on the GitHub App's settings page | Secret. In Coolify choose the value type **Multiline** and paste the key with its line breaks, or paste it on one line with the breaks written as `\n`; both give the same key ([`github-app.md`](github-app.md), section 3). The key is parsed at start; an unusable one is reported in the log by variable name and GitHub stays not configured. |
 | `RUNNER_TOKEN` | yes | `openssl rand -hex 32` | At least 32 characters. Secret shared by the app and the runner; both read this one variable. |
-| `LLM_API_KEY` | optional | The OpenRouter API key | Secret. Without it the app starts and shows a configuration error, and every review fails with `llm_not_configured`: set it before the first review. |
+| `LLM_API_KEY` | optional | The OpenRouter API key | Legacy, secret. Every workspace enters its own key in the UI (Settings, LLM access). This one only serves a single-tenant instance for a workspace that has no key of its own. Without any key, reviews of that workspace fail with `llm_not_configured`: enter one before the first review. |
 | `LLM_PROVIDER` | optional | `openrouter` | The only provider for now; this is the default. |
 | `LLM_MODEL` | optional | An OpenRouter model name | Default `anthropic/claude-haiku-5.5`. The review settings in the UI can choose another model per project. |
 | `LLM_MAX_TOKENS` | optional | Context window of a model PR-Agent does not know | Leave empty for known models. |
@@ -567,7 +567,7 @@ Do this once with the whole team in the room; it is the acceptance test of the d
 | GitHub says the callback URL does not match | The OAuth app's callback URL is not exactly `<BETTER_AUTH_URL>/api/auth/callback/github`. |
 | A webhook delivery shows 401 | `GITHUB_APP_WEBHOOK_SECRET` differs from the GitHub App's webhook secret ([`github-app.md`](github-app.md), section 4). |
 | A webhook delivery shows a timeout, 502 or 503 | The app is unreachable: domain, proxy, health. |
-| A run fails with `llm_not_configured` | `LLM_API_KEY` is empty or invalid. |
+| A run fails with `llm_not_configured` | The workspace of the run has no LLM key, or the saved key cannot be read (an Admin enters it again under Settings, LLM access). On a single-tenant instance the legacy `LLM_API_KEY` is the fallback; it must be set and valid. |
 | The build is killed or the server is unresponsive during a deployment | Not enough memory for the build: more RAM, or a [build server](https://coolify.io/docs/troubleshoot/server/crash-during-build). |
 
 ## What is verified

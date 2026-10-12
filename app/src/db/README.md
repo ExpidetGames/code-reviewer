@@ -158,6 +158,21 @@ and 2.7):
   A third key, `smtp`, holds the mail server's settings (the password is in `secrets`, never here); the repository
   can also `remove` a setting.
 
+### Workspace secrets and the remembered keys of jobs
+
+Migrations `20261012140000_create_workspace_secrets` and `20261012140100_create_job_claimed_keys` (sections 2.7, 2.8
+and 2.10):
+
+- `workspace_secrets` (`workspace_id`, `name`, `binding`, `ciphertext`, `nonce`, `key_version`, `last_four`,
+  `updated_by`, `updated_at`; primary key (workspace, name)): the encrypted credentials of one workspace, today its LLM
+  key (`workspace-secrets-repository.ts`, scoped, used through `src/secrets/workspace-store.ts`). The workspace id
+  and the name are bound into the ciphertext; `binding` is the provider the key was entered for. A row goes with
+  its workspace.
+- `job_claimed_keys` (`job_id`, `ciphertext`, `nonce`, `key_version`, `created_at`): the LLM key handed to a runner
+  with the claim of a job, encrypted, so any app instance can mask a result (`job-claimed-keys-repository.ts`,
+  instance level; `src/runner-api/claimed-keys.ts`). A row goes with its job and with the cleanup a week after the
+  job finished.
+
 ## Workspace scoping
 
 Every repository that reads or writes customer data is created for one workspace:

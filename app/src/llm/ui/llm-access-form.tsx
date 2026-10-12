@@ -189,7 +189,7 @@ export function LlmAccessForm({
               ? "The saved key was made for another provider and is not carried over: enter the key for this provider."
               : keyStatus.state === "unreadable"
                 ? "The saved key cannot be read. Enter it again."
-                : "A key is saved. Leave the field empty to keep it, or enter a new one to replace it."}{" "}
+                : `A key is saved${keyStatus.state === "configured" && keyStatus.lastFour !== null ? ` (ends in ${keyStatus.lastFour})` : ""}. Leave the field empty to keep it, or enter a new one to replace it.`}{" "}
           It is stored encrypted and is never shown again.
         </p>
         {keyIssue ? (
