@@ -1,54 +1,101 @@
 // SPDX-License-Identifier: Apache-2.0
 
 "use client";
-// The links of the main navigation: the places of the workspace the page is in (none outside a workspace).
-// `NavLinks` takes the current path as a value so it can be rendered anywhere; `CurrentNavLinks` reads it from
-// the router. The router read can wait for the request on routes with dynamic segments, so the shell wraps
-// it in <Suspense> and shows `NavLinks` without a current page meanwhile.
+// The links of the main navigation, on the shadcn Sidebar: the groups of the workspace the page is
+// in (none outside a workspace). The sidebar itself reads the current path from the router, which
+// can wait for the request on routes with dynamic segments, so the shell wraps it in <Suspense>.
+// Every link marks the current page with `aria-current="page"` and closes the narrow-screen drawer.
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useRef } from "react";
-import { isCurrentPage, navItemsFor } from "./nav-items.ts";
+import { Fragment, useEffect, useRef } from "react";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarSeparator,
+  useSidebar,
+} from "@/components/ui/sidebar";
+import { isCurrentPage, navGroupsFor } from "./nav-items.ts";
 
-export function NavLinks({
-  pathname,
-  onNavigate,
-}: {
-  pathname: string | null;
-  /** Called when a link is chosen; the narrow menu closes itself with it. */
-  onNavigate?: () => void;
-}) {
+/** How much of the top the fixed sidebar leaves to the header (`min-h-14` + its bottom border). */
+export const SIDEBAR_TOP_CLASS = "top-14 h-[calc(100svh-3.5rem)]";
+
+export function NavLinks({ pathname }: { pathname: string | null }) {
+  const groups = navGroupsFor(pathname);
+  if (groups.length === 0) return null;
   return (
-    <ul className="nav-list">
-      {navItemsFor(pathname).map((item) => (
-        <li key={item.href}>
-          <Link
-            href={item.href}
-            className="nav-link"
-            aria-current={
-              isCurrentPage(pathname, item.href) ? "page" : undefined
-            }
-            onClick={onNavigate}
-          >
-            {item.label}
-          </Link>
-        </li>
+    <SidebarContent>
+      {groups.map((group, index) => (
+        <Fragment key={index}>
+          {index > 0 ? <SidebarSeparator /> : null}
+          <SidebarGroup>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {group.items.map((item) => (
+                  <NavLink key={item.href} item={item} pathname={pathname} />
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        </Fragment>
       ))}
-    </ul>
+    </SidebarContent>
   );
 }
 
-export function CurrentNavLinks({ onNavigate }: { onNavigate?: () => void }) {
+function NavLink({
+  item,
+  pathname,
+}: {
+  item: { href: string; label: string };
+  pathname: string | null;
+}) {
+  const { setOpenMobile } = useSidebar();
+  const current = isCurrentPage(pathname, item.href);
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton asChild isActive={current}>
+        <Link
+          href={item.href}
+          aria-current={current ? "page" : undefined}
+          onClick={() => setOpenMobile(false)}
+        >
+          {item.label}
+        </Link>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  );
+}
+
+/**
+ * The workspace sidebar of the shell. It reads the current path and renders nothing outside a
+ * workspace, so the pages of an account without a workspace (and the admin portal) get no empty
+ * column. The `Sidebar` becomes the shadcn Sheet drawer on a narrow screen; a link or a page change
+ * closes it.
+ */
+export function CurrentWorkspaceSidebar() {
   const pathname = usePathname();
+  const { setOpenMobile } = useSidebar();
   const shownPath = useRef(pathname);
 
-  // The page changed, by whatever means (a link anywhere, back and forward): the narrow menu has
-  // done its job. A click on a nav link closes it sooner through `onNavigate` on the link.
+  // The page changed, by whatever means (a link anywhere, back and forward): the drawer has done
+  // its job. A click on a nav link closes it sooner through the link's own onClick.
   useEffect(() => {
     if (shownPath.current === pathname) return;
     shownPath.current = pathname;
-    onNavigate?.();
-  }, [pathname, onNavigate]);
+    setOpenMobile(false);
+  }, [pathname, setOpenMobile]);
 
-  return <NavLinks pathname={pathname} onNavigate={onNavigate} />;
+  if (navGroupsFor(pathname).length === 0) return null;
+  return (
+    <Sidebar className={SIDEBAR_TOP_CLASS}>
+      <nav aria-label="Main" className="flex min-h-0 flex-1 flex-col">
+        <NavLinks pathname={pathname} />
+      </nav>
+    </Sidebar>
+  );
 }

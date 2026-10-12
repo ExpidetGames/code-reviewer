@@ -141,7 +141,7 @@ test.describe("the admin portal", () => {
     await signInAsAdmin(page);
 
     await page.getByRole("button", { name: "admin", exact: true }).click();
-    await page.getByRole("link", { name: "Admin" }).click();
+    await page.getByRole("menuitem", { name: "Admin" }).click();
 
     await expect(page).toHaveURL(/\/admin$/);
     await expect(
@@ -152,11 +152,11 @@ test.describe("the admin portal", () => {
     const sections = page.getByRole("navigation", { name: "Admin" });
     await expect(sections.getByRole("link")).toHaveText([
       "Overview",
-      "Setup",
-      "Integrations",
       "Approvals",
-      "Mail",
+      "Setup",
       "Limits",
+      "Integrations",
+      "Mail",
     ]);
     await expect(
       sections.getByRole("link", { name: "Overview" }),
@@ -267,7 +267,7 @@ test.describe("the admin portal", () => {
     );
     await page.goto("/w/default/projects");
     await page.getByRole("button", { name: member.name }).click();
-    await expect(page.getByRole("link", { name: "Admin" })).toHaveCount(0);
+    await expect(page.getByRole("menuitem", { name: "Admin" })).toHaveCount(0);
   });
 
   // #138

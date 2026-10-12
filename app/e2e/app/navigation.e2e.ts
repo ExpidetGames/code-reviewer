@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Pins down the frame around the signed in app in a real browser: the three places load one after
-// the other inside the same frame and signing out lands on the login page, on a desktop window and
-// on a phone-sized one (where the navigation sits behind the Menu button and the page must not
-// scroll sideways). The details of the navigation and the menus are proven as component tests.
+// Pins down the frame around the signed in app in a real browser: the sidebar places load one after
+// the other inside the same frame and signing out lands on the login page, on a desktop window and on
+// a phone-sized one (where the sidebar sits behind the "Toggle Sidebar" trigger and opens as a
+// drawer, and the page must not scroll sideways). The details of the navigation and the menus are
+// proven as component tests.
 import { expect, test } from "@playwright/test";
 import {
   addGithubAccount,
@@ -56,26 +57,34 @@ test.describe("the app frame", () => {
   test.describe("on a narrow window", () => {
     test.use({ viewport: { width: 375, height: 812 } });
 
-    // CR-36-T10
-    test("a person on a phone opens the menu, switches from Projects to Runs and the page does not scroll sideways", async ({
+    // #168-T05, CR-36-T10
+    test("a person on a phone opens the drawer, switches from Projects to Runs and the page does not scroll sideways", async ({
       page,
     }) => {
       await signInThroughTheForm(page, account);
       await expect(
         page.getByRole("heading", { level: 1, name: "Projects" }),
       ).toBeVisible();
-      const menuButton = page.getByRole("button", { name: "Menu" });
+      const trigger = page.getByRole("button", { name: "Toggle Sidebar" });
       const runs = page.getByRole("link", { name: "Runs" });
       await expect(runs).toBeHidden();
 
-      await menuButton.click();
-      await expect(menuButton).toHaveAttribute("aria-expanded", "true");
-      await runs.click();
+      await trigger.click();
+      await expect(trigger).toHaveAttribute("aria-expanded", "true");
+      const nav = page.getByRole("navigation", { name: "Main" });
+      await expect(nav.getByRole("link")).toHaveText([
+        "Projects",
+        "Runs",
+        "Connections",
+        "Members",
+        "Settings",
+      ]);
+      await nav.getByRole("link", { name: "Runs" }).click();
 
       await expect(
         page.getByRole("heading", { level: 1, name: "Runs" }),
       ).toBeVisible();
-      await expect(menuButton).toHaveAttribute("aria-expanded", "false");
+      await expect(trigger).toHaveAttribute("aria-expanded", "false");
       await expect(runs).toBeHidden();
       const overflow = await page.evaluate(
         () =>

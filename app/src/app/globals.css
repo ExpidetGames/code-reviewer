@@ -538,35 +538,6 @@
   letter-spacing: 0.04em;
 }
 
-.theme-toggle {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 0.25rem;
-  padding: 0.25rem;
-  border-radius: var(--radius);
-  background: var(--muted);
-}
-
-.theme-toggle button {
-  min-height: 2rem;
-  padding: 0.25rem 0.5rem;
-  border: 0;
-  border-radius: calc(var(--radius) - 0.125rem);
-  background: transparent;
-  cursor: pointer;
-}
-
-/* The chosen option has a check mark besides its background, for the same reason as above. */
-.theme-toggle button[aria-pressed="true"] {
-  background: var(--card);
-  box-shadow: 0 0 0 1px var(--border);
-  font-weight: 600;
-}
-
-.theme-toggle button[aria-pressed="true"]::before {
-  content: "\2713\00a0";
-}
-
 /* Narrow screens: the navigation folds into the "Menu" button. */
 @media (max-width: 47.99rem) {
   .menu-button {

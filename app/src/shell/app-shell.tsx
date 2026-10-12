@@ -1,22 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 "use client";
-// The frame around every signed in page: skip link, header with the brand, the main navigation and
-// the user menu, and the main landmark for the page. On a narrow screen the navigation sits behind
-// a "Menu" button (a disclosure, see globals.css for the breakpoint); it closes after a place is
-// chosen and with Escape. The user menu arrives as a slot: it needs the session, so the layout
-// renders it on the server and the frame itself stays static.
+// The frame around every signed in page: the skip link, a header (the drawer trigger, the brand, the
+// workspace switcher and the user menu) and the main landmark with the page. The workspace
+// navigation is the shadcn Sidebar to the left; on a narrow screen it becomes the Sheet drawer the
+// trigger opens. The user menu and the workspace switcher arrive as slots: they need the session, so
+// the layout renders them on the server and the frame itself stays static.
 import Link from "next/link";
+import { Suspense, useId, type ReactNode } from "react";
 import {
-  Suspense,
-  useCallback,
-  useEffect,
-  useId,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
-import { CurrentNavLinks, NavLinks } from "./nav-links.tsx";
+  SidebarInset,
+  SidebarProvider,
+  SidebarTrigger,
+} from "@/components/ui/sidebar";
+import { CurrentWorkspaceSidebar } from "./nav-links.tsx";
 
 export function AppShell({
   userMenu,
@@ -28,77 +25,40 @@ export function AppShell({
   workspaceSwitcher?: ReactNode;
   children: ReactNode;
 }) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuButtonRef = useRef<HTMLButtonElement>(null);
-  const navId = useId();
   const mainId = useId();
-  const navRef = useRef<HTMLElement>(null);
-  const closeMenu = useCallback(() => setMenuOpen(false), []);
-
-  // A press anywhere but on the navigation and its button closes the open menu (also on the user
-  // menu next to it, so the two panels never overlap on a phone).
-  useEffect(() => {
-    if (!menuOpen) return;
-    function onPointerDown(event: PointerEvent) {
-      const target = event.target as Node;
-      if (navRef.current?.contains(target)) return;
-      if (menuButtonRef.current?.contains(target)) return;
-      setMenuOpen(false);
-    }
-    document.addEventListener("pointerdown", onPointerDown);
-    return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, [menuOpen]);
 
   return (
-    <div className="app-shell">
-      <a className="skip-link" href={`#${mainId}`}>
+    <SidebarProvider className="min-h-dvh flex-col">
+      <a
+        href={`#${mainId}`}
+        className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-primary-foreground"
+      >
         Skip to content
       </a>
-      <header
-        className="app-header"
-        onKeyDown={(event) => {
-          if (event.key !== "Escape" || !menuOpen) return;
-          setMenuOpen(false);
-          menuButtonRef.current?.focus();
-        }}
-      >
-        <div className="app-header-inner">
-          <button
-            ref={menuButtonRef}
-            type="button"
-            className="menu-button"
-            aria-expanded={menuOpen}
-            aria-controls={navId}
-            onClick={() => setMenuOpen((open) => !open)}
-          >
-            <span className="menu-icon" aria-hidden="true" />
-            Menu
-          </button>
-          <Link href="/" className="brand" onClick={closeMenu}>
+      <header className="sticky top-0 z-20 border-b border-border bg-card">
+        <div className="mx-auto flex min-h-14 w-full max-w-6xl items-center gap-3 px-4 py-2">
+          <SidebarTrigger className="size-11" />
+          <Link href="/" className="font-bold text-foreground">
             Code Reviewer
           </Link>
-          <nav
-            ref={navRef}
-            id={navId}
-            className="main-nav"
-            aria-label="Main"
-            data-open={menuOpen ? "true" : "false"}
-          >
-            <Suspense
-              fallback={<NavLinks pathname={null} onNavigate={closeMenu} />}
-            >
-              <CurrentNavLinks onNavigate={closeMenu} />
-            </Suspense>
-          </nav>
-          <div className="header-end">
+          <div className="ml-auto flex min-w-0 items-center gap-2">
             {workspaceSwitcher}
             {userMenu}
           </div>
         </div>
       </header>
-      <main id={mainId} className="app-main" tabIndex={-1}>
-        {children}
-      </main>
-    </div>
+      <div className="flex min-h-0 flex-1">
+        <Suspense fallback={null}>
+          <CurrentWorkspaceSidebar />
+        </Suspense>
+        <SidebarInset
+          id={mainId}
+          tabIndex={-1}
+          className="mx-auto w-full max-w-6xl flex-1 px-4 pt-6 pb-12"
+        >
+          {children}
+        </SidebarInset>
+      </div>
+    </SidebarProvider>
   );
 }

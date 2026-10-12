@@ -24,9 +24,9 @@ export default function AdminLayout({
 async function AdminFrame({ children }: { children: ReactNode }) {
   await requireAdmin();
   return (
-    <div className="admin-frame">
+    <div className="admin-frame flex flex-col gap-6 md:flex-row">
       <AdminNav />
-      {children}
+      <div className="min-w-0 flex-1">{children}</div>
     </div>
   );
 }

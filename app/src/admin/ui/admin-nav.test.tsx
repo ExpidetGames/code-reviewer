@@ -1,35 +1,67 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // @vitest-environment jsdom
-// Pins down the navigation of the portal: the sections in order, and the current one marked, with
-// Overview current only on its own page (every other page of the portal is below /admin).
+// Pins down the navigation of the portal on the shadcn Sidebar: the grouped sections in order, and
+// the current one marked, with Overview current only on its own page (every other page of the portal
+// is below /admin).
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
-import { SectionLinks } from "./admin-nav.tsx";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { SidebarProvider } from "@/components/ui/sidebar";
+
+const navigation = vi.hoisted(() => ({ pathname: "/admin/setup" }));
+vi.mock("next/navigation", () => ({
+  usePathname: () => navigation.pathname,
+}));
+
+import { AdminNav } from "./admin-nav.tsx";
 import { ADMIN_NAV_ITEMS, isCurrentSection } from "./nav-items.ts";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  navigation.pathname = "/admin/setup";
+});
+
+function renderAdminNav() {
+  return render(
+    <SidebarProvider>
+      <AdminNav />
+    </SidebarProvider>,
+  );
+}
 
 describe("the sections of the portal", () => {
-  // #98-AD-03
-  it("are Overview, Setup, Integrations, Approvals, Mail and Limits, in that order", () => {
-    render(<SectionLinks pathname={null} />);
+  // #168-T02
+  it("are grouped and in order, and mark only the current one", () => {
+    renderAdminNav();
 
-    expect(screen.getAllByRole("link").map((link) => link.textContent)).toEqual(
-      ["Overview", "Setup", "Integrations", "Approvals", "Mail", "Limits"],
+    const nav = screen.getByRole("navigation", { name: "Admin" });
+    const groups = Array.from(
+      nav.querySelectorAll('[data-slot="sidebar-group"]'),
     );
     expect(
-      screen.getAllByRole("link").map((link) => link.getAttribute("href")),
-    ).toEqual(ADMIN_NAV_ITEMS.map((item) => item.href));
-  });
+      groups.map(
+        (group) =>
+          group.querySelector('[data-slot="sidebar-group-label"]')?.textContent,
+      ),
+    ).toEqual(["Admin", "Setup", "Integrations"]);
 
-  it("mark the current section only", () => {
-    render(<SectionLinks pathname="/admin/setup" />);
-
-    const current = screen
-      .getAllByRole("link")
-      .filter((link) => link.getAttribute("aria-current") === "page");
-    expect(current.map((link) => link.textContent)).toEqual(["Setup"]);
+    const links = Array.from(nav.querySelectorAll("a"));
+    expect(links.map((link) => link.textContent)).toEqual([
+      "Overview",
+      "Approvals",
+      "Setup",
+      "Limits",
+      "Integrations",
+      "Mail",
+    ]);
+    expect(links.map((link) => link.getAttribute("href"))).toEqual(
+      ADMIN_NAV_ITEMS.map((item) => item.href),
+    );
+    expect(
+      links
+        .filter((link) => link.getAttribute("aria-current") === "page")
+        .map((link) => link.textContent),
+    ).toEqual(["Setup"]);
   });
 
   it("do not mark Overview on the other pages, which are all below /admin", () => {

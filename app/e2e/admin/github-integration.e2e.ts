@@ -172,7 +172,7 @@ test.describe("the GitHub integration of the admin portal", () => {
       .click();
     await expect(page).toHaveURL(/\/projects$/);
     await page.getByRole("button", { name: operator.name }).click();
-    await expect(page.getByRole("link", { name: "Admin" })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "Admin" })).toBeVisible();
   });
 
   // #102-GH-05
