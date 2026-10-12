@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // `users.org_checked_for`: the GitHub organization that `org_checked_at` was confirmed for, so a
 // confirmation is never reused when `ALLOWED_GITHUB_ORG` names another organization (the access rule
 // in src/auth/access-policy.ts compares them). Better Auth reads and writes it as the additional

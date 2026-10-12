@@ -1,4 +1,9 @@
-// Access to the integrations table. The only code that reads or writes it.
+// SPDX-License-Identifier: Apache-2.0
+
+// Access to the integrations table of ONE workspace (the factory takes the workspace id; see
+// ../workspace-scope.ts). The only code that reads or writes the table, together with the instance
+// level directory (integration-directory-repository.ts) that webhooks and the sync need before a
+// workspace is known.
 import "server-only";
 import type { Kysely } from "kysely";
 import { findSecretLikeKeys } from "../../integrations/config-schema.ts";
@@ -15,6 +20,7 @@ import {
 import { decodeJson, encodeJson, formatTimestamp } from "../codecs.ts";
 import { errorCode } from "../errors.ts";
 import type { Database, IntegrationsTable } from "../schema.ts";
+import type { WorkspaceId } from "../workspace-scope.ts";
 
 export type NewIntegration = {
   type: IntegrationType;
@@ -46,7 +52,7 @@ export type IntegrationsRepository = {
   ): Promise<void>;
 };
 
-function toIntegration(row: IntegrationsTable): Integration {
+export function toIntegration(row: IntegrationsTable): Integration {
   if (!isIntegrationType(row.type))
     throw new IntegrationError(
       "INTEGRATION_TYPE_UNKNOWN",
@@ -61,6 +67,7 @@ function toIntegration(row: IntegrationsTable): Integration {
 
   return {
     id: row.id,
+    workspaceId: row.workspace_id,
     type: row.type,
     displayName: row.display_name,
     externalId: row.external_id,
@@ -122,6 +129,7 @@ function assertValidInput(input: NewIntegration): void {
 
 export function createIntegrationsRepository(
   db: Kysely<Database>,
+  workspaceId: WorkspaceId,
   now: () => Date = () => new Date(),
   newId: () => string = () => crypto.randomUUID(),
 ): IntegrationsRepository {
@@ -129,6 +137,7 @@ export function createIntegrationsRepository(
     const row = await db
       .selectFrom("integrations")
       .selectAll()
+      .where("workspace_id", "=", workspaceId)
       .where("id", "=", id)
       .executeTakeFirst();
     return row === undefined ? undefined : toIntegration(row);
@@ -141,6 +150,7 @@ export function createIntegrationsRepository(
       const timestamp = formatTimestamp(now());
       const row: IntegrationsTable = {
         id: newId(),
+        workspace_id: workspaceId,
         type: input.type,
         display_name: input.displayName,
         external_id: input.externalId,
@@ -173,6 +183,7 @@ export function createIntegrationsRepository(
       const row = await db
         .selectFrom("integrations")
         .selectAll()
+        .where("workspace_id", "=", workspaceId)
         .where("type", "=", type)
         .where("external_id", "=", externalId)
         .executeTakeFirst();
@@ -183,6 +194,7 @@ export function createIntegrationsRepository(
       const rows = await db
         .selectFrom("integrations")
         .selectAll()
+        .where("workspace_id", "=", workspaceId)
         .orderBy("created_at")
         .orderBy("id")
         .execute();
@@ -194,6 +206,7 @@ export function createIntegrationsRepository(
       const result = await db
         .updateTable("integrations")
         .set({ status, updated_at: formatTimestamp(now()) })
+        .where("workspace_id", "=", workspaceId)
         .where("id", "=", id)
         .executeTakeFirst();
       if (Number(result.numUpdatedRows) === 0)
@@ -212,6 +225,7 @@ export function createIntegrationsRepository(
           config: encodeJson(details.config),
           updated_at: formatTimestamp(now()),
         })
+        .where("workspace_id", "=", workspaceId)
         .where("id", "=", id)
         .executeTakeFirst();
       if (Number(result.numUpdatedRows) === 0)

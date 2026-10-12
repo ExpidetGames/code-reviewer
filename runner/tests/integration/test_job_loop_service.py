@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Pins down the service of the job loop as a real process: it takes jobs from the app, and a real
 SIGTERM stops it in an orderly way."""
 

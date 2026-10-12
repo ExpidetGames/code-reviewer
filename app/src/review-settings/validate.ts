@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Checks review settings that come from outside (a request body) or from storage. Pure: no database,
 // no environment. Every problem is reported as `{ field, code }` with a stable code; the message a
 // person reads is the UI's business, and a value is never echoed back.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // @vitest-environment jsdom
 // Pins down the user menu in the header: who is signed in, the way to sign out, and that the menu
 // works from the keyboard. The name and avatar come from the GitHub profile, so they are shown as
@@ -29,6 +31,23 @@ function renderMenu(
 ) {
   return render(<UserMenu user={user} signOutAction={signOut} />);
 }
+
+describe("the way to the admin portal", () => {
+  // #98-AD-03
+  it("is offered to the instance admin and to nobody else", async () => {
+    const user = userEvent.setup();
+    const admin = renderMenu({ ...ada, isInstanceAdmin: true });
+    await user.click(screen.getByRole("button", { name: /Ada Lovelace/ }));
+    const link = screen.getByRole("link", { name: "Admin" });
+    expect(link.getAttribute("href")).toBe("/admin");
+    admin.unmount();
+
+    renderMenu(ada);
+    await user.click(screen.getByRole("button", { name: /Ada Lovelace/ }));
+
+    expect(screen.queryByRole("link", { name: "Admin" })).toBeNull();
+  });
+});
 
 describe("opening the user menu", () => {
   // CR-36-T02
@@ -62,6 +81,11 @@ describe("opening the user menu", () => {
       screen.getByRole("button", { name: /Ada Lovelace/ }),
     );
     await user.keyboard("{Enter}");
+    // The account link, the two entries of the theme, then sign out.
+    await user.tab();
+    expect(document.activeElement).toBe(
+      screen.getByRole("link", { name: "Account" }),
+    );
     await user.tab();
     await user.tab();
     await user.tab();
@@ -70,6 +94,18 @@ describe("opening the user menu", () => {
     expect(document.activeElement).toBe(
       screen.getByRole("button", { name: "Sign out" }),
     );
+  });
+
+  // #102-GH-23
+  it("offers the account page to everybody who is signed in", async () => {
+    const user = userEvent.setup();
+    renderMenu(ada);
+
+    await user.click(screen.getByRole("button", { name: /Ada Lovelace/ }));
+
+    expect(
+      screen.getByRole("link", { name: "Account" }).getAttribute("href"),
+    ).toBe("/account");
   });
 
   // CR-36-T02

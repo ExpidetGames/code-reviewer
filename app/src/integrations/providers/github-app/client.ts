@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // A small GitHub client for the app: authenticates as the app (JWT) and as an installation (token),
 // lists installations and their repositories, reads pull requests and permissions. Everything it
 // returns is already in the shapes the provider needs; nothing outside this folder sees GitHub JSON.
@@ -27,6 +29,17 @@ export type RemoteRepository = {
   url: string;
 };
 
+/** The app as `GET /app` describes it to its own JWT. */
+export type RemoteApp = {
+  /** The app id as text. */
+  id: string;
+  slug: string;
+  /** The account the App belongs to (`owner` of `GET /app`), or null when GitHub does not say. */
+  owner: { id: number; login: string } | null;
+  /** The permissions the App holds, by API name (`pull_requests`, `emails`, `members`, ...). */
+  permissions: Record<string, string>;
+};
+
 export type CollaboratorPermission = "admin" | "write" | "read" | "none";
 
 export type InstallationToken = {
@@ -48,6 +61,11 @@ export type JobTokenScope = {
 };
 
 export type GithubAppClient = {
+  /**
+   * The app itself (`GET /app`, App JWT): proves that the key belongs to the app id, and says what the
+   * App is granted. Rejects with GITHUB_APP_AUTH_FAILED when GitHub refuses the JWT.
+   */
+  getApp(): Promise<RemoteApp>;
   /** Every installation of the app (needs the App JWT). */
   listInstallations(): Promise<RemoteInstallation[]>;
   /** One installation, or null when GitHub does not know it (it was removed, or is not ours). */
@@ -56,15 +74,22 @@ export type GithubAppClient = {
   listInstallationRepositories(
     installationId: string,
   ): Promise<RemoteRepository[]>;
-  /** Rejects with GITHUB_APP_NOT_FOUND for an unknown pull request. */
+  /**
+   * Rejects with GITHUB_APP_NOT_FOUND for an unknown pull request. When `signal` fires, the HTTP
+   * request in flight is aborted (the connection is closed) and the call rejects with
+   * GITHUB_APP_UNAVAILABLE.
+   */
   getPullRequest(
     installationId: string,
     repoFullName: string,
     prNumber: number,
+    signal?: AbortSignal,
   ): Promise<PullRequestRef>;
+  /** Aborts like `getPullRequest` when `signal` fires, also between two pages. */
   listOpenPullRequests(
     installationId: string,
     repoFullName: string,
+    signal?: AbortSignal,
   ): Promise<PullRequestRef[]>;
   /** The repository permission of a user; "none" for a user GitHub does not know. */
   getCollaboratorPermission(
@@ -301,8 +326,14 @@ export function createGithubAppClient(
     method: "GET" | "POST",
     path: string,
     body?: unknown,
+    signal?: AbortSignal,
   ): Promise<unknown> {
     let response: Response;
+    // The client's own timeout always applies; the caller's signal can only end the request sooner.
+    const requestSignal =
+      signal === undefined
+        ? AbortSignal.timeout(timeoutMs)
+        : AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]);
     try {
       response = await doFetch(`${config.apiBaseUrl}${path}`, {
         method,
@@ -314,7 +345,7 @@ export function createGithubAppClient(
           ...(body === undefined ? {} : { "content-type": "application/json" }),
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: requestSignal,
       });
     } catch {
       // The cause is dropped on purpose: it can quote the request.
@@ -331,6 +362,13 @@ export function createGithubAppClient(
     try {
       return await response.json();
     } catch {
+      // Cut off while the body was read (the caller's signal or the timeout): the answer is missing,
+      // not malformed.
+      if (requestSignal.aborted)
+        throw new GithubAppError(
+          "GITHUB_APP_UNAVAILABLE",
+          `GitHub could not be reached for ${method} ${path.split("?")[0]}.`,
+        );
       throw shapeError(`${method} ${path.split("?")[0]}`);
     }
   }
@@ -340,6 +378,7 @@ export function createGithubAppClient(
     path: string,
     pick: (json: unknown) => unknown[],
     map: (item: unknown) => T,
+    signal?: AbortSignal,
   ): Promise<T[]> {
     const items: T[] = [];
     const separator = path.includes("?") ? "&" : "?";
@@ -348,6 +387,8 @@ export function createGithubAppClient(
         await credential(),
         "GET",
         `${path}${separator}per_page=${PAGE_SIZE}&page=${page}`,
+        undefined,
+        signal,
       );
       const batch = pick(json);
       items.push(...batch.map(map));
@@ -389,6 +430,7 @@ export function createGithubAppClient(
   async function mint(
     installationId: string,
     scope?: JobTokenScope,
+    signal?: AbortSignal,
   ): Promise<InstallationToken> {
     checkInstallationId(installationId);
     let json: unknown;
@@ -403,6 +445,7 @@ export function createGithubAppClient(
               repository_ids: [...scope.repositoryIds],
               permissions: { ...scope.permissions },
             },
+        signal,
       );
     } catch (error) {
       // Same code and message; only marked as the answer to the token request.
@@ -436,11 +479,14 @@ export function createGithubAppClient(
     };
   }
 
-  async function cachedToken(installationId: string): Promise<string> {
+  async function cachedToken(
+    installationId: string,
+    signal?: AbortSignal,
+  ): Promise<string> {
     const cached = tokenCache.get(installationId);
     if (cached && cached.expiresAtMs - now() > TOKEN_EXPIRY_BUFFER_MS)
       return cached.token;
-    const minted = await mint(installationId);
+    const minted = await mint(installationId, undefined, signal);
     tokenCache.set(installationId, {
       token: minted.token,
       expiresAtMs: Date.parse(minted.expiresAt),
@@ -452,9 +498,10 @@ export function createGithubAppClient(
   async function withInstallationToken<T>(
     installationId: string,
     run: (token: () => Promise<string>) => Promise<T>,
+    signal?: AbortSignal,
   ): Promise<T> {
     try {
-      return await run(() => cachedToken(installationId));
+      return await run(() => cachedToken(installationId, signal));
     } catch (error) {
       if (
         !(error instanceof GithubAppError) ||
@@ -463,11 +510,37 @@ export function createGithubAppClient(
       )
         throw error;
       tokenCache.delete(installationId);
-      return run(() => cachedToken(installationId));
+      return run(() => cachedToken(installationId, signal));
     }
   }
 
   return {
+    async getApp() {
+      const json = await request(appJwt(), "GET", "/app");
+      if (
+        !isRecord(json) ||
+        typeof json.id !== "number" ||
+        typeof json.slug !== "string"
+      )
+        throw shapeError("GET /app");
+      const permissions: Record<string, string> = {};
+      if (isRecord(json.permissions))
+        for (const [name, level] of Object.entries(json.permissions))
+          if (typeof level === "string") permissions[name] = level;
+      const owner = json.owner;
+      return {
+        id: String(json.id),
+        slug: json.slug,
+        owner:
+          isRecord(owner) &&
+          typeof owner.id === "number" &&
+          typeof owner.login === "string"
+            ? { id: owner.id, login: owner.login }
+            : null,
+        permissions,
+      };
+    },
+
     listInstallations() {
       return allPages(
         async () => appJwt(),
@@ -541,37 +614,51 @@ export function createGithubAppClient(
       });
     },
 
-    async getPullRequest(installationId, repoFullName, prNumber) {
+    async getPullRequest(installationId, repoFullName, prNumber, signal) {
       checkInstallationId(installationId);
       checkPullRequestNumber(prNumber);
       const path = `${repoPath(repoFullName)}/pulls/${prNumber}`;
-      return withInstallationToken(installationId, async (token) => {
-        const json = await request(await token(), "GET", path);
-        const pr = toPullRequestRef(json);
-        if (pr === null)
-          throw shapeError("GET /repos/{owner}/{repo}/pulls/{n}");
-        return pr;
-      });
+      return withInstallationToken(
+        installationId,
+        async (token) => {
+          const json = await request(
+            await token(),
+            "GET",
+            path,
+            undefined,
+            signal,
+          );
+          const pr = toPullRequestRef(json);
+          if (pr === null)
+            throw shapeError("GET /repos/{owner}/{repo}/pulls/{n}");
+          return pr;
+        },
+        signal,
+      );
     },
 
-    async listOpenPullRequests(installationId, repoFullName) {
+    async listOpenPullRequests(installationId, repoFullName, signal) {
       checkInstallationId(installationId);
-      return withInstallationToken(installationId, (token) =>
-        allPages(
-          token,
-          `${repoPath(repoFullName)}/pulls?state=open`,
-          (json) => {
-            if (!Array.isArray(json))
-              throw shapeError("GET /repos/{owner}/{repo}/pulls");
-            return json;
-          },
-          (item) => {
-            const pr = toPullRequestRef(item);
-            if (pr === null)
-              throw shapeError("GET /repos/{owner}/{repo}/pulls");
-            return pr;
-          },
-        ),
+      return withInstallationToken(
+        installationId,
+        (token) =>
+          allPages(
+            token,
+            `${repoPath(repoFullName)}/pulls?state=open`,
+            (json) => {
+              if (!Array.isArray(json))
+                throw shapeError("GET /repos/{owner}/{repo}/pulls");
+              return json;
+            },
+            (item) => {
+              const pr = toPullRequestRef(item);
+              if (pr === null)
+                throw shapeError("GET /repos/{owner}/{repo}/pulls");
+              return pr;
+            },
+            signal,
+          ),
+        signal,
       );
     },
 

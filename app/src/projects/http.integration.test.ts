@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the handler behind `PUT /api/repositories/:id/project`: it asks for the user first, checks
 // the request, calls the service and answers with a stable error code. The user check is injected so
 // this test needs no session; the proxy in front of the real route is tested in
@@ -10,6 +12,7 @@ import type { SessionUser } from "../auth/access-policy.ts";
 import { createTestDatabase } from "../test-support/test-database.ts";
 import { createProjectRouteHandler } from "./http.ts";
 import { createProjectService } from "./service.ts";
+import { defaultWorkspaceId } from "../test-support/workspaces.ts";
 
 const USER = { id: "u1", githubLogin: "octocat" } as unknown as SessionUser;
 
@@ -17,13 +20,19 @@ async function setup(
   requireUser: () => Promise<SessionUser> = async () => USER,
 ) {
   const { db } = await createTestDatabase();
-  const integration = await createIntegrationsRepository(db).create({
+  const integration = await createIntegrationsRepository(
+    db,
+    await defaultWorkspaceId(db),
+  ).create({
     type: "github_app",
     displayName: "acme",
     externalId: "4242",
     config: {},
   });
-  const repositories = createRepositoriesRepository(db);
+  const repositories = createRepositoriesRepository(
+    db,
+    await defaultWorkspaceId(db),
+  );
   await repositories.reconcile(integration.id, [
     {
       integrationId: integration.id,
@@ -35,7 +44,7 @@ async function setup(
   const [repository] = await repositories.list();
   if (repository === undefined) throw new Error("seeding failed");
   const service = createProjectService({
-    projects: createProjectsRepository(db),
+    projects: createProjectsRepository(db, await defaultWorkspaceId(db)),
   });
   const handler = createProjectRouteHandler({ requireUser, service });
   const put = (
@@ -144,10 +153,10 @@ describe("switching a project on and off over HTTP", () => {
   // CR-24-T08
   it("refuses a repository of a suspended installation with 409 PROJECT_INTEGRATION_UNAVAILABLE", async () => {
     const { put, repository, db, integration, projectRows } = await setup();
-    await createIntegrationsRepository(db).setStatus(
-      integration.id,
-      "disabled",
-    );
+    await createIntegrationsRepository(
+      db,
+      await defaultWorkspaceId(db),
+    ).setStatus(integration.id, "disabled");
 
     const response = await put(repository.id, { active: true });
 

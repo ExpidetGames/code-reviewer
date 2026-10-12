@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Everything a test of the webhook route needs: the sync harness (a real SQLite file, the fake
 // GitHub API, the real GitHub App provider behind a registry), the delivery record, a recording
 // intake and the route's handler wired to all of them. `deliver*` builds signed requests like GitHub.
@@ -18,6 +20,7 @@ import { AUTOMATIC_REVIEW_DEBOUNCE_MS } from "../webhooks/automatic-review-polic
 import {
   createGithubAppWebhookHandler,
   type AutomaticReviewDeps,
+  type WorkspaceCollaborators,
 } from "../webhooks/github-app-handler.ts";
 import {
   builtInReviewSettings,
@@ -53,6 +56,8 @@ export async function startWebhookHarness(
     /** How long one request to the fake GitHub may take (default: 5 seconds). */
     requestTimeoutMs?: number;
     env?: Record<string, string | undefined>;
+    /** The GitHub App lives only in the database (see `startSyncHarness`). */
+    credentialsFromDatabase?: boolean;
     /** Changes the real provider, for example to make `canTrigger` refuse. */
     wrapProvider?: (provider: IntegrationProvider) => IntegrationProvider;
     /** The review settings every project uses; default: the built-in values (everything on). */
@@ -65,6 +70,9 @@ export async function startWebhookHarness(
 ) {
   const base = await startSyncHarness({
     ...(options.env === undefined ? {} : { env: options.env }),
+    ...(options.credentialsFromDatabase === undefined
+      ? {}
+      : { credentialsFromDatabase: options.credentialsFromDatabase }),
     ...(options.requestTimeoutMs === undefined
       ? {}
       : { requestTimeoutMs: options.requestTimeoutMs }),
@@ -78,7 +86,7 @@ export async function startWebhookHarness(
 
   const deliveries = createWebhookDeliveriesRepository(base.db);
   const projects = createProjectService({
-    projects: createProjectsRepository(base.db),
+    projects: createProjectsRepository(base.db, base.workspaceId),
   });
   const intake = createRecordingReviewTriggerIntake();
   const infoLines: string[] = [];
@@ -91,19 +99,19 @@ export async function startWebhookHarness(
     ...builtInReviewSettings("test/model"),
     ...options.reviewSettings,
   };
+  const settingsFor: WorkspaceCollaborators["settingsFor"] = async () =>
+    settings;
   const automatic: AutomaticReviewDeps = {
-    settingsFor: async () => settings,
     debounceMs: options.debounceMs ?? AUTOMATIC_REVIEW_DEBOUNCE_MS,
     now: options.now ?? (() => new Date()),
   };
   const handler = createGithubAppWebhookHandler({
     registry,
-    integrations: base.integrations,
+    integrations: base.directory,
     deliveries,
     sync: base.sync,
-    projects,
+    workspace: () => ({ projects, settingsFor, intake }),
     automatic,
-    intake,
     logger,
     ...(options.maxBodyBytes === undefined
       ? {}
@@ -213,6 +221,7 @@ export async function startWebhookHarness(
     parseEvent,
     deliveries,
     projects,
+    settingsFor,
     automatic,
     intake,
     handler,

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Shared setup of the review settings integration tests: a real SQLite file with one repository, and
 // the service on top of it. Not product code.
 import { createAppSettingsRepository } from "../db/repositories/app-settings-repository.ts";
@@ -7,19 +9,24 @@ import { createRepositoriesRepository } from "../db/repositories/repositories-re
 import type { Database } from "../db/schema.ts";
 import type { Kysely } from "kysely";
 import { createTestDatabase } from "./test-database.ts";
+import { defaultWorkspaceId } from "./workspaces.ts";
 import { createReviewSettingsService } from "../review-settings/service.ts";
 import { builtInReviewSettings } from "../review-settings/settings.ts";
 
 export const TEST_MODEL = "deepseek/deepseek-v3.2";
 
-export async function seedRepositories(db: Kysely<Database>) {
-  const integration = await createIntegrationsRepository(db).create({
+export async function seedRepositories(
+  db: Kysely<Database>,
+  workspaceId?: string,
+) {
+  const workspace = workspaceId ?? (await defaultWorkspaceId(db));
+  const integration = await createIntegrationsRepository(db, workspace).create({
     type: "github_app",
     displayName: "acme",
     externalId: "4242",
     config: {},
   });
-  const repositories = createRepositoriesRepository(db);
+  const repositories = createRepositoriesRepository(db, workspace);
   await repositories.reconcile(
     integration.id,
     ["widgets", "gadgets"].map((name, index) => ({
@@ -32,14 +39,15 @@ export async function seedRepositories(db: Kysely<Database>) {
   const [first, second] = await repositories.list();
   if (first === undefined || second === undefined)
     throw new Error("seeding failed");
-  return { first, second };
+  return { first, second, workspaceId: workspace };
 }
 
 export async function setupReviewSettings(db?: Kysely<Database>) {
   const database = db ?? (await createTestDatabase()).db;
-  const { first, second } = await seedRepositories(database);
-  const projects = createProjectsRepository(database);
-  const appSettings = createAppSettingsRepository(database);
+  const workspaceId = await defaultWorkspaceId(database);
+  const { first, second } = await seedRepositories(database, workspaceId);
+  const projects = createProjectsRepository(database, workspaceId);
+  const appSettings = createAppSettingsRepository(database, workspaceId);
   let model = TEST_MODEL;
   const service = createReviewSettingsService({
     appSettings,
@@ -48,6 +56,7 @@ export async function setupReviewSettings(db?: Kysely<Database>) {
   });
   return {
     db: database,
+    workspaceId,
     first,
     second,
     projects,

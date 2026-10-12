@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Builds the access policy the running server uses: the allow list from the configuration, the pins
 // of its logins and, in organization mode, the pieces that talk to GitHub and to Better Auth's
 // tables (the stored token, the time of the last check, ending sessions). Kept apart from `access-policy.ts`, which is

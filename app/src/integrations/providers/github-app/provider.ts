@@ -1,6 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The GitHub App as an IntegrationProvider: one installation of our own app is one integration.
 // Everything GitHub specific stays in this folder; the rest of the app sees normalized types only.
 // See ../../README.md.
+import { createHash } from "node:crypto";
 import {
   validateConfigAgainstSchema,
   type ConfigSchema,
@@ -35,11 +38,15 @@ const CONFIG_SCHEMA: ConfigSchema = {
 
 export type GithubAppProviderOptions = {
   /**
-   * The settings, or a function that reads them on first use. The provider is created when the app
-   * loads, so a missing variable must not break anything else: it fails the first call that needs
-   * GitHub, with GITHUB_APP_CONFIG_INVALID, and works again once the variables are fixed.
+   * The settings, or a function that reads them. The provider is created when the app loads, so a
+   * missing setting must not break anything else: it fails the call that needs GitHub, with
+   * GITHUB_APP_CONFIG_INVALID, and works again once the settings are fixed. A function is asked on
+   * every call and its answer is not remembered: a webhook secret or a key that the admin replaced
+   * counts from the next request on, on every app instance (docs/decisions/0001-editions-setup-and-
+   * accounts.md, section 2.10). Only the HTTP client is kept, for as long as the settings it was made
+   * for are the settings in force.
    */
-  config: GithubAppConfig | (() => GithubAppConfig);
+  config: GithubAppConfig | (() => GithubAppConfig | Promise<GithubAppConfig>);
   /** Replaces the HTTP client; for unit tests. */
   client?: GithubAppClient;
   /** Passed to the default client (a different fetch, clock or timeout). */
@@ -70,24 +77,36 @@ async function readJson(request: Request): Promise<unknown> {
 export function createGithubAppProvider(
   options: GithubAppProviderOptions,
 ): IntegrationProvider {
-  let resolvedConfig: GithubAppConfig | undefined;
-  let resolvedClient: GithubAppClient | undefined;
+  let resolvedClient:
+    { fingerprint: string; client: GithubAppClient } | undefined;
 
-  // Only a successful load is remembered, so fixing the environment needs no restart of this object.
-  function getConfig(): GithubAppConfig {
-    if (resolvedConfig) return resolvedConfig;
-    resolvedConfig =
-      typeof options.config === "function" ? options.config() : options.config;
-    return resolvedConfig;
+  async function getConfig(): Promise<GithubAppConfig> {
+    return typeof options.config === "function"
+      ? await options.config()
+      : options.config;
   }
 
-  function getClient(): GithubAppClient {
+  // What the client was made from. The key is hashed, so nothing secret is kept as a string.
+  function fingerprintOf(config: GithubAppConfig): string {
+    return [
+      config.appId,
+      config.slug,
+      config.apiBaseUrl,
+      createHash("sha256").update(config.privateKey).digest("hex"),
+    ].join("\n");
+  }
+
+  async function getClient(): Promise<GithubAppClient> {
     // Reading the settings first makes an injected client fail like the real one when they are bad.
-    const config = getConfig();
-    resolvedClient ??=
-      options.client ??
-      createGithubAppClient({ ...options.clientOptions, config });
-    return resolvedClient;
+    const config = await getConfig();
+    if (options.client) return options.client;
+    const fingerprint = fingerprintOf(config);
+    if (resolvedClient?.fingerprint !== fingerprint)
+      resolvedClient = {
+        fingerprint,
+        client: createGithubAppClient({ ...options.clientOptions, config }),
+      };
+    return resolvedClient.client;
   }
 
   async function hasWriteAccess(
@@ -95,11 +114,9 @@ export function createGithubAppProvider(
     repoFullName: string,
     login: string,
   ): Promise<boolean> {
-    const permission = await getClient().getCollaboratorPermission(
-      installationId,
-      repoFullName,
-      login,
-    );
+    const permission = await (
+      await getClient()
+    ).getCollaboratorPermission(installationId, repoFullName, login);
     return permission === "admin" || permission === "write";
   }
 
@@ -112,18 +129,27 @@ export function createGithubAppProvider(
     },
 
     async discoverConnections() {
-      return (await getClient().listInstallations()).map(toDiscovered);
+      return (await (await getClient()).listInstallations()).map(toDiscovered);
     },
 
     async findConnection(externalId) {
-      const installation = await getClient().getInstallation(externalId);
+      const installation = await (
+        await getClient()
+      ).getInstallation(externalId);
       return installation === null ? null : toDiscovered(installation);
     },
 
+    async ownerAccount() {
+      const { owner } = await (await getClient()).getApp();
+      return owner === null
+        ? null
+        : { externalId: String(owner.id), login: owner.login };
+    },
+
     async listRepositories(integration) {
-      const remote = await getClient().listInstallationRepositories(
-        integration.externalId,
-      );
+      const remote = await (
+        await getClient()
+      ).listInstallationRepositories(integration.externalId);
       return remote.map((repo): RepoRef => ({
         integrationId: integration.id,
         externalId: repo.externalId,
@@ -138,7 +164,7 @@ export function createGithubAppProvider(
       return isValidSignature(
         body,
         request.headers.get("x-hub-signature-256"),
-        getConfig().webhookSecret,
+        (await getConfig()).webhookSecret,
       );
     },
 
@@ -160,11 +186,9 @@ export function createGithubAppProvider(
         hasWriteAccess: (repoFullName, login) =>
           hasWriteAccess(integration.externalId, repoFullName, login),
         async headShaOf(repoFullName, prNumber) {
-          const pr = await getClient().getPullRequest(
-            integration.externalId,
-            repoFullName,
-            prNumber,
-          );
+          const pr = await (
+            await getClient()
+          ).getPullRequest(integration.externalId, repoFullName, prNumber);
           return pr.headSha;
         },
       });
@@ -184,17 +208,19 @@ export function createGithubAppProvider(
       // A fresh token for exactly this repository on every call, never cached or shared between
       // jobs. A failure is an IntegrationError with a stable code; nothing broader is tried instead.
       try {
-        const config = getConfig();
+        const config = await getConfig();
         const repositoryIds = jobTokenRepositoryIds(repo.externalId);
         if (repo.integrationId !== integration.id || repositoryIds === null)
           throw new IntegrationError(
             "INTEGRATION_ACCESS_SCOPE_REFUSED",
             "The repository does not belong to this integration or has no usable id.",
           );
-        const minted = await getClient().mintInstallationToken(
-          integration.externalId,
-          { repositoryIds, permissions: JOB_TOKEN_PERMISSIONS },
-        );
+        const minted = await (
+          await getClient()
+        ).mintInstallationToken(integration.externalId, {
+          repositoryIds,
+          permissions: JOB_TOKEN_PERMISSIONS,
+        });
         return createGitAccess({
           provider: "github",
           baseUrl: config.apiBaseUrl,
@@ -208,12 +234,15 @@ export function createGithubAppProvider(
       }
     },
 
-    async getPullRequest(integration, repo, prNumber) {
+    async getPullRequest(integration, repo, prNumber, signal) {
       try {
-        return await getClient().getPullRequest(
+        return await (
+          await getClient()
+        ).getPullRequest(
           integration.externalId,
           repo.fullName,
           prNumber,
+          signal,
         );
       } catch (error) {
         // A 404 of the call itself is a pull request that does not exist; a 404 of the token request
@@ -233,14 +262,13 @@ export function createGithubAppProvider(
       }
     },
 
-    async listOpenPullRequests(integration, repo) {
+    async listOpenPullRequests(integration, repo, signal) {
       // Failures leave as provider neutral codes (the installation is gone, access is refused, GitHub
       // is down), so the page that lists the pull requests never has to know GitHub's error codes.
       try {
-        return await getClient().listOpenPullRequests(
-          integration.externalId,
-          repo.fullName,
-        );
+        return await (
+          await getClient()
+        ).listOpenPullRequests(integration.externalId, repo.fullName, signal);
       } catch (error) {
         throw toReadError(error);
       }

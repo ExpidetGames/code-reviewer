@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import { describe, expect, it } from "vitest";
 import { AUTOMATIC_REVIEW_DEBOUNCE_MS } from "./automatic-review-policy.ts";
 import {

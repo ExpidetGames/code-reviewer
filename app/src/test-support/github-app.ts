@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Dummy GitHub App credentials for tests: a fresh RSA key pair per test process (never a real key)
 // and the environment variables built from it. The public half is what the fake GitHub checks JWTs
 // with. Knows nothing about the provider, so any test may use it.
@@ -27,6 +29,9 @@ export function testGithubAppEnv(
     GITHUB_APP_SLUG: TEST_APP_SLUG,
     GITHUB_APP_PRIVATE_KEY: testAppKeys().privateKey,
     GITHUB_APP_WEBHOOK_SECRET: TEST_WEBHOOK_SECRET,
+    // The master key: the credential store of the running server reads the database first and needs it
+    // before it falls back to the variables above.
+    APP_SECRET: "test-app-secret-0123456789-0123456789-abc",
     ...overrides,
   };
 }

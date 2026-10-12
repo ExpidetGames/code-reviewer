@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Pins down the runner API format of contracts/runner-api.v1.json from the runner's side.
 
 The app checks its real answers against the same file (app/integration-tests/compatibility), so a

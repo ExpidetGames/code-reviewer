@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // @vitest-environment jsdom
 // Pins down the Settings page with real data: the form for the global defaults saves through the
 // route handler into the real database and every project that has no value of its own follows, the
@@ -11,7 +13,11 @@ vi.mock("next/navigation", () => ({
 }));
 
 import type { SessionUser } from "../../auth/access-policy.ts";
-import { describeConfigStatus } from "../../config-status/status.ts";
+import {
+  describeConfigStatus,
+  statusForMembers,
+  type ConfigAudience,
+} from "../../config-status/status.ts";
 import { testGithubAppEnv } from "../../test-support/github-app.ts";
 import { setupReviewSettings } from "../../test-support/review-settings-harness.ts";
 import { createReviewSettingsRouteHandlers } from "../http.ts";
@@ -32,6 +38,7 @@ const WORKING_ENV = {
 
 async function openSettings(
   env: Record<string, string | undefined> = WORKING_ENV,
+  audience: ConfigAudience = "operator",
 ) {
   const s = await setupReviewSettings();
   const handlers = createReviewSettingsRouteHandlers({
@@ -39,22 +46,35 @@ async function openSettings(
       ({ githubLogin: "octocat" }) as unknown as SessionUser,
     service: s.service,
   });
-  const api = createGlobalSettingsApi(async (url, init) =>
-    handlers.putGlobal(
-      new Request(`https://app.test${url}`, {
-        ...init,
-        headers: {
-          ...(init?.headers as Record<string, string>),
-          "sec-fetch-site": "same-origin",
-        },
-      }),
-    ),
+  const api = createGlobalSettingsApi(
+    async (url, init) =>
+      handlers.putGlobal(
+        new Request(`https://app.test${url}`, {
+          ...init,
+          headers: {
+            ...(init?.headers as Record<string, string>),
+            "sec-fetch-site": "same-origin",
+          },
+        }),
+      ),
+    "acme",
   );
   const data = await loadGlobalSettingsPage({
     settings: s.service,
-    config: () => describeConfigStatus(env),
+    // What the page file does: the whole status for the instance admin, the reduced one for a member.
+    config: () =>
+      audience === "operator"
+        ? describeConfigStatus(env)
+        : statusForMembers(describeConfigStatus(env)),
   });
-  const view = render(<GlobalSettingsPageContent data={data} api={api} />);
+  const view = render(
+    <GlobalSettingsPageContent
+      workspaceSlug="acme"
+      audience={audience}
+      data={data}
+      api={api}
+    />,
+  );
   return { ...s, view };
 }
 
@@ -100,21 +120,48 @@ describe("the Settings page", () => {
     expect(await app.appSettingRows()).toEqual([]);
   });
 
-  // CR-34-T09
-  it("shows that the LLM key is missing and names the variable, never a value", async () => {
-    const app = await openSettings({ ...WORKING_ENV, LLM_API_KEY: undefined });
+  // #104-LK-13 (the hint about the workspace's LLM key is src/llm/ui/llm-access-notice.tsx)
+  it("does not report an absent LLM variable as a problem of the instance, and shows no key value", async () => {
+    const app = await openSettings({
+      ...WORKING_ENV,
+      LLM_API_KEY: undefined,
+      LLM_PROVIDER: undefined,
+    });
 
-    expect(screen.getByText("LLM key missing")).toBeTruthy();
-    expect(screen.getByText("LLM_API_KEY", { selector: ".mono" })).toBeTruthy();
+    expect(screen.queryByText("LLM key missing")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
     expect(app.view.container.textContent).not.toContain(LLM_KEY);
   });
 
   // CR-34-T11
-  it("shows provider and model and no hint while the configuration is complete", async () => {
+  it("shows no hint while the configuration is complete, and never the key", async () => {
     const app = await openSettings();
 
     expect(screen.queryByRole("alert")).toBeNull();
-    expect(screen.getByText("openrouter")).toBeTruthy();
     expect(app.view.container.textContent).not.toContain(LLM_KEY);
+  });
+
+  // #101-WM-08
+  it("tells a member only that a part is not set up, in the hints and in the instance block, and nothing of how it is configured", async () => {
+    const app = await openSettings(
+      { ...WORKING_ENV, LLM_API_KEY: undefined, GITHUB_APP_ID: undefined },
+      "member",
+    );
+
+    const text = app.view.container.textContent ?? "";
+    expect(screen.queryByText("Reviews are not set up yet")).toBeNull();
+    expect(screen.getByText("GitHub is not set up yet")).toBeTruthy();
+    expect(text).toContain("Ask your instance admin");
+    expect(text).not.toMatch(/GITHUB_APP|LLM_|openrouter|Missing:/);
+  });
+
+  // #101-WM-08
+  it("keeps the provider and the model from a member of a working instance", async () => {
+    const app = await openSettings(WORKING_ENV, "member");
+
+    const text = app.view.container.textContent ?? "";
+    expect(text).not.toMatch(/openrouter|claude/);
+    expect(text).not.toContain(LLM_KEY);
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

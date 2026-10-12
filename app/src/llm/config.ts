@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Reads the shared LLM access from the environment. The only place that knows the variable names.
 //
 // One LLM account serves the whole instance (a key per project or per user comes later). The app
@@ -94,6 +96,22 @@ export function createLlmConfig(fields: LlmConfig): LlmConfig {
   return config as LlmConfig;
 }
 
+/**
+ * Whether the legacy configuration is simply ABSENT: neither the provider nor the key is set. That is the normal
+ * state of an instance whose workspaces bring their own key and nothing to report. One that is half set (a key
+ * without a provider, or the other way round) or set but wrong is not absent: the instance admin hears about it.
+ * The one rule for the resolver, the start-up warning and the notices.
+ */
+export function legacyConfigIsAbsent(
+  issues: readonly LlmConfigIssue[],
+): boolean {
+  return (
+    issues.length === 2 &&
+    issues.some((issue) => issue.code === "LLM_API_KEY_MISSING") &&
+    issues.some((issue) => issue.code === "LLM_PROVIDER_MISSING")
+  );
+}
+
 /** Reads and validates the four variables. Never throws; never puts a value into the result. */
 export function loadLlmConfig(env: Env): LlmConfigState {
   const issues: LlmConfigIssue[] = [];
@@ -112,6 +130,25 @@ export function loadLlmConfig(env: Env): LlmConfigState {
     config: createLlmConfig({ provider, model, apiKey, contextWindowTokens }),
     warnings,
   };
+}
+
+/**
+ * What the environment says about the model and the context window, whether or not it holds a usable
+ * provider and key: a workspace brings its own key, but the instance's `LLM_MODEL` and `LLM_MAX_TOKENS`
+ * still describe the built-in model and the context window of a model PR-Agent does not know. Wrong values
+ * are ignored and recorded as warnings, like in `loadLlmConfig`.
+ */
+export type LlmDefaults = {
+  model: string;
+  contextWindowTokens: number | null;
+  warnings: readonly LlmConfigIssue[];
+};
+
+export function readLlmDefaults(env: Env): LlmDefaults {
+  const warnings: LlmConfigIssue[] = [];
+  const model = readModel(env.LLM_MODEL, warnings);
+  const contextWindowTokens = readContextWindow(env.LLM_MAX_TOKENS, warnings);
+  return { model, contextWindowTokens, warnings };
 }
 
 /**
@@ -138,22 +175,36 @@ function readProvider(
   return provider;
 }
 
+/**
+ * The one rule for an LLM key, whether it comes from the environment or from a workspace's settings:
+ * surrounding whitespace is ignored, an empty key is `missing`, and a key with whitespace or control
+ * characters inside, or over 4096 characters, is `invalid` (a paste accident; the runner would refuse the
+ * job anyway). Never puts the value into the result of a refusal.
+ */
+export function checkLlmApiKey(
+  raw: string | undefined,
+): { ok: true; key: string } | { ok: false; problem: "missing" | "invalid" } {
+  const value = raw?.trim();
+  if (!value) return { ok: false, problem: "missing" };
+  if (value.length > MAX_LLM_KEY_CHARS || /[\s\p{Cc}]/u.test(value))
+    return { ok: false, problem: "invalid" };
+  return { ok: true, key: value };
+}
+
 function readApiKey(
   raw: string | undefined,
   issues: LlmConfigIssue[],
 ): string | undefined {
-  const value = raw?.trim();
-  if (!value) {
-    issues.push({ code: "LLM_API_KEY_MISSING", variable: "LLM_API_KEY" });
-    return undefined;
-  }
-  // A key with whitespace or control characters inside is a paste accident; the runner would refuse
-  // the job anyway, so say so here.
-  if (value.length > MAX_LLM_KEY_CHARS || /[\s\p{Cc}]/u.test(value)) {
-    issues.push({ code: "LLM_API_KEY_INVALID", variable: "LLM_API_KEY" });
-    return undefined;
-  }
-  return value;
+  const checked = checkLlmApiKey(raw);
+  if (checked.ok) return checked.key;
+  issues.push({
+    code:
+      checked.problem === "missing"
+        ? "LLM_API_KEY_MISSING"
+        : "LLM_API_KEY_INVALID",
+    variable: "LLM_API_KEY",
+  });
+  return undefined;
 }
 
 /** The model of `LLM_MODEL`, or the default when it is not set or not valid (a warning is recorded). */

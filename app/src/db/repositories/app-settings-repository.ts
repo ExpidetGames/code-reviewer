@@ -1,9 +1,13 @@
-// Access to the app_settings table. The only code that reads or writes it. One row per setting of the
-// whole instance, the value as JSON.
+// SPDX-License-Identifier: Apache-2.0
+
+// Access to the app_settings table of ONE workspace (the factory takes the workspace id; see
+// ../workspace-scope.ts). The only code that reads or writes it. One row per setting of a workspace,
+// the value as JSON.
 import "server-only";
 import type { Kysely } from "kysely";
 import { encodeJson, formatTimestamp, tryDecodeJson } from "../codecs.ts";
 import type { Database } from "../schema.ts";
+import type { WorkspaceId } from "../workspace-scope.ts";
 
 export type StoredAppSetting = {
   /** The stored value; `undefined` when the stored text is not valid JSON (a warning is logged). */
@@ -24,6 +28,7 @@ export type AppSettingsRepository = {
 
 export function createAppSettingsRepository(
   db: Kysely<Database>,
+  workspaceId: WorkspaceId,
   now: () => Date = () => new Date(),
   warn: (message: string) => void = console.warn,
 ): AppSettingsRepository {
@@ -32,6 +37,7 @@ export function createAppSettingsRepository(
       const row = await db
         .selectFrom("app_settings")
         .selectAll()
+        .where("workspace_id", "=", workspaceId)
         .where("key", "=", key)
         .executeTakeFirst();
       if (row === undefined) return undefined;
@@ -54,17 +60,27 @@ export function createAppSettingsRepository(
       const updated_at = formatTimestamp(now());
       await db
         .insertInto("app_settings")
-        .values({ key, value: encoded, updated_at, updated_by: updatedBy })
+        .values({
+          workspace_id: workspaceId,
+          key,
+          value: encoded,
+          updated_at,
+          updated_by: updatedBy,
+        })
         .onConflict((conflict) =>
           conflict
-            .column("key")
+            .columns(["workspace_id", "key"])
             .doUpdateSet({ value: encoded, updated_at, updated_by: updatedBy }),
         )
         .execute();
     },
 
     async delete(key) {
-      await db.deleteFrom("app_settings").where("key", "=", key).execute();
+      await db
+        .deleteFrom("app_settings")
+        .where("workspace_id", "=", workspaceId)
+        .where("key", "=", key)
+        .execute();
     },
   };
 }

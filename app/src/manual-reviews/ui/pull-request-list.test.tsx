@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // @vitest-environment jsdom
 // Pins down the list of pull requests a person picks from: number, title and author of each open
 // pull request, the empty state, and that text from GitHub is only ever shown as text.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the security properties of a finished sign in: how the session cookie is set, that no
 // secret (client secret, GitHub access token, session token) leaks into logs, responses or
 // redirect addresses, that the GitHub token is not stored in the clear, and that a sign in cannot
@@ -102,19 +104,20 @@ describe("secrets during a sign in", () => {
   });
 
   // CR-18-T14
-  it("keeps the GitHub access token out of the database in the clear", async () => {
+  it("does not keep the GitHub access token in the database, not even after a second sign in", async () => {
     const harness = await createAuthHarness();
 
     await harness.signIn();
+    await harness.signIn();
 
-    const [accessToken] = harness.github.issuedAccessTokens();
+    expect(harness.github.issuedAccessTokens().length).toBeGreaterThan(0);
     const account = await harness.db
       .selectFrom("accounts")
       .selectAll()
       .executeTakeFirstOrThrow();
-    expect(accessToken).toBeDefined();
-    expect(account.access_token).toBeTruthy();
-    expect(account.access_token).not.toContain(accessToken!);
+    expect(account.access_token).toBeNull();
+    expect(account.refresh_token).toBeNull();
+    expect(account.id_token).toBeNull();
   });
 });
 

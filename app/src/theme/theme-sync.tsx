@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 "use client";
 // Development only (the root layout renders it only outside production). React Strict Mode remounts
 // the root in `next dev` and drops attributes it does not manage, which removes the `data-theme`

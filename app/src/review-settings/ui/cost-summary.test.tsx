@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // @vitest-environment jsdom
 // Pins down how the estimated cost of a review is shown: the amount for the model (and the fallback
 // model), a warning above the customer's limit of 0.10 USD, a warning for a model without a known

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // `allowed_login_pins`: which GitHub account (its numeric id) a login on `ALLOWED_GITHUB_LOGINS` is
 // bound to. GitHub frees an old username after a rename, so a login alone is not an identity; the
 // first account that signs in with a listed login is pinned (or an id is pre-set with

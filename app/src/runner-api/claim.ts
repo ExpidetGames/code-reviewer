@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // POST /api/runners/v1/claim: hands the next job to a runner, with everything it needs to run it.
 //
 // The credentials are created here, at claim time, and nowhere else (never when the job is queued):
@@ -28,7 +30,7 @@ import type {
   IntegrationType,
   RepoRef,
 } from "../integrations/types.ts";
-import type { JobQueue } from "../jobs/job-queue.ts";
+import type { RunnerQueue } from "../jobs/runner-queue.ts";
 import type { ClaimResult, Job, JobErrorCode } from "../jobs/job-types.ts";
 import { revealLlmAccess, type LlmAccessResult } from "../llm/access.ts";
 import {
@@ -83,14 +85,25 @@ const MAX_REFUSED_PER_REQUEST = 25;
 const MAX_QUESTION_CHARS = 4000;
 
 export type ClaimDeps = {
-  queue: Pick<JobQueue, "claimNext" | "complete" | "release" | "cancelClaimed">;
-  repositories: Pick<RepositoriesRepository, "get">;
-  integrations: Pick<IntegrationsRepository, "get">;
+  queue: Pick<
+    RunnerQueue,
+    "claimNext" | "complete" | "release" | "cancelClaimed"
+  >;
+  /**
+   * The repositories and integrations of one workspace. A claim serves the whole instance, so the
+   * workspace is the one the claimed job names (`job.workspaceId`).
+   */
+  repositories: (workspaceId: string) => Pick<RepositoriesRepository, "get">;
+  integrations: (workspaceId: string) => Pick<IntegrationsRepository, "get">;
   registry: IntegrationRegistry;
   guard: ClaimGuard;
   jobOptions: JobOptionsSource;
-  loadLlm: () => LlmAccessResult;
-  /** Where the key handed out with a claim is noted, so a rotated key can still be masked. */
+  /**
+   * The LLM access of ONE workspace: the one the claimed job names (`job.workspaceId`), never another
+   * (src/llm/resolve.ts, docs/decisions/0001-editions-setup-and-accounts.md, section 2.8).
+   */
+  loadLlm: (workspaceId: string) => Promise<LlmAccessResult>;
+  /** Where the key handed out with a claim is noted (encrypted, in the database), so a rotated key can still be masked. */
   claimedKeys: Pick<ClaimedKeys, "remember">;
   now: () => Date;
   logger: RunnerApiLogger;
@@ -183,12 +196,19 @@ async function prepare(
       ? { kind: "cancelled", errorCode: decision.errorCode }
       : refuse(decision.errorCode);
 
-  const llm = deps.loadLlm();
-  // The log names which variable is wrong and why (names and codes, never a value).
+  // The access of the job's own workspace: its key, or the operator's, or the legacy variables of a
+  // single-tenant instance. Another workspace's key is never looked at.
+  const llm = await deps.loadLlm(job.workspaceId);
+  // The log names the variables that are wrong and why (names and codes, never a value), or else the
+  // reason the workspace has no access.
   if (!llm.ok)
     return refuse(
       llm.errorCode,
-      llm.issues.map((issue) => `${issue.variable}: ${issue.code}`).join(", "),
+      llm.issues.length > 0
+        ? llm.issues
+            .map((issue) => `${issue.variable}: ${issue.code}`)
+            .join(", ")
+        : llm.reason,
     );
 
   const args = argsOf(job);
@@ -201,11 +221,13 @@ async function prepare(
   if (job.leaseExpiresAt === null)
     throw new Error(`Claimed job ${job.id} has no lease expiry.`);
 
-  const repository = await deps.repositories.get(job.repositoryId);
+  const repository = await deps
+    .repositories(job.workspaceId)
+    .get(job.repositoryId);
   const integration =
     repository === undefined
       ? undefined
-      : await deps.integrations.get(repository.integrationId);
+      : await deps.integrations(job.workspaceId).get(repository.integrationId);
   if (
     repository === undefined ||
     integration === undefined ||
@@ -427,7 +449,9 @@ export async function handleClaim(
         });
       }
 
-      deps.claimedKeys.remember(
+      // Before the key leaves with the response: if it cannot be remembered, the job is given back (below)
+      // and no runner has the key.
+      await deps.claimedKeys.remember(
         claimed.job.id,
         prepared.response.job.input.llm.apiKey,
       );

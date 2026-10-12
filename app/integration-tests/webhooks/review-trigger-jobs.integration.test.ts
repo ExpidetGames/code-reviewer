@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down how a verified delivery ends up in the job queue: through the real webhook handler, the
 // real GitHub App provider, the real queue and a real SQLite file. The intake is a thin mapping from
 // a trigger to a job; what the queue does with it (supersede, dedupe) is covered in
@@ -13,9 +15,10 @@ import { TEST_WEBHOOK_SECRET } from "../../src/test-support/github-app.ts";
 import { webhookDelivery } from "../../../fakes/github/webhooks.ts";
 import {
   createGithubAppWebhookHandler,
-  type GithubAppWebhookDeps,
+  type WorkspaceCollaborators,
 } from "../../src/webhooks/github-app-handler.ts";
 import { createJobQueueReviewTriggerIntake } from "../../src/webhooks/job-queue-intake.ts";
+import { defaultWorkspaceId } from "../../src/test-support/workspaces.ts";
 
 const OPENED_HEAD = "1f3a5c7e9b2d4f60a8c1e3b5d7f90a2c4e6b8d01";
 const NEW_HEAD = "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00";
@@ -30,11 +33,14 @@ function withHeadSha(fixture: string, sha: string): PullRequestPayload {
 
 /** The webhook harness with the job queue intake instead of the recording one. */
 async function startHarness(
-  options: { projects?: GithubAppWebhookDeps["projects"] } = {},
+  options: { projects?: WorkspaceCollaborators["projects"] } = {},
 ) {
   const h = await startWebhookHarness();
-  const queue = createJobQueue(h.db);
-  const repositories = createRepositoriesRepository(h.db);
+  const queue = createJobQueue(h.db, await defaultWorkspaceId(h.db));
+  const repositories = createRepositoriesRepository(
+    h.db,
+    await defaultWorkspaceId(h.db),
+  );
   const logLines: string[] = [];
   const routeLog: string[] = [];
   const intake = createJobQueueReviewTriggerIntake({
@@ -50,9 +56,12 @@ async function startHarness(
     integrations: h.integrations,
     deliveries: h.deliveries,
     sync: h.sync,
-    projects: options.projects ?? h.projects,
+    workspace: () => ({
+      projects: options.projects ?? h.projects,
+      settingsFor: h.settingsFor,
+      intake,
+    }),
     automatic: h.automatic,
-    intake,
     logger: {
       info: (line) => routeLog.push(line),
       error: (line) => routeLog.push(line),
@@ -110,6 +119,7 @@ describe("a pull request delivery with the job queue behind the route", () => {
     expect(Date.parse(job?.runAfter ?? "")).toBeLessThanOrEqual(Date.now());
     const repository = await createRepositoriesRepository(
       h.db,
+      await defaultWorkspaceId(h.db),
     ).findByExternalId(
       (await h.integrations.findByExternalId("github_app", "4242"))?.id ?? "",
       "7001",

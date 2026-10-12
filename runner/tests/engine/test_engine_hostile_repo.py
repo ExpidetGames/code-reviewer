@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Pins down what a hostile `.pr_agent.toml` on the default branch can and cannot do to a run of the
 real PR-Agent (the file is delivered by the fake GitHub, so PR-Agent merges it like any other).
 

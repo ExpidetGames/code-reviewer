@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Reads the GitHub App settings from the environment. The only place that knows the variable names.
 // Problems are reported by variable name, never by value; the private key and the webhook secret are
 // readable properties that JSON.stringify, spreading and console output leave out.
@@ -46,7 +48,7 @@ export function normalizePemKey(raw: string): string {
   return `-----BEGIN ${match[1]}-----\n${lines.join("\n")}\n-----END ${match[1]}-----`;
 }
 
-function isUsableRsaKey(pem: string): boolean {
+export function isUsableRsaKey(pem: string): boolean {
   try {
     return createPrivateKey(pem).asymmetricKeyType === "rsa";
   } catch {

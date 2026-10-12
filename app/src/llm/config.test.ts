@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down how the shared LLM access is read from the environment: what is required, what the
 // defaults are, that a problem is reported as a state (the app starts anyway) with stable codes and
 // variable names, and that the key never shows up in anything but `config.apiKey`.
@@ -6,6 +8,7 @@ import {
   DEFAULT_LLM_MODEL,
   LLM_CONFIG_ISSUE_CODES,
   configuredLlmModel,
+  legacyConfigIsAbsent,
   loadLlmConfig,
   type LlmConfigIssue,
 } from "./config.ts";
@@ -228,6 +231,47 @@ describe("loading the LLM configuration", () => {
   });
 });
 
+describe("the legacy configuration being absent", () => {
+  // #104-LK-12
+  it("is absent only when neither the provider nor the key is set", () => {
+    expect(legacyConfigIsAbsent(issuesOf({}))).toBe(true);
+    expect(legacyConfigIsAbsent(issuesOf({ LLM_API_KEY: KEY }))).toBe(false);
+    expect(legacyConfigIsAbsent(issuesOf({ LLM_PROVIDER: "openrouter" }))).toBe(
+      false,
+    );
+    expect(
+      legacyConfigIsAbsent(
+        issuesOf({ LLM_PROVIDER: "openrouter", LLM_API_KEY: "has a space" }),
+      ),
+    ).toBe(false);
+  });
+
+  // #104-LK-12
+  it("needs both missing codes, not any two issues", () => {
+    const providerMissing: LlmConfigIssue = {
+      code: "LLM_PROVIDER_MISSING",
+      variable: "LLM_PROVIDER",
+    };
+    const keyMissing: LlmConfigIssue = {
+      code: "LLM_API_KEY_MISSING",
+      variable: "LLM_API_KEY",
+    };
+    const keyInvalid: LlmConfigIssue = {
+      code: "LLM_API_KEY_INVALID",
+      variable: "LLM_API_KEY",
+    };
+    const providerUnknown: LlmConfigIssue = {
+      code: "LLM_PROVIDER_UNKNOWN",
+      variable: "LLM_PROVIDER",
+    };
+
+    expect(legacyConfigIsAbsent([providerMissing, keyMissing])).toBe(true);
+    expect(legacyConfigIsAbsent([keyMissing, providerMissing])).toBe(true);
+    expect(legacyConfigIsAbsent([providerMissing, keyInvalid])).toBe(false);
+    expect(legacyConfigIsAbsent([providerUnknown, keyMissing])).toBe(false);
+  });
+});
+
 describe("the model of the instance", () => {
   it("is LLM_MODEL when it is set and valid, even while the key is missing", () => {
     expect(configuredLlmModel({ LLM_MODEL: " qwen/qwen3-coder " })).toBe(
@@ -238,6 +282,7 @@ describe("the model of the instance", () => {
     ).toBe("qwen/qwen3-coder");
   });
 
+  // #104-LK-10 (the model of a workspace key is the same built-in value)
   it("is the default model when LLM_MODEL is missing, blank or invalid", () => {
     for (const value of [undefined, "", "  ", "bad model"])
       expect(configuredLlmModel({ LLM_MODEL: value })).toBe(DEFAULT_LLM_MODEL);

@@ -2,39 +2,69 @@
 
 The fake GitHub: one HTTP server that speaks every part of GitHub that Code Reviewer talks to, so the
 sign in tests and the GitHub integration tests share one fake and one address. The app is pointed at
-it with `GITHUB_OAUTH_BASE_URL` and `GITHUB_API_BASE_URL` (both set to the fake's address; they
-default to the real GitHub). The app refuses both unless `ALLOW_TEST_GITHUB_ENDPOINTS=true` is set as
+it with `GITHUB_OAUTH_BASE_URL` (GitHub's web pages: the authorization and the creation of an App) and
+`GITHUB_API_BASE_URL` (both set to the fake's address; they default to the real GitHub). The app refuses both unless `ALLOW_TEST_GITHUB_ENDPOINTS=true` is set as
 well, because the client secret, the App JWT and the tokens are sent to that address. State is in
 memory. Dummy values only.
 
-| File          | Part                                                                                        |
-| ------------- | ------------------------------------------------------------------------------------------- |
-| `server.ts`   | The server (`startGithubFake`), the request log, failure injection, the control endpoints.  |
-| `oauth.ts`    | Sign in: OAuth authorize and token endpoints, the user, e-mail and organization membership. |
-| `app-api.ts`  | The REST API as the GitHub App uses it: installations, tokens, repositories, pull requests. |
-| `webhooks.ts` | Signed webhook deliveries, `webhookFixture(name)` loads a payload from `../fixtures`.       |
-| `http.ts`     | Small helpers for answering and reading HTTP messages.                                      |
-| `main.ts`     | Starts the sign in part as its own process (Playwright).                                    |
+| File            | Part                                                                                                               |
+| --------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `server.ts`     | The server (`startGithubFake`), the request log, failure injection, the control endpoints.                         |
+| `oauth.ts`      | Sign in: OAuth authorize and token endpoints, the user, e-mail and organization membership.                        |
+| `manifest.ts`   | The GitHub App manifest flow: the creation page, the one-time code, the conversion.                                |
+| `registry.ts`   | The Apps the fake knows (the one registered at start and the ones the manifest flow created), shared by the parts. |
+| `app-api.ts`    | The REST API as the GitHub App uses it: installations, tokens, repositories, pull requests.                        |
+| `review-api.ts` | What a reviewer reads and writes: diff, commits, file contents and comments of a pull request.                     |
+| `webhooks.ts`   | Signed webhook deliveries, `webhookFixture(name)` loads a payload from `../fixtures`.                              |
+| `http.ts`       | Small helpers for answering and reading HTTP messages.                                                             |
+| `main.ts`       | Starts the sign in part as its own process (Playwright).                                                           |
 
 A part is switched on by its options. `clientId` and `clientSecret` give the sign in; `appId` and
-`publicKeyPem` give the GitHub App API (give both options of a part or neither). A part that is not
+`publicKeyPem` give the GitHub App API (give both options of a part or neither); `manifestFlow: true`
+(`GITHUB_FAKE_MANIFEST_FLOW=true`) lets apps be created through the manifest flow and switches the sign in and
+the GitHub App API on for them even without a first app. A part that is not
 switched on answers 404, and its controls (`addUser`, `addInstallation`, ...) are not there. In the
-app's tests `startTestGithub()` (`app/src/test-support/github-fake.ts`) starts it with both parts.
+app's tests `startTestGithub()` (`app/src/test-support/github-fake.ts`) starts it with all three parts.
 
 ## Sign in
 
-| Endpoint                                                                                     | Behavior                                                                                                                                                                                                                                                        |
-| -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /login/oauth/authorize`                                                                 | An HTML page with one "Authorize `<login>`" button per account and a "Cancel" button. Needs the registered `client_id` and a `redirect_uri`.                                                                                                                    |
-| `POST /login/oauth/authorize/confirm`                                                        | What the buttons post. Redirects to `redirect_uri` with `code` and `state`, or with `error=access_denied` after "Cancel".                                                                                                                                       |
-| `POST /login/oauth/access_token`                                                             | Exchanges the code (single use, bound to `redirect_uri` and to the PKCE challenge) for an access token. Like GitHub, a refused code is answered with status 200 and an `error` field; answers JSON when asked for it, form encoded otherwise.                   |
-| `GET /user`                                                                                  | The profile for a bearer token: `id`, `login`, `name`, `email` (may be `null`), `avatar_url`. 401 `Bad credentials` for an unknown token.                                                                                                                       |
-| `GET /user/emails`                                                                           | The email list; needs the `user:email` scope, else 404 as on GitHub.                                                                                                                                                                                            |
-| `GET /user/memberships/orgs/:org`                                                            | The signed in account's own membership in an organization, like GitHub: needs the `read:org` scope (else 403), 401 for an unknown or revoked token, 404 when not a member, otherwise 200 with `state` (`active` or `pending`), `role` and `organization.login`. |
-| `GET /__fake/health`, `POST /__fake/users`, `POST /__fake/org-members`, `POST /__fake/reset` | Control endpoints for tests that run the fake as its own process (Playwright). `POST /__fake/users` takes a JSON `FakeGithubUser`; `POST /__fake/org-members` takes `{ org, login, state? }`.                                                                   |
+| Endpoint                                                                                     | Behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /login/oauth/authorize`                                                                 | An HTML page with one "Authorize `<login>`" button per account and a "Cancel" button. Needs the registered `client_id` and a `redirect_uri`.                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `POST /login/oauth/authorize/confirm`                                                        | What the buttons post. Redirects to `redirect_uri` with `code` and `state`, or with `error=access_denied` after "Cancel".                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `POST /login/oauth/access_token`                                                             | Exchanges the code (single use, bound to `redirect_uri` and to the PKCE challenge) for an access token. Like GitHub, a refused code is answered with status 200 and an `error` field; answers JSON when asked for it, form encoded otherwise.                                                                                                                                                                                                                                                                                                                                  |
+| `GET /user`                                                                                  | The profile for a bearer token: `id`, `login`, `name`, `email` (may be `null`), `avatar_url`. 401 `Bad credentials` for an unknown token.                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `GET /user/emails`                                                                           | The email list; needs the `user:email` scope, else 404 as on GitHub.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `GET /user/memberships/orgs/:org`                                                            | The signed in account's own membership in an organization, like GitHub: an OAuth token needs the `read:org` scope, the user token of a GitHub App needs the App's organization permission "Members" (`DEFAULT_ACCOUNT_PERMISSIONS`; else 403, also for an organization made unreadable with `makeMembershipUnreadable`), 401 for an unknown or revoked token, 404 when not a member, otherwise 200 with `state` (`active` or `pending`), `role` (`admin` is an owner, `member`, `billing_manager`; set with `addOrgMember(org, login, state, role)`) and `organization.login`. |
+| `GET /user/installations`                                                                    | The installations of the App the token's user can use (`per_page`, `page`): the personal account's, those of organizations the user is an active member of (any role), and those granted with `grantInstallationAccess`.                                                                                                                                                                                                                                                                                                                                                       |
+| `GET /__fake/health`, `POST /__fake/users`, `POST /__fake/org-members`, `POST /__fake/reset` | Control endpoints for tests that run the fake as its own process (Playwright). `POST /__fake/users` takes a JSON `FakeGithubUser`; `POST /__fake/org-members` takes `{ org, login, state? }`.                                                                                                                                                                                                                                                                                                                                                                                  |
 
-The app does not call `/user/emails` (it stores a noreply address); the endpoint is there for tickets
-that may need it.
+The app reads `/user/emails` to get the verified primary address (the account permission "Email addresses"): like
+GitHub, the endpoint answers for the user token of a GitHub App only when the app holds that permission (the app
+registered at start holds it unless a test calls `setAppAccountPermissions({})`), or, for an OAuth app, with the
+`user:email` scope. A client id that was created by the manifest flow only accepts the callback addresses of its
+manifest as `redirect_uri`, like GitHub.
+
+| Endpoint                              | Behavior                                                                                                                                                                                                                      |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /applications/:client_id/token` | "Check a token" with the client credentials as basic authentication: 404 for a token that does not exist when the pair is right, 401 when it is not. This is how the app asks whether a client id and secret belong together. |
+
+## The installation page
+
+`GET /apps/:slug/installations/new?state=` shows one pair of buttons per installation the fake holds ("Install on `<account>`", "Ask `<account>` to approve"; a test adds the installation first, which stands for the account the person chooses). The buttons post to `/apps/:slug/installations/confirm`, which redirects to the App's setup URL with `installation_id`, `setup_action` (`install` or `request`, without an installation id) and the `state`, like GitHub. The setup URL is the one in the manifest of an App created through the manifest flow; for the App registered at start a test says it (`setAppSetupUrl(url)`, `POST /__fake/app-setup-url` `{ url }`). Control endpoints: `POST /__fake/org-members` takes `{ org, login, state?, role? }`, `POST /__fake/org-unreadable` takes `{ org }` (the roles in that organization cannot be read), `POST /__fake/installation-access` takes `{ installationId, login }`, and `POST /__fake/tokens` takes `{ login, scope?, clientId? }` and answers `{ token }`: an access token issued without the browser round trip, which is what an installation that signed people in before accounts holds in its database (the update's organization check uses it; in a Vitest test `github.issueAccessToken(login, { scope, clientId })`). `GET /app` reports the owner with `id` (`ownerIdFor(login)`), which the single-tenant auto-attach compares an installation's account with.
+
+## The manifest flow
+
+| Endpoint                                                                              | Behavior                                                                                                                                                                                                                                                                                             |
+| ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /settings/apps/new?state=`, `POST /organizations/:org/settings/apps/new?state=` | The creation page GitHub shows after the browser posts a `manifest` form field: the manifest's name and a "Create GitHub App" button. 422 for a manifest that is not JSON with a `redirect_url`.                                                                                                     |
+| `POST /settings/apps/new/confirm`                                                     | What the button posts. Remembers the manifest under a one-time `code` and redirects to the manifest's `redirect_url` with `code` and the `state` it was given.                                                                                                                                       |
+| `POST /app-manifests/:code/conversions`                                               | Trades the code for the new App's credentials, once (404 afterwards): id, slug, `client_id`, `client_secret`, `webhook_secret` and `pem`, a real RSA key pair made for the App. The App is registered: its JWTs are accepted by the GitHub App API part, its client credentials by the sign in part. |
+| `GET /app`                                                                            | The App named by a valid App JWT: id, slug, owner, permissions and events (the permissions the manifest asked for; the app registered at start reports `setAppPermissions` and its account permissions).                                                                                             |
+
+`github.confirmManifest(postUrl, manifest)` does what the person does (posts the form, presses the button) and resolves
+to the address the browser is sent back to; `postedManifests()`, `conversionCodes()` and `registeredApps()` read what
+happened. Failures are injected like everywhere (`fail({ pathIncludes: "/app-manifests/", status: 404 })`, `delayMs`).
 
 ## The GitHub App API
 
@@ -48,6 +78,35 @@ that may need it.
 | `GET /repos/:owner/:repo/collaborators/:login/permission` | Installation token with metadata read. `{ permission }`, `none` for a user without an entry.                                                                                                                                                                                                                                                                                                                                     |
 | `POST /__fake/pull-requests`                              | Control endpoint for the fake as its own process: body `{ repository: "owner/name", pullRequest }` (a `FakePullRequest`: `number`, `title`, `state`, `headSha`, `headRef`, `baseRef`, `author`) adds the pull request, replacing one with the same number. 400 for a body that is not one.                                                                                                                                       |
 | `POST /__fake/installations`                              | Control endpoint for the fake as its own process: body `{ installation, repositories }` installs the app for the account (or replaces the repositories of an installation that exists). Needs the GitHub App part (`GITHUB_FAKE_APP_ID`, `GITHUB_FAKE_APP_PUBLIC_KEY`).                                                                                                                                                          |
+
+## What a reviewer reads and writes
+
+The calls the GitHub provider of PR-Agent makes (through PyGithub, with the `token` scheme of the
+`Authorization` header), so the runner's real PR-Agent can review a pull request here. They need an
+installation token with the permission GitHub asks for (`pull_requests`, `issues`, `contents`,
+`metadata`) and a repository the token reaches.
+
+| Endpoint                                                                                  | Behavior                                                                                                                                                                                                      |
+| ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /repos/:o/:r`, `.../languages`, `.../branches/:b`                                    | The repository, a language list, a branch.                                                                                                                                                                    |
+| `GET/PATCH /repos/:o/:r/pulls/:n`                                                         | The pull request (head, base, changed files); `PATCH` changes title and body.                                                                                                                                 |
+| `GET .../pulls/:n/files`, `.../pulls/:n/commits`, `.../commits/:sha`, `.../compare/:spec` | The diff (`patch`, `additions`, `deletions`) and the commit of the pull request. A `FakePullRequest` carries `files` (`filename`, `baseContent`, `headContent`, `patch`); a small Python change when omitted. |
+| `GET .../contents/:path?ref=`                                                             | The file at the head of the pull request (by sha or branch) or at the base (default branch); 404 for anything else, like `AGENTS.md`.                                                                         |
+| `GET/POST .../issues/:n/comments`, `PATCH/DELETE .../issues/comments/:id`                 | Comments below a pull request, written as `<slug>[bot]` (`appSlug`, default `fake-app`), refused above 65,536 characters with a 422. `revision` counts the writes of a comment, so an edit in place shows.    |
+| `GET /rate_limit`, `POST /graphql`                                                        | An answer that lets PR-Agent go on (no review threads).                                                                                                                                                       |
+| `GET /__fake/comments?repository=owner/name&number=7`                                     | Control endpoint: the comments below a pull request (`id`, `body`, `login`, `htmlUrl`, `revision`).                                                                                                           |
+| `GET /__fake/installation-tokens`                                                         | Control endpoint: every installation token issued so far, to search outputs for them.                                                                                                                         |
+
+Links (`html_url`) point to `https://github.test` unless the fake is started with `selfLinks`
+(`GITHUB_FAKE_SELF_LINKS=true` as its own process): then they point to the fake itself, which is what
+the runner needs, because it demands that the pull request and the API address of a job are on one
+host. Routes that name a commit or a ref (`commits`, `compare`, `contents`) serve the pull request
+with that head. A ref that is no head (the default branch, the base commit) is answered only when it
+is unambiguous: with one pull request in the repository it is that one's, with several a file is
+served when all pull requests that have it agree on its text; everything else is a 404, the fake never
+guesses. Not modelled: inline review comments, reviews, labels,
+check runs and paging (the engine suite's own fake, `runner/tests/engine/fake_github.py`, has the same
+limits and stays: it serves the job entry point on its own, with `/api/v3` in its address).
 
 ## In a Vitest test (same process)
 
@@ -87,6 +146,8 @@ github.omitFromListings(4242, [7002]); // a page boundary that skipped a reposit
 github.rejectAppJwts(true); // every JWT answered with 401
 github.setAppPermissions({ metadata: "read", pull_requests: "read" }); // token requests above this get 422
 github.answerTokensWith({ repository_selection: "all" }); // a token answer that claims to be broader than asked
+github.pullRequestComments("acme/widgets", 7); // the comments below a pull request: id, body, login, htmlUrl, revision
+github.addPullRequestComment("acme/widgets", 7, "text"); // written as <slug>[bot] unless a login is given
 github.tokenRequests(); // per access token request: repositories, repositoryIds, permissions (null when not sent)
 github.revokedInstallationTokens(); // tokens switched off with DELETE /installation/token
 
@@ -101,6 +162,9 @@ github.fail({
   responseDelayMs: 300,
   times: 1,
 }); // a slow answer that reflects the state when the request arrived (GitHub App API answers)
+github.fail({ pathIncludes: "/pulls/", hang: true }); // never answers; stays open until the client gives up
+github.fail({ pathIncludes: "/pulls/", hangBody: true }); // sends the headers and the first byte of the answer, then stalls
+github.abortedRequests(); // requests the client closed before an answer was complete (an aborted request, not one merely no longer waited for)
 github.requests(); // method and path of every request, no credentials
 github.seenCredentials(); // every JWT or token received, to search outputs for leaks
 github.reset(); // all state, the request log and the injected failures (not failTokenEndpoint / failMembershipEndpoint)
@@ -126,13 +190,14 @@ GITHUB_FAKE_CLIENT_ID=id GITHUB_FAKE_CLIENT_SECRET=secret GITHUB_FAKE_PORT=4010 
 ```
 
 `app/playwright.config.ts` starts it next to the app with fixed dummy credentials, including the
-public half of the throwaway GitHub App key it gives the app (`GITHUB_FAKE_APP_ID`,
-`GITHUB_FAKE_APP_PUBLIC_KEY`), so the process serves the sign in and the GitHub App API. Each journey
+public half of the throwaway GitHub App key (`GITHUB_FAKE_APP_ID`, `GITHUB_FAKE_APP_PUBLIC_KEY`; the run enters
+the App with its private half in the admin portal of the apps, `e2e/setup/prepare-apps.e2e.ts`) and
+`GITHUB_FAKE_MANIFEST_FLOW=true`, so the process serves the sign in, the GitHub App API and the manifest flow. Each journey
 adds the accounts and installations it needs (`app/e2e/helpers/github-fake.ts`: `POST /__fake/users`,
 `POST /__fake/installations` with `{ installation, repositories }`) and never resets the fake, because
 other spec files run at the same time.
 
 ## Not covered yet
 
-Posting comments and reviews, diffs and file contents (for the runner and the engine tests), and
-delivering webhooks over HTTP to a running app.
+Inline review comments and reviews, and delivering webhooks over HTTP to a running app (the
+journeys sign and send them themselves, `app/e2e/helpers/webhooks.ts`).

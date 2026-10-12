@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The comments that were already answered with a job: one row per (repository, comment), pointing at
 // the job that answers it. A comment that created a job and a comment that found an equal job
 // already waiting or running (so no new one was needed) are both recorded. GitHub's delivery id is

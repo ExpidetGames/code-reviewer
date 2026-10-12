@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the rule that decides, on every authenticated request, whether a signed in user may
 // still use the instance: the logins list is checked every time, the organization membership at
 // most every 24 hours, and anything that cannot be decided is a no.
@@ -9,16 +11,18 @@ import {
   createAccessPolicy,
   type LoginPinDependencies,
   type OrgAccessDependencies,
-  type SessionUser,
+  type GithubSessionUser,
 } from "./access-policy.ts";
 import type { OrgMembership } from "./github-org.ts";
 
 const NOW = new Date("2026-10-10T12:00:00.000Z");
 
-function user(overrides: Partial<SessionUser> = {}): SessionUser {
+function user(overrides: Partial<GithubSessionUser> = {}): GithubSessionUser {
   return {
     id: "user-1",
     name: "The Octocat",
+    email: "1001@users.noreply.github.com",
+    isInstanceAdmin: false,
     githubLogin: "octocat",
     githubId: "1001",
     orgCheckedAt: null,

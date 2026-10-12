@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Pins down that the package can report a version even when it is run from source without being
 installed, instead of failing on import."""
 

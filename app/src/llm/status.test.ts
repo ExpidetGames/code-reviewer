@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down what the settings page may show about the LLM access: provider and model when it works,
 // the variable names and codes when it does not, and never the key.
 import { describe, expect, it } from "vitest";

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Reads PR-Agent's own source to prove the places the identity patch relies on.
 
 PR-Agent decides whether a comment is its own in a chain of three methods: the review tool asks

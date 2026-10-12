@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the rule that the proxy is not the only guard: a Server Function is a POST to the page
 // it lives on, so the proxy may let it through (a public page) or stop seeing it (a changed
 // matcher). Every route handler that is not public, and every file of Server Functions, must
@@ -17,8 +19,17 @@ const SRC = join(APP_DIRECTORY, "..");
 // Server Functions that need no user: they start the sign in and end a session.
 const PUBLIC_SERVER_FUNCTION_FILES = ["auth/actions.ts"];
 
+// `requireUser()` is the guard of a route handler or a Server Function. The admin data routes hand
+// `lookupAdmin` to `createAdminRouteHandlers`, which checks it before anything else (a 401 for nobody,
+// a 404 for somebody who is not an instance admin; src/admin/guard.integration.test.ts), and the admin
+// pages call `requireAdmin()`. The routes of a workspace run their handler through `withWorkspace(...)`
+// (the membership and the role of the person, src/workspaces/access-runtime.ts) and the routes that are
+// not about one workspace through `withSignedIn(...)`. The backup status is for the instance admin
+// (`adminAccessOf`).
 function callsRequireUser(source: string): boolean {
-  return /\brequireUser\(\)/.test(source);
+  return /\brequireUser\(\)|\brequireAdmin\(\)|\baccess:\s*lookupAdmin\b|\bwithWorkspace\(|\bwithSignedIn\(|\badminAccessOf\(/.test(
+    source,
+  );
 }
 
 function isServerFunctionFile(source: string): boolean {

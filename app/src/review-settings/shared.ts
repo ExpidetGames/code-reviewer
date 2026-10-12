@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The wiring of the running server: the real database and the model of the instance. The webhook
 // intake and the claim of the runner API get the settings of a project from here.
 import "server-only";
@@ -11,12 +13,14 @@ import {
 } from "./service.ts";
 import { builtInReviewSettings } from "./settings.ts";
 
-/** The review settings service for the current request. */
-export function getReviewSettingsService(): ReviewSettingsService {
+/** The review settings service of one workspace. */
+export function reviewSettingsServiceFor(
+  workspaceId: string,
+): ReviewSettingsService {
   const db = getDatabase();
   return createReviewSettingsService({
-    appSettings: createAppSettingsRepository(db),
-    projects: createProjectsRepository(db),
+    appSettings: createAppSettingsRepository(db, workspaceId),
+    projects: createProjectsRepository(db, workspaceId),
     // Read on every call, so a changed LLM_MODEL reaches the next review.
     builtIn: () => builtInReviewSettings(configuredLlmModel(process.env)),
   });

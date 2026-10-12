@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // A complete sign in setup for integration tests: a real SQLite file, the real Better Auth
 // instance of the app, and the fake GitHub on a loopback port. The tests call `auth.handler`
 // with real `Request` objects, the same entry point the route handler uses, and walk the OAuth
@@ -6,10 +8,12 @@ import type {
   FakeGithub,
   FakeGithubUser,
 } from "../../../fakes/github/server.ts";
-import { createRuntimeAccessPolicy } from "../auth/access-runtime.ts";
+import type { SignInMethods } from "../admin/sign-in-methods.ts";
 import { createAuth } from "../auth/auth.ts";
 import { loadAuthConfig } from "../auth/config.ts";
-import { syncLoginPinsOnStart } from "../auth/startup.ts";
+import { createGithubSignInDecider } from "../github-signin/decider.ts";
+import type { SignUpRule } from "../signup/rule.ts";
+import type { SignUpFacts } from "../signup/state.ts";
 import type { Kysely } from "kysely";
 import type { Database } from "../db/schema.ts";
 import {
@@ -41,13 +45,12 @@ export type AuthHarnessOptions = {
   secureCookies?: boolean;
   githubRequestTimeoutMs?: number;
   users?: FakeGithubUser[];
-  /**
-   * `ALLOWED_GITHUB_LOGINS`. Default: the logins of `users`, so a test that does not care about
-   * the allow list can sign in. Pass `[]` for an empty list.
-   */
-  allowedLogins?: string[];
-  /** `ALLOWED_GITHUB_ORG`. When set, the default for `allowedLogins` is an empty list. */
-  allowedOrg?: string;
+  /** The sign-up rule in force. Default: everyone. */
+  signUpRule?: SignUpRule;
+  /** Whether the instance can send mail (a mail server is configured). Default: no. */
+  mailConfigured?: boolean;
+  /** The ways to sign in that are on. Default: both. */
+  signInMethods?: SignInMethods;
 };
 
 export async function createAuthHarness(options: AuthHarnessOptions = {}) {
@@ -59,49 +62,48 @@ export async function createAuthHarness(options: AuthHarnessOptions = {}) {
 
 export type AuthHarness = Awaited<ReturnType<typeof createAuthHarness>>;
 
-// Everything that depends on the settings: the Better Auth instance, the access policy and the
-// request helpers. `restart` builds it again over the same database and the same fake GitHub with
-// other settings, like a server that was restarted with a changed allow list.
+// Everything that depends on the settings: the Better Auth instance and the request helpers. `restart`
+// builds it again over the same database and the same fake GitHub with other settings.
 function assembleHarness(
   db: Kysely<Database>,
   github: FakeGithub,
   options: AuthHarnessOptions,
 ) {
-  const users = options.users ?? [OCTOCAT];
-  const allowedLogins =
-    options.allowedLogins ??
-    (options.allowedOrg === undefined ? users.map((user) => user.login) : []);
-
   // The settings come through the same loader as in the app, including the flag that allows the
   // fake GitHub's address. `secureCookies` is what an https BETTER_AUTH_URL yields; the harness
   // keeps its address on http (nothing here listens on it) and forces the flag.
   const loaded = loadAuthConfig({
-    BETTER_AUTH_SECRET: TEST_AUTH_SECRET,
+    APP_SECRET: TEST_AUTH_SECRET,
     BETTER_AUTH_URL: TEST_BASE_URL,
-    GITHUB_OAUTH_CLIENT_ID: TEST_CLIENT_ID,
-    GITHUB_OAUTH_CLIENT_SECRET: TEST_CLIENT_SECRET,
     GITHUB_OAUTH_BASE_URL: github.baseUrl,
     GITHUB_API_BASE_URL: github.baseUrl,
     ALLOW_TEST_GITHUB_ENDPOINTS: "true",
-    ALLOWED_GITHUB_LOGINS: allowedLogins.join(","),
-    ALLOWED_GITHUB_ORG: options.allowedOrg,
   });
   const config = {
     ...loaded,
     secureCookies: options.secureCookies ?? loaded.secureCookies,
   };
+  // What the decision of the sign in rests on, as the app reads it per sign in; a test changes it.
+  const facts: SignUpFacts = {
+    rule: options.signUpRule ?? { kind: "everyone" },
+    signInMethods: options.signInMethods ?? {
+      emailPassword: true,
+      github: true,
+    },
+    mailConfigured: options.mailConfigured ?? false,
+  };
   const auth = createAuth({
     db,
     config,
+    githubSignIn: {
+      clientId: TEST_CLIENT_ID,
+      clientSecret: TEST_CLIENT_SECRET,
+      decide: createGithubSignInDecider({
+        db,
+        readFacts: () => Promise.resolve({ ...facts }),
+      }),
+    },
     githubRequestTimeoutMs: options.githubRequestTimeoutMs,
-  });
-
-  // The same access rule the server uses, on the same database and the same fake GitHub.
-  const policy = createRuntimeAccessPolicy({
-    db,
-    auth,
-    config,
-    orgCheckTimeoutMs: options.githubRequestTimeoutMs,
   });
 
   /** Sends a request to the auth handler the way the route handler does. */
@@ -178,26 +180,13 @@ function assembleHarness(
     github,
     auth,
     config,
-    policy,
     request,
     startSignIn,
     callback,
     signIn,
     authorizeSignIn,
-    /**
-     * What the server does when it starts, after the migrations: applies the pins of the
-     * allow list (deletes the pins of logins that left it, sets pre-set ids). `info` receives the
-     * line it would log.
-     */
-    start: (info: (message: string) => void = () => undefined) =>
-      syncLoginPinsOnStart({
-        db,
-        config: config.access,
-        info,
-        exit: (code) => {
-          throw new Error(`The server would exit with code ${String(code)}`);
-        },
-      }),
+    /** The facts the decision rests on; change them to change the rule, the mail server or the ways to sign in. */
+    facts,
     /** The same database and fake GitHub, started again with other settings. */
     restart: (changes: AuthHarnessOptions) =>
       assembleHarness(db, github, { ...options, ...changes }),

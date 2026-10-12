@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Turns what a job process did into the `result` of a `complete` request.
 
 The job process prints one line of JSON (`JobResult`) and exits with 0 or 1. The loop does not

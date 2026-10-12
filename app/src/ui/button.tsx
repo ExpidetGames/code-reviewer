@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Buttons are plain elements with the classes `btn btn-<variant>` (see globals.css).
 import type { ButtonHTMLAttributes } from "react";
 

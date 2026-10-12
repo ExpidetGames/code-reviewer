@@ -3,6 +3,7 @@ name = "code-reviewer-runner"
 version = "0.1.0"
 description = "Worker that picks up review jobs from the Code Reviewer app and runs PR-Agent."
 requires-python = ">=3.13"
+license = "Apache-2.0"
 dependencies = [
     "pr-agent==0.47.0",
 ]
@@ -66,7 +67,7 @@ src = ["src", "tests"]
 select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
 
 [tool.pyright]
-include = ["src", "tests", "scripts"]
+include = ["src", "tests", "scripts", "../fakes"]
 pythonVersion = "3.13"
 typeCheckingMode = "strict"
 venvPath = "."

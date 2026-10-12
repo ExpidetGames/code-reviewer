@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // @vitest-environment jsdom
 // Pins down the "Sync from GitHub" button: it runs the sync, says how many repositories are new in a
 // sentence, translates the problems GitHub reported instead of showing codes, and refreshes the list.
@@ -11,13 +13,15 @@ vi.mock("next/navigation", () => ({
 }));
 
 import type { ProjectsApi } from "./api.ts";
-import { SyncButton } from "./sync-button.tsx";
+import { InstanceSyncButton, SyncButton } from "./sync-button.tsx";
 
 afterEach(cleanup);
 
 function renderButton(result: Awaited<ReturnType<ProjectsApi["sync"]>>) {
   const sync = vi.fn<ProjectsApi["sync"]>(async () => result);
-  render(<SyncButton api={{ setActive: vi.fn(), sync }} />);
+  render(
+    <SyncButton workspaceSlug="acme" api={{ setActive: vi.fn(), sync }} />,
+  );
   return sync;
 }
 
@@ -82,5 +86,24 @@ describe("the sync button", () => {
       /not allowed/i,
     );
     expect(navigation.refresh).not.toHaveBeenCalled();
+  });
+});
+
+describe("the sync button of the instance", () => {
+  // #103-IB-13
+  it("runs the synchronization it is given and says how many repositories are new", async () => {
+    const user = userEvent.setup();
+    const sync = vi.fn<ProjectsApi["sync"]>(async () => ({
+      ok: true,
+      data: { added: 3, errors: [] },
+    }));
+    render(<InstanceSyncButton api={{ sync }} />);
+
+    await user.click(screen.getByRole("button", { name: "Sync from GitHub" }));
+
+    expect((await screen.findByRole("status")).textContent).toBe(
+      "3 new repositories.",
+    );
+    expect(sync).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the security rules of the runner API through the real handler: nothing works without the
 // shared token, a refusal says nothing about how close a token was, and the git token and the LLM key
 // appear in the claim response and nowhere else (not in other answers, logs, or any table).
@@ -277,7 +279,7 @@ describe("where the git token and the LLM key appear", () => {
 
   it("removes the LLM key from a result even when it has white space in the setting or comes back URL-encoded", async () => {
     const key = "key/with+special=chars-1234";
-    const h = await startRunnerApiHarness({ env: { LLM_API_KEY: `${key}\n` } });
+    const h = await startRunnerApiHarness({ llmKey: `${key}\n` });
     await h.enqueueNew();
     const claim = await h.claimed();
     expect(claim.job.input.llm.apiKey).toBe(key);

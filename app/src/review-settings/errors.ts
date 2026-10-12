@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The stable error codes of the review settings routes and service. A caller (the UI, a test)
 // branches on `code`, never on the message; the UI translates codes to copy.
 import type { ReviewSettingIssue } from "./validate.ts";
@@ -13,7 +15,7 @@ export const REVIEW_SETTINGS_ERROR_CODES = [
   "REVIEW_SETTINGS_BODY_TOO_LARGE",
   /** The content type is not `application/json`. 415. */
   "REVIEW_SETTINGS_CONTENT_TYPE_UNSUPPORTED",
-  /** The repository has no project (it was never activated, or there is no such repository). 404. */
+  /** There is no such repository (unknown, or no longer listed by the platform and without a project). 404. */
   "REVIEW_SETTINGS_PROJECT_NOT_FOUND",
 ] as const;
 export type ReviewSettingsErrorCode =

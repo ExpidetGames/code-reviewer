@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the schema bootstrap: a missing file is created and fully migrated, a second start
 // changes nothing, a failing migration leaves no trace, and the migrated schema follows the
 // portable column conventions.
@@ -64,6 +66,22 @@ describe("the migrations of both epics", () => {
       "20261010201500_create_app_settings",
       "20261011090000_create_job_comments",
       "20261011100000_add_jobs_repository_recent_index",
+      "20261011160000_create_workspaces",
+      "20261011160100_add_workspace_to_customer_data",
+      "20261011160200_prepare_users_for_accounts",
+      "20261011170000_create_instance_settings",
+      "20261011170100_create_rate_limits",
+      "20261011170200_add_instance_admin_flag_to_users",
+      "20261011200000_create_secrets",
+      "20261011200100_create_password_reset_tokens",
+      "20261011210000_create_email_verification_tokens",
+      "20261012100000_create_invitations",
+      "20261012120000_create_signed_states",
+      "20261012120100_add_users_email_conflict",
+      "20261012120200_unique_accounts",
+      "20261012140000_create_workspace_secrets",
+      "20261012140100_create_job_claimed_keys",
+      "20261012150000_create_installation_binding",
     ]);
   });
 
@@ -105,17 +123,30 @@ describe("starting the database", () => {
       "allowed_login_pins",
       "app_meta",
       "app_settings",
+      "email_verification_tokens",
+      "installation_link_requests",
+      "instance_settings",
       "integrations",
+      "invitations",
+      "job_claimed_keys",
       "job_comments",
       "jobs",
       "kysely_migration",
       "kysely_migration_lock",
+      "password_reset_tokens",
       "projects",
+      "rate_limits",
       "repositories",
+      "secrets",
       "sessions",
+      "signed_states",
+      "unclaimed_installations",
       "users",
       "verifications",
       "webhook_deliveries",
+      "workspace_members",
+      "workspace_secrets",
+      "workspaces",
     ]);
     const { rows } = await sql<{
       name: string;

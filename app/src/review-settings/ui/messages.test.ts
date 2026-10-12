@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down that every stable code a settings field or a save can fail with has copy that says what
 // to do, never shows the raw code, and names the limit where there is one.
 import { describe, expect, it } from "vitest";
@@ -90,9 +92,9 @@ describe("the copy for a save that failed as a whole", () => {
     expect(describeSaveFailure("REVIEW_SETTINGS_INVALID")).toMatch(/marked/);
   });
 
-  it("says a project that was never activated has no settings yet", () => {
+  it("says the repository was not found when it is gone", () => {
     expect(describeSaveFailure("REVIEW_SETTINGS_PROJECT_NOT_FOUND")).toMatch(
-      /activate/i,
+      /not found/i,
     );
   });
 });

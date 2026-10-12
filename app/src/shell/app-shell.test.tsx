@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // @vitest-environment jsdom
 // Pins down the frame around every signed in page: the navigation with its three places and the
 // current one marked, and on a narrow screen the menu button that opens and closes it. Whether it
@@ -13,7 +15,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const navigation = vi.hoisted(() => ({ pathname: "/runs" }));
+const navigation = vi.hoisted(() => ({ pathname: "/w/acme/runs" }));
 vi.mock("next/navigation", () => ({
   usePathname: () => navigation.pathname,
 }));
@@ -27,7 +29,7 @@ beforeEach(() => document.addEventListener("click", keepPageInPlace));
 afterEach(() => {
   document.removeEventListener("click", keepPageInPlace);
   cleanup();
-  navigation.pathname = "/runs";
+  navigation.pathname = "/w/acme/runs";
 });
 
 function renderShell() {
@@ -40,7 +42,7 @@ function renderShell() {
 
 describe("the navigation", () => {
   // CR-36-T01
-  it("links Projects, Runs and Settings and marks only the current page", () => {
+  it("links Projects, Runs, Connections, Settings and Members of the workspace in the address and marks only the current page", () => {
     renderShell();
 
     const nav = screen.getByRole("navigation", { name: "Main" });
@@ -49,22 +51,28 @@ describe("the navigation", () => {
     expect(links.map((link) => link.textContent)).toEqual([
       "Projects",
       "Runs",
+      "Connections",
       "Settings",
+      "Members",
     ]);
     expect(links.map((link) => link.getAttribute("href"))).toEqual([
-      "/projects",
-      "/runs",
-      "/settings",
+      "/w/acme/projects",
+      "/w/acme/runs",
+      "/w/acme/connections",
+      "/w/acme/settings",
+      "/w/acme/members",
     ]);
     expect(links.map((link) => link.getAttribute("aria-current"))).toEqual([
       null,
       "page",
       null,
+      null,
+      null,
     ]);
   });
 
   it("keeps a place marked while a page below it is open", () => {
-    navigation.pathname = "/runs/42";
+    navigation.pathname = "/w/acme/runs/42";
     renderShell();
 
     expect(
@@ -77,11 +85,50 @@ describe("the navigation", () => {
     ).toBeNull();
   });
 
-  it("marks nothing on a page that is not one of the three places", () => {
-    navigation.pathname = "/runs-archive";
+  it("marks nothing on a page that is not one of the places", () => {
+    navigation.pathname = "/w/acme/runs-archive";
     renderShell();
 
     expect(document.querySelector("[aria-current]")).toBeNull();
+  });
+
+  // #101-WM-03
+  it("shows the places of the workspace in the address and of no other, so switching changes every link", () => {
+    navigation.pathname = "/w/other-team/runs";
+    renderShell();
+
+    expect(
+      screen
+        .getAllByRole("link")
+        .filter((link) => link.closest("nav"))
+        .map((link) => link.getAttribute("href")),
+    ).toEqual([
+      "/w/other-team/projects",
+      "/w/other-team/runs",
+      "/w/other-team/connections",
+      "/w/other-team/settings",
+      "/w/other-team/members",
+    ]);
+  });
+
+  // #101-WM-01
+  it.each(["/no-access", "/workspaces/new", "/invitations", "/"])(
+    "has no places on %s, which is outside any workspace",
+    (path) => {
+      navigation.pathname = path;
+      renderShell();
+
+      const nav = screen.getByRole("navigation", { name: "Main" });
+      expect(within(nav).queryAllByRole("link")).toEqual([]);
+    },
+  );
+
+  it("sends the brand link to the start page, which opens the first workspace of the person", () => {
+    renderShell();
+
+    expect(
+      screen.getByRole("link", { name: "Code Reviewer" }).getAttribute("href"),
+    ).toBe("/");
   });
 
   it("puts the content in the main landmark and offers a way to skip the navigation", () => {
@@ -166,7 +213,7 @@ describe("the menu on a narrow screen", () => {
     await user.click(button);
     expect(button.getAttribute("aria-expanded")).toBe("true");
 
-    navigation.pathname = "/projects";
+    navigation.pathname = "/w/acme/projects";
     rerender(
       <AppShell userMenu={<span>user menu</span>}>
         <h1>Page content</h1>
@@ -179,7 +226,7 @@ describe("the menu on a narrow screen", () => {
   // CR-36-T07
   it("closes the navigation when the brand link is chosen on the page it points to", async () => {
     const user = userEvent.setup();
-    navigation.pathname = "/projects";
+    navigation.pathname = "/w/acme/projects";
     renderShell();
     const button = screen.getByRole("button", { name: "Menu" });
     await user.click(button);

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // POST /api/runners/v1/jobs/:id/heartbeat and /complete: what a runner says about a job it holds.
 // Both prove the claim with the lease token of the claim response (not with the runner id, which is
 // bookkeeping only), so a stale execution of a job that was requeued and claimed again gets 409
@@ -5,7 +7,7 @@
 //
 // The answers never contain the git token or the LLM key: only the claim response does.
 import "server-only";
-import type { JobQueue } from "../jobs/job-queue.ts";
+import type { RunnerQueue } from "../jobs/runner-queue.ts";
 import type { JobOutcome } from "../jobs/job-types.ts";
 import {
   RUNNER_API_VERSION,
@@ -24,11 +26,15 @@ import {
 import { errorResponse, jsonResponse } from "./responses.ts";
 
 export type ReportDeps = {
-  queue: Pick<JobQueue, "get" | "heartbeat" | "complete" | "release">;
+  queue: Pick<RunnerQueue, "get" | "heartbeat" | "complete" | "release">;
   logger: RunnerApiLogger;
-  /** Exact values (the current LLM key, the runner token) that must never end up in a stored result. */
-  knownSecrets: () => readonly string[];
-  /** The LLM key each job was handed with its claim; it may differ from the current one. */
+  /**
+   * Exact values that must never end up in a stored result: the runner token and the CURRENT LLM key of
+   * the workspace the job belongs to (and the legacy variable, where it applies). Best effort; a lookup that
+   * fails gives an empty list rather than failing the completion.
+   */
+  knownSecrets: (workspaceId: string) => Promise<readonly string[]>;
+  /** The LLM key each job was handed with its claim; it may differ from the current one. Read from the database. */
   claimedKeys: Pick<ClaimedKeys, "keysOf">;
 };
 
@@ -90,15 +96,16 @@ export async function handleComplete(
   const parsed = parseCompleteRequest(body);
   if (!parsed.ok) return invalid(parsed);
 
-  if ((await deps.queue.get(jobId)) === undefined)
-    return errorResponse(404, "RUNNER_JOB_NOT_FOUND");
+  const job = await deps.queue.get(jobId);
+  if (job === undefined) return errorResponse(404, "RUNNER_JOB_NOT_FOUND");
 
   // What is stored: the checked result with everything that looks like a credential removed. The
   // same report always gives the same stored value, which is what makes a repetition recognisable.
-  // The key of the claim and the current one: the key may have been rotated while the job ran.
+  // The key of the claim and the current one: the key may have been rotated while the job ran, and the
+  // claim may have been served by another app instance (the key of the claim is in the database).
   const stored = redactResult(parsed.value.result, [
-    ...deps.knownSecrets(),
-    ...deps.claimedKeys.keysOf(jobId),
+    ...(await deps.knownSecrets(job.workspaceId)),
+    ...(await deps.claimedKeys.keysOf(jobId)),
   ]);
   const outcome: JobOutcome =
     stored.errorCode === null

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the text the login page shows for the `error` code that Better Auth puts into the URL
 // when a sign in fails: known codes get a specific message, anything else the generic one, and the
 // text of the URL never reaches the page.
@@ -31,21 +33,27 @@ describe("the message for a failed sign in", () => {
     expect(loginErrorMessage("account_not_linked")).not.toMatch(/try again/i);
   });
 
-  // CR-19-T07
-  it("says that the account is not allowed, in the words of the ticket, without naming anybody", () => {
-    expect(loginErrorMessage("not_allowed")).toBe(
-      "Your GitHub account is not allowed to use this Code Reviewer instance.",
+  // #102-SR-15
+  it.each([
+    ["github_email_unverified", /verified primary email/i],
+    ["email_not_allowed", /not allowed to sign up/i],
+    ["signup_closed", /closed/i],
+    ["email_exists_unverified", /not verified/i],
+    ["github_identity_conflict", /another GitHub account/i],
+    ["check_failed", /try again later/i],
+    ["github_not_configured", /not set up/i],
+  ])(
+    "explains the refusal %s of the sign in with GitHub without naming anybody",
+    (code, expected) => {
+      expect(loginErrorMessage(code)).toMatch(expected);
+    },
+  );
+
+  // #97-SU-14
+  it("says that the email address or the password is wrong without saying which", () => {
+    expect(loginErrorMessage("invalid_credentials")).toBe(
+      "The email address or the password is not correct.",
     );
-  });
-
-  // CR-19-T11
-  it("says that the check was not possible, and that waiting may help", () => {
-    expect(loginErrorMessage("check_failed")).toMatch(/could not check/i);
-    expect(loginErrorMessage("check_failed")).toMatch(/try again later/i);
-  });
-
-  it("asks for a new sign in when the stored authorization no longer works", () => {
-    expect(loginErrorMessage("sign_in_again")).toMatch(/sign in again/i);
   });
 
   it("uses a generic message for a code it does not know and never echoes it", () => {

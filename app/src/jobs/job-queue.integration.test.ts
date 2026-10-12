@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the job queue against a real SQLite file: what enqueueing stores and when it refuses to
 // create a second job, what a runner is handed and in which order, how leases and runtimes run out,
 // and how a job is finished. Concurrent callers (two processes) are in
@@ -30,6 +32,7 @@ describe("enqueueing a job", () => {
     const stored = await fixture.queue.get(result.job.id);
     expect(stored).toEqual({
       id: result.job.id,
+      workspaceId: fixture.workspaceId,
       repositoryId: fixture.repositoryId,
       prNumber: 7,
       prUrl: "https://github.test/acme/widgets/pull/7",

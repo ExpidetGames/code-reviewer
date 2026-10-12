@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The stable error codes of the project service. A caller (the route, a test) branches on `code`,
 // never on the message; the UI translates codes to copy.
 export const PROJECT_ERROR_CODES = [

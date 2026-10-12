@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the review settings service against a real SQLite file: the global defaults and the
 // overrides of a project are two layers that are combined when they are read, a change of the global
 // defaults reaches every project that does not override the field, resetting an override brings the
@@ -331,18 +333,87 @@ describe("the settings of a project", () => {
     });
   });
 
-  it("are not found for a repository without a project, for read, save and reset alike", async () => {
+  it("are not found for an unknown repository, for read, save and reset alike", async () => {
     const app = await setupReviewSettings();
 
     for (const call of [
-      app.service.getProjectSettings(app.first.id),
-      app.service.updateProjectSettings(app.first.id, { maxFindings: 2 }),
-      app.service.resetProjectSettings(app.first.id),
       app.service.getProjectSettings("no-such-repository"),
+      app.service.updateProjectSettings("no-such-repository", {
+        maxFindings: 2,
+      }),
+      app.service.resetProjectSettings("no-such-repository"),
     ])
       expect((await refusal(call)).code).toBe(
         "REVIEW_SETTINGS_PROJECT_NOT_FOUND",
       );
+    expect(await app.projectRows()).toEqual([]);
+  });
+
+  // #80
+  it("can be read for a repository that was never activated, which shows the defaults and writes nothing", async () => {
+    const app = await setupReviewSettings();
+    await app.service.updateGlobalSettings({ maxFindings: 8 }, "octocat");
+
+    const view = await app.service.getProjectSettings(app.first.id);
+
+    expect(view).toMatchObject({
+      repositoryId: app.first.id,
+      projectId: null,
+      active: false,
+      overrides: {},
+      effective: { maxFindings: 8 },
+      inherited: { maxFindings: 8 },
+    });
+    expect(await app.projectRows()).toEqual([]);
+  });
+
+  // #80
+  it("can be saved for a repository that was never activated, which creates an inactive project and keeps it out of reviews", async () => {
+    const app = await setupReviewSettings();
+
+    const view = await app.service.updateProjectSettings(app.first.id, {
+      maxFindings: 2,
+    });
+
+    expect(view).toMatchObject({
+      active: false,
+      overrides: { maxFindings: 2 },
+    });
+    expect(view.projectId).not.toBeNull();
+    expect(await app.projectRows()).toMatchObject([
+      { repository_id: app.first.id, active: 0 },
+    ]);
+    expect(
+      await app.projects.findActiveForRepository(app.first.id),
+    ).toBeUndefined();
+  });
+
+  // #80
+  it("saved before the first activation are still there once the project is activated", async () => {
+    const app = await setupReviewSettings();
+    await app.service.updateProjectSettings(app.first.id, { maxFindings: 2 });
+
+    await app.projects.activate(app.first.id);
+
+    const view = await app.service.getProjectSettings(app.first.id);
+    expect(view).toMatchObject({ active: true, overrides: { maxFindings: 2 } });
+    expect(
+      (await app.service.resolveForRepository(app.first.id))?.settings
+        .maxFindings,
+    ).toBe(2);
+  });
+
+  // #80
+  it("reset for a repository that was never activated writes nothing", async () => {
+    const app = await setupReviewSettings();
+
+    const view = await app.service.resetProjectSettings(app.first.id);
+
+    expect(view).toMatchObject({
+      projectId: null,
+      active: false,
+      overrides: {},
+    });
     expect(await app.projectRows()).toEqual([]);
   });
 

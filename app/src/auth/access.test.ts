@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down which paths need a session and what an unauthenticated request gets back. The rule is
 // default deny: only the paths on the public list are open, everything else, including paths that
 // do not exist yet, needs a session.
@@ -28,6 +30,12 @@ describe("which paths are public", () => {
     "/api/jobs",
     "/api/anything-new",
     "/settings",
+    "/no-access",
+    "/w/acme/projects",
+    "/api/w/acme/runs",
+    "/api/workspaces",
+    "/api/invitations/accept",
+    "/invitations",
   ])("requires a session for %s", (pathname) => {
     expect(isPublicPath(pathname)).toBe(false);
   });
@@ -58,7 +66,18 @@ describe("which paths are public", () => {
     expect(PUBLIC_PATHS).toEqual([
       { path: "/login", match: "exact" },
       { path: "/api/health", match: "exact" },
+      { path: "/setup", match: "exact" },
+      { path: "/api/setup", match: "prefix" },
       { path: "/api/auth", match: "prefix" },
+      { path: "/reset-password", match: "exact" },
+      { path: "/api/password-reset", match: "exact" },
+      { path: "/forgot-password", match: "exact" },
+      { path: "/api/password-reset/request", match: "exact" },
+      { path: "/sign-up", match: "exact" },
+      { path: "/api/sign-up", match: "exact" },
+      { path: "/verify-email", match: "exact" },
+      { path: "/api/verify-email", match: "prefix" },
+      { path: "/invitation", match: "exact" },
       { path: "/api/runners", match: "prefix" },
       { path: "/api/webhooks", match: "prefix" },
     ]);

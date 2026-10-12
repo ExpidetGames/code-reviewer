@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down docker/smoke/instance.sh, the smoke test of a running instance (health, login page,
 // webhook with a wrong signature, runner API without a token). The script is run for real, as a
 // child process, against a small HTTP server in this test that answers what a healthy or a broken
@@ -28,6 +30,7 @@ const servers: Server[] = [];
 
 async function fakeInstance(
   answers: Answers,
+  bodies: Record<string, string> = {},
 ): Promise<{ url: string; seen: Seen[] }> {
   const seen: Seen[] = [];
   const server = createServer((request, response) => {
@@ -35,7 +38,7 @@ async function fakeInstance(
     seen.push({ method: request.method ?? "", path, headers: request.headers });
     request.resume();
     response.statusCode = answers[`${request.method} ${path}`] ?? 404;
-    response.end("{}");
+    response.end(bodies[`${request.method} ${path}`] ?? "{}");
   });
   servers.push(server);
   await new Promise<void>((resolve) =>
@@ -91,6 +94,26 @@ describe("the instance smoke test", () => {
     expect(result.code).toBe(0);
     expect(result.out).toContain("smoke test passed");
     expect(result.err).toBe("");
+  });
+
+  // #97-SU-03
+  it("says that the instance is not set up yet, instead of reporting failing checks, when it waits for the first-run setup", async () => {
+    const { url } = await fakeInstance(
+      {
+        ...HEALTHY,
+        "GET /login": 200,
+        "POST /api/webhooks/github-app": 503,
+        "POST /api/runners/v1/claim": 503,
+      },
+      { "POST /api/runners/v1/claim": '{"error":"setup_required"}' },
+    );
+
+    const result = await run([url]);
+
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("not set up yet");
+    expect(result.err).toContain("setup code");
+    expect(result.err).not.toContain("expected 401");
   });
 
   // CR-39-T01

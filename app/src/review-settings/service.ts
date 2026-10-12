@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The review settings service: what the routes, the claim of the runner API and the webhook intake
 // use to read and change the settings. It validates input, keeps the layers apart (the global
 // defaults in `app_settings`, the overrides of a project in `projects.settings`), computes the
@@ -55,7 +57,9 @@ export type GlobalSettingsView = ViewBase & {
 
 export type ProjectSettingsView = ViewBase & {
   repositoryId: string;
-  projectId: string;
+  /** Null for a repository that has no project row yet (never activated, nothing saved). */
+  projectId: string | null;
+  /** Whether reviews run for the project; false for a repository that was never activated. */
   active: boolean;
   /** What the project would use without its own overrides (the global level). */
   inherited: ReviewSettings;
@@ -71,21 +75,32 @@ export type ReviewSettingsService = {
     input: unknown,
     actor: string,
   ): Promise<GlobalSettingsView>;
-  /** Throws `REVIEW_SETTINGS_PROJECT_NOT_FOUND` when the repository has no project. */
+  /**
+   * The settings of a repository's project; a repository that was never activated shows the defaults
+   * (no overrides, `projectId` null). Throws `REVIEW_SETTINGS_PROJECT_NOT_FOUND` for a repository
+   * that does not exist or that the platform no longer lists and that has no project.
+   */
   getProjectSettings(repositoryId: string): Promise<ProjectSettingsView>;
   /**
-   * Replaces the overrides of a project with the given fields (a field left out is inherited).
+   * Replaces the overrides of a project with the given fields (a field left out is inherited). A
+   * repository that was never activated gets an inactive project, so it can be configured first.
    * Throws `REVIEW_SETTINGS_INVALID` or `REVIEW_SETTINGS_PROJECT_NOT_FOUND`.
    */
   updateProjectSettings(
     repositoryId: string,
     input: unknown,
   ): Promise<ProjectSettingsView>;
-  /** Removes every override of a project, so it follows the global defaults again. */
+  /**
+   * Removes every override of a project, so it follows the global defaults again. A repository
+   * without a project has none to remove: nothing is written.
+   */
   resetProjectSettings(repositoryId: string): Promise<ProjectSettingsView>;
   /**
    * The settings a review of the repository's project uses (project over global over built-in), or
-   * undefined when the repository has no project. The claim and the webhook intake use this.
+   * undefined when the repository has no project row. It also answers for a row that is switched off
+   * (one that only holds saved settings), so it is **not** a gate: the claim, the webhook intake and
+   * the manual start check for an active project first (`hasActiveProject`,
+   * `getActiveProjectForRepository`) and only then ask for the settings.
    */
   resolveForRepository(
     repositoryId: string,
@@ -95,7 +110,7 @@ export type ReviewSettingsService = {
 function notFound(): ReviewSettingsError {
   return new ReviewSettingsError(
     "REVIEW_SETTINGS_PROJECT_NOT_FOUND",
-    "This repository has no project.",
+    "There is no such repository.",
   );
 }
 
@@ -184,11 +199,12 @@ export function createReviewSettingsService(deps: {
   }
 
   async function projectView(
-    project: StoredProject,
+    repositoryId: string,
+    project: StoredProject | undefined,
   ): Promise<ProjectSettingsView> {
     const builtIn = deps.builtIn();
     const global = (await readGlobal()).overrides;
-    const overrides = parseStoredOverrides(project.settings);
+    const overrides = parseStoredOverrides(project?.settings);
     const effective = resolveReviewSettings({
       builtIn,
       global,
@@ -196,17 +212,21 @@ export function createReviewSettingsService(deps: {
     });
     return {
       ...viewOf(effective, overrides),
-      repositoryId: project.repositoryId,
-      projectId: project.id,
-      active: project.active,
+      repositoryId,
+      projectId: project?.id ?? null,
+      active: project?.active ?? false,
       inherited: resolveReviewSettings({ builtIn, global }).settings,
     };
   }
 
-  async function requireProject(repositoryId: string): Promise<StoredProject> {
-    const project = await projects.get(repositoryId);
-    if (project === undefined) throw notFound();
-    return project;
+  // The view of a repository that has no project row yet is the defaults; one the list does not show
+  // (unknown, or no longer listed by the platform and without a project) is not found.
+  async function viewOfRepository(
+    repositoryId: string,
+  ): Promise<ProjectSettingsView> {
+    const entry = await projects.find(repositoryId);
+    if (entry === undefined) throw notFound();
+    return projectView(repositoryId, entry.project ?? undefined);
   }
 
   return {
@@ -224,7 +244,7 @@ export function createReviewSettingsService(deps: {
     },
 
     async getProjectSettings(repositoryId) {
-      return projectView(await requireProject(repositoryId));
+      return viewOfRepository(repositoryId);
     },
 
     async updateProjectSettings(repositoryId, input) {
@@ -239,13 +259,16 @@ export function createReviewSettingsService(deps: {
       );
       const project = await projects.updateSettings(repositoryId, overrides);
       if (project === undefined) throw notFound();
-      return projectView(project);
+      return projectView(repositoryId, project);
     },
 
     async resetProjectSettings(repositoryId) {
+      // Nothing to remove, so no row is created just for this.
+      if ((await projects.get(repositoryId)) === undefined)
+        return viewOfRepository(repositoryId);
       const project = await projects.updateSettings(repositoryId, {});
       if (project === undefined) throw notFound();
-      return projectView(project);
+      return projectView(repositoryId, project);
     },
 
     async resolveForRepository(repositoryId) {

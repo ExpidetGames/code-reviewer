@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down who may change the review settings: the access proxy (real Better Auth, real database)
 // in front of the handlers of `PUT /api/review-settings` and of the project settings routes. A request
 // without a session gets 401, one from a signed in user who is no longer on the allow list gets 403,
@@ -15,6 +17,11 @@ import {
   createAuthHarness,
   type CookieJar,
 } from "../../src/test-support/auth-harness.ts";
+import type { AccessGates } from "../../src/auth/access-gates.ts";
+import {
+  noWorkspaceGates,
+  openGates,
+} from "../../src/test-support/open-gates.ts";
 
 type Harness = Awaited<ReturnType<typeof createAuthHarness>>;
 
@@ -32,10 +39,10 @@ async function startApp() {
   } as const;
 
   /** What the server does with a request: the proxy first, the handler only if the proxy lets it by. */
-  function through(auth: Harness = harness) {
+  function through(auth: Harness = harness, gates: AccessGates = openGates) {
     const proxy = createAccessProxy({
       getAuth: () => auth.auth,
-      getPolicy: () => auth.policy,
+      getGates: () => gates,
     });
     return async function send(
       target: "global" | "project",
@@ -59,7 +66,7 @@ async function startApp() {
       const handlers = createReviewSettingsRouteHandlers({
         // The same lookup `requireUser()` makes, without Next.js's request scope.
         requireUser: async () => {
-          const lookup = await lookupSession(auth.auth, headers, auth.policy);
+          const lookup = await lookupSession(auth.auth, headers, gates);
           if (lookup.kind !== "user") throw new Error("NEXT_REDIRECT");
           return lookup.user;
         },
@@ -120,7 +127,7 @@ describe("a request without a session", () => {
   );
 });
 
-describe("a signed in user who is not on the allow list", () => {
+describe("a signed in user who belongs to no workspace", () => {
   // CR-25-T12
   it.each(CHANGES)(
     "is answered with 403 when trying %s %s, and nothing is stored",
@@ -128,15 +135,15 @@ describe("a signed in user who is not on the allow list", () => {
       const app = await startApp();
       const { cookies } = await app.harness.signIn();
       const before = await app.stored();
-      const removed = app.harness.restart({ allowedLogins: ["somebody-else"] });
 
-      const response = await app.through(removed)(target, method, cookies);
+      const response = await app.through(app.harness, noWorkspaceGates)(
+        target,
+        method,
+        cookies,
+      );
 
       expect(response.status).toBe(403);
-      expect(await response.json()).toEqual({
-        error: "ACCESS_DENIED",
-        reason: "not_allowed",
-      });
+      expect(await response.json()).toEqual({ error: "no_workspace_access" });
       expect(await app.stored()).toEqual(before);
     },
   );

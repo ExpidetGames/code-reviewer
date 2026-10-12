@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The handlers behind `GET /api/repositories/:repositoryId/pull-requests` (the pull requests a
 // person can pick) and `POST /api/repositories/:repositoryId/reviews` (start a command for one of
 // them), with their collaborators passed in so the route files only wire the real ones and tests wire
@@ -8,7 +10,7 @@
 // is `{ "error": <code> }` with a stable code from `errors.ts`; an unusable body adds
 // `"issues": [{ "field", "code" }]`. Every answer is `Cache-Control: no-store`. The start answers 201
 // with `created: true` for a new run and 200 with `created: false` for the run that was already there.
-import type { SessionUser } from "../auth/access-policy.ts";
+import { actorName, type SessionUser } from "../auth/access-policy.ts";
 import { isCrossSite, isJsonRequest } from "../http/request-checks.ts";
 import { readLimitedBody } from "../webhooks/limited-body.ts";
 import { MANUAL_REVIEW_ERROR_STATUS, ManualReviewError } from "./errors.ts";
@@ -91,7 +93,9 @@ export function createManualReviewRouteHandlers({
             "The request does not come from this site.",
           );
         const started = await service.startReview(
-          user,
+          // The login that is recorded as the one who started the review: the GitHub login, or the
+          // email of an account without GitHub.
+          { githubLogin: actorName(user) },
           repositoryId,
           await readBody(request),
         );

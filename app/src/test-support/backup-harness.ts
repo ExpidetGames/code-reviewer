@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Helpers of the backup tests: a database that holds data of every kind the app stores, row counts
 // and integrity checks read through a connection of their own (never through the code under test),
 // and a writer in a separate OS process for "another process writes while the backup runs".
@@ -24,6 +26,7 @@ export async function seedInstance(db: Kysely<Database>): Promise<void> {
         email_verified: 1,
         image: null,
         github_login: login,
+        imported_at: null,
         org_checked_at: null,
         org_checked_for: null,
         created_at: TIMESTAMP,
@@ -45,9 +48,20 @@ export async function seedInstance(db: Kysely<Database>): Promise<void> {
     })
     .execute();
   await db
+    .insertInto("workspaces")
+    .values({
+      id: "workspace-1",
+      name: "Example",
+      slug: "example",
+      created_by: null,
+      created_at: TIMESTAMP,
+    })
+    .execute();
+  await db
     .insertInto("integrations")
     .values({
       id: "integration-1",
+      workspace_id: "workspace-1",
       type: "github_app",
       display_name: "Example",
       external_id: "42",
@@ -63,6 +77,7 @@ export async function seedInstance(db: Kysely<Database>): Promise<void> {
     .insertInto("repositories")
     .values({
       id: "repository-1",
+      workspace_id: "workspace-1",
       integration_id: "integration-1",
       external_id: "1001",
       full_name: "example/app",

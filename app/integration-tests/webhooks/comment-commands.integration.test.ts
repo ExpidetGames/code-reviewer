@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down what a comment on a pull request does: a signed `issue_comment` delivery with one of the
 // four commands from a user with write access becomes a job with exactly that command, through the
 // real webhook handler, the real GitHub App provider, the real job queue and a real SQLite file.
@@ -11,7 +13,7 @@ import {
 } from "../../../fakes/github/webhooks.ts";
 import { createRepositoriesRepository } from "../../src/db/repositories/repositories-repository.ts";
 import { createIntegrationRegistry } from "../../src/integrations/registry.ts";
-import { createJobQueue } from "../../src/jobs/job-queue.ts";
+import { createTestQueue } from "../../src/test-support/jobs.ts";
 import type { ReviewSettings } from "../../src/review-settings/settings.ts";
 import { TEST_WEBHOOK_SECRET } from "../../src/test-support/github-app.ts";
 import {
@@ -20,6 +22,7 @@ import {
 } from "../../src/test-support/webhook-harness.ts";
 import { createGithubAppWebhookHandler } from "../../src/webhooks/github-app-handler.ts";
 import { createJobQueueReviewTriggerIntake } from "../../src/webhooks/job-queue-intake.ts";
+import { defaultWorkspaceId } from "../../src/test-support/workspaces.ts";
 
 type CommentPayload = {
   action: string;
@@ -56,23 +59,27 @@ async function start(
       ? {}
       : { reviewSettings: options.reviewSettings }),
   });
-  const queue = createJobQueue(h.db);
+  const workspaceId = await defaultWorkspaceId(h.db);
+  const queue = createTestQueue(h.db, workspaceId);
   const logLines: string[] = [];
   const handler = createGithubAppWebhookHandler({
     registry: createIntegrationRegistry({ github_app: h.provider }),
     integrations: h.integrations,
     deliveries: h.deliveries,
     sync: h.sync,
-    projects: h.projects,
-    automatic: h.automatic,
-    intake: createJobQueueReviewTriggerIntake({
-      queue,
-      repositories: createRepositoriesRepository(h.db),
-      logger: {
-        info: (line) => logLines.push(line),
-        error: (line) => logLines.push(line),
-      },
+    workspace: () => ({
+      projects: h.projects,
+      settingsFor: h.settingsFor,
+      intake: createJobQueueReviewTriggerIntake({
+        queue,
+        repositories: createRepositoriesRepository(h.db, workspaceId),
+        logger: {
+          info: (line) => logLines.push(line),
+          error: (line) => logLines.push(line),
+        },
+      }),
     }),
+    automatic: h.automatic,
     logger: {
       info: (line) => logLines.push(line),
       error: (line) => logLines.push(line),

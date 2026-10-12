@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Reads how long a push waits before its automatic review may start. The only place that knows the
 // variable name. A value that is not a whole number of seconds from 0 to 600 is ignored and the
 // default is used: a typo must not stop every review. The server says so once when it starts

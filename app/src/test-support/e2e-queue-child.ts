@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // A program the Playwright journeys run (node runs this file directly, TypeScript types are
 // stripped; `--conditions=react-server` lets `server-only` pass) to act on the job queue of the app
 // under test the way the running app and a runner do: through the real job queue on the app's SQLite
@@ -12,7 +14,9 @@
 import { openDatabase } from "../db/connection.ts";
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
 import { createJobQueue } from "../jobs/job-queue.ts";
+import { createRunnerQueue } from "../jobs/runner-queue.ts";
 import type { EnqueueJobInput, JobOutcome } from "../jobs/job-types.ts";
+import { defaultWorkspaceId } from "./workspaces.ts";
 
 const [command, databasePath, argument] = process.argv.slice(2);
 if (!command || !databasePath || !argument)
@@ -20,15 +24,19 @@ if (!command || !databasePath || !argument)
 
 const db = openDatabase({ path: databasePath, busyTimeoutMs: 5000 });
 try {
-  const queue = createJobQueue(db);
+  const workspaceId = await defaultWorkspaceId(db);
+  const queue = {
+    ...createJobQueue(db, workspaceId),
+    ...createRunnerQueue(db),
+  };
   const input = JSON.parse(argument) as Record<string, unknown>;
   if (command === "enqueue") {
     const { repository, ...rest } = input as {
       repository: string;
     } & Omit<EnqueueJobInput, "repositoryId">;
-    const found = (await createRepositoriesRepository(db).list()).find(
-      (candidate) => candidate.fullName === repository,
-    );
+    const found = (
+      await createRepositoriesRepository(db, workspaceId).list()
+    ).find((candidate) => candidate.fullName === repository);
     if (found === undefined) throw new Error(`No repository ${repository}.`);
     console.log(
       JSON.stringify(await queue.enqueue({ ...rest, repositoryId: found.id })),

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the control endpoint with which a Playwright journey adds a pull request to the fake
 // GitHub that runs as its own process: what it adds is what the app's real client reads back over
 // HTTP, and adding the same number again replaces the pull request.

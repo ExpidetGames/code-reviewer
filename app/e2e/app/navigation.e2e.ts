@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the frame around the signed in app in a real browser: the three places load one after
 // the other inside the same frame and signing out lands on the login page, on a desktop window and
 // on a phone-sized one (where the navigation sits behind the Menu button and the page must not
@@ -23,13 +25,13 @@ test.describe("the app frame", () => {
   });
 
   // CR-36-T09
-  test("@smoke a signed in person opens Projects, Runs and Settings in the same frame and signs out", async ({
+  test("@smoke a signed in person opens Projects, Runs, Settings and Members of the workspace in the same frame and signs out", async ({
     page,
   }) => {
     await signInThroughTheForm(page, account);
     const nav = page.getByRole("navigation", { name: "Main" });
 
-    for (const place of ["Projects", "Runs", "Settings"]) {
+    for (const place of ["Projects", "Runs", "Settings", "Members"]) {
       await nav.getByRole("link", { name: place }).click();
 
       await expect(

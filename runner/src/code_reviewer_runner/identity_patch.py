@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """The identity patch for variant B (installation token in PR-Agent's user mode).
 
 A GitHub App installation token cannot call `GET /user`, which PR-Agent's GitHub provider uses to
@@ -17,10 +19,11 @@ from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
 from code_reviewer_runner.identity_funnel import FunnelError, verify_identity_funnel
-from code_reviewer_runner.job import _BOT_LOGIN  # pyright: ignore[reportPrivateUsage]
+from code_reviewer_runner.job import BOT_LOGIN_PATTERN
 from code_reviewer_runner.result import ErrorCode
 
 PATCHED_FOR_VERSION = "0.47.0"
+BOT_SUFFIX = "[bot]"
 _METHOD = "_resolve_user_login"
 _EXPECTED_SIGNATURE = ["self"]
 # Set on the replacement, so a second application finds the real method instead of wrapping it.
@@ -75,11 +78,18 @@ def apply_identity_patch(
     """
     if not isinstance(bot_login, str):  # pyright: ignore[reportUnnecessaryIsInstance]
         raise TypeError("the bot login must be a string")
-    if not _BOT_LOGIN.fullmatch(bot_login):
+    if not BOT_LOGIN_PATTERN.fullmatch(bot_login):
         # No fallback to another identity: PR-Agent would post under a login it cannot recognise.
         # parse_job guarantees this already; the patch does not rely on its caller.
         raise IdentityPatchError(
             ErrorCode.IDENTITY_PATCH_FAILED, "the bot login of the job is empty or not an app login"
+        )
+    if not bot_login.endswith(BOT_SUFFIX):
+        # GitHub reports an app's comments as `<slug>[bot]`. parse_job appends the suffix, so a bare
+        # slug here would make PR-Agent miss its own comments; refuse it instead of normalizing.
+        raise IdentityPatchError(
+            ErrorCode.IDENTITY_PATCH_FAILED,
+            f"the bot login must end with {BOT_SUFFIX}, the login GitHub reports for an app",
         )
     if provider_class is None:
         from pr_agent.git_providers.github_provider import GithubProvider

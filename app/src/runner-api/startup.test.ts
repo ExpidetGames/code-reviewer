@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the start-up hint about the runner token: it names the problem, once, and never the token.
 import { describe, expect, it } from "vitest";
 import { runnerTokenWarning, warnAboutRunnerToken } from "./startup.ts";

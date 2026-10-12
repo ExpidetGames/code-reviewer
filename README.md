@@ -15,6 +15,7 @@ Code Reviewer wraps PR-Agent: it runs PR-Agent against pull requests and adds a 
 | `compose.yml` | The whole stack on one machine (app and runner), see "Run with Docker Compose" |
 | `compose.coolify.yml` | The same stack for Coolify (built from the repository, no published port), see "Deploy on Coolify" |
 | `docs/` | Guides for operators: [`docs/deployment-coolify.md`](docs/deployment-coolify.md) (deploying on Coolify), [`docs/github-app.md`](docs/github-app.md) (creating and installing the team's GitHub App) |
+| `docs/decisions/` | Architecture decision records, see [`docs/decisions/README.md`](docs/decisions/README.md) |
 | `fakes/` | Fake servers and fixtures used by the tests |
 | `TESTING.md` | Testing strategy |
 | `AGENTS.md` | Rules for agents and contributors |
@@ -58,35 +59,113 @@ created and migrated when the server starts; a missing directory stops the start
 message. Settings and the database layer are described in `app/.env.example` and
 `app/src/db/README.md`.
 
-### Sign in
+### First start and sign in
 
-Every page except the login page needs a session, and GitHub is the only way to get one. The server
-refuses to start until the four sign in settings in `app/.env.example` are set: a random
-`BETTER_AUTH_SECRET`, the address of the app in `BETTER_AUTH_URL`, and the client id and secret of
-a GitHub OAuth app of your own (GitHub > Settings > Developer settings > OAuth Apps). Register
-`<BETTER_AUTH_URL>/api/auth/callback/github` as its "Authorization callback URL".
+Every page except the login page needs a session. The server refuses to start until two settings in
+`app/.env.example` are set: a random `APP_SECRET` (the master key of the instance, at least 32
+characters, `openssl rand -base64 32`; its deprecated name `BETTER_AUTH_SECRET` is still accepted) and
+the address of the app in `BETTER_AUTH_URL`. No GitHub setting is needed to start.
 
-Signing in is limited to people you name: set `ALLOWED_GITHUB_LOGINS` (comma separated GitHub
-logins) and/or `ALLOWED_GITHUB_ORG` (members of one GitHub organization). If both are set, either
-is enough. If neither is set, nobody can sign in; the server starts and logs one warning. A login
-removed from the list loses access on the next request (after a restart with the new value);
-organization membership is checked at sign in and again every 24 hours.
-How it works: `app/src/auth/README.md`.
+A new instance is set up in the browser. While it is not set up, every start of the app prints a fresh
+6-digit **setup code** in its log (`[setup] Setup code: ...`); everything but `/api/health` waits for the
+setup. Open the app, enter the code, and answer three questions: single-tenant or multi-tenant, who may
+sign up (everyone, a list of emails, or allowed email domains), and the email and password of the
+instance admin (12 to 128 characters, not a common password). You land in `/admin`, signed in; the
+setup page is gone afterwards. The code is valid for 60 minutes, works once, and after 10 wrong codes
+the setup locks until the app is restarted (which prints a new code); the code lives in the memory of
+one process, so do the setup with one app instance. An installation from before the setup existed keeps
+its data, and its settings are imported once ([Updating from a version before
+accounts](#updating-from-a-version-before-accounts)): only the web UI waits, webhooks and the runner API keep
+working. How it works: `app/src/setup/README.md`.
+
+The admin portal at `/admin` (instance admin only; everybody else gets a 404) holds the settings of the
+instance: tenancy, sign-up rule, the ways to sign in and the limits, with who changed what and when.
+Credentials (the GitHub App, the mail server password) are stored encrypted with a key derived from `APP_SECRET`. **A lost admin password** without
+a mail server: `docker compose exec app admin reset-password <email>` prints a single-use link valid for 30
+minutes. Details: `app/src/admin/README.md`.
+
+**Signing up.** `/sign-up` creates an account with an email address and a password when the sign-up rule
+lets the address in. With a mail server (set up in the admin portal under Mail: SMTP host, port, STARTTLS or TLS, login, sender; the password is stored encrypted and never shown; a test mail button tells why it fails) every email and
+password account has to confirm its address with a link before it can sign in or act (the admin keeps
+`/admin` meanwhile); without one nothing can be confirmed, and the rule "everyone" works at once. A rule
+that names emails or domains stays closed until addresses can be verified. A new account belongs to no
+workspace and sees no data: in a single-tenant instance the person asks an admin for an invitation. How it
+works: `app/src/signup/README.md`.
+
+Signing in with email and password always exists (the admin). "Sign in with GitHub" exists while the
+GitHub App has its user authorization configured: the same App that reviews pull requests signs people in,
+and it is created with one click in the admin portal (Integrations) or entered by hand; there is no
+separate OAuth app and no environment variable. The sign-up rule is applied to the **verified primary email
+address** GitHub reports; a GitHub account is matched by its numeric id; an address alone never joins two
+accounts. A person who is signed in can link their GitHub account from their account page, and the
+instance admin can link the GitHub account of an operator who was imported from an earlier version, which
+merges the two accounts. How it works: `app/src/auth/README.md`, `app/src/github-config/README.md` and
+`app/src/github-signin/README.md`.
 
 ### LLM access
 
-One shared LLM account serves the whole instance: set `LLM_PROVIDER=openrouter` and `LLM_API_KEY`
-(optionally `LLM_MODEL`, `LLM_MAX_TOKENS`) as environment variables, see `app/.env.example`. Without
-them the app still starts and shows a configuration error; every job then fails with
-`llm_not_configured`. The default model is `anthropic/claude-haiku-5.5`. The key is never logged, stored or shown. How it works: `app/src/llm/README.md`.
+Every workspace brings its own LLM key (bring your own key): an Admin or an Owner enters it under
+**Settings, LLM access** of the workspace (provider OpenRouter, a write-only key, a "Test key" button). The key is
+stored encrypted in the database (with `APP_SECRET`; the operator of the instance holds that key and can technically
+decrypt it), never shown again, never logged, and reviews of a workspace use the key of that workspace only. A
+workspace without a key fails its reviews with `llm_not_configured` and shows "LLM not configured" with a link to
+the form. The default model is `anthropic/claude-haiku-5.5` (the model is a review setting).
+
+The legacy variables `LLM_PROVIDER` and `LLM_API_KEY` are not read any more: the update of an existing installation
+imports them once into the default workspace's key and ignores them afterwards. `LLM_MODEL` and `LLM_MAX_TOKENS`
+(see `app/.env.example`) stay instance settings. How it works: `app/src/llm/README.md`.
 
 ### GitHub App
 
-Reading pull requests and posting reviews needs a GitHub App of the team (webhook, four repository
-permissions, two events). [`docs/github-app.md`](docs/github-app.md) creates it step by step, says
-which value goes into which variable (`GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_WEBHOOK_SECRET`,
-`GITHUB_APP_PRIVATE_KEY`), how to keep the private key safe and how to install the app on the
-repositories. The production server refuses to start without these four settings; `pnpm dev` does not.
+Reading pull requests, posting reviews and signing people in needs one GitHub App of the team. In the admin
+portal, under **Integrations**, one click creates it (the manifest flow: GitHub asks you to confirm, and
+the credentials come back to the portal by themselves), or you enter its values by hand;
+[`docs/github-app.md`](docs/github-app.md) describes both, the permissions and events, how to keep the
+private key safe and how to install the app on the repositories. The App id, slug, private key, webhook
+secret, client id and client secret are stored encrypted in the database and never shown again; no
+environment variable is needed, and a replaced webhook secret counts from the next delivery on every
+instance. Without an App GitHub is "not configured" and no review can run. An installation from before
+accounts that still has `GITHUB_APP_*` variables has them imported once by the update.
+
+## Updating from a version before accounts
+
+An installation that ran the release before accounts (the GitHub OAuth app and the allow list, `GITHUB_APP_*` and
+`LLM_*` in the environment, `BETTER_AUTH_SECRET`, users who signed in with GitHub) updates without losing anything
+and needs the operator **once**, for a short setup. The decision is in
+[`docs/decisions/0001-editions-setup-and-accounts.md`](docs/decisions/0001-editions-setup-and-accounts.md),
+section 2.11; the step by step guide for Coolify is "Updating an installation from before accounts" in
+[`docs/deployment-coolify.md`](docs/deployment-coolify.md); how it works is in
+[`app/src/legacy-import/README.md`](app/src/legacy-import/README.md).
+
+1. **Back up, and keep the master key.** Add `APP_SECRET` with exactly the value of `BETTER_AUTH_SECRET` (the old
+   name keeps working while `APP_SECRET` is empty; two different values sign everybody out and make the stored
+   GitHub tokens unreadable) and keep a copy of it **apart from the database backups**. The update takes a backup of
+   the SQLite file itself before it touches it (a file `code-reviewer-before-update-<time>.db` in the backup
+   directory, which the daily rotation never deletes) and does not start if that fails (the `backups` volume must be
+   mounted and writable). Only one is taken: a restart after a failed import takes none.
+2. **Start the new version with the environment you have.** On the first start the app backs up the database,
+   migrates it and imports, in one transaction: one default workspace holds all the data; the GitHub App and the
+   LLM key move into the encrypted store (the LLM key becomes the default workspace's key); the people who pass the
+   allow list **at that moment** become members (a listed login whose GitHub id is bound to the account, or, with
+   `ALLOWED_GITHUB_ORG`, a live check of the organization with the person's own stored token), the first of them
+   to have signed in becomes the Owner. If the import fails it changes nothing and the start ends with one line;
+   fix the cause and start again (no second backup is taken). The log names every variable that is ignored from then on, never a value.
+   Reviews are never interrupted: webhooks and the runner API serve the imported settings meanwhile.
+3. **Do the short setup.** Read `[setup] Setup code: ...` in the log of the app, open the app, enter the code and
+   answer three questions (single or multi-tenant, who may sign up, your admin account; for an update the
+   wizard starts on "a list of email addresses", not "everyone"). **The allow list is not
+   turned into a sign-up rule and the organization is not migrated**: the admin portal lists who was not made a
+   member, the allowed logins that never signed in (invite them by email) and the organization (recreate that
+   access as an email list or as allowed domains).
+4. **Enable sign in with GitHub** in the admin portal (Integrations: the client id and secret of the GitHub App, the
+   callback address is shown; confirm whether the App can only be installed on its own account). Until then sign in
+   is by email and password. People who used GitHub before are recognised by their numeric GitHub id.
+5. **Remove the old variables** (`GITHUB_APP_*`, `GITHUB_OAUTH_*`, `ALLOWED_GITHUB_*`, `LLM_PROVIDER`,
+   `LLM_API_KEY`, `BETTER_AUTH_SECRET`) and redeploy.
+
+`make test-images` and CI run `docker/smoke/upgrade.sh` against the image with the database of the previous
+release; the browser journey `app/e2e/upgrade/update-from-previous-release.e2e.ts` walks through the same steps with
+the real runner and PR-Agent against the fakes.
 
 ## Supported browsers
 
@@ -127,18 +206,21 @@ uv run python scripts/manual_review.py
 
 ## Container images
 
-Two images are built from the repository, each with its own Dockerfile and `.dockerignore`:
+Two images are built from the repository, each with its own Dockerfile and `Dockerfile.dockerignore`
+(a root `.dockerignore` lists the same exclusions for the classic builder, which only reads that
+file; both builders produce working images).
+The build context is the repository root (the images also carry `LICENSE`, `NOTICE` and
+`THIRD_PARTY_LICENSES.md` from there, in `/licenses`), so the Dockerfile is named with `--file`:
 
 | Image | Build | Notes |
 |---|---|---|
-| `ghcr.io/expidetgames/code-reviewer-app` | `docker build -t code-reviewer-app app` | Next.js standalone server on port 3000, runs as uid 10001. The database lives in the volume `/data` (`DATABASE_PATH=/data/app.db`); it is created and migrated on start. |
-| `ghcr.io/expidetgames/code-reviewer-runner` | `docker build -t code-reviewer-runner runner` | Python (version of `runner/.python-version`) with the runner installed by uv from `uv.lock`, runs as uid 10001. Holds PR-Agent (pinned, from `uv.lock`) and its tiktoken encodings, so a job needs no download besides GitHub and the LLM. |
+| `ghcr.io/expidetgames/code-reviewer-app` | `docker build -f app/Dockerfile -t code-reviewer-app .` | Next.js standalone server on port 3000, runs as uid 10001. The database lives in the volume `/data` (`DATABASE_PATH=/data/app.db`); it is created and migrated on start. |
+| `ghcr.io/expidetgames/code-reviewer-runner` | `docker build -f runner/Dockerfile -t code-reviewer-runner .` | Python (version of `runner/.python-version`) with the runner installed by uv from `uv.lock`, runs as uid 10001. Holds PR-Agent (pinned, from `uv.lock`) and its tiktoken encodings, so a job needs no download besides GitHub and the LLM. |
 
 ```sh
 docker run --rm -p 3000:3000 -v code-reviewer-data:/data \
-  -e BETTER_AUTH_SECRET=... -e BETTER_AUTH_URL=http://localhost:3000 \
-  -e GITHUB_OAUTH_CLIENT_ID=... -e GITHUB_OAUTH_CLIENT_SECRET=... \
-  -e ALLOWED_GITHUB_LOGINS=octocat,hubot code-reviewer-app
+  -e APP_SECRET=... -e BETTER_AUTH_URL=http://localhost:3000 \
+  -e RUNNER_TOKEN=... code-reviewer-app
 docker run --rm code-reviewer-runner --version
 ```
 
@@ -164,26 +246,27 @@ docker compose up -d --wait
 docker compose ps         # app: healthy, runner: running
 ```
 
-Open `http://localhost:3000`: it shows the login page. Which values you need and where to get them:
+Open `http://localhost:3000`: a new instance asks for the **setup code**, which the app printed in its log
+(`docker compose logs app`); see "First start and sign in". Which values you need and where to get them:
 
 | Setting | Where it comes from |
 |---|---|
-| `BETTER_AUTH_SECRET` | Random, at least 32 characters: `openssl rand -base64 32` |
-| `RUNNER_TOKEN` | Random, at least 32 characters: `openssl rand -hex 32` (the app and the runner share it) |
-| `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET` | A GitHub OAuth app of your own; callback URL `<BETTER_AUTH_URL>/api/auth/callback/github` (see "Sign in") |
-| `ALLOWED_GITHUB_LOGINS` and/or `ALLOWED_GITHUB_ORG` | Who may sign in; with neither set nobody can |
-| `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_WEBHOOK_SECRET`, `GITHUB_APP_PRIVATE_KEY` | The GitHub App that reads pull requests and posts reviews: create it once with [docs/github-app.md](docs/github-app.md) (permissions, events, webhook URL, key handling, installation) |
-| `LLM_API_KEY` (and `LLM_PROVIDER`) | The LLM access shared by the team. Optional for starting the stack; without it review jobs fail |
+| `APP_SECRET` | Required. Random, at least 32 characters: `openssl rand -base64 32`. Keep a copy apart from the database backups: a database restored without it loses every stored credential. An existing `BETTER_AUTH_SECRET` is accepted in its place |
+| `RUNNER_TOKEN` | Required. Random, at least 32 characters: `openssl rand -hex 32` (the app and the runner share it) |
+| `BETTER_AUTH_URL` | The address people use, https beyond localhost (a local try-out needs nothing) |
+| The GitHub App | Not an environment variable: create it in the admin portal under Integrations ([docs/github-app.md](docs/github-app.md): one click, or by hand). `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_WEBHOOK_SECRET` and `GITHUB_APP_PRIVATE_KEY` of an installation from before accounts are imported once by the update and ignored afterwards ([Updating from a version before accounts](#updating-from-a-version-before-accounts)); `GITHUB_OAUTH_*` are no longer used |
+| `LLM_API_KEY` (and `LLM_PROVIDER`) | Legacy, optional: an installation from before accounts has its key imported once into the default workspace by the update. The key is normally entered per workspace in the UI (Settings, LLM access) |
 
-A required setting that is empty stops `docker compose up` with a message naming the variable, before
-any container is created. The production app also refuses to start without them (one line in the log
-naming the variables, never their values): the sign in settings, `RUNNER_TOKEN` (at least 32
-characters) and the GitHub App credentials. The development server (`pnpm dev`) does not require the
-last two, so the sign in can be tried without a GitHub App.
+`RUNNER_TOKEN` empty stops `docker compose up` with a message naming the variable, before any container
+is created. The production app refuses to start without `APP_SECRET` (or `BETTER_AUTH_SECRET`) and
+without `RUNNER_TOKEN` (at least 32 characters): one line in the log naming the variables, never their
+values. No `GITHUB_*` variable is required. On a new instance the old `GITHUB_APP_*`, `ALLOWED_GITHUB_*`
+and `LLM_*` variables are ignored (one line in the log says so), and GitHub stays "not configured" until the App
+is entered in the admin portal.
 
 Compose only catches *empty* values. A value that is set but invalid passes compose and is rejected by
-the app, which exits with one `[auth]` or `[deploy]` line (for example a `RUNNER_TOKEN` shorter than 32
-characters, or a `BETTER_AUTH_URL` that is plain http on anything but localhost: https is mandatory
+the app, which exits with one `[auth]` or `[deploy]` line (for example a missing `APP_SECRET`, a
+`RUNNER_TOKEN` shorter than 32 characters, or a `BETTER_AUTH_URL` that is plain http on anything but localhost: https is mandatory
 beyond localhost). Because of `restart: unless-stopped` that looks like a restart loop and the runner
 never starts: run `docker compose logs app` and read the last lines.
 
@@ -231,7 +314,7 @@ survives `down` and `up`, an app process that exits by itself is restarted, a ba
 
 [`docs/deployment-coolify.md`](docs/deployment-coolify.md) is the step by step guide for the team's
 server: the Coolify resource type, the domain and TLS, every environment variable and where its value
-comes from, storage and backups ([`app/src/backup/README.md`](app/src/backup/README.md)), runner sizing,
+comes from, the first-run setup with the setup code, storage and backups ([`app/src/backup/README.md`](app/src/backup/README.md)), runner sizing,
 updates and rollback, and a first-run checklist. Coolify builds the images from this repository with the
 Compose file `compose.coolify.yml`. `docker/smoke/instance.sh <base-url>` checks a running instance (health,
 login page, webhook and runner API refuse what they must).
@@ -250,12 +333,12 @@ make verify            # all of the above, run before every pull request
 
 Or per part:
 
-|             | App (`cd app`)                                            | Runner (`cd runner`)                                     |
-| ----------- | --------------------------------------------------------- | -------------------------------------------------------- |
-| Lint        | `pnpm lint` and `pnpm format:check` (`pnpm format` fixes) | `uv run ruff check .` and `uv run ruff format --check .` |
-| Typecheck   | `pnpm typecheck`                                          | `uv run pyright`                                         |
-| Unit tests  | `pnpm test`                                               | `uv run pytest -m unit`                                  |
-| Integration | `pnpm test:int`                                           | `uv run pytest -m "integration or contract"`             |
+|             | App (`cd app`)                                            | Runner (`cd runner`)                                                       |
+| ----------- | --------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Lint        | `pnpm lint` and `pnpm format:check` (`pnpm format` fixes) | `uv run ruff check . ../fakes` and `uv run ruff format --check . ../fakes` |
+| Typecheck   | `pnpm typecheck`                                          | `uv run pyright`                                                           |
+| Unit tests  | `pnpm test`                                               | `uv run pytest -m unit`                                                    |
+| Integration | `pnpm test:int`                                           | `uv run pytest -m "integration or contract"`                               |
 
 End-to-end tests run against a production build on port 3417 (`E2E_PORT`), next to a fake GitHub on
 a random port (`fakes/github`):
@@ -266,6 +349,11 @@ make test-e2e                              # needs a Playwright browser:
 make test-e2e PLAYWRIGHT_CHANNEL=chrome   # or use an installed Google Chrome
 ```
 
+The journey with the real runner and PR-Agent (`app/e2e/jobs`) also needs the runner installed
+(`make install`) and the tiktoken encoding cached once per machine
+(`uv --directory runner run python scripts/prime_tiktoken_cache.py`, needs the internet); it fails
+at the start and says so when one is missing.
+
 All automated tests are hermetic: a network guard blocks every host except loopback. See
 [TESTING.md](TESTING.md) for the test levels, naming rules and fakes.
 
@@ -275,16 +363,26 @@ All automated tests are hermetic: a network guard blocks every host except loopb
   first and trips over `runner/.python-version`. Put the real uv (for example `~/.local/bin`) before
   `~/.pyenv/shims` in your `PATH`, or install the Python version with pyenv.
 
+## Contributing
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow (branch names, commit messages,
+pull requests, which checks to run) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Report security
+problems privately as described in [SECURITY.md](SECURITY.md).
+
 ## Branching
 
 - `main` and `development` are permanent branches. `development` is the default branch.
-- Epic branches start with the epic's ticket key and branch off `development`, e.g. `CR-2-foundation`.
-- Ticket branches start with the ticket key and branch off their epic branch, e.g. `CR-14-repo-skeleton`.
-
-Pull requests flow upwards:
-
-1. Ticket branch -> PR into its epic branch.
-2. Epic branch -> PR into `development`.
-3. `development` -> PR into `main` for releases.
+- Every change starts from a GitHub issue `#<n>`. Its branch is named `<n>-<slug>` and branches off
+  `development`, e.g. `123-fix-webhook-retry`.
+- A pull request goes into `development`, its description contains `Closes #<n>`, and it is squash
+  merged once the review is done and CI is green.
+- `development` -> PR into `main` for releases.
 
 Direct pushes to `main` and `development` are not allowed; all changes go through pull requests.
+[CONTRIBUTING.md](CONTRIBUTING.md) has the full workflow.
+
+## License
+
+code-review.com is licensed under the [Apache License, Version 2.0](LICENSE). [`NOTICE`](NOTICE)
+and [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md) carry the attribution for third party
+software, including the MIT licensed PR-Agent.

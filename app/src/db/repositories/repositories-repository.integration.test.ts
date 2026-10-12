@@ -1,18 +1,22 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the repositories table against a real SQLite file: reconciling a list from the platform
 // adds, renames, deactivates and reactivates rows without ever deleting or duplicating one.
 import type { Kysely } from "kysely";
 import { describe, expect, it } from "vitest";
 import type { RepoRef } from "../../integrations/types.ts";
 import { createTestDatabase } from "../../test-support/test-database.ts";
+import { defaultWorkspaceId } from "../../test-support/workspaces.ts";
 import type { Database } from "../schema.ts";
 import { createIntegrationsRepository } from "./integrations-repository.ts";
 import { createRepositoriesRepository } from "./repositories-repository.ts";
 
 async function setup() {
   const { db } = await createTestDatabase();
+  const workspaceId = await defaultWorkspaceId(db);
   let tick = 0;
   const now = () => new Date(Date.UTC(2026, 9, 10, 12, 0, tick++));
-  const integrations = createIntegrationsRepository(db, now);
+  const integrations = createIntegrationsRepository(db, workspaceId, now);
   const first = await integrations.create({
     type: "github_app",
     displayName: "acme",
@@ -29,7 +33,7 @@ async function setup() {
     db,
     first,
     second,
-    repositories: createRepositoriesRepository(db, now),
+    repositories: createRepositoriesRepository(db, workspaceId, now),
   };
 }
 

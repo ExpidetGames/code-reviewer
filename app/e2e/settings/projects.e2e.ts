@@ -1,12 +1,16 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the project list and the settings pages in a real browser, against a production build
 // next to the fake GitHub: a person syncs the repositories of an installation, switches one on,
 // changes a review setting and finds it after a reload, sees the cost warning of a pricey model, and
 // changes the global defaults that a project without its own value then follows. The details of each
 // piece (copy, validation, the routes) are proven as component and integration tests.
 import { expect, test } from "@playwright/test";
+import { syncFromGithubAsAdmin } from "../helpers/admin-api";
 import {
   addGithubAccount,
   addGithubInstallation,
+  GITHUB_APP_OWNER_ACCOUNT,
   signInThroughTheForm,
   type GithubAccount,
 } from "../helpers/github-fake";
@@ -30,7 +34,7 @@ test.describe("the project list and the settings pages", () => {
       request,
       {
         id: 9100001,
-        account: { login: account.login, id: account.id, type: "User" },
+        account: GITHUB_APP_OWNER_ACCOUNT,
       },
       [{ id: 9200001, fullName: REPOSITORY }],
     );
@@ -40,7 +44,7 @@ test.describe("the project list and the settings pages", () => {
   test.afterAll(async ({ browser }) => {
     const page = await browser.newPage({ baseURL: e2eEnv.appUrl });
     await signInThroughTheForm(page, account);
-    const response = await page.request.put("/api/review-settings", {
+    const response = await page.request.put("/api/w/default/review-settings", {
       data: { settings: {} },
     });
     expect(response.status()).toBe(200);
@@ -51,13 +55,18 @@ test.describe("the project list and the settings pages", () => {
   test("@smoke a person syncs the repository, switches it on, changes a setting, reloads and finds it, and switches it off again", async ({
     page,
   }) => {
+    // The installation is found by the synchronization of the whole instance, which is the instance admin's
+    // (it sits on the App's own account, so it is attached to the one workspace). The person here owns the
+    // workspace and does not run the instance: their page has the button that reads their own connections.
+    await syncFromGithubAsAdmin(e2eEnv.appUrl);
     await signInThroughTheForm(page, account);
     await expect(
       page.getByRole("heading", { level: 1, name: "Projects" }),
     ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Sync from GitHub" }),
+    ).toBeVisible();
 
-    await page.getByRole("button", { name: "Sync from GitHub" }).click();
-    await expect(page.getByRole("status")).toContainText(/new repositor/);
     const row = page.getByRole("listitem").filter({ hasText: REPOSITORY });
     await expect(row.getByText("Inactive")).toBeVisible();
 
@@ -96,6 +105,36 @@ test.describe("the project list and the settings pages", () => {
         .filter({ hasText: REPOSITORY })
         .getByText("Inactive"),
     ).toBeVisible();
+  });
+
+  // #103-IB-13
+  test("@smoke a person who owns the workspace runs the Sync from GitHub button and reads their own connections", async ({
+    page,
+  }) => {
+    await signInThroughTheForm(page, account);
+
+    await page.getByRole("button", { name: "Sync from GitHub" }).click();
+
+    await expect(page.getByRole("status")).toContainText(
+      "No new repositories.",
+    );
+    await expect(
+      page.getByRole("listitem").filter({ hasText: REPOSITORY }),
+    ).toBeVisible();
+  });
+
+  // #101-WM-08
+  test("the instance admin, who is an Owner of the workspace too, runs the same button there", async ({
+    page,
+  }) => {
+    await page.goto("/login");
+    await page.getByLabel("Email address").fill(e2eEnv.adminEmail);
+    await page.getByLabel("Password").fill(e2eEnv.adminPassword);
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    await expect(page).toHaveURL(/\/w\/default\/projects$/);
+
+    await page.getByRole("button", { name: "Sync from GitHub" }).click();
+    await expect(page.getByRole("status")).toContainText(/repositor/);
   });
 
   // CR-34-T14
@@ -138,7 +177,7 @@ test.describe("the project list and the settings pages", () => {
       page.locator(".field", { has: budget() }).getByText("Built-in value"),
     ).toBeVisible();
 
-    await page.getByRole("link", { name: "Settings" }).click();
+    await page.getByRole("link", { name: "Settings", exact: true }).click();
     await expect(
       page.getByRole("heading", { level: 1, name: "Settings" }),
     ).toBeVisible();
@@ -161,24 +200,40 @@ test.describe("the project list and the settings pages", () => {
     await expect(budget()).toHaveValue("60000");
   });
 
-  // CR-34-T09
-  test("the Settings page says that the LLM key is missing, in a browser too", async ({
+  // CR-34-T09, #101-WM-08, #104-LK-13
+  test("the Settings page tells the Owner that the LLM is not configured and where to add a key, and nothing of the server's variables, in a browser too", async ({
     page,
+    browser,
   }) => {
     await signInThroughTheForm(page, account);
 
-    await page.getByRole("link", { name: "Settings" }).click();
+    await page.getByRole("link", { name: "Settings", exact: true }).click();
     // The page left behind stays in the document, hidden, with its own copy of the hint.
     await expect(
       page.getByRole("heading", { level: 1, name: "Settings" }),
     ).toBeVisible();
 
+    // The workspace has no key: the hint links to the form, which an Owner can fill.
     await expect(
-      page.getByText("LLM key missing").filter({ visible: true }),
+      page.getByText("LLM not configured").filter({ visible: true }),
     ).toBeVisible();
+    await expect(page.getByRole("form", { name: "LLM key" })).toBeVisible();
+    await expect(page.getByText(/LLM_API_KEY|GITHUB_APP/)).toHaveCount(0);
+
+    // The instance admin no longer reads about a missing server variable: the key is the workspace's.
+    const context = await browser.newContext({ baseURL: e2eEnv.appUrl });
+    const admin = await context.newPage();
+    await admin.goto("/login");
+    await admin.getByLabel("Email address").fill(e2eEnv.adminEmail);
+    await admin.getByLabel("Password").fill(e2eEnv.adminPassword);
+    await admin.getByRole("button", { name: "Sign in", exact: true }).click();
+    await expect(admin).toHaveURL(/\/w\/default\/projects$/);
+    await admin.goto("/w/default/settings");
     await expect(
-      page.getByText(/Set LLM_API_KEY on the server/).filter({ visible: true }),
+      admin.getByRole("heading", { level: 1, name: "Settings" }),
     ).toBeVisible();
+    await expect(admin.getByText("LLM key missing")).toHaveCount(0);
+    await context.close();
   });
 
   test.describe("on a narrow window", () => {

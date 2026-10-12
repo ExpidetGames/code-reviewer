@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down that the app and contracts/runner-api.v1.json describe the same API: what the app really
 // answers (through the real handler) is valid against the file, what the app accepts from a runner
 // is exactly what the file allows, and the lists the app keeps in TypeScript (error codes, commands)

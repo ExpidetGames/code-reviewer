@@ -1,15 +1,14 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down how the sign-in settings are read from the environment: what is required, what a
 // missing value reports, which defaults point at the real GitHub, and that no secret is ever echoed.
 import { describe, expect, it } from "vitest";
 import { AuthConfigError, loadAuthConfig } from "./config.ts";
 
 const SECRET = "s".repeat(40);
-const CLIENT_SECRET = "dummy-client-secret-value";
 const validEnv = {
-  BETTER_AUTH_SECRET: SECRET,
+  APP_SECRET: SECRET,
   BETTER_AUTH_URL: "http://localhost:3000",
-  GITHUB_OAUTH_CLIENT_ID: "dummy-client-id",
-  GITHUB_OAUTH_CLIENT_SECRET: CLIENT_SECRET,
 };
 
 function loadError(env: Record<string, string | undefined>): AuthConfigError {
@@ -23,41 +22,58 @@ function loadError(env: Record<string, string | undefined>): AuthConfigError {
 }
 
 describe("loading the sign-in configuration", () => {
-  it("reads the four required values and points GitHub at the real endpoints by default", () => {
+  it("reads the master key and the public address, and points GitHub at the real endpoints by default", () => {
     const config = loadAuthConfig(validEnv);
 
     expect(config).toMatchObject({
       secret: SECRET,
       baseUrl: "http://localhost:3000",
       github: {
-        clientId: "dummy-client-id",
-        clientSecret: CLIENT_SECRET,
         oauthBaseUrl: "https://github.com",
         apiBaseUrl: "https://api.github.com",
       },
     });
   });
 
-  it("names every missing variable at once, never a value", () => {
-    const error = loadError({ BETTER_AUTH_SECRET: SECRET });
+  // #102-GH-16
+  it("does not read the variables of the GitHub OAuth app of the previous release, whatever they hold", () => {
+    const config = loadAuthConfig({
+      ...validEnv,
+      GITHUB_OAUTH_CLIENT_ID: "dummy-client-id",
+      GITHUB_OAUTH_CLIENT_SECRET: "dummy-client-secret-value",
+    });
+
+    expect(JSON.stringify(config)).not.toContain("dummy-client");
+  });
+
+  // #97-SU-17
+  it("names every missing required variable at once, never a value", () => {
+    const error = loadError({});
 
     expect(error.code).toBe("AUTH_CONFIG_INVALID");
+    expect(error.message).toContain("APP_SECRET");
     expect(error.message).toContain("BETTER_AUTH_URL");
-    expect(error.message).toContain("GITHUB_OAUTH_CLIENT_ID");
-    expect(error.message).toContain("GITHUB_OAUTH_CLIENT_SECRET");
-    expect(error.message).not.toContain(SECRET);
+    expect(error.message).not.toContain("GITHUB");
   });
 
-  it("treats blank values as missing", () => {
-    const error = loadError({ ...validEnv, GITHUB_OAUTH_CLIENT_ID: "   " });
+  // #97-SU-17
+  it("accepts BETTER_AUTH_SECRET in place of APP_SECRET, and prefers APP_SECRET", () => {
+    const { APP_SECRET: _unused, ...withoutSecret } = validEnv;
+    void _unused;
+    const legacy = "legacy-".padEnd(40, "l");
 
-    expect(error.message).toContain("GITHUB_OAUTH_CLIENT_ID");
+    expect(
+      loadAuthConfig({ ...withoutSecret, BETTER_AUTH_SECRET: legacy }).secret,
+    ).toBe(legacy);
+    expect(
+      loadAuthConfig({ ...validEnv, BETTER_AUTH_SECRET: legacy }).secret,
+    ).toBe(SECRET);
   });
 
-  it("rejects a signing secret that is too short without echoing it", () => {
-    const error = loadError({ ...validEnv, BETTER_AUTH_SECRET: "short" });
+  it("rejects a master key that is too short without echoing it", () => {
+    const error = loadError({ ...validEnv, APP_SECRET: "short" });
 
-    expect(error.message).toContain("BETTER_AUTH_SECRET");
+    expect(error.message).toContain("APP_SECRET");
     expect(error.message).toMatch(/at least 32/);
     expect(error.message).not.toContain("short");
   });
@@ -194,10 +210,10 @@ describe("loading the allow list as part of the sign-in configuration", () => {
     expect(config.access.org).toBeNull();
   });
 
-  it("refuses an organization name that is not one, by variable name only", () => {
-    const error = loadError({ ...validEnv, ALLOWED_GITHUB_ORG: "a/b" });
+  // #106-IM-14
+  it("does not refuse to start for an organization name that is not one, because nothing enforces the allow list any more", () => {
+    const config = loadAuthConfig({ ...validEnv, ALLOWED_GITHUB_ORG: "a/b" });
 
-    expect(error.message).toContain("ALLOWED_GITHUB_ORG");
-    expect(error.message).not.toContain("a/b");
+    expect(config.access.org).toBeNull();
   });
 });

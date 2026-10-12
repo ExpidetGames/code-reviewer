@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down that the production build of the app boots (migrating a fresh database) and serves a
 // page without console errors. Without a session the start page is the login page, so this is also
 // the first proof that the access guard works in the built server and not only in the tests.

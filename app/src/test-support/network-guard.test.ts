@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down that automated tests cannot reach the internet: the guard that Vitest installs
 // for every test file rejects non-loopback hosts and leaves loopback usable, so real
 // outbound requests can never slip into a unit test by accident.

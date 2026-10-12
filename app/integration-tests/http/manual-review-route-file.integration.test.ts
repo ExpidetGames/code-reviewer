@@ -1,18 +1,20 @@
-// Pins down the real route files `GET /api/repositories/:repositoryId/pull-requests` and
-// `POST /api/repositories/:repositoryId/reviews` with the wiring the running server uses: the
-// dynamic segment, the database opened at start, the registry configured from the environment (the
-// real GitHub App client against the fake GitHub), the project and settings services, the job queue
-// and the user check. Only the session lookup and `connection()` are replaced (they need Next.js's
-// request scope). The behavior of the handlers is in src/manual-reviews/http.integration.test.ts and
-// the proxy in front is in manual-review-route.integration.test.ts; this file proves the pieces are
-// connected.
+// SPDX-License-Identifier: Apache-2.0
+
+// Pins down the real route files `GET /api/w/:workspace/repositories/:repositoryId/pull-requests` and
+// `POST /api/w/:workspace/repositories/:repositoryId/reviews` with the wiring the running server uses: the
+// dynamic segments, the database opened at start, the registry configured from the environment (the real
+// GitHub App client against the fake GitHub), the project and settings services, the job queue and the
+// workspace access. Only the session lookup and `connection()` are replaced (they need Next.js's request
+// scope). The behavior of the handlers is in src/manual-reviews/http.integration.test.ts and the proxy in
+// front is in manual-review-route.integration.test.ts; this file proves the pieces are connected, that
+// every member may start a review, and that the workspace is the one in the address.
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   startGithubFake,
   type FakeGithub,
 } from "../../../fakes/github/server.ts";
-import type { SessionUser } from "../../src/auth/access-policy.ts";
+import type { SessionLookup } from "../../src/auth/session-user.ts";
 import { createIntegrationsRepository } from "../../src/db/repositories/integrations-repository.ts";
 import { createRepositoriesRepository } from "../../src/db/repositories/repositories-repository.ts";
 import {
@@ -25,19 +27,21 @@ import {
   testAppKeys,
   testGithubAppEnv,
 } from "../../src/test-support/github-app.ts";
+import { saveGithubAppFromEnv } from "../../src/test-support/server-credentials.ts";
 import { createTestDirectory } from "../../src/test-support/test-database.ts";
+import { signedInMember } from "../../src/test-support/session-lookup.ts";
+import { defaultWorkspaceId } from "../../src/test-support/workspaces.ts";
 
 const session = vi.hoisted(() => ({
-  requireUser: vi.fn<() => Promise<SessionUser>>(),
+  currentLookup: vi.fn<() => Promise<SessionLookup>>(),
 }));
-vi.mock("@/auth/session", () => ({ requireUser: session.requireUser }));
+vi.mock("@/auth/session", () => ({ currentLookup: session.currentLookup }));
 // `connection()` only works inside a Next.js request; here it just returns.
 vi.mock("next/server", async (importOriginal) => ({
   ...(await importOriginal<typeof import("next/server")>()),
   connection: async () => undefined,
 }));
 
-const USER = { id: "u1", githubLogin: "octocat" } as unknown as SessionUser;
 const HEAD = "1f3a5c7e9b2d4f60a8c1e3b5d7f90a2c4e6b8d01";
 const fakes: FakeGithub[] = [];
 
@@ -57,13 +61,20 @@ async function startRoutes() {
     env: { DATABASE_PATH: join(await createTestDirectory(), "app.db") },
   });
   const db = getDatabase();
-  const integration = await createIntegrationsRepository(db).create({
+  await saveGithubAppFromEnv(db, env);
+  const integration = await createIntegrationsRepository(
+    db,
+    await defaultWorkspaceId(db),
+  ).create({
     type: "github_app",
     displayName: "acme",
     externalId: "4242",
     config: {},
   });
-  const repositories = createRepositoriesRepository(db);
+  const repositories = createRepositoriesRepository(
+    db,
+    await defaultWorkspaceId(db),
+  );
   await repositories.reconcile(integration.id, [
     {
       integrationId: integration.id,
@@ -90,36 +101,52 @@ async function startRoutes() {
   });
   // The registry reads the environment on first use, so every test loads the routes anew.
   vi.resetModules();
-  const { getProjectService } = await import("../../src/projects/shared.ts");
-  await getProjectService().activateProject(repository.id);
+  const workspaceId = await defaultWorkspaceId(db);
+  const { projectServiceFor } = await import("../../src/projects/shared.ts");
+  await projectServiceFor(workspaceId).activateProject(repository.id);
+  session.currentLookup.mockResolvedValue(
+    await signedInMember(db, {
+      workspaceId,
+      role: "member",
+      githubLogin: "octocat",
+    }),
+  );
   const list =
-    await import("../../src/app/api/repositories/[repositoryId]/pull-requests/route.ts");
+    await import("../../src/app/api/w/[workspace]/repositories/[repositoryId]/pull-requests/route.ts");
   const start =
-    await import("../../src/app/api/repositories/[repositoryId]/reviews/route.ts");
+    await import("../../src/app/api/w/[workspace]/repositories/[repositoryId]/reviews/route.ts");
 
-  function get(repositoryId: string): Promise<Response> {
+  function get(repositoryId: string, workspace = "default"): Promise<Response> {
     return list.GET(
       new Request(
-        `https://app.test/api/repositories/${repositoryId}/pull-requests`,
+        `https://app.test/api/w/${workspace}/repositories/${repositoryId}/pull-requests`,
       ),
-      { params: Promise.resolve({ repositoryId }) } as Parameters<
+      { params: Promise.resolve({ workspace, repositoryId }) } as Parameters<
         typeof list.GET
       >[1],
     );
   }
-  function post(repositoryId: string, body: unknown): Promise<Response> {
+  function post(
+    repositoryId: string,
+    body: unknown,
+    workspace = "default",
+  ): Promise<Response> {
     return start.POST(
-      new Request(`https://app.test/api/repositories/${repositoryId}/reviews`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      }),
-      { params: Promise.resolve({ repositoryId }) } as Parameters<
+      new Request(
+        `https://app.test/api/w/${workspace}/repositories/${repositoryId}/reviews`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      ),
+      { params: Promise.resolve({ workspace, repositoryId }) } as Parameters<
         typeof start.POST
       >[1],
     );
   }
   return {
+    db,
     repository,
     get,
     post,
@@ -128,10 +155,6 @@ async function startRoutes() {
     start,
   };
 }
-
-beforeEach(() => {
-  session.requireUser.mockResolvedValue(USER);
-});
 
 afterEach(async () => {
   vi.unstubAllEnvs();
@@ -176,16 +199,40 @@ describe("the manual start route files", () => {
     ]);
   });
 
-  // CR-33-T11
-  it("asks for the user before it reads anything, and a refusal reaches the caller", async () => {
-    const { get, post, repository, jobs } = await startRoutes();
-    const refusal = new Error("NEXT_REDIRECT");
-    session.requireUser.mockRejectedValue(refusal);
+  // #101-WM-06, #101-WM-07
+  it("answers a person who does not belong to the workspace like for a workspace that does not exist, and starts nothing", async () => {
+    const { get, post, repository, jobs, db } = await startRoutes();
+    session.currentLookup.mockResolvedValue(
+      await signedInMember(db, { id: "outsider" }),
+    );
 
-    await expect(get(repository.id)).rejects.toBe(refusal);
-    await expect(
-      post(repository.id, { prNumber: 7, command: "review" }),
-    ).rejects.toBe(refusal);
+    for (const workspace of ["default", "no-such-workspace"]) {
+      for (const response of [
+        await get(repository.id, workspace),
+        await post(
+          repository.id,
+          { prNumber: 7, command: "review" },
+          workspace,
+        ),
+      ]) {
+        expect(response.status, workspace).toBe(404);
+        expect(await response.json(), workspace).toEqual({
+          error: "not_found",
+        });
+      }
+    }
+    expect(await jobs()).toEqual([]);
+  });
+
+  // CR-33-T11
+  it("asks for the session before it reads anything, and answers a visitor with 401", async () => {
+    const { get, post, repository, jobs } = await startRoutes();
+    session.currentLookup.mockResolvedValue({ kind: "none" });
+
+    expect((await get(repository.id)).status).toBe(401);
+    expect(
+      (await post(repository.id, { prNumber: 7, command: "review" })).status,
+    ).toBe(401);
 
     expect(await jobs()).toEqual([]);
   });

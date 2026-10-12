@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the Runs pages in a real browser, against a production build next to the fake GitHub: a
 // pull request opened at GitHub reaches the app through a signed delivery, the run shows up on the
 // open Runs page without a reload as waiting, then running, then succeeded, and its page links the
@@ -9,10 +11,12 @@ import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
+import { syncFromGithubAsAdmin } from "../helpers/admin-api";
 import { e2eEnv } from "../helpers/e2e-env";
 import {
   addGithubAccount,
   addGithubInstallation,
+  GITHUB_APP_OWNER_ACCOUNT,
   signInThroughTheForm,
   type GithubAccount,
 } from "../helpers/github-fake";
@@ -45,7 +49,7 @@ test.describe("the runs pages", () => {
       request,
       {
         id: INSTALLATION_ID,
-        account: { login: account.login, id: account.id, type: "User" },
+        account: GITHUB_APP_OWNER_ACCOUNT,
       },
       [WIDGETS, GADGETS],
     );
@@ -125,8 +129,8 @@ test.describe("the runs pages", () => {
     page,
     request,
   }) => {
+    await syncFromGithubAsAdmin(e2eEnv.appUrl);
     await signInThroughTheForm(page, account);
-    await page.getByRole("button", { name: "Sync from GitHub" }).click();
     const row = page
       .getByRole("listitem")
       .filter({ hasText: WIDGETS.fullName });
@@ -196,7 +200,7 @@ test.describe("the runs pages", () => {
       .filter({ visible: true });
     await expect(project.getByText(/Last run: Succeeded/)).toBeVisible();
     await project.getByRole("link", { name: "All runs" }).click();
-    await expect(page).toHaveURL(/\/runs\?repository=/);
+    await expect(page).toHaveURL(/\/w\/default\/runs\?repository=/);
     await expect(
       page.getByRole("listitem").filter({ hasText: `${WIDGETS.fullName} #7` }),
     ).toBeVisible();
@@ -242,7 +246,7 @@ test.describe("the runs pages", () => {
       actorLogin: account.login,
     });
 
-    await page.goto("/runs");
+    await page.goto("/w/default/runs");
     const runs = page
       .getByRole("list", { name: "Runs" })
       .filter({ visible: true });
@@ -285,11 +289,19 @@ test.describe("the runs pages", () => {
     await expect(runs.getByRole("listitem")).toHaveCount(3);
 
     await runs.getByRole("link", { name: `${GADGETS.fullName} #21` }).click();
+    // Wait for the run page first. Right after the click the URL is already the run's, but the old
+    // list is still in the document, and its row carries the same sentence as the page, so a text
+    // query made in that moment finds two elements. The sentence of the page sits in its details
+    // list, which the rows do not have.
     await expect(
-      page.getByText("The AI provider says the credit or quota is used up."),
+      page.getByRole("heading", { level: 1, name: `${GADGETS.fullName} #21` }),
+    ).toBeVisible();
+    await expect(
+      page
+        .locator("dd")
+        .getByText("The AI provider says the credit or quota is used up."),
     ).toBeVisible();
     await expect(page.getByText("llm_quota")).toBeVisible();
-    // The list left behind stays in the document, hidden, with a line of the same words.
     await expect(
       page.getByText("Started by runs-journey", { exact: true }),
     ).toBeVisible();
@@ -307,15 +319,15 @@ test.describe("the runs pages", () => {
   }) => {
     await signInThroughTheForm(page, account);
 
-    await page.goto("/runs/00000000-0000-4000-8000-000000000000");
+    await page.goto("/w/default/runs/00000000-0000-4000-8000-000000000000");
     await expect(
       page.getByText(/could not be found|not found/i).first(),
     ).toBeVisible();
     await expect(page.getByText(WIDGETS.fullName)).toHaveCount(0);
 
-    const list = await request.get("/api/runs", { maxRedirects: 0 });
+    const list = await request.get("/api/w/default/runs", { maxRedirects: 0 });
     const one = await request.get(
-      "/api/runs/00000000-0000-4000-8000-000000000000",
+      "/api/w/default/runs/00000000-0000-4000-8000-000000000000",
       {
         maxRedirects: 0,
       },
@@ -332,7 +344,7 @@ test.describe("the runs pages", () => {
       page,
     }) => {
       await signInThroughTheForm(page, account);
-      await page.goto("/runs");
+      await page.goto("/w/default/runs");
       await expect(
         page.getByRole("list", { name: "Runs" }).getByRole("listitem").first(),
       ).toBeVisible();

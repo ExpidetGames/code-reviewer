@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Pins down the small parts of the job loop: output buffers, log masking and back-off."""
 
 import logging

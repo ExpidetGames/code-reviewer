@@ -1,14 +1,16 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Where the trigger policy gets the settings of a project from: the repository row of the delivery,
 // then the review settings service (project over global over built-in). Kept apart from `shared.ts`
 // so a test can wire the same lookup to a real database.
 import type { RepositoriesRepository } from "../db/repositories/repositories-repository.ts";
 import type { ReviewSettingsService } from "../review-settings/service.ts";
-import type { AutomaticReviewDeps } from "./github-app-handler.ts";
+import type { WorkspaceCollaborators } from "./github-app-handler.ts";
 
 export function createAutomaticReviewSettingsSource(deps: {
   repositories: Pick<RepositoriesRepository, "findByExternalId">;
   settings: Pick<ReviewSettingsService, "resolveForRepository">;
-}): AutomaticReviewDeps["settingsFor"] {
+}): WorkspaceCollaborators["settingsFor"] {
   return async (integrationId, repositoryExternalId) => {
     const repository = await deps.repositories.findByExternalId(
       integrationId,

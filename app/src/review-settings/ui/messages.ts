@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The copy for review settings: what a problem with one field means and what to do about it, and what
 // a save that failed as a whole means. The service answers with stable codes (a field and a code per
 // problem); this is where a code becomes a sentence next to its field. A code is never shown.
@@ -92,7 +94,7 @@ const SAVE_FAILURE_COPY: Record<ReviewSettingsErrorCode, string> = {
   REVIEW_SETTINGS_CONTENT_TYPE_UNSUPPORTED:
     "The request was not understood. Reload the page and try again.",
   REVIEW_SETTINGS_PROJECT_NOT_FOUND:
-    "This repository has no project yet. Activate it on the Projects page first.",
+    "This repository was not found. Reload the Projects page and try again.",
 };
 
 /** The sentence for a save (or reset) that failed as a whole. */

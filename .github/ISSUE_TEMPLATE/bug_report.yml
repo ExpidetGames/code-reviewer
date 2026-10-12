@@ -1,0 +1,80 @@
+name: Bug report
+description: Something does not work as documented or as you would expect.
+labels: ["type: bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. Please search the existing issues first.
+
+        **Never paste API keys, tokens, private keys, webhook secrets or `.env` files into this
+        form.** For a security problem, do not use this form: report it privately at
+        https://github.com/ExpidetGames/code-reviewer/security/advisories/new
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The image tag (for example `development`, `latest` or `sha-abc1234`) or the commit you run.
+      placeholder: sha-abc1234
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment type
+      description: How do you run code-review.com?
+      options:
+        - Docker Compose
+        - Coolify
+        - Local development (pnpm dev and uv)
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The smallest set of steps that shows the problem.
+      placeholder: |
+        1. Open ...
+        2. Click ...
+        3. See ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead. Screenshots are welcome if they show no secret.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: |
+        Optional. Paste only the lines that matter, and only after you removed everything secret:
+        API keys, tokens, private keys, webhook secrets, passwords, and private repository or
+        customer names. If you are unsure whether a line is safe, leave it out.
+      render: text
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Anything else that helps, for example the LLM provider and model you configured (never its key).
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you submit
+      options:
+        - label: I removed all secrets (API keys, tokens, private keys, passwords) from this report.
+          required: true
+        - label: I searched the existing issues and found no duplicate.
+          required: true

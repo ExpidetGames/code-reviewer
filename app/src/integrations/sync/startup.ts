@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The synchronization that runs when the server starts. It must never stop the start: a platform
 // that is down, or settings that are missing, are reported in the log and the app serves requests
 // anyway. (Refusing to start without the GitHub App settings is a deployment concern: see
@@ -7,13 +9,19 @@ import type { Kysely } from "kysely";
 import type { Database } from "../../db/schema.ts";
 import { getDatabase } from "../../db/startup.ts";
 import { integrationRegistry, type IntegrationRegistry } from "../registry.ts";
-import { createIntegrationSync, type SyncSummary } from "./service.ts";
+import {
+  createIntegrationSync,
+  type IntegrationSyncOptions,
+  type SyncSummary,
+} from "./service.ts";
 import { getIntegrationSync } from "./shared.ts";
 
 export type StartupSyncOptions = {
   /** Replaces the database and registry of the running server; for tests. */
   getDb?: () => Kysely<Database>;
   registry?: IntegrationRegistry;
+  /** Replaces where a new connection goes (for tests; the running server uses the placement of the binding). */
+  placeNewConnection?: IntegrationSyncOptions["placeNewConnection"];
   /** Receives every line with its level. Default: console.info and console.error. */
   log?: (line: string, level: "info" | "error") => void;
 };
@@ -36,6 +44,9 @@ export async function runStartupSync(
             db: (options.getDb ?? getDatabase)(),
             registry: options.registry ?? integrationRegistry,
             log: (line) => log(line, "error"),
+            ...(options.placeNewConnection === undefined
+              ? {}
+              : { placeNewConnection: options.placeNewConnection }),
           });
     const summary = await sync.syncAll();
     const { repositories, integrations, errors } = summary;

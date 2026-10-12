@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The decision made while a sign in is completed, before any user, account or session is written.
 // It is made from the profile and the freshly issued token, so a person who is not allowed leaves
 // nothing behind. The decision travels from the GitHub provider (which has the token) to Better

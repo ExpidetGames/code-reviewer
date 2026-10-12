@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Access to the webhook_deliveries table: the record of which deliveries were accepted, so that a
 // redelivery of a delivery that already succeeded does not produce a second trigger. The only code
 // that reads or writes the table.
@@ -60,6 +62,8 @@ export const WEBHOOK_DELIVERY_OUTCOMES = [
   "waiting_jobs_discarded",
   /** The installation or its repositories were synchronized. */
   "installation_changed",
+  /** An installation no workspace has linked: noted as unclaimed, nothing was created (not final: it can be redelivered). */
+  "installation_unclaimed",
 ] as const;
 export type WebhookDeliveryOutcome = (typeof WEBHOOK_DELIVERY_OUTCOMES)[number];
 

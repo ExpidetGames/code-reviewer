@@ -1,68 +1,23 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down what the claim hands to a runner (the LLM access) and how a missing configuration
 // becomes the job error `llm_not_configured`; and that the key can be masked in any text.
 import { inspect } from "node:util";
 import { describe, expect, it } from "vitest";
-import { loadLlmConfig } from "./config.ts";
 import {
   LLM_NOT_CONFIGURED_ERROR,
   LlmAccessError,
   createLlmAccess,
   maskSecretInText,
-  resolveLlmAccess,
   revealLlmAccess,
 } from "./access.ts";
 
 const KEY = "dummy-llm-key-0123456789";
-const validEnv = { LLM_PROVIDER: "openrouter", LLM_API_KEY: KEY };
 
-describe("resolving the LLM access for a job", () => {
-  // CR-26-T02 (the value comes from the environment at the time of the call)
-  it("hands out the provider, the model and the key from the environment", () => {
-    const result = resolveLlmAccess(
-      loadLlmConfig({ ...validEnv, LLM_MODEL: "qwen/qwen3-coder" }),
-    );
-
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.access.provider).toBe("openrouter");
-    expect(result.access.model).toBe("qwen/qwen3-coder");
-    expect(revealLlmAccess(result.access).apiKey).toBe(KEY);
-  });
-
-  it("reads a changed environment on the next call", () => {
-    const first = resolveLlmAccess(loadLlmConfig(validEnv));
-    const second = resolveLlmAccess(
-      loadLlmConfig({ ...validEnv, LLM_API_KEY: "another-dummy-key" }),
-    );
-
-    if (!first.ok || !second.ok) throw new Error("expected both to resolve");
-    expect(revealLlmAccess(first.access).apiKey).toBe(KEY);
-    expect(revealLlmAccess(second.access).apiKey).toBe("another-dummy-key");
-  });
-
+describe("the failure of an access", () => {
   // CR-26-T06 (the claim of the runner API fails the job with this code)
-  it("answers llm_not_configured with the affected variables when the key is missing", () => {
-    const result = resolveLlmAccess(
-      loadLlmConfig({ LLM_PROVIDER: "openrouter" }),
-    );
-
-    expect(result).toEqual({
-      ok: false,
-      errorCode: LLM_NOT_CONFIGURED_ERROR,
-      issues: [{ code: "LLM_API_KEY_MISSING", variable: "LLM_API_KEY" }],
-    });
+  it("is the stable code llm_not_configured", () => {
     expect(LLM_NOT_CONFIGURED_ERROR).toBe("llm_not_configured");
-  });
-
-  it("answers llm_not_configured for an unknown provider", () => {
-    const result = resolveLlmAccess(
-      loadLlmConfig({ LLM_PROVIDER: "other", LLM_API_KEY: KEY }),
-    );
-
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.errorCode).toBe("llm_not_configured");
-    expect(JSON.stringify(result)).not.toContain(KEY);
   });
 });
 

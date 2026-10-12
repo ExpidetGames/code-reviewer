@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Two small file operations shared by the backup and the restore.
 //
 // No `server-only` import: the command line (cli.ts) runs this code without Next.js.
