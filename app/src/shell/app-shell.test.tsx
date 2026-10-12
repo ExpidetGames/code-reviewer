@@ -5,6 +5,7 @@
 // places, the current one marked, the brand link, the skip link and the user menu slot. The narrow
 // screen drawer is a journey (e2e/app/navigation.e2e.ts); whether it looks right is checked by eye.
 import { cleanup, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const navigation = vi.hoisted(() => ({ pathname: "/w/acme/runs" }));
@@ -18,8 +19,12 @@ import { AppShell } from "./app-shell.tsx";
 const keepPageInPlace = (event: Event) => event.preventDefault();
 beforeEach(() => document.addEventListener("click", keepPageInPlace));
 
+// The shim of the setup file (matchMedia always "desktop"); a narrow-screen test replaces it and
+// this puts it back.
+const desktopMatchMedia = window.matchMedia;
 afterEach(() => {
   document.removeEventListener("click", keepPageInPlace);
+  window.matchMedia = desktopMatchMedia;
   cleanup();
   navigation.pathname = "/w/acme/runs";
 });
@@ -30,6 +35,19 @@ function renderShell() {
       <h1>Page content</h1>
     </AppShell>,
   );
+}
+
+function narrowScreen() {
+  window.matchMedia = ((query: string) => ({
+    matches: query.includes("767px"),
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia;
 }
 
 function mainNavigation() {
@@ -154,5 +172,27 @@ describe("the frame", () => {
     expect(
       within(banner).getByRole("button", { name: "Toggle Sidebar" }),
     ).toBeTruthy();
+  });
+});
+
+describe("the drawer on a narrow screen", () => {
+  // CR-36-T07, #168-T01
+  it("opens with the trigger and closes when the page changes without a link, such as back and forward", async () => {
+    const user = userEvent.setup();
+    narrowScreen();
+    const { rerender } = renderShell();
+    expect(screen.queryByRole("navigation", { name: "Main" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Toggle Sidebar" }));
+    expect(screen.getByRole("navigation", { name: "Main" })).toBeTruthy();
+
+    navigation.pathname = "/w/acme/projects";
+    rerender(
+      <AppShell userMenu={<span>user menu</span>}>
+        <h1>Page content</h1>
+      </AppShell>,
+    );
+
+    expect(screen.queryByRole("navigation", { name: "Main" })).toBeNull();
   });
 });
