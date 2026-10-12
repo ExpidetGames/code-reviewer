@@ -62,7 +62,7 @@ export function SignInMethodsForm({
             <span className="muted">
               {settings.githubConfigured
                 ? "Sign in with the GitHub App. Switch email with password off to make this the only way, which needs your own GitHub account linked to this admin account."
-                : "Not available: GitHub is not configured yet."}
+                : "Not available: set up the GitHub App and enable its sign-in under Integrations first."}
             </span>
           </span>
         </label>

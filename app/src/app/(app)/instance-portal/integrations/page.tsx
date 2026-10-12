@@ -1,25 +1,32 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Integrations: GitHub first. A placeholder until the GitHub issue fills it. Instance admin only.
+// Integrations: GitHub first. The status of the GitHub App, the one-click and the manual way to configure it,
+// the prompts for an App that was imported, and the admin's own GitHub account. Instance admin only.
 import type { Metadata } from "next";
 import { requireAdmin } from "@/admin/session";
-import { Placeholder } from "@/admin/ui/placeholder";
-import { PageHeader } from "@/ui/page-header";
+import { getIntegrationsPageData } from "@/github-config/shared";
+import { GithubSection } from "@/github-config/ui/github-section";
 
 export const metadata: Metadata = { title: "Integrations · Admin" };
 
-export default async function AdminIntegrationsPage() {
-  await requireAdmin();
+function single(value: string | string[] | undefined): string | null {
+  return typeof value === "string" && value !== "" ? value : null;
+}
+
+export default async function AdminIntegrationsPage(
+  props: PageProps<"/instance-portal/integrations">,
+) {
+  // The admin first: a person who is not one gets the 404 before anything is read.
+  const user = await requireAdmin();
+  const data = await getIntegrationsPageData(user.id);
+  const query = await props.searchParams;
   return (
-    <>
-      <PageHeader
-        title="Integrations"
-        description="The services this instance works with."
-      />
-      <Placeholder title="GitHub is configured with environment variables for now">
-        Setting up the GitHub App in the browser will be here. Until then the
-        GitHub App is configured as described in docs/github-app.md.
-      </Placeholder>
-    </>
+    <GithubSection
+      {...data}
+      outcome={{
+        ok: single(query.github),
+        error: single(query.github_error),
+      }}
+    />
   );
 }

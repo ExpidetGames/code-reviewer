@@ -9,7 +9,9 @@ import { resolveAppSecret } from "../crypto/app-secret.ts";
 import { createRateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import { getDatabase } from "../db/startup.ts";
+import { suggestedAppName } from "../integrations/registry.ts";
 import { createSignedStates } from "../signed-state/state.ts";
+import { readEmailConflicts, readGithubIdentity } from "./facts.ts";
 import {
   createGithubCredentialStore,
   type GithubCredentialStore,
@@ -55,4 +57,23 @@ export function getGithubConfigService(): GithubConfigService {
     webBaseUrl: config.github.oauthBaseUrl,
     apiBaseUrl: config.github.apiBaseUrl,
   });
+}
+
+/** What the Integrations page shows besides the integration itself: the admin's own GitHub account, the addresses that could not be updated, the name the one-click form starts with and the tenancy. */
+export async function getIntegrationsPageData(adminId: string) {
+  const db = getDatabase();
+  const config = loadAuthConfig(process.env);
+  const [view, identity, conflicts, tenancy] = await Promise.all([
+    getGithubConfigService().view(),
+    readGithubIdentity(db, adminId),
+    readEmailConflicts(db),
+    createInstanceSettingsRepository(db).get("tenancy"),
+  ]);
+  return {
+    view,
+    identity,
+    conflicts,
+    tenancy: tenancy ?? "single",
+    suggestedName: suggestedAppName(config.baseUrl),
+  };
 }
