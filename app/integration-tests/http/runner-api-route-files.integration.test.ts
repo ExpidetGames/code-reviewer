@@ -25,6 +25,10 @@ import {
   testGithubAppEnv,
 } from "../../src/test-support/github-app.ts";
 import { projectServiceFor } from "../../src/projects/shared.ts";
+import {
+  saveDefaultWorkspaceLlmKey,
+  saveGithubAppFromEnv,
+} from "../../src/test-support/server-credentials.ts";
 import { createTestDirectory } from "../../src/test-support/test-database.ts";
 import {
   defaultWorkspaceId,
@@ -60,8 +64,6 @@ async function startRoutes() {
     RUNNER_TOKEN,
     // The master key: the key of a claim is remembered encrypted in the database.
     APP_SECRET: "route-file-app-secret-0123456789-0123456789",
-    LLM_PROVIDER: "openrouter",
-    LLM_API_KEY: LLM_KEY,
     LLM_MODEL: "vendor/test-model",
   };
   for (const [name, value] of Object.entries(env))
@@ -72,7 +74,13 @@ async function startRoutes() {
   });
   // A deployment that is in use has been set up (the first-run setup decides about workspaces).
   await markInstanceSetUp(getDatabase());
-  // The registry reads the environment on first use, so every test loads the routes anew.
+  await saveGithubAppFromEnv(getDatabase(), env);
+  await saveDefaultWorkspaceLlmKey(
+    getDatabase(),
+    env.APP_SECRET ?? "",
+    LLM_KEY,
+  );
+  // The registry reads the credentials on first use, so every test loads the routes anew.
   vi.resetModules();
   return {
     fake,

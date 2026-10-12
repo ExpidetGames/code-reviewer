@@ -14,7 +14,6 @@ import { sha } from "../../src/test-support/jobs.ts";
 import {
   startRunnerApiHarness,
   TEST_LLM_API_KEY,
-  TEST_LLM_MODEL,
   TEST_RUNNER_TOKEN,
 } from "../../src/test-support/runner-api-harness.ts";
 import { redactText } from "../../src/runner-api/redact.ts";
@@ -27,11 +26,10 @@ const KEY_B = "sk-or-v1-sentinel-key-of-workspace-bravo-0002";
 // Keys that no shape of src/runner-api/redact.ts matches, so only what the app remembers can mask them.
 const PLAIN_KEY_A = "plain-workspace-key-alpha-0001";
 const PLAIN_KEY_ROTATED = "plain-workspace-key-alpha-rotated-0002";
-const NO_LEGACY_KEY = { LLM_PROVIDER: undefined, LLM_API_KEY: undefined };
 
-/** A harness whose environment has no legacy key, so a key can only come from a workspace. */
+/** A harness whose default workspace has no key yet, so a key can only be one a test saves. */
 function startWithoutLegacyKey() {
-  return startRunnerApiHarness({ env: NO_LEGACY_KEY });
+  return startRunnerApiHarness({ llmKey: null });
 }
 
 async function saveKey(h: Harness, workspaceId: string, apiKey: string) {
@@ -165,8 +163,8 @@ describe("the key a claim hands out", () => {
   // #104-LK-05
   it("uses the model and the context window the instance suggests for a workspace key", async () => {
     const h = await startRunnerApiHarness({
+      llmKey: null,
       env: {
-        ...NO_LEGACY_KEY,
         LLM_MODEL: "vendor/instance-model",
         LLM_MAX_TOKENS: "64000",
       },
@@ -187,7 +185,8 @@ describe("the key a claim hands out", () => {
   // #104-LK-10
   it("uses the built-in default model for a workspace key when the instance's model name is invalid", async () => {
     const h = await startRunnerApiHarness({
-      env: { ...NO_LEGACY_KEY, LLM_MODEL: "not a model name" },
+      llmKey: null,
+      env: { LLM_MODEL: "not a model name" },
     });
     const job = await h.enqueueNew();
     await saveKey(h, job.workspaceId, KEY_A);
@@ -198,39 +197,32 @@ describe("the key a claim hands out", () => {
     expect(claimed.job.input.llm.apiKey).toBe(KEY_A);
   });
 
-  // #104-LK-12
-  it("still works with only the legacy variables, and a workspace key overrides them", async () => {
-    const h = await startRunnerApiHarness();
-    const first = await h.enqueueNew();
-    const legacy = await h.claimed();
-    h.clock.advance(1000);
-    await h.enqueueNew({ prNumber: 8 });
-    await saveKey(h, first.workspaceId, KEY_A);
+  // #106-LK-12
+  it("takes the key from the workspace only: the variables of the earlier release are not read, on a single-tenant instance or a multi-tenant one", async () => {
+    for (const tenancy of ["single", "multi"] as const) {
+      const h = await startRunnerApiHarness({
+        llmKey: null,
+        env: { LLM_PROVIDER: "openrouter", LLM_API_KEY: TEST_LLM_API_KEY },
+      });
+      await createInstanceSettingsRepository(h.db).set(
+        "tenancy",
+        tenancy,
+        null,
+      );
+      const job = await h.enqueueNew();
 
-    const own = await h.claimed();
+      const response = await h.claim();
 
-    expect(legacy.job.input.llm.apiKey).toBe(TEST_LLM_API_KEY);
-    expect(own.job.input.llm.apiKey).toBe(KEY_A);
-    expect(own.job.input.llm.model).toBe(TEST_LLM_MODEL);
+      expect(response.status).toBe(204);
+      expect(await h.queue.get(job.id)).toMatchObject({
+        status: "failed",
+        errorCode: "llm_not_configured",
+      });
+      expect(h.logLines().join("\n")).not.toContain(TEST_LLM_API_KEY);
+    }
   });
 
-  // #104-LK-12
-  it("does not hand the legacy variables to a workspace of a multi-tenant instance", async () => {
-    const h = await startRunnerApiHarness();
-    await createInstanceSettingsRepository(h.db).set("tenancy", "multi", null);
-    const job = await h.enqueueNew();
-
-    const response = await h.claim();
-
-    expect(response.status).toBe(204);
-    expect(await h.queue.get(job.id)).toMatchObject({
-      status: "failed",
-      errorCode: "llm_not_configured",
-    });
-    expect(h.logLines().join("\n")).not.toContain(TEST_LLM_API_KEY);
-  });
-
-  it("fails closed for a key that cannot be read, even where the legacy variables would work", async () => {
+  it("fails closed for a key that cannot be read, even where another key would work", async () => {
     const h = await startRunnerApiHarness();
     const job = await h.enqueueNew();
     await saveKey(h, job.workspaceId, KEY_A);

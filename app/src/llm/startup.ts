@@ -8,11 +8,7 @@
 // (`LLM_MODEL`, `LLM_MAX_TOKENS`) is a warning of its own: the default is used and reviews run.
 // Called from `src/instrumentation.ts`.
 import { ALLOW_TEST_LLM_ENDPOINTS_FLAG, llmApiBaseUrl } from "./endpoint.ts";
-import {
-  legacyConfigIsAbsent,
-  loadLlmConfig,
-  type LlmConfigIssue,
-} from "./config.ts";
+import { readLlmDefaults, type LlmConfigIssue } from "./config.ts";
 
 type StartOptions = {
   env?: Readonly<Record<string, string | undefined>>;
@@ -27,13 +23,6 @@ export function checkLlmConfigOnStart({
   env = process.env,
   warn = console.warn,
 }: StartOptions = {}): void {
-  const state = loadLlmConfig(env);
-  // Nothing set at all is the normal state of an instance whose workspaces bring their own key; a variable that
-  // is set but wrong, or a key without a provider (or the other way round), is reported.
-  if (state.status === "misconfigured" && !legacyConfigIsAbsent(state.issues))
-    warn(
-      `[llm] LLM_NOT_CONFIGURED: the shared LLM access from the environment is not usable: ${describe(state.issues)}. Workspaces with a key of their own are not affected.`,
-    );
   // A key is sent to the address of the test stack, so a deployment hears when it is switched on, and when an
   // address is named without the switch (it is ignored and the provider's own address is used).
   if (env[ALLOW_TEST_LLM_ENDPOINTS_FLAG]?.trim() === "true")
@@ -44,8 +33,9 @@ export function checkLlmConfigOnStart({
     warn(
       "[llm] LLM_API_BASE_URL_IGNORED: LLM_API_BASE_URL is set without ALLOW_TEST_LLM_ENDPOINTS=true and is ignored; keys are checked at the provider.",
     );
-  if (state.warnings.length > 0)
+  const { warnings } = readLlmDefaults(env);
+  if (warnings.length > 0)
     warn(
-      `[llm] LLM_OPTIONS_IGNORED: ${describe(state.warnings)}. The default is used instead.`,
+      `[llm] LLM_OPTIONS_IGNORED: ${describe(warnings)}. The default is used instead.`,
     );
 }

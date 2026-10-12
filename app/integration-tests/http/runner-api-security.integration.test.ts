@@ -279,7 +279,7 @@ describe("where the git token and the LLM key appear", () => {
 
   it("removes the LLM key from a result even when it has white space in the setting or comes back URL-encoded", async () => {
     const key = "key/with+special=chars-1234";
-    const h = await startRunnerApiHarness({ env: { LLM_API_KEY: `${key}\n` } });
+    const h = await startRunnerApiHarness({ llmKey: `${key}\n` });
     await h.enqueueNew();
     const claim = await h.claimed();
     expect(claim.job.input.llm.apiKey).toBe(key);

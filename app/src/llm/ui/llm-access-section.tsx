@@ -12,23 +12,9 @@ import type { LlmKeyApi } from "./api.ts";
 
 export const LLM_ACCESS_SECTION_ID = "llm-access";
 
-function SourceNote({
-  summary,
-  canManage,
-}: {
-  summary: WorkspaceLlmSummary;
-  canManage: boolean;
-}) {
+function SourceNote({ summary }: { summary: WorkspaceLlmSummary }) {
   if (!summary.configured) return null;
   if (summary.source === "workspace") return null;
-  if (summary.source === "environment")
-    return (
-      <p className="muted">
-        {canManage
-          ? "Reviews of this workspace currently use the key that is set on the server (the LLM_API_KEY variable). A key saved here replaces it for this workspace."
-          : "Reviews of this workspace currently use the key that is set on the server."}
-      </p>
-    );
   return (
     <p className="muted">
       Reviews of this workspace use the key of the operator.
@@ -64,7 +50,7 @@ export function LlmAccessSection({
         shown again. The operator of this instance holds the key that encrypts
         it and can technically decrypt it.
       </p>
-      <SourceNote summary={summary} canManage={canManage} />
+      <SourceNote summary={summary} />
       {canManage ? (
         <LlmAccessForm
           // Not keyed on the status: the page's data changes after a save (`router.refresh()`), and a form

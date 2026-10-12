@@ -317,9 +317,7 @@ describe("when the credentials are created", () => {
 
 describe("a job that cannot be handed out", () => {
   it("fails the job with llm_not_configured and creates no credentials when the LLM key is missing", async () => {
-    const h = await startRunnerApiHarness({
-      env: { LLM_API_KEY: undefined },
-    });
+    const h = await startRunnerApiHarness({ llmKey: null });
     const job = await h.enqueueNew();
 
     const response = await h.claim();
@@ -550,7 +548,7 @@ describe("a job that cannot be handed out", () => {
 
   it("trims a key with white space around it before it is handed out", async () => {
     const h = await startRunnerApiHarness({
-      env: { LLM_API_KEY: ` ${TEST_LLM_API_KEY}\n` },
+      llmKey: ` ${TEST_LLM_API_KEY}\n`,
     });
     await h.enqueueNew();
 

@@ -10,7 +10,6 @@ import {
   createLlmConfig,
   type LlmConfig,
   type LlmConfigIssue,
-  type LlmConfigState,
 } from "./config.ts";
 
 /** The job error code of a claim that found no usable LLM configuration. */
@@ -29,8 +28,6 @@ export const LLM_ACCESS_SOURCES = [
   "workspace",
   /** The operator's key, when the operator offers included usage (a stub that is off, for now). */
   "operator",
-  /** The legacy `LLM_*` variables of a single-tenant instance, until the import moves them. */
-  "environment",
 ] as const;
 export type LlmAccessSource = (typeof LLM_ACCESS_SOURCES)[number];
 
@@ -42,8 +39,6 @@ export const LLM_NOT_CONFIGURED_REASONS = [
   "key_unreadable",
   /** The workspace's key was made for another provider than the one it would be sent to. */
   "key_binding_mismatch",
-  /** Nothing from the workspace, and the legacy variables are set but not usable. */
-  "environment_misconfigured",
 ] as const;
 export type LlmNotConfiguredReason =
   (typeof LLM_NOT_CONFIGURED_REASONS)[number];
@@ -93,18 +88,6 @@ export function revealLlmAccess(access: LlmAccess): LlmAccess {
     model: access.model,
     apiKey: access.apiKey,
     contextWindowTokens: access.contextWindowTokens,
-  };
-}
-
-/** The access of the legacy `LLM_*` variables (the instance's shared key). */
-export function resolveLlmAccess(state: LlmConfigState): LlmAccessResult {
-  if (state.status === "configured")
-    return { ok: true, access: state.config, source: "environment" };
-  return {
-    ok: false,
-    errorCode: LLM_NOT_CONFIGURED_ERROR,
-    reason: "environment_misconfigured",
-    issues: state.issues,
   };
 }
 

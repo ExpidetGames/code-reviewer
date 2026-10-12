@@ -61,12 +61,12 @@ export type SecretView = "none" | "configured" | "unreadable";
 export type GithubConfigView = {
   /** `not_configured`: nothing. `configured`: the App works. `problem`: something is saved or set, and unusable. */
   status: "not_configured" | "configured" | "problem";
-  source: "database" | "environment" | "none";
+  source: "database" | "none";
   app: {
     appId: string | null;
     slug: string | null;
     privateApp: boolean | null;
-    origin: StoredGithubApp["origin"] | "environment";
+    origin: StoredGithubApp["origin"];
     /** Where a person installs the App; null while the slug is not known. */
     installUrl: string | null;
   } | null;
@@ -279,7 +279,7 @@ export function createGithubConfigService({
                   (snapshot.app.ok ? snapshot.app.config.appId : null),
                 slug: snapshot.slug,
                 privateApp: stored?.privateApp ?? null,
-                origin: stored?.origin ?? "environment",
+                origin: stored?.origin ?? "manual",
                 installUrl:
                   snapshot.slug === null
                     ? null

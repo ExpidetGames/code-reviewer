@@ -733,21 +733,19 @@ describe("the prompt of an imported App", () => {
 });
 
 describe("the credentials as the instances read them", () => {
-  // #102-GH-16
-  it("uses the variables of an installation that was not imported, and the database once credentials are saved", async () => {
+  // #106-IM-01
+  it("never reads the GitHub App variables: the App is the one in the database, or none", async () => {
     const h = await createGithubConfigHarness({ env: testGithubAppEnv() });
 
-    const legacy = await h.credentials.load();
+    const without = await h.credentials.load();
     await h.service.saveApp(
       "admin-1",
       h.validManualInput({ webhookSecret: "database-webhook-secret" }),
     );
     const afterwards = await h.credentials.load();
 
-    expect(legacy.source).toBe("environment");
-    expect(legacy.app.ok && legacy.app.config.webhookSecret).toBe(
-      "test-webhook-secret-value",
-    );
+    expect(without.source).toBe("none");
+    expect(without.app.ok).toBe(false);
     expect(afterwards.source).toBe("database");
     expect(afterwards.app.ok && afterwards.app.config.webhookSecret).toBe(
       "database-webhook-secret",

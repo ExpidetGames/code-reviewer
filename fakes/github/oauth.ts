@@ -96,6 +96,12 @@ export type FakeGithubOAuth = {
   makeMembershipUnreadable(org: string, unreadable?: boolean): void;
   /** Revokes an access token, like the person removing the app at github.com. */
   revokeToken(accessToken: string): void;
+  /**
+   * Issues an access token for `login` without the browser round trip: what an installation that signed
+   * people in before accounts holds in its database (the token of their last sign in). `clientId` is the
+   * app the token belongs to (default: the first app the fake knows), `scope` what it was granted.
+   */
+  issueAccessToken(login: string, options?: { scope?: string; clientId?: string }): string;
   /** Every access token issued so far; lets a test search outputs for them. */
   issuedAccessTokens(): string[];
   /**
@@ -196,6 +202,22 @@ export function createOAuthPart(
       }>(request);
       addOrgMember(body.org, body.login, body.state, body.role);
       sendJson(response, 201, { ok: true });
+      return true;
+    }
+    if (method === "POST" && path === "/__fake/tokens") {
+      const body = await readJson<{
+        login: string;
+        scope?: string;
+        clientId?: string;
+      }>(request);
+      try {
+        const token = issueAccessToken(body.login, body);
+        sendJson(response, 201, { token });
+      } catch (error) {
+        sendJson(response, 400, {
+          error: error instanceof Error ? error.message : "bad request",
+        });
+      }
       return true;
     }
     if (method === "POST" && path === "/__fake/org-unreadable") {
@@ -654,6 +676,25 @@ export function createOAuthPart(
     users.set(user.id, { ...user });
   }
 
+  function issueAccessToken(
+    login: string,
+    options: { scope?: string; clientId?: string } = {},
+  ): string {
+    const user = [...users.values()].find((u) => u.login === login);
+    if (!user) throw new Error(`No fake GitHub user with login ${login}`);
+    const clientId = options.clientId ?? registry.all()[0]?.clientId ?? "";
+    if (registry.byClientId(clientId) === undefined)
+      throw new Error("The fake GitHub knows no such app");
+    const accessToken = randomToken("gho_fake");
+    tokens.set(accessToken, {
+      userId: user.id,
+      scope: options.scope ?? "read:user user:email read:org",
+      clientId,
+    });
+    issued.push(accessToken);
+    return accessToken;
+  }
+
   function reset() {
     users.clear();
     codes.clear();
@@ -712,6 +753,7 @@ export function createOAuthPart(
       tokens.delete(accessToken);
     },
     issuedAccessTokens: () => [...issued],
+    issueAccessToken,
     holdTokenRequests(count) {
       hold = { count, waiting: [] };
     },
