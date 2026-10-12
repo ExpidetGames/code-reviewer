@@ -4,7 +4,7 @@
 // activating, deactivating and running the sync. The routes themselves are proven where they live.
 import { describe, expect, it } from "vitest";
 import type { FetchLike } from "../../ui/json-request.ts";
-import { createProjectsApi } from "./api.ts";
+import { createInstanceSyncApi, createProjectsApi } from "./api.ts";
 
 function recorder(body: unknown = {}) {
   const calls: Array<{ url: string; method: string; body: string | null }> = [];
@@ -66,6 +66,25 @@ describe("the project list's calls", () => {
         method: "POST",
         body: null,
       },
+    ]);
+  });
+});
+
+describe("the instance's call", () => {
+  // #103-IB-13
+  it("runs the synchronization of the whole instance on the route of the admin portal", async () => {
+    const calls: Array<{ url: string; method: string }> = [];
+    const api = createInstanceSyncApi(async (url, init) => {
+      calls.push({ url, method: init?.method ?? "GET" });
+      return new Response(JSON.stringify({ added: 0, errors: [] }), {
+        status: 200,
+      });
+    });
+
+    await api.sync();
+
+    expect(calls).toEqual([
+      { url: "/api/admin/integrations/sync", method: "POST" },
     ]);
   });
 });

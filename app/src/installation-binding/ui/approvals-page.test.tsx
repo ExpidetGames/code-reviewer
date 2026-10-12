@@ -220,6 +220,61 @@ describe("the page without requests", () => {
     expect(items[1]?.textContent).toMatch(
       /beta.*Denied by the admin of the instance/,
     );
-    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Approve|Deny/ })).toBeNull();
+  });
+});
+
+describe("the installations nobody has linked", () => {
+  // #103-IB-11
+  it("lists them with their account and when they were first seen, and says that they have no repositories in the app", () => {
+    render(
+      <ApprovalsPageContent
+        pending={[]}
+        decided={[]}
+        unclaimed={[
+          {
+            installationId: "4242",
+            accountLogin: "acme",
+            accountType: "Organization",
+            firstSeenAt: "2026-10-12T10:00:00.000Z",
+            lastSeenAt: "2026-10-12T11:00:00.000Z",
+            source: "webhook",
+          },
+          {
+            installationId: "4300",
+            accountLogin: "octo",
+            accountType: "User",
+            firstSeenAt: "2026-10-12T09:00:00.000Z",
+            lastSeenAt: "2026-10-12T09:00:00.000Z",
+            source: "sync",
+          },
+        ]}
+        api={api()}
+      />,
+    );
+
+    const list = screen.getByRole("list", {
+      name: "Installations nobody has linked",
+    });
+    const items = within(list).getAllByRole("listitem");
+    expect(items[0]?.textContent).toMatch(
+      /acme.*Organization.*2026-10-12 10:00 UTC/,
+    );
+    expect(items[1]?.textContent).toMatch(/octo.*Personal account/);
+    expect(
+      screen.getByText(/Reading the installations again from GitHub does not/),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Sync from GitHub" }),
+    ).toBeTruthy();
+  });
+
+  // #103-IB-11
+  it("says so when GitHub lists none", () => {
+    render(<ApprovalsPageContent pending={[]} decided={[]} api={api()} />);
+
+    expect(
+      screen.getByText("GitHub lists no installation that waits."),
+    ).toBeTruthy();
   });
 });

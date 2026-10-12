@@ -5,6 +5,10 @@
 // that serves requests.
 import type { Kysely } from "kysely";
 import { createRateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
+import {
+  createUnclaimedInstallationsRepository,
+  type UnclaimedInstallationsRepository,
+} from "../db/repositories/unclaimed-installations-repository.ts";
 import type { Database } from "../db/schema.ts";
 import type { IntegrationRegistry } from "../integrations/registry.ts";
 import type { IntegrationSyncService } from "../integrations/sync/service.ts";
@@ -42,6 +46,8 @@ export type AssembledBinding = {
   service: InstallationBindingService;
   connections: Connections;
   approvals: ApprovalService;
+  /** The installations of the App that no workspace has linked (what the admin portal lists). */
+  unclaimed: UnclaimedInstallationsRepository;
   signedStates: SignedStates;
 };
 
@@ -87,6 +93,7 @@ export function assembleInstallationBinding(
       connections,
       ...(now === undefined ? {} : { now }),
     }),
+    unclaimed: createUnclaimedInstallationsRepository(db, now),
     signedStates,
   };
 }

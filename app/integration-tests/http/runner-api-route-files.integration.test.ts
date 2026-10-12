@@ -28,6 +28,7 @@ import { projectServiceFor } from "../../src/projects/shared.ts";
 import { createTestDirectory } from "../../src/test-support/test-database.ts";
 import {
   defaultWorkspaceId,
+  linkTestInstallation,
   markInstanceSetUp,
 } from "../../src/test-support/workspaces.ts";
 
@@ -129,6 +130,12 @@ describe("the runner API route files", () => {
       account: { login: "acme", id: 5001, type: "Organization" },
     });
     routes.fake.setRepositories(4242, [{ id: 7001, fullName: "acme/widgets" }]);
+    // A person of the workspace linked the installation (the binding); nothing is made from a delivery alone.
+    await linkTestInstallation(
+      getDatabase(),
+      await defaultWorkspaceId(getDatabase()),
+      { id: "4242", accountLogin: "acme", accountId: 5001 },
+    );
     routes.fake.addPullRequest("acme/widgets", {
       number: 7,
       title: "Add widget caching",

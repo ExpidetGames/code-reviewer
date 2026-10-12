@@ -54,11 +54,17 @@ const PROTECTED_ROUTES = [
   // The files of the admin portal; people use /admin, which is rewritten to them for the instance admin
   // and does not exist for anybody else (src/admin/guard.integration.test.ts).
   "/instance-portal",
+  "/instance-portal/approvals",
   "/instance-portal/integrations",
   "/instance-portal/limits",
   "/instance-portal/mail",
   "/instance-portal/setup",
   "/account",
+  // The binding of a GitHub installation to a workspace: where GitHub sends the browser after an installation
+  // (the Setup URL of the App; a route that redirects) and where a flow ends when no workspace can be named
+  // (src/installation-binding/).
+  "/github/connected",
+  "/github/result",
   // The old addresses of the pages, which lead to the first workspace of the person.
   "/projects/[[...rest]]",
   "/runs/[[...rest]]",
@@ -69,6 +75,7 @@ const PROTECTED_ROUTES = [
   "/workspaces/new",
   // The pages of a workspace: for its members only (src/workspaces/access-runtime.ts).
   "/w/[workspace]",
+  "/w/[workspace]/connections",
   "/w/[workspace]/members",
   "/w/[workspace]/projects",
   "/w/[workspace]/projects/[repositoryId]",
@@ -79,6 +86,7 @@ const PROTECTED_ROUTES = [
 // Data routes: a visitor without a session gets 401 instead of a redirect.
 const PROTECTED_DATA_ROUTES = [
   "/api/account/github/link",
+  "/api/instance-portal/approvals/[id]",
   "/api/instance-portal/settings",
   "/api/instance-portal/mail/test",
   "/api/instance-portal/github",
@@ -93,6 +101,11 @@ const PROTECTED_DATA_ROUTES = [
   "/api/invitations/accept",
   // The data routes of a workspace: for its members only (src/workspaces/access-runtime.ts).
   "/api/w/[workspace]",
+  "/api/w/[workspace]/github/connect",
+  "/api/w/[workspace]/github/installations",
+  "/api/w/[workspace]/github/installations/choose",
+  "/api/w/[workspace]/integrations/[integrationId]",
+  "/api/w/[workspace]/integrations/sync",
   "/api/w/[workspace]/invitations",
   "/api/w/[workspace]/invitations/[invitationId]",
   "/api/w/[workspace]/invitations/[invitationId]/resend",

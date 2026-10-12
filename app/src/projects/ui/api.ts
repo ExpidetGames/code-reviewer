@@ -57,3 +57,18 @@ export function createProjectsApi(
 export function browserProjectsApi(workspaceSlug: string): ProjectsApi {
   return createProjectsApi((url, init) => fetch(url, init), workspaceSlug);
 }
+
+/** The synchronization of the whole instance: the instance admin's route of the admin portal. */
+export const INSTANCE_SYNC_PATH = "/api/admin/integrations/sync";
+
+export type InstanceSyncApi = Pick<ProjectsApi, "sync">;
+
+export function createInstanceSyncApi(fetchImpl: FetchLike): InstanceSyncApi {
+  return {
+    sync: () => requestJson<SyncAnswer>(fetchImpl, "POST", INSTANCE_SYNC_PATH),
+  };
+}
+
+export const browserInstanceSyncApi: InstanceSyncApi = createInstanceSyncApi(
+  (url, init) => fetch(url, init),
+);

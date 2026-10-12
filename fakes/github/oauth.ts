@@ -88,6 +88,12 @@ export type FakeGithubOAuth = {
   grantInstallationAccess(installationId: number, login: string): void;
   /** Makes `GET /user/memberships/orgs/:org` answer an error, or answer slowly. */
   failMembershipEndpoint(failure: MembershipEndpointFailure): void;
+  /**
+   * Makes the role of the people in one organization unreadable for the App's user tokens (403), like an
+   * organization whose owners did not accept the permission "Members" for the App. Other organizations are
+   * not affected.
+   */
+  makeMembershipUnreadable(org: string, unreadable?: boolean): void;
   /** Revokes an access token, like the person removing the app at github.com. */
   revokeToken(accessToken: string): void;
   /** Every access token issued so far; lets a test search outputs for them. */
@@ -160,6 +166,8 @@ export function createOAuthPart(
     string,
     Map<number, { state: FakeMembershipState; role: FakeMembershipRole }>
   >();
+  // organizations whose membership the App's user tokens cannot read (lower case)
+  const unreadableOrgs = new Set<string>();
   // installation id -> account ids that see it without being its account or a member
   const installationAccess = new Map<number, Set<number>>();
   const timers = new Set<NodeJS.Timeout>();
@@ -187,6 +195,14 @@ export function createOAuthPart(
         role?: FakeMembershipRole;
       }>(request);
       addOrgMember(body.org, body.login, body.state, body.role);
+      sendJson(response, 201, { ok: true });
+      return true;
+    }
+    if (method === "POST" && path === "/__fake/org-unreadable") {
+      const body = await readJson<{ org: string; unreadable?: boolean }>(
+        request,
+      );
+      makeMembershipUnreadable(body.org, body.unreadable);
       sendJson(response, 201, { ok: true });
       return true;
     }
@@ -538,6 +554,13 @@ export function createOAuthPart(
         { message: "Resource not accessible by integration" },
         headers,
       );
+    if (unreadableOrgs.has(org.toLowerCase()))
+      return sendJson(
+        response,
+        403,
+        { message: "Resource not accessible by integration" },
+        headers,
+      );
     const membership = orgs.get(org.toLowerCase())?.get(auth.user.id);
     if (!membership)
       return sendJson(response, 404, { message: "Not Found" }, headers);
@@ -572,6 +595,11 @@ export function createOAuthPart(
       >();
     members.set(user.id, { state, role });
     orgs.set(key, members);
+  }
+
+  function makeMembershipUnreadable(org: string, unreadable = true) {
+    if (unreadable) unreadableOrgs.add(org.toLowerCase());
+    else unreadableOrgs.delete(org.toLowerCase());
   }
 
   function grantInstallationAccess(installationId: number, login: string) {
@@ -632,6 +660,7 @@ export function createOAuthPart(
     tokens.clear();
     orgs.clear();
     installationAccess.clear();
+    unreadableOrgs.clear();
     issued.length = 0;
   }
 
@@ -670,6 +699,7 @@ export function createOAuthPart(
       failure = next;
     },
     addOrgMember,
+    makeMembershipUnreadable,
     grantInstallationAccess,
     removeOrgMember(org, login) {
       const user = [...users.values()].find((u) => u.login === login);

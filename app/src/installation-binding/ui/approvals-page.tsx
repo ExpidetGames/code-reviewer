@@ -6,6 +6,8 @@
 // read of their role in the organization gave), and the decisions made last. `ApprovalsPageContent` is pure
 // markup over the requests; the buttons are in `ApprovalActions`. Everything from GitHub or from a person is
 // text.
+import type { UnclaimedInstallation } from "../../db/repositories/unclaimed-installations-repository.ts";
+import { InstanceSyncButton } from "../../projects/ui/sync-button.tsx";
 import { formatUtc } from "../../ui/format-time.ts";
 import type { ApprovalsApi } from "./api.ts";
 import { ApprovalActions } from "./approval-actions.tsx";
@@ -73,10 +75,13 @@ function Evidence({ request }: { request: InstallationLinkRequestView }) {
 export function ApprovalsPageContent({
   pending,
   decided,
+  unclaimed = [],
   api,
 }: {
   pending: InstallationLinkRequestView[];
   decided: InstallationLinkRequestView[];
+  /** The installations of the App that no workspace has linked. */
+  unclaimed?: UnclaimedInstallation[];
   /** Only tests pass this: a server component cannot hand functions to the client buttons. */
   api?: ApprovalsApi;
 }) {
@@ -148,6 +153,46 @@ export function ApprovalsPageContent({
             ))}
           </ul>
         )}
+      </section>
+      <section className="settings-section" aria-labelledby="unclaimed-heading">
+        <h2 id="unclaimed-heading">Installations nobody has linked</h2>
+        <p className="muted">
+          Anybody may install the GitHub App. An installation gives a workspace
+          its repositories only once an Owner or Admin of that workspace has
+          connected it on the Connections page, so these have no repositories in
+          the app. Reading the installations again from GitHub does not connect
+          them either.
+        </p>
+        {unclaimed.length === 0 ? (
+          <p className="muted">GitHub lists no installation that waits.</p>
+        ) : (
+          <ul
+            className="member-list"
+            aria-label="Installations nobody has linked"
+          >
+            {unclaimed.map((installation) => (
+              <li key={installation.installationId} className="member-row">
+                <div className="member-main">
+                  <span className="member-name">
+                    {installation.accountLogin}
+                  </span>
+                  <span className="muted small">
+                    {installation.accountType === "Organization"
+                      ? "Organization"
+                      : installation.accountType === "User"
+                        ? "Personal account"
+                        : "Account"}
+                    , first seen{" "}
+                    <time dateTime={installation.firstSeenAt}>
+                      {formatUtc(installation.firstSeenAt)}
+                    </time>
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+        <InstanceSyncButton />
       </section>
     </>
   );

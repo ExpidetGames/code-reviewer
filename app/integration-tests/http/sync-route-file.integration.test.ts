@@ -30,6 +30,7 @@ import { signedInMember } from "../../src/test-support/session-lookup.ts";
 import { createTestDirectory } from "../../src/test-support/test-database.ts";
 import {
   defaultWorkspaceId,
+  linkTestInstallation,
   markInstanceSetUp,
 } from "../../src/test-support/workspaces.ts";
 
@@ -111,6 +112,17 @@ describe("the sync route file", () => {
       account: { login: "acme", id: 5001, type: "Organization" },
     });
     fake.setRepositories(4242, [{ id: 7001, fullName: "acme/widgets" }]);
+    // The installation was linked by a person of the workspace; one that nobody linked is not made a connection.
+    await linkTestInstallation(
+      getDatabase(),
+      await defaultWorkspaceId(getDatabase()),
+      { id: "4242", accountLogin: "acme", accountId: 5001 },
+    );
+    fake.addInstallation({
+      id: 4900,
+      account: { login: "other", id: 5900, type: "Organization" },
+    });
+    fake.setRepositories(4900, [{ id: 7900, fullName: "other/secret" }]);
 
     const response = await post(route);
 
@@ -124,6 +136,12 @@ describe("the sync route file", () => {
         ).list()
       ).map((repo) => repo.fullName),
     ).toEqual(["acme/widgets"]);
+    expect(
+      await getDatabase()
+        .selectFrom("unclaimed_installations")
+        .select("installation_id")
+        .execute(),
+    ).toEqual([{ installation_id: "4900" }]);
   });
 
   // #101-WM-08
