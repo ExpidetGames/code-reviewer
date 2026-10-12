@@ -114,6 +114,7 @@ describe("restoring a backup", () => {
     expect(tableCounts(databasePath)).toEqual(expected);
     // The way the app starts: open (WAL, foreign keys), run pending migrations (none), read.
     const { db, migrationsApplied } = await startDatabase({
+      driver: "sqlite",
       path: databasePath,
       busyTimeoutMs: 5000,
     });

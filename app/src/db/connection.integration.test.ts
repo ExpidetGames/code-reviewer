@@ -66,7 +66,8 @@ describe("openDatabase", () => {
       const directory = await createTestDirectory();
       const path = join(directory, "does-not-exist", "app.db");
 
-      const open = () => openDatabase({ path, busyTimeoutMs: 100 });
+      const open = () =>
+        openDatabase({ driver: "sqlite", path, busyTimeoutMs: 100 });
 
       expect(open).toThrow(DatabaseError);
       expect(open).toThrow(
@@ -84,6 +85,7 @@ describe("openDatabase", () => {
 
       const open = () =>
         openDatabase({
+          driver: "sqlite",
           path: join(notADirectory, "app.db"),
           busyTimeoutMs: 100,
         });
@@ -104,6 +106,7 @@ describe("openDatabase", () => {
       try {
         const open = () =>
           openDatabase({
+            driver: "sqlite",
             path: join(closed, "inner", "app.db"),
             busyTimeoutMs: 100,
           });
@@ -127,7 +130,11 @@ describe("openDatabase", () => {
 
       try {
         const open = () =>
-          openDatabase({ path: join(readOnly, "app.db"), busyTimeoutMs: 100 });
+          openDatabase({
+            driver: "sqlite",
+            path: join(readOnly, "app.db"),
+            busyTimeoutMs: 100,
+          });
 
         expect(open).toThrow(
           expect.objectContaining({ code: "DATABASE_DIRECTORY_UNAVAILABLE" }),
@@ -150,7 +157,8 @@ describe("openDatabase", () => {
       ),
     );
 
-    const open = () => track(openDatabase({ path, busyTimeoutMs: 100 }));
+    const open = () =>
+      track(openDatabase({ driver: "sqlite", path, busyTimeoutMs: 100 }));
 
     expect(open).toThrow(
       expect.objectContaining({ code: "DATABASE_OPEN_FAILED" }),
@@ -159,7 +167,8 @@ describe("openDatabase", () => {
   });
 
   it("refuses a database that cannot use WAL mode instead of running in another journal mode", () => {
-    const open = () => openDatabase({ path: ":memory:", busyTimeoutMs: 100 });
+    const open = () =>
+      openDatabase({ driver: "sqlite", path: ":memory:", busyTimeoutMs: 100 });
 
     expect(open).toThrow(
       expect.objectContaining({ code: "DATABASE_OPEN_FAILED" }),
@@ -175,7 +184,8 @@ describe("openDatabase", () => {
     expect(await holder.nextLine()).toBe("locked");
     const started = Date.now();
 
-    const open = () => openDatabase({ path, busyTimeoutMs: 300 });
+    const open = () =>
+      openDatabase({ driver: "sqlite", path, busyTimeoutMs: 300 });
 
     expect(open).toThrow(
       expect.objectContaining({ code: "DATABASE_OPEN_FAILED" }),

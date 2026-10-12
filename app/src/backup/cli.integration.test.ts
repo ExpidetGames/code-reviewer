@@ -174,6 +174,7 @@ describe("the restore command", () => {
     expect(result.stdout).toContain(`restored`);
     expect(tableCounts(databasePath)).toEqual(tableCounts(config.path));
     const { db } = await startDatabase({
+      driver: "sqlite",
       path: databasePath,
       busyTimeoutMs: 5000,
     });

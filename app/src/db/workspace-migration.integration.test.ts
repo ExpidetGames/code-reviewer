@@ -34,7 +34,11 @@ type OldDb = Kysely<any>;
 async function openAtPreviousVersion(): Promise<OldDb> {
   const directory = await createTestDirectory();
   const db: OldDb = track(
-    openDatabase({ path: join(directory, "app.db"), busyTimeoutMs: 5000 }),
+    openDatabase({
+      driver: "sqlite",
+      path: join(directory, "app.db"),
+      busyTimeoutMs: 5000,
+    }),
   );
   await migrateToLatest(db, previousVersion);
   return db;
