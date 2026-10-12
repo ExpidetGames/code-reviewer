@@ -84,6 +84,7 @@ export default defineConfig({
         /e2e\/admin\/github-integration\.e2e\.ts$/,
         /e2e\/workspaces\//,
         /e2e\/settings\/llm-key\.e2e\.ts$/,
+        /e2e\/upgrade\//,
       ],
     },
     {
@@ -175,6 +176,16 @@ export default defineConfig({
       testMatch: /e2e\/admin\/github-integration\.e2e\.ts$/,
       dependencies: ["setup"],
     },
+    // The update of an installation of the previous release (a database and an environment made like the
+    // previous release's): the journey starts and restarts the app itself, with a database of its own, and
+    // runs the real runner and the real PR-Agent against the fake GitHub, so it only needs the fake GitHub and
+    // the build of the first app.
+    {
+      name: "upgrade",
+      use: { ...browser, baseURL: e2eEnv.upgradeAppUrl },
+      testMatch: /e2e\/upgrade\/.*\.e2e\.ts$/,
+      dependencies: ["prepare"],
+    },
     // The journey with the real runner and the real PR-Agent. It has an app of its own (its own
     // database, the LLM configured, a real runner polling it), so it cannot disturb the queue of the
     // other journeys and they cannot disturb it, and it runs next to them.
@@ -255,8 +266,8 @@ export default defineConfig({
         ...appEnv,
         DATABASE_PATH: e2eEnv.pipelineDatabasePath,
         BETTER_AUTH_URL: e2eEnv.pipelineAppUrl,
-        LLM_PROVIDER: llmEnv.provider,
-        LLM_API_KEY: llmEnv.apiKey,
+        // The key is not an environment setting any more: the journey saves it for the workspace, as an Owner
+        // does. The model and the context window of a model PR-Agent does not know still are.
         LLM_MODEL: llmEnv.model,
         LLM_MAX_TOKENS: llmEnv.maxTokens,
         REVIEW_DEBOUNCE_SECONDS: "1",
