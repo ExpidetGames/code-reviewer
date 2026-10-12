@@ -2,6 +2,8 @@
 
 // Reads the sign-in settings from the environment. The only place that knows the variable names.
 // A problem is reported with the variable names only, never with a value (they include secrets).
+// The credentials of the sign in with GitHub (the GitHub App's client id and secret) are not here: they
+// live in the database and the admin portal edits them (src/github-config/).
 import {
   ALLOW_TEST_GITHUB_ENDPOINTS_FLAG,
   resolveGithubEndpoint,
@@ -30,14 +32,9 @@ export type AuthConfig = {
    * sign in).
    */
   secret: string;
-  /** Origin of this app as users reach it; the GitHub OAuth callback is `<baseUrl>/api/auth/callback/github`. */
+  /** Origin of this app as users reach it; the callback of the GitHub sign in is `<baseUrl>/api/auth/callback/github`. */
   baseUrl: string;
   github: {
-    /**
-     * The GitHub OAuth app that signs people in, or null while it is not configured. GitHub is
-     * optional: without it only email and password sign in exists.
-     */
-    oauth: { clientId: string; clientSecret: string } | null;
     /** Authorize and token endpoints live below this URL (`/login/oauth/...`). */
     oauthBaseUrl: string;
     /** `/user` and `/user/emails` live below this URL. */
@@ -78,18 +75,6 @@ export function loadAuthConfig(env: Env): AuthConfig {
     );
   }
   const allowTestEndpoints = testGithubEndpointsAllowed(env);
-  // The GitHub OAuth app is optional (the instance can be used with email and password alone), but
-  // half of it is a mistake worth stopping for: say which half is missing.
-  const clientId = optionalValue(env, "GITHUB_OAUTH_CLIENT_ID");
-  const clientSecret = optionalValue(env, "GITHUB_OAUTH_CLIENT_SECRET");
-  if (clientId !== undefined && clientSecret === undefined)
-    problems.push(
-      "GITHUB_OAUTH_CLIENT_SECRET is not set (GITHUB_OAUTH_CLIENT_ID is; set both or neither)",
-    );
-  if (clientSecret !== undefined && clientId === undefined)
-    problems.push(
-      "GITHUB_OAUTH_CLIENT_ID is not set (GITHUB_OAUTH_CLIENT_SECRET is; set both or neither)",
-    );
   const oauthBaseUrl = optionalBaseUrl(
     env,
     "GITHUB_OAUTH_BASE_URL",
@@ -117,10 +102,6 @@ export function loadAuthConfig(env: Env): AuthConfig {
     secret,
     baseUrl,
     github: {
-      oauth:
-        clientId !== undefined && clientSecret !== undefined
-          ? { clientId, clientSecret }
-          : null,
       oauthBaseUrl,
       apiBaseUrl,
     },
@@ -138,11 +119,6 @@ function required(
   if (value) return value;
   problems.push(`${name} is not set`);
   return undefined;
-}
-
-function optionalValue(env: Env, name: string): string | undefined {
-  const value = env[name]?.trim();
-  return value ? value : undefined;
 }
 
 function parseHttpUrl(value: string): URL | undefined {

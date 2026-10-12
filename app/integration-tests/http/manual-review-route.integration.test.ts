@@ -17,7 +17,11 @@ import {
   createAuthHarness,
   type CookieJar,
 } from "../../src/test-support/auth-harness.ts";
-import { openGates } from "../../src/test-support/open-gates.ts";
+import type { AccessGates } from "../../src/auth/access-gates.ts";
+import {
+  noWorkspaceGates,
+  openGates,
+} from "../../src/test-support/open-gates.ts";
 
 type Harness = Awaited<ReturnType<typeof createAuthHarness>>;
 
@@ -41,11 +45,13 @@ async function startApp() {
     },
   };
 
-  function through(settings: Harness = harness) {
+  function through(
+    settings: Harness = harness,
+    gates: AccessGates = openGates,
+  ) {
     const proxy = createAccessProxy({
       getAuth: () => settings.auth,
-      getPolicy: () => settings.policy,
-      getGates: () => openGates,
+      getGates: () => gates,
     });
     return async function send(
       action: "list" | "start",
@@ -68,12 +74,7 @@ async function startApp() {
       const handlers = createManualReviewRouteHandlers({
         // The same lookup `requireUser()` makes, without Next.js's request scope.
         requireUser: async () => {
-          const lookup = await lookupSession(
-            settings.auth,
-            headers,
-            settings.policy,
-            openGates,
-          );
+          const lookup = await lookupSession(settings.auth, headers, gates);
           if (lookup.kind !== "user") throw new Error("NEXT_REDIRECT");
           return lookup.user;
         },
@@ -105,24 +106,21 @@ describe("a request without a session", () => {
   );
 });
 
-describe("a signed in user who is not on the allow list", () => {
+describe("a signed in user who belongs to no workspace", () => {
   // CR-33-T12
   it.each(["list", "start"] as const)(
     "is answered with 403 when it tries to %s, and no job is created",
     async (action) => {
       const app = await startApp();
       const { cookies } = await app.harness.signIn();
-      const removed = app.harness.restart({
-        allowedLogins: ["somebody-else"],
-      });
 
-      const response = await app.through(removed)(action, cookies);
+      const response = await app.through(app.harness, noWorkspaceGates)(
+        action,
+        cookies,
+      );
 
       expect(response.status).toBe(403);
-      expect(await response.json()).toEqual({
-        error: "ACCESS_DENIED",
-        reason: "not_allowed",
-      });
+      expect(await response.json()).toEqual({ error: "no_workspace_access" });
       expect(app.calls).toEqual([]);
     },
   );

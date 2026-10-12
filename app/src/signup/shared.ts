@@ -6,7 +6,7 @@
 import "server-only";
 import { getAuth } from "../auth/auth.ts";
 import { loadAuthConfig } from "../auth/config.ts";
-import { githubSignInConfigured } from "../auth/sign-in-methods.ts";
+import { isGithubSignInConfigured } from "../github-config/shared.ts";
 import { getDatabase } from "../db/startup.ts";
 import { getMailSender } from "../mail/shared.ts";
 import { signUpAvailability, type SignUpAvailability } from "./availability.ts";
@@ -22,7 +22,7 @@ export function getSignUpRouteHandlers(): SignUpRouteHandlers {
       (await getAuth().$context).password.hash(password),
     verifyPassword: async (input) =>
       (await getAuth().$context).password.verify(input),
-    githubConfigured: () => githubSignInConfigured(process.env),
+    githubConfigured: isGithubSignInConfigured,
     // The address the links point to is the configured one, never a request header.
     baseUrl: loadAuthConfig(process.env).baseUrl,
     async currentUserId(request) {
@@ -48,7 +48,7 @@ export function getSignUpFacts() {
   return readSignUpFacts({
     db: getDatabase(),
     mail: getMailSender(),
-    githubConfigured: () => githubSignInConfigured(process.env),
+    githubConfigured: isGithubSignInConfigured,
   });
 }
 
@@ -58,7 +58,7 @@ export async function getSignUpAvailability(): Promise<SignUpAvailability> {
     await readSignUpFacts({
       db: getDatabase(),
       mail: getMailSender(),
-      githubConfigured: () => githubSignInConfigured(process.env),
+      githubConfigured: isGithubSignInConfigured,
     }),
   );
 }

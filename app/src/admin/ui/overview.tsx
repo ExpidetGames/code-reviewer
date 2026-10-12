@@ -5,6 +5,7 @@
 // cannot work yet, and stored credentials that cannot be read any more.
 import Link from "next/link";
 import type { ReactNode } from "react";
+import type { GithubConfigView } from "../../github-config/service.ts";
 import type { AdminSettingsView } from "../service.ts";
 import { FailClosedNotice } from "./notices.tsx";
 
@@ -52,13 +53,78 @@ function Item({
   );
 }
 
-export function Overview({ settings }: { settings: AdminSettingsView }) {
+function describeGithub(
+  github: GithubConfigView | undefined,
+  signInConfigured: boolean,
+): { done: boolean; text: ReactNode } {
+  const integrations = <Link href="/admin/integrations">Integrations</Link>;
+  if (github === undefined || github.status === "not_configured")
+    return {
+      done: false,
+      text: (
+        <>
+          Not configured. Reviews and the sign in with GitHub need the GitHub
+          App. {integrations}
+        </>
+      ),
+    };
+  if (github.status === "problem")
+    return {
+      done: false,
+      text: (
+        <>
+          The GitHub App settings are not usable
+          {github.problem === null
+            ? ""
+            : `: ${github.problem.fields.join(", ")}`}
+          . Reviews and the sign in stay off until this is fixed. {integrations}
+        </>
+      ),
+    };
+  return {
+    done: true,
+    text: (
+      <>
+        The GitHub App {github.app?.slug ?? ""} is configured.{" "}
+        {signInConfigured
+          ? "Signing in with GitHub is enabled."
+          : "Signing in with GitHub is not enabled yet: the client id and secret of the App are missing."}{" "}
+        {integrations}
+      </>
+    ),
+  };
+}
+
+export function Overview({
+  settings,
+  github,
+  emailConflictCount = 0,
+}: {
+  settings: AdminSettingsView;
+  /** The GitHub integration (src/github-config/); left out, the checklist asks nothing about it. */
+  github?: GithubConfigView;
+  /** Users whose placeholder address could not be replaced because another account has GitHub's address. */
+  emailConflictCount?: number;
+}) {
+  const githubItem = describeGithub(github, settings.githubConfigured);
   const broken = settings.secrets.filter(
     (secret) => secret.state === "undecryptable",
   );
   return (
     <>
       {settings.signUpRuleState.failClosed ? <FailClosedNotice /> : null}
+      {emailConflictCount > 0 ? (
+        <p role="note" className="alert alert-warning">
+          <strong>
+            {emailConflictCount === 1
+              ? "One user could not get their GitHub address."
+              : `${String(emailConflictCount)} users could not get their GitHub address.`}
+          </strong>{" "}
+          The verified address of their GitHub account belongs to another
+          account, so they keep the placeholder address and nothing was merged.{" "}
+          <Link href="/admin/integrations">Integrations</Link>
+        </p>
+      ) : null}
       {broken.length > 0 ? (
         <p role="alert" className="alert alert-error">
           <strong>
@@ -94,15 +160,8 @@ export function Overview({ settings }: { settings: AdminSettingsView }) {
               </>
             )}
           </Item>
-          <Item done={settings.githubConfigured} title="GitHub">
-            {settings.githubConfigured ? (
-              "GitHub is configured."
-            ) : (
-              <>
-                Not configured. Reviews need the GitHub App.{" "}
-                <Link href="/admin/integrations">Integrations</Link>
-              </>
-            )}
+          <Item done={githubItem.done} title="GitHub">
+            {githubItem.text}
           </Item>
           <Item done={null} title="Tenancy">
             {settings.tenancy.value === "single"

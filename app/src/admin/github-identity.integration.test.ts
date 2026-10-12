@@ -1,20 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Pins down the check behind "GitHub only": the acting admin's GitHub identity has to be one that signs in
-// today, that is one the access policy lets through, not just a row in `accounts`. Otherwise switching
-// email with password off would lock everybody out, the admin included.
+// Pins down the check behind "GitHub only": the acting admin has a GitHub identity linked, a row in `accounts`
+// of the GitHub provider with a numeric GitHub id. Otherwise switching email with password off would lock
+// everybody out, the admin included.
 import { sql } from "kysely";
-import { describe, expect, it, vi } from "vitest";
-import type { AccessPolicy } from "../auth/access-policy.ts";
+import { describe, expect, it } from "vitest";
 import { createTestDatabase } from "../test-support/test-database.ts";
-import { githubIdentityPasses } from "./github-identity.ts";
+import { githubIdentityLinked } from "./github-identity.ts";
 
-async function startInstance(
-  options: { githubLogin?: string | null; linked?: boolean } = {},
-) {
+async function startInstance(options: { linked?: boolean } = {}) {
   const { db } = await createTestDatabase();
   await sql`insert into users (id, name, email, email_verified, github_login, is_instance_admin, created_at, updated_at)
-    values ('admin-1', 'Admin', 'admin@example.test', 1, ${options.githubLogin === undefined ? "octocat" : options.githubLogin}, 1, '2026-10-11T00:00:00.000Z', '2026-10-11T00:00:00.000Z')`.execute(
+    values ('admin-1', 'Admin', 'admin@example.test', 1, 'octocat', 1, '2026-10-11T00:00:00.000Z', '2026-10-11T00:00:00.000Z')`.execute(
     db,
   );
   if (options.linked !== false)
@@ -25,61 +22,29 @@ async function startInstance(
   return db;
 }
 
-const allow: AccessPolicy = () => Promise.resolve({ allowed: true });
-const deny: AccessPolicy = () =>
-  Promise.resolve({ allowed: false, reason: "not_allowed" });
-
-describe("a GitHub identity that would sign in", () => {
-  // #98-AD-16
-  it("passes when the access policy lets it through, and is asked with the login and the GitHub id", async () => {
+describe("a linked GitHub identity", () => {
+  // #98-AD-16, #102-GH-22
+  it("is found for a user with a GitHub account row", async () => {
     const db = await startInstance();
-    const policy = vi.fn(allow);
 
-    const passes = await githubIdentityPasses(db, policy, "admin-1");
+    expect(await githubIdentityLinked(db, "admin-1")).toBe(true);
+  });
 
-    expect(passes).toBe(true);
-    expect(policy).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "admin-1",
-        githubLogin: "octocat",
-        githubId: "583231",
-      }),
+  // #98-AD-16, #102-GH-22
+  it("is not found for a user without a GitHub account row", async () => {
+    const db = await startInstance({ linked: false });
+
+    expect(await githubIdentityLinked(db, "admin-1")).toBe(false);
+  });
+
+  it("is not found for a user that does not exist, or for an account of another provider", async () => {
+    const db = await startInstance({ linked: false });
+    await sql`insert into accounts (id, account_id, provider_id, user_id, created_at, updated_at)
+      values ('acc-2', 'x', 'credential', 'admin-1', '2026-10-11T00:00:00.000Z', '2026-10-11T00:00:00.000Z')`.execute(
+      db,
     );
-  });
 
-  // #98-AD-16
-  it("does not pass when the access policy turns it away", async () => {
-    const db = await startInstance();
-
-    expect(await githubIdentityPasses(db, deny, "admin-1")).toBe(false);
-  });
-
-  // #98-AD-16
-  it("does not pass without a linked GitHub account, or when its login is not known", async () => {
-    const unlinked = await startInstance({ linked: false });
-    const noLogin = await startInstance({ githubLogin: null });
-    const policy = vi.fn(allow);
-
-    expect(await githubIdentityPasses(unlinked, policy, "admin-1")).toBe(false);
-    expect(await githubIdentityPasses(noLogin, policy, "admin-1")).toBe(false);
-    expect(policy).not.toHaveBeenCalled();
-  });
-
-  it("does not pass when the check cannot be made", async () => {
-    const db = await startInstance();
-
-    expect(
-      await githubIdentityPasses(
-        db,
-        () => Promise.reject(new Error("GitHub unreachable")),
-        "admin-1",
-      ),
-    ).toBe(false);
-  });
-
-  it("does not pass for a user that does not exist", async () => {
-    const db = await startInstance();
-
-    expect(await githubIdentityPasses(db, allow, "nobody")).toBe(false);
+    expect(await githubIdentityLinked(db, "nobody")).toBe(false);
+    expect(await githubIdentityLinked(db, "admin-1")).toBe(false);
   });
 });

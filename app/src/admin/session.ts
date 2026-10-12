@@ -9,7 +9,6 @@ import { notFound, redirect } from "next/navigation";
 import { cache } from "react";
 import { getAccessGates } from "../auth/access-gates-runtime.ts";
 import type { SessionUser } from "../auth/access-policy.ts";
-import { getAccessPolicy } from "../auth/access-runtime.ts";
 import { getAuth } from "../auth/auth.ts";
 import { currentLookup } from "../auth/session.ts";
 import { loginPath, lookupSession } from "../auth/session-user.ts";
@@ -19,14 +18,11 @@ import { adminAccessOf, type AdminAccess } from "./access.ts";
 export async function lookupAdmin(): Promise<AdminAccess> {
   const requestHeaders = await headers();
   return adminAccessOf(
-    await lookupSession(
-      getAuth(),
-      requestHeaders,
-      getAccessPolicy(),
-      getAccessGates(),
-    ),
+    await lookupSession(getAuth(), requestHeaders, getAccessGates()),
   );
 }
+
+export { lookupSessionId } from "../auth/session.ts";
 
 /**
  * The instance admin of the current request, for a page or a layout. Without a session the person is

@@ -72,7 +72,7 @@ test.describe("a pull request on its way to a review comment", () => {
     // first repository on. The other one stays off.
     const context = await browser.newContext({ baseURL });
     const page = await context.newPage();
-    await addGithubAccount(context.request, account);
+    await addGithubAccount(context.request, account, "pipeline");
     await addGithubInstallation(
       context.request,
       {

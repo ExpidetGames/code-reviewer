@@ -530,7 +530,6 @@ describe("an account that may not use the app", () => {
       const lookups: Array<[SessionLookup, number, string]> = [
         [{ kind: "no_workspace", user }, 403, "no_workspace_access"],
         [{ kind: "unverified", user }, 403, "email_not_verified"],
-        [{ kind: "denied", reason: "not_allowed" }, 401, "UNAUTHENTICATED"],
         [{ kind: "none" }, 401, "UNAUTHENTICATED"],
       ];
 

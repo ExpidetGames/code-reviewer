@@ -6,7 +6,7 @@
 // the module is loaded, because the database is only opened once the server runs.
 import "server-only";
 import { loadAuthConfig } from "../auth/config.ts";
-import { githubSignInConfigured } from "../auth/sign-in-methods.ts";
+import { isGithubSignInConfigured } from "../github-config/shared.ts";
 import { getDatabase } from "../db/startup.ts";
 import { getMailSender } from "../mail/shared.ts";
 import { assembleWorkspaces, type AssembledWorkspaces } from "./assemble.ts";
@@ -20,7 +20,7 @@ function assembled(): AssembledWorkspaces {
     mail: getMailSender(),
     // The address in a link is the configured one, never a request header.
     baseUrl: loadAuthConfig(process.env).baseUrl,
-    githubConfigured: () => githubSignInConfigured(process.env),
+    githubConfigured: () => isGithubSignInConfigured(),
   });
 }
 

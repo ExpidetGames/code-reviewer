@@ -156,7 +156,24 @@ and 2.7):
 - `instance_settings` gained two keys: `sign_in_methods` and `max_workspaces_per_user` (typed in
   `instance-settings-repository.ts`, which also reads a value with who saved it and when).
   A third key, `smtp`, holds the mail server's settings (the password is in `secrets`, never here); the repository
-  can also `remove` a setting.
+  can also `remove` a setting. A fourth, `github_app`, holds the GitHub App's non-secret settings (app id, slug,
+  client id, the "private app" flag, where it came from; the private key, webhook secret and client secret are in
+  `secrets`, `src/github-config/`).
+
+### Signed states, the address conflict and the accounts indexes
+
+Migrations `20261012120000_create_signed_states`, `20261012120100_add_users_email_conflict` and
+`20261012120200_unique_accounts` (sections 2.4, 2.5 and 2.9):
+
+- `signed_states` (`id` = the nonce, `purpose`, `user_id`, `session_hash`, `code_verifier`, `data`, `created_at`,
+  `expires_at`, `used_at`): the single-use side of the signed `state` values of the round trips through GitHub (the
+  manifest flow, linking a GitHub identity), `src/signed-state/`. A row goes with its user and is removed by the
+  clean-up once it has expired.
+- `users.email_conflict`: GitHub's verified primary address when another account has it already, so an imported
+  user's placeholder address could not be replaced (`src/github-signin/decide.ts`). Null otherwise.
+- Unique indexes on `accounts`: `(provider_id, account_id)` (an identity belongs to one user) and `(user_id,
+provider_id)` (a user has one identity per way to sign in), so linking a GitHub identity is safe when two requests
+  race.
 
 ## Workspace scoping
 

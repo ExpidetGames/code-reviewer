@@ -29,6 +29,15 @@ export type RemoteRepository = {
   url: string;
 };
 
+/** The app as `GET /app` describes it to its own JWT. */
+export type RemoteApp = {
+  /** The app id as text. */
+  id: string;
+  slug: string;
+  /** The permissions the App holds, by API name (`pull_requests`, `emails`, `members`, ...). */
+  permissions: Record<string, string>;
+};
+
 export type CollaboratorPermission = "admin" | "write" | "read" | "none";
 
 export type InstallationToken = {
@@ -50,6 +59,11 @@ export type JobTokenScope = {
 };
 
 export type GithubAppClient = {
+  /**
+   * The app itself (`GET /app`, App JWT): proves that the key belongs to the app id, and says what the
+   * App is granted. Rejects with GITHUB_APP_AUTH_FAILED when GitHub refuses the JWT.
+   */
+  getApp(): Promise<RemoteApp>;
   /** Every installation of the app (needs the App JWT). */
   listInstallations(): Promise<RemoteInstallation[]>;
   /** One installation, or null when GitHub does not know it (it was removed, or is not ours). */
@@ -499,6 +513,21 @@ export function createGithubAppClient(
   }
 
   return {
+    async getApp() {
+      const json = await request(appJwt(), "GET", "/app");
+      if (
+        !isRecord(json) ||
+        typeof json.id !== "number" ||
+        typeof json.slug !== "string"
+      )
+        throw shapeError("GET /app");
+      const permissions: Record<string, string> = {};
+      if (isRecord(json.permissions))
+        for (const [name, level] of Object.entries(json.permissions))
+          if (typeof level === "string") permissions[name] = level;
+      return { id: String(json.id), slug: json.slug, permissions };
+    },
+
     listInstallations() {
       return allPages(
         async () => appJwt(),

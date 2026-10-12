@@ -6,6 +6,7 @@
 // credentials that cannot be read are announced.
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
+import type { GithubConfigView } from "../../github-config/service.ts";
 import type { AdminSettingsView } from "../service.ts";
 import { Overview } from "./overview.tsx";
 
@@ -37,6 +38,38 @@ function item(title: string): HTMLElement {
   const element = screen.getByText(title).closest("li");
   if (element === null) throw new Error(`No checklist item ${title}`);
   return element;
+}
+
+function githubView(changes: Partial<GithubConfigView> = {}): GithubConfigView {
+  return {
+    status: "configured",
+    source: "database",
+    app: {
+      appId: "424242",
+      slug: "code-reviewer-acme",
+      privateApp: true,
+      origin: "manifest",
+      installUrl:
+        "https://github.com/apps/code-reviewer-acme/installations/new",
+    },
+    problem: null,
+    secrets: {
+      privateKey: "configured",
+      webhookSecret: "configured",
+      clientSecret: "configured",
+    },
+    userAuthorization: { configured: true, clientId: "Iv1.0123456789abcdef" },
+    urls: {
+      homepage: "https://reviews.example.test",
+      webhook: "https://reviews.example.test/api/webhooks/github-app",
+      callback: "https://reviews.example.test/api/auth/callback/github",
+      setup: "https://reviews.example.test/github/connected",
+    },
+    privateAppUnknown: false,
+    mayLackPermissions: false,
+    updatedAt: "2026-10-12T08:00:00.000Z",
+    ...changes,
+  };
 }
 
 describe("the checklist", () => {
@@ -76,11 +109,57 @@ describe("the checklist", () => {
     render(
       <Overview
         settings={view({ mailConfigured: true, githubConfigured: true })}
+        github={githubView()}
       />,
     );
 
     expect(within(item("Mail server")).getByText("Done")).toBeTruthy();
     expect(within(item("GitHub")).getByText("Done")).toBeTruthy();
+    expect(within(item("GitHub")).getByText(/code-reviewer-acme/)).toBeTruthy();
+    expect(
+      within(item("GitHub")).getByText(/Signing in with GitHub is enabled/),
+    ).toBeTruthy();
+  });
+
+  // #102-GH-21
+  it("says that an App without the user authorization cannot sign people in yet", () => {
+    render(
+      <Overview
+        settings={view({ githubConfigured: false })}
+        github={githubView({
+          userAuthorization: { configured: false, clientId: null },
+        })}
+      />,
+    );
+
+    expect(within(item("GitHub")).getByText("Done")).toBeTruthy();
+    expect(within(item("GitHub")).getByText(/not enabled yet/)).toBeTruthy();
+  });
+
+  it("names what is wrong with the App's settings, as field names only", () => {
+    render(
+      <Overview
+        settings={view()}
+        github={githubView({
+          status: "problem",
+          problem: { kind: "invalid", fields: ["github_app_private_key"] },
+        })}
+      />,
+    );
+
+    expect(within(item("GitHub")).getByText("To do")).toBeTruthy();
+    expect(
+      within(item("GitHub")).getByText(/github_app_private_key/),
+    ).toBeTruthy();
+  });
+
+  // #102-GH-27
+  it("tells the admin how many users could not get their GitHub address", () => {
+    render(<Overview settings={view()} emailConflictCount={2} />);
+
+    expect(
+      screen.getByText(/2 users could not get their GitHub address/),
+    ).toBeTruthy();
   });
 
   // #100-review-4

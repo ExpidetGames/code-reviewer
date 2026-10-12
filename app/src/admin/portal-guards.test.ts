@@ -60,7 +60,7 @@ describe("the guards of the admin portal", () => {
       .filter(({ file }) => {
         const source = readFileSync(file, "utf8");
         return !(
-          /\bcreateAdminRouteHandlers\(/.test(source) &&
+          /\bcreate(Admin|Github)RouteHandlers\(/.test(source) &&
           /\baccess:\s*lookupAdmin\b/.test(source)
         );
       })
