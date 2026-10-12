@@ -147,7 +147,11 @@ describePostgres("the job queue on Postgres", () => {
     const postgres = await createPostgresTestDatabase();
     const fixture = await createJobQueueFixture({ database: postgres.db });
     await fixture.enqueueNew({ prNumber: 7, headSha: sha("a") });
+    // A later created_at makes the pull request 7 job unambiguously the oldest due job; the claim
+    // breaks ties of equal timestamps by the random id, which would make this test flaky.
+    fixture.clock.advance(1000);
     await fixture.enqueueNew({ prNumber: 7, headSha: sha("b") });
+    fixture.clock.advance(1000);
     const next = await fixture.enqueueNew({ prNumber: 8, headSha: sha("c") });
 
     // A second connection holds a running job of pull request 7 without committing. The claim's
