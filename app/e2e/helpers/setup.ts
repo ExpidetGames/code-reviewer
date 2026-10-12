@@ -5,7 +5,7 @@
 // (playwright.config.ts), the way an operator reads `docker compose logs`.
 import { readFileSync } from "node:fs";
 import { expect, request, type APIRequestContext } from "@playwright/test";
-import { e2eEnv } from "./e2e-env";
+import { e2eEnv, githubAppPrivateKey } from "./e2e-env";
 
 /** The setup code the app under test printed. Fails when the log has none, or more than one line. */
 export function readSetupCode(logFile: string): string {
@@ -43,6 +43,39 @@ export async function setUpApp(
       },
     });
     expect(completed.status(), await completed.text()).toBe(200);
+  } finally {
+    await client.dispose();
+  }
+}
+
+/**
+ * Enters the GitHub App of the fake GitHub in the admin portal of the app at `baseURL`, with the form of the
+ * manual way and the instance admin's own session: the same route and the same checks an operator meets
+ * (the key is checked against the fake's `GET /app`, the client id and secret against its token check). The
+ * apps are not configured through the environment any more, so every app that signs people in with GitHub or
+ * reviews pull requests needs this once per run (e2e/setup/prepare-apps.e2e.ts).
+ */
+export async function enterGithubApp(baseURL: string): Promise<void> {
+  const client: APIRequestContext = await request.newContext({ baseURL });
+  try {
+    const signedIn = await client.post("/api/auth/sign-in/email", {
+      data: { email: e2eEnv.adminEmail, password: e2eEnv.adminPassword },
+    });
+    expect(signedIn.status(), await signedIn.text()).toBe(200);
+    const saved = await client.put("/api/admin/github", {
+      data: {
+        app: {
+          appId: e2eEnv.githubAppId,
+          slug: e2eEnv.githubAppSlug,
+          privateKey: githubAppPrivateKey(),
+          webhookSecret: e2eEnv.githubAppWebhookSecret,
+          clientId: e2eEnv.githubClientId,
+          clientSecret: e2eEnv.githubClientSecret,
+          privateApp: true,
+        },
+      },
+    });
+    expect(saved.status(), await saved.text()).toBe(200);
   } finally {
     await client.dispose();
   }

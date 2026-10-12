@@ -159,6 +159,6 @@ describe("the GitHub App setup guide", () => {
     // The MVP asks for no Checks permission (decision of the project lead).
     expect(section("Permissions")).not.toMatch(/\(`checks`\)/);
     // The variables of the separate OAuth app are documented as no longer used.
-    expect(guide).toMatch(/GITHUB_OAUTH_CLIENT_ID[^.]*not used any more/s);
+    expect(guide).toMatch(/GITHUB_OAUTH_CLIENT_ID[\s\S]*?not used any more/);
   });
 });

@@ -73,30 +73,17 @@ export const e2eEnv = {
   /** The instance admin the journeys create when they set an app up. A dummy, as everything here. */
   adminEmail: "admin@e2e.test",
   adminPassword: "e2e-admin-passphrase-orbit-lantern-77",
-  /** ALLOWED_GITHUB_LOGINS of the second app. */
-  pipelineAllowedLogins: "pipeline-journey",
   githubUrl: `http://127.0.0.1:${githubPort}`,
   githubClientId: "e2e-client-id",
   githubClientSecret: "e2e-client-secret-value",
-  // ALLOWED_GITHUB_LOGINS of the app under test: the accounts of the journeys that sign in. A new
-  // journey that signs in with an account of its own adds the login here. Accounts that are not
-  // listed are refused (see e2e/auth/allow-list.e2e.ts).
-  allowedLogins: [
-    "login-journey",
-    "nav-journey",
-    "projects-journey",
-    "inactive-journey",
-    "runs-journey",
-    "manual-journey",
-    "portal-journey",
-  ].join(","),
   appSecret: "e2e-app-secret-0123456789-0123456789-abcdef",
   // The production server refuses to start without the runner token. A dummy: only the journey of
   // e2e/jobs starts a runner that talks to an app (the second one); the others act on the queue
   // through its code (e2e/helpers/job-queue.ts).
   runnerToken: "e2e-runner-token-0123456789-0123456789-abcdef",
-  // The GitHub App of the app under test. Only the webhook secret matters to the journeys (they
-  // sign deliveries with it); the private key is generated for each run in playwright.config.ts.
+  // The GitHub App of the apps under test, which the run enters in the admin portal of each (e2e/setup/
+  // prepare-apps.e2e.ts). The webhook secret matters to the journeys (they sign deliveries with it); the
+  // private key is generated for each run in playwright.config.ts and handed on through the environment.
   githubAppId: "424242",
   githubAppSlug: "code-reviewer-e2e",
   /** The login the app's comments are written as at the fake GitHub. */
@@ -115,3 +102,15 @@ export const llmEnv = {
   model: "test/fake-model",
   maxTokens: "32000",
 };
+
+/**
+ * The private key of the GitHub App registered at the fake GitHub (a throwaway made for each run in
+ * playwright.config.ts and passed on in the environment, never written anywhere), for the journeys that
+ * enter the App in the admin portal.
+ */
+export function githubAppPrivateKey(): string {
+  const key = process.env.E2E_GITHUB_APP_PRIVATE_KEY;
+  if (key === undefined || key === "")
+    throw new Error("playwright.config.ts did not make the GitHub App key.");
+  return key;
+}

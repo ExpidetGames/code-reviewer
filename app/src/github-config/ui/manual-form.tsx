@@ -156,7 +156,7 @@ export function ManualForm({
             rows={4}
             autoComplete="off"
             spellCheck={false}
-            placeholder="-----BEGIN RSA PRIVATE KEY-----"
+            placeholder="The content of the .pem file"
             value={privateKey}
             onChange={(event) => setPrivateKey(event.target.value)}
             aria-invalid={issueFor("privateKey") !== undefined}

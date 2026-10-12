@@ -2,25 +2,81 @@
 
 // Helpers for the journeys that sign in: add an account to the fake GitHub that Playwright started
 // next to the app, and walk through the sign in form the way a person does.
+import { execFile } from "node:child_process";
+import { resolve } from "node:path";
+import { promisify } from "node:util";
 import { expect, type APIRequestContext, type Page } from "@playwright/test";
 import { e2eEnv } from "./e2e-env";
+
+const run = promisify(execFile);
+const ACCOUNTS_CHILD = resolve(
+  process.cwd(),
+  "src/test-support/e2e-accounts-child.ts",
+);
 
 export type GithubAccount = {
   id: number;
   login: string;
   name: string;
+  /** The public profile email. Also the one verified primary address, unless `emails` says otherwise. */
   email: string | null;
+  /** What `GET /user/emails` answers, when it should not be just the public email. */
+  emails?: Array<{ email: string; primary: boolean; verified: boolean }>;
 };
 
-/** Each spec file owns its accounts (own id and login); nobody resets the fake while others run. */
+/** The apps a journey can sign an account into: the SQLite file of each. */
+export type AppUnderTest = "main" | "pipeline" | "setup";
+const DATABASES: Record<AppUnderTest, string> = {
+  main: e2eEnv.databasePath,
+  pipeline: e2eEnv.pipelineDatabasePath,
+  setup: e2eEnv.setupDatabasePath,
+};
+
+/**
+ * Puts a user into the database of an app the way the import of an existing installation leaves one: a user
+ * who signed in with GitHub before accounts existed, a member of the default workspace (see
+ * src/test-support/e2e-accounts-child.ts). The first sign in as that GitHub account is found by its numeric id.
+ */
+export async function importGithubUser(
+  account: GithubAccount,
+  app: AppUnderTest,
+  role: "owner" | "admin" | "member" = "member",
+): Promise<void> {
+  await run(
+    process.execPath,
+    [
+      "--no-warnings",
+      "--conditions=react-server",
+      ACCOUNTS_CHILD,
+      "import-user",
+      resolve(process.cwd(), DATABASES[app]),
+      JSON.stringify({
+        githubId: account.id,
+        login: account.login,
+        name: account.name,
+        role,
+      }),
+    ],
+    { cwd: process.cwd() },
+  );
+}
+
+/**
+ * Each spec file owns its accounts (own id and login); nobody resets the fake while others run. With `app`,
+ * the account also exists in that app as an imported user and a member (so a journey that signs in finds the
+ * workspace); without, it is a GitHub account nobody here knows.
+ */
 export async function addGithubAccount(
   request: APIRequestContext,
   account: GithubAccount,
+  app: AppUnderTest | null = "main",
+  role: "owner" | "admin" | "member" = "member",
 ): Promise<void> {
   const response = await request.post(`${e2eEnv.githubUrl}/__fake/users`, {
     data: account,
   });
   expect(response.status()).toBe(201);
+  if (app !== null) await importGithubUser(account, app, role);
 }
 
 /** Opens the app, signs in as `account` at the fake GitHub and waits for the signed in app (the user menu with their name). */
