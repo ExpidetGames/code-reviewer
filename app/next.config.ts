@@ -3,7 +3,10 @@
 import type { NextConfig } from "next";
 import {
   MISSING_PATH,
+  PORTAL_API_ROOT,
   PORTAL_DENIED_HEADER,
+  PORTAL_PAGE_ROOT,
+  PORTAL_REWRITE_HEADER,
   PROXY_SKIPPED_PATHS,
 } from "./src/admin/paths.ts";
 
@@ -30,6 +33,20 @@ const nextConfig: NextConfig = {
       // (src/admin/paths.ts). Next.js answers it as a path that does not exist, the same as any other,
       // with nothing of the portal in the answer.
       beforeFiles: [
+        // The instance admin's request for the portal (`/admin`, `/api/admin`) is marked by the proxy and
+        // served from the files of the portal. Not a rewrite made by the proxy: see PORTAL_REWRITE_HEADER.
+        // Nobody else carries the header (the proxy takes it off), and the pages and routes of the portal
+        // check the admin again themselves.
+        {
+          source: "/admin/:path*",
+          has: [{ type: "header", key: PORTAL_REWRITE_HEADER }],
+          destination: `${PORTAL_PAGE_ROOT}/:path*`,
+        },
+        {
+          source: "/api/admin/:path*",
+          has: [{ type: "header", key: PORTAL_REWRITE_HEADER }],
+          destination: `${PORTAL_API_ROOT}/:path*`,
+        },
         {
           // Only what the proxy sees: it is the proxy that takes the header off a request from outside.
           source: `/:path((?!${PROXY_SKIPPED_PATHS}).*)`,
