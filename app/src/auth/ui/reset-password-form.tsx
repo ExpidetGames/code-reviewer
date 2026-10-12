@@ -12,6 +12,7 @@ import {
   type FetchLike,
   type RequestIssue,
 } from "../../ui/json-request.ts";
+import { CROSS_SITE_REQUEST } from "../../copy/messages.ts";
 import {
   describeTransportFailure,
   GENERIC_FAILURE,
@@ -28,7 +29,7 @@ const FAILURE_COPY: Record<string, string> = {
     'This link is not valid any more. It was used already, or it expired after 30 minutes, or it is not complete. Ask for a new one with "Forgot your password?" on the sign-in page (if this instance sends mail), or ask the operator of this instance, who can run `admin reset-password` on the server.',
   rate_limited:
     "Too many attempts in a short time. Wait a minute and try again.",
-  cross_site_request: "The request did not come from this page. Reload it.",
+  cross_site_request: CROSS_SITE_REQUEST,
 };
 
 function describe(code: string, issues: RequestIssue[]): string {

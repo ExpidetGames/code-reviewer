@@ -19,9 +19,8 @@ import {
 export const GITHUB_SIGN_IN_NOT_ENABLED =
   "Signing in with GitHub is not enabled yet: the client id and secret of the App are missing.";
 export const GITHUB_SIGN_IN_NOT_CONFIGURED =
-  "Sign in with GitHub is not set up yet. Enter the client id and secret of the App first.";
-export const PRIVATE_APP_WHERE_HINT =
-  'Look at "Where can this GitHub App be installed?" in the App\'s settings.';
+  "Sign in with GitHub is not configured yet. Enter the client id and secret of the App first.";
+export const PRIVATE_APP_WHERE_HINT = `Look at "Where can this GitHub App be installed?" in the App's settings.`;
 
 const FAILURE_COPY: Record<string, string> = {
   cross_site_request: CROSS_SITE_REQUEST,

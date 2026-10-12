@@ -177,8 +177,8 @@ export function LlmAccessForm({
           </label>
           {stored !== null ? (
             <InfoHint label="About the saved key">
-              Leave the field empty to keep the saved key, or enter a new one
-              to replace it.
+              Leave the field empty to keep the saved key, or enter a new one to
+              replace it.
             </InfoHint>
           ) : null}
         </div>

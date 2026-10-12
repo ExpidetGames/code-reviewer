@@ -17,8 +17,36 @@ import {
   GITHUB_NOT_CONFIGURED_COPY,
   GITHUB_NOT_CONFIGURED_TITLE,
 } from "../config-status/notices.ts";
-import { UNREADABLE_SECRET_CAUSE } from "../secrets/messages.ts";
+import {
+  STORED_ENCRYPTED_HINT,
+  UNREADABLE_SECRET_CAUSE,
+} from "../secrets/messages.ts";
 import { INVITATION_LINK_LIFETIME } from "../workspaces/ui/messages.ts";
+import {
+  GITHUB_SIGN_IN_NOT_CONFIGURED,
+  GITHUB_SIGN_IN_NOT_ENABLED,
+  PRIVATE_APP_WHERE_HINT,
+} from "../github-config/ui/messages.ts";
+import {
+  FAIL_CLOSED_WARNING,
+  SIGN_UP_RULE_OPTIONS,
+} from "../signup/ui/rule-copy.ts";
+import { PROJECT_STATE_TEXT } from "../projects/ui/messages.ts";
+import {
+  CROSS_SITE_REQUEST,
+  CROSS_SITE_REQUEST_RELOAD_PAGE,
+  ENTRIES_REQUIRED,
+  ENTRY_INVALID,
+  INVALID_EMAIL,
+  INVALID_VALUES,
+  NOT_AVAILABLE_TO_YOU,
+  REQUEST_NOT_UNDERSTOOD,
+  ROLE_NOT_ALLOWED,
+  SESSION_ENDED,
+  TOO_MANY_ATTEMPTS,
+  TOO_MANY_ENTRIES,
+  UNAVAILABLE,
+} from "./messages.ts";
 
 const APP_SRC = fileURLToPath(new URL("..", import.meta.url)); // app/src/
 
@@ -38,6 +66,44 @@ function filesContaining(fragment: string): string[] {
     )
     .sort();
 }
+
+/**
+ * Every consolidated sentence of #169, with its one owner module. `sourceFiles()` scans the whole of
+ * `app/src/`, so a sentence pasted into a screen fails here just as a second message module does.
+ */
+const CONSOLIDATED: ReadonlyArray<readonly [string, string]> = [
+  [PASSWORD_RULE_HINT, "auth/password-policy.ts"],
+  [PASSWORDS_DO_NOT_MATCH, "auth/password-policy.ts"],
+  [UNREADABLE_SECRET_CAUSE, "secrets/messages.ts"],
+  [STORED_ENCRYPTED_HINT, "secrets/messages.ts"],
+  [GITHUB_NOT_CONFIGURED_TITLE, "config-status/notices.ts"],
+  [GITHUB_NOT_CONFIGURED_COPY, "config-status/notices.ts"],
+  [GITHUB_SIGN_IN_NOT_ENABLED, "github-config/ui/messages.ts"],
+  [GITHUB_SIGN_IN_NOT_CONFIGURED, "github-config/ui/messages.ts"],
+  [PRIVATE_APP_WHERE_HINT, "github-config/ui/messages.ts"],
+  [INVITATION_LINK_LIFETIME, "workspaces/ui/messages.ts"],
+  [FAIL_CLOSED_WARNING, "signup/ui/rule-copy.ts"],
+  ...SIGN_UP_RULE_OPTIONS.map((option): readonly [string, string] => [
+    option.text,
+    "signup/ui/rule-copy.ts",
+  ]),
+  ...Object.values(PROJECT_STATE_TEXT).map(
+    (text): readonly [string, string] => [text, "projects/ui/messages.ts"],
+  ),
+  [CROSS_SITE_REQUEST, "copy/messages.ts"],
+  [CROSS_SITE_REQUEST_RELOAD_PAGE, "copy/messages.ts"],
+  [REQUEST_NOT_UNDERSTOOD, "copy/messages.ts"],
+  [UNAVAILABLE, "copy/messages.ts"],
+  [TOO_MANY_ATTEMPTS, "copy/messages.ts"],
+  [NOT_AVAILABLE_TO_YOU, "copy/messages.ts"],
+  [INVALID_VALUES, "copy/messages.ts"],
+  [ROLE_NOT_ALLOWED, "copy/messages.ts"],
+  [SESSION_ENDED, "copy/messages.ts"],
+  [INVALID_EMAIL, "copy/messages.ts"],
+  [ENTRIES_REQUIRED, "copy/messages.ts"],
+  [ENTRY_INVALID, "copy/messages.ts"],
+  [TOO_MANY_ENTRIES, "copy/messages.ts"],
+];
 
 /** The message modules: where copy lives, one owner per fact (#169, the plan's duplication table). */
 const MESSAGE_MODULES = [
@@ -111,9 +177,9 @@ describe("the owners of the consolidated copy", () => {
 
   // #169-T03
   it("has one module for the text that GitHub is not set up yet", () => {
-    expect(
-      filesContaining(JSON.stringify(GITHUB_NOT_CONFIGURED_TITLE)),
-    ).toEqual(["config-status/notices.ts"]);
+    expect(filesContaining(GITHUB_NOT_CONFIGURED_TITLE)).toEqual([
+      "config-status/notices.ts",
+    ]);
     expect(filesContaining(GITHUB_NOT_CONFIGURED_COPY)).toEqual([
       "config-status/notices.ts",
     ]);
@@ -124,6 +190,13 @@ describe("the owners of the consolidated copy", () => {
     expect(filesContaining(INVITATION_LINK_LIFETIME)).toEqual([
       "workspaces/ui/messages.ts",
     ]);
+  });
+
+  // #169-T05
+  it("gives every consolidated sentence exactly one owner in the whole source", () => {
+    for (const [sentence, owner] of CONSOLIDATED) {
+      expect(filesContaining(sentence), sentence).toEqual([owner]);
+    }
   });
 });
 
