@@ -28,6 +28,9 @@ const HSL = "hsl" + "(";
 const OKLCH = "oklch" + "(";
 const NAMED = "red";
 const REBECCA = "rebeccapurple";
+const QUOTED_STYLE = `style={{ color: ${JSON.stringify(NAMED)} }}`;
+const PALETTE_CLASS = "bg-" + "red-" + "500";
+const PALETTE_BLACK = "text-" + "black";
 
 describe("no color literal outside theme.css", () => {
   // #166-T01
@@ -71,6 +74,9 @@ describe("findColorLiterals", () => {
       `className="bg-[${REBECCA}]"`,
       REBECCA,
     ],
+    ["a named color in a quoted style value", QUOTED_STYLE, NAMED],
+    ["a Tailwind palette background utility", PALETTE_CLASS, PALETTE_CLASS],
+    ["a Tailwind palette text utility", PALETTE_BLACK, PALETTE_BLACK],
   ])("finds %s", (_name, content, literal) => {
     expect(
       findColorLiterals(content).map((finding) => finding.literal),
@@ -83,6 +89,10 @@ describe("findColorLiterals", () => {
     ["the words of prose", "reject a token with white space around it"],
     ["a variable reference", "background: var(--primary);"],
     ["a Tailwind utility by name", "className='text-muted-foreground'"],
+    [
+      "a token utility that only looks like a palette name",
+      "className='bg-background text-foreground'",
+    ],
   ])("does not treat %s as a color", (_name, content) => {
     expect(findColorLiterals(content)).toEqual([]);
   });
