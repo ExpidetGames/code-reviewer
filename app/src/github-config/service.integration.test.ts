@@ -518,6 +518,26 @@ describe("the manual form", () => {
 
     expect(results.at(-1)).toMatchObject({ ok: false, error: "rate_limited" });
   });
+
+  // #102-GH-02
+  it("is not locked out of the check or the manual save by callbacks that carry no valid state", async () => {
+    const h = await createGithubConfigHarness();
+
+    const junk = [];
+    for (let i = 0; i < 21; i += 1)
+      junk.push(
+        await h.service.completeManifest(h.admin, {
+          code: "some-code",
+          state: i % 2 === 0 ? `forged-${String(i)}` : null,
+        }),
+      );
+    const check = await h.service.checkPermissions("admin-1");
+    const save = await h.service.saveApp("admin-1", h.validManualInput());
+
+    expect(junk.every((r) => !r.ok && r.error === "state_invalid")).toBe(true);
+    expect(check).not.toMatchObject({ error: "rate_limited" });
+    expect(save).toEqual({ ok: true });
+  });
 });
 
 describe("what the portal shows", () => {

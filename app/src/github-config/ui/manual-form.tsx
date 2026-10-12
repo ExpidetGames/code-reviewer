@@ -2,7 +2,7 @@
 
 "use client";
 // The step-by-step way to connect GitHub: the six values of an App that was made by hand (docs/github-app.md),
-// and a checkbox for what GitHub's API does not report: whether the App can only be installed on its own
+// and a required choice (no default) for what GitHub's API does not report: whether the App can only be installed on its own
 // account. The private key, the webhook secret and the client secret are write-only: the page shows whether
 // one is saved, an empty field keeps it while the App id (and, for the client secret, the client id) is
 // unchanged, and the saved value never reaches this page. The server validates before it saves: the key
@@ -46,12 +46,23 @@ export function ManualForm({
     view.userAuthorization.clientId ?? "",
   );
   const [clientSecret, setClientSecret] = useState("");
-  const [privateApp, setPrivateApp] = useState(view.app?.privateApp ?? true);
+  const [privateApp, setPrivateApp] = useState<boolean | null>(
+    view.app?.privateApp ?? null,
+  );
   const [pending, setPending] = useState(false);
   const [status, setStatus] = useState<Status>(null);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (privateApp === null) {
+      // The radio group is required, so the browser stops this first; this is the same answer in words.
+      setStatus({
+        kind: "failed",
+        text: describeGithubFailure("invalid_input"),
+        issues: [{ field: "privateApp", code: "private_app_invalid" }],
+      });
+      return;
+    }
     setPending(true);
     setStatus(null);
     const result = await api.saveApp({
@@ -195,22 +206,38 @@ export function ManualForm({
           </p>
           {error("webhookSecret")}
         </div>
-        <div className="field">
+        <fieldset className="field">
+          <legend className="field-label">
+            Where can this App be installed?
+          </legend>
           <label className="check">
             <input
-              type="checkbox"
-              checked={privateApp}
-              onChange={(event) => setPrivateApp(event.target.checked)}
+              type="radio"
+              name={`${ids}-privateApp`}
+              required
+              checked={privateApp === true}
+              onChange={() => setPrivateApp(true)}
             />
-            <span>This App can only be installed on its own account</span>
+            <span>Only on its own account (a private App)</span>
+          </label>
+          <label className="check">
+            <input
+              type="radio"
+              name={`${ids}-privateApp`}
+              required
+              checked={privateApp === false}
+              onChange={() => setPrivateApp(false)}
+            />
+            <span>On any account (a public App)</span>
           </label>
           <p className="muted small">
-            GitHub does not report it. It decides whether a new installation may
-            be attached to the one workspace of a single-tenant instance without
-            asking.
+            Look at &quot;Where can this GitHub App be installed?&quot; in the
+            App&apos;s settings. GitHub does not report it. It decides whether a
+            new installation may be attached to the one workspace of a
+            single-tenant instance without asking, so there is no default.
           </p>
           {error("privateApp")}
-        </div>
+        </fieldset>
       </fieldset>
       <fieldset>
         <legend>Sign in with GitHub (optional)</legend>

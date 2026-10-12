@@ -180,6 +180,11 @@ test.describe("the GitHub integration of the admin portal", () => {
     await form.getByLabel("Webhook secret").fill(e2eEnv.githubAppWebhookSecret);
     await form.getByLabel("Client ID").fill(e2eEnv.githubClientId);
     await form.getByLabel("Client secret").fill(e2eEnv.githubClientSecret);
+    // There is no default for the App's visibility: the form does not go out until one is chosen.
+    await form.getByRole("button", { name: "Save and check" }).click();
+    await expect(form.getByLabel(/Only on its own account/)).not.toBeChecked();
+    await expect(form.getByLabel(/On any account/)).not.toBeChecked();
+    await form.getByLabel(/Only on its own account/).check();
     await form.getByRole("button", { name: "Save and check" }).click();
     await expect(form.getByText("another slug")).toBeVisible();
 

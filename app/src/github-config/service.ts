@@ -551,11 +551,6 @@ export function createGithubConfigService({
 
     async completeManifest(actor, query) {
       const { code, state } = query;
-      const hit = await rateLimits.hit(
-        githubAdminKey(actor.id),
-        GITHUB_ADMIN_WINDOW_MS,
-      );
-      if (hit.count > GITHUB_ADMIN_MAX) return fail("rate_limited");
       if (typeof state !== "string" || state === "" || state.length > 2048)
         return fail("state_invalid");
       // The state first, and used up before anything else happens: a forged, expired, replayed or foreign
@@ -567,6 +562,14 @@ export function createGithubConfigService({
         sessionId: actor.sessionId,
       });
       if (!consumed.ok) return fail("state_invalid");
+      // Only a request that carried a state of this admin and this session is counted: a callback with a
+      // forged, expired or foreign state costs nothing, so junk cannot lock the admin out of the check or
+      // the manual save, which share the counter. A state is single use and a start is limited on its own.
+      const hit = await rateLimits.hit(
+        githubAdminKey(actor.id),
+        GITHUB_ADMIN_WINDOW_MS,
+      );
+      if (hit.count > GITHUB_ADMIN_MAX) return fail("rate_limited");
       if (typeof code !== "string" || code === "" || code.length > 512)
         return fail("manifest_code_invalid");
 
