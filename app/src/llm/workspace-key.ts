@@ -74,7 +74,10 @@ export type RevealedLlmKey =
 
 export type WorkspaceLlmKeyService = {
   status(): Promise<WorkspaceLlmKeyStatus>;
-  save(input: SaveLlmKeyInput, updatedBy: string): Promise<SaveLlmKeyResult>;
+  save(
+    input: SaveLlmKeyInput,
+    updatedBy: string | null,
+  ): Promise<SaveLlmKeyResult>;
   /** Removes the key; false when there was none. */
   remove(): Promise<boolean>;
   /** The key, for code on the server that sends it to its provider. Never hand it to a response. */

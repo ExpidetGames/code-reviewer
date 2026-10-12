@@ -9,8 +9,13 @@
 //   force is ever removed and no limit starts early.
 // - A verification link is kept for a week after it expired or was used, so that someone who holds it
 //   (and its password) is told "used" or "expired" and not just "not valid". After that it is gone.
+// - The LLM key that was handed to a runner with the claim of a job (`job_claimed_keys`, encrypted) is kept
+//   for a week after the job finished, as long as a late or repeated report of the job can still need it to
+//   mask the key in its result. After that it is gone: a key that was rotated away does not stay in the
+//   database for ever. (The row also goes with its job.)
 import type { Kysely } from "kysely";
 import { formatTimestamp } from "../db/codecs.ts";
+import { createJobClaimedKeysRepository } from "../db/repositories/job-claimed-keys-repository.ts";
 import { createRateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
 import type { Database } from "../db/schema.ts";
 
@@ -19,10 +24,14 @@ export const VERIFICATION_TOKEN_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
 /** A reset link is kept as long, for the same reason: a hash that is still known answers "used" or "expired". */
 export const PASSWORD_RESET_TOKEN_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
 
+/** How long the key of a finished job is kept: a late report of the job can still be masked. */
+export const JOB_CLAIMED_KEY_KEEP_MS = 7 * 24 * 60 * 60 * 1000;
+
 export type CleanupResult = {
   rateLimits: number;
   verificationTokens: number;
   passwordResetTokens: number;
+  jobClaimedKeys: number;
 };
 
 export async function cleanUpExpiredRows(
@@ -53,9 +62,14 @@ export async function cleanUpExpiredRows(
       ]),
     )
     .executeTakeFirst();
+  const jobClaimedKeys = await createJobClaimedKeysRepository(
+    db,
+    now,
+  ).deleteFinishedBefore(new Date(now().getTime() - JOB_CLAIMED_KEY_KEEP_MS));
   return {
     rateLimits,
     verificationTokens: Number(tokens.numDeletedRows),
     passwordResetTokens: Number(resets.numDeletedRows),
+    jobClaimedKeys,
   };
 }
