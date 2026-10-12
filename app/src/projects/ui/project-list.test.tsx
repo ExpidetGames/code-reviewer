@@ -39,6 +39,7 @@ function renderList(
   const view: ProjectListView = { rows };
   return render(
     <ProjectList
+      workspaceSlug="acme"
       view={view}
       installUrl={options.installUrl ?? null}
       activationBlocked={options.activationBlocked ?? null}
@@ -136,7 +137,7 @@ describe("the project list with repositories", () => {
 
     expect(
       screen.getByRole("link", { name: "All runs" }).getAttribute("href"),
-    ).toBe("/runs?repository=repo%20with%20space");
+    ).toBe("/w/acme/runs?repository=repo%20with%20space");
   });
 
   // CR-34-T01
@@ -191,7 +192,7 @@ describe("the project list with repositories", () => {
     for (const id of ["a", "b", "c"])
       expect(
         screen.getByRole("link", { name: `acme/${id}` }).getAttribute("href"),
-      ).toBe(`/projects/${id}`);
+      ).toBe(`/w/acme/projects/${id}`);
   });
 
   // CR-34-T10

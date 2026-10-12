@@ -7,7 +7,12 @@
 import { generateKeyPairSync } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { findGithubAppConfigProblem } from "../integrations/registry.ts";
-import { describeConfigStatus, githubAppInstallUrl } from "./status.ts";
+import {
+  configAudienceOf,
+  describeConfigStatus,
+  githubAppInstallUrl,
+  statusForMembers,
+} from "./status.ts";
 
 const KEY = generateKeyPairSync("rsa", {
   modulusLength: 2048,
@@ -138,5 +143,39 @@ describe("describing the configuration for the pages", () => {
     expect(githubAppInstallUrl(COMPLETE)).toBe(
       "https://github.com/apps/code-reviewer-test/installations/new",
     );
+  });
+});
+
+describe("the status for members", () => {
+  // #101-WM-08
+  it("keeps whether each part works and nothing else: no variable, slug, provider, model or warning", () => {
+    const broken = describeConfigStatus({
+      LLM_PROVIDER: "openrouter",
+      LLM_MODEL: "not a model",
+    });
+    const working = describeConfigStatus({
+      ...COMPLETE,
+      LLM_MODEL: "vendor/secret-model",
+    });
+
+    expect(statusForMembers(broken)).toEqual({
+      githubApp: {
+        configured: false,
+        kind: "missing",
+        variables: [],
+        slug: null,
+      },
+      llm: { configured: false, issues: [], warnings: [] },
+    });
+    const shown = statusForMembers(working);
+    expect(shown.githubApp.configured).toBe(true);
+    expect(shown.llm.configured).toBe(true);
+    expect(JSON.stringify(shown)).not.toMatch(/secret-model|LLM_|GITHUB_APP/);
+  });
+
+  // #101-WM-08
+  it("is for everybody but the instance admin", () => {
+    expect(configAudienceOf({ isInstanceAdmin: true })).toBe("operator");
+    expect(configAudienceOf({ isInstanceAdmin: false })).toBe("member");
   });
 });

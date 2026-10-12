@@ -13,6 +13,17 @@ const nextConfig: NextConfig = {
   output: "standalone",
   cacheComponents: true,
   partialPrefetching: true,
+  async headers() {
+    return [
+      {
+        // The address of these pages can carry an invitation link (its token is the credential), so a
+        // browser must not pass it on as a referrer to anything the page loads or links to
+        // (src/workspaces/README.md). The pages ask for the same in their metadata.
+        source: "/:path(invitation|login|sign-up)",
+        headers: [{ key: "Referrer-Policy", value: "no-referrer" }],
+      },
+    ];
+  },
   async rewrites() {
     return {
       // A request for the files of the admin portal by their own address is marked by the proxy

@@ -123,16 +123,20 @@ and never warns. `exceedsContext` lists the models whose context window is small
 
 ## Routes
 
-Both are protected by the proxy (401/403) and by `requireUser()` (called first). A change must come from
+All of them belong to the workspace in the address (`src/workspaces/README.md`): the defaults are the defaults
+of that workspace (`app_settings` is per workspace), every member reads them and changing them needs an
+Admin or an Owner (`manage_review_defaults`); the settings of a project are read and changed by every member
+(`change_project_settings`). They are protected by the proxy (401, 403 and the answer of a missing path for
+a workspace that is not the person's) and by `withWorkspace(...)` (called first). A change must come from
 this site (`Sec-Fetch-Site`/`Origin`), be `application/json` and at most 64 KB.
 
-| Route                                                     | Does                                                                                                            |
-| --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `GET /api/review-settings`                                | the global defaults: `overrides`, `effective`, `sources`, `builtIn`, `cost`, `limits`, `updatedAt`, `updatedBy` |
-| `PUT /api/review-settings`                                | body `{ "settings": { ... } }`, replaces the global defaults                                                    |
-| `GET /api/repositories/:repositoryId/project/settings`    | the project's `overrides`, `effective`, `sources`, `inherited`, `cost`, `limits`                                |
-| `PUT /api/repositories/:repositoryId/project/settings`    | body `{ "settings": { ... } }`, replaces the project's overrides                                                |
-| `DELETE /api/repositories/:repositoryId/project/settings` | removes the project's overrides                                                                                 |
+| Route                                                                  | Does                                                                                                            |
+| ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `GET /api/w/:workspace/review-settings`                                | the global defaults: `overrides`, `effective`, `sources`, `builtIn`, `cost`, `limits`, `updatedAt`, `updatedBy` |
+| `PUT /api/w/:workspace/review-settings`                                | body `{ "settings": { ... } }`, replaces the global defaults                                                    |
+| `GET /api/w/:workspace/repositories/:repositoryId/project/settings`    | the project's `overrides`, `effective`, `sources`, `inherited`, `cost`, `limits`                                |
+| `PUT /api/w/:workspace/repositories/:repositoryId/project/settings`    | body `{ "settings": { ... } }`, replaces the project's overrides                                                |
+| `DELETE /api/w/:workspace/repositories/:repositoryId/project/settings` | removes the project's overrides                                                                                 |
 
 A repository that was never activated can be read (the defaults, `projectId` null, `active` false) and
 saved: the first save creates its project with `active = 0`, so the settings are in place when it is
@@ -148,7 +152,7 @@ repository, or the platform no longer lists it and it has no project). The setti
 ## The pages
 
 `/settings` holds the instance state (GitHub App, LLM access) and the form for the global defaults;
-`/projects/:repositoryId` holds the same form for one project. The form (`ui/settings-form.tsx`) shows
+`/w/:workspace/projects/:repositoryId` holds the same form for one project. The form (`ui/settings-form.tsx`) shows
 the value in force and where it comes from (built-in, global, this project); changing a field sets it
 for the layer, "Use default" takes it back; a save sends only the fields that are set and replaces the
 layer. `ui/form-state.ts` checks the values with `validateReviewSettingsPatch` before sending, so a

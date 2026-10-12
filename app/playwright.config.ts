@@ -82,6 +82,7 @@ export default defineConfig({
         /e2e\/auth\/(sign-up|password-reset)\.e2e\.ts$/,
         /e2e\/admin\/mail\.e2e\.ts$/,
         /e2e\/admin\/github-integration\.e2e\.ts$/,
+        /e2e\/workspaces\//,
       ],
     },
     {
@@ -112,6 +113,32 @@ export default defineConfig({
       use: { ...browser, baseURL: e2eEnv.signupAppUrl },
       testMatch: /e2e\/auth\/(sign-up|password-reset)\.e2e\.ts$/,
       dependencies: ["prepare", "mail"],
+    },
+    // The journey of the invitations changes who belongs to the workspace of the first app and needs its
+    // sign-up rule to be "everyone", which the admin portal journey changes for a while: it runs after
+    // every journey of that app.
+    {
+      name: "invitations",
+      use: browser,
+      testMatch: /e2e\/workspaces\/invite-and-accept\.e2e\.ts$/,
+      dependencies: ["chromium", "runs", "reviews"],
+    },
+    // The journeys of the workspaces in a multi-tenant instance have an app of their own (the fifth): people
+    // create workspaces there, and a single-tenant instance does not let them.
+    {
+      name: "multi",
+      use: { ...browser, baseURL: e2eEnv.multiAppUrl },
+      testMatch: /e2e\/workspaces\/multi-tenant\.e2e\.ts$/,
+      dependencies: ["prepare"],
+    },
+    // The journey of the invitations by mail uses the multi-tenant app again, after the journeys that need it
+    // without a mail server: it configures the fake SMTP server there, which makes every account of that
+    // app confirm its address.
+    {
+      name: "multi-mail",
+      use: { ...browser, baseURL: e2eEnv.multiAppUrl },
+      testMatch: /e2e\/workspaces\/invite-by-mail\.e2e\.ts$/,
+      dependencies: ["multi"],
     },
     // The journey of the first-run setup has an app of its own that nobody has set up (the third
     // one), so it needs nothing to run first and disturbs nobody.
@@ -243,6 +270,19 @@ export default defineConfig({
         BETTER_AUTH_URL: e2eEnv.signupAppUrl,
       },
       url: e2eEnv.signupAppUrl,
+      reuseExistingServer: false,
+      timeout: 60_000,
+    },
+    {
+      command:
+        "rm -rf test-results/e2e-multi-data && mkdir -p test-results/e2e-multi-data && " +
+        `pnpm start --hostname 127.0.0.1 --port ${e2eEnv.multiAppPort} > ${e2eEnv.logFiles.multi} 2>&1`,
+      env: {
+        ...appEnv,
+        DATABASE_PATH: e2eEnv.multiDatabasePath,
+        BETTER_AUTH_URL: e2eEnv.multiAppUrl,
+      },
+      url: e2eEnv.multiAppUrl,
       reuseExistingServer: false,
       timeout: 60_000,
     },

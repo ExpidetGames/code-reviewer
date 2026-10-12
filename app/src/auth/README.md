@@ -45,6 +45,19 @@ the sign-up or the sign in has none, so it sees no data until it is invited). A 
 `email_not_verified` or `no_workspace_access`. Nobody signs up through Better Auth (`emailAndPassword.disableSignUp`, and
 the endpoint is not reachable): `POST /api/sign-up` creates an email account, the GitHub sign in creates a GitHub account.
 
+An account without a workspace still reaches the few places made for it (`NO_WORKSPACE_PATHS` in `access.ts`: `/no-access`,
+`/invitations`, `/workspaces/new`, `POST /api/workspaces`, `POST /api/invitations/accept`), which is how it accepts an
+invitation or creates a workspace (`src/workspaces/README.md`).
+
+A request for a workspace address (`/w/<slug>...`, `/api/w/<slug>...`, `src/workspaces/paths.ts`) is asked one more thing by the
+proxy: the role of the person in that slug (`AccessGates.workspaceRole`). No role is the answer of a path that does not exist (the
+same marked request as for the files of the admin portal), for a workspace that does not exist and for one the person does not
+belong to alike, the instance admin included. The pages and routes check again (`requireWorkspace`, `withWorkspace`).
+
+An invitation link the person came from travels through the sign in: the login page puts the token into the email form and into
+the GitHub form (`invitation`), and the GitHub sign in hands `/invitation?token=...` to Better Auth as the callback address, which
+Better Auth keeps with its own state. Only a value shaped like a link token is carried, and the only place it leads to is that page.
+
 The refusals of a sign in with GitHub reach the login page as `?error=<code>`:
 
 | Code                       | Meaning                                                                                          |
@@ -74,7 +87,7 @@ not read at all; sessions that the earlier sign in made stay valid until they ex
 
 Everything needs a session except `/login`, `/api/health`, `/api/auth/**` (the callback of a GitHub linking is among them: it needs the session that started it, which it checks itself), `/api/runners/**` (own
 token), `/api/webhooks/**` (own signature), `/reset-password` and `/api/password-reset` (the token in a
-reset link is the credential), `/forgot-password` and `/api/password-reset/request` (the visitor asks for a link; limits of their own), `/sign-up`, `/api/sign-up`, `/verify-email`, `/api/verify-email/**` and `/no-access` (the sign-up and the verification have limits of their own, `src/signup/limits.ts`) and, while the instance is not set up, `/setup` and
+reset link is the credential), `/forgot-password` and `/api/password-reset/request` (the visitor asks for a link; limits of their own), `/sign-up`, `/api/sign-up`, `/verify-email`, `/api/verify-email/**` (the sign-up and the verification have limits of their own, `src/signup/limits.ts`) and `/invitation` (the page behind an invitation link; the token is its credential and accepting is a POST that needs a session, `src/workspaces/README.md`) and, while the instance is not set up, `/setup` and
 `/api/setup/**` (the setup code and the setup session; the setup gate in `src/proxy.ts`, which runs before
 this check, answers 404 for them once the instance is set up and 503 `setup_required` for everything
 else before that, `src/setup/gate.ts`). The list is `PUBLIC_PATHS` in `access.ts`; a route

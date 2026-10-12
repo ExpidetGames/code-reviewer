@@ -191,6 +191,9 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
     })();
     return githubPart;
   }
+  // The synchronization with GitHub is a double that counts how often it was asked: what these tests need to
+  // know is whether a request got as far as the synchronization.
+  const syncCalls = { count: 0 };
   const handlers = createAdminRouteHandlers({
     access: async () => {
       const lookup = await lookupSession(auth, current.headers, setup.gates);
@@ -200,6 +203,22 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
       throw new NotFoundSignal();
     },
     service,
+    sync: () => ({
+      syncAll: () => {
+        syncCalls.count += 1;
+        return Promise.resolve({
+          integrations: { created: 0, updated: 0, enabled: 0, disabled: 0 },
+          repositories: {
+            added: 3,
+            reactivated: 0,
+            updated: 0,
+            deactivated: 0,
+            unchanged: 0,
+          },
+          errors: [],
+        });
+      },
+    }),
   });
 
   /** Makes a user with a password (and, if asked, the instance admin flag). */
@@ -429,6 +448,11 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
         )
           return await routes.startLink(request);
       }
+      if (
+        pathname === "/api/instance-portal/integrations/sync" &&
+        request.method === "POST"
+      )
+        return await handlers.syncIntegrations(request);
     } catch (error) {
       if (error instanceof NotFoundSignal)
         return new Response("not found", { status: 404 });
@@ -505,6 +529,8 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
     /** The fake GitHub behind the GitHub routes (started on first use). */
     fakeGithub: async () => (await github()).fake,
     flags,
+    /** How many times a request got as far as the synchronization with GitHub. */
+    syncCalls,
     createUser,
     signIn,
     visit,

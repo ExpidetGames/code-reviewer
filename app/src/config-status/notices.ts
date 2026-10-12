@@ -4,7 +4,7 @@
 // them into the sentences a person reads (the UI translates codes, never the other way round). Never
 // a value: a hint names what to fix, not what is there.
 import type { LlmConfigIssue, LlmConfigIssueCode } from "../llm/config.ts";
-import type { ConfigStatus } from "./status.ts";
+import type { ConfigAudience, ConfigStatus } from "./status.ts";
 
 export type ConfigNotice = {
   id: string;
@@ -69,8 +69,40 @@ function llmNotice(issue: LlmConfigIssue): ConfigNotice {
   };
 }
 
-/** What is wrong with the configuration, in the order a person should fix it; empty when nothing is. */
-export function describeConfigNotices(status: ConfigStatus): ConfigNotice[] {
+/**
+ * What a member of a workspace is told: that a part is not set up and who to ask, and nothing of how the
+ * instance is configured (no variable name, no warning about a setting that is ignored).
+ */
+function describeNoticesForMembers(status: ConfigStatus): ConfigNotice[] {
+  const notices: ConfigNotice[] = [];
+  if (!status.githubApp.configured)
+    notices.push({
+      id: "github_app",
+      severity: "error",
+      title: "GitHub is not set up yet",
+      detail:
+        "Ask your instance admin to set it up. Repositories cannot be read from GitHub and projects cannot be activated until then.",
+    });
+  if (!status.llm.configured)
+    notices.push({
+      id: "llm",
+      severity: "error",
+      title: "Reviews are not set up yet",
+      detail:
+        "Ask your instance admin to set them up. Reviews cannot run until then.",
+    });
+  return notices;
+}
+
+/**
+ * What is wrong with the configuration, in the order a person should fix it; empty when nothing is. The
+ * default audience is the member: the names of the variables are for the operator, who has to ask for them.
+ */
+export function describeConfigNotices(
+  status: ConfigStatus,
+  audience: ConfigAudience = "member",
+): ConfigNotice[] {
+  if (audience === "member") return describeNoticesForMembers(status);
   const notices: ConfigNotice[] = [];
   if (!status.githubApp.configured) {
     const { kind, variables } = status.githubApp;

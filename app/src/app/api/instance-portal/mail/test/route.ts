@@ -9,6 +9,7 @@ import { connection } from "next/server";
 import { createAdminRouteHandlers } from "@/admin/http";
 import { lookupAdmin } from "@/admin/session";
 import { getAdminService } from "@/admin/shared";
+import { getIntegrationSync } from "@/integrations/sync/shared";
 
 export async function POST(request: Request): Promise<Response> {
   // Needs the request and the database, so it never runs at build time.
@@ -18,5 +19,6 @@ export async function POST(request: Request): Promise<Response> {
     access: lookupAdmin,
     notFound,
     service: getAdminService(),
+    sync: getIntegrationSync,
   }).testMail(request);
 }

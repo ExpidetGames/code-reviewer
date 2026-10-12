@@ -52,8 +52,187 @@ describe("creating a workspace for a user", () => {
       creatorId: "user-1",
     });
 
-    expect(result).toEqual({ ok: false, error: "tenancy_is_single" });
+    expect(result).toEqual({ ok: false, error: "multi_tenant_required" });
     const rows = await db.selectFrom("workspaces").selectAll().execute();
     expect(rows).toEqual([]);
+  });
+});
+
+describe("the name and the slug of a new workspace", () => {
+  // #101-WM-03
+  it("makes the slug from the name and numbers it when a workspace has it already", async () => {
+    const db = await startInstance("multi");
+
+    const first = await createWorkspaceUnderTenancy(db, {
+      name: "Team A",
+      creatorId: "user-1",
+    });
+    const second = await createWorkspaceUnderTenancy(db, {
+      name: "Team A",
+      creatorId: "user-1",
+    });
+    const third = await createWorkspaceUnderTenancy(db, {
+      name: "team a",
+      creatorId: "user-1",
+    });
+
+    expect(
+      [first, second, third].map(
+        (result) => result.ok && result.workspace.slug,
+      ),
+    ).toEqual(["team-a", "team-a-2", "team-a-3"]);
+  });
+
+  // #101-WM-03
+  it.each(["", "   ", "a".repeat(81), "Team\r\nA"])(
+    "refuses the name %j and creates nothing",
+    async (name) => {
+      const db = await startInstance("multi");
+
+      const result = await createWorkspaceUnderTenancy(db, {
+        name,
+        creatorId: "user-1",
+      });
+
+      expect(result).toEqual({ ok: false, error: "invalid_name" });
+      expect(await db.selectFrom("workspaces").selectAll().execute()).toEqual(
+        [],
+      );
+    },
+  );
+});
+
+describe("creations at the same moment", () => {
+  // #101-WM-03
+  it("give two requests with the same name two different addresses, never an error", async () => {
+    const db = await startInstance("multi");
+    await sql`insert into users (id, name, email, email_verified, created_at, updated_at)
+      values ('user-2', 'u2', 'u2@example.test', 1, '2026-10-11T00:00:00.000Z', '2026-10-11T00:00:00.000Z')`.execute(
+      db,
+    );
+
+    const results = await Promise.all(
+      ["user-1", "user-2", "user-1", "user-2"].map((creatorId) =>
+        createWorkspaceUnderTenancy(db, { name: "Team A", creatorId }),
+      ),
+    );
+
+    expect(results.every((result) => result.ok)).toBe(true);
+    expect(
+      results.map((result) => result.ok && result.workspace.slug).sort(),
+    ).toEqual(["team-a", "team-a-2", "team-a-3", "team-a-4"]);
+  });
+
+  // #101-WM-04
+  it("let one person past the limit only as often as the limit says", async () => {
+    const db = await startInstance("multi");
+    await createInstanceSettingsRepository(db).set(
+      "max_workspaces_per_user",
+      2,
+      null,
+    );
+
+    const results = await Promise.all(
+      Array.from({ length: 5 }, (_, n) =>
+        createWorkspaceUnderTenancy(db, {
+          name: `Team ${String(n)}`,
+          creatorId: "user-1",
+        }),
+      ),
+    );
+
+    expect(results.filter((result) => result.ok)).toHaveLength(2);
+    expect(
+      results.filter(
+        (result) => !result.ok && result.error === "workspace_limit_reached",
+      ),
+    ).toHaveLength(3);
+  });
+});
+
+describe("the limit of workspaces per user", () => {
+  async function create(db: Awaited<ReturnType<typeof startInstance>>) {
+    return createWorkspaceUnderTenancy(db, {
+      name: "Another",
+      creatorId: "user-1",
+    });
+  }
+
+  // #101-WM-04
+  it("stops at 10 owned workspaces by default and says so", async () => {
+    const db = await startInstance("multi");
+    for (let n = 0; n < 10; n += 1) expect((await create(db)).ok).toBe(true);
+
+    expect(await create(db)).toEqual({
+      ok: false,
+      error: "workspace_limit_reached",
+    });
+    expect(
+      await db.selectFrom("workspaces").select("id").execute(),
+    ).toHaveLength(10);
+  });
+
+  // #101-WM-04
+  it("allows another one as soon as the limit on the Limits page is raised", async () => {
+    const db = await startInstance("multi");
+    const settings = createInstanceSettingsRepository(db);
+    await settings.set("max_workspaces_per_user", 1, null);
+    expect((await create(db)).ok).toBe(true);
+    expect(await create(db)).toEqual({
+      ok: false,
+      error: "workspace_limit_reached",
+    });
+
+    await settings.set("max_workspaces_per_user", 2, null);
+
+    expect((await create(db)).ok).toBe(true);
+  });
+
+  // #101-WM-04
+  it("counts the workspaces a person is an Owner of, not the ones they only belong to", async () => {
+    const db = await startInstance("multi");
+    await createInstanceSettingsRepository(db).set(
+      "max_workspaces_per_user",
+      1,
+      null,
+    );
+    await sql`insert into users (id, name, email, email_verified, created_at, updated_at)
+      values ('user-2', 'u2', 'u2@example.test', 1, '2026-10-11T00:00:00.000Z', '2026-10-11T00:00:00.000Z')`.execute(
+      db,
+    );
+    const other = await createWorkspaceUnderTenancy(db, {
+      name: "Other",
+      creatorId: "user-2",
+    });
+    if (!other.ok) throw new Error("setup failed");
+    await sql`insert into workspace_members (workspace_id, user_id, role, created_at)
+      values (${other.workspace.id}, 'user-1', 'admin', '2026-10-11T00:00:00.000Z')`.execute(
+      db,
+    );
+
+    expect((await create(db)).ok).toBe(true);
+    expect((await create(db)).ok).toBe(false);
+  });
+
+  // #101-WM-04
+  it("does not count the workspaces of another person", async () => {
+    const db = await startInstance("multi");
+    await createInstanceSettingsRepository(db).set(
+      "max_workspaces_per_user",
+      1,
+      null,
+    );
+    await sql`insert into users (id, name, email, email_verified, created_at, updated_at)
+      values ('user-2', 'u2', 'u2@example.test', 1, '2026-10-11T00:00:00.000Z', '2026-10-11T00:00:00.000Z')`.execute(
+      db,
+    );
+    await create(db);
+
+    const result = await createWorkspaceUnderTenancy(db, {
+      name: "Theirs",
+      creatorId: "user-2",
+    });
+
+    expect(result.ok).toBe(true);
   });
 });

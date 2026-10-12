@@ -8,15 +8,14 @@ import { createRunsRepository } from "../db/repositories/runs-repository.ts";
 import { getDatabase } from "../db/startup.ts";
 import { knownSecretsFromEnv, redactText } from "../runner-api/redact.ts";
 import type { LastRunSource } from "../projects/ui/list-view.ts";
-import { getCurrentWorkspaceId } from "../workspaces/current-workspace.ts";
-import { inCurrentWorkspace } from "../workspaces/in-current-workspace.ts";
 import {
   createLastRunSource,
   createRunsService,
   type RunsService,
 } from "./runs-service.ts";
 
-function runsServiceFor(workspaceId: string): RunsService {
+/** The runs service of one workspace. */
+export function runsServiceFor(workspaceId: string): RunsService {
   return createRunsService({
     runs: createRunsRepository(getDatabase(), workspaceId),
     // Read on every call: the keys can change while the server runs.
@@ -24,14 +23,9 @@ function runsServiceFor(workspaceId: string): RunsService {
   });
 }
 
-export function getRunsService(): RunsService {
-  return inCurrentWorkspace(runsServiceFor);
-}
-
-/** The status of each repository's last run, for the project list. */
-export function getLastRunSource(): LastRunSource {
-  return async (repositoryIds) =>
-    createLastRunSource({
-      runs: createRunsRepository(getDatabase(), await getCurrentWorkspaceId()),
-    })(repositoryIds);
+/** The status of each repository's last run in one workspace, for the project list. */
+export function lastRunSourceFor(workspaceId: string): LastRunSource {
+  return createLastRunSource({
+    runs: createRunsRepository(getDatabase(), workspaceId),
+  });
 }

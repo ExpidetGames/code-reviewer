@@ -25,13 +25,13 @@ test.describe("the app frame", () => {
   });
 
   // CR-36-T09
-  test("@smoke a signed in person opens Projects, Runs and Settings in the same frame and signs out", async ({
+  test("@smoke a signed in person opens Projects, Runs, Settings and Members of the workspace in the same frame and signs out", async ({
     page,
   }) => {
     await signInThroughTheForm(page, account);
     const nav = page.getByRole("navigation", { name: "Main" });
 
-    for (const place of ["Projects", "Runs", "Settings"]) {
+    for (const place of ["Projects", "Runs", "Settings", "Members"]) {
       await nav.getByRole("link", { name: place }).click();
 
       await expect(

@@ -62,7 +62,9 @@ function fakeApi(
 describe("the settings form", () => {
   it("shows the values in force and where each one comes from", () => {
     const model = projectModel({ maxFindings: 9 });
-    render(<SettingsForm initial={model} api={fakeApi().api} />);
+    render(
+      <SettingsForm workspaceSlug="acme" initial={model} api={fakeApi().api} />,
+    );
 
     expect(
       (screen.getByLabelText("Most findings per review") as HTMLInputElement)
@@ -84,6 +86,7 @@ describe("the settings form", () => {
   it("places where a checkbox value comes from right beside the checkbox text", () => {
     render(
       <SettingsForm
+        workspaceSlug="acme"
         initial={projectModel({ largePrChunking: false })}
         api={fakeApi().api}
       />,
@@ -108,7 +111,13 @@ describe("the settings form", () => {
   });
 
   it("places where the comment commands setting comes from beside its heading", () => {
-    render(<SettingsForm initial={projectModel()} api={fakeApi().api} />);
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={projectModel()}
+        api={fakeApi().api}
+      />,
+    );
 
     const heading = screen.getByText("Comment commands people may use");
 
@@ -116,7 +125,13 @@ describe("the settings form", () => {
   });
 
   it("explains the model and the token budget in plain words", () => {
-    render(<SettingsForm initial={projectModel()} api={fakeApi().api} />);
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={projectModel()}
+        api={fakeApi().api}
+      />,
+    );
 
     const model = screen
       .getByLabelText("Model")
@@ -139,7 +154,9 @@ describe("the settings form", () => {
   it("names every wrong value next to its field and sends nothing", async () => {
     const user = userEvent.setup();
     const { api, save } = fakeApi();
-    render(<SettingsForm initial={projectModel()} api={api} />);
+    render(
+      <SettingsForm workspaceSlug="acme" initial={projectModel()} api={api} />,
+    );
 
     const findings = screen.getByLabelText("Most findings per review");
     await user.clear(findings);
@@ -174,7 +191,9 @@ describe("the settings form", () => {
   it("names project rules that are too long", async () => {
     const user = userEvent.setup();
     const { api, save } = fakeApi();
-    render(<SettingsForm initial={projectModel()} api={api} />);
+    render(
+      <SettingsForm workspaceSlug="acme" initial={projectModel()} api={api} />,
+    );
 
     await user.click(screen.getByLabelText("Project rules"));
     await user.paste("x".repeat(4001));
@@ -188,7 +207,13 @@ describe("the settings form", () => {
 
   // CR-34-T06 (an unknown command cannot be typed: the form offers exactly the four that exist)
   it("offers exactly the four comment commands", () => {
-    render(<SettingsForm initial={projectModel()} api={fakeApi().api} />);
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={projectModel()}
+        api={fakeApi().api}
+      />,
+    );
 
     expect(
       screen
@@ -202,7 +227,9 @@ describe("the settings form", () => {
     const user = userEvent.setup();
     const saved = projectModel({ maxFindings: 12 });
     const { api, save } = fakeApi({ ok: true, data: answerFor(saved) });
-    render(<SettingsForm initial={projectModel()} api={api} />);
+    render(
+      <SettingsForm workspaceSlug="acme" initial={projectModel()} api={api} />,
+    );
 
     const findings = screen.getByLabelText("Most findings per review");
     await user.clear(findings);
@@ -227,7 +254,9 @@ describe("the settings form", () => {
       code: "REVIEW_SETTINGS_INVALID",
       issues: [{ field: "maxTokens", code: "TOO_LARGE" }],
     });
-    render(<SettingsForm initial={projectModel()} api={api} />);
+    render(
+      <SettingsForm workspaceSlug="acme" initial={projectModel()} api={api} />,
+    );
 
     await user.type(screen.getByLabelText("Token budget"), "0");
     await user.click(
@@ -252,7 +281,9 @@ describe("the settings form", () => {
       code: "REVIEW_SETTINGS_INVALID",
       issues: [{ field: "maxTokens", code: "EXCEEDS_MODEL_CONTEXT" }],
     });
-    render(<SettingsForm initial={projectModel()} api={api} />);
+    render(
+      <SettingsForm workspaceSlug="acme" initial={projectModel()} api={api} />,
+    );
 
     const tokens = screen.getByLabelText("Token budget");
     await user.clear(tokens);
@@ -276,7 +307,9 @@ describe("the settings form", () => {
       code: "NETWORK_ERROR",
       issues: [],
     });
-    render(<SettingsForm initial={projectModel()} api={api} />);
+    render(
+      <SettingsForm workspaceSlug="acme" initial={projectModel()} api={api} />,
+    );
 
     await user.click(
       screen.getByRole("button", { name: "Save project settings" }),
@@ -294,7 +327,11 @@ describe("the settings form", () => {
       data: answerFor(projectModel()),
     });
     render(
-      <SettingsForm initial={projectModel({ maxFindings: 9 })} api={api} />,
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={projectModel({ maxFindings: 9 })}
+        api={api}
+      />,
     );
 
     await user.click(
@@ -320,7 +357,11 @@ describe("the settings form", () => {
       data: answerFor(projectModel()),
     });
     render(
-      <SettingsForm initial={projectModel({ maxFindings: 9 })} api={api} />,
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={projectModel({ maxFindings: 9 })}
+        api={api}
+      />,
     );
 
     await user.click(
@@ -343,7 +384,11 @@ describe("the settings form", () => {
     const user = userEvent.setup();
     const { api, reset } = fakeApi();
     render(
-      <SettingsForm initial={projectModel({ maxFindings: 9 })} api={api} />,
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={projectModel({ maxFindings: 9 })}
+        api={api}
+      />,
     );
 
     await user.click(
@@ -359,7 +404,13 @@ describe("the settings form", () => {
 
   it("takes the problem of a field away as soon as the person changes it", async () => {
     const user = userEvent.setup();
-    render(<SettingsForm initial={projectModel()} api={fakeApi().api} />);
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={projectModel()}
+        api={fakeApi().api}
+      />,
+    );
     const findings = screen.getByLabelText("Most findings per review");
     await user.clear(findings);
     await user.type(findings, "abc");
@@ -383,7 +434,9 @@ describe("the settings form", () => {
       code: "REVIEW_SETTINGS_INVALID",
       issues: [{ field: "settings", code: "INVALID_TYPE" }],
     });
-    render(<SettingsForm initial={projectModel()} api={api} />);
+    render(
+      <SettingsForm workspaceSlug="acme" initial={projectModel()} api={api} />,
+    );
 
     await user.click(
       screen.getByRole("button", { name: "Save project settings" }),
@@ -400,7 +453,13 @@ describe("the settings form", () => {
     const save = vi.fn<SettingsApi["save"]>(
       () => new Promise((resolve) => (finish = resolve)),
     );
-    render(<SettingsForm initial={projectModel()} api={{ save }} />);
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={projectModel()}
+        api={{ save }}
+      />,
+    );
 
     await user.click(
       screen.getByRole("button", { name: "Save project settings" }),
@@ -418,6 +477,7 @@ describe("the settings form", () => {
   it("names every reset button after what the person sees, never after the internal field name", async () => {
     render(
       <SettingsForm
+        workspaceSlug="acme"
         initial={projectModel({
           largePrChunking: false,
           inlineKeyIssues: true,
@@ -446,7 +506,9 @@ describe("the settings form", () => {
   it("warns above the cost limit while the person picks a pricey model, and still lets them save", async () => {
     const user = userEvent.setup();
     const { api } = fakeApi();
-    render(<SettingsForm initial={projectModel()} api={api} />);
+    render(
+      <SettingsForm workspaceSlug="acme" initial={projectModel()} api={api} />,
+    );
 
     const model = screen.getByLabelText("Model");
     await user.clear(model);
@@ -465,7 +527,13 @@ describe("the settings form", () => {
   // CR-34-T05
   it("warns that a model has no known price", async () => {
     const user = userEvent.setup();
-    render(<SettingsForm initial={projectModel()} api={fakeApi().api} />);
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={projectModel()}
+        api={fakeApi().api}
+      />,
+    );
 
     const model = screen.getByLabelText("Model");
     await user.clear(model);
@@ -482,6 +550,7 @@ describe("the settings form", () => {
       '<img src=x onerror="window.pwned=1"><script>window.pwned=1</script>';
     const { container } = render(
       <SettingsForm
+        workspaceSlug="acme"
         initial={projectModel({ extraInstructions: hostile })}
         api={fakeApi().api}
       />,
@@ -504,7 +573,9 @@ describe("the settings form", () => {
     };
     const save = vi.fn<SettingsApi["save"]>();
 
-    render(<SettingsForm initial={model} api={{ save }} />);
+    render(
+      <SettingsForm workspaceSlug="acme" initial={model} api={{ save }} />,
+    );
 
     expect(screen.getByRole("button", { name: "Save defaults" })).toBeTruthy();
     expect(
@@ -523,7 +594,13 @@ describe("the settings form", () => {
       seen.push({ url, method: init?.method });
       return new Response("{}", { status: 200 });
     });
-    render(<SettingsForm initial={projectModel()} repositoryId="repo-9" />);
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={projectModel()}
+        repositoryId="repo-9"
+      />,
+    );
 
     await user.click(
       screen.getByRole("button", { name: "Save project settings" }),
@@ -531,14 +608,23 @@ describe("the settings form", () => {
 
     await screen.findByRole("alert");
     expect(seen).toEqual([
-      { url: "/api/repositories/repo-9/project/settings", method: "PUT" },
+      {
+        url: "/api/w/acme/repositories/repo-9/project/settings",
+        method: "PUT",
+      },
     ]);
     vi.unstubAllGlobals();
   });
 
   // CR-34 (CR-46 review: the fallback model is stored but not sent to the runner yet)
   it("says that the fallback model is stored but not used yet", () => {
-    render(<SettingsForm initial={projectModel()} api={fakeApi().api} />);
+    render(
+      <SettingsForm
+        workspaceSlug="acme"
+        initial={projectModel()}
+        api={fakeApi().api}
+      />,
+    );
 
     const field = screen
       .getByLabelText("Fallback model", { exact: true })

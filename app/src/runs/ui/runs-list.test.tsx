@@ -76,6 +76,7 @@ describe("the rows of the list", () => {
   it("show project, pull request, command, status and start time, each run linking to its page", () => {
     render(
       <RunsList
+        workspaceSlug="acme"
         initial={snapshot([
           run(),
           run({
@@ -113,12 +114,13 @@ describe("the rows of the list", () => {
       within(first as HTMLElement)
         .getByRole("link")
         .getAttribute("href"),
-    ).toBe("/runs/6b1f0a52-5f43-4a53-9d0e-8d4a0f1c2e11");
+    ).toBe("/w/acme/runs/6b1f0a52-5f43-4a53-9d0e-8d4a0f1c2e11");
   });
 
   it("tell a waiting run from one that started, and show how long a run took", () => {
     render(
       <RunsList
+        workspaceSlug="acme"
         initial={snapshot([
           run({
             id: "a",
@@ -152,6 +154,7 @@ describe("the rows of the list", () => {
   it("say when the list is cut off", () => {
     render(
       <RunsList
+        workspaceSlug="acme"
         initial={snapshot([run()], { limited: true })}
         filter={{}}
         api={apiAnswering([])}
@@ -165,6 +168,7 @@ describe("the rows of the list", () => {
   it("render a project name and a login with HTML as text and run no script", () => {
     const { container } = render(
       <RunsList
+        workspaceSlug="acme"
         initial={snapshot([
           run({
             project: "<script>alert(1)</script>/<img src=x onerror=alert(1)>",
@@ -188,7 +192,12 @@ describe("the empty list", () => {
   // CR-35-T03
   it("explains that there are no runs yet", () => {
     render(
-      <RunsList initial={snapshot([])} filter={{}} api={apiAnswering([])} />,
+      <RunsList
+        workspaceSlug="acme"
+        initial={snapshot([])}
+        filter={{}}
+        api={apiAnswering([])}
+      />,
     );
 
     expect(screen.getByRole("heading", { name: "No runs yet" })).toBeTruthy();
@@ -199,6 +208,7 @@ describe("the empty list", () => {
   it("explains that no run matches the filter and offers to reset it", () => {
     render(
       <RunsList
+        workspaceSlug="acme"
         initial={snapshot([])}
         filter={{ status: "failed" }}
         api={apiAnswering([])}
@@ -210,7 +220,7 @@ describe("the empty list", () => {
     ).toBeTruthy();
     expect(
       screen.getByRole("link", { name: "Reset filter" }).getAttribute("href"),
-    ).toBe("/runs");
+    ).toBe("/w/acme/runs");
   });
 });
 
@@ -237,7 +247,14 @@ describe("polling the list", () => {
       ),
       answer(snapshot([run({ id: waiting.id })])),
     ]);
-    render(<RunsList initial={snapshot([waiting])} filter={{}} api={api} />);
+    render(
+      <RunsList
+        workspaceSlug="acme"
+        initial={snapshot([waiting])}
+        filter={{}}
+        api={api}
+      />,
+    );
     expect(screen.getByText("Waiting")).toBeTruthy();
 
     await pass(3000);
@@ -252,7 +269,14 @@ describe("polling the list", () => {
   // CR-35-T11
   it("slows down once every run is settled instead of asking every few seconds", async () => {
     const api = apiAnswering([answer(snapshot([run()]))]);
-    render(<RunsList initial={snapshot([run()])} filter={{}} api={api} />);
+    render(
+      <RunsList
+        workspaceSlug="acme"
+        initial={snapshot([run()])}
+        filter={{}}
+        api={api}
+      />,
+    );
 
     await pass(4000);
     expect(api.list).not.toHaveBeenCalled();
@@ -275,7 +299,14 @@ describe("polling the list", () => {
         ]),
       ),
     ]);
-    render(<RunsList initial={snapshot([])} filter={{}} api={api} />);
+    render(
+      <RunsList
+        workspaceSlug="acme"
+        initial={snapshot([])}
+        filter={{}}
+        api={api}
+      />,
+    );
     expect(screen.getByText("No runs yet")).toBeTruthy();
 
     await pass(5000);
@@ -296,7 +327,14 @@ describe("polling the list", () => {
       failure,
       answer(snapshot([run({ id: waiting.id })])),
     ]);
-    render(<RunsList initial={snapshot([waiting])} filter={{}} api={api} />);
+    render(
+      <RunsList
+        workspaceSlug="acme"
+        initial={snapshot([waiting])}
+        filter={{}}
+        api={api}
+      />,
+    );
 
     await pass(3000);
     expect(screen.getByRole("status").textContent).toBe(POLL_FAILED_TEXT);
@@ -311,6 +349,7 @@ describe("polling the list", () => {
     const api = apiAnswering([answer(snapshot([]))]);
     render(
       <RunsList
+        workspaceSlug="acme"
         initial={snapshot([])}
         filter={{ repositoryId: "repo-1", status: "failed" }}
         api={api}

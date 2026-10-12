@@ -9,10 +9,15 @@ import { NextResponse, type NextRequest } from "next/server";
 import {
   PORTAL_DENIED_HEADER,
   isAdminPath,
+  isInstanceAdminOnlyPath,
   isInternalPortalPath,
   portalRewriteTarget,
 } from "../admin/paths.ts";
-import { decideAccess, isPublicPath } from "./access.ts";
+import {
+  legacyWorkspaceTarget,
+  workspaceSlugOfPath,
+} from "../workspaces/paths.ts";
+import { decideAccess, isNoWorkspacePath, isPublicPath } from "./access.ts";
 import type { AccessGates } from "./access-gates.ts";
 import type { Auth } from "./auth.ts";
 import {
@@ -31,6 +36,12 @@ export const PORTAL_REWRITE_HEADER = "x-portal-rewrite";
 /** SHA-256 of a text: equal in length whatever the text, which is what `timingSafeEqual` needs. */
 function digest(text: string): Buffer {
   return createHash("sha256").update(text).digest();
+}
+
+/** Whether the request is a browser's navigation (or any client that asks for HTML), not a fetch of the app's own. */
+function asksForADocument(request: NextRequest): boolean {
+  if (request.headers.get("sec-fetch-dest") === "empty") return false;
+  return (request.headers.get("accept") ?? "").includes("text/html");
 }
 
 export type AccessProxyDependencies = {
@@ -100,16 +111,91 @@ export function createAccessProxy({
       });
     }
 
+    // What is about the instance and not about a workspace (the backup status) is for the instance admin. For
+    // every other person who is let into the app it is a path that does not exist, whatever their role in a
+    // workspace is: the same answer, so nothing says the route is there. (A person who still has to verify
+    // the address or has no workspace gets the answer every other path gets, below.)
+    if (
+      isInstanceAdminOnlyPath(pathname) &&
+      lookup.kind === "user" &&
+      !lookup.user.isInstanceAdmin
+    )
+      return treatAsMissing(request);
+
     // The instance admin whose address is not verified yet keeps the admin portal, so that a problem with
     // the mail server can always be repaired; everything else of the app waits for the verification
     // (src/auth/access-gates.ts). The portal's own files count, because a rewrite runs the proxy again.
+    // A person without a workspace reaches the few places made for them (access.ts, NO_WORKSPACE_PATHS) and
+    // nothing else.
     const signedIn =
       lookup.kind === "user" ||
+      (lookup.kind === "no_workspace" && isNoWorkspacePath(pathname)) ||
       (lookup.kind === "unverified" &&
         lookup.user.isInstanceAdmin &&
-        (isAdminPath(pathname) || isInternalPortalPath(pathname)))
+        (isAdminPath(pathname) ||
+          isInternalPortalPath(pathname) ||
+          isInstanceAdminOnlyPath(pathname)))
         ? lookup.user
         : null;
+
+    // A workspace address (`/w/<slug>...`, `/api/w/<slug>...`) is for the members of that workspace. For
+    // everybody else it is a path that does not exist: the same answer for a workspace that is not there and
+    // one the person does not belong to, so nothing tells them apart. (The pages and routes check the
+    // membership again themselves, src/workspaces/access.ts.)
+    const workspaceSlug = workspaceSlugOfPath(pathname);
+    if (workspaceSlug !== undefined && signedIn !== null) {
+      try {
+        const role =
+          workspaceSlug === null
+            ? null
+            : await getGates().workspaceRole(signedIn.id, workspaceSlug);
+        if (role === null) return treatAsMissing(request);
+      } catch (error) {
+        console.error(
+          `[auth] could not check the workspace: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return new NextResponse("Service unavailable", {
+          status: 503,
+          headers: { "cache-control": "no-store" },
+        });
+      }
+    }
+
+    // An address from before the workspace was in the address (the start page, `/projects`, `/runs/<id>`,
+    // `/settings`) leads to the same page of the first workspace of the person, with a real redirect. The
+    // page behind it checks the membership like any other. (A person without a workspace, or who has to
+    // verify the address, is sent where every other page sends them, below.)
+    // Only for a page that is asked for as a document (the address bar, a bookmark, a link from elsewhere):
+    // the browser follows a 307 there. The client-side navigation inside the app (a request for the page's
+    // data, which Next.js strips its own markers from before the proxy sees it, but which asks for no HTML and
+    // says `Sec-Fetch-Dest: empty`) keeps the redirect of the page itself, which the router follows in place; a
+    // 307 there makes the router fetch the target twice and the address stays where it was.
+    if (
+      lookup.kind === "user" &&
+      (request.method === "GET" || request.method === "HEAD") &&
+      asksForADocument(request) &&
+      legacyWorkspaceTarget(pathname, "x") !== null
+    ) {
+      let first: string | null;
+      try {
+        first = await getGates().firstWorkspaceSlug(lookup.user.id);
+      } catch (error) {
+        console.error(
+          `[auth] could not check the workspace: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return new NextResponse("Service unavailable", {
+          status: 503,
+          headers: { "cache-control": "no-store" },
+        });
+      }
+      const target =
+        first === null ? null : legacyWorkspaceTarget(pathname, first);
+      if (target !== null)
+        return NextResponse.redirect(
+          new URL(`${target}${request.nextUrl.search}`, request.url),
+          307,
+        );
+    }
 
     const decision = decideAccess({
       pathname,

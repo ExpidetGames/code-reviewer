@@ -44,37 +44,69 @@ vi.mock("../auth/access-gates-runtime.ts", () => ({
   getAccessGates: () => pageGates.current,
 }));
 
+vi.mock("../db/startup.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../db/startup.ts")>()),
+  getDatabase: () => (request.harness as AuthHarness).db,
+}));
+
 import { signOut } from "../auth/actions.ts";
-import ProjectsPage from "../app/(app)/projects/page.tsx";
-import RunsPage from "../app/(app)/runs/page.tsx";
-import RunDetailPage from "../app/(app)/runs/[id]/page.tsx";
-import SettingsPage from "../app/(app)/settings/page.tsx";
-import ProjectSettingsPage from "../app/(app)/projects/[repositoryId]/page.tsx";
-import type { AccessGates } from "../auth/access-gates.ts";
+import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
+import ProjectsPage from "../app/(app)/w/[workspace]/projects/page.tsx";
+import RunsPage from "../app/(app)/w/[workspace]/runs/page.tsx";
+import RunDetailPage from "../app/(app)/w/[workspace]/runs/[id]/page.tsx";
+import SettingsPage from "../app/(app)/w/[workspace]/settings/page.tsx";
+import MembersPage from "../app/(app)/w/[workspace]/members/page.tsx";
+import ProjectSettingsPage from "../app/(app)/w/[workspace]/projects/[repositoryId]/page.tsx";
 import { noWorkspaceGates, openGates } from "../test-support/open-gates.ts";
+import type { AccessGates } from "../auth/access-gates.ts";
+
+const WORKSPACE = { workspace: "acme" };
 
 const APP_PAGES = [
-  { path: "/projects", render: ProjectsPage },
   {
-    path: "/runs",
+    path: "/w/acme/projects",
     render: () =>
-      RunsPage({ searchParams: Promise.resolve({}) } as Parameters<
-        typeof RunsPage
+      ProjectsPage({ params: Promise.resolve(WORKSPACE) } as Parameters<
+        typeof ProjectsPage
       >[0]),
   },
   {
-    path: "/runs/some-run",
+    path: "/w/acme/runs",
+    render: () =>
+      RunsPage({
+        params: Promise.resolve(WORKSPACE),
+        searchParams: Promise.resolve({}),
+      } as Parameters<typeof RunsPage>[0]),
+  },
+  {
+    path: "/w/acme/runs/some-run",
     render: () =>
       RunDetailPage({
-        params: Promise.resolve({ id: "some-run" }),
+        params: Promise.resolve({ ...WORKSPACE, id: "some-run" }),
       } as Parameters<typeof RunDetailPage>[0]),
   },
-  { path: "/settings", render: SettingsPage },
   {
-    path: "/projects/some-repository",
+    path: "/w/acme/settings",
+    render: () =>
+      SettingsPage({ params: Promise.resolve(WORKSPACE) } as Parameters<
+        typeof SettingsPage
+      >[0]),
+  },
+  {
+    path: "/w/acme/members",
+    render: () =>
+      MembersPage({ params: Promise.resolve(WORKSPACE) } as Parameters<
+        typeof MembersPage
+      >[0]),
+  },
+  {
+    path: "/w/acme/projects/some-repository",
     render: () =>
       ProjectSettingsPage({
-        params: Promise.resolve({ repositoryId: "some-repository" }),
+        params: Promise.resolve({
+          ...WORKSPACE,
+          repositoryId: "some-repository",
+        }),
       } as Parameters<typeof ProjectSettingsPage>[0]),
   },
 ] as const;
@@ -174,6 +206,15 @@ describe("signing out", () => {
   it("ends the session on the server so every app page turns the old cookie away", async () => {
     const app = await startApp();
     const { cookies } = await app.signIn();
+    // The pages are for the members of the workspace in the address.
+    const workspaces = createWorkspacesRepository(app.db);
+    const workspace = await workspaces.create({
+      name: "Acme",
+      slug: "acme",
+      createdBy: null,
+    });
+    for (const user of await app.db.selectFrom("users").select("id").execute())
+      await workspaces.addMember(workspace.id, user.id, "owner");
     const oldCookies = new Map(cookies);
     for (const { path, render } of APP_PAGES) {
       expect((await app.visit(path, oldCookies)).headers.get("location")).toBe(

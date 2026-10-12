@@ -75,7 +75,11 @@ describe("the detail page", () => {
   // CR-35-T04
   it("shows pull request, command, trigger, status, times, duration, comment link and log", () => {
     const { container } = render(
-      <RunDetail initial={snap(detail())} api={apiAnswering([])} />,
+      <RunDetail
+        workspaceSlug="acme"
+        initial={snap(detail())}
+        api={apiAnswering([])}
+      />,
     );
 
     expect(text(container)).toContain("Succeeded");
@@ -101,6 +105,7 @@ describe("the detail page", () => {
   it("names who started a run by comment or by hand", () => {
     const { container } = render(
       <RunDetail
+        workspaceSlug="acme"
         initial={snap(
           detail({ triggerKind: "comment", trigger: "Comment by alice" }),
         )}
@@ -115,6 +120,7 @@ describe("the detail page", () => {
   it("shows the translated error and the error code of a failed run", () => {
     const { container } = render(
       <RunDetail
+        workspaceSlug="acme"
         initial={snap(
           detail({
             status: "failed",
@@ -137,6 +143,7 @@ describe("the detail page", () => {
   it("shows an unknown error code with the general sentence and does not fail", () => {
     const { container } = render(
       <RunDetail
+        workspaceSlug="acme"
         initial={snap(
           detail({
             status: "failed",
@@ -157,6 +164,7 @@ describe("the detail page", () => {
   it("says the log was shortened, and says when there is no log", () => {
     const shortened = render(
       <RunDetail
+        workspaceSlug="acme"
         initial={snap(detail({ log: { text: "tail", truncated: true } }))}
         api={apiAnswering([])}
       />,
@@ -167,6 +175,7 @@ describe("the detail page", () => {
 
     const empty = render(
       <RunDetail
+        workspaceSlug="acme"
         initial={snap(detail({ log: { text: "", truncated: false } }))}
         api={apiAnswering([])}
       />,
@@ -181,6 +190,7 @@ describe("the detail page", () => {
       "<script>alert(1)</script><img src=x onerror=alert(1)>\n<b>bold</b>";
     const { container } = render(
       <RunDetail
+        workspaceSlug="acme"
         initial={snap(
           detail({
             project: "<script>alert(2)</script>",
@@ -205,6 +215,7 @@ describe("the detail page", () => {
   it("shows the sentence for a review that outgrew the comment limit together with the link to the review", () => {
     const { container } = render(
       <RunDetail
+        workspaceSlug="acme"
         initial={snap(
           detail({
             status: "failed",
@@ -231,6 +242,7 @@ describe("the detail page", () => {
   it("shows no comment link for a run without one, and says the link was not found", () => {
     const { container } = render(
       <RunDetail
+        workspaceSlug="acme"
         initial={snap(detail({ commentUrl: null, commentMissing: true }))}
         api={apiAnswering([])}
       />,
@@ -243,6 +255,7 @@ describe("the detail page", () => {
   it("shows a pull request address that is no web address as plain text", () => {
     render(
       <RunDetail
+        workspaceSlug="acme"
         initial={snap(detail({ prUrl: null }))}
         api={apiAnswering([])}
       />,
@@ -255,6 +268,7 @@ describe("the detail page", () => {
   it("links a replaced run to the newer one and shows lost attempts", () => {
     render(
       <RunDetail
+        workspaceSlug="acme"
         initial={snap(
           detail({
             status: "superseded",
@@ -272,7 +286,7 @@ describe("the detail page", () => {
 
     expect(
       screen.getByRole("link", { name: "The newer run" }).getAttribute("href"),
-    ).toBe("/runs/newer-run");
+    ).toBe("/w/acme/runs/newer-run");
     expect(screen.getByText("Lost attempts")).toBeTruthy();
     expect(screen.getByText("Replaced")).toBeTruthy();
   });
@@ -307,7 +321,9 @@ describe("polling the detail page", () => {
       },
       { ok: true, data: snap(detail()) },
     ]);
-    render(<RunDetail initial={snap(waiting)} api={api} />);
+    render(
+      <RunDetail workspaceSlug="acme" initial={snap(waiting)} api={api} />,
+    );
     expect(screen.getByText("Waiting")).toBeTruthy();
 
     await pass(3000);
@@ -331,7 +347,9 @@ describe("polling the detail page", () => {
       commentUrl: null,
     });
     const api = apiAnswering([failure, { ok: true, data: snap(detail()) }]);
-    render(<RunDetail initial={snap(running)} api={api} />);
+    render(
+      <RunDetail workspaceSlug="acme" initial={snap(running)} api={api} />,
+    );
 
     await pass(3000);
     expect(screen.getByRole("status").textContent).toBe(
@@ -346,7 +364,9 @@ describe("polling the detail page", () => {
 
   it("does not ask at all for a run that is settled", async () => {
     const api = apiAnswering([]);
-    render(<RunDetail initial={snap(detail())} api={api} />);
+    render(
+      <RunDetail workspaceSlug="acme" initial={snap(detail())} api={api} />,
+    );
 
     await pass(60_000);
 
@@ -359,7 +379,9 @@ describe("polling the detail page", () => {
     const api = apiAnswering([
       { ok: false, status: 401, code: "UNAUTHENTICATED", issues: [] },
     ]);
-    render(<RunDetail initial={snap(running)} api={api} />);
+    render(
+      <RunDetail workspaceSlug="acme" initial={snap(running)} api={api} />,
+    );
 
     await pass(3000);
 
@@ -378,7 +400,9 @@ describe("polling the detail page", () => {
     const api = apiAnswering([
       { ok: false, status: 404, code: "RUN_NOT_FOUND", issues: [] },
     ]);
-    render(<RunDetail initial={snap(running)} api={api} />);
+    render(
+      <RunDetail workspaceSlug="acme" initial={snap(running)} api={api} />,
+    );
 
     await pass(3000);
 

@@ -1,0 +1,39 @@
+// SPDX-License-Identifier: Apache-2.0
+
+import type { Metadata } from "next";
+import { redirect } from "next/navigation";
+import { connection } from "next/server";
+import { currentLookup } from "@/auth/session";
+import { loginPath } from "@/auth/session-user";
+import { loadAccountView } from "@/workspaces/account-view";
+import { PendingInvitations } from "@/workspaces/ui/pending-invitations";
+import { EmptyState } from "@/ui/empty-state";
+import { PageHeader } from "@/ui/page-header";
+
+export const metadata: Metadata = { title: "Invitations" };
+
+// The invitations that wait for the verified address of the signed in account. Only with a mail server:
+// without one an invitation is accepted through its link and nothing is found by an address.
+export default async function InvitationsPage() {
+  await connection();
+  const lookup = await currentLookup();
+  if (lookup.kind !== "user" && lookup.kind !== "no_workspace")
+    redirect(loginPath(lookup));
+  const view = await loadAccountView(lookup.user.id);
+  return (
+    <>
+      <PageHeader
+        title="Invitations"
+        description="Workspaces you are invited to."
+      />
+      {view.pending.length === 0 ? (
+        <EmptyState title="No invitations waiting">
+          Invitations for your email address show up here once it is confirmed.
+          A link you were sent opens the invitation directly.
+        </EmptyState>
+      ) : (
+        <PendingInvitations invitations={view.pending} />
+      )}
+    </>
+  );
+}

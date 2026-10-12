@@ -57,6 +57,12 @@ function form(): FormData {
   return data;
 }
 
+function formWith(values: Record<string, string>): FormData {
+  const data = new FormData();
+  for (const [name, value] of Object.entries(values)) data.set(name, value);
+  return data;
+}
+
 afterEach(() => {
   vi.clearAllMocks();
 });
@@ -100,5 +106,58 @@ describe("the GitHub button", () => {
     const target = await run(signInWithGithub);
 
     expect(target).toBe("https://github.example/authorize");
+    expect(mocks.signInSocial).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: { provider: "github", callbackURL: "/" },
+      }),
+    );
+  });
+
+  // #101-follow-up: the invitation travels through GitHub
+  it("brings an invitee back to the page of the invitation, and only to that page", async () => {
+    mocks.methods.mockResolvedValue({ emailPassword: true, github: true });
+    const token = "A".repeat(43);
+
+    await run(() => signInWithGithub(formWith({ invitation: token })));
+
+    expect(mocks.signInSocial).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: {
+          provider: "github",
+          callbackURL: `/invitation?token=${token}`,
+        },
+      }),
+    );
+  });
+
+  it.each([
+    "https://evil.example/phish",
+    "//evil.example",
+    "/admin",
+    "short",
+    `${"A".repeat(43)}&next=https://evil.example`,
+  ])("ignores a value that is not an invitation token: %s", async (value) => {
+    mocks.methods.mockResolvedValue({ emailPassword: true, github: true });
+
+    await run(() => signInWithGithub(formWith({ invitation: value })));
+
+    expect(mocks.signInSocial).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: { provider: "github", callbackURL: "/" },
+      }),
+    );
+  });
+
+  it("keeps the invitation on the login page when the sign in cannot start", async () => {
+    mocks.methods.mockResolvedValue({ emailPassword: true, github: false });
+    const token = "A".repeat(43);
+
+    const target = await run(() =>
+      signInWithGithub(formWith({ invitation: token })),
+    );
+
+    expect(target).toBe(
+      `/login?error=sign_in_method_disabled&invitation=${token}`,
+    );
   });
 });

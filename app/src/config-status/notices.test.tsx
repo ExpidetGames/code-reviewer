@@ -47,6 +47,7 @@ describe("the configuration hints", () => {
             warnings: [],
           },
         }}
+        audience="operator"
       />,
     );
 
@@ -67,6 +68,7 @@ describe("the configuration hints", () => {
             slug: null,
           },
         }}
+        audience="operator"
       />,
     );
 
@@ -77,15 +79,18 @@ describe("the configuration hints", () => {
   });
 
   it("separate a variable that is wrong from one that is missing", () => {
-    const notices = describeConfigNotices({
-      ...WORKING,
-      githubApp: {
-        configured: false,
-        kind: "invalid",
-        variables: ["GITHUB_APP_PRIVATE_KEY"],
-        slug: null,
+    const notices = describeConfigNotices(
+      {
+        ...WORKING,
+        githubApp: {
+          configured: false,
+          kind: "invalid",
+          variables: ["GITHUB_APP_PRIVATE_KEY"],
+          slug: null,
+        },
       },
-    });
+      "operator",
+    );
 
     expect(notices).toMatchObject([
       { id: "github_app", title: "GitHub App settings not valid" },
@@ -93,15 +98,18 @@ describe("the configuration hints", () => {
   });
 
   it("show a wrong optional LLM variable as a warning next to a working configuration", () => {
-    const notices = describeConfigNotices({
-      ...WORKING,
-      llm: {
-        configured: true,
-        provider: "openrouter",
-        model: "anthropic/claude-haiku-5.5",
-        warnings: [{ code: "LLM_MODEL_INVALID", variable: "LLM_MODEL" }],
+    const notices = describeConfigNotices(
+      {
+        ...WORKING,
+        llm: {
+          configured: true,
+          provider: "openrouter",
+          model: "anthropic/claude-haiku-5.5",
+          warnings: [{ code: "LLM_MODEL_INVALID", variable: "LLM_MODEL" }],
+        },
       },
-    });
+      "operator",
+    );
 
     expect(notices).toMatchObject([{ severity: "warning" }]);
   });
@@ -112,5 +120,49 @@ describe("the configuration hints", () => {
       expect(copy.title, code).not.toBe("");
       expect(copy.title, code).not.toBe(code);
     }
+  });
+
+  // #101-WM-08
+  it("tell a member that a part is not set up and who to ask, naming no variable and no setting", () => {
+    const broken: ConfigStatus = {
+      githubApp: {
+        configured: false,
+        kind: "missing",
+        variables: ["GITHUB_APP_ID", "GITHUB_APP_PRIVATE_KEY"],
+        slug: null,
+      },
+      llm: {
+        configured: false,
+        issues: [{ code: "LLM_API_KEY_MISSING", variable: "LLM_API_KEY" }],
+        warnings: [{ code: "LLM_MODEL_INVALID", variable: "LLM_MODEL" }],
+      },
+    };
+
+    const { container } = render(<ConfigNotices status={broken} />);
+
+    expect(screen.getByText("GitHub is not set up yet")).toBeTruthy();
+    expect(screen.getByText("Reviews are not set up yet")).toBeTruthy();
+    expect(container.textContent).toContain("Ask your instance admin");
+    expect(container.textContent).not.toMatch(/GITHUB_APP|LLM_|private key/i);
+    expect(describeConfigNotices(broken)).toHaveLength(2);
+  });
+
+  // #101-WM-08
+  it("show a member nothing about a setting that is ignored while everything works", () => {
+    const { container } = render(
+      <ConfigNotices
+        status={{
+          ...WORKING,
+          llm: {
+            configured: true,
+            provider: "openrouter",
+            model: "anthropic/claude-haiku-5.5",
+            warnings: [{ code: "LLM_MODEL_INVALID", variable: "LLM_MODEL" }],
+          },
+        }}
+      />,
+    );
+
+    expect(container.textContent).toBe("");
   });
 });

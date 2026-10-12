@@ -19,6 +19,7 @@ import {
 import { startTestGithub } from "../test-support/github-fake.ts";
 import { createTestDatabase } from "../test-support/test-database.ts";
 import { insertUser } from "../test-support/users.ts";
+import { defaultWorkspaceId } from "../test-support/workspaces.ts";
 import {
   createLinkCallbackHandler,
   createStartLinkHandler,
@@ -64,7 +65,7 @@ async function setup(options: { failMergeAfterMove?: boolean } = {}) {
       : {}),
   });
   const workspaces = createWorkspacesRepository(db);
-  const workspace = await workspaces.ensureDefault();
+  const workspace = { id: await defaultWorkspaceId(db) };
 
   /** The whole linking as a person does it: start, authorize at GitHub as `who`, come back. */
   async function link(
@@ -163,11 +164,34 @@ describe("merging the instance admin with an imported operator", () => {
         updated_at: "2026-10-11T08:00:00.000Z",
       })
       .execute();
+    // The invitations the operator sent or accepted are history that names the user, like the rest.
+    await ctx.db
+      .insertInto("invitations")
+      .values({
+        id: "inv-1",
+        workspace_id: ctx.workspace.id,
+        email: "someone@example.test",
+        role: "member",
+        token_hash: "a".repeat(64),
+        invited_by: "operator",
+        created_at: "2026-10-11T08:00:00.000Z",
+        expires_at: "2026-10-18T08:00:00.000Z",
+        accepted_at: "2026-10-11T09:00:00.000Z",
+        accepted_by: "operator",
+        revoked_at: null,
+      })
+      .execute();
     expect(await githubIdentityLinked(ctx.db, "admin")).toBe(false);
 
     const result = await ctx.link(ADMIN);
 
     expect(result).toEqual({ ok: true, outcome: "merged", surface: "account" });
+    const invitation = await ctx.db
+      .selectFrom("invitations")
+      .select(["invited_by", "accepted_by"])
+      .where("id", "=", "inv-1")
+      .executeTakeFirstOrThrow();
+    expect(invitation).toEqual({ invited_by: "admin", accepted_by: "admin" });
     const after = await snapshot(ctx);
     expect(after.users.map((user) => user.id)).toEqual(["admin"]);
     expect(after.users[0]).toMatchObject({

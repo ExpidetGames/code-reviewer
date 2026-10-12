@@ -8,22 +8,31 @@ import { redirect } from "next/navigation";
 import { getAccessGates } from "./access-gates-runtime.ts";
 import { getAuth } from "./auth.ts";
 import { getGithubAuth } from "./github-auth.ts";
+import { landingWithInvitation, pathCarrying } from "./invitation-return.ts";
 import { pathAfterPasswordSignIn } from "./post-sign-in.ts";
 import { signInWithPasswordChecked } from "./password-sign-in.ts";
 import { getSignInLimiter, getSignInMethods } from "./sign-in-runtime.ts";
 
-export async function signInWithGithub(): Promise<void> {
+export async function signInWithGithub(formData?: FormData): Promise<void> {
   // A way the admin switched off is off here too, not only on the login page. (redirect() works by
   // throwing, so it stays outside the try block.)
   if (!(await getSignInMethods()).github)
-    redirect("/login?error=sign_in_method_disabled");
+    redirect(
+      pathCarrying("/login", formData?.get("invitation"), {
+        error: "sign_in_method_disabled",
+      }),
+    );
+  // An invitation link the person came from: carried through GitHub (in the callback address Better Auth keeps
+  // with its own state, not in anything the browser can change on the way) to the page of the invitation.
+  // Only a value shaped like a link token is carried, and the only place it leads to is that page.
+  const landing = landingWithInvitation("/", formData?.get("invitation"));
   let githubUrl: string | undefined;
   let notConfigured = false;
   try {
     const github = await getGithubAuth();
     notConfigured = github === null;
     const result = await github?.api.signInSocial({
-      body: { provider: "github", callbackURL: "/" },
+      body: { provider: "github", callbackURL: landing },
       headers: await headers(),
     });
     githubUrl = result?.url;
@@ -36,8 +45,12 @@ export async function signInWithGithub(): Promise<void> {
   redirect(
     githubUrl ??
       (notConfigured
-        ? "/login?error=github_not_configured"
-        : "/login?error=sign_in_unavailable"),
+        ? pathCarrying("/login", formData?.get("invitation"), {
+            error: "github_not_configured",
+          })
+        : pathCarrying("/login", formData?.get("invitation"), {
+            error: "sign_in_unavailable",
+          })),
   );
 }
 
@@ -56,6 +69,8 @@ export async function signInWithPassword(formData: FormData): Promise<void> {
     redirect("/login?error=sign_in_method_disabled");
   const email = formData.get("email");
   const password = formData.get("password");
+  // An invitation link the person came from: carried to the page of the invitation after the sign-in.
+  const invitation = formData.get("invitation");
   let error: string | null = "invalid_credentials";
   if (typeof email === "string" && typeof password === "string") {
     const requestHeaders = await headers();
@@ -76,8 +91,11 @@ export async function signInWithPassword(formData: FormData): Promise<void> {
   // redirect() works by throwing, so it stays outside the try block.
   redirect(
     error === null
-      ? await landingAfterSignIn(email as string)
-      : `/login?error=${error}`,
+      ? landingWithInvitation(
+          await landingAfterSignIn(email as string),
+          invitation,
+        )
+      : pathCarrying("/login", invitation, { error }),
   );
 }
 

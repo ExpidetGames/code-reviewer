@@ -5,9 +5,11 @@
 import "server-only";
 import { getGithubCredentialStore } from "../github-config/shared.ts";
 import {
+  configAudienceOf,
   describeConfigStatus,
   githubAppStatusOf,
   installUrlOf,
+  statusForMembers,
   type ConfigStatus,
 } from "./status.ts";
 
@@ -20,4 +22,17 @@ export async function getGithubAppInstallUrl(): Promise<string | null> {
   return installUrlOf(
     githubAppStatusOf(await getGithubCredentialStore().load()),
   );
+}
+
+/**
+ * The status for the person who looks at the page: complete for the instance admin, only whether each part
+ * works for everybody else (`statusForMembers`).
+ */
+export async function getConfigStatusFor(user: {
+  isInstanceAdmin: boolean;
+}): Promise<ConfigStatus> {
+  const status = await getConfigStatus();
+  return configAudienceOf(user) === "operator"
+    ? status
+    : statusForMembers(status);
 }

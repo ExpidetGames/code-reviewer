@@ -21,7 +21,7 @@ async function signInAsAdmin(page: Page): Promise<void> {
   await page.getByLabel("Password").fill(e2eEnv.adminPassword);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   // With a mail server the admin's unverified address sends them to the verification page.
-  await page.waitForURL(/\/(projects|verify-email)$/);
+  await page.waitForURL(/\/(w\/default\/projects|verify-email)$/);
 }
 
 const form = (page: Page) =>

@@ -14,6 +14,7 @@ import { openDatabase } from "../db/connection.ts";
 import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
 import type { WorkspaceRole } from "../workspaces/roles.ts";
 import { insertUser } from "./users.ts";
+import { defaultWorkspaceId } from "./workspaces.ts";
 
 const [command, databasePath, argument] = process.argv.slice(2);
 if (!command || !databasePath || !argument)
@@ -38,8 +39,8 @@ try {
     importedAt: new Date().toISOString(),
   });
   const workspaces = createWorkspacesRepository(db);
-  const workspace = await workspaces.ensureDefault();
-  await workspaces.addMember(workspace.id, id, input.role);
+  const workspaceId = await defaultWorkspaceId(db);
+  await workspaces.addMember(workspaceId, id, input.role);
   console.log(JSON.stringify({ id }));
 } finally {
   await db.destroy();

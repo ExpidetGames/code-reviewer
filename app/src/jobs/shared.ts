@@ -5,18 +5,12 @@
 // and `createRunnerQueue`.
 import "server-only";
 import { getDatabase } from "../db/startup.ts";
-import { inCurrentWorkspace } from "../workspaces/in-current-workspace.ts";
 import { createJobQueue, type JobQueue } from "./job-queue.ts";
 import { createRunnerQueue, type RunnerQueue } from "./runner-queue.ts";
 
 /** The queue of one workspace. */
 export function jobQueueFor(workspaceId: string): JobQueue {
   return createJobQueue(getDatabase(), workspaceId);
-}
-
-/** The queue of the workspace the signed-in user works in. */
-export function getJobQueue(): JobQueue {
-  return inCurrentWorkspace(jobQueueFor);
 }
 
 /** The queue as runners use it: one for the whole instance, every workspace. */

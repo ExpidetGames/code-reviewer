@@ -55,6 +55,8 @@ export const USER_REFERENCES: ReadonlyArray<{
   { table: "workspaces", column: "created_by", handling: "move" },
   { table: "instance_settings", column: "updated_by", handling: "move" },
   { table: "secrets", column: "updated_by", handling: "move" },
+  { table: "invitations", column: "invited_by", handling: "move" },
+  { table: "invitations", column: "accepted_by", handling: "move" },
 ];
 
 function higher(a: WorkspaceRole, b: WorkspaceRole): WorkspaceRole {
@@ -183,6 +185,17 @@ export async function mergeImportedUser(
       .updateTable("secrets")
       .set({ updated_by: actingUserId })
       .where("updated_by", "=", source.id)
+      .execute();
+
+    await trx
+      .updateTable("invitations")
+      .set({ invited_by: actingUserId })
+      .where("invited_by", "=", source.id)
+      .execute();
+    await trx
+      .updateTable("invitations")
+      .set({ accepted_by: actingUserId })
+      .where("accepted_by", "=", source.id)
       .execute();
 
     // The identity becomes the admin's, and the admin shows the login it carries.

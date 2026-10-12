@@ -15,6 +15,8 @@ import {
 import type { Database } from "../schema.ts";
 import { createAppSettingsRepository } from "./app-settings-repository.ts";
 import { createIntegrationsRepository } from "./integrations-repository.ts";
+import { createInvitationsRepository } from "./invitations-repository.ts";
+import { createWorkspaceMembersRepository } from "./workspace-members-repository.ts";
 import { createJobsRepository } from "./jobs-repository.ts";
 import { createProjectsRepository } from "./projects-repository.ts";
 import { createRepositoriesRepository } from "./repositories-repository.ts";
@@ -30,6 +32,8 @@ function reposOf(db: Kysely<Database>, workspaceId: string) {
     appSettings: createAppSettingsRepository(db, workspaceId),
     jobs: createJobsRepository(db, workspaceId),
     runs: createRunsRepository(db, workspaceId),
+    members: createWorkspaceMembersRepository(db, workspaceId),
+    invitations: createInvitationsRepository(db, workspaceId),
   };
 }
 type Repos = ReturnType<typeof reposOf>;
@@ -69,8 +73,37 @@ async function seed(db: Kysely<Database>, workspaceId: string, tag: string) {
   });
   if (enqueued.status !== "created") throw new Error("seeding failed");
   await repos.appSettings.set("review_defaults", { from: tag }, tag);
+  // A member and an open invitation.
+  await db
+    .insertInto("users")
+    .values({
+      id: `user-${tag}`,
+      name: `user-${tag}`,
+      email: `user-${tag}@example.test`,
+      email_verified: 1,
+      image: null,
+      github_login: null,
+      imported_at: null,
+      is_instance_admin: 0,
+      org_checked_at: null,
+      org_checked_for: null,
+      created_at: "2026-10-12T00:00:00.000Z",
+      updated_at: "2026-10-12T00:00:00.000Z",
+    })
+    .execute();
+  await repos.members.add(`user-${tag}`, "owner");
+  const invitation = await repos.invitations.create({
+    id: `invitation-${tag}`,
+    email: `invited-${tag}@example.test`,
+    role: "member",
+    invitedBy: `user-${tag}`,
+    tokenHash: `hash-${tag}`,
+    expiresAt: new Date("2099-01-01T00:00:00.000Z"),
+  });
   return {
     workspaceId,
+    userId: `user-${tag}`,
+    invitation,
     integration,
     repository,
     job: enqueued.job,
@@ -96,6 +129,18 @@ async function rowsOf(db: Kysely<Database>, workspaceId: string) {
       .execute(),
     jobs: await db
       .selectFrom("jobs")
+      .selectAll()
+      .where("workspace_id", "=", workspaceId)
+      .orderBy("id")
+      .execute(),
+    members: await db
+      .selectFrom("workspace_members")
+      .selectAll()
+      .where("workspace_id", "=", workspaceId)
+      .orderBy("user_id")
+      .execute(),
+    invitations: await db
+      .selectFrom("invitations")
       .selectAll()
       .where("workspace_id", "=", workspaceId)
       .orderBy("id")
@@ -354,6 +399,102 @@ const CASES: Case[] = [
     name: "jobs.discardWaitingAutomaticForPr",
     run: (a, b) => a.jobs.discardWaitingAutomaticForPr(b.repository.id, 7),
     expectAnswer: (answer) => expect(answer).toBe(0),
+  },
+  // members
+  {
+    name: "members.list",
+    run: (a) => a.members.list(),
+    expectAnswer: (answer, a) =>
+      expect(answer).toEqual([expect.objectContaining({ userId: a.userId })]),
+  },
+  {
+    name: "members.get",
+    run: (a, b) => a.members.get(b.userId),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "members.countOwners",
+    run: (a) => a.members.countOwners(),
+    expectAnswer: (answer) => expect(answer).toBe(1),
+  },
+  {
+    name: "members.add",
+    run: (a, b) => a.members.add(b.userId, "admin"),
+    // B's owner joins A: a row of A's own; B keeps its row (the check below compares B's rows).
+    expectAnswer: (answer) => expect(answer).toBe("added"),
+  },
+  {
+    name: "members.setRole",
+    run: (a, b) => a.members.setRole(b.userId, "member"),
+    expectAnswer: (answer) => expect(answer).toBe(false),
+  },
+  {
+    name: "members.remove",
+    run: (a, b) => a.members.remove(b.userId),
+    expectAnswer: (answer) => expect(answer).toBe(false),
+  },
+  {
+    name: "members.lock",
+    run: (a) => a.members.lock(),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  // invitations
+  {
+    name: "invitations.create",
+    run: (a) =>
+      a.invitations.create({
+        id: "invitation-new",
+        email: "new@example.test",
+        role: "member",
+        invitedBy: "user-a",
+        tokenHash: "hash-new",
+        expiresAt: new Date("2099-01-01T00:00:00.000Z"),
+      }),
+    expectAnswer: (answer, a) =>
+      expect(answer).toMatchObject({ workspaceId: a.workspaceId }),
+  },
+  {
+    name: "invitations.get",
+    run: (a, b) => a.invitations.get(b.invitation.id),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "invitations.listOpen",
+    run: (a) => a.invitations.listOpen(),
+    expectAnswer: (answer, a) =>
+      expect(answer).toEqual([
+        expect.objectContaining({ id: a.invitation.id }),
+      ]),
+  },
+  {
+    name: "invitations.findOpenByEmail",
+    run: (a, b) => a.invitations.findOpenByEmail(b.invitation.email),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "invitations.revokeExpiredFor",
+    run: (a, b) => a.invitations.revokeExpiredFor(b.invitation.email),
+    expectAnswer: (answer) => expect(answer).toBe(0),
+  },
+  {
+    name: "invitations.revoke",
+    run: (a, b) => a.invitations.revoke(b.invitation.id),
+    expectAnswer: (answer) => expect(answer).toBe(false),
+  },
+  {
+    name: "invitations.replaceToken",
+    run: (a, b) =>
+      a.invitations.replaceToken(
+        b.invitation.id,
+        "hash-hijacked",
+        new Date("2099-01-01T00:00:00.000Z"),
+      ),
+    expectAnswer: (answer) => expect(answer).toBe(false),
+  },
+  {
+    name: "invitations.markAccepted",
+    run: (a, b) => a.invitations.markAccepted(b.invitation.id, "user-a"),
+    expectAnswer: (answer) => expect(answer).toBe(false),
   },
   // runs
   {

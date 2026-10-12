@@ -74,6 +74,49 @@ describe("signing in with GitHub for the first time", () => {
     });
   });
 
+  // #101-follow-up: the invitation link survives the sign in with GitHub
+  it("brings an invitee back to the page of the invitation, new account or known one", async () => {
+    const token = "B".repeat(43);
+    const landing = `/invitation?token=${token}`;
+    const harness = await createAuthHarness();
+    const finish = async () => {
+      const started = await harness.startSignIn({ callbackURL: landing });
+      const callbackUrl = await harness.github.authorize(
+        started.authorizeUrl ?? "",
+        "octocat",
+      );
+      return harness.callback(callbackUrl, started.cookies);
+    };
+
+    const first = await finish();
+    const again = await finish();
+
+    expect(first.headers.get("location")).toBe(landing);
+    expect(again.headers.get("location")).toBe(landing);
+  });
+
+  // #101-follow-up: no open redirect through the callback address
+  it.each([
+    "https://evil.example/phish",
+    "//evil.example",
+    "javascript:alert(1)",
+  ])(
+    "refuses a callback address that leaves the site: %s",
+    async (callbackURL) => {
+      const harness = await createAuthHarness();
+
+      const started = await harness.startSignIn({ callbackURL });
+
+      expect(started.response.status).toBeGreaterThanOrEqual(400);
+      expect(started.authorizeUrl).toBeUndefined();
+      expect(await counts(harness)).toEqual({
+        users: 0,
+        accounts: 0,
+        sessions: 0,
+      });
+    },
+  );
+
   // #102-GH-11
   it("reads the addresses with the user token of the App and asks for no scope", async () => {
     const harness = await createAuthHarness();

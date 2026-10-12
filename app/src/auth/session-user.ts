@@ -15,8 +15,9 @@ export const CREDENTIAL_PROVIDER_ID = "credential";
  * - `user`: a valid session of a user who may use the app.
  * - `unverified`: a valid session of an email and password account whose address must be verified
  *   first (a mail server is configured). Only the instance admin may still use `/admin`.
- * - `no_workspace`: a valid session of an email and password account that belongs to no workspace, so
- *   it has no access to customer data (access-gates.ts).
+ * - `no_workspace`: a valid session of an account that belongs to no workspace, so it has no access to
+ *   customer data (access-gates.ts). It can still reach the few places made for exactly this: accepting an
+ *   invitation, creating a workspace, the page that explains (`NO_WORKSPACE_PATHS`, access.ts).
  * - `none`: no valid session.
  */
 export type SessionLookup =
