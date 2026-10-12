@@ -1,0 +1,8 @@
+{
+  "include": ["."],
+  "extraPaths": ["."],
+  "typeCheckingMode": "strict",
+  "pythonVersion": "3.13",
+  "venvPath": "../../../../runner",
+  "venv": ".venv"
+}
