@@ -76,6 +76,8 @@ describe("the migrations of both epics", () => {
       "20261011200100_create_password_reset_tokens",
       "20261011210000_create_email_verification_tokens",
       "20261012100000_create_invitations",
+      "20261012140000_create_workspace_secrets",
+      "20261012140100_create_job_claimed_keys",
     ]);
   });
 
@@ -121,6 +123,7 @@ describe("starting the database", () => {
       "instance_settings",
       "integrations",
       "invitations",
+      "job_claimed_keys",
       "job_comments",
       "jobs",
       "kysely_migration",
@@ -135,6 +138,7 @@ describe("starting the database", () => {
       "verifications",
       "webhook_deliveries",
       "workspace_members",
+      "workspace_secrets",
       "workspaces",
     ]);
     const { rows } = await sql<{

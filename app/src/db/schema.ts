@@ -275,6 +275,39 @@ export interface SecretsTable {
   updated_at: string;
 }
 
+/** An encrypted credential of one workspace (src/db/repositories/workspace-secrets-repository.ts, src/secrets/). */
+export interface WorkspaceSecretsTable {
+  workspace_id: string;
+  /** The secret's name (the field bound into the ciphertext), from WORKSPACE_SECRET_NAMES. */
+  name: string;
+  /** What the secret was made for (the provider of an LLM key); it must still match when it is used. */
+  binding: string;
+  /** The encrypted value followed by the authentication tag, base64. */
+  ciphertext: string;
+  /** The random 96-bit nonce, base64. */
+  nonce: string;
+  /** The version of the derived key that encrypted it. */
+  key_version: number;
+  /** The last four characters of the value when the caller asked for the hint (not a secret), or null. */
+  last_four: string | null;
+  /** The id of the user who saved it last, or null. */
+  updated_by: string | null;
+  /** ISO 8601 text in UTC. */
+  updated_at: string;
+}
+
+/** The LLM key handed to a runner with the claim of a job, encrypted (src/runner-api/claimed-keys.ts). */
+export interface JobClaimedKeysTable {
+  job_id: string;
+  /** The encrypted key followed by the authentication tag, base64. */
+  ciphertext: string;
+  /** The random 96-bit nonce, base64. */
+  nonce: string;
+  key_version: number;
+  /** ISO 8601 text in UTC. */
+  created_at: string;
+}
+
 /** A single-use link to set a new password; only the hash of the token is kept (src/auth/password-reset.ts). */
 export interface PasswordResetTokensTable {
   /** SHA-256 of the token, hex. */
@@ -353,6 +386,8 @@ export interface Database {
   instance_settings: InstanceSettingsTable;
   rate_limits: RateLimitsTable;
   secrets: SecretsTable;
+  workspace_secrets: WorkspaceSecretsTable;
+  job_claimed_keys: JobClaimedKeysTable;
   password_reset_tokens: PasswordResetTokensTable;
   email_verification_tokens: EmailVerificationTokensTable;
   invitations: InvitationsTable;

@@ -28,6 +28,8 @@ import { migration as createSecrets } from "./20261011200000_create_secrets.ts";
 import { migration as createPasswordResetTokens } from "./20261011200100_create_password_reset_tokens.ts";
 import { migration as createEmailVerificationTokens } from "./20261011210000_create_email_verification_tokens.ts";
 import { migration as createInvitations } from "./20261012100000_create_invitations.ts";
+import { migration as createWorkspaceSecrets } from "./20261012140000_create_workspace_secrets.ts";
+import { migration as createJobClaimedKeys } from "./20261012140100_create_job_claimed_keys.ts";
 
 const migrations: Record<string, Migration> = {
   "0001_create_app_meta": createAppMeta,
@@ -56,6 +58,8 @@ const migrations: Record<string, Migration> = {
   "20261011210000_create_email_verification_tokens":
     createEmailVerificationTokens,
   "20261012100000_create_invitations": createInvitations,
+  "20261012140000_create_workspace_secrets": createWorkspaceSecrets,
+  "20261012140100_create_job_claimed_keys": createJobClaimedKeys,
 };
 
 export const migrationProvider: MigrationProvider = {
