@@ -23,8 +23,6 @@ export function sessionUser(
     githubLogin: null,
     githubId: null,
     image: null,
-    orgCheckedAt: null,
-    orgCheckedFor: null,
     ...overrides,
   };
 }

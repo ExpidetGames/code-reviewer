@@ -5,15 +5,9 @@
 // IntegrationProvider interface. See README.md in this folder.
 import "server-only";
 import { IntegrationError } from "./errors.ts";
-import {
-  GithubAppConfigError,
-  type GithubAppConfigProblemKind,
-} from "./providers/github-app/errors.ts";
+import { GithubAppConfigError } from "./providers/github-app/errors.ts";
 import type { IntegrationProvider } from "./provider.ts";
-import {
-  loadGithubAppConfig,
-  type GithubAppConfig,
-} from "./providers/github-app/config.ts";
+import type { GithubAppConfig } from "./providers/github-app/config.ts";
 import { createGithubAppProvider } from "./providers/github-app/provider.ts";
 import type { GithubAppClientOptions } from "./providers/github-app/client.ts";
 
@@ -71,7 +65,6 @@ export function createIntegrationRegistry(
 // through this file only.
 export {
   githubAppInstallPageUrl,
-  githubAppInstallUrl,
   githubAppInstallUrlFor,
 } from "./providers/github-app/setup-status.ts";
 // The calls made with a person's own GitHub token (the binding of an installation to a workspace).
@@ -85,10 +78,6 @@ export {
   type UserRequestFailure,
   type UserRequestOptions,
 } from "./providers/github-app/user-requests.ts";
-// Whether any GitHub App variable is set at all (the fallback of an installation that has not been imported
-// yet; none is the normal state of an instance that is not connected to GitHub).
-export { anyGithubAppVariableSet } from "./providers/github-app/configured.ts";
-export type { GithubAppConfigProblemKind };
 export { GithubAppConfigError };
 export {
   loadGithubAppConfig,
@@ -114,48 +103,15 @@ export {
   type VerifyAppErrorCode,
 } from "./providers/github-app/app-requests.ts";
 
-export type GithubAppConfigProblem = {
-  /** `missing`: the variables are not set. `invalid`: they are set but not usable. */
-  kind: GithubAppConfigProblemKind;
-  /** Names of environment variables, never their values. */
-  variables: readonly string[];
-};
-
-/**
- * Whether the GitHub App settings in `env` are usable, asked of the one loader the provider itself
- * uses. Returns what is wrong (the kind of problem and the variable names, never a value), or null. The
- * production start (src/deploy/startup.ts) calls it for the environment of an installation that has not
- * been imported yet.
- */
-export function findGithubAppConfigProblem(
-  env: Readonly<Record<string, string | undefined>>,
-): GithubAppConfigProblem | null {
-  try {
-    loadGithubAppConfig(env);
-    return null;
-  } catch (error) {
-    if (!(error instanceof GithubAppConfigError)) throw error;
-    return { kind: error.problem, variables: error.variables };
-  }
-}
-
 export type DefaultRegistryOptions = {
-  /**
-   * Where the GitHub App settings are read from, on every use. Default: the database first, the process
-   * environment as the fallback of an installation that has not been imported (src/github-config/).
-   * Tests that have no database give the environment here, or a `loadConfig` of their own.
-   */
-  env?: Readonly<Record<string, string | undefined>>;
-  /** Reads the GitHub App settings. Overrides `env` and the default. */
+  /** Reads the GitHub App settings. Overrides the running server's database loader. */
   loadConfig?: () => Promise<GithubAppConfig> | GithubAppConfig;
   /** For tests: a different fetch, clock or request timeout for the GitHub client. */
   githubClient?: Omit<GithubAppClientOptions, "config">;
 };
 
 /**
- * The credentials of the GitHub App as the running server has them: the database first, the environment
- * as the fallback. A configuration that is missing or unusable fails the call that needs GitHub with
- * GITHUB_APP_CONFIG_INVALID, naming fields or variables, never values.
+ * The credentials of the GitHub App as the running server has them: the database.
  */
 async function loadServerGithubAppConfig(): Promise<GithubAppConfig> {
   // Imported here, not at the top: the credential store builds on this file.
@@ -174,11 +130,7 @@ async function loadServerGithubAppConfig(): Promise<GithubAppConfig> {
 export function createDefaultIntegrationRegistry(
   options: DefaultRegistryOptions = {},
 ): IntegrationRegistry {
-  const config =
-    options.loadConfig ??
-    (options.env === undefined
-      ? loadServerGithubAppConfig
-      : () => loadGithubAppConfig(options.env as Record<string, string>));
+  const config = options.loadConfig ?? loadServerGithubAppConfig;
   return createIntegrationRegistry({
     github_app: createGithubAppProvider({
       config,

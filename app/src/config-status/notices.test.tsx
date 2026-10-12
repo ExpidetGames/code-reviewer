@@ -2,8 +2,8 @@
 
 // @vitest-environment jsdom
 // Pins down the configuration hints the pages show: nothing while everything works, a visible hint
-// naming the variable (never a value) when the LLM key or the GitHub App settings are wrong, and
-// the same stable codes always giving the same copy.
+// naming the variable (never a value) when the GitHub App settings are wrong, a warning for an
+// ignored LLM option, and the same stable codes always giving the same copy.
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -33,61 +33,6 @@ describe("the configuration hints", () => {
 
     expect(container.textContent).toBe("");
     expect(describeConfigNotices(WORKING)).toEqual([]);
-  });
-
-  // #104-LK-13 (the LLM access is a matter of the workspace now; its hint is src/llm/ui/llm-access-notice.tsx)
-  it("do not call an absent LLM variable a problem of the instance", () => {
-    const status: ConfigStatus = {
-      ...WORKING,
-      llm: {
-        configured: false,
-        issues: [
-          { code: "LLM_PROVIDER_MISSING", variable: "LLM_PROVIDER" },
-          { code: "LLM_API_KEY_MISSING", variable: "LLM_API_KEY" },
-        ],
-        warnings: [],
-      },
-    };
-
-    expect(describeConfigNotices(status, "operator")).toEqual([]);
-    expect(describeConfigNotices(status)).toEqual([]);
-  });
-
-  // #104-LK-12
-  it("tell the instance admin about a key without a provider, which the fallback does not use", () => {
-    const notices = describeConfigNotices(
-      {
-        ...WORKING,
-        llm: {
-          configured: false,
-          issues: [{ code: "LLM_PROVIDER_MISSING", variable: "LLM_PROVIDER" }],
-          warnings: [],
-        },
-      },
-      "operator",
-    );
-
-    expect(notices).toMatchObject([{ id: "LLM_PROVIDER_MISSING" }]);
-    expect(notices[0]?.detail).toContain("LLM_PROVIDER");
-  });
-
-  it("still tell the instance admin about a legacy LLM variable that is set but wrong", () => {
-    render(
-      <ConfigNotices
-        status={{
-          ...WORKING,
-          llm: {
-            configured: false,
-            issues: [{ code: "LLM_API_KEY_INVALID", variable: "LLM_API_KEY" }],
-            warnings: [],
-          },
-        }}
-        audience="operator"
-      />,
-    );
-
-    expect(screen.getByText("LLM key not valid")).toBeTruthy();
-    expect(screen.getByText(/LLM_API_KEY/)).toBeTruthy();
   });
 
   // CR-34-T10
@@ -120,7 +65,7 @@ describe("the configuration hints", () => {
         githubApp: {
           configured: false,
           kind: "invalid",
-          variables: ["GITHUB_APP_PRIVATE_KEY"],
+          variables: ["github_app_private_key"],
           slug: null,
         },
       },
@@ -167,8 +112,9 @@ describe("the configuration hints", () => {
         slug: null,
       },
       llm: {
-        configured: false,
-        issues: [{ code: "LLM_API_KEY_MISSING", variable: "LLM_API_KEY" }],
+        configured: true,
+        provider: "openrouter",
+        model: "anthropic/claude-haiku-5.5",
         warnings: [{ code: "LLM_MODEL_INVALID", variable: "LLM_MODEL" }],
       },
     };
