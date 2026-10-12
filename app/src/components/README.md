@@ -16,6 +16,9 @@ destructive`, sizes `sm | default | icon`, the `loading`/`loadingLabel` conventi
   - `@/components/page-header` — one `h1`, a breadcrumb slot and the page actions.
   - `@/components/info-hint` — the focusable "?" next to a label (Tooltip, `aria-describedby`,
     Escape closes, 44px hit area).
+  - `@/components/help-disclosure` — the "how it works" trigger over the Collapsible: the text stays
+    in the DOM and is hidden while closed, the trigger announces `aria-expanded`/`aria-controls` and
+    has a 44px target.
   - `@/components/status-region` — `role="status"`, `aria-live="polite"`.
   - `@/components/danger-zone` — a destructive `Card` with the confirmation in an `AlertDialog`.
   - `@/components/description-list` — a dense `<dl>` for run/instance facts.

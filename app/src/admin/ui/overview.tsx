@@ -6,6 +6,8 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import type { GithubConfigView } from "../../github-config/service.ts";
+import { GITHUB_SIGN_IN_NOT_ENABLED } from "../../github-config/ui/messages.ts";
+import { UNREADABLE_SECRET_CAUSE } from "../../secrets/messages.ts";
 import type { AdminSettingsView } from "../service.ts";
 import { ImportNotice } from "./import-notice.tsx";
 import { FailClosedNotice } from "./notices.tsx";
@@ -89,7 +91,7 @@ function describeGithub(
         The GitHub App {github.app?.slug ?? ""} is configured.{" "}
         {signInConfigured
           ? "Signing in with GitHub is enabled."
-          : "Signing in with GitHub is not enabled yet: the client id and secret of the App are missing."}{" "}
+          : GITHUB_SIGN_IN_NOT_ENABLED}{" "}
         {integrations}
       </>
     ),
@@ -136,9 +138,8 @@ export function Overview({
               ? "A stored credential cannot be read."
               : `${String(broken.length)} stored credentials cannot be read.`}
           </strong>{" "}
-          It was saved with another APP_SECRET, or the stored value was changed.
-          Enter it again where it belongs; if you changed APP_SECRET by mistake,
-          restore the old value.
+          {UNREADABLE_SECRET_CAUSE} Enter it again where it belongs; if you
+          changed APP_SECRET by mistake, restore the old value.
         </p>
       ) : null}
       <section className="settings-section" aria-labelledby="checklist-heading">
@@ -151,7 +152,7 @@ export function Overview({
               <>
                 A mail server is saved, but no mail can be sent:{" "}
                 {settings.smtp.password === "unreadable"
-                  ? "the saved password cannot be read (it was saved with another APP_SECRET)."
+                  ? `the saved password cannot be read. ${UNREADABLE_SECRET_CAUSE}`
                   : "the login has no password."}{" "}
                 Until it is entered again, nothing that needs mail is offered
                 (confirming addresses, resetting a password by mail).{" "}

@@ -23,6 +23,7 @@ import {
 } from "../../review-settings/ui/form-model.ts";
 import { SettingsForm } from "../../review-settings/ui/settings-form.tsx";
 import type { ProjectService } from "../service.ts";
+import { PROJECT_STATE_TEXT } from "./messages.ts";
 import type { ProjectRowView } from "./list-view.ts";
 import { loadProjectRow } from "./list-view.ts";
 
@@ -60,14 +61,6 @@ export async function loadProjectSettingsPage(
   }
 }
 
-const STATE_TEXT: Record<ProjectRowView["status"], string> = {
-  active: "Active: new pull requests are reviewed.",
-  inactive:
-    "Inactive: no reviews run until the project is activated. You can save settings now; they apply once it is switched on.",
-  unavailable:
-    "Unavailable: the GitHub App can no longer read this repository. Its settings are kept.",
-};
-
 export function ProjectSettingsPageContent({
   workspaceSlug,
   audience = "member",
@@ -101,7 +94,7 @@ export function ProjectSettingsPageContent({
         }
       />
       <ConfigNotices status={data.config} audience={audience} />
-      <p className="muted">{STATE_TEXT[row.status]}</p>
+      <p className="muted">{PROJECT_STATE_TEXT[row.status]}</p>
       {/* Keyed on the repository: a panel that Cache Components kept mounted for another project
           must not show its pull requests. Only an active project can be started by hand. */}
       {row.status === "active" ? (

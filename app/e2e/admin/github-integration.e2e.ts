@@ -186,8 +186,12 @@ test.describe("the GitHub integration of the admin portal", () => {
 
     await form.getByLabel("App ID").fill(e2eEnv.githubAppId);
     await form.getByLabel("Slug").fill("another-slug");
-    await form.getByLabel("Private key").fill(githubAppPrivateKey());
-    await form.getByLabel("Webhook secret").fill(e2eEnv.githubAppWebhookSecret);
+    await form
+      .getByLabel("Private key", { exact: true })
+      .fill(githubAppPrivateKey());
+    await form
+      .getByLabel("Webhook secret", { exact: true })
+      .fill(e2eEnv.githubAppWebhookSecret);
     await form.getByLabel("Client ID").fill(e2eEnv.githubClientId);
     await form.getByLabel("Client secret").fill(e2eEnv.githubClientSecret);
     // There is no default for the App's visibility: the choice is required (this instance has an answer from
@@ -206,7 +210,9 @@ test.describe("the GitHub integration of the admin portal", () => {
     // below are the lasting proof.)
     await expect(page.getByText(e2eEnv.githubAppSlug).first()).toBeVisible();
     // The secrets were sent once; the page forgot them and says that they are saved.
-    await expect(form.getByLabel("Private key")).toHaveValue("");
+    await expect(form.getByLabel("Private key", { exact: true })).toHaveValue(
+      "",
+    );
     await expect(form.getByText("A value is saved").first()).toBeVisible();
     expect(await page.content()).not.toContain(e2eEnv.githubClientSecret);
     expect(await page.content()).not.toContain("PRIVATE KEY");

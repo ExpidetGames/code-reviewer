@@ -5,6 +5,7 @@
 // App that was imported or made without the user authorization, what an App may lack, and the admin's own
 // GitHub account. Server rendered; the forms are client components.
 import { PageHeader } from "../../ui/page-header.tsx";
+import { UNREADABLE_SECRET_CAUSE } from "../../secrets/messages.ts";
 import type { GithubIdentityView, EmailConflictView } from "../facts.ts";
 import type { GithubConfigView } from "../service.ts";
 import { ManifestForm } from "./manifest-form.tsx";
@@ -14,6 +15,7 @@ import { LinkPanel } from "./link-panel.tsx";
 import {
   describeGithubOutcome,
   describeGithubOutcomeError,
+  GITHUB_SIGN_IN_NOT_ENABLED,
 } from "./messages.ts";
 import { PrivateAppForm, UserAuthorizationForm } from "./prompt-forms.tsx";
 
@@ -129,11 +131,7 @@ export function GithubSection({
             </div>
             <div>
               <dt>Sign in with GitHub</dt>
-              <dd>
-                {signInReady
-                  ? "Enabled."
-                  : "Not enabled yet: the client id and secret of the App are missing."}
-              </dd>
+              <dd>{signInReady ? "Enabled." : GITHUB_SIGN_IN_NOT_ENABLED}</dd>
             </div>
             <div>
               <dt>Only on its own account</dt>
@@ -155,7 +153,7 @@ export function GithubSection({
             </strong>{" "}
             <span className="mono">{view.problem.fields.join(", ")}</span>.
             {view.source === "database"
-              ? " A stored secret that cannot be read was saved with another APP_SECRET, or was changed. Enter it again in the form below."
+              ? ` A stored secret that cannot be read. ${UNREADABLE_SECRET_CAUSE} Enter it again in the form below.`
               : " Fix the variables, or enter the App in the form below."}{" "}
             Reviews and sign in stay off until this is fixed.
           </p>

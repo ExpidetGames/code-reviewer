@@ -4,9 +4,10 @@
 // ended, the person is not allowed, the server was not reached, the answer was not what a route
 // documents. Shared by the copy of the project list and of the settings form.
 import type { TransportErrorCode } from "./json-request.ts";
+import { SESSION_ENDED } from "../copy/messages.ts";
 
 export const TRANSPORT_FAILURE_COPY: Record<TransportErrorCode, string> = {
-  UNAUTHENTICATED: "Your session has ended. Sign in again.",
+  UNAUTHENTICATED: SESSION_ENDED,
   ACCESS_DENIED:
     "Your GitHub account is not allowed to use this Code Reviewer instance.",
   NETWORK_ERROR:

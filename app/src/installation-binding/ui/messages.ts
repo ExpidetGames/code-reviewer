@@ -7,6 +7,8 @@ import {
   describeTransportFailure,
   GENERIC_FAILURE,
 } from "../../ui/transport-messages.ts";
+import { GITHUB_NOT_CONFIGURED_COPY } from "../../config-status/notices.ts";
+import { ROLE_NOT_ALLOWED } from "../../copy/messages.ts";
 import type { BindingResultCode } from "../errors.ts";
 import type { ConnectAvailability } from "../service.ts";
 import type { RoleResult } from "../requests.ts";
@@ -43,7 +45,7 @@ export const RESULT_COPY: Record<
   },
   github_app_not_configured: {
     tone: "error",
-    text: "The GitHub App of this instance is not set up yet. Ask the admin of the instance.",
+    text: GITHUB_NOT_CONFIGURED_COPY,
   },
   user_authorization_not_configured: {
     tone: "error",
@@ -107,8 +109,7 @@ export const AVAILABILITY_COPY: Record<
   Exclude<ConnectAvailability, "available">,
   string
 > = {
-  app_not_configured:
-    "The GitHub App of this instance is not set up yet. The admin of the instance sets it up in the admin portal.",
+  app_not_configured: `${GITHUB_NOT_CONFIGURED_COPY} The admin of the instance sets it up in the admin portal.`,
   user_authorization_not_configured:
     "Connecting GitHub is not available yet. It needs the sign in with GitHub of the GitHub App, which the admin of this instance has to set up in the admin portal.",
   needs_approval:
@@ -129,9 +130,7 @@ export function describeBindingFailure(code: string): string {
   return (
     describeResultCode(code)?.text ??
     describeTransportFailure(code) ??
-    (code === "forbidden"
-      ? "Your role in this workspace does not allow that."
-      : GENERIC_FAILURE)
+    (code === "forbidden" ? ROLE_NOT_ALLOWED : GENERIC_FAILURE)
   );
 }
 
