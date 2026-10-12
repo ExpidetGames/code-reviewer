@@ -11,9 +11,8 @@ export function FailClosedNotice() {
   return (
     <p role="note" className="alert alert-warning">
       <strong>This sign-up rule does not work yet.</strong>{" "}
-      {FAIL_CLOSED_WARNING} No invitation can be created either. Configure a
-      mail server (Mail) or make GitHub the only way to sign in (Setup) and the
-      rule starts working. Accounts that exist are not affected.
+      {FAIL_CLOSED_WARNING} Configure it under Mail or Setup. No invitation can
+      be created either. Accounts that exist are not affected.
     </p>
   );
 }

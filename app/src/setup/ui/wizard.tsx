@@ -230,7 +230,8 @@ export function Wizard({
               </p>
             ) : null}
             <p className="alert alert-warning">
-              {FAIL_CLOSED_WARNING} The entries are saved now.
+              {FAIL_CLOSED_WARNING} You set either up in the admin area after
+              the setup. The entries are saved now.
             </p>
           </div>
         )}
