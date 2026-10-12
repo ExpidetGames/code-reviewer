@@ -368,7 +368,7 @@ test.describe("a pull request on its way to a review comment", () => {
       headSha: head,
     });
     await signInThroughTheForm(page, account);
-    await page.getByRole("link", { name: "Settings" }).click();
+    await page.getByRole("link", { name: "Settings", exact: true }).click();
     const form = page.getByRole("form", { name: "LLM key" });
     await form.getByLabel("API key").fill(WORKSPACE_KEY);
     await form.getByRole("button", { name: "Save key" }).click();
