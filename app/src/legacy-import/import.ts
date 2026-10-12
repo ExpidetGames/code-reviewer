@@ -24,7 +24,7 @@
 // nothing.
 //
 // Nothing here logs a value. The log lines name variables and counts.
-import type { Kysely } from "kysely";
+import { sql, type Kysely } from "kysely";
 import { createAllowedLoginPinsRepository } from "../db/repositories/allowed-login-pins-repository.ts";
 import { createAppSettingsRepository } from "../db/repositories/app-settings-repository.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
@@ -34,7 +34,8 @@ import {
 } from "../db/repositories/legacy-users-repository.ts";
 import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
 import type { Database } from "../db/schema.ts";
-import { formatTimestamp } from "../db/codecs.ts";
+import { encodeJson, formatTimestamp } from "../db/codecs.ts";
+import { databaseDriver } from "../db/driver.ts";
 import {
   CLIENT_SECRET,
   PRIVATE_KEY_SECRET,
@@ -213,8 +214,25 @@ export async function importExistingInstallation(
     const instance = createInstanceSettingsRepository(trx, () => at);
     const workspaces = createWorkspacesRepository(trx, () => at, newId);
 
-    // The marker again, inside the transaction that sets it: a second start at the same moment (two
-    // processes on one file) imports once.
+    // The marker again, inside the transaction that sets it: a second start at the same moment
+    // imports once. SQLite serializes writers on its own (`begin immediate`); Postgres does not, so
+    // the `import_state` row is locked: the second instance waits here, then finds `done` (or the
+    // row this transaction leaves behind) and does nothing.
+    if (databaseDriver(trx) === "postgres") {
+      await trx
+        .insertInto("instance_settings")
+        .values({
+          key: "import_state",
+          value: encodeJson("none"),
+          updated_by: null,
+          updated_at: timestamp,
+        })
+        .onConflict((conflict) => conflict.column("key").doNothing())
+        .execute();
+      await sql`select value from instance_settings where key = ${"import_state"} for update`.execute(
+        trx,
+      );
+    }
     if ((await instance.get("import_state")) === "done") return null;
 
     // 1. The workspace.
