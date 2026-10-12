@@ -4,6 +4,7 @@
 // backup (DATABASE_PATH is the database layer's own variable, read here with the same default).
 //
 // No `server-only` import: the command line (cli.ts) runs this code without Next.js.
+import { isPostgresUrl } from "../db/config.ts";
 import { BackupError } from "./errors.ts";
 
 export const DEFAULT_BACKUP_DIR = "/backups";
@@ -14,8 +15,13 @@ export const DEFAULT_DATABASE_PATH_FOR_BACKUP = "/data/app.db";
 export type BackupConfig = {
   databasePath: string;
   backupDir: string;
-  /** When the scheduler runs, in UTC; null when it is switched off. */
+  /** When the scheduler runs, in UTC; null when it is switched off or does not apply. */
   time: { hour: number; minute: number } | null;
+  /**
+   * Whether the app schedules backups itself. False for Postgres (an external database is the
+   * operator's to back up), so the scheduler starts nothing and the status says so.
+   */
+  applies: boolean;
 };
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -45,7 +51,14 @@ export function loadBackupSchedule(env: Env): BackupConfig["time"] {
 }
 
 export function loadBackupConfig(env: Env): BackupConfig {
-  return { ...loadBackupPaths(env), time: loadBackupSchedule(env) };
+  // Postgres has no file to `VACUUM INTO`, so the schedule does not apply: its settings are not even
+  // read, and a stray BACKUP_TIME cannot stop a start whose backups are the operator's job.
+  const applies = !isPostgresUrl(env.DATABASE_URL);
+  return {
+    ...loadBackupPaths(env),
+    applies,
+    time: applies ? loadBackupSchedule(env) : null,
+  };
 }
 
 /** "02:30" for the time of day of the schedule. */

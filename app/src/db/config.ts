@@ -33,11 +33,21 @@ export type PostgresDatabaseConfig = {
 
 export type DatabaseConfig = SqliteDatabaseConfig | PostgresDatabaseConfig;
 
+/**
+ * Whether a `DATABASE_URL` value names Postgres. Pure, so code that must not throw on an invalid URL
+ * (the backup settings) can still ask which engine is configured.
+ */
+export function isPostgresUrl(value: string | undefined): boolean {
+  const url = value?.trim().toLowerCase() ?? "";
+  return url.startsWith("postgres://") || url.startsWith("postgresql://");
+}
+
 export function loadDatabaseConfig(
   env: Readonly<Record<string, string | undefined>>,
 ): DatabaseConfig {
   const url = env.DATABASE_URL?.trim();
   if (!url) return sqliteConfig(env);
+  if (isPostgresUrl(url)) return postgresConfig(url, env);
   const lower = url.toLowerCase();
   if (lower.startsWith("postgres://") || lower.startsWith("postgresql://"))
     return postgresConfig(url, env);
