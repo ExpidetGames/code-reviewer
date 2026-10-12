@@ -136,6 +136,12 @@ Migrations `20261011160000_create_workspaces`, `20261011160100_add_workspace_to_
   is rebuilt parents first (rename to `*_old`, create, copy), the old tables are dropped leaf first and
   the indexes are created last. No foreign key is violated at any point. `users` is not rebuilt (its
   children cascade on delete): `github_login` is replaced by a nullable copy of itself.
+- **Postgres.** The same migration runs on Postgres with two guarded differences, none of which
+  touches the SQLite statements or their order: Postgres refuses a composite foreign key whose target
+  has no matching unique constraint, so `integrations_id_workspace_unique` is created before the
+  `repositories` table on Postgres (and after it, in its shipped place, on SQLite); and Postgres keeps
+  an explicitly named constraint's name when a table is renamed, so `job_comments_pk` is freed before
+  the new `job_comments` reuses it. A fresh SQLite `sqlite_master` is byte-for-byte the shipped one.
 - **Time budget.** The migration of a database with 10 000 jobs that each hold a result of about 2 KB
   must finish within 10 seconds in one transaction (`workspace-migration.integration.test.ts`). It
   takes about 0.4 seconds on a laptop; the budget is generous so that a slow CI machine does not make

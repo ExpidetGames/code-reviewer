@@ -65,6 +65,16 @@ async function renameToOld(db: AnyDb, table: string): Promise<void> {
   );
 }
 
+/** The unique target of the composite foreign keys of `repositories` and `jobs`. */
+function createIntegrationsIdWorkspaceUnique(db: AnyDb): Promise<void> {
+  return db.schema
+    .createIndex("integrations_id_workspace_unique")
+    .on("integrations")
+    .columns(["id", "workspace_id"])
+    .unique()
+    .execute();
+}
+
 // Postgres keeps the name of an explicitly named constraint when its table is renamed, and the
 // names of primary key constraints are schema-wide (each is backed by an index). The new
 // `job_comments` below reuses the explicit name `job_comments_pk`, so the old one steps aside first.
@@ -138,16 +148,11 @@ export const migration: Migration = {
              webhook_secret, status, created_at, updated_at
       from integrations_old`.execute(db);
 
-    // The target of the composite foreign keys must be unique, AND the unique index must exist
-    // before a table that refers to it is created: Postgres refuses a foreign key whose target has
-    // no matching unique constraint (SQLite would only check at insert). Reordering the DDL does not
-    // change the schema this migration ends with.
-    await db.schema
-      .createIndex("integrations_id_workspace_unique")
-      .on("integrations")
-      .columns(["id", "workspace_id"])
-      .unique()
-      .execute();
+    // Postgres refuses a foreign key whose target has no matching unique constraint, so the index
+    // below must exist before `repositories` (with its composite FK) is created. SQLite only checks
+    // at insert, and its schema object order is frozen: create the index here on Postgres only, and
+    // in its shipped place (after `repositories`) on SQLite.
+    if (postgres) await createIntegrationsIdWorkspaceUnique(db);
 
     // repositories
     await renameToOld(db, "repositories");
@@ -171,6 +176,10 @@ export const migration: Migration = {
         ["id", "workspace_id"],
       )
       .execute();
+    // The target of the composite foreign keys must be unique; it has to exist before rows are
+    // inserted into a table that refers to it. (On Postgres it was already created above, before
+    // `repositories`, because the FK needs it then.)
+    if (!postgres) await createIntegrationsIdWorkspaceUnique(db);
     await sql`
       insert into repositories (id, workspace_id, integration_id, external_id, full_name, url, active,
                                 created_at, updated_at)
