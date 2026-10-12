@@ -43,11 +43,12 @@ export function startCleanup({
         removed.rateLimits +
           removed.unverifiedAccounts +
           removed.verificationTokens +
-          removed.passwordResetTokens >
+          removed.passwordResetTokens +
+          removed.jobClaimedKeys >
         0
       )
         log.info(
-          `[maintenance] removed ${String(removed.rateLimits)} old rate limit counters, ${String(removed.unverifiedAccounts)} unverified accounts, ${String(removed.verificationTokens)} old verification links and ${String(removed.passwordResetTokens)} old reset links.`,
+          `[maintenance] removed ${String(removed.rateLimits)} old rate limit counters, ${String(removed.unverifiedAccounts)} unverified accounts, ${String(removed.verificationTokens)} old verification links and ${String(removed.passwordResetTokens)} old reset links and ${String(removed.jobClaimedKeys)} remembered job keys.`,
         );
     } catch {
       log.error(

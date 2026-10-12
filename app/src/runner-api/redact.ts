@@ -22,9 +22,10 @@ const SECRET_SHAPES: readonly RegExp[] = [
 ];
 
 /**
- * The secrets the app itself holds, as they are used: surrounding white space is not part of a
- * setting (the LLM key is trimmed before it is handed to a runner, the runner token before it is
- * compared), so it is trimmed here as well. Empty settings are left out.
+ * The secrets the app itself holds in its environment, as they are used: surrounding white space is not
+ * part of a setting (the LLM key is trimmed before it is handed to a runner, the runner token before it is
+ * compared), so it is trimmed here as well. Empty settings are left out. (`LLM_API_KEY` is the legacy key of
+ * a single-tenant instance; the key of a workspace is added by the caller, see `runner-api/shared.ts`.)
  */
 export function knownSecretsFromEnv(
   env: Readonly<Record<string, string | undefined>>,
