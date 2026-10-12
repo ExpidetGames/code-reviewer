@@ -2,8 +2,10 @@
 
 "use client";
 // The invitations waiting for the verified address of the signed in account (only while the instance can
-// send mail): one row each, with the button that accepts it. Never shown for an unverified address, and
-// never without a mail server (src/workspaces/invitations.ts, `listPendingFor`).
+// send mail): one compact row each (the workspace, its role, the expiry and Accept), under a single
+// accessible list name. Never shown for an unverified address, and never without a mail server
+// (src/workspaces/invitations.ts, `listPendingFor`).
+import { Badge } from "../../components/ui/badge.tsx";
 import { formatUtc } from "../../ui/format-time.ts";
 import type { PendingInvitation } from "../invitations.ts";
 import { AcceptInvitation } from "./accept-invitation.tsx";
@@ -22,36 +24,35 @@ export function PendingInvitations({
 }) {
   if (invitations.length === 0) return null;
   return (
-    <section aria-labelledby="pending-heading" className="pending">
-      <h2 id="pending-heading">Invitations for you</h2>
-      <ul className="member-list" aria-label="Invitations for you">
-        {invitations.map((invitation) => (
-          <li
-            key={invitation.id}
-            className="member-row pending-row"
-            data-invitation={invitation.id}
-          >
-            <div className="member-main">
-              <span className="member-name">{invitation.workspaceName}</span>
-              <span className="muted small">
-                As {ROLE_LABEL[invitation.role]}, until{" "}
-                <time dateTime={invitation.expiresAt}>
-                  {formatUtc(invitation.expiresAt)}
-                </time>
-              </span>
-            </div>
-            <div className="member-actions">
-              <AcceptInvitation
-                which={{ invitationId: invitation.id }}
-                workspaceName={invitation.workspaceName}
-                label="Accept"
-                {...(api === undefined ? {} : { api })}
-                {...(open === undefined ? {} : { open })}
-              />
-            </div>
-          </li>
-        ))}
-      </ul>
-    </section>
+    <ul
+      aria-label="Invitations"
+      className="flex flex-col divide-y divide-border rounded-lg border"
+    >
+      {invitations.map((invitation) => (
+        <li
+          key={invitation.id}
+          data-invitation={invitation.id}
+          className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3"
+        >
+          <span className="min-w-0 flex-1 truncate font-medium">
+            {invitation.workspaceName}
+          </span>
+          <Badge variant="neutral">{ROLE_LABEL[invitation.role]}</Badge>
+          <span className="text-sm whitespace-nowrap text-muted-foreground">
+            Expires{" "}
+            <time dateTime={invitation.expiresAt}>
+              {formatUtc(invitation.expiresAt)}
+            </time>
+          </span>
+          <AcceptInvitation
+            which={{ invitationId: invitation.id }}
+            workspaceName={invitation.workspaceName}
+            label="Accept"
+            {...(api === undefined ? {} : { api })}
+            {...(open === undefined ? {} : { open })}
+          />
+        </li>
+      ))}
+    </ul>
   );
 }

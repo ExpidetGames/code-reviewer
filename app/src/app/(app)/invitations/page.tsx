@@ -5,10 +5,9 @@ import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { currentLookup } from "@/auth/session";
 import { loginPath } from "@/auth/session-user";
+import { PageHeader } from "@/components/page-header";
 import { loadAccountView } from "@/workspaces/account-view";
-import { PendingInvitations } from "@/workspaces/ui/pending-invitations";
-import { EmptyState } from "@/ui/empty-state";
-import { PageHeader } from "@/ui/page-header";
+import { InvitationsView } from "@/workspaces/ui/invitations-view";
 
 export const metadata: Metadata = { title: "Invitations" };
 
@@ -22,18 +21,10 @@ export default async function InvitationsPage() {
   const view = await loadAccountView(lookup.user.id);
   return (
     <>
-      <PageHeader
-        title="Invitations"
-        description="Workspaces you are invited to."
-      />
-      {view.pending.length === 0 ? (
-        <EmptyState title="No invitations waiting">
-          Invitations for your email address show up here once it is confirmed.
-          A link you were sent opens the invitation directly.
-        </EmptyState>
-      ) : (
-        <PendingInvitations invitations={view.pending} />
-      )}
+      <PageHeader title="Invitations" />
+      <div className="pt-6">
+        <InvitationsView pending={view.pending} />
+      </div>
     </>
   );
 }
