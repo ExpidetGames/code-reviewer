@@ -30,8 +30,9 @@ import type {
   ReleaseResult,
 } from "../../jobs/job-types.ts";
 import { encodeJson, formatTimestamp } from "../codecs.ts";
+import { databaseDriver, type DatabaseDriver } from "../driver.ts";
 import type { Database } from "../schema.ts";
-import { claimOldestDueJob } from "./jobs-claim.ts";
+import { claimOldestDueJob, claimOldestDueJobPostgres } from "./jobs-claim.ts";
 import { toJob } from "./jobs-repository.ts";
 
 /** What `expireStaleJobs` did. */
@@ -49,6 +50,8 @@ export type RunnerJobsRepositoryOptions = {
   /** The random lease token of a claim. */
   newToken?: () => string;
   limits?: Partial<JobQueueLimits>;
+  /** Overrides the engine read from the connection; tests only. */
+  driver?: DatabaseDriver;
 };
 
 export type RunnerJobsRepository = {
@@ -129,6 +132,7 @@ export function createRunnerJobsRepository(
   const now = options.now ?? (() => new Date());
   const newToken = options.newToken ?? (() => crypto.randomUUID());
   const limits = { ...DEFAULT_JOB_QUEUE_LIMITS, ...options.limits };
+  const driver = options.driver ?? databaseDriver(db);
 
   // A transaction cannot start another one; inside one, just use it.
   function inTransaction<T>(
@@ -238,12 +242,15 @@ export function createRunnerJobsRepository(
         const current = now();
         await expire(trx, current);
         const leaseToken = newToken();
-        const row = await claimOldestDueJob(trx, {
+        const claim = {
           runnerId,
           leaseToken,
           now: current,
           leaseExpiresAt: new Date(current.getTime() + limits.leaseMs),
-        });
+        };
+        const row = await (
+          driver === "postgres" ? claimOldestDueJobPostgres : claimOldestDueJob
+        )(trx, claim);
         return row === undefined ? null : { job: toJob(row), leaseToken };
       });
     },

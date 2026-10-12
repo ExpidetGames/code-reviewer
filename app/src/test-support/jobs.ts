@@ -76,9 +76,19 @@ export type JobQueueFixture = {
 };
 
 export async function createJobQueueFixture(
-  options: { limits?: Partial<JobQueueLimits> } = {},
+  options: {
+    limits?: Partial<JobQueueLimits>;
+    /** A database to seed instead of a fresh SQLite one (for the Postgres tests). */
+    database?: Kysely<Database>;
+  } = {},
 ): Promise<JobQueueFixture> {
-  const { db, config } = await createTestDatabase();
+  const created = options.database
+    ? { db: options.database, databasePath: "" }
+    : await (async () => {
+        const test = await createTestDatabase();
+        return { db: test.db, databasePath: test.config.path };
+      })();
+  const { db, databasePath } = created;
   const clock = createTestClock();
   const workspaceId = await defaultWorkspaceId(db);
   const integration = await createIntegrationsRepository(
@@ -129,7 +139,7 @@ export async function createJobQueueFixture(
   return {
     db,
     workspaceId,
-    databasePath: config.path,
+    databasePath,
     queue,
     clock,
     repositoryId: first.id,
