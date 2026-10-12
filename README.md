@@ -74,8 +74,9 @@ instance admin (12 to 128 characters, not a common password). You land in `/admi
 setup page is gone afterwards. The code is valid for 60 minutes, works once, and after 10 wrong codes
 the setup locks until the app is restarted (which prints a new code); the code lives in the memory of
 one process, so do the setup with one app instance. An installation from before the setup existed keeps
-its data: only the web UI waits, webhooks and the runner API keep working. How it works:
-`app/src/setup/README.md`.
+its data, and its settings are imported once ([Updating from a version before
+accounts](#updating-from-a-version-before-accounts)): only the web UI waits, webhooks and the runner API keep
+working. How it works: `app/src/setup/README.md`.
 
 The admin portal at `/admin` (instance admin only; everybody else gets a 404) holds the settings of the
 instance: tenancy, sign-up rule, the ways to sign in and the limits, with who changed what and when.
@@ -110,10 +111,9 @@ decrypt it), never shown again, never logged, and reviews of a workspace use the
 workspace without a key fails its reviews with `llm_not_configured` and shows "LLM not configured" with a link to
 the form. The default model is `anthropic/claude-haiku-5.5` (the model is a review setting).
 
-The legacy variables `LLM_PROVIDER` and `LLM_API_KEY` (optionally `LLM_MODEL`, `LLM_MAX_TOKENS`, see
-`app/.env.example`) still work on a single-tenant instance for a workspace that has no key of its own, until the
-import of an existing installation moves them into the default workspace; a multi-tenant instance ignores the key.
-How it works: `app/src/llm/README.md`.
+The legacy variables `LLM_PROVIDER` and `LLM_API_KEY` are not read any more: the update of an existing installation
+imports them once into the default workspace's key and ignores them afterwards. `LLM_MODEL` and `LLM_MAX_TOKENS`
+(see `app/.env.example`) stay instance settings. How it works: `app/src/llm/README.md`.
 
 ### GitHub App
 
@@ -125,7 +125,45 @@ private key safe and how to install the app on the repositories. The App id, slu
 secret, client id and client secret are stored encrypted in the database and never shown again; no
 environment variable is needed, and a replaced webhook secret counts from the next delivery on every
 instance. Without an App GitHub is "not configured" and no review can run. An installation from before
-accounts that still has `GITHUB_APP_*` variables keeps working until the update imports them.
+accounts that still has `GITHUB_APP_*` variables has them imported once by the update.
+
+## Updating from a version before accounts
+
+An installation that ran the release before accounts (the GitHub OAuth app and the allow list, `GITHUB_APP_*` and
+`LLM_*` in the environment, `BETTER_AUTH_SECRET`, users who signed in with GitHub) updates without losing anything
+and needs the operator **once**, for a short setup. The decision is in
+[`docs/decisions/0001-editions-setup-and-accounts.md`](docs/decisions/0001-editions-setup-and-accounts.md),
+section 2.11; the step by step guide for Coolify is "Updating an installation from before accounts" in
+[`docs/deployment-coolify.md`](docs/deployment-coolify.md); how it works is in
+[`app/src/legacy-import/README.md`](app/src/legacy-import/README.md).
+
+1. **Back up, and keep the master key.** Add `APP_SECRET` with exactly the value of `BETTER_AUTH_SECRET` (the old
+   name keeps working while `APP_SECRET` is empty; two different values sign everybody out and make the stored
+   GitHub tokens unreadable) and keep a copy of it **apart from the database backups**. The update takes a backup of
+   the SQLite file itself before it touches it and does not start if that fails (the `backups` volume must be
+   mounted and writable).
+2. **Start the new version with the environment you have.** On the first start the app backs up the database,
+   migrates it and imports, in one transaction: one default workspace holds all the data; the GitHub App and the
+   LLM key move into the encrypted store (the LLM key becomes the default workspace's key); the people who pass the
+   allow list **at that moment** become members (a listed login whose GitHub id is bound to the account, or, with
+   `ALLOWED_GITHUB_ORG`, a live check of the organization with the person's own stored token), the first of them
+   to have signed in becomes the Owner. If the import fails it changes nothing and the start ends with one line;
+   fix the cause and start again. The log names every variable that is ignored from then on, never a value.
+   Reviews are never interrupted: webhooks and the runner API serve the imported settings meanwhile.
+3. **Do the short setup.** Read `[setup] Setup code: ...` in the log of the app, open the app, enter the code and
+   answer three questions (single or multi-tenant, who may sign up, your admin account). **The allow list is not
+   turned into a sign-up rule and the organization is not migrated**: the admin portal lists who was not made a
+   member, the allowed logins that never signed in (invite them by email) and the organization (recreate that
+   access as an email list or as allowed domains).
+4. **Enable sign in with GitHub** in the admin portal (Integrations: the client id and secret of the GitHub App, the
+   callback address is shown; confirm whether the App can only be installed on its own account). Until then sign in
+   is by email and password. People who used GitHub before are recognised by their numeric GitHub id.
+5. **Remove the old variables** (`GITHUB_APP_*`, `GITHUB_OAUTH_*`, `ALLOWED_GITHUB_*`, `LLM_PROVIDER`,
+   `LLM_API_KEY`, `BETTER_AUTH_SECRET`) and redeploy.
+
+`make test-images` and CI run `docker/smoke/upgrade.sh` against the image with the database of the previous
+release; the browser journey `app/e2e/upgrade/update-from-previous-release.e2e.ts` walks through the same steps with
+the real runner and PR-Agent against the fakes.
 
 ## Supported browsers
 
@@ -214,14 +252,15 @@ Open `http://localhost:3000`: a new instance asks for the **setup code**, which 
 | `APP_SECRET` | Required. Random, at least 32 characters: `openssl rand -base64 32`. Keep a copy apart from the database backups: a database restored without it loses every stored credential. An existing `BETTER_AUTH_SECRET` is accepted in its place |
 | `RUNNER_TOKEN` | Required. Random, at least 32 characters: `openssl rand -hex 32` (the app and the runner share it) |
 | `BETTER_AUTH_URL` | The address people use, https beyond localhost (a local try-out needs nothing) |
-| The GitHub App | Not an environment variable: create it in the admin portal under Integrations ([docs/github-app.md](docs/github-app.md): one click, or by hand). `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_WEBHOOK_SECRET` and `GITHUB_APP_PRIVATE_KEY` of an installation from before accounts are read until the update imports them; `GITHUB_OAUTH_*` are no longer used |
-| `LLM_API_KEY` (and `LLM_PROVIDER`) | Legacy: an LLM key for a single-tenant instance whose workspace has no key of its own. Optional; the key is normally entered per workspace in the UI (Settings, LLM access) |
+| The GitHub App | Not an environment variable: create it in the admin portal under Integrations ([docs/github-app.md](docs/github-app.md): one click, or by hand). `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_WEBHOOK_SECRET` and `GITHUB_APP_PRIVATE_KEY` of an installation from before accounts are imported once by the update and ignored afterwards ([Updating from a version before accounts](#updating-from-a-version-before-accounts)); `GITHUB_OAUTH_*` are no longer used |
+| `LLM_API_KEY` (and `LLM_PROVIDER`) | Legacy, optional: an installation from before accounts has its key imported once into the default workspace by the update. The key is normally entered per workspace in the UI (Settings, LLM access) |
 
 `RUNNER_TOKEN` empty stops `docker compose up` with a message naming the variable, before any container
 is created. The production app refuses to start without `APP_SECRET` (or `BETTER_AUTH_SECRET`) and
 without `RUNNER_TOKEN` (at least 32 characters): one line in the log naming the variables, never their
-values. No `GITHUB_*` variable is required. An incomplete or unusable set of the old `GITHUB_APP_*`
-variables is only reported in the log, and GitHub stays "not configured".
+values. No `GITHUB_*` variable is required. On a new instance the old `GITHUB_APP_*`, `ALLOWED_GITHUB_*`
+and `LLM_*` variables are ignored (one line in the log says so), and GitHub stays "not configured" until the App
+is entered in the admin portal.
 
 Compose only catches *empty* values. A value that is set but invalid passes compose and is rejected by
 the app, which exits with one `[auth]` or `[deploy]` line (for example a missing `APP_SECRET`, a

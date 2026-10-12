@@ -22,7 +22,7 @@ no port and only talks to the app.
 8. [Storage and backups](#8-storage-and-backups)
 9. [Runner sizing and `RUNNER_CONCURRENCY`](#9-runner-sizing-and-runner_concurrency)
 10. [One app instance only](#10-one-app-instance-only)
-11. [Updates and rollback](#11-updates-and-rollback)
+11. [Updates and rollback](#11-updates-and-rollback), including [updating an installation from before accounts](#updating-an-installation-from-before-accounts)
 12. [First-run checklist](#12-first-run-checklist)
 13. [When something does not work](#13-when-something-does-not-work)
 - [What is verified](#what-is-verified)
@@ -165,10 +165,11 @@ localhost, because browsers drop its secure cookies over http.
 ## 6. Environment variables
 
 > The GitHub App and "Sign in with GitHub" are configured in the admin portal now, not here
-> ([`github-app.md`](github-app.md)). The `GITHUB_*` and `ALLOWED_GITHUB_*` rows below describe an
-> installation from before accounts: its variables are read as long as the database holds no GitHub App,
-> and the update to accounts imports them once. `GITHUB_OAUTH_*` are no longer used and
-> `ALLOWED_GITHUB_*` no longer decide who may sign in (the sign-up rule and the workspaces do).
+> ([`github-app.md`](github-app.md)). The `GITHUB_APP_*`, `ALLOWED_GITHUB_*` and `LLM_*` rows below describe an
+> installation from before accounts: the update to accounts **imports them once** on its first start and ignores
+> them afterwards ([updating an installation from before accounts](#updating-an-installation-from-before-accounts)).
+> `GITHUB_OAUTH_*` are no longer used and `ALLOWED_GITHUB_*` no longer decide who may sign in (the sign-up rule
+> and the workspaces do). On a new instance all of them are ignored.
 
 Open **Environment Variables** of the application. Coolify lists every variable that
 `compose.coolify.yml` references; the ones marked required block the deployment while empty
@@ -187,19 +188,19 @@ value), set Literal.
 |---|---|---|---|
 | `BETTER_AUTH_URL` | yes | The public address: `https://<domain>` | No path, no port, no trailing slash. If you use GitHub sign in, register `<this>/api/auth/callback/github` as the OAuth app's callback URL. |
 | `APP_SECRET` | by the app | `openssl rand -base64 32` | **Required**, at least 32 characters. The master key of the instance: it signs the session cookie and encrypts the credentials stored in the database. Coolify does not block the deployment when it is empty, the app refuses to start and the log names the variable. **Back it up separately from the database** (a password manager): a database restored without its `APP_SECRET` loses every stored credential, and it cannot be recovered. Changing it signs everybody out. |
-| `BETTER_AUTH_SECRET` | deprecated | The value an existing deployment already has | The old name of `APP_SECRET`. The app uses it as `APP_SECRET` while `APP_SECRET` is empty (and logs once that it is deprecated), so an existing deployment keeps its sessions and stored tokens. Set `APP_SECRET` to the same value, then remove this one. |
+| `BETTER_AUTH_SECRET` | deprecated | The value an existing deployment already has | The old name of `APP_SECRET`. The app uses it as `APP_SECRET` while `APP_SECRET` is empty (and logs once that it is deprecated), so an existing deployment keeps its sessions and stored tokens. When you update, add `APP_SECRET` with **exactly this value**, then remove this one; two different values sign everybody out and make the stored GitHub tokens of the earlier sign in unreadable. |
 | `GITHUB_OAUTH_CLIENT_ID` | optional | Nowhere: no longer used | The separate OAuth app of earlier versions is replaced by the user authorization of the GitHub App (client id and secret are entered in the admin portal) and is never imported. Remove it. |
 | `GITHUB_OAUTH_CLIENT_SECRET` | optional | Nowhere: no longer used | Secret of the old OAuth app. Remove it. |
-| `ALLOWED_GITHUB_LOGINS` | optional | Comma separated GitHub logins of the earlier allow list | No longer decides who may sign in: the sign-up rule and the workspaces do (admin portal). The update to accounts reads it once to decide who becomes a member. A login can be bound to its numeric id (`octocat:583231`): [`app/src/auth/README.md`](../app/src/auth/README.md). |
+| `ALLOWED_GITHUB_LOGINS` | optional | Comma separated GitHub logins of the earlier allow list | No longer decides who may sign in: the sign-up rule and the workspaces do (admin portal). The update to accounts reads it once to decide who becomes a member, then ignores it. A login can be bound to its numeric id (`octocat:583231`): [`app/src/auth/README.md`](../app/src/auth/README.md). |
 | `ALLOWED_GITHUB_ORG` | optional | The name of a GitHub organization (`github.com/<name>`) of the earlier allow list | Read once by the update to accounts, like `ALLOWED_GITHUB_LOGINS`; it never becomes a sign-up rule. |
-| `GITHUB_APP_ID` | optional | The App ID on the GitHub App's settings page | Only for an installation from before accounts: read while the database holds no GitHub App ([`github-app.md`](github-app.md), "Older installations"). Set all four GitHub App values or none; a partial set is reported in the log at start. |
+| `GITHUB_APP_ID` | optional | The App ID on the GitHub App's settings page | Only for an installation from before accounts: imported once into the encrypted store on the first start after the update, then ignored ([`github-app.md`](github-app.md), "Older installations"). Set all four GitHub App values or none; a value that is missing or unusable is not imported, and the log and the admin portal name the variable. |
 | `GITHUB_APP_SLUG` | optional | The last part of `github.com/apps/<slug>` | |
 | `GITHUB_APP_WEBHOOK_SECRET` | optional | The secret entered in the GitHub App's webhook settings | Secret. Byte for byte: no trailing space or line break. |
-| `GITHUB_APP_PRIVATE_KEY` | optional | The `.pem` file generated on the GitHub App's settings page | Secret. In Coolify choose the value type **Multiline** and paste the key with its line breaks, or paste it on one line with the breaks written as `\n`; both give the same key ([`github-app.md`](github-app.md), "Older installations"). The key is parsed at start; an unusable one is reported in the log by variable name and GitHub stays not configured. |
+| `GITHUB_APP_PRIVATE_KEY` | optional | The `.pem` file generated on the GitHub App's settings page | Secret. In Coolify choose the value type **Multiline** and paste the key with its line breaks, or paste it on one line with the breaks written as `\n`; both give the same key ([`github-app.md`](github-app.md), "Older installations"). The key is parsed at the import; an unusable one is not imported, the log names the variable, and GitHub stays not configured until the App is entered in the admin portal. |
 | `RUNNER_TOKEN` | yes | `openssl rand -hex 32` | At least 32 characters. Secret shared by the app and the runner; both read this one variable. |
-| `LLM_API_KEY` | optional | The OpenRouter API key | Legacy, secret. Every workspace enters its own key in the UI (Settings, LLM access). This one only serves a single-tenant instance for a workspace that has no key of its own. Without any key, reviews of that workspace fail with `llm_not_configured`: enter one before the first review. |
+| `LLM_API_KEY` | optional | The OpenRouter API key | Legacy, secret. Every workspace enters its own key in the UI (Settings, LLM access). The update imports this one **once** into the default workspace (encrypted) and does not read it afterwards. Without a key, reviews of a workspace fail with `llm_not_configured`: enter one before the first review. |
 | `LLM_PROVIDER` | optional | `openrouter` | The only provider for now; this is the default. |
-| `LLM_MODEL` | optional | An OpenRouter model name | Default `anthropic/claude-haiku-5.5`. The review settings in the UI can choose another model per project. |
+| `LLM_MODEL` | optional | An OpenRouter model name | Default `anthropic/claude-haiku-5.5`. The review settings in the UI can choose another model per project. The update also copies a model that differs from the default into the review defaults of the default workspace, so removing this variable later does not change the model. |
 | `LLM_MAX_TOKENS` | optional | Context window of a model PR-Agent does not know | Leave empty for known models. |
 | `REVIEW_DEBOUNCE_SECONDS` | optional | A number from 0 to 600 | How long a push to a pull request waits before its automatic review starts. Empty: 90. |
 | `DATABASE_BUSY_TIMEOUT_MS` | optional | A number of milliseconds | How long a database write waits for a lock. Empty: 5000. |
@@ -308,14 +309,16 @@ What to know:
   configured. The wizard says so next to the choice. Under the rule "everyone" people can sign up at
   `/sign-up` at once; with a mail server they have to confirm their address with a link first. A new
   account belongs to no workspace and sees no data until an admin invites it.
-- If `GITHUB_APP_*` is set, the synchronization with GitHub that ran at start lists the installations of the App.
-  It never makes a connection from the list: an installation is noted as unclaimed (the admin portal shows them
-  under **Approvals**) until a person of a workspace connects it, or, in a single-tenant instance whose App is
-  private, until it is found on the App's own account. Installations that were linked before the update keep their
-  workspace. With no `GITHUB_APP_*` variable nothing is attempted: GitHub is simply not configured.
-- An existing deployment that updates to this version also gets the code and the wizard (the data it has is
-  kept). Until the wizard is finished only the web UI waits: the webhooks and the runner API keep working, so
-  reviews do not stop.
+- When a GitHub App is configured (in the admin portal, or imported by the update), the synchronization with GitHub
+  that runs at start lists the installations of the App. It never makes a connection from the list: an
+  installation is noted as unclaimed (the admin portal shows them under **Approvals**) until a person of a
+  workspace connects it, or, in a single-tenant instance whose App is private, until it is found on the App's own
+  account. Installations that were linked before the update keep their workspace. Without an App nothing is
+  attempted: GitHub is simply not configured.
+- An existing deployment that updates to this version also gets the code and the wizard, after its data and
+  settings were imported (the data it has is kept). Until the wizard is finished only the web UI waits: the
+  webhooks and the runner API keep working, so reviews do not stop. The steps are in
+  [updating an installation from before accounts](#updating-an-installation-from-before-accounts).
 
 ## 8. Storage and backups
 
@@ -516,6 +519,82 @@ does not become healthy does:
    images for a Docker Compose application on your version is not verified here. If it does, it is the
    faster way back.
 
+### Updating an installation from before accounts
+
+This is the update of an instance that was set up before accounts existed: the GitHub OAuth app and the allow list
+(`GITHUB_OAUTH_*`, `ALLOWED_GITHUB_*`), the GitHub App (`GITHUB_APP_*`) and the LLM key (`LLM_*`) in the
+environment, `BETTER_AUTH_SECRET` as the master key, users who signed in with GitHub. Nothing is lost: its data
+stays, and its settings move into the new model once. You do a **short setup** once and nothing else.
+
+**Before the update**
+
+1. **Add `APP_SECRET` with exactly the value of `BETTER_AUTH_SECRET`** (keep `BETTER_AUTH_SECRET` until the setup is
+   done). `APP_SECRET` is the master key that encrypts every stored credential. With only `BETTER_AUTH_SECRET` the
+   app works too (it logs that the name is deprecated). A different value signs everybody out, and the stored
+   GitHub tokens of the earlier sign in can no longer be read, so the organization check of the import cannot run
+   and the people it would have admitted are only listed in the notice.
+   **Back `APP_SECRET` up separately from the database** (a password manager): a database restored without it loses
+   every stored credential.
+2. Leave every other variable as it is. The update needs them once.
+3. The `backups` volume must be mounted and writable (`compose.coolify.yml` declares it). The update takes a backup
+   before it touches the database and does not start without one.
+
+**What happens on the first start.** Open the **Logs** of the service `app` in Coolify. The lines, in this order:
+
+1. `[update] BACKUP_BEFORE_UPDATE` and `[backup] created /backups/...`: the database exactly as the previous
+   version left it. To go back, restore it ([section 8](#8-storage-and-backups)) and deploy the previous commit.
+   If the backup cannot be written the start ends with `UPDATE_BACKUP_FAILED` and the database is untouched.
+2. `[database] applied migrations: ...`.
+3. `[import] IMPORT_DONE ...`: how many people became members, whether the GitHub App and the LLM key were
+   imported. A variable that could not be imported (a broken private key, a key with a space) gets a
+   `VARIABLE_NOT_IMPORTED` line that names the **variable**, never its value; everything else is imported anyway.
+   If the import fails (`IMPORT_FAILED`) it changed nothing; fix the cause and start again, the whole import then
+   runs from the beginning (with another backup, which is harmless).
+4. `[import] LEGACY_VARIABLES_IGNORED: ...`: the old variables are ignored from now on (names only).
+5. **`[setup] Setup code: 482913 ...`**: the code for the short setup (the number is yours). It is valid for 60
+   minutes; restart the app for a new one. A restart before you finished the wizard prints a new code and imports
+   nothing twice.
+
+**Reviews keep running** while you have not found the code: webhooks and the runner API serve with the imported
+GitHub App and LLM key; only the web UI waits for the setup.
+
+**What you do once** (`https://<domain>`):
+
+1. Enter the code and answer the three questions: **single-tenant** (what the instance was; choose multi-tenant only if
+   you want people to create workspaces), **who may sign up**, and the email and password of the **instance admin**.
+   Mind the second question: `ALLOWED_GITHUB_LOGINS` and `ALLOWED_GITHUB_ORG` are **not** turned into a sign-up rule.
+   Under "everyone" anybody can create an account (in a single-tenant instance it sees nothing until it is invited);
+   choose an email list or allowed domains to limit that. You become an Owner of the default workspace next to the
+   Owner the import chose (in multi-tenant mode only if the import left the workspace without one).
+2. Open **Admin**. The overview shows a notice you can hide when you have read it: the people who were **not** made
+   members and why, the allowed logins that never signed in (**invite them by email**), the allowed GitHub
+   organization (**it is not migrated into a rule**: recreate that access as an email list or as allowed domains),
+   and anything that could not be imported.
+3. **Integrations**: the imported GitHub App is there. Confirm whether it can only be installed on its own account
+   (until you do, nothing is attached by itself; installations that were linked before the update keep their link),
+   press **Check permissions** and add the two permissions it lacks if it does (Email addresses: read-only, Members:
+   read-only), and enter the **client id and client secret of the GitHub App** (its user authorization; the callback
+   address to register is shown). The OAuth app of the earlier sign in is not imported and not needed.
+4. **Setup, ways to sign in**: switch on sign in with GitHub. People who used GitHub before sign in with it, are
+   recognised by their numeric GitHub id and are members of the default workspace if they were admitted. Their
+   temporary address is replaced by their verified GitHub address at their next sign in. Until you switch it on,
+   sign in is by email and password (you).
+5. If you were one of those people and are now also the admin: link your GitHub identity from the admin account
+   (Integrations, your GitHub account); the two accounts merge, and you can then make GitHub the only way to sign in.
+
+**What changes for people.** Sign in is by email and password until you switch GitHub on, then by GitHub as before.
+People who would have been blocked by the earlier allow list are not members. Organization members who never signed
+in cannot sign up on their own until you recreate the access.
+
+**After the setup: which variables can be removed.** Remove `GITHUB_APP_ID`, `GITHUB_APP_SLUG`,
+`GITHUB_APP_PRIVATE_KEY`, `GITHUB_APP_WEBHOOK_SECRET`, `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`,
+`ALLOWED_GITHUB_LOGINS`, `ALLOWED_GITHUB_ORG`, `LLM_PROVIDER`, `LLM_API_KEY` and, once `APP_SECRET` has its value,
+`BETTER_AUTH_SECRET`. Keep `BETTER_AUTH_URL`, `APP_SECRET`, `RUNNER_TOKEN` and the operational settings
+(`REVIEW_DEBOUNCE_SECONDS`, `BACKUP_TIME`, `RUNNER_*`, `LLM_MODEL`, `LLM_MAX_TOKENS`). Save, redeploy, and check that
+the log no longer says `LEGACY_VARIABLES_IGNORED`, that nothing asks for a setup code, and that a test pull request
+is reviewed. An old variable that stays does no harm (it is ignored), but the secrets in it are then stored in two
+places.
+
 **A rollback does not undo database changes.** A version that applied a database migration leaves a
 database that the older version cannot open: it stops at start with a `MIGRATION_FAILED` error
 ("corrupted migrations: previously executed migration ... is missing"). If that happens, restore the
@@ -570,7 +649,8 @@ Do this once with the whole team in the room; it is the acceptance test of the d
 | GitHub says the callback URL does not match | The GitHub App's callback URL is not exactly `<BETTER_AUTH_URL>/api/auth/callback/github` (the one-click setup registers it; by hand, see [`github-app.md`](github-app.md)). |
 | A webhook delivery shows 401 | The webhook secret in the admin portal (or `GITHUB_APP_WEBHOOK_SECRET` of an installation that was not updated) differs from the GitHub App's webhook secret ([`github-app.md`](github-app.md), "Check the webhook"). |
 | A webhook delivery shows a timeout, 502 or 503 | The app is unreachable: domain, proxy, health. |
-| A run fails with `llm_not_configured` | The workspace of the run has no LLM key, or the saved key cannot be read (an Admin enters it again under Settings, LLM access). On a single-tenant instance the legacy `LLM_API_KEY` is the fallback; it must be set and valid. |
+| A run fails with `llm_not_configured` | The workspace of the run has no LLM key, or the saved key cannot be read (an Admin enters it again under Settings, LLM access). An `LLM_API_KEY` in the environment is not a fallback any more: the update imported it once into the default workspace (the update log says `VARIABLE_NOT_IMPORTED` if it could not). |
+| The update does not start and the log says `UPDATE_BACKUP_FAILED` or `IMPORT_FAILED` | The update takes a backup first and stops, without touching the database, when it cannot write it: mount the `backups` volume and make it writable, then redeploy ([updating an installation from before accounts](#updating-an-installation-from-before-accounts)). `IMPORT_FAILED` rolled everything back; read the line, fix the cause and start again. |
 | The build is killed or the server is unresponsive during a deployment | Not enough memory for the build: more RAM, or a [build server](https://coolify.io/docs/troubleshoot/server/crash-during-build). |
 
 ## What is verified
@@ -579,7 +659,11 @@ Do this once with the whole team in the room; it is the acceptance test of the d
   images from the repository, publishes no port, requires the runner token and the public address and stays in step with `compose.yml`;
   this guide mentions every variable of `.env.example`; its sizing table matches the formula; the smoke
   script `docker/smoke/instance.sh` is tested against fake instances and runs against the Docker Compose
-  stack in CI.
+  stack in CI. The update of an installation from before accounts is rehearsed on every pull request that
+  builds the images: `docker/smoke/upgrade.sh` starts the image on the database of the previous release with
+  the old environment (backup, import, setup code, webhook, restart, removal of the old variables), and
+  the journey `app/e2e/upgrade/update-from-previous-release.e2e.ts` adds the real runner and PR-Agent against the
+  fakes.
 - **Not yet, and left to the first deployment with the customer:** everything that needs a real Coolify
   instance, a domain, a certificate, GitHub's real deliveries and a real model: that Coolify accepts and
   parses the Compose file as described, the domain and certificate, the persistence across a redeploy, the

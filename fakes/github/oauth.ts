@@ -101,7 +101,10 @@ export type FakeGithubOAuth = {
    * people in before accounts holds in its database (the token of their last sign in). `clientId` is the
    * app the token belongs to (default: the first app the fake knows), `scope` what it was granted.
    */
-  issueAccessToken(login: string, options?: { scope?: string; clientId?: string }): string;
+  issueAccessToken(
+    login: string,
+    options?: { scope?: string; clientId?: string },
+  ): string;
   /** Every access token issued so far; lets a test search outputs for them. */
   issuedAccessTokens(): string[];
   /**

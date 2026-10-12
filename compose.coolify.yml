@@ -40,11 +40,13 @@ services:
       APP_SECRET: ${APP_SECRET:-}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-}
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:?}
+      # Legacy variables of an installation from before accounts (imported once by the update, see
+      # docs/deployment-coolify.md, "Updating an installation from before accounts"). Optional.
       GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:-}
       GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET:-}
-      # Ignored by the sign in (the sign-up rule in the admin portal decides, the server logs one
-      # ALLOW_LIST_IGNORED warning while they are set). They are passed through only for the one-time
-      # import of the update to accounts (#106).
+      # Not enforced any more (the sign-up rule in the admin portal decides). They are passed through
+      # only for the one-time import of the update to accounts: it reads them once to decide who becomes
+      # a member of the default workspace, then ignores them (the log names them, never their values).
       ALLOWED_GITHUB_LOGINS: ${ALLOWED_GITHUB_LOGINS:-}
       ALLOWED_GITHUB_ORG: ${ALLOWED_GITHUB_ORG:-}
       GITHUB_APP_ID: ${GITHUB_APP_ID:-}
@@ -53,8 +55,10 @@ services:
       GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
       # The runner presents the same token; both services read the one variable.
       RUNNER_TOKEN: ${RUNNER_TOKEN:?}
-      # One shared LLM access for the team. Not needed for the stack to start: without a key the app
-      # runs and shows a configuration error, and review jobs fail with a stable error code.
+      # Legacy: the shared LLM key of an installation from before accounts. The update imports it once
+      # into the default workspace and ignores it afterwards; every workspace enters its own key in the
+      # UI. Not needed for the stack to start: without a key a workspace's review jobs fail with the
+      # stable error code llm_not_configured. LLM_MODEL and LLM_MAX_TOKENS stay instance settings.
       LLM_PROVIDER: ${LLM_PROVIDER:-openrouter}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-}
