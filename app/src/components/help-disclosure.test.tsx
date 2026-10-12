@@ -23,6 +23,8 @@ describe("the help disclosure", () => {
     const trigger = screen.getByRole("button", {
       name: "What makes a good password",
     });
+    // The hit area is at least 44px tall (WCAG 2.5.5), like the InfoHint's `size-11`.
+    expect(trigger.className).toContain("min-h-11");
     const controls = trigger.getAttribute("aria-controls");
     expect(controls).toBeTruthy();
     const content = document.getElementById(controls!);
