@@ -4,7 +4,7 @@
 // real counters and a real SQLite file: a link verifies once, every way a link can be wrong is refused
 // with a stable code and changes nothing, nothing says whether an address has an account, and junk can
 // never use up the attempts of a valid link.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createSignUpHarness,
   SIGNUP_TEST_PASSWORD,
@@ -268,6 +268,37 @@ describe("asking for a new verification link", () => {
     await harness.flush();
 
     expect(unknown).toEqual(known);
+    expect(harness.mail.to("nobody@example.com")).toEqual([]);
+  });
+
+  // #143
+  it("looks at no account before the answer is on its way, for a known address and an unknown one alike", async () => {
+    const harness = await createSignUpHarness({ mail: true });
+    await signedUp(harness);
+    const touched = new Set<string>();
+    const executor = harness.db.getExecutor();
+    const original = executor.transformQuery.bind(executor);
+    const spy = vi
+      .spyOn(executor, "transformQuery")
+      .mockImplementation((node, queryId) => {
+        const text = JSON.stringify(node);
+        for (const table of ["users", "accounts", "email_verification_tokens"])
+          if (text.includes(`"name":"${table}"`)) touched.add(table);
+        return original(node, queryId);
+      });
+
+    const known = await answer(await harness.resend({ email: ADDRESS }));
+    const unknown = await answer(
+      await harness.resend({ email: "nobody@example.com" }),
+    );
+    spy.mockRestore();
+
+    expect(unknown).toEqual(known);
+    expect([...touched]).toEqual([]);
+    expect(harness.waiting()).toBe(2);
+    expect(harness.mail.outbox).toHaveLength(1);
+    await harness.flush();
+    expect(harness.mail.to(ADDRESS)).toHaveLength(2);
     expect(harness.mail.to("nobody@example.com")).toEqual([]);
   });
 

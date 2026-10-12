@@ -28,7 +28,8 @@ export type AssembleSignUpOptions = {
   /** The configured public address of the app. */
   baseUrl: string;
   currentUserId: (request: Request) => Promise<string | null>;
-  defer: (work: Promise<void>) => void;
+  /** Runs work after the answer is sent (Next's `after()` on the server). */
+  defer: (work: () => Promise<void>) => void;
   now?: () => Date;
   newId?: () => string;
   log?: (message: string) => void;

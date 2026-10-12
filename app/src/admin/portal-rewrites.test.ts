@@ -6,7 +6,14 @@
 // being changed without anyone noticing.
 import { describe, expect, it } from "vitest";
 import nextConfig from "../../next.config.ts";
-import { MISSING_PATH, PORTAL_DENIED_HEADER } from "./paths.ts";
+import {
+  MISSING_PATH,
+  PORTAL_API_ROOT,
+  PORTAL_DENIED_HEADER,
+  PORTAL_PAGE_ROOT,
+  PORTAL_REWRITE_HEADER,
+  portalRewriteTarget,
+} from "./paths.ts";
 
 async function rewrites() {
   const result = await nextConfig.rewrites?.();
@@ -15,15 +22,69 @@ async function rewrites() {
   return result;
 }
 
+// Turns a source of the form `/prefix/:path*` into a test on a path and, for a match, the destination with the
+// rest of the path filled in (a Next.js source of this form matches the prefix alone as well).
+function applied(
+  rule: { source: string; destination: string },
+  path: string,
+): string | null {
+  const prefix = rule.source.replace("/:path*", "");
+  if (path !== prefix && !path.startsWith(`${prefix}/`)) return null;
+  return `${rule.destination.replace("/:path*", "")}${path.slice(prefix.length)}`;
+}
+
 describe("the rewrites of next.config.ts", () => {
+  // #146
+  it("serve the portal's addresses from its files when the proxy marked the request, and do nothing else", async () => {
+    const { beforeFiles } = await rewrites();
+    const rules = (beforeFiles ?? []).filter((candidate) =>
+      candidate.destination.includes(":path*"),
+    );
+
+    expect(rules.map((rule) => rule.destination)).toEqual([
+      `${PORTAL_PAGE_ROOT}/:path*`,
+      `${PORTAL_API_ROOT}/:path*`,
+    ]);
+    // Only a request that carries the header the proxy sets for the instance admin, nothing else.
+    for (const rule of rules)
+      expect(rule.has).toEqual([
+        { type: "header", key: PORTAL_REWRITE_HEADER },
+      ]);
+    // The same places as the proxy decides on (portalRewriteTarget), for the spellings Next.js hands on.
+    for (const path of [
+      "/admin",
+      "/admin/setup",
+      "/admin/github/check",
+      "/api/admin/settings",
+      "/api/admin/github/manifest/callback",
+    ])
+      expect(
+        rules.map((rule) => applied(rule, path)).find((hit) => hit !== null),
+        path,
+      ).toBe(portalRewriteTarget(path));
+    for (const path of ["/", "/administrator", "/api/administrator", "/w/a"])
+      expect(
+        rules.map((rule) => applied(rule, path)).find((hit) => hit !== null),
+        path,
+      ).toBeUndefined();
+  });
+
+  // #146
+  it("put the portal's rewrites in front of the one for a marked request for a missing path", async () => {
+    const { beforeFiles } = await rewrites();
+
+    expect(beforeFiles?.at(-1)?.destination).toBe(MISSING_PATH);
+  });
+
   // #138
   it("send a request the proxy marked to the missing path before any file is looked at", async () => {
     const { beforeFiles } = await rewrites();
 
-    expect(beforeFiles).toHaveLength(1);
-    const [rule] = beforeFiles ?? [];
+    expect(beforeFiles).toHaveLength(3);
+    const rule = (beforeFiles ?? []).find(
+      (candidate) => candidate.destination === MISSING_PATH,
+    );
     expect(rule?.has).toEqual([{ type: "header", key: PORTAL_DENIED_HEADER }]);
-    expect(rule?.destination).toBe(MISSING_PATH);
     // Only what the proxy sees: the proxy takes the header off a request from outside, and does not see
     // Next.js's static files, the image route and the favicon.
     const matches = new RegExp(

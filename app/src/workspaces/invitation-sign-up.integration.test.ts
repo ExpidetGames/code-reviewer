@@ -82,6 +82,7 @@ describe("an invitation and the sign-up rule", () => {
       email: "newcomer@example.com",
       password: SIGNUP_TEST_PASSWORD,
     });
+    await h.flush();
     const account = await h.user("newcomer@example.com");
     if (account === undefined) throw new Error("no account was made");
     const accepted = await assembled.invitations.accept(
