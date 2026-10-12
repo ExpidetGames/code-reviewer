@@ -33,3 +33,17 @@ export function githubAppInstallUrlFor(slug: string): string | null {
     ? `https://github.com/apps/${slug}/installations/new`
     : null;
 }
+
+/**
+ * The installation page of the App on GitHub's web address (`webBaseUrl` is github.com, or the fake's address in
+ * the test stack), for a slug that is well formed; null otherwise. The binding of an installation to a workspace
+ * sends the person here with a signed `state` that comes back to the App's setup URL.
+ */
+export function githubAppInstallPageUrl(
+  webBaseUrl: string,
+  slug: string,
+): string | null {
+  return SLUG_PATTERN.test(slug)
+    ? `${webBaseUrl.replace(/\/+$/, "")}/apps/${slug}/installations/new`
+    : null;
+}

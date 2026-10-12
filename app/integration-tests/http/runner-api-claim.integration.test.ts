@@ -470,6 +470,25 @@ describe("a job that cannot be handed out", () => {
     });
   });
 
+  // #103-IB-14
+  it("fails a job whose integration was disconnected by its workspace, and creates no credential for it", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await h.enqueueNew();
+    await h.db
+      .updateTable("integrations")
+      .set({ status: "disconnected" })
+      .execute();
+
+    const response = await h.claim();
+
+    expect(response.status).toBe(204);
+    expect(await h.queue.get(job.id)).toMatchObject({
+      status: "failed",
+      errorCode: "git_connection_disabled",
+    });
+    expect(h.issuedJobTokens()).toStrictEqual([]);
+  });
+
   it("fails an ask job without a question, so the runner is not handed a job it must refuse", async () => {
     const h = await startRunnerApiHarness();
     const job = await h.enqueueNew({ command: "ask", args: "   " });

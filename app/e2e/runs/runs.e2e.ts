@@ -16,6 +16,7 @@ import { e2eEnv } from "../helpers/e2e-env";
 import {
   addGithubAccount,
   addGithubInstallation,
+  GITHUB_APP_OWNER_ACCOUNT,
   signInThroughTheForm,
   type GithubAccount,
 } from "../helpers/github-fake";
@@ -48,7 +49,7 @@ test.describe("the runs pages", () => {
       request,
       {
         id: INSTALLATION_ID,
-        account: { login: account.login, id: account.id, type: "User" },
+        account: GITHUB_APP_OWNER_ACCOUNT,
       },
       [WIDGETS, GADGETS],
     );

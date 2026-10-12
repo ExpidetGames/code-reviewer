@@ -17,6 +17,7 @@ import {
 } from "../admin/paths.ts";
 import { PORTAL_REWRITE_HEADER } from "../auth/access-proxy.ts";
 import { createAdminRouteHandlers } from "../admin/http.ts";
+import { createApprovalRouteHandlers } from "../installation-binding/approvals-http.ts";
 import { createAdminService } from "../admin/service.ts";
 import { createRateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
 import { createSmtpConfigStore } from "../mail/smtp-config.ts";
@@ -220,6 +221,28 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
         });
       },
     }),
+  });
+
+  // The decisions on requests to link an installation are a double that counts how often it was asked to
+  // decide: what these tests need to know is whether a request got as far as the decision.
+  const approvalCalls = { count: 0 };
+  const approvalRoutes = createApprovalRouteHandlers({
+    access: async () =>
+      adminAccessOf(await lookupSession(auth, current.headers, setup.gates)),
+    notFound: () => {
+      throw new NotFoundSignal();
+    },
+    approvals: {
+      list: async () => ({ pending: [], decided: [] }),
+      approve: async () => {
+        approvalCalls.count += 1;
+        return { ok: true };
+      },
+      deny: async () => {
+        approvalCalls.count += 1;
+        return { ok: true };
+      },
+    },
   });
 
   /** Makes a user with a password (and, if asked, the instance admin flag). */
@@ -432,6 +455,14 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
         request.method === "POST"
       )
         return await handlers.syncIntegrations(request);
+      const approval = /^\/api\/instance-portal\/approvals\/([^/]+)$/.exec(
+        pathname,
+      );
+      if (approval !== null && request.method === "POST")
+        return await approvalRoutes.decide(
+          request,
+          decodeURIComponent(approval[1] ?? ""),
+        );
     } catch (error) {
       if (error instanceof NotFoundSignal)
         return new Response("not found", { status: 404 });
@@ -510,6 +541,8 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
     flags,
     /** How many times a request got as far as the synchronization with GitHub. */
     syncCalls,
+    /** How many times a request got as far as the decision on a request to link an installation. */
+    approvalCalls,
     createUser,
     signIn,
     visit,

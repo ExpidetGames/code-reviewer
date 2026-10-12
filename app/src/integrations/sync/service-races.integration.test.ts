@@ -150,7 +150,7 @@ describe("overlapping syncs and deliveries", () => {
 describe("a failure for one installation", () => {
   it("is reported with the installation's id and does not stop the others", async () => {
     const { db } = await createTestDatabase();
-    await markInstanceSetUp(db);
+    const workspaceId = await markInstanceSetUp(db);
     const base = fakeIntegrationProvider();
     const provider = {
       ...base,
@@ -182,6 +182,7 @@ describe("a failure for one installation", () => {
       db,
       registry: createIntegrationRegistry({ github_app: provider }),
       log: (line) => lines.push(line),
+      placeNewConnection: async () => workspaceId,
     });
 
     const summary = await sync.syncAll();

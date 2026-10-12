@@ -149,6 +149,15 @@ export default defineConfig({
       testMatch: /e2e\/settings\/llm-key\.e2e\.ts$/,
       dependencies: ["multi"],
     },
+    // The journey that connects GitHub installations to workspaces uses the multi-tenant app again, after the
+    // journeys that configure the fake SMTP server there (which makes every account of that app confirm its
+    // address) have removed it.
+    {
+      name: "connect",
+      use: { ...browser, baseURL: e2eEnv.multiAppUrl },
+      testMatch: /e2e\/workspaces\/connect-github\.e2e\.ts$/,
+      dependencies: ["multi-mail"],
+    },
     // The journey of the first-run setup has an app of its own that nobody has set up (the third
     // one), so it needs nothing to run first and disturbs nobody.
     {

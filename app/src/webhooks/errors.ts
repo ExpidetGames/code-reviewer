@@ -46,6 +46,8 @@ export const WEBHOOK_ACCEPTED_OUTCOMES = [
   /** A pull request was closed; the jobs still waiting for it were dropped (possibly none). */
   "waiting_jobs_discarded",
   "installation_changed",
+  /** An installation that no workspace has linked: noted as unclaimed, nothing was created. */
+  "installation_unclaimed",
 ] as const;
 export type WebhookAcceptedOutcome = (typeof WEBHOOK_ACCEPTED_OUTCOMES)[number];
 

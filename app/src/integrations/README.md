@@ -107,6 +107,7 @@ installation (`..._CONNECTION_GONE`). A page never has to know a platform's own 
 
 - `canTrigger` is about the trigger: may this event start a job (for example, does the comment author
   have write access)? It is not about the app's own permissions on the platform.
+- `ownerAccount` is optional: the account the platform says the app itself belongs to (GitHub: `owner` of `GET /app`), which the single-tenant auto-attach compares an installation's account with.
 - `discoverConnections` and `findConnection` are optional and only for platforms that can list the
   connections of the app. Both reject when the platform cannot be asked: a failure must never look
   like "no connections".
@@ -264,20 +265,22 @@ never a token, JWT, key or response body.
 
 `sync/service.ts` (`createIntegrationSync`) keeps the tables in line with the platform. It serves the whole
 instance: it finds every connection through the directory and changes each one through repositories of the
-workspace that connection belongs to. A connection that is new to the instance is put in the default
-workspace (`workspaceForNewConnection`, temporary: the workspace feature binds an installation to the
-workspace of the person who installed it). The button syncs every connection of the instance for now. A repository row
+workspace that connection belongs to. A connection that is new to the instance is **not** made here
+unless `placeNewConnection` (`src/installation-binding/placement.ts`) names a workspace for it (a single-tenant instance, a private App
+and an installation on the App's own account); otherwise the installation is noted in `unclaimed_installations` and a person of a
+workspace links it (`src/installation-binding/README.md`). The instance admin's button syncs every connection of the instance,
+`syncWorkspace(workspaceId)` only those of one workspace. A repository row
 is `active` while the platform lists it for its integration and becomes inactive when it does not;
 nothing is deleted, so projects and past reviews keep their reference. A repository that comes back
 gets its old row back. New repositories are active in this table; whether a project reviews them is
 decided when a project is activated for the repository, not here.
 
-| Entry point                          | When                                                       | What                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| ------------------------------------ | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `runStartupSync` (`sync/startup.ts`) | When the server starts (`instrumentation.ts`), not awaited | `syncAll`; logs the result; never stops the start                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `syncAll()`                          | Start, and later the button in the UI                      | Creates, updates and disables integrations from `discoverConnections`, then reads every active integration's repositories                                                                                                                                                                                                                                                                                                                                          |
-| `handleInstallationChange(change)`   | The webhook route, for an `installation_changed` event     | `deleted`: disable and deactivate all repositories without a call to GitHub. `created`/`suspended`/`unsuspended`: the delivery may be a retry or arrive out of order, so `findConnection` is asked first and the row follows GitHub's answer (suspended or not); an active row has its repositories read again. `repositories_changed`: read the repositories again. A connection without a row is confirmed with `findConnection` (App JWT) and only then created |
-| `syncIntegration(id)`                | Single integration                                         | Reads its repositories                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Entry point                          | When                                                       | What                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ------------------------------------ | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `runStartupSync` (`sync/startup.ts`) | When the server starts (`instrumentation.ts`), not awaited | `syncAll`; logs the result; never stops the start                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `syncAll()`                          | Start, and later the button in the UI                      | Creates, updates and disables integrations from `discoverConnections`, then reads every active integration's repositories                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `handleInstallationChange(change)`   | The webhook route, for an `installation_changed` event     | `deleted`: disable and deactivate all repositories without a call to GitHub. `created`/`suspended`/`unsuspended`: the delivery may be a retry or arrive out of order, so `findConnection` is asked first and the row follows GitHub's answer (suspended or not); an active row has its repositories read again. `repositories_changed`: read the repositories again. A connection without a row is confirmed with `findConnection` (App JWT), and then created only where `placeNewConnection` names a workspace; otherwise it is noted as unclaimed (outcome `unclaimed`, the webhook answers `installation_unclaimed`) |
+| `syncIntegration(id)`                | Single integration                                         | Reads its repositories                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 All of them return a summary and never reject because of the platform (`errors` lists each failure by
 stage and stable code). The rule: the tables change to "gone" only after GitHub answered completely. A
@@ -294,21 +297,22 @@ the button use `getIntegrationSync()` (`sync/shared.ts`), the process-wide servi
 decides from the list alone: before it disables a row the list does not mention, and before it
 suspends or resumes one, it asks GitHub about that one installation inside the lock.
 
-The button is `POST /api/admin/integrations/sync` (`sync/http.ts`, the route file in
-`src/app/api/instance-portal/integrations/sync`), **the instance admin's**: it is a data route of the admin portal
-(`src/admin/http.ts`, `syncIntegrations`), so a person who is not the instance admin gets the answer of a path that does
-not exist, however high their role in a workspace is, and the Projects page shows the button to the instance admin only.
-The reason is what it does: `getIntegrationSync().syncAll()` is the process-wide service and reads every connection of the
-instance, so its answer (counts over the whole instance, the problems of every installation) is not for the member of one
-workspace. Binding an installation to the workspace of the person who installed it, and a synchronization of that
-workspace only, are the job of the GitHub installation issue (`src/workspaces/README.md`); the route moves into the
-workspace then. A same-site check comes before the sync. The answer is
+The instance admin's button is `POST /api/admin/integrations/sync` (`sync/http.ts`, the route file in
+`src/app/api/instance-portal/integrations/sync`): it is a data route of the admin portal (`src/admin/http.ts`,
+`syncIntegrations`), so a person who is not the instance admin gets the answer of a path that does not exist, however high
+their role in a workspace is. It is the instance's: `getIntegrationSync().syncAll()` is the process-wide service and reads
+every connection of the instance, so its answer (counts over the whole instance, the problems of every installation) is
+not for the member of one workspace; the button is on the Approvals page of the portal. An Owner or Admin of a workspace
+has `POST /api/w/:workspace/integrations/sync` (`syncWorkspace`): it asks GitHub about each connection of the workspace,
+reads their repositories, finds no new connection, and answers `{ added, errors }` about those only. A same-site check comes before the sync. The answer is
 `{ added, errors }` (`summary.repositories.added` and `summary.errors`, stage and stable code, never a
 credential). Overlapping full syncs share one run: `getIntegrationSync()` wraps the service with
 `coalesceSyncAll` (`sync/coalesce.ts`), so several tabs or the start-up sync meeting the button read GitHub once. The Projects page shows it as "Sync from GitHub".
 
 `disabled` always means "suspended or gone on GitHub": a full sync resumes any disabled row GitHub
-lists as active. There is no way to keep an integration disabled by hand.
+lists as active. A connection that a person of the workspace ended is `disconnected`: no synchronization, delivery or
+button brings it back (only linking it again from the same workspace does), its repositories are inactive and its
+projects and runs stay (`src/installation-binding/README.md`).
 
 ## Types and reserved values
 

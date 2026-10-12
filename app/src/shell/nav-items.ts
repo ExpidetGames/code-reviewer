@@ -8,6 +8,7 @@ import { workspacePath, workspaceSlugOfPath } from "../workspaces/paths.ts";
 export const NAV_PLACES = [
   { path: "/projects", label: "Projects" },
   { path: "/runs", label: "Runs" },
+  { path: "/connections", label: "Connections" },
   { path: "/settings", label: "Settings" },
   { path: "/members", label: "Members" },
 ] as const;

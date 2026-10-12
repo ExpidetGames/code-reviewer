@@ -27,6 +27,7 @@ import {
 import { createTestDirectory } from "../../src/test-support/test-database.ts";
 import {
   defaultWorkspaceId,
+  linkTestInstallation,
   markInstanceSetUp,
 } from "../../src/test-support/workspaces.ts";
 
@@ -79,7 +80,8 @@ afterEach(async () => {
 
 // #102-GH-10 (regression): unchanged by the move of the GitHub App into the database.
 describe("the webhook route file", () => {
-  it("creates the integration of a new installation and remembers the delivery", async () => {
+  // #103-IB-11
+  it("creates no integration for a new installation nobody linked, notes it as unclaimed and remembers the delivery", async () => {
     const { route, github } = await startRoute();
     github.fake.addInstallation({
       id: 4242,
@@ -98,13 +100,19 @@ describe("the webhook route file", () => {
 
     expect(response.status).toBe(202);
     const db = getDatabase();
+    expect(await db.selectFrom("integrations").select("id").execute()).toEqual(
+      [],
+    );
     expect(
-      await db.selectFrom("integrations").select("external_id").execute(),
-    ).toEqual([{ external_id: "4242" }]);
+      await db
+        .selectFrom("unclaimed_installations")
+        .select(["installation_id", "source"])
+        .execute(),
+    ).toEqual([{ installation_id: "4242", source: "webhook" }]);
     expect(
       await db.selectFrom("webhook_deliveries").selectAll().execute(),
     ).toMatchObject([
-      { delivery_id: "delivery-1", outcome: "installation_changed" },
+      { delivery_id: "delivery-1", outcome: "installation_unclaimed" },
     ]);
   });
 
@@ -115,6 +123,12 @@ describe("the webhook route file", () => {
       account: { login: "acme", id: 5001, type: "Organization" },
     });
     github.fake.setRepositories(4242, [{ id: 7001, fullName: "acme/widgets" }]);
+    // A person of the workspace linked the installation (the binding), then GitHub reports it.
+    await linkTestInstallation(
+      getDatabase(),
+      await defaultWorkspaceId(getDatabase()),
+      { id: "4242", accountLogin: "acme", accountId: 5001 },
+    );
     await route.POST(
       webhookDelivery({
         event: "installation",

@@ -181,6 +181,27 @@ describe("merging the instance admin with an imported operator", () => {
         revoked_at: null,
       })
       .execute();
+    // The requests to link an installation that the operator made or decided are history as well.
+    await ctx.db
+      .insertInto("installation_link_requests")
+      .values({
+        id: "request-1",
+        workspace_id: ctx.workspace.id,
+        requested_by: "operator",
+        requester_github_login: "octocat",
+        installation_id: "4242",
+        account_login: "acme",
+        account_type: "Organization",
+        account_id: "5001",
+        status: "approved",
+        token_can_access: 1,
+        role_result: "unreadable",
+        role_detail: "forbidden",
+        created_at: "2026-10-11T08:00:00.000Z",
+        decided_at: "2026-10-11T09:00:00.000Z",
+        decided_by: "operator",
+      })
+      .execute();
     // The operator saved the LLM key of the workspace: who saved it is history that names the user too (#104).
     await ctx.db
       .insertInto("workspace_secrets")
@@ -201,6 +222,12 @@ describe("merging the instance admin with an imported operator", () => {
     const result = await ctx.link(ADMIN);
 
     expect(result).toEqual({ ok: true, outcome: "merged", surface: "account" });
+    expect(
+      await ctx.db
+        .selectFrom("installation_link_requests")
+        .select(["requested_by", "decided_by"])
+        .execute(),
+    ).toEqual([{ requested_by: "admin", decided_by: "admin" }]);
     expect(
       (
         await ctx.db

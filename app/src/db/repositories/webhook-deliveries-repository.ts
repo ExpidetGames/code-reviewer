@@ -62,6 +62,8 @@ export const WEBHOOK_DELIVERY_OUTCOMES = [
   "waiting_jobs_discarded",
   /** The installation or its repositories were synchronized. */
   "installation_changed",
+  /** An installation no workspace has linked: noted as unclaimed, nothing was created (not final: it can be redelivered). */
+  "installation_unclaimed",
 ] as const;
 export type WebhookDeliveryOutcome = (typeof WEBHOOK_DELIVERY_OUTCOMES)[number];
 

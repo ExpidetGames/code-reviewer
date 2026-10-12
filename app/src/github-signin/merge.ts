@@ -58,6 +58,16 @@ export const USER_REFERENCES: ReadonlyArray<{
   { table: "workspace_secrets", column: "updated_by", handling: "move" },
   { table: "invitations", column: "invited_by", handling: "move" },
   { table: "invitations", column: "accepted_by", handling: "move" },
+  {
+    table: "installation_link_requests",
+    column: "requested_by",
+    handling: "move",
+  },
+  {
+    table: "installation_link_requests",
+    column: "decided_by",
+    handling: "move",
+  },
 ];
 
 function higher(a: WorkspaceRole, b: WorkspaceRole): WorkspaceRole {
@@ -203,6 +213,17 @@ export async function mergeImportedUser(
       .updateTable("invitations")
       .set({ accepted_by: actingUserId })
       .where("accepted_by", "=", source.id)
+      .execute();
+    // The requests to link an installation that the operator made or decided.
+    await trx
+      .updateTable("installation_link_requests")
+      .set({ requested_by: actingUserId })
+      .where("requested_by", "=", source.id)
+      .execute();
+    await trx
+      .updateTable("installation_link_requests")
+      .set({ decided_by: actingUserId })
+      .where("decided_by", "=", source.id)
       .execute();
 
     // The identity becomes the admin's, and the admin shows the login it carries.

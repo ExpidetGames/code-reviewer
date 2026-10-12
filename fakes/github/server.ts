@@ -23,6 +23,7 @@ import {
   type FakeGithubAppControls,
 } from "./app-api.ts";
 import { send, sendJson } from "./http.ts";
+import { createInstallPart, type InstallPart } from "./install-flow.ts";
 import {
   createManifestPart,
   type FakeManifestFlowControls,
@@ -36,6 +37,7 @@ import {
 import {
   createAppRegistry,
   DEFAULT_ACCOUNT_PERMISSIONS,
+  ownerIdFor,
   type FakeRegisteredApp,
 } from "./registry.ts";
 
@@ -52,6 +54,7 @@ export type { FakeManifest, FakeManifestFlowControls } from "./manifest.ts";
 export type { FakeRegisteredApp } from "./registry.ts";
 export type {
   FakeGithubUser,
+  FakeMembershipRole,
   FakeMembershipState,
   MembershipEndpointFailure,
   TokenEndpointFailure,
@@ -169,6 +172,7 @@ export async function startGithubFake(
       slug: options.appSlug ?? "fake-app",
       name: options.appSlug ?? "fake-app",
       ownerLogin: "fake-owner",
+      ownerId: ownerIdFor("fake-owner"),
       publicKeyPem: publicKeyPem ?? null,
       clientId: clientId ?? null,
       clientSecret: clientSecret ?? null,
@@ -178,12 +182,20 @@ export async function startGithubFake(
       events: [],
       callbackUrls: null,
       isPublic: false,
+      setupUrl: null,
       createdFromManifest: false,
     });
   }
+  // The sign in part lists the installations of a user from the GitHub App part, which is made after it.
+  let appPart: AppPart | undefined;
   const oauth: OAuthPart | undefined =
     clientId !== undefined || manifestFlow
-      ? createOAuthPart({ clientId, clientSecret }, () => baseUrl, registry)
+      ? createOAuthPart(
+          { clientId, clientSecret },
+          () => baseUrl,
+          registry,
+          () => appPart?.controls.installations() ?? [],
+        )
       : undefined;
   const app: AppPart | undefined =
     appId !== undefined || manifestFlow
@@ -202,6 +214,11 @@ export async function startGithubFake(
           registry,
         )
       : undefined;
+  appPart = app;
+  const install: InstallPart | undefined =
+    app === undefined
+      ? undefined
+      : createInstallPart(registry, () => app.controls.installations());
   const manifest: ManifestPart | undefined = manifestFlow
     ? createManifestPart(registry, () => baseUrl)
     : undefined;
@@ -295,6 +312,7 @@ export async function startGithubFake(
 
       if (oauth && (await oauth.handle(request, response, url))) return;
       if (manifest && (await manifest.handle(request, response, url))) return;
+      if (install && (await install.handle(request, response, url))) return;
       if (
         app &&
         (await app.handle({

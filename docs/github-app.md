@@ -188,17 +188,38 @@ instance admin.
 
 ## Install the App
 
-1. Open the install link of the Integrations page (`https://github.com/apps/<slug>/installations/new`), pick the
-   account or organization, and choose **Only select repositories**. Select the repositories the team wants
-   reviewed. Granting "All repositories" is possible but not recommended.
-2. Confirm the permission list GitHub shows.
-3. GitHub sends an `installation` delivery. In the App's *Recent Deliveries* it shows **202**; the response body
-   says `installation_changed`.
+Anybody can install a public App, so an installation is **not** reviewed until a workspace has linked it
+(`docs/decisions/0001-editions-setup-and-accounts.md`, section 2.9). An Owner or Admin of the workspace does that:
+
+1. Open the workspace's **Connections** page and press **Connect GitHub**. GitHub shows the App's installation page.
+2. Pick the account or organization, and choose **Only select repositories**. Select the repositories the team
+   wants reviewed. Granting "All repositories" is possible but not recommended. Confirm the permission list GitHub
+   shows and press Install.
+3. GitHub brings you back to the app (the Setup URL) and asks you to authorize the App. That proves two things with
+   *your own* GitHub token, which is used once and never stored: that you can use the installation, and that you
+   are the owner of the personal account, or an owner of the organization. A member of an organization who is not
+   an owner cannot connect its installation, and neither can somebody who only has access to a repository.
+   (If you are not allowed to install the App on an organization, GitHub asks its owners instead; once they
+   approved, use **Link an existing installation** on the Connections page.)
+4. The repositories of the installation appear under **Projects** of that workspace, and in no other. An
+   installation belongs to one workspace only.
+
+If GitHub does not let the App read your role in the organization (the App lacks the organization permission
+*Members*, see [Permissions](#permissions)), nothing is linked: the request goes to the instance admin, who sees who
+asked, the account and the evidence under **Approvals** in the admin portal and approves or denies it.
+
+A single-tenant instance whose App is **private** (it can only be installed on its own account) attaches an
+installation on that account to its one workspace by itself, without this round trip. Everything else needs
+Connect GitHub. An installation made by somebody else is only listed under **Approvals** as "nobody has linked it".
+
+The `installation` delivery GitHub sends shows **202** in the App's *Recent Deliveries*; the body says
+`installation_unclaimed` while nobody has linked the installation, and `installation_changed` for a linked one.
 
 Newly synced repositories are **inactive**: a repository is reviewed only after it was activated as a project in
-the application. Open the app's **Projects** page, press **Sync from GitHub** (only the instance admin sees the button) if the repository is missing, and
-switch the repository on. The API call `PUT /api/w/:workspace/repositories/:repositoryId/project` of a signed-in user stays
-available for scripts (see `app/src/projects/README.md`).
+the application. Open the workspace's **Projects** page, press **Sync from GitHub** (Owners and Admins see the button;
+it reads the workspace's own connections) if the repository is missing, and switch the repository on. The API call
+`PUT /api/w/:workspace/repositories/:repositoryId/project` of a signed-in user stays available for scripts (see
+`app/src/projects/README.md`).
 
 ## Check the webhook
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // The admin portal in a real browser against a production build: the instance admin signs in with email
-// and password and finds the five sections and the checklist; a person signed in with GitHub who is not
+// and password and finds the sections and the checklist; a person signed in with GitHub who is not
 // an admin gets the 404 of a page that does not exist (the same one, nothing says the portal is there),
 // also from the data route; a visitor without a session is sent to the login. The admin changes a setting
 // and sees who changed it. The rules behind are proven as integration tests (src/admin/).
@@ -135,7 +135,7 @@ test.describe("the admin portal", () => {
   });
 
   // #98-AD-03
-  test("@smoke the instance admin opens the portal and sees the five sections and the checklist", async ({
+  test("@smoke the instance admin opens the portal and sees the sections and the checklist", async ({
     page,
   }) => {
     await signInAsAdmin(page);
@@ -154,6 +154,7 @@ test.describe("the admin portal", () => {
       "Overview",
       "Setup",
       "Integrations",
+      "Approvals",
       "Mail",
       "Limits",
     ]);

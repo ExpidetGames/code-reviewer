@@ -5,11 +5,11 @@ App (`src/github-config/`) and the authorization that links a GitHub identity to
 (`src/github-signin/`). The decision is in `docs/decisions/0001-editions-setup-and-accounts.md`, sections
 2.4 and 2.9.
 
-| File       | Role                                                                                               |
-| ---------- | -------------------------------------------------------------------------------------------------- |
-| `state.ts` | `createSignedStates`: `issue` (a signed value and its row) and `consume` (verify and use up, once) |
+| File       | Role                                                                                                                                                                                            |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `state.ts` | `createSignedStates`: `issue` (a signed value and its row), `consume` (verify and use up, once) and `peek` (the same checks, not used up); `purposeOfState` tells which flow a value belongs to |
 
-- The value is `<purpose>.<nonce>.<expires at>.<user id>.<session hash>`, signed with HMAC-SHA256 under a key
+- The value is `<base64url JSON of purpose, nonce, expiry, user, session hash and, for a flow of a workspace, the workspace>.<mac>`, signed with HMAC-SHA256 under a key
   derived from `APP_SECRET` for the purpose `state-signing` (`src/crypto/sign.ts`, constant time
   comparison). It is integrity protected, not secret; it contains no credential.
 - The nonce is also the id of a row in `signed_states`. `consume` accepts a state only when the signature
@@ -20,3 +20,6 @@ App (`src/github-config/`) and the authorization that links a GitHub identity to
 - The refusal is a stable code (`state_invalid`) that does not say which of the checks failed, so a forged
   value learns nothing.
 - Rows are removed by the clean-up of `src/maintenance/` once they have expired.
+- The purposes are `github-manifest`, `github-link` and, for the binding of installations to workspaces
+  (`src/installation-binding/`), `github-install`, `github-authorize` and `github-picker`. A flow of a workspace puts the
+  workspace into the signed value (`workspaceId`), so a callback can only act for the workspace the state was made for.

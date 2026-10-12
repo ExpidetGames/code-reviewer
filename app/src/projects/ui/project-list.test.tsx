@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // @vitest-environment jsdom
-// Pins down what the project list shows: the empty state with the steps to install the GitHub App,
+// Pins down what the project list shows: the empty state with the steps to connect GitHub,
 // "No run yet" for a project without a run, the status of the last run, the switch with its state,
 // and text from GitHub rendered as text. The calls behind the switch are in project-toggle.test.tsx.
 import { cleanup, render, screen, within } from "@testing-library/react";
@@ -32,7 +32,7 @@ function row(overrides: Partial<ProjectRowView> = {}): ProjectRowView {
 function renderList(
   rows: ProjectRowView[],
   options: {
-    installUrl?: string | null;
+    canConnect?: boolean;
     activationBlocked?: string | null;
   } = {},
 ) {
@@ -41,39 +41,33 @@ function renderList(
     <ProjectList
       workspaceSlug="acme"
       view={view}
-      installUrl={options.installUrl ?? null}
+      canConnect={options.canConnect ?? true}
       activationBlocked={options.activationBlocked ?? null}
     />,
   );
 }
 
 describe("the project list without repositories", () => {
-  // CR-34-T02
-  it("explains in steps how to install the GitHub App and links to the installation page", () => {
-    renderList([], {
-      installUrl: "https://github.com/apps/code-reviewer/installations/new",
-    });
+  // CR-34-T02, #103-IB-18
+  it("explains in steps how to connect GitHub and links to the connections of the workspace", () => {
+    renderList([]);
 
     expect(
       screen.getByRole("heading", { name: "No repositories yet" }),
     ).toBeTruthy();
-    const link = screen.getByRole("link", {
-      name: "GitHub App installation page",
-    });
-    expect(link.getAttribute("href")).toBe(
-      "https://github.com/apps/code-reviewer/installations/new",
-    );
+    const link = screen.getByRole("link", { name: "Connections" });
+    expect(link.getAttribute("href")).toBe("/w/acme/connections");
     expect(screen.getAllByRole("listitem")).toHaveLength(3);
     expect(screen.queryByRole("switch")).toBeNull();
   });
 
-  // CR-34-T02
-  it("still explains the steps when the app's address is not configured, naming the variable", () => {
-    renderList([]);
+  // CR-34-T02, #103-IB-15
+  it("tells a person who cannot connect GitHub to ask an Owner or Admin, without the steps", () => {
+    renderList([], { canConnect: false });
 
-    expect(screen.queryByRole("link")).toBeNull();
-    expect(screen.getByText(/GITHUB_APP_SLUG/)).toBeTruthy();
-    expect(screen.getAllByRole("listitem")).toHaveLength(3);
+    expect(screen.getByText(/An Owner or Admin of the workspace/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Connections" })).toBeTruthy();
+    expect(screen.queryAllByRole("listitem")).toHaveLength(0);
   });
 });
 

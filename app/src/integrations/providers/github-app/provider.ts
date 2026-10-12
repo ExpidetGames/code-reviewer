@@ -139,6 +139,13 @@ export function createGithubAppProvider(
       return installation === null ? null : toDiscovered(installation);
     },
 
+    async ownerAccount() {
+      const { owner } = await (await getClient()).getApp();
+      return owner === null
+        ? null
+        : { externalId: String(owner.id), login: owner.login };
+    },
+
     async listRepositories(integration) {
       const remote = await (
         await getClient()

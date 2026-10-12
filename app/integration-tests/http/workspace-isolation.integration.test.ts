@@ -49,7 +49,11 @@ import type { WorkspaceRole } from "../../src/workspaces/roles.ts";
 const session = vi.hoisted(() => ({
   currentLookup: vi.fn<() => Promise<SessionLookup>>(),
 }));
-vi.mock("@/auth/session", () => ({ currentLookup: session.currentLookup }));
+vi.mock("@/auth/session", () => ({
+  currentLookup: session.currentLookup,
+  // The id of the session a state of the binding of an installation is bound to.
+  lookupSessionId: async () => "session-of-the-test",
+}));
 vi.mock("next/server", async (importOriginal) => ({
   ...(await importOriginal<typeof import("next/server")>()),
   connection: async () => undefined,
@@ -59,6 +63,7 @@ const fakes: FakeGithub[] = [];
 const HEAD = "1f3a5c7e9b2d4f60a8c1e3b5d7f90a2c4e6b8d01";
 
 type Ids = {
+  integrationId: string;
   repositoryId: string;
   runId: string;
   userId: string;
@@ -277,6 +282,59 @@ const ENTRIES: Entry[] = [
     takesNoIds: true,
   },
   {
+    name: "POST github/connect",
+    route: "/api/w/[workspace]/github/connect",
+    method: "POST",
+    minRole: MINIMUM_ROLE.manage_connections,
+    path: () => "/github/connect",
+    body: () => ({}),
+    params: () => ({}),
+    file: "github/connect/route.ts",
+    takesNoIds: true,
+  },
+  {
+    name: "POST github/installations",
+    route: "/api/w/[workspace]/github/installations",
+    method: "POST",
+    minRole: MINIMUM_ROLE.manage_connections,
+    path: () => "/github/installations",
+    body: () => ({}),
+    params: () => ({}),
+    file: "github/installations/route.ts",
+    takesNoIds: true,
+  },
+  {
+    name: "POST github/installations/choose",
+    route: "/api/w/[workspace]/github/installations/choose",
+    method: "POST",
+    minRole: MINIMUM_ROLE.manage_connections,
+    path: () => "/github/installations/choose",
+    body: () => ({ picker: "not-a-list", installationId: "4343" }),
+    params: () => ({}),
+    file: "github/installations/choose/route.ts",
+    takesNoIds: true,
+  },
+  {
+    name: "DELETE integrations/[integrationId]",
+    route: "/api/w/[workspace]/integrations/[integrationId]",
+    method: "DELETE",
+    minRole: MINIMUM_ROLE.manage_connections,
+    path: (ids) => `/integrations/${ids.integrationId}`,
+    params: (ids) => ({ integrationId: ids.integrationId }),
+    file: "integrations/[integrationId]/route.ts",
+  },
+  {
+    name: "POST integrations/sync",
+    route: "/api/w/[workspace]/integrations/sync",
+    method: "POST",
+    minRole: MINIMUM_ROLE.manage_connections,
+    path: () => "/integrations/sync",
+    body: () => ({}),
+    params: () => ({}),
+    file: "integrations/sync/route.ts",
+    takesNoIds: true,
+  },
+  {
     name: "DELETE invitations/[invitationId]",
     route: "/api/w/[workspace]/invitations/[invitationId]",
     method: "DELETE",
@@ -369,6 +427,7 @@ async function seedWorkspace(
     owner,
     keySentinel,
     ids: {
+      integrationId: integration.id,
       repositoryId: repository.id,
       runId: job.job.id,
       userId: names.owner,

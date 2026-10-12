@@ -108,12 +108,11 @@ export function GithubSection({
               <dt>App</dt>
               <dd>
                 <span className="mono">{view.app.slug}</span>
-                {view.app.installUrl !== null ? (
-                  <>
-                    {" "}
-                    (<a href={view.app.installUrl}>install it on GitHub</a>)
-                  </>
-                ) : null}
+                <span className="muted small">
+                  {" "}
+                  (installations are connected by the Owners and Admins of a
+                  workspace, on its Connections page)
+                </span>
               </dd>
             </div>
             <div>
