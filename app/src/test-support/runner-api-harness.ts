@@ -7,6 +7,7 @@
 import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
 import { createDefaultIntegrationRegistry } from "../integrations/registry.ts";
+import { loadGithubAppConfig } from "../integrations/registry.ts";
 import type { JobQueueLimits } from "../jobs/job-limits.ts";
 import { createWorkspaceLlm } from "../llm/assemble.ts";
 import { createRunnerApi } from "../runner-api/api.ts";
@@ -121,7 +122,7 @@ export async function startRunnerApiHarness(
   };
 
   const registry = createDefaultIntegrationRegistry({
-    env: github.env,
+    loadConfig: () => loadGithubAppConfig(github.env),
     githubClient: { now: github.clock.now, requestTimeoutMs: 5000 },
   });
   const infoLines: string[] = [];
