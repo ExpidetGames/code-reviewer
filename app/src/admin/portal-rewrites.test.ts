@@ -108,10 +108,11 @@ describe("the rewrites of next.config.ts", () => {
   it("send a request the proxy marked to the missing path before any file is looked at", async () => {
     const { beforeFiles } = await rewrites();
 
-    expect(beforeFiles).toHaveLength(3);
-    const rule = (beforeFiles ?? []).find(
+    const rules = (beforeFiles ?? []).filter(
       (candidate) => candidate.destination === MISSING_PATH,
     );
+    expect(rules).toHaveLength(1);
+    const [rule] = rules;
     expect(rule?.has).toEqual([{ type: "header", key: PORTAL_DENIED_HEADER }]);
     // Only what the proxy sees: the proxy takes the header off a request from outside, and does not see
     // Next.js's static files, the image route and the favicon.

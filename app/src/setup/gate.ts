@@ -15,6 +15,7 @@
 //
 // Set up: the setup does not exist any more. `/setup` and `/api/setup/**` answer 404, and nothing
 // else is touched.
+import { SETUP_PAGE } from "./paths.ts";
 import type { SetupState } from "./state.ts";
 
 export type SetupGateDecision =
@@ -27,7 +28,6 @@ function isPath(pathname: string, path: string): boolean {
   return pathname === path || pathname.startsWith(`${path}/`);
 }
 
-const SETUP_PAGE = "/setup";
 const SETUP_API = "/api/setup";
 
 /** Paths that keep working on an existing installation while the setup is open. */
