@@ -10,7 +10,7 @@ import { createInstanceSettingsRepository } from "../db/repositories/instance-se
 import { createRateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
 import { getDatabase } from "../db/startup.ts";
 import { createSignInLimiter, type SignInLimiter } from "./sign-in-limit.ts";
-import { githubSignInConfigured } from "./sign-in-methods.ts";
+import { isGithubSignInConfigured } from "../github-config/shared.ts";
 
 export function getSignInLimiter(): SignInLimiter {
   return createSignInLimiter(createRateLimitsRepository(getDatabase()));
@@ -25,5 +25,5 @@ export async function getSignInMethods(): Promise<SignInMethods> {
     await createInstanceSettingsRepository(getDatabase()).get(
       "sign_in_methods",
     );
-  return effectiveSignInMethods(stored, githubSignInConfigured(process.env));
+  return effectiveSignInMethods(stored, await isGithubSignInConfigured());
 }

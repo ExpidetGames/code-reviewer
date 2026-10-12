@@ -3,9 +3,8 @@
 // The wiring of the running server for the admin portal: the settings service on the server's database,
 // the secret store, the mail server settings and the facts the portal shows. Server code only.
 import "server-only";
-import { getAccessPolicy } from "../auth/access-runtime.ts";
 import { loadAuthConfig } from "../auth/config.ts";
-import { githubSignInConfigured } from "../auth/sign-in-methods.ts";
+import { isGithubSignInConfigured } from "../github-config/shared.ts";
 import { createRateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
 import { getDatabase } from "../db/startup.ts";
 import { getSmtpConfigStore } from "../mail/shared.ts";
@@ -25,9 +24,8 @@ export function getAdminService(): AdminService {
       // The address in the test mail is the configured one, never a request header.
       baseUrl: loadAuthConfig(process.env).baseUrl,
     }),
-    // Sign-in with GitHub exists while the GitHub OAuth app is configured. The GitHub issue of the
-    // admin portal moves the configuration into the database and changes only this line.
-    githubConfigured: () => githubSignInConfigured(process.env),
-    accessPolicy: (user) => getAccessPolicy()(user),
+    // Sign-in with GitHub exists while the GitHub App's user authorization is configured, read from the
+    // database on every call.
+    githubConfigured: isGithubSignInConfigured,
   });
 }

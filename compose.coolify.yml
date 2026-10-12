@@ -42,6 +42,9 @@ services:
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:?}
       GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:-}
       GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET:-}
+      # Ignored by the sign in (the sign-up rule in the admin portal decides, the server logs one
+      # ALLOW_LIST_IGNORED warning while they are set). They are passed through only for the one-time
+      # import of the update to accounts (#106).
       ALLOWED_GITHUB_LOGINS: ${ALLOWED_GITHUB_LOGINS:-}
       ALLOWED_GITHUB_ORG: ${ALLOWED_GITHUB_ORG:-}
       GITHUB_APP_ID: ${GITHUB_APP_ID:-}

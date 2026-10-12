@@ -14,9 +14,9 @@
 //   page behind `/no-access`, src/workspaces/README.md). The instance admin is exempt, so that the
 //   portal is always reachable. Every identity is asked this, the GitHub ones too.
 //
-// Accounts that sign in with GitHub are asked the workspace question only: their admission is the GitHub
-// allow list (access-policy.ts) until the GitHub issues replace it, and their address is not verified by
-// the app.
+// An account that signs in with GitHub only is asked the second question only: the address GitHub reports as
+// the verified primary one was verified at the sign in (an imported user's placeholder waits for it). Who may
+// have an account at all was decided when it was made, by the sign-up rule (src/github-signin/decide.ts).
 import type { WorkspaceRole } from "../workspaces/roles.ts";
 
 export type AccessGates = {

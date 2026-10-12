@@ -9,8 +9,23 @@ import {
 } from "../crypto/app-secret.ts";
 import { createAllowedLoginPinsRepository } from "../db/repositories/allowed-login-pins-repository.ts";
 import type { Database } from "../db/schema.ts";
-import { isAccessConfigured, type AccessConfig } from "./access-config.ts";
+import type { AccessConfig } from "./access-config.ts";
 import { AuthConfigError, loadAuthConfig } from "./config.ts";
+
+/**
+ * One line, or null: the allow list variables of the earlier sign in are still set, and nothing reads
+ * them to decide who may sign in. The sign-up rule in the admin portal decides; the update to accounts
+ * (#106) reads them once. Names the variables, never their values.
+ */
+export function allowListIgnoredWarning(
+  env: Readonly<Record<string, string | undefined>>,
+): string | null {
+  const set =
+    (env.ALLOWED_GITHUB_LOGINS ?? "").trim() !== "" ||
+    (env.ALLOWED_GITHUB_ORG ?? "").trim() !== "";
+  if (!set) return null;
+  return "[auth] ALLOW_LIST_IGNORED: ALLOWED_GITHUB_LOGINS and ALLOWED_GITHUB_ORG are ignored: the sign-up rule in the admin portal decides who may sign up. The import of the update to accounts will carry them over once.";
+}
 
 type StartOptions = {
   env?: Readonly<Record<string, string | undefined>>;
@@ -19,39 +34,11 @@ type StartOptions = {
   exit?: (code: number) => void;
 };
 
-const NOBODY_ALLOWED_WARNING =
-  "[auth] ACCESS_LIST_EMPTY: neither ALLOWED_GITHUB_LOGINS nor ALLOWED_GITHUB_ORG is set, so nobody is allowed to sign in. Set one of them to let people in.";
-
-// The plain entries are public GitHub names (or typos of them), shortened so that nothing else that
-// was pasted into the variable ends up in the log. An entry of the form `login:id` that is not valid
-// is only counted: it contains an id, and no id is ever printed.
-function invalidEntriesWarning(
-  entries: readonly string[],
-  invalidPresets: number,
-): string {
-  const parts: string[] = [];
-  if (entries.length > 0) {
-    const shown = entries
-      .slice(0, 3)
-      .map((entry) => JSON.stringify(entry.slice(0, 20)))
-      .join(", ");
-    parts.push(
-      `${String(entries.length)} entr${entries.length === 1 ? "y" : "ies"} cannot be a GitHub login (${shown}); a login has only letters, digits and hyphens, without an @`,
-    );
-  }
-  if (invalidPresets > 0)
-    parts.push(
-      `${String(invalidPresets)} login:id entr${invalidPresets === 1 ? "y is" : "ies are"} not valid (the id is 1 to 20 digits without a leading zero, the login has no colon) or contradict${invalidPresets === 1 ? "s" : ""} another one`,
-    );
-  return `[auth] ACCESS_LIST_ENTRY_INVALID: in ALLOWED_GITHUB_LOGINS ${parts.join("; ")}. Such entries are ignored and admit nobody.`;
-}
-
 /**
  * An invalid configuration ends the process with exit code 1 and one readable line (the error code
  * and the variable names), not a stack trace. Anything unexpected is rethrown unchanged. The master
- * key (`APP_SECRET`, or its deprecated name) and the public address are required; GitHub sign in is
- * optional. An empty allow list is not an error (the server is safe: nobody gets in) but is worth
- * one warning while GitHub sign in is configured.
+ * key (`APP_SECRET`, or its deprecated name) and the public address are required. The sign in with
+ * GitHub is configured in the admin portal, not here.
  */
 export function checkAuthConfigOnStart({
   env = process.env,
@@ -60,20 +47,14 @@ export function checkAuthConfigOnStart({
   exit = (code) => process.exit(code),
 }: StartOptions = {}): void {
   try {
-    const config = loadAuthConfig(env);
+    loadAuthConfig(env);
     // The old name of the master key still works; say once that it is on its way out.
     const deprecated = legacyAppSecretWarning(env);
     if (deprecated !== null) warn(deprecated);
     const conflict = conflictingAppSecretWarning(env);
     if (conflict !== null) warn(conflict);
-    // The allow list is about GitHub identities: it only matters while GitHub sign in is configured.
-    if (config.github.oauth !== null) {
-      if (!isAccessConfigured(config.access)) warn(NOBODY_ALLOWED_WARNING);
-      const odd = config.access.invalidLoginEntries;
-      const oddPresets = config.access.invalidPresetEntries;
-      if (odd.length > 0 || oddPresets > 0)
-        warn(invalidEntriesWarning(odd, oddPresets));
-    }
+    const allowList = allowListIgnoredWarning(env);
+    if (allowList !== null) warn(allowList);
   } catch (error) {
     if (!(error instanceof AuthConfigError)) throw error;
     log(`[auth] ${error.code}: ${error.message}`);

@@ -42,11 +42,14 @@ services:
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-}
       BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:${APP_PORT:-3000}}
       # GitHub is optional: a new instance is set up in the browser (the setup code is in the log of the
-      # app) and starts without any of the settings below. Until the GitHub integration moves into the
-      # browser they are how GitHub sign in and the GitHub App are configured; an existing installation
-      # keeps its values here.
+      # app) and starts without any of the settings below. The GitHub App and the sign in with GitHub are
+      # configured in the admin portal (Integrations). The settings below are only for an installation
+      # that already had them: the GITHUB_APP_* values are read while the database holds no App.
       GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:-}
       GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET:-}
+      # Ignored by the sign in (the sign-up rule in the admin portal decides, the server logs one
+      # ALLOW_LIST_IGNORED warning while they are set). They are passed through only for the one-time
+      # import of the update to accounts (#106).
       ALLOWED_GITHUB_LOGINS: ${ALLOWED_GITHUB_LOGINS:-}
       ALLOWED_GITHUB_ORG: ${ALLOWED_GITHUB_ORG:-}
       GITHUB_APP_ID: ${GITHUB_APP_ID:-}

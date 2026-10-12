@@ -24,10 +24,20 @@ import {
 } from "./app-api.ts";
 import { send, sendJson } from "./http.ts";
 import {
+  createManifestPart,
+  type FakeManifestFlowControls,
+  type ManifestPart,
+} from "./manifest.ts";
+import {
   createOAuthPart,
   type FakeGithubOAuth,
   type OAuthPart,
 } from "./oauth.ts";
+import {
+  createAppRegistry,
+  DEFAULT_ACCOUNT_PERMISSIONS,
+  type FakeRegisteredApp,
+} from "./registry.ts";
 
 export type {
   FakeCollaboratorPermission,
@@ -38,6 +48,8 @@ export type {
   FakeTokenRequest,
 } from "./app-api.ts";
 export { DEFAULT_FAKE_APP_PERMISSIONS } from "./app-api.ts";
+export type { FakeManifest, FakeManifestFlowControls } from "./manifest.ts";
+export type { FakeRegisteredApp } from "./registry.ts";
 export type {
   FakeGithubUser,
   FakeMembershipState,
@@ -52,6 +64,12 @@ export type FakeGithubOptions = {
   /** Switches the GitHub App API on: the app id and the SPKI PEM its JWTs are checked with (both or neither). */
   appId?: string;
   publicKeyPem?: string;
+  /**
+   * Switches the manifest flow on: `POST /settings/apps/new` and the conversion endpoint create GitHub
+   * Apps, each with a key pair of its own, that sign in and call the GitHub App API like the app
+   * registered at start. Switches the sign in and the GitHub App API on as well (without a first app).
+   */
+  manifestFlow?: boolean;
   /** The fake's clock in milliseconds since the epoch, for tokens and JWTs. Default Date.now. */
   now?: () => number;
   /**
@@ -104,7 +122,10 @@ export type FakeFailure = {
 
 /** The whole fake: the controls of the sign in and of the GitHub App API, plus what both share. */
 export type FakeGithub = FakeGithubOAuth &
-  FakeGithubAppControls & {
+  FakeGithubAppControls &
+  FakeManifestFlowControls & {
+    /** Every app the fake knows: the one registered at start and the ones the manifest flow created. */
+    registeredApps(): FakeRegisteredApp[];
     /** For example http://127.0.0.1:41234; serves the OAuth pages and the API alike. */
     baseUrl: string;
     /** Makes matching requests fail, on any path. */
@@ -138,24 +159,52 @@ export async function startGithubFake(
 
   const host = options.host ?? "127.0.0.1";
   let baseUrl = "";
+  const manifestFlow = options.manifestFlow === true;
+  // The app registered at start, if any: its client credentials and its key, in one record that the
+  // sign in and the GitHub App API look up by client id and by app id.
+  const registry = createAppRegistry();
+  if (clientId !== undefined || appId !== undefined) {
+    registry.add({
+      id: appId ?? "0",
+      slug: options.appSlug ?? "fake-app",
+      name: options.appSlug ?? "fake-app",
+      ownerLogin: "fake-owner",
+      publicKeyPem: publicKeyPem ?? null,
+      clientId: clientId ?? null,
+      clientSecret: clientSecret ?? null,
+      webhookSecret: null,
+      permissions: {},
+      accountPermissions: { ...DEFAULT_ACCOUNT_PERMISSIONS },
+      events: [],
+      callbackUrls: null,
+      isPublic: false,
+      createdFromManifest: false,
+    });
+  }
   const oauth: OAuthPart | undefined =
-    clientId !== undefined && clientSecret !== undefined
-      ? createOAuthPart({ clientId, clientSecret }, () => baseUrl)
+    clientId !== undefined || manifestFlow
+      ? createOAuthPart({ clientId, clientSecret }, () => baseUrl, registry)
       : undefined;
   const app: AppPart | undefined =
-    appId !== undefined && publicKeyPem !== undefined
-      ? createAppPart({
-          appId,
-          publicKeyPem,
-          ...(options.now === undefined ? {} : { now: options.now }),
-          ...(options.appSlug === undefined
-            ? {}
-            : { appSlug: options.appSlug }),
-          ...(options.selfLinks === true
-            ? { webBase: () => baseUrl, apiBase: () => baseUrl }
-            : {}),
-        })
+    appId !== undefined || manifestFlow
+      ? createAppPart(
+          {
+            ...(appId === undefined ? {} : { appId }),
+            ...(publicKeyPem === undefined ? {} : { publicKeyPem }),
+            ...(options.now === undefined ? {} : { now: options.now }),
+            ...(options.appSlug === undefined
+              ? {}
+              : { appSlug: options.appSlug }),
+            ...(options.selfLinks === true
+              ? { webBase: () => baseUrl, apiBase: () => baseUrl }
+              : {}),
+          },
+          registry,
+        )
       : undefined;
+  const manifest: ManifestPart | undefined = manifestFlow
+    ? createManifestPart(registry, () => baseUrl)
+    : undefined;
 
   let log: FakeGithubRequest[] = [];
   let aborted: FakeGithubRequest[] = [];
@@ -177,8 +226,10 @@ export async function startGithubFake(
   }
 
   function resetAll(): void {
+    registry.resetCreated();
     oauth?.reset();
     app?.reset();
+    manifest?.reset();
     log = [];
     aborted = [];
     credentials = [];
@@ -243,6 +294,7 @@ export async function startGithubFake(
       }
 
       if (oauth && (await oauth.handle(request, response, url))) return;
+      if (manifest && (await manifest.handle(request, response, url))) return;
       if (
         app &&
         (await app.handle({
@@ -285,11 +337,15 @@ export async function startGithubFake(
 
   // The controls of a part that is switched off are absent: calling one is a TypeError, which is
   // what a test that forgot the option should get.
-  const parts = { ...oauth?.controls, ...app?.controls } as FakeGithubOAuth &
-    FakeGithubAppControls;
+  const parts = {
+    ...oauth?.controls,
+    ...app?.controls,
+    ...manifest?.controls,
+  } as FakeGithubOAuth & FakeGithubAppControls & FakeManifestFlowControls;
 
   return {
     ...parts,
+    registeredApps: () => registry.all(),
     baseUrl,
     fail(failure) {
       failures.push({ ...failure, remaining: failure.times ?? Infinity });

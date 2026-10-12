@@ -4,7 +4,7 @@ Housekeeping of tables that an outsider can make grow. `cleanup.ts` removes the 
 window is over (every window of the app is at most 24 hours, which `cleanup.integration.test.ts` pins against
 each window constant, so a counter in force is never removed) and the verification links that expired or were
 used more than a week ago (a week, so that someone who holds a link and its password is still told "used" or
-"expired"), and the password reset links the same way. It also removes the encrypted LLM keys that were remembered for jobs
+"expired"), and the password reset links the same way. A signed state (the single-use side of a round trip through GitHub, `src/signed-state/`) is removed once it has expired. It also removes the encrypted LLM keys that were remembered for jobs
 (`job_claimed_keys`, `src/runner-api/claimed-keys.ts`) a week after the job finished, so a key that was rotated away
 does not stay in the database for ever. `startup.ts` runs it when the production server starts and then every hour, from
 `src/instrumentation.ts`, like the backup timer (no timer in other environments); a failing run is logged by its

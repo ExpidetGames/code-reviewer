@@ -26,6 +26,15 @@ vi.mock("./db/startup.ts", () => ({
   getDatabase: () => ({}),
   initializeDatabaseOnStart: async () => void calls.push("database"),
 }));
+// Where the GitHub App comes from (the database, or the variables of an installation that was not imported):
+// the real store is tested in src/github-config/; the stand-in reads the variable the tests set.
+vi.mock("./github-config/shared.ts", () => ({
+  getGithubCredentialStore: () => ({
+    load: async () => ({
+      source: process.env.GITHUB_APP_ID ? "environment" : "none",
+    }),
+  }),
+}));
 // The setup code is printed once the database is ready; the real thing is tested in src/setup/.
 vi.mock("./setup/start.ts", () => ({
   startSetupOnStart: async () => void calls.push("setup"),

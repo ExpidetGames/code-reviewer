@@ -79,7 +79,7 @@ its data: only the web UI waits, webhooks and the runner API keep working. How i
 
 The admin portal at `/admin` (instance admin only; everybody else gets a 404) holds the settings of the
 instance: tenancy, sign-up rule, the ways to sign in and the limits, with who changed what and when.
-Credentials will be stored encrypted with a key derived from `APP_SECRET`. **A lost admin password** without
+Credentials (the GitHub App, the mail server password) are stored encrypted with a key derived from `APP_SECRET`. **A lost admin password** without
 a mail server: `docker compose exec app admin reset-password <email>` prints a single-use link valid for 30
 minutes. Details: `app/src/admin/README.md`.
 
@@ -91,16 +91,15 @@ that names emails or domains stays closed until addresses can be verified. A new
 workspace and sees no data: in a single-tenant instance the person asks an admin for an invitation. How it
 works: `app/src/signup/README.md`.
 
-Signing in with email and password always exists (the admin). "Sign in with GitHub" exists while a
-GitHub OAuth app of your own is configured (`GITHUB_OAUTH_CLIENT_ID` and `GITHUB_OAUTH_CLIENT_SECRET`;
-GitHub > Settings > Developer settings > OAuth Apps; register
-`<BETTER_AUTH_URL>/api/auth/callback/github` as its "Authorization callback URL"). GitHub sign in is
-limited to people you name: set `ALLOWED_GITHUB_LOGINS` (comma separated GitHub logins) and/or
-`ALLOWED_GITHUB_ORG` (members of one GitHub organization). If both are set, either is enough. If
-neither is set, nobody can sign in with GitHub; the server starts and logs one warning. A login
-removed from the list loses access on the next request (after a restart with the new value);
-organization membership is checked at sign in and again every 24 hours.
-How it works: `app/src/auth/README.md`.
+Signing in with email and password always exists (the admin). "Sign in with GitHub" exists while the
+GitHub App has its user authorization configured: the same App that reviews pull requests signs people in,
+and it is created with one click in the admin portal (Integrations) or entered by hand; there is no
+separate OAuth app and no environment variable. The sign-up rule is applied to the **verified primary email
+address** GitHub reports; a GitHub account is matched by its numeric id; an address alone never joins two
+accounts. A person who is signed in can link their GitHub account from their account page, and the
+instance admin can link the GitHub account of an operator who was imported from an earlier version, which
+merges the two accounts. How it works: `app/src/auth/README.md`, `app/src/github-config/README.md` and
+`app/src/github-signin/README.md`.
 
 ### LLM access
 
@@ -118,12 +117,15 @@ How it works: `app/src/llm/README.md`.
 
 ### GitHub App
 
-Reading pull requests and posting reviews needs a GitHub App of the team (webhook, four repository
-permissions, two events). [`docs/github-app.md`](docs/github-app.md) creates it step by step, says
-which value goes into which variable (`GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_WEBHOOK_SECRET`,
-`GITHUB_APP_PRIVATE_KEY`), how to keep the private key safe and how to install the app on the
-repositories. The four settings are optional for starting the instance: without them GitHub is "not
-configured" and no review can run (an incomplete set is reported in the log at start).
+Reading pull requests, posting reviews and signing people in needs one GitHub App of the team. In the admin
+portal, under **Integrations**, one click creates it (the manifest flow: GitHub asks you to confirm, and
+the credentials come back to the portal by themselves), or you enter its values by hand;
+[`docs/github-app.md`](docs/github-app.md) describes both, the permissions and events, how to keep the
+private key safe and how to install the app on the repositories. The App id, slug, private key, webhook
+secret, client id and client secret are stored encrypted in the database and never shown again; no
+environment variable is needed, and a replaced webhook secret counts from the next delivery on every
+instance. Without an App GitHub is "not configured" and no review can run. An installation from before
+accounts that still has `GITHUB_APP_*` variables keeps working until the update imports them.
 
 ## Supported browsers
 
@@ -212,15 +214,14 @@ Open `http://localhost:3000`: a new instance asks for the **setup code**, which 
 | `APP_SECRET` | Required. Random, at least 32 characters: `openssl rand -base64 32`. Keep a copy apart from the database backups: a database restored without it loses every stored credential. An existing `BETTER_AUTH_SECRET` is accepted in its place |
 | `RUNNER_TOKEN` | Required. Random, at least 32 characters: `openssl rand -hex 32` (the app and the runner share it) |
 | `BETTER_AUTH_URL` | The address people use, https beyond localhost (a local try-out needs nothing) |
-| `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_WEBHOOK_SECRET`, `GITHUB_APP_PRIVATE_KEY` | Optional for starting; needed for reviews. The GitHub App that reads pull requests and posts reviews: create it once with [docs/github-app.md](docs/github-app.md) (permissions, events, webhook URL, key handling, installation) |
-| `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, `ALLOWED_GITHUB_LOGINS` and/or `ALLOWED_GITHUB_ORG` | Optional: "Sign in with GitHub" and who may use it (see "First start and sign in") |
+| The GitHub App | Not an environment variable: create it in the admin portal under Integrations ([docs/github-app.md](docs/github-app.md): one click, or by hand). `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_WEBHOOK_SECRET` and `GITHUB_APP_PRIVATE_KEY` of an installation from before accounts are read until the update imports them; `GITHUB_OAUTH_*` are no longer used |
 | `LLM_API_KEY` (and `LLM_PROVIDER`) | Legacy: an LLM key for a single-tenant instance whose workspace has no key of its own. Optional; the key is normally entered per workspace in the UI (Settings, LLM access) |
 
 `RUNNER_TOKEN` empty stops `docker compose up` with a message naming the variable, before any container
 is created. The production app refuses to start without `APP_SECRET` (or `BETTER_AUTH_SECRET`) and
 without `RUNNER_TOKEN` (at least 32 characters): one line in the log naming the variables, never their
-values. No `GITHUB_*` variable is required. An incomplete or unusable GitHub App configuration is only
-reported in the log, and GitHub stays "not configured".
+values. No `GITHUB_*` variable is required. An incomplete or unusable set of the old `GITHUB_APP_*`
+variables is only reported in the log, and GitHub stays "not configured".
 
 Compose only catches *empty* values. A value that is set but invalid passes compose and is rejected by
 the app, which exits with one `[auth]` or `[deploy]` line (for example a missing `APP_SECRET`, a

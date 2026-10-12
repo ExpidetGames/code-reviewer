@@ -18,6 +18,11 @@ import { createPublicKey, randomBytes, verify } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { readBody } from "./http.ts";
 import {
+  DEFAULT_ACCOUNT_PERMISSIONS,
+  type AppRegistry,
+  type FakeRegisteredApp,
+} from "./registry.ts";
+import {
   createReviewApi,
   type FakeChangedFile,
   type FakeComment,
@@ -99,11 +104,16 @@ export const DEFAULT_FAKE_APP_PERMISSIONS: FakePermissions = {
 
 export type FakeCollaboratorPermission = "admin" | "write" | "read" | "none";
 
-/** The GitHub App registered at the fake: what the App JWTs of the app under test are checked with. */
+/**
+ * The GitHub App registered at the fake when it starts: what the App JWTs of the app under test are
+ * checked with. Apps created through the manifest flow (`manifest.ts`) are registered in the shared
+ * registry as well; both are checked by the key of the app a JWT names.
+ */
 export type FakeAppOptions = {
-  appId: string;
+  /** The app registered at start; absent when only the manifest flow creates apps. */
+  appId?: string;
   /** SPKI PEM of the app's key pair; JWTs are checked against it. */
-  publicKeyPem: string;
+  publicKeyPem?: string;
   /** The fake's clock in milliseconds since the epoch. Default Date.now. */
   now?: () => number;
   /**
@@ -168,6 +178,12 @@ export type FakeGithubAppControls = {
   ): FakeComment;
   /** The permissions the app itself is granted; token requests may not exceed them (422). */
   setAppPermissions(permissions: FakePermissions): void;
+  /**
+   * The account and organization permissions (`emails`, `members`) the user tokens of the app
+   * registered at start hold, and what `GET /app` reports for them. Default: both read-only. Without
+   * `emails`, `GET /user/emails` answers 404 for a user token, like GitHub for an app that lacks it.
+   */
+  setAppAccountPermissions(permissions: FakePermissions): void;
   /**
    * Merges these fields into every access token answer from now on (null stops it): a misbehaving
    * GitHub that reports a token as broader than it was asked for, for example
@@ -258,9 +274,11 @@ function base64urlDecode(text: string): Buffer {
   return Buffer.from(text, "base64url");
 }
 
-export function createAppPart(options: FakeAppOptions): AppPart {
+export function createAppPart(
+  options: FakeAppOptions,
+  registry: AppRegistry,
+): AppPart {
   const now = options.now ?? Date.now;
-  const publicKey = createPublicKey(options.publicKeyPem);
   const webBase = options.webBase ?? (() => DEFAULT_WEB_BASE);
   const apiBase = options.apiBase ?? webBase;
   const review = createReviewApi({
@@ -283,37 +301,46 @@ export function createAppPart(options: FakeAppOptions): AppPart {
   let jwtsRejected = false;
   let tokenAnswerPatch: Record<string, unknown> | null = null;
 
-  function jwtIsValid(token: string): boolean {
-    if (jwtsRejected) return false;
+  /** The app an App JWT is valid for: signed with its key, naming it as issuer, not expired. */
+  function appForJwt(token: string): FakeRegisteredApp | undefined {
+    if (jwtsRejected) return undefined;
     const parts = token.split(".");
-    if (parts.length !== 3) return false;
+    if (parts.length !== 3) return undefined;
     const [header, payload, signature] = parts as [string, string, string];
     try {
-      const signed = verify(
-        "RSA-SHA256",
-        Buffer.from(`${header}.${payload}`),
-        publicKey,
-        base64urlDecode(signature),
-      );
-      if (!signed) return false;
       const claims = JSON.parse(base64urlDecode(payload).toString("utf8")) as {
         iss?: unknown;
         iat?: unknown;
         exp?: unknown;
       };
+      if (typeof claims.iss !== "string" && typeof claims.iss !== "number")
+        return undefined;
+      const app = registry.byId(String(claims.iss));
+      if (app?.publicKeyPem == null) return undefined;
+      const signed = verify(
+        "RSA-SHA256",
+        Buffer.from(`${header}.${payload}`),
+        createPublicKey(app.publicKeyPem),
+        base64urlDecode(signature),
+      );
+      if (!signed) return undefined;
       const seconds = now() / 1000;
-      return (
-        claims.iss === options.appId &&
-        typeof claims.exp === "number" &&
+      return typeof claims.exp === "number" &&
         typeof claims.iat === "number" &&
         claims.exp > seconds &&
         claims.iat <= seconds &&
         claims.exp - claims.iat <= 600
-      );
+        ? app
+        : undefined;
     } catch {
-      return false;
+      return undefined;
     }
   }
+
+  const jwtIsValid = (token: string): boolean => appForJwt(token) !== undefined;
+
+  const isStartApp = (app: FakeRegisteredApp): boolean =>
+    app.id === options.appId;
 
   function installationToken(token: string): IssuedToken | undefined {
     const issued = tokens.get(token);
@@ -400,6 +427,26 @@ export function createAppPart(options: FakeAppOptions): AppPart {
       return send(200, issuedTokens);
 
     // App JWT endpoints
+    // The app itself, as GitHub describes it to its own JWT: id, slug, owner and what it is granted.
+    // A person who types the credentials of an app by hand is checked against this answer.
+    if (path === "/app" && method === "GET") {
+      const app = bearer === undefined ? undefined : appForJwt(bearer);
+      if (app === undefined) return unauthorized();
+      return send(200, {
+        id: Number(app.id),
+        slug: app.slug,
+        name: app.name,
+        owner: { login: app.ownerLogin, type: "User" },
+        description: "",
+        external_url: webBase(),
+        html_url: `${webBase()}/apps/${app.slug}`,
+        permissions: isStartApp(app)
+          ? { ...appPermissions, ...app.accountPermissions }
+          : { ...app.permissions, ...app.accountPermissions },
+        events: app.events,
+      });
+    }
+
     if (path === "/app/installations" && method === "GET") {
       if (bearer === undefined || !jwtIsValid(bearer)) return unauthorized();
       const list: unknown[] = [...installations.values()].map(
@@ -407,7 +454,7 @@ export function createAppPart(options: FakeAppOptions): AppPart {
           id: installation.id,
           account: accountJson(installation.account, webBase()),
           suspended_at: installation.suspended ? "2026-10-01T00:00:00Z" : null,
-          app_id: Number(options.appId),
+          app_id: Number(appForJwt(bearer)?.id),
         }),
       );
       list.push(...rawInstallationRecords);
@@ -423,7 +470,7 @@ export function createAppPart(options: FakeAppOptions): AppPart {
         id: installation.id,
         account: accountJson(installation.account, webBase()),
         suspended_at: installation.suspended ? "2026-10-01T00:00:00Z" : null,
-        app_id: Number(options.appId),
+        app_id: Number(appForJwt(bearer)?.id),
       });
     }
 
@@ -725,6 +772,10 @@ export function createAppPart(options: FakeAppOptions): AppPart {
     setAppPermissions(permissions) {
       appPermissions = { ...permissions };
     },
+    setAppAccountPermissions(permissions) {
+      const start = options.appId && registry.byId(options.appId);
+      if (start) start.accountPermissions = { ...permissions };
+    },
     answerTokensWith(patch) {
       tokenAnswerPatch = patch;
     },
@@ -754,6 +805,8 @@ export function createAppPart(options: FakeAppOptions): AppPart {
       jwtsRejected = false;
       tokenAnswerPatch = null;
       appPermissions = { ...DEFAULT_FAKE_APP_PERMISSIONS };
+      const start = options.appId && registry.byId(options.appId);
+      if (start) start.accountPermissions = { ...DEFAULT_ACCOUNT_PERMISSIONS };
     },
   };
 }

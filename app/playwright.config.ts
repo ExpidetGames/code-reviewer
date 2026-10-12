@@ -8,15 +8,17 @@ import { e2eEnv, llmEnv } from "./e2e/helpers/e2e-env";
 // e2e/helpers/e2e-env.ts); never 3000 or 3100 so parallel work in other worktrees is safe.
 const baseURL = e2eEnv.appUrl;
 
-// A throwaway key for the GitHub App settings of the app under test, new for every run and never
-// written anywhere. No journey asks GitHub for a token, so the key is only there to make the
-// settings complete (the webhook route verifies deliveries only with complete settings, and the
-// production server refuses to start with an unusable key).
-const githubAppPrivateKey = generateKeyPairSync("rsa", {
+// A throwaway key for the GitHub App of the apps under test, new for every run and never written
+// anywhere. The run enters the App in the admin portal of each app (e2e/setup/prepare-apps.e2e.ts),
+// so the journeys that need a token (the real review) and the portal's own check (`GET /app` with
+// the App's JWT) work against the fake GitHub. It is made once in this process and handed on through
+// the environment, which every worker inherits.
+process.env.E2E_GITHUB_APP_PRIVATE_KEY ||= generateKeyPairSync("rsa", {
   modulusLength: 2048,
   privateKeyEncoding: { type: "pkcs1", format: "pem" },
   publicKeyEncoding: { type: "spki", format: "pem" },
 }).privateKey;
+const githubAppPrivateKey = process.env.E2E_GITHUB_APP_PRIVATE_KEY;
 
 // The fake GitHub checks the App JWTs of the app under test with the public half of that key.
 const githubAppPublicKey = createPublicKey(githubAppPrivateKey)
@@ -30,17 +32,12 @@ const browser = {
   channel: process.env.PLAYWRIGHT_CHANNEL || undefined,
 };
 
-// What both apps under test share: the sign in, the GitHub App and the runner token, all dummies.
+// What all apps under test share: the address of GitHub (the fake), the master key and the runner token,
+// all dummies. The GitHub App itself is not in the environment: the run enters it in each app's admin portal.
 const appEnv = {
   APP_SECRET: e2eEnv.appSecret,
-  GITHUB_OAUTH_CLIENT_ID: e2eEnv.githubClientId,
-  GITHUB_OAUTH_CLIENT_SECRET: e2eEnv.githubClientSecret,
   GITHUB_OAUTH_BASE_URL: e2eEnv.githubUrl,
   GITHUB_API_BASE_URL: e2eEnv.githubUrl,
-  GITHUB_APP_ID: e2eEnv.githubAppId,
-  GITHUB_APP_SLUG: e2eEnv.githubAppSlug,
-  GITHUB_APP_WEBHOOK_SECRET: e2eEnv.githubAppWebhookSecret,
-  GITHUB_APP_PRIVATE_KEY: githubAppPrivateKey,
   RUNNER_TOKEN: e2eEnv.runnerToken,
   // Without this flag the server refuses the two overrides above.
   ALLOW_TEST_GITHUB_ENDPOINTS: "true",
@@ -84,6 +81,7 @@ export default defineConfig({
         /e2e\/setup\//,
         /e2e\/auth\/(sign-up|password-reset)\.e2e\.ts$/,
         /e2e\/admin\/mail\.e2e\.ts$/,
+        /e2e\/admin\/github-integration\.e2e\.ts$/,
         /e2e\/workspaces\//,
         /e2e\/settings\/llm-key\.e2e\.ts$/,
       ],
@@ -158,6 +156,16 @@ export default defineConfig({
       use: { ...browser, baseURL: e2eEnv.setupAppUrl },
       testMatch: /e2e\/setup\/first-run\.e2e\.ts$/,
     },
+    // The journey of the GitHub integration uses the third app after the first-run journey has set it up: it
+    // creates the GitHub App through the manifest flow, signs people in with GitHub, merges the admin with an
+    // imported operator, makes GitHub the only way to sign in and enters the App by hand, so nobody else may
+    // use that app.
+    {
+      name: "github",
+      use: { ...browser, baseURL: e2eEnv.setupAppUrl },
+      testMatch: /e2e\/admin\/github-integration\.e2e\.ts$/,
+      dependencies: ["setup"],
+    },
     // The journey with the real runner and the real PR-Agent. It has an app of its own (its own
     // database, the LLM configured, a real runner polling it), so it cannot disturb the queue of the
     // other journeys and they cannot disturb it, and it runs next to them.
@@ -191,6 +199,8 @@ export default defineConfig({
         GITHUB_FAKE_PORT: String(e2eEnv.githubPort),
         GITHUB_FAKE_CLIENT_ID: e2eEnv.githubClientId,
         GITHUB_FAKE_CLIENT_SECRET: e2eEnv.githubClientSecret,
+        // Apps can also be created through the manifest flow (e2e/admin/github-integration.e2e.ts).
+        GITHUB_FAKE_MANIFEST_FLOW: "true",
         GITHUB_FAKE_APP_ID: e2eEnv.githubAppId,
         GITHUB_FAKE_APP_PUBLIC_KEY: githubAppPublicKey,
         GITHUB_FAKE_APP_SLUG: e2eEnv.githubAppSlug,
@@ -223,7 +233,6 @@ export default defineConfig({
         ...appEnv,
         DATABASE_PATH: e2eEnv.databasePath,
         BETTER_AUTH_URL: e2eEnv.appUrl,
-        ALLOWED_GITHUB_LOGINS: e2eEnv.allowedLogins,
       },
       url: e2eEnv.appUrl,
       reuseExistingServer: false,
@@ -237,7 +246,6 @@ export default defineConfig({
         ...appEnv,
         DATABASE_PATH: e2eEnv.pipelineDatabasePath,
         BETTER_AUTH_URL: e2eEnv.pipelineAppUrl,
-        ALLOWED_GITHUB_LOGINS: e2eEnv.pipelineAllowedLogins,
         LLM_PROVIDER: llmEnv.provider,
         LLM_API_KEY: llmEnv.apiKey,
         LLM_MODEL: llmEnv.model,
@@ -256,7 +264,6 @@ export default defineConfig({
         ...appEnv,
         DATABASE_PATH: e2eEnv.setupDatabasePath,
         BETTER_AUTH_URL: e2eEnv.setupAppUrl,
-        ALLOWED_GITHUB_LOGINS: e2eEnv.allowedLogins,
       },
       url: e2eEnv.setupAppUrl,
       reuseExistingServer: false,
@@ -270,7 +277,6 @@ export default defineConfig({
         ...appEnv,
         DATABASE_PATH: e2eEnv.signupDatabasePath,
         BETTER_AUTH_URL: e2eEnv.signupAppUrl,
-        ALLOWED_GITHUB_LOGINS: e2eEnv.allowedLogins,
       },
       url: e2eEnv.signupAppUrl,
       reuseExistingServer: false,
@@ -284,7 +290,6 @@ export default defineConfig({
         ...appEnv,
         DATABASE_PATH: e2eEnv.multiDatabasePath,
         BETTER_AUTH_URL: e2eEnv.multiAppUrl,
-        ALLOWED_GITHUB_LOGINS: e2eEnv.allowedLogins,
         // The "test key" button of the LLM key journey asks the fake LLM, not the provider.
         LLM_API_BASE_URL: e2eEnv.llmFakeApiUrl,
         ALLOW_TEST_LLM_ENDPOINTS: "true",

@@ -7,6 +7,7 @@
 // - A counter is removed once its window is over, and every window of the app is at most 24 hours
 //   (`LONGEST_RATE_LIMIT_WINDOW_MS`, pinned by the test against every window constant), so no counter in
 //   force is ever removed and no limit starts early.
+// - A signed state (the single-use side of the round trips through GitHub) is removed once it has expired.
 // - A verification link is kept for a week after it expired or was used, so that someone who holds it
 //   (and its password) is told "used" or "expired" and not just "not valid". After that it is gone.
 // - The LLM key that was handed to a runner with the claim of a job (`job_claimed_keys`, encrypted) is kept
@@ -62,6 +63,11 @@ export async function cleanUpExpiredRows(
       ]),
     )
     .executeTakeFirst();
+  // A signed state lives ten minutes; one that has expired is of no use to anyone (not counted in the result).
+  await db
+    .deleteFrom("signed_states")
+    .where("expires_at", "<=", formatTimestamp(now()))
+    .execute();
   const jobClaimedKeys = await createJobClaimedKeysRepository(
     db,
     now,

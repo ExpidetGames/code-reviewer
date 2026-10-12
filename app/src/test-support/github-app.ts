@@ -29,6 +29,9 @@ export function testGithubAppEnv(
     GITHUB_APP_SLUG: TEST_APP_SLUG,
     GITHUB_APP_PRIVATE_KEY: testAppKeys().privateKey,
     GITHUB_APP_WEBHOOK_SECRET: TEST_WEBHOOK_SECRET,
+    // The master key: the credential store of the running server reads the database first and needs it
+    // before it falls back to the variables above.
+    APP_SECRET: "test-app-secret-0123456789-0123456789-abc",
     ...overrides,
   };
 }

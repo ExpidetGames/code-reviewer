@@ -104,6 +104,12 @@ export async function handleAuthRequest(
    * (tests of other things), both ways are on.
    */
   signInMethods?: () => Promise<SignInMethods>,
+  /**
+   * The instance of Better Auth that serves the sign in with GitHub (its start and its callback), made for
+   * the credentials of the GitHub App in force, or null while there are none. Left out (tests of other
+   * things), `auth` serves everything.
+   */
+  githubAuth?: () => Promise<Pick<Auth, "handler"> | null>,
 ): Promise<Response> {
   const { pathname } = new URL(request.url);
   if (!isAuthEndpointAllowed(request.method, pathname))
@@ -141,6 +147,36 @@ export async function handleAuthRequest(
         { status: 403, headers: NO_STORE },
       );
     }
+  }
+
+  if (isGithub && githubAuth !== undefined) {
+    let github: Pick<Auth, "handler"> | null;
+    try {
+      github = await githubAuth();
+    } catch {
+      console.error(
+        "[auth] GITHUB_SIGN_IN_UNAVAILABLE: the credentials of the GitHub sign in could not be read.",
+      );
+      return Response.json(
+        { error: "sign_in_unavailable" },
+        { status: 503, headers: NO_STORE },
+      );
+    }
+    if (github === null) {
+      if (pathname.endsWith("/callback/github"))
+        return new Response(null, {
+          status: 302,
+          headers: {
+            location: "/login?error=github_not_configured",
+            ...NO_STORE,
+          },
+        });
+      return Response.json(
+        { error: "github_not_configured" },
+        { status: 404, headers: NO_STORE },
+      );
+    }
+    return github.handler(request);
   }
 
   if (!isEmail) return auth.handler(request);

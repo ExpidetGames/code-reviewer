@@ -7,8 +7,6 @@
 import { NextRequest } from "next/server";
 import type { AccessGates } from "../auth/access-gates.ts";
 import { createAccessProxy } from "../auth/access-proxy.ts";
-import { createAccessPolicy } from "../auth/access-policy.ts";
-import { parseAccessConfig } from "../auth/access-config.ts";
 import { createAuth } from "../auth/auth.ts";
 import { loadAuthConfig } from "../auth/config.ts";
 import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
@@ -138,18 +136,8 @@ function assemble(
       return first?.workspace.slug ?? null;
     },
   };
-  // The allow list is for GitHub identities; none is configured here, and nobody signs in with GitHub.
-  const problems: string[] = [];
   const access = createAccessProxy({
     getAuth: () => auth,
-    getPolicy: () =>
-      createAccessPolicy({
-        config: parseAccessConfig({}, problems),
-        loginPins: {
-          pin: () => Promise.resolve(null),
-          revokeSessions: () => Promise.resolve(),
-        },
-      }),
     getGates: () => gates,
   });
 

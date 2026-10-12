@@ -51,11 +51,9 @@ describe("signing in with email and password", () => {
     const cookies = new Map<string, string>();
     remember(cookies, response);
 
-    // A policy that refuses everybody: an account with a password does not go through it.
     const lookup = await lookupSession(
       harness.auth,
       new Headers({ cookie: cookieHeader(cookies) }),
-      () => Promise.resolve({ allowed: false, reason: "not_allowed" }),
       openGates,
     );
 

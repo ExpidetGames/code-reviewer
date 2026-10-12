@@ -97,6 +97,9 @@ async function SignInForms({
       ) : null}
       {methods.github ? (
         <form action={signInWithGithub}>
+          {invitation !== null ? (
+            <input type="hidden" name="invitation" value={invitation} />
+          ) : null}
           <Button type="submit" variant="secondary" className="btn-block">
             Sign in with GitHub
           </Button>

@@ -14,7 +14,7 @@ no port and only talks to the app.
 
 1. [What you need](#1-what-you-need)
 2. [The decisions in short](#2-the-decisions-in-short)
-3. [The three GitHub things, and the order](#3-the-three-github-things-and-the-order)
+3. [The GitHub things, and the order](#3-the-github-things-and-the-order)
 4. [Create the Coolify application](#4-create-the-coolify-application)
 5. [Domain and TLS](#5-domain-and-tls)
 6. [Environment variables](#6-environment-variables)
@@ -84,36 +84,31 @@ load is a problem, Coolify can build on a separate
 prefers GHCR, it needs a variant of `compose.coolify.yml` with `image:` lines instead of `build:` and the
 registry login above; the tags to pin are the ones named in this section.
 
-## 3. The three GitHub things, and the order
+## 3. The GitHub things, and the order
 
-Three different things on GitHub are involved, which are easy to mix up. None of the last two is needed
-to start the instance and to finish the first-run setup ([section 7](#7-deploy-and-check-the-instance)):
-the GitHub App is what lets Code Reviewer review pull requests, and the OAuth app only adds "Sign in with
-GitHub" (the admin always signs in with email and password). Both are still configured with environment
-variables for now; a later release moves them into the browser.
+Two different things on GitHub are involved, which are easy to mix up. Code Reviewer's GitHub App is not
+needed to start the instance and to finish the first-run setup ([section 7](#7-deploy-and-check-the-instance)):
+it is what lets Code Reviewer review pull requests **and** sign people in with GitHub (the admin always signs
+in with email and password). It is created in the browser, in the admin portal under **Integrations**, after
+the first-run setup: no environment variable is needed. The separate OAuth app of earlier versions is gone.
 
 | What | Who uses it | Created by | Where its values go |
 |---|---|---|---|
 | **Coolify's GitHub App** | Coolify, to read this repository and to be told about pushes | Coolify's source wizard ([Coolify: GitHub App](https://coolify.io/docs/applications/sources/github/app)) | Stays inside Coolify. Not an environment variable of Code Reviewer. |
-| **Code Reviewer's GitHub App** | Code Reviewer, to receive webhooks and to read and review pull requests | You, once, with [`github-app.md`](github-app.md) | `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_WEBHOOK_SECRET`, `GITHUB_APP_PRIVATE_KEY` (optional for the start, needed for reviews) |
-| **GitHub OAuth app** (optional) | "Sign in with GitHub" for the people using the web UI | You, once, GitHub > Settings > Developer settings > OAuth Apps | `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET` |
+| **Code Reviewer's GitHub App** | Code Reviewer, to receive webhooks, to read and review pull requests and to sign people in | You, once, in the admin portal under Integrations ([`github-app.md`](github-app.md): one click, or by hand) | Stored encrypted in the database. Not an environment variable (an installation from before accounts that still has `GITHUB_APP_*` variables keeps working until the update imports them) |
 
-The apps need the domain and the deployment needs their values, so do it in this order:
+The App needs the domain, so do it in this order:
 
 1. Server, DNS record and the domain ([section 1](#1-what-you-need)).
 2. Coolify's GitHub App with access to this repository ([section 4](#4-create-the-coolify-application)).
-3. Create the Coolify application and assign the domain to it, **do not deploy yet** (sections 4 and 5).
-4. Optional, for "Sign in with GitHub": create the OAuth app: *Homepage URL* `https://<domain>`,
-   *Authorization callback URL* `https://<domain>/api/auth/callback/github` (the same address as
-   `BETTER_AUTH_URL`, plus that path). Generate its client secret.
-5. Create Code Reviewer's GitHub App (steps 1 and 2 of [`github-app.md`](github-app.md)): webhook URL
-   `https://<domain>/api/webhooks/github-app`, permissions, events, private key. GitHub sends a first
-   `ping` delivery right away, before anything runs on the domain: it shows as failed. That is expected;
-   redeliver it after the first deploy (*Advanced > Recent Deliveries*), or ignore it.
-6. Enter all values in Coolify ([section 6](#6-environment-variables)) and deploy
+3. Create the Coolify application and assign the domain to it (sections 4 and 5).
+4. Enter the environment variables in Coolify ([section 6](#6-environment-variables)) and deploy
    ([section 7](#7-deploy-and-check-the-instance)). Only `APP_SECRET`, `BETTER_AUTH_URL` and `RUNNER_TOKEN`
-   are needed to deploy; the GitHub values can follow later with a redeploy.
-7. Install the GitHub App on the repositories (step 5 of [`github-app.md`](github-app.md)).
+   are needed.
+5. Finish the first-run setup in the browser, then create Code Reviewer's GitHub App in the admin portal
+   (Integrations > Create GitHub App, [`github-app.md`](github-app.md)): GitHub sends the webhook deliveries
+   to `https://<domain>/api/webhooks/github-app`, which now answers.
+6. Install the GitHub App on the repositories ([`github-app.md`](github-app.md), "Install the App").
 
 ## 4. Create the Coolify application
 
@@ -169,6 +164,12 @@ localhost, because browsers drop its secure cookies over http.
 
 ## 6. Environment variables
 
+> The GitHub App and "Sign in with GitHub" are configured in the admin portal now, not here
+> ([`github-app.md`](github-app.md)). The `GITHUB_*` and `ALLOWED_GITHUB_*` rows below describe an
+> installation from before accounts: its variables are read as long as the database holds no GitHub App,
+> and the update to accounts imports them once. `GITHUB_OAUTH_*` are no longer used and
+> `ALLOWED_GITHUB_*` no longer decide who may sign in (the sign-up rule and the workspaces do).
+
 Open **Environment Variables** of the application. Coolify lists every variable that
 `compose.coolify.yml` references; the ones marked required block the deployment while empty
 ([Coolify: Docker Compose variables](https://coolify.io/docs/applications/builds/docker-compose#environment-variables)).
@@ -187,14 +188,14 @@ value), set Literal.
 | `BETTER_AUTH_URL` | yes | The public address: `https://<domain>` | No path, no port, no trailing slash. If you use GitHub sign in, register `<this>/api/auth/callback/github` as the OAuth app's callback URL. |
 | `APP_SECRET` | by the app | `openssl rand -base64 32` | **Required**, at least 32 characters. The master key of the instance: it signs the session cookie and encrypts the credentials stored in the database. Coolify does not block the deployment when it is empty, the app refuses to start and the log names the variable. **Back it up separately from the database** (a password manager): a database restored without its `APP_SECRET` loses every stored credential, and it cannot be recovered. Changing it signs everybody out. |
 | `BETTER_AUTH_SECRET` | deprecated | The value an existing deployment already has | The old name of `APP_SECRET`. The app uses it as `APP_SECRET` while `APP_SECRET` is empty (and logs once that it is deprecated), so an existing deployment keeps its sessions and stored tokens. Set `APP_SECRET` to the same value, then remove this one. |
-| `GITHUB_OAUTH_CLIENT_ID` | optional | The OAuth app's settings page | Set both or neither. The OAuth app is not the GitHub App. Without it there is no "Sign in with GitHub". |
-| `GITHUB_OAUTH_CLIENT_SECRET` | optional | Generated on the OAuth app's settings page | Secret. |
-| `ALLOWED_GITHUB_LOGINS` | one of two | Comma separated GitHub logins of the team | **Set this or `ALLOWED_GITHUB_ORG` (or both) if you use GitHub sign in.** Coolify does not block the deployment when both are empty, the app is healthy and the smoke test passes, but nobody can sign in with GitHub (the app logs one warning). Details, including binding a login to its numeric id (`octocat:583231`): [`app/src/auth/README.md`](../app/src/auth/README.md). |
-| `ALLOWED_GITHUB_ORG` | one of two | The name of a GitHub organization (`github.com/<name>`) | **Set this or `ALLOWED_GITHUB_LOGINS` (or both) if you use GitHub sign in.** Its members may sign in. If both are set, either is enough. |
-| `GITHUB_APP_ID` | optional | The App ID on the GitHub App's settings page | Needed for reviews: [`github-app.md`](github-app.md), step 2. Set all four GitHub App values or none; a partial set is reported in the log at start. |
+| `GITHUB_OAUTH_CLIENT_ID` | optional | Nowhere: no longer used | The separate OAuth app of earlier versions is replaced by the user authorization of the GitHub App (client id and secret are entered in the admin portal) and is never imported. Remove it. |
+| `GITHUB_OAUTH_CLIENT_SECRET` | optional | Nowhere: no longer used | Secret of the old OAuth app. Remove it. |
+| `ALLOWED_GITHUB_LOGINS` | optional | Comma separated GitHub logins of the earlier allow list | No longer decides who may sign in: the sign-up rule and the workspaces do (admin portal). The update to accounts reads it once to decide who becomes a member. A login can be bound to its numeric id (`octocat:583231`): [`app/src/auth/README.md`](../app/src/auth/README.md). |
+| `ALLOWED_GITHUB_ORG` | optional | The name of a GitHub organization (`github.com/<name>`) of the earlier allow list | Read once by the update to accounts, like `ALLOWED_GITHUB_LOGINS`; it never becomes a sign-up rule. |
+| `GITHUB_APP_ID` | optional | The App ID on the GitHub App's settings page | Only for an installation from before accounts: read while the database holds no GitHub App ([`github-app.md`](github-app.md), "Older installations"). Set all four GitHub App values or none; a partial set is reported in the log at start. |
 | `GITHUB_APP_SLUG` | optional | The last part of `github.com/apps/<slug>` | |
 | `GITHUB_APP_WEBHOOK_SECRET` | optional | The secret entered in the GitHub App's webhook settings | Secret. Byte for byte: no trailing space or line break. |
-| `GITHUB_APP_PRIVATE_KEY` | optional | The `.pem` file generated on the GitHub App's settings page | Secret. In Coolify choose the value type **Multiline** and paste the key with its line breaks, or paste it on one line with the breaks written as `\n`; both give the same key ([`github-app.md`](github-app.md), section 3). The key is parsed at start; an unusable one is reported in the log by variable name and GitHub stays not configured. |
+| `GITHUB_APP_PRIVATE_KEY` | optional | The `.pem` file generated on the GitHub App's settings page | Secret. In Coolify choose the value type **Multiline** and paste the key with its line breaks, or paste it on one line with the breaks written as `\n`; both give the same key ([`github-app.md`](github-app.md), "Older installations"). The key is parsed at start; an unusable one is reported in the log by variable name and GitHub stays not configured. |
 | `RUNNER_TOKEN` | yes | `openssl rand -hex 32` | At least 32 characters. Secret shared by the app and the runner; both read this one variable. |
 | `LLM_API_KEY` | optional | The OpenRouter API key | Legacy, secret. Every workspace enters its own key in the UI (Settings, LLM access). This one only serves a single-tenant instance for a workspace that has no key of its own. Without any key, reviews of that workspace fail with `llm_not_configured`: enter one before the first review. |
 | `LLM_PROVIDER` | optional | `openrouter` | The only provider for now; this is the default. |
@@ -253,12 +254,12 @@ After changing a variable, save and **Restart** (only runtime values changed) or
    setup is finished it fails once, with a message that the instance is not set up yet (every request
    but the health check answers `503 setup_required` until then).
 5. Compare the variables in Coolify with the table in [section 6](#6-environment-variables). If you use GitHub
-   sign in, check that **at least one of `ALLOWED_GITHUB_LOGINS` and `ALLOWED_GITHUB_ORG` is set**: neither
-   Coolify nor the health check notices when both are empty. Where the app
+   sign in, check that the GitHub App is configured in the admin portal (Integrations shows it as
+   **Configured** and the login page offers "Sign in with GitHub"). Where the app
    shows configuration hints (the setup status of the project pages), they are empty once everything is set.
 6. From outside the server, only 80 and 443 answer (for example `nmap -p 1-10000 <server-ip>` from another
    machine; your hosting provider's firewall helps), and the runner has no domain.
-7. Check the webhook: [`github-app.md`](github-app.md), section 4.
+7. Check the webhook: [`github-app.md`](github-app.md), "Check the webhook".
 
 ### The first-run setup
 
@@ -532,7 +533,7 @@ Do this once with the whole team in the room; it is the acceptance test of the d
       team member opens `https://<domain>` and signs in with GitHub. A GitHub account that is
       not on the list is turned away ("Your GitHub account is not allowed to use this Code Reviewer
       instance.") and sees no project or run data.
-- [ ] **Install the GitHub App** on a team repository ([`github-app.md`](github-app.md), step 5). The
+- [ ] **Install the GitHub App** on a team repository ([`github-app.md`](github-app.md), "Install the App"). The
       `installation` delivery shows 202 under *Recent Deliveries*, and the repository appears in the app.
 - [ ] **Activate the repository as a project.** Repositories are inactive until someone activates them. Open
       the **Projects** page of the app, press **Sync from GitHub** (the button is for the instance admin) if the repository is missing, and switch the
@@ -565,8 +566,8 @@ Do this once with the whole team in the room; it is the acceptance test of the d
 | `app` restarts in a loop, the log has one `[deploy]` or `[auth]` line | A setting is missing or invalid; the line names the variable. Typical: `APP_SECRET` (or `BETTER_AUTH_SECRET`) missing or shorter than 32 characters, `RUNNER_TOKEN` shorter than 32 characters, `BETTER_AUTH_URL` with `http://`. An unusable `GITHUB_APP_PRIVATE_KEY` does not stop the start; the log has a `GITHUB_APP_CONFIG_INVALID` line. |
 | The domain shows "No Available Server" or a 404 from the proxy | `app` is not healthy yet, or the domain lacks `:3000` or is attached to the wrong service ([Coolify: troubleshooting](https://coolify.io/docs/applications/builds/docker-compose#troubleshoot-an-unavailable-domain)). |
 | No certificate, or a browser warning | DNS does not point to the server yet, or 80 and 443 are closed ([Coolify: Let's Encrypt](https://coolify.io/docs/troubleshoot/dns-and-domains/lets-encrypt-not-working)). |
-| GitHub says the callback URL does not match | The OAuth app's callback URL is not exactly `<BETTER_AUTH_URL>/api/auth/callback/github`. |
-| A webhook delivery shows 401 | `GITHUB_APP_WEBHOOK_SECRET` differs from the GitHub App's webhook secret ([`github-app.md`](github-app.md), section 4). |
+| GitHub says the callback URL does not match | The GitHub App's callback URL is not exactly `<BETTER_AUTH_URL>/api/auth/callback/github` (the one-click setup registers it; by hand, see [`github-app.md`](github-app.md)). |
+| A webhook delivery shows 401 | The webhook secret in the admin portal (or `GITHUB_APP_WEBHOOK_SECRET` of an installation that was not updated) differs from the GitHub App's webhook secret ([`github-app.md`](github-app.md), "Check the webhook"). |
 | A webhook delivery shows a timeout, 502 or 503 | The app is unreachable: domain, proxy, health. |
 | A run fails with `llm_not_configured` | The workspace of the run has no LLM key, or the saved key cannot be read (an Admin enters it again under Settings, LLM access). On a single-tenant instance the legacy `LLM_API_KEY` is the fallback; it must be set and valid. |
 | The build is killed or the server is unresponsive during a deployment | Not enough memory for the build: more RAM, or a [build server](https://coolify.io/docs/troubleshoot/server/crash-during-build). |

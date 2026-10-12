@@ -33,7 +33,6 @@ async function startGuardedRoute() {
   const harness = await createAuthHarness();
   const proxy = createAccessProxy({
     getAuth: () => harness.auth,
-    getPolicy: () => harness.policy,
     getGates: () => openGates,
   });
   for (const [name, value] of Object.entries(testGithubAppEnv()))
@@ -85,6 +84,7 @@ afterEach(async () => {
   await closeDatabase();
 });
 
+// #102-GH-10 (regression): unchanged by the move of the GitHub App into the database.
 describe("the webhook route behind the login protection", () => {
   // CR-43-T02
   it("is reached by a signed delivery without a session and answers as it does without the protection", async () => {

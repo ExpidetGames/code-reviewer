@@ -52,7 +52,6 @@ export async function resolveWorkspaceAccess({
 }): Promise<WorkspaceAccessResult> {
   switch (lookup.kind) {
     case "none":
-    case "denied":
       return { kind: "anonymous" };
     case "unverified":
       return { kind: "unverified" };

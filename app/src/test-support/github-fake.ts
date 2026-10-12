@@ -19,6 +19,8 @@ export async function startTestGithub(
   options: {
     /** One clock for the fake and the code under test. Default: the real clock. */
     now?: () => number;
+    /** The slug of the app registered at start (the bot is `<slug>[bot]`). Default: the fake's own. */
+    appSlug?: string;
   } = {},
 ): Promise<FakeGithub> {
   const github = await startGithubFake({
@@ -26,7 +28,10 @@ export async function startTestGithub(
     clientSecret: TEST_CLIENT_SECRET,
     appId: TEST_APP_ID,
     publicKeyPem: testAppKeys().publicKey,
+    // Apps can be created through the manifest flow, next to the one registered at start.
+    manifestFlow: true,
     ...(options.now === undefined ? {} : { now: options.now }),
+    ...(options.appSlug === undefined ? {} : { appSlug: options.appSlug }),
   });
   cleanUpAfterTest(() => github.close());
   return github;
