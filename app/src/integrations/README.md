@@ -290,12 +290,14 @@ reported with its integration id and does not stop the others.
 
 Overlapping triggers: work on the same installation runs one after the other, and each run reads
 GitHub's current state inside the lock, so repeating or overlapping triggers end in the same state.
-The lock (`keyed-lock.ts`, `sharedKeyedLock`) is one per process, kept on `globalThis` because Next.js
-may load `instrumentation.ts` and the route handlers as separate module graphs. The webhook route and
-the button use `getIntegrationSync()` (`sync/shared.ts`), the process-wide service, never their own
-`createIntegrationSync`. A full sync works from a list that can be older than a delivery, so it never
-decides from the list alone: before it disables a row the list does not mention, and before it
-suspends or resumes one, it asks GitHub about that one installation inside the lock.
+`defaultKeyedLock` (`keyed-lock.ts`) picks the lock: on SQLite the in-process one (`sharedKeyedLock`,
+kept on `globalThis` because Next.js may load `instrumentation.ts` and the route handlers as separate
+module graphs), on Postgres a transaction-scoped advisory lock keyed on the installation, so two app
+instances serialize too (PG-12). The webhook route and the button use `getIntegrationSync()`
+(`sync/shared.ts`), the process-wide service, never their own `createIntegrationSync`. A full sync
+works from a list that can be older than a delivery, so it never decides from the list alone: before it
+disables a row the list does not mention, and before it suspends or resumes one, it asks GitHub about
+that one installation inside the lock.
 
 The instance admin's button is `POST /api/admin/integrations/sync` (`sync/http.ts`, the route file in
 `src/app/api/instance-portal/integrations/sync`): it is a data route of the admin portal (`src/admin/http.ts`,

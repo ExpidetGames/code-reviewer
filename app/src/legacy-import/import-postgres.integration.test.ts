@@ -92,7 +92,6 @@ describePostgres("the import of a legacy installation on Postgres", () => {
       log: {
         info: () => undefined,
         warn: () => undefined,
-        error: () => undefined,
       },
       now: () => new Date("2026-10-12T09:00:00.000Z"),
       afterStep,
