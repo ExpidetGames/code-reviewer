@@ -118,7 +118,7 @@ test.describe("invitations by mail", () => {
     await signIn(colleague, COLLEAGUE);
     await expect(colleague).toHaveURL(/\/no-access$/);
     const waiting = colleague.getByRole("list", {
-      name: "Invitations for you",
+      name: "Invitations",
     });
     await expect(waiting.getByText(WORKSPACE)).toBeVisible();
     await waiting.getByRole("button", { name: /Accept/ }).click();
@@ -168,7 +168,7 @@ test.describe("invitations by mail", () => {
     await signIn(newcomer, NEWCOMER);
     await expect(newcomer).toHaveURL(/\/no-access$/);
     await newcomer
-      .getByRole("list", { name: "Invitations for you" })
+      .getByRole("list", { name: "Invitations" })
       .getByRole("button", { name: /Accept/ })
       .click();
     await expect(newcomer).toHaveURL(/\/w\/mail-team\/projects$/);
@@ -186,9 +186,9 @@ test.describe("invitations by mail", () => {
     await signIn(owner, stranger);
 
     await expect(owner).toHaveURL(/\/no-access$/);
-    await expect(
-      owner.getByRole("list", { name: "Invitations for you" }),
-    ).toHaveCount(0);
+    await expect(owner.getByRole("list", { name: "Invitations" })).toHaveCount(
+      0,
+    );
     const mails = await readInbox(stranger);
     expect(mails.map((mail) => mail.subject)).toEqual([CONFIRM_SUBJECT]);
     await owner.context().close();
