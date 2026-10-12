@@ -49,7 +49,7 @@ function row(title: string): HTMLElement {
 }
 
 function configuredLink(title: string): HTMLElement {
-  return within(row(title)).getByRole("link", { name: "Configure" });
+  return within(row(title)).getByRole("link", { name: `Configure ${title}` });
 }
 
 function githubView(changes: Partial<GithubConfigView> = {}): GithubConfigView {
@@ -170,6 +170,49 @@ describe("the needs attention region", () => {
       within(attention).getByText(/2 users could not get their GitHub address/),
     ).toBeTruthy();
   });
+
+  // #180-T01
+  it("renders the Needs attention region before the Setup card", () => {
+    render(
+      <Overview settings={view({ signUpRuleState: { failClosed: true } })} />,
+    );
+
+    const attention = screen.getByRole("region", { name: "Needs attention" });
+    const setup = screen.getByRole("region", { name: "Setup" });
+    expect(
+      attention.compareDocumentPosition(setup) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  // #180-T01
+  it("shows the three attention rows open and no overflow disclosure", () => {
+    render(
+      <Overview
+        settings={view({
+          signUpRuleState: { failClosed: true },
+          secrets: [
+            {
+              name: "smtp_password",
+              state: "undecryptable",
+              code: "secret_undecryptable",
+              updatedAt: "2026-10-11T08:00:00.000Z",
+              updatedBy: null,
+            },
+          ],
+        })}
+        emailConflictCount={1}
+      />,
+    );
+
+    const attention = screen.getByRole("region", { name: "Needs attention" });
+    expect(
+      attention.querySelectorAll('[data-slot="attention-row"]'),
+    ).toHaveLength(3);
+    expect(
+      within(attention).queryByRole("button", { name: /more notice/ }),
+    ).toBeNull();
+  });
 });
 
 describe("the setup card", () => {
@@ -204,7 +247,7 @@ describe("the setup card", () => {
       "Ways to sign in",
     ])
       expect(
-        within(row(title)).getByRole("link", { name: "Configure" }),
+        within(row(title)).getByRole("link", { name: `Configure ${title}` }),
       ).toBeTruthy();
   });
 
@@ -257,6 +300,26 @@ describe("the setup card", () => {
 
     expect(row("Tenancy").textContent).toContain("Multi-tenant");
     expect(row("Tenancy").textContent).toContain("2 workspaces");
+  });
+
+  // #180-T02
+  it("says in the sign-up rule row that the rule cannot work yet", () => {
+    render(
+      <Overview
+        settings={view({
+          signUpRule: {
+            value: { kind: "domains", entries: ["a.com"] },
+            updatedBy: null,
+            updatedAt: null,
+          },
+          signUpRuleState: { failClosed: true },
+        })}
+      />,
+    );
+
+    expect(row("Sign-up rule").textContent).toContain(
+      "This sign-up rule does not work yet.",
+    );
   });
 
   // #102-GH-21

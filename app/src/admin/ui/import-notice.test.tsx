@@ -116,18 +116,19 @@ describe("the notice of the import", () => {
   // #180-T03
   it("shows one line of summary with the details behind a disclosure", async () => {
     const user = userEvent.setup();
-    const { container } = render(
-      <ImportNotice notice={NOTICE} api={api().api} />,
-    );
+    render(<ImportNotice notice={NOTICE} api={api().api} />);
 
-    expect(container.textContent).toContain(
-      "imported into the default workspace",
+    // The banner is one line: the member count is a detail, not part of it.
+    const line = screen.getByText(
+      "Your data and settings were imported into the default workspace.",
     );
+    expect(line.textContent).not.toContain("2 people are a member");
     const trigger = screen.getByRole("button", { name: "Details" });
     const content = document.getElementById(
       trigger.getAttribute("aria-controls")!,
     );
     expect(content?.hasAttribute("hidden")).toBe(true);
+    expect(content?.textContent).toContain("2 people are a member");
     expect(content?.textContent).toContain("dave");
 
     await user.click(trigger);

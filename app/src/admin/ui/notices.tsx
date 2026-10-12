@@ -10,7 +10,7 @@ import { HelpDisclosure } from "../../components/help-disclosure.tsx";
 import type { AttentionNotice } from "../../components/needs-attention.tsx";
 import { FAIL_CLOSED_WARNING } from "../../signup/ui/rule-copy.ts";
 
-const FAIL_CLOSED_TITLE = "This sign-up rule does not work yet.";
+export const FAIL_CLOSED_TITLE = "This sign-up rule does not work yet.";
 const FAIL_CLOSED_INVITATIONS =
   "No invitation can be created either. Accounts that exist are not affected.";
 

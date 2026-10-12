@@ -167,7 +167,9 @@ test.describe("the admin portal", () => {
     await expect(setup.getByText("Tenancy")).toBeVisible();
     await expect(setup.getByText("Sign-up rule")).toBeVisible();
     await expect(setup.getByText("Ways to sign in")).toBeVisible();
-    await expect(setup.getByRole("link", { name: "Configure" })).toHaveCount(5);
+    await expect(setup.getByRole("link", { name: /^Configure / })).toHaveCount(
+      5,
+    );
   });
 
   // #168-T05

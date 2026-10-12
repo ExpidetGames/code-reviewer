@@ -22,7 +22,7 @@ import { GITHUB_SIGN_IN_NOT_ENABLED } from "../../github-config/ui/messages.ts";
 import { UNREADABLE_SECRET_CAUSE } from "../../secrets/messages.ts";
 import type { AdminSettingsView } from "../service.ts";
 import { ImportNotice } from "./import-notice.tsx";
-import { failClosedAttention } from "./notices.tsx";
+import { FAIL_CLOSED_TITLE, failClosedAttention } from "./notices.tsx";
 
 type RowStatus = "ok" | "warn";
 
@@ -60,6 +60,7 @@ function SetupRow({
       </div>
       <Link
         href={href}
+        aria-label={`Configure ${title}`}
         className="shrink-0 rounded-sm text-sm font-medium text-primary underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
       >
         Configure
@@ -246,6 +247,9 @@ export function Overview({
               title="Sign-up rule"
               status={settings.signUpRuleState.failClosed ? "warn" : "ok"}
               summary={signUpRuleSummary(settings.signUpRule.value)}
+              {...(settings.signUpRuleState.failClosed
+                ? { hint: FAIL_CLOSED_TITLE }
+                : {})}
               href="/admin/setup"
             />
             <SetupRow

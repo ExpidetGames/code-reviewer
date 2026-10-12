@@ -1,13 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // The one attention region of a screen (#173): the notices a person has to act on, as up to
-// `maxRows` rows, and nothing while there is nothing to attend to. Built on the kit's Alert so
-// #174 and #178 reuse it under the same accessible name, "Needs attention". The rows beyond
+// `maxRows` rows, and nothing while there is nothing to attend to. Built on the kit's alert look so
+// #174 and #178 reuse it under the same accessible name, "Needs attention". The rows are static
+// content, so they carry no `role="alert"` — only the labelled region announces them. The rows beyond
 // `maxRows` go behind a HelpDisclosure: the strip stays short, nothing is lost.
 "use client";
 
 import { useId, type ReactNode } from "react";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  AlertDescription,
+  AlertTitle,
+  alertVariants,
+} from "@/components/ui/alert";
 import { HelpDisclosure } from "@/components/help-disclosure";
 import { cn } from "@/lib/utils";
 
@@ -42,13 +47,18 @@ export function NeedsAttention({
         Needs attention
       </h2>
       {rows.map((notice) => (
-        <Alert
+        <div
           key={notice.id}
-          variant={notice.severity === "error" ? "destructive" : "warning"}
+          data-slot="attention-row"
+          className={cn(
+            alertVariants({
+              variant: notice.severity === "error" ? "destructive" : "warning",
+            }),
+          )}
         >
           <AlertTitle>{notice.title}</AlertTitle>
           <AlertDescription>{notice.detail}</AlertDescription>
-        </Alert>
+        </div>
       ))}
       {rest.length > 0 ? (
         <HelpDisclosure
