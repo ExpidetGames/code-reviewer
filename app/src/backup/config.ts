@@ -4,13 +4,22 @@
 // backup (DATABASE_PATH is the database layer's own variable, read here with the same default).
 //
 // No `server-only` import: the command line (cli.ts) runs this code without Next.js.
-import { isPostgresUrl } from "../db/config.ts";
+// The Postgres-URL check is written out here on purpose: this folder is copied into the image alone
+// (app/Dockerfile), so it must import no value from outside `src/backup` (a test keeps it that way).
 import { BackupError } from "./errors.ts";
 
 export const DEFAULT_BACKUP_DIR = "/backups";
 export const DEFAULT_BACKUP_TIME = "02:30";
 /** The same default as src/db/config.ts (a test keeps the two equal). */
 export const DEFAULT_DATABASE_PATH_FOR_BACKUP = "/data/app.db";
+
+/** Whether `DATABASE_URL` names Postgres (the large topology); the same rule as src/db/config.ts. */
+function usesExternalPostgres(
+  env: Readonly<Record<string, string | undefined>>,
+): boolean {
+  const url = env.DATABASE_URL?.trim().toLowerCase() ?? "";
+  return url.startsWith("postgres://") || url.startsWith("postgresql://");
+}
 
 export type BackupConfig = {
   databasePath: string;
@@ -53,7 +62,7 @@ export function loadBackupSchedule(env: Env): BackupConfig["time"] {
 export function loadBackupConfig(env: Env): BackupConfig {
   // Postgres has no file to `VACUUM INTO`, so the schedule does not apply: its settings are not even
   // read, and a stray BACKUP_TIME cannot stop a start whose backups are the operator's job.
-  const applies = !isPostgresUrl(env.DATABASE_URL);
+  const applies = !usesExternalPostgres(env);
   return {
     ...loadBackupPaths(env),
     applies,
