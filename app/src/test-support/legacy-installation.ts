@@ -61,6 +61,13 @@ export type LegacyInstallationSeed = {
   repositories: Array<{ id: number; fullName: string; project?: boolean }>;
 };
 
+export type LegacyHistoricalRun = {
+  /** A command the previous release could run but this one cannot (#203). */
+  command: string;
+  status?: string;
+  errorCode?: string | null;
+};
+
 export type LegacySeed = {
   /** The master key the previous release ran with (`BETTER_AUTH_SECRET`). */
   secret: string;
@@ -70,6 +77,8 @@ export type LegacySeed = {
   installations?: LegacyInstallationSeed[];
   /** Finished jobs per repository (default 2 for the first repository of each installation). */
   jobsPerProject?: number;
+  /** Runs of a command this release removed (#203), kept in history. One per entry. */
+  historicalRuns?: LegacyHistoricalRun[];
   /** The review defaults the team saved (default: a few). Null: none saved. */
   reviewDefaults?: Record<string, unknown> | null;
 };
@@ -252,6 +261,39 @@ async function seedLegacyRows(db: OldDb, seed: LegacySeed): Promise<void> {
             outcome: "processed",
             claim_token: "legacy-claim",
             received_at: T,
+          })
+          .execute();
+      }
+      // Runs of a removed command (#203): the next release must keep them readable. They are the
+      // shape the old queue left behind, so the data migration leaves them alone (they are not
+      // waiting) and the runs pages still decode their command.
+      for (const [index, run] of (seed.historicalRuns ?? []).entries()) {
+        const number = jobsPerProject + 1 + index;
+        await db
+          .insertInto("jobs")
+          .values({
+            id: `legacy-job-${String(repository.id)}-history-${String(index)}`,
+            repository_id: repositoryId,
+            pr_number: number,
+            pr_url: `https://github.test/${repository.fullName}/pull/${String(number)}`,
+            head_sha: String(number).repeat(40).slice(0, 40),
+            command: run.command,
+            args: run.command === "ask" ? "a historical question" : "",
+            trigger_kind: "comment",
+            actor_login: seed.users[0]?.login ?? "someone",
+            delivery_id: null,
+            status: run.status ?? "succeeded",
+            run_after: T,
+            attempts: 1,
+            result: JSON.stringify({
+              ok: true,
+              durationMs: 4200,
+              commentUrl: `https://github.test/${repository.fullName}/pull/${String(number)}#issuecomment-history-${String(index)}`,
+            }),
+            error_code: run.errorCode ?? null,
+            created_at: T,
+            updated_at: T,
+            finished_at: T,
           })
           .execute();
       }

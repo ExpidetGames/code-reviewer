@@ -238,7 +238,26 @@ test.describe(
       expect(
         readUpgradeDatabase<{ n: number }>("select count(*) as n from jobs")[0]
           ?.n,
-      ).toBe(2);
+      ).toBe(4);
+      // #203-T17: the runs of the removed commands stay, with their original command and status.
+      expect(
+        readUpgradeDatabase(
+          "select command, status from jobs where command in ('ask','improve') order by command",
+        ),
+      ).toEqual([
+        { command: "ask", status: "succeeded" },
+        { command: "improve", status: "succeeded" },
+      ]);
+      // #203-T08/T17: the stored review defaults no longer name the removed commands.
+      expect(
+        (
+          JSON.parse(
+            readUpgradeDatabase<{ value: string }>(
+              "select value from app_settings where key = 'review_defaults'",
+            )[0]?.value ?? "{}",
+          ) as { allowedCommands?: string[] }
+        ).allowedCommands,
+      ).toEqual(["review"]);
       // Whoever is not a member has no session any more, and the tokens of the earlier sign in are gone.
       expect(
         readUpgradeDatabase("select user_id from sessions order by user_id"),

@@ -220,3 +220,37 @@ describe("enqueueing from two processes", () => {
     expect(await fixture.queue.list({ status: "superseded" })).toHaveLength(2);
   });
 });
+
+// #203-T10
+describe("removed commands in the queue", () => {
+  it("are never claimed ahead of a review, even when two runners claim at the same moment", async () => {
+    const fixture = await createJobQueueFixture();
+    await fixture.seedHistoricalJob({
+      command: "ask",
+      status: "queued",
+      prNumber: 8,
+      args: "why?",
+    });
+    await fixture.seedHistoricalJob({
+      command: "improve",
+      status: "queued",
+      prNumber: 9,
+    });
+    const review = await fixture.enqueueNew({ prNumber: 7 });
+
+    const answers = await runTogether<{ job: Job | null }>([
+      claimArgs(fixture.databasePath, T0, "runner-a"),
+      claimArgs(fixture.databasePath, T0, "runner-b"),
+    ]);
+
+    const winners = answers.filter((answer) => answer.job !== null);
+    expect(winners).toHaveLength(1);
+    expect(winners[0]?.job?.id).toBe(review.id);
+    expect(winners[0]?.job?.command).toBe("review");
+    const cancelled = await fixture.queue.list({ status: "cancelled" });
+    expect(cancelled).toHaveLength(2);
+    expect(cancelled.every((job) => job.errorCode === "command_removed")).toBe(
+      true,
+    );
+  });
+});

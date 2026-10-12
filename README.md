@@ -186,7 +186,7 @@ uv run code-reviewer-runner --version
 
 ### Run one PR-Agent job
 
-`code-reviewer-run-job` runs one PR-Agent command (`review`, `improve`, `describe` or `ask`) for one
+`code-reviewer-run-job` runs one PR-Agent command (`review`) for one
 pull request. The job is JSON on stdin (`runner/src/code_reviewer_runner/job.py` documents the
 shape: pull request URL, command, installation token and bot login, LLM model and key). The result
 is exactly one line of JSON on stdout (`ok`, `durationMs`, `commentUrl`, `errorCode`, `logTail`,

@@ -397,3 +397,32 @@ describe("the read side with many jobs", () => {
     ]);
   });
 });
+
+// #203-T12
+describe("a historical run of a removed command", () => {
+  it("keeps its original command, its read-only question and its result", async () => {
+    const f = await createRunsFixture();
+    const run = await f.seedHistoricalJob({
+      command: "ask",
+      status: "succeeded",
+      args: "why is ![x](https://evil.test/a.png) this?",
+      result: {
+        ok: true,
+        commentUrl: "https://github.com/acme/widgets/pull/7#issuecomment-9",
+        logTail: "the answer",
+      },
+    });
+
+    const listed = (await f.runs.list({})).runs.find(
+      (entry) => entry.id === run.id,
+    );
+    expect(listed).toMatchObject({ command: "ask" });
+
+    const detail = await f.runs.get(run.id);
+    expect(detail?.run).toMatchObject({
+      command: "ask",
+      args: "why is ![x](https://evil.test/a.png) this?",
+      commentUrl: "https://github.com/acme/widgets/pull/7#issuecomment-9",
+    });
+  });
+});

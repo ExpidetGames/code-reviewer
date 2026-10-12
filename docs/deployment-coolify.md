@@ -450,7 +450,7 @@ two minutes later.
 
 The runner is the one component that handles text an outsider wrote (the title, description, diff and
 comments of a pull request) and passes it to a model, with a GitHub token and the LLM key in the process.
-The app filters what it can (for example image links in `/ask` questions, which PR-Agent would fetch from the
+The app filters what it can (for example image links a comment once carried with an `/ask` question, which PR-Agent would fetch from the
 runner), but the network is the second line: **the runner needs to reach only three things**,
 
 - `api.github.com`, HTTPS port 443 (GitHub's API; GitHub Enterprise Server would be its own host),

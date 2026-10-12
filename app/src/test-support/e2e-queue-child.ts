@@ -9,6 +9,9 @@
 //   enqueue  <db> <json>   {repository: "owner/name", ...EnqueueJobInput without repositoryId}
 //   claim    <db> <json>   {runnerId}                        -> {job, leaseToken} | {job: null}
 //   complete <db> <json>   {jobId, leaseToken, outcome}      -> the CompleteResult
+//   seed     <db> <json>   {repository, prNumber, command, status, errorCode?} -> {id}
+//                          Inserts a historical run row DIRECTLY, for journeys that need a run of a
+//                          removed command (#203) an upgrade left behind. The queue cannot create one.
 //
 // Every command prints one JSON line. The id of a repository is looked up by its name.
 import { openDatabase } from "../db/connection.ts";
@@ -57,6 +60,59 @@ try {
     console.log(
       JSON.stringify(await queue.complete(jobId, leaseToken, outcome)),
     );
+  } else if (command === "seed") {
+    const {
+      repository,
+      prNumber,
+      command: historicalCommand,
+      status,
+      errorCode,
+      args,
+    } = input as {
+      repository: string;
+      prNumber: number;
+      command: string;
+      status: string;
+      errorCode?: string | null;
+      args?: string;
+    };
+    const found = (
+      await createRepositoriesRepository(db, workspaceId).list()
+    ).find((candidate) => candidate.fullName === repository);
+    if (found === undefined) throw new Error(`No repository ${repository}.`);
+    const timestamp = new Date().toISOString();
+    const id = crypto.randomUUID();
+    await db
+      .insertInto("jobs")
+      .values({
+        id,
+        workspace_id: workspaceId,
+        repository_id: found.id,
+        pr_number: prNumber,
+        pr_url: `https://github.com/${found.fullName}/pull/${String(prNumber)}`,
+        head_sha: String(prNumber).padStart(40, "0"),
+        command: historicalCommand,
+        args: args ?? "",
+        trigger_kind: "comment",
+        actor_login: "octocat",
+        delivery_id: null,
+        status,
+        run_after: timestamp,
+        attempts: 0,
+        runner_id: null,
+        lease_token: null,
+        claimed_at: null,
+        heartbeat_at: null,
+        lease_expires_at: null,
+        result: null,
+        error_code: errorCode ?? null,
+        superseded_by: null,
+        created_at: timestamp,
+        updated_at: timestamp,
+        finished_at: null,
+      })
+      .execute();
+    console.log(JSON.stringify({ id }));
   } else {
     throw new Error(`Unknown command: ${command}`);
   }

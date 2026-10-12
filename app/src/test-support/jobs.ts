@@ -99,6 +99,10 @@ export type JobQueueFixture = {
     result?: unknown;
     errorCode?: string | null;
     actorLogin?: string;
+    /** For a `running` row: the claim token; defaults to a fixed one, and the lease is live. */
+    leaseToken?: string;
+    /** For a `running` row: an ISO timestamp; defaults to the fixture's now. */
+    leaseExpiresAt?: string;
   }): Promise<Job>;
 };
 
@@ -198,6 +202,7 @@ export async function createJobQueueFixture(
       const status = overrides.status ?? "succeeded";
       const timestamp = formatTimestamp(clock.now());
       const id = crypto.randomUUID();
+      const running = status === "running";
       await db
         .insertInto("jobs")
         .values({
@@ -215,11 +220,15 @@ export async function createJobQueueFixture(
           status,
           run_after: timestamp,
           attempts: 0,
-          runner_id: null,
-          lease_token: null,
-          claimed_at: null,
-          heartbeat_at: null,
-          lease_expires_at: null,
+          runner_id: running ? "runner-1" : null,
+          lease_token: running
+            ? (overrides.leaseToken ?? "historical-lease")
+            : null,
+          claimed_at: running ? timestamp : null,
+          heartbeat_at: running ? timestamp : null,
+          lease_expires_at: running
+            ? (overrides.leaseExpiresAt ?? timestamp)
+            : null,
           result:
             overrides.result === undefined
               ? null

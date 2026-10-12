@@ -1502,3 +1502,110 @@ describe("the automatic slot index", () => {
     expect(listed.sort()).toEqual([...SLOT_HOLDING_STATUSES].sort());
   });
 });
+
+// #203-T10, #203-T11
+describe("jobs of a command the product removed", () => {
+  it("are never claimed, are cancelled when the claim runs the expiry step, and never starve a review", async () => {
+    const fixture = await createJobQueueFixture();
+    const removed = await fixture.seedHistoricalJob({
+      command: "ask",
+      status: "queued",
+      prNumber: 9,
+      args: "why?",
+    });
+    const review = await fixture.enqueueNew({ prNumber: 7 });
+
+    const claim = await fixture.queue.claimNext("runner-a");
+
+    expect(claim?.job.id).toBe(review.id);
+    expect(await fixture.queue.get(removed.id)).toMatchObject({
+      status: "cancelled",
+      errorCode: "command_removed",
+    });
+    expect(await fixture.queue.claimNext("runner-a")).toBeNull();
+  });
+
+  it("that are running may finish under their lease", async () => {
+    const fixture = await createJobQueueFixture();
+    const running = await fixture.seedHistoricalJob({
+      command: "improve",
+      status: "running",
+      prNumber: 7,
+      leaseToken: "historical-lease",
+      leaseExpiresAt: new Date(
+        fixture.clock.now().getTime() + 60_000,
+      ).toISOString(),
+    });
+
+    const heartbeat = await fixture.queue.heartbeat(
+      running.id,
+      "historical-lease",
+    );
+    expect(heartbeat.status).toBe("ok");
+
+    const completed = await fixture.queue.complete(
+      running.id,
+      "historical-lease",
+      { ok: true, result: { ok: true } },
+    );
+    expect(completed).toMatchObject({
+      status: "completed",
+      job: { status: "succeeded", command: "improve" },
+    });
+  });
+
+  it("whose lease ran out are cancelled instead of requeued, and a stale holder is refused", async () => {
+    const fixture = await createJobQueueFixture();
+    const running = await fixture.seedHistoricalJob({
+      command: "describe",
+      status: "running",
+      prNumber: 7,
+      leaseToken: "historical-lease",
+      leaseExpiresAt: fixture.clock.now().toISOString(),
+    });
+    fixture.clock.advance(3 * 60 * 1000);
+
+    // The claim's expiry step sees the lapsed lease of the removed command and cancels it.
+    expect(await fixture.queue.claimNext("runner-a")).toBeNull();
+
+    expect(await fixture.queue.get(running.id)).toMatchObject({
+      status: "cancelled",
+      errorCode: "command_removed",
+    });
+    // The old holder can no longer complete or release it.
+    expect(
+      await fixture.queue.complete(running.id, "historical-lease", {
+        ok: true,
+        result: {},
+      }),
+    ).toEqual({ status: "not_holder" });
+    expect(
+      await fixture.queue.release(running.id, "historical-lease", "x"),
+    ).toEqual({ status: "not_holder" });
+  });
+
+  it("are cancelled instead of requeued when the holder gives one back", async () => {
+    const fixture = await createJobQueueFixture();
+    const running = await fixture.seedHistoricalJob({
+      command: "improve",
+      status: "running",
+      prNumber: 7,
+      leaseToken: "historical-lease",
+      leaseExpiresAt: new Date(
+        fixture.clock.now().getTime() + 60_000,
+      ).toISOString(),
+    });
+
+    const released = await fixture.queue.release(
+      running.id,
+      "historical-lease",
+      "runner_shutdown",
+    );
+
+    expect(released).toMatchObject({
+      status: "cancelled",
+      job: { status: "cancelled", errorCode: "command_removed" },
+    });
+    expect(await fixture.queue.list({ status: "queued" })).toEqual([]);
+  });
+});

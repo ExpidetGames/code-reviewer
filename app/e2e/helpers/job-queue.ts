@@ -34,7 +34,7 @@ export type Claim = { job: { id: string } | null; leaseToken?: string };
 export async function enqueueManualRun(input: {
   repository: string;
   prNumber: number;
-  command?: "review" | "improve" | "describe" | "ask";
+  command?: "review";
   actorLogin: string;
 }): Promise<QueuedJob> {
   const result = await queueCommand<{ status: string; job: QueuedJob }>(
@@ -93,4 +93,25 @@ export async function completeRun(
   });
   if (result.status !== "completed")
     throw new Error(`The run was not completed: ${result.status}`);
+}
+
+/**
+ * Seeds a historical run of a removed command (#203) directly, for a journey that needs what an
+ * upgrade left behind. The queue cannot create such a row any more; this is the only helper that
+ * writes one, and only for the removed commands.
+ */
+export async function seedHistoricalRun(input: {
+  repository: string;
+  prNumber: number;
+  command: "improve" | "describe" | "ask";
+  status?: "succeeded" | "failed" | "cancelled";
+  errorCode?: string | null;
+}): Promise<QueuedJob> {
+  return queueCommand<QueuedJob>("seed", {
+    repository: input.repository,
+    prNumber: input.prNumber,
+    command: input.command,
+    status: input.status ?? "succeeded",
+    errorCode: input.errorCode ?? null,
+  });
 }
