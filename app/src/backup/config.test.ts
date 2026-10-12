@@ -20,6 +20,7 @@ describe("backup configuration", () => {
       databasePath: "/data/app.db",
       backupDir: "/backups",
       time: { hour: 2, minute: 30 },
+      applies: true,
     });
     expect(DEFAULT_BACKUP_DIR).toBe("/backups");
     expect(DEFAULT_BACKUP_TIME).toBe("02:30");
@@ -40,6 +41,7 @@ describe("backup configuration", () => {
       databasePath: "/srv/db/app.db",
       backupDir: "/mnt/backups",
       time: { hour: 23, minute: 5 },
+      applies: true,
     });
   });
 

@@ -66,6 +66,13 @@ export function startBackupSchedulerOnStart({
 
   const config = loadConfigOrExit(env, log, exit);
   if (config === null) return null;
+  if (!config.applies) {
+    log.info(
+      "[backup] the database is Postgres: the app schedules no backup. Back it up with Postgres " +
+        "tooling or the managed service; that is the operator's job.",
+    );
+    return null;
+  }
   if (config.time === null) {
     log.warn(
       "[backup] BACKUP_TIME=off: no daily backup is scheduled. Make sure something else backs up the database.",

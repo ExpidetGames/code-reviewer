@@ -312,6 +312,12 @@ settings: validation of the settings, no runner before a healthy app, the stack 
 survives `down` and `up`, an app process that exits by itself is restarted, a backup restores, and a
 `docker compose stop` while a (fake) review runs ends with the runner reporting that review. CI runs the same script for pull requests.
 
+**Large topology (Postgres, several instances).** For a hosted deployment with several app instances
+and several runners on an external Postgres, start from `compose.large.yml` and read
+[docs/deployment-large.md](docs/deployment-large.md): the same product, selected with `DATABASE_URL`
+(`postgres://` or `postgresql://`, or empty for SQLite). The app then schedules no backup — the
+operator backs up the database — and the job queue is safe for concurrent runners.
+
 ## Deploy on Coolify
 
 [`docs/deployment-coolify.md`](docs/deployment-coolify.md) is the step by step guide for the team's

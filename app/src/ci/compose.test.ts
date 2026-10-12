@@ -207,10 +207,11 @@ const SHIPPED_COMPOSE_FILES = readdirSync(repoRoot).filter((name) =>
 );
 
 describe("compose files and the test command of the runner", () => {
-  it("finds the three compose files of the repository", () => {
+  it("finds the four compose files of the repository", () => {
     expect(SHIPPED_COMPOSE_FILES.sort()).toEqual([
       "compose.build.yml",
       "compose.coolify.yml",
+      "compose.large.yml",
       "compose.yml",
     ]);
   });

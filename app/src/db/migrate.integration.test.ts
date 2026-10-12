@@ -48,6 +48,7 @@ describe("the migrations of both epics", () => {
   // CR-43-T01
   it("run on an empty database in one fixed, ascending order: login tables first, then the GitHub integration", async () => {
     const { migrationsApplied } = await startDatabase({
+      driver: "sqlite",
       path: join(await createTestDirectory(), "app.db"),
       busyTimeoutMs: 1000,
     });
@@ -108,6 +109,7 @@ describe("starting the database", () => {
     ).sort();
 
     const { db, migrationsApplied } = await startDatabase({
+      driver: "sqlite",
       path,
       busyTimeoutMs: 1000,
     });
@@ -211,6 +213,7 @@ describe("a failing migration", () => {
     const db = track(
       (
         await startDatabase({
+          driver: "sqlite",
           path: join(directory, "app.db"),
           busyTimeoutMs: 1000,
         })
@@ -237,7 +240,11 @@ describe("a failing migration", () => {
   it("does not keep the migrations of the same start that ran before it", async () => {
     const directory = await createTestDirectory();
     const db = track(
-      openDatabase({ path: join(directory, "app.db"), busyTimeoutMs: 1000 }),
+      openDatabase({
+        driver: "sqlite",
+        path: join(directory, "app.db"),
+        busyTimeoutMs: 1000,
+      }),
     );
 
     await expect(migrateToLatest(db, provider)).rejects.toMatchObject({
@@ -254,7 +261,9 @@ describe("migrating while another process holds the write lock", () => {
   it("reports DATABASE_LOCKED, not a broken migration, when the lock outlasts the busy timeout", async () => {
     const directory = await createTestDirectory();
     const path = join(directory, "app.db");
-    const db = track(openDatabase({ path, busyTimeoutMs: 200 }));
+    const db = track(
+      openDatabase({ driver: "sqlite", path, busyTimeoutMs: 200 }),
+    );
     const holder = startDbProcess(["hold-lock", path, "0"]);
     expect(await holder.nextLine()).toBe("locked");
 

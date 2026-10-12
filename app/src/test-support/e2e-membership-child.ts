@@ -23,7 +23,11 @@ const input = JSON.parse(argument) as {
   role: WorkspaceRole;
   workspace?: string;
 };
-const db = openDatabase({ path: databasePath, busyTimeoutMs: 5000 });
+const db = openDatabase({
+  driver: "sqlite",
+  path: databasePath,
+  busyTimeoutMs: 5000,
+});
 try {
   const user = await db
     .selectFrom("users")

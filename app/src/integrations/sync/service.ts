@@ -41,7 +41,7 @@ import type {
   Integration,
   IntegrationType,
 } from "../types.ts";
-import { sharedKeyedLock, type KeyedLock } from "./keyed-lock.ts";
+import { defaultKeyedLock, type KeyedLock } from "./keyed-lock.ts";
 
 export type SyncError = {
   stage: "discover" | "connection" | "repositories";
@@ -181,7 +181,7 @@ export function createIntegrationSync(
     createRepositoriesRepository(executor, workspaceId, options.now);
   const placeNewConnection = options.placeNewConnection ?? (async () => null);
   const unclaimed = createUnclaimedInstallationsRepository(db, options.now);
-  const lock = options.lock ?? sharedKeyedLock();
+  const lock = options.lock ?? defaultKeyedLock(db);
   const lockKey = (type: IntegrationType, externalId: string) =>
     `${type}:${externalId}`;
 

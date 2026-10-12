@@ -107,6 +107,28 @@ describe("starting the backup scheduler", () => {
     ]);
     expect(startScheduler).not.toHaveBeenCalled();
   });
+
+  // #105-PG-13
+  it("starts no scheduler with Postgres and says in one line that backups are the operator's job", () => {
+    const startScheduler = vi.fn();
+    const { lines, log } = recorder();
+
+    const result = startBackupSchedulerOnStart({
+      env: {
+        ...PRODUCTION,
+        DATABASE_URL: "postgres://u:p@db:5432/app",
+        BACKUP_TIME: "teatime",
+      },
+      startScheduler,
+      log,
+    });
+
+    expect(result).toBeNull();
+    expect(startScheduler).not.toHaveBeenCalled();
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("operator");
+    expect(lines[0]).toContain("Postgres");
+  });
 });
 
 describe("checking the backup settings at the start of the server", () => {
