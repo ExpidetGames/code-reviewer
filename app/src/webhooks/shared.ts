@@ -8,10 +8,8 @@ import { createRepositoriesRepository } from "../db/repositories/repositories-re
 import { createWebhookDeliveriesRepository } from "../db/repositories/webhook-deliveries-repository.ts";
 import { getDatabase } from "../db/startup.ts";
 import { jobQueueFor } from "../jobs/shared.ts";
-import {
-  anyGithubAppVariableSet,
-  integrationRegistry,
-} from "../integrations/registry.ts";
+import { getGithubCredentialStore } from "../github-config/shared.ts";
+import { integrationRegistry } from "../integrations/registry.ts";
 import { getIntegrationSync } from "../integrations/sync/shared.ts";
 import {
   createGithubAppWebhookHandler,
@@ -62,7 +60,8 @@ export function getGithubAppWebhookHandler(): WebhookHandler {
       now: () => new Date(),
     },
     logger: consoleWebhookLogger,
-    // No GitHub App variable at all is "not configured", the normal state, not an error to log.
-    githubAppConfigured: () => anyGithubAppVariableSet(process.env),
+    // Nothing saved and no variable set is "not configured", the normal state, not an error to log.
+    githubAppConfigured: async () =>
+      (await getGithubCredentialStore().load()).source !== "none",
   });
 }

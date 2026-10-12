@@ -33,6 +33,11 @@ export interface UsersTable {
    * fills in 0, so an insert (Better Auth's, a test's) may leave it out.
    */
   is_instance_admin: ColumnType<number, number | undefined, number>;
+  /**
+   * The verified primary email of the user's GitHub account when another account has it already, so an
+   * imported user's placeholder address could not be replaced (src/github-signin/decide.ts); otherwise null.
+   */
+  email_conflict: string | null;
   /** When the membership in the allowed GitHub organization was last confirmed (ISO 8601, UTC), or null. */
   org_checked_at: string | null;
   /** The GitHub organization that check was made for, or null. */
@@ -309,6 +314,31 @@ export interface EmailVerificationTokensTable {
 }
 
 /**
+ * The single-use side of a signed `state` that travels through the browser and GitHub (the manifest flow, the
+ * authorization that links a GitHub identity); see src/signed-state/.
+ */
+export interface SignedStatesTable {
+  /** The random nonce that the signed value names. */
+  id: string;
+  /** What the state is for (`github-manifest`, `github-link`): a state of one purpose is worthless for another. */
+  purpose: string;
+  /** The person who started it. */
+  user_id: string | null;
+  /** SHA-256 (hex) of the session it was started in: the callback must come from the same session. */
+  session_hash: string | null;
+  /** The PKCE verifier of an authorization started here; never leaves the server. */
+  code_verifier: string | null;
+  /** JSON text that belongs to the flow and comes back when the state is used (never a secret), or null. */
+  data: string | null;
+  /** ISO 8601 text in UTC. */
+  created_at: string;
+  /** ISO 8601 text in UTC. */
+  expires_at: string;
+  /** ISO 8601 text in UTC, or null while the state is unused. */
+  used_at: string | null;
+}
+
+/**
  * A single-use link that brings a person into a workspace; only the hash of the token is kept
  * (src/workspaces/invitations.ts).
  */
@@ -355,5 +385,6 @@ export interface Database {
   secrets: SecretsTable;
   password_reset_tokens: PasswordResetTokensTable;
   email_verification_tokens: EmailVerificationTokensTable;
+  signed_states: SignedStatesTable;
   invitations: InvitationsTable;
 }

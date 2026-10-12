@@ -112,7 +112,6 @@ describe("the access to a workspace", () => {
     const never = () => Promise.reject(new Error("must not be asked"));
     const cases: Array<[SessionLookup, string]> = [
       [{ kind: "none" }, "anonymous"],
-      [{ kind: "denied", reason: "not_allowed" }, "anonymous"],
       [{ kind: "unverified", user: USER }, "unverified"],
       [{ kind: "no_workspace", user: USER }, "no_workspace"],
     ];

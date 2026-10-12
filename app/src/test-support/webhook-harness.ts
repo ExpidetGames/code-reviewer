@@ -56,6 +56,8 @@ export async function startWebhookHarness(
     /** How long one request to the fake GitHub may take (default: 5 seconds). */
     requestTimeoutMs?: number;
     env?: Record<string, string | undefined>;
+    /** The GitHub App lives only in the database (see `startSyncHarness`). */
+    credentialsFromDatabase?: boolean;
     /** Changes the real provider, for example to make `canTrigger` refuse. */
     wrapProvider?: (provider: IntegrationProvider) => IntegrationProvider;
     /** The review settings every project uses; default: the built-in values (everything on). */
@@ -68,6 +70,9 @@ export async function startWebhookHarness(
 ) {
   const base = await startSyncHarness({
     ...(options.env === undefined ? {} : { env: options.env }),
+    ...(options.credentialsFromDatabase === undefined
+      ? {}
+      : { credentialsFromDatabase: options.credentialsFromDatabase }),
     ...(options.requestTimeoutMs === undefined
       ? {}
       : { requestTimeoutMs: options.requestTimeoutMs }),

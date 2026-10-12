@@ -20,6 +20,7 @@ describe("which ways to sign in are on", () => {
     });
   });
 
+  // #102-GH-15
   it("does not offer GitHub that is switched on while it is not configured", () => {
     expect(
       effectiveSignInMethods({ emailPassword: true, github: true }, false),

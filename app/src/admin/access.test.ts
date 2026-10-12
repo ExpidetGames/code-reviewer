@@ -26,10 +26,7 @@ describe("the admin access of a session", () => {
       });
   });
 
-  it("is anonymous without a session and for a person the allow list turned away", () => {
+  it("is anonymous without a session", () => {
     expect(adminAccessOf({ kind: "none" })).toEqual({ kind: "anonymous" });
-    expect(adminAccessOf({ kind: "denied", reason: "not_allowed" })).toEqual({
-      kind: "anonymous",
-    });
   });
 });

@@ -69,6 +69,13 @@ export function UserMenu({
             <strong>{name}</strong>
             <span>@{user.login}</span>
           </div>
+          <Link
+            href="/account"
+            className="nav-link"
+            onClick={() => setOpen(false)}
+          >
+            Account
+          </Link>
           {user.isInstanceAdmin === true ? (
             <Link
               href="/admin"

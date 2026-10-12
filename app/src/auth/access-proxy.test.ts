@@ -9,7 +9,6 @@ import { NextRequest } from "next/server";
 import { describe, expect, it, vi } from "vitest";
 import { PORTAL_DENIED_HEADER } from "../admin/paths.ts";
 import type { AccessGates } from "./access-gates.ts";
-import type { AccessPolicy } from "./access-policy.ts";
 import { PORTAL_REWRITE_HEADER, createAccessProxy } from "./access-proxy.ts";
 import type { SessionLookup } from "./session-user.ts";
 
@@ -53,7 +52,6 @@ function newProxy(
   return createAccessProxy({
     // Never used: the session lookup is replaced above.
     getAuth: () => undefined as never,
-    getPolicy: () => undefined as unknown as AccessPolicy,
     // The proxy asks the gates only about a workspace address (and the session lookup, which is replaced
     // above, asks the others).
     getGates: () => gates as AccessGates,

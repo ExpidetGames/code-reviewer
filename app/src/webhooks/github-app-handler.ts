@@ -130,7 +130,7 @@ export type GithubAppWebhookDeps = {
    * GitHub is in its normal state, not broken: a delivery that cannot be verified is then refused
    * as always, but the log does not call it an error. Default: configured.
    */
-  githubAppConfigured?: () => boolean;
+  githubAppConfigured?: () => boolean | Promise<boolean>;
 };
 
 export type WebhookHandler = (request: Request) => Promise<Response>;
@@ -477,7 +477,10 @@ export function createGithubAppWebhookHandler(
       // A delivery that cannot be verified is refused like a forged one; callers learn nothing about
       // the configuration. The operator reads the cause in the log.
       const logged = loggedUnverifiableFor();
-      if (!logged.has(logger) && (deps.githubAppConfigured?.() ?? true)) {
+      if (
+        !logged.has(logger) &&
+        ((await deps.githubAppConfigured?.()) ?? true)
+      ) {
         logged.add(logger);
         logger.error(
           `[webhook] deliveries cannot be verified: ${describeError(error)}`,

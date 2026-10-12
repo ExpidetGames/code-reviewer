@@ -81,6 +81,11 @@ describe("opening the user menu", () => {
       screen.getByRole("button", { name: /Ada Lovelace/ }),
     );
     await user.keyboard("{Enter}");
+    // The account link, the two entries of the theme, then sign out.
+    await user.tab();
+    expect(document.activeElement).toBe(
+      screen.getByRole("link", { name: "Account" }),
+    );
     await user.tab();
     await user.tab();
     await user.tab();
@@ -89,6 +94,18 @@ describe("opening the user menu", () => {
     expect(document.activeElement).toBe(
       screen.getByRole("button", { name: "Sign out" }),
     );
+  });
+
+  // #102-GH-23
+  it("offers the account page to everybody who is signed in", async () => {
+    const user = userEvent.setup();
+    renderMenu(ada);
+
+    await user.click(screen.getByRole("button", { name: /Ada Lovelace/ }));
+
+    expect(
+      screen.getByRole("link", { name: "Account" }).getAttribute("href"),
+    ).toBe("/account");
   });
 
   // CR-36-T02

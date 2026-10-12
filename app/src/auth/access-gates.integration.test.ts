@@ -366,7 +366,7 @@ describe("an email and password account without a workspace", () => {
 });
 
 describe("an account that signs in with GitHub", () => {
-  // #101-WM-02
+  // #99-SR-26, #101-WM-02
   it("is asked for a workspace like every account, and not for a verified address", async () => {
     const harness = await createAuthHarness();
     const { cookies } = await harness.signIn();
@@ -381,7 +381,6 @@ describe("an account that signs in with GitHub", () => {
       lookupSession(
         harness.auth,
         new Headers({ cookie: cookieHeader(cookies) }),
-        harness.policy,
         gates(workspace),
       );
 

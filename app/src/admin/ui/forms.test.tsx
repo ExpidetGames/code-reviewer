@@ -240,7 +240,7 @@ describe("the form of the ways to sign in", () => {
 
     const github = screen.getByRole("checkbox", { name: /GitHub/ });
     expect((github as HTMLInputElement).disabled).toBe(true);
-    expect(screen.getByText(/GitHub is not configured yet/)).toBeTruthy();
+    expect(screen.getByText(/set up the GitHub App/)).toBeTruthy();
   });
 
   // #98-SIGN-IN-METHODS

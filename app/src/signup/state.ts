@@ -28,7 +28,7 @@ export async function readSignUpFacts({
   db: Kysely<Database>;
   mail: Pick<MailSender, "isConfigured">;
   /** Whether sign-in with GitHub exists (the admin portal asks the same). */
-  githubConfigured: () => boolean;
+  githubConfigured: () => boolean | Promise<boolean>;
 }): Promise<SignUpFacts> {
   const settings = createInstanceSettingsRepository(db);
   const [rule, methods, mailConfigured] = await Promise.all([
@@ -38,7 +38,7 @@ export async function readSignUpFacts({
   ]);
   return {
     rule: rule ?? CLOSED_RULE,
-    signInMethods: effectiveSignInMethods(methods, githubConfigured()),
+    signInMethods: effectiveSignInMethods(methods, await githubConfigured()),
     mailConfigured,
   };
 }

@@ -56,13 +56,18 @@ afterEach(() => {
 });
 
 describe("the routes of the portal", () => {
-  it("are found on the file system: the pages of the five sections, the settings route, the test mail route and the synchronization", () => {
+  it("are found on the file system: the pages of the five sections, the settings route, the test mail route and the routes of the GitHub integration and the synchronization", () => {
     expect(adminRoutes.map(({ route }) => route).sort()).toEqual([
       "/admin",
       "/admin/integrations",
       "/admin/limits",
       "/admin/mail",
       "/admin/setup",
+      "/api/admin/github",
+      "/api/admin/github/check",
+      "/api/admin/github/link",
+      "/api/admin/github/manifest",
+      "/api/admin/github/manifest/callback",
       "/api/admin/integrations/sync",
       "/api/admin/mail/test",
       "/api/admin/settings",

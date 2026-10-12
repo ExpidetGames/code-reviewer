@@ -113,7 +113,10 @@ export function describeConfigNotices(
         kind === "missing"
           ? "GitHub App not configured"
           : "GitHub App settings not valid",
-      detail: `${kind === "missing" ? "Missing" : "Not valid"}: ${variables.join(", ")}. Repositories cannot be read from GitHub and projects cannot be activated until this is fixed.`,
+      detail:
+        variables.length === 0
+          ? "GitHub is not connected yet. An instance admin connects it under Integrations in the admin portal. Until then repositories cannot be read from GitHub and projects cannot be activated."
+          : `${kind === "missing" ? "Missing" : "Not valid"}: ${variables.join(", ")}. Repositories cannot be read from GitHub and projects cannot be activated until this is fixed (an instance admin does that under Integrations in the admin portal).`,
     });
   }
   const llmIssues = status.llm.configured ? [] : status.llm.issues;

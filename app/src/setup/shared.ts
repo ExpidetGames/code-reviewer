@@ -5,7 +5,7 @@
 // modules), the state reader on the server's database, and the route handlers with the real hash and
 // the real sign in.
 import "server-only";
-import { anyGithubAppVariableSet } from "../integrations/registry.ts";
+import { getGithubCredentialStore } from "../github-config/shared.ts";
 import { loadAuthConfig } from "../auth/config.ts";
 import { getAuth } from "../auth/auth.ts";
 import { getDatabase } from "../db/startup.ts";
@@ -101,9 +101,14 @@ export function checkCurrentSetupSession(
  * there is nothing to read.
  */
 function runSyncAfterSetup(): void {
-  if (!anyGithubAppVariableSet(process.env)) return;
-  void import("../integrations/sync/startup.ts")
-    .then(({ runStartupSync }) => runStartupSync())
+  void getGithubCredentialStore()
+    .load()
+    .then(async (snapshot) => {
+      if (snapshot.source === "none") return;
+      const { runStartupSync } =
+        await import("../integrations/sync/startup.ts");
+      await runStartupSync();
+    })
     .catch(() => {
       // Never the reason, and never thrown: the setup is done either way.
       console.error(

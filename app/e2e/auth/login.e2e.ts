@@ -38,6 +38,22 @@ test.describe("signing in and out", () => {
     await expect(userMenuButton(page, account)).toBeVisible();
   });
 
+  // #102-GH-26
+  test("an imported user's placeholder address is replaced by the verified address of the GitHub account at the first sign in", async ({
+    page,
+  }) => {
+    await signInThroughTheForm(page, account);
+
+    await page.goto("/account");
+
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Your account" }),
+    ).toBeVisible();
+    await expect(page.getByText(account.email ?? "")).toBeVisible();
+    await expect(page.getByText("Verified", { exact: true })).toBeVisible();
+    await expect(page.getByText(`@${account.login}`)).toBeVisible();
+  });
+
   // CR-18-T02
   test("a signed in person signs out, lands on the login page and is sent back there from a protected page", async ({
     page,

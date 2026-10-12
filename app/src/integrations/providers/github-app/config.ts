@@ -48,7 +48,7 @@ export function normalizePemKey(raw: string): string {
   return `-----BEGIN ${match[1]}-----\n${lines.join("\n")}\n-----END ${match[1]}-----`;
 }
 
-function isUsableRsaKey(pem: string): boolean {
+export function isUsableRsaKey(pem: string): boolean {
   try {
     return createPrivateKey(pem).asymmetricKeyType === "rsa";
   } catch {

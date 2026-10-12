@@ -10,7 +10,6 @@
 import type { NextRequest } from "next/server";
 import { getAccessGates } from "./auth/access-gates-runtime.ts";
 import { createAccessProxy } from "./auth/access-proxy.ts";
-import { getAccessPolicy } from "./auth/access-runtime.ts";
 import { getAuth } from "./auth/auth.ts";
 import { createSetupGate } from "./setup/gate-proxy.ts";
 import { getSetupStateReader } from "./setup/shared.ts";
@@ -22,7 +21,6 @@ const setupGate = createSetupGate({
 
 const accessProxy = createAccessProxy({
   getAuth,
-  getPolicy: getAccessPolicy,
   getGates: getAccessGates,
 });
 

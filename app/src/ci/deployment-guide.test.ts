@@ -109,16 +109,6 @@ describe("the Coolify guide and the environment variables", () => {
     expect(byRequirement("yes").sort()).toEqual(required.sort());
   });
 
-  // CR-39-T03
-  it("names the two settings of which one must be set, and both can be set in the Compose file", () => {
-    expect(byRequirement("one of two").sort()).toEqual([
-      "ALLOWED_GITHUB_LOGINS",
-      "ALLOWED_GITHUB_ORG",
-    ]);
-    for (const name of byRequirement("one of two"))
-      expect(appEnvironment[name], name).toBe(`\${${name}:-}`);
-  });
-
   // CR-39-T03, #97-SU-17
   it("marks as optional, deprecated or checked by the app exactly the settings the Compose file passes on with a default", () => {
     const withDefault = [
@@ -128,11 +118,7 @@ describe("the Coolify guide and the environment variables", () => {
       ["RUNNER_MEMORY_LIMIT", String(coolify.services.runner?.mem_limit)],
     ]
       .filter(([, value]) => /^\$\{[A-Z0-9_]+:-/.test(String(value)))
-      .map(([name]) => name)
-      .filter(
-        (name) =>
-          !["ALLOWED_GITHUB_LOGINS", "ALLOWED_GITHUB_ORG"].includes(name),
-      );
+      .map(([name]) => name);
 
     expect(
       [
@@ -246,18 +232,16 @@ describe("the Coolify guide and the smoke test", () => {
     );
   });
 
-  // CR-39-T03
-  it("makes it prominent that one of the two allow list settings must be set for GitHub sign in", () => {
-    const rows = variableRows(section("6. Environment variables")).filter(
-      (row) => row.required === "one of two",
-    );
+  // #102-GH-16
+  it("says that the allow list settings and the OAuth app settings no longer decide who signs in, and that the GitHub App is set up in the portal", () => {
+    const table = section("6. Environment variables");
 
-    expect(rows).toHaveLength(2);
-    for (const row of rows)
-      expect(row.cells.join("|")).toContain("**Set this or");
-    expect(section("7. Deploy and check the instance")).toContain(
-      "**at least one of `ALLOWED_GITHUB_LOGINS` and `ALLOWED_GITHUB_ORG` is set**",
+    expect(table).toContain("No longer decides who may sign in");
+    expect(table).toContain("no longer used");
+    expect(section("3. The GitHub things, and the order")).toContain(
+      "admin portal under **Integrations**",
     );
+    expect(byRequirement("one of two")).toEqual([]);
   });
 
   it("does not tell people to edit the tracked Compose file to move the backups", () => {

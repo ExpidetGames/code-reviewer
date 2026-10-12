@@ -26,7 +26,7 @@ export type AssembleWorkspacesOptions = {
   /** The configured public address of the app: a link never comes from a request header. */
   baseUrl: string;
   /** Whether sign-in with GitHub exists (a fact of the sign-up rule). */
-  githubConfigured: () => boolean;
+  githubConfigured: () => boolean | Promise<boolean>;
   now?: () => Date;
   newId?: () => string;
   newToken?: () => string;

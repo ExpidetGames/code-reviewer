@@ -61,13 +61,7 @@ describe("a route that is not about one workspace", () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
-  it.each([
-    ["nobody is signed in", { kind: "none" }],
-    [
-      "the allow list turned the person away",
-      { kind: "denied", reason: "not_allowed" },
-    ],
-  ] as const)(
+  it.each([["nobody is signed in", { kind: "none" }]] as const)(
     "refuses with 401 UNAUTHENTICATED when %s, and does not run",
     async (_why, lookup) => {
       session.currentLookup.mockResolvedValue(lookup);

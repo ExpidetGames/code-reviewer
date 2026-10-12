@@ -7,6 +7,7 @@
 import "server-only";
 import type { Kysely } from "kysely";
 import { decodeJson, encodeJson, formatTimestamp } from "../codecs.ts";
+import type { StoredGithubApp } from "../../github-config/settings.ts";
 import type { SmtpSettings } from "../../mail/smtp-settings.ts";
 import type { Database } from "../schema.ts";
 
@@ -38,6 +39,12 @@ export type InstanceSettingValues = {
    * not here but in the secret store (`smtp_password`).
    */
   smtp: SmtpSettings;
+  /**
+   * The GitHub App (src/github-config/): app id, slug, client id and the "private app" flag. The private key,
+   * the webhook secret and the client secret are in the secret store. No row: the instance has none (the
+   * environment of an installation that was not imported yet is the fallback).
+   */
+  github_app: StoredGithubApp;
 };
 export type InstanceSettingKey = keyof InstanceSettingValues;
 

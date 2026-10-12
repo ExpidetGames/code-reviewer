@@ -22,9 +22,16 @@ import { createSmtpConfigStore } from "../mail/smtp-config.ts";
 import type { SmtpTimeouts } from "../mail/smtp-delivery.ts";
 import { createTestMailService } from "../mail/test-mail.ts";
 import { createSecretStore } from "../secrets/store.ts";
+import type { FakeGithub } from "../../../fakes/github/server.ts";
+import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
+import { createGithubCredentialStore } from "../github-config/credentials.ts";
+import { createGithubRouteHandlers } from "../github-config/http.ts";
+import { createGithubConfigService } from "../github-config/service.ts";
+import { createGithubLinkService } from "../github-signin/link.ts";
+import { createSignedStates } from "../signed-state/state.ts";
+import { TEST_APP_SLUG } from "./github-app.ts";
+import { startTestGithub } from "./github-fake.ts";
 import { lookupSession } from "../auth/session-user.ts";
-import { createAccessPolicy } from "../auth/access-policy.ts";
-import { parseAccessConfig } from "../auth/access-config.ts";
 import { cookieHeader, remember, type CookieJar } from "./auth-harness.ts";
 import {
   createSetupHarness,
@@ -52,6 +59,8 @@ export const MISSING_ANSWER_MARKER = "x-answer-of-a-missing-path";
 export type AdminHarnessOptions = {
   githubConfigured?: boolean;
   mailConfigured?: boolean;
+  /** The fake GitHub the GitHub routes talk to. Default: one is started the first time a GitHub route is used. */
+  github?: FakeGithub;
 };
 
 /** Short waits, so a test of a mail server that never answers does not take half a minute. */
@@ -83,10 +92,18 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
     set mail(value: boolean) {
       setup.gateState.mail = value;
     },
-    /** What the access policy answers for a GitHub identity. */
-    githubAllowed: true,
   };
   const secrets = createSecretStore({ db, appSecret: SETUP_TEST_SECRET });
+  // The GitHub credentials as the portal saves and reads them. The addresses of GitHub are the fake's, which
+  // is started when the first GitHub route is used; the store itself reads them from this object.
+  const githubEnv: Record<string, string | undefined> = {
+    ALLOW_TEST_GITHUB_ENDPOINTS: "true",
+  };
+  const credentials = createGithubCredentialStore({
+    db,
+    appSecret: SETUP_TEST_SECRET,
+    env: githubEnv,
+  });
   const smtp = createSmtpConfigStore({ db, appSecret: SETUP_TEST_SECRET });
   const service = createAdminService({
     db,
@@ -98,37 +115,88 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
       baseUrl: ADMIN_TEST_BASE_URL,
       timeouts: ADMIN_TEST_SMTP_TIMEOUTS,
     }),
-    githubConfigured: () => flags.github,
+    // A test switches the flag; a user authorization saved through the portal counts as well.
+    githubConfigured: async () =>
+      flags.github ||
+      (await credentials.load()).userAuthorization.state === "configured",
     // A test switches the flag; a mail server saved through the portal counts as well.
     mailConfigured: () => Promise.resolve(flags.mail),
-    accessPolicy: () =>
-      Promise.resolve(
-        flags.githubAllowed
-          ? { allowed: true }
-          : { allowed: false, reason: "not_allowed" },
-      ),
   });
 
-  const policy = createAccessPolicy({
-    config: parseAccessConfig({}, []),
-    loginPins: {
-      pin: () => Promise.resolve(null),
-      revokeSessions: () => Promise.resolve(),
-    },
-  });
   // The headers of the request being served, as the page code reads them with `headers()`.
   const current = { headers: new Headers() };
+
+  // The routes of the GitHub integration, built on first use over the fake GitHub.
+  let githubPart:
+    | Promise<{
+        fake: FakeGithub;
+        routes: ReturnType<typeof createGithubRouteHandlers>;
+      }>
+    | undefined;
+  function github() {
+    githubPart ??= (async () => {
+      const fake =
+        options.github ?? (await startTestGithub({ appSlug: TEST_APP_SLUG }));
+      githubEnv.GITHUB_API_BASE_URL = fake.baseUrl;
+      const signedStates = createSignedStates({
+        db,
+        appSecret: SETUP_TEST_SECRET,
+      });
+      const rateLimits = createRateLimitsRepository(db);
+      const service = createGithubConfigService({
+        credentials,
+        signedStates,
+        rateLimits,
+        publicUrl: ADMIN_TEST_BASE_URL,
+        tenancy: async () =>
+          (await createInstanceSettingsRepository(db).get("tenancy")) ??
+          "single",
+        webBaseUrl: fake.baseUrl,
+        apiBaseUrl: fake.baseUrl,
+        log: () => undefined,
+      });
+      const link = createGithubLinkService({
+        db,
+        signedStates,
+        rateLimits,
+        authorization: async () => {
+          const { userAuthorization } = await credentials.load();
+          return userAuthorization.state === "configured"
+            ? {
+                clientId: userAuthorization.clientId,
+                clientSecret: userAuthorization.clientSecret.reveal(),
+              }
+            : null;
+        },
+        publicUrl: ADMIN_TEST_BASE_URL,
+        oauthBaseUrl: fake.baseUrl,
+        apiBaseUrl: fake.baseUrl,
+        log: () => undefined,
+      });
+      const routes = createGithubRouteHandlers({
+        access: async () =>
+          adminAccessOf(
+            await lookupSession(auth, current.headers, setup.gates),
+          ),
+        sessionId: async () =>
+          (await auth.api.getSession({ headers: current.headers }))?.session
+            .id ?? null,
+        notFound: () => {
+          throw new NotFoundSignal();
+        },
+        service,
+        link,
+      });
+      return { fake, routes };
+    })();
+    return githubPart;
+  }
   // The synchronization with GitHub is a double that counts how often it was asked: what these tests need to
   // know is whether a request got as far as the synchronization.
   const syncCalls = { count: 0 };
   const handlers = createAdminRouteHandlers({
     access: async () => {
-      const lookup = await lookupSession(
-        auth,
-        current.headers,
-        policy,
-        setup.gates,
-      );
+      const lookup = await lookupSession(auth, current.headers, setup.gates);
       return adminAccessOf(lookup);
     },
     notFound: () => {
@@ -347,6 +415,39 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
         request.method === "POST"
       )
         return await handlers.testMail(request);
+      if (pathname.startsWith("/api/instance-portal/github")) {
+        const { routes } = await github();
+        if (
+          pathname === "/api/instance-portal/github" &&
+          request.method === "GET"
+        )
+          return await routes.get(request);
+        if (
+          pathname === "/api/instance-portal/github" &&
+          request.method === "PUT"
+        )
+          return await routes.put(request);
+        if (
+          pathname === "/api/instance-portal/github/manifest" &&
+          request.method === "POST"
+        )
+          return await routes.startManifest(request);
+        if (
+          pathname === "/api/instance-portal/github/manifest/callback" &&
+          request.method === "GET"
+        )
+          return await routes.manifestCallback(request);
+        if (
+          pathname === "/api/instance-portal/github/check" &&
+          request.method === "POST"
+        )
+          return await routes.check(request);
+        if (
+          pathname === "/api/instance-portal/github/link" &&
+          request.method === "POST"
+        )
+          return await routes.startLink(request);
+      }
       if (
         pathname === "/api/instance-portal/integrations/sync" &&
         request.method === "POST"
@@ -424,6 +525,9 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
     secrets,
     smtp,
     service,
+    credentials,
+    /** The fake GitHub behind the GitHub routes (started on first use). */
+    fakeGithub: async () => (await github()).fake,
     flags,
     /** How many times a request got as far as the synchronization with GitHub. */
     syncCalls,

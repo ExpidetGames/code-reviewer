@@ -18,6 +18,7 @@ import {
   sendHtml,
   sendJson,
 } from "./http.ts";
+import type { AppRegistry } from "./registry.ts";
 
 export type FakeGithubUser = {
   /** GitHub's numeric account id; it stays when the login changes. */
@@ -31,10 +32,14 @@ export type FakeGithubUser = {
   avatarUrl?: string;
 };
 
-/** The OAuth app registered for the sign in: the credentials the app under test sends. */
+/**
+ * The OAuth app registered for the sign in: the credentials the app under test sends. Absent when
+ * only apps created through the manifest flow sign people in. Every client, this one and the apps
+ * of the manifest flow, is looked up in the shared registry (`registry.ts`).
+ */
 export type FakeOAuthOptions = {
-  clientId: string;
-  clientSecret: string;
+  clientId?: string;
+  clientSecret?: string;
 };
 
 /** How the token endpoint misbehaves; `null` is normal behavior. */
@@ -107,7 +112,7 @@ type AuthorizationCode = {
   codeChallenge: string | undefined;
 };
 
-type IssuedToken = { userId: number; scope: string };
+type IssuedToken = { userId: number; scope: string; clientId: string };
 
 const AUTHORIZE_PARAMS = [
   "client_id",
@@ -121,8 +126,9 @@ const AUTHORIZE_PARAMS = [
 
 /** `baseUrl` is read when a test confirms an authorize page, so it may be known after the part exists. */
 export function createOAuthPart(
-  options: FakeOAuthOptions,
+  _options: FakeOAuthOptions,
   baseUrl: () => string,
+  registry: AppRegistry,
 ): OAuthPart {
   const users = new Map<number, FakeGithubUser>();
   const codes = new Map<string, AuthorizationCode>();
@@ -171,6 +177,27 @@ export function createOAuthPart(
       await issueToken(request, response);
       return true;
     }
+    // "Check a token" with the client credentials as basic authentication: the way to ask whether a
+    // client id and secret belong together. Right pair: 404 for a token that does not exist (or 200
+    // for one that does); wrong pair: 401.
+    const checkToken = /^\/applications\/([^/]+)\/token$/.exec(path);
+    if (method === "POST" && checkToken) {
+      await readBody(request);
+      const clientId = decodeURIComponent(checkToken[1] ?? "");
+      const given = Buffer.from(
+        /^Basic (.+)$/i.exec(request.headers.authorization ?? "")?.[1] ?? "",
+        "base64",
+      ).toString("utf8");
+      const client = registry.byClientId(clientId);
+      if (
+        client === undefined ||
+        client.clientSecret === null ||
+        given !== `${clientId}:${client.clientSecret}`
+      )
+        sendJson(response, 401, { message: "Bad credentials" });
+      else sendJson(response, 404, { message: "Not Found" });
+      return true;
+    }
     if (method === "GET" && path === "/user") {
       sendProfile(request, response);
       return true;
@@ -193,17 +220,26 @@ export function createOAuthPart(
 
   function renderAuthorizePage(url: URL, response: ServerResponse) {
     const params = url.searchParams;
-    if (params.get("client_id") !== options.clientId)
+    const app = registry.byClientId(params.get("client_id") ?? "");
+    if (app === undefined)
       return sendHtml(
         response,
         404,
         "<h1>Application not found</h1><p>The client_id is not registered.</p>",
       );
-    if (!params.get("redirect_uri"))
+    const redirectUri = params.get("redirect_uri");
+    if (!redirectUri)
       return sendHtml(
         response,
         400,
         "<h1>Bad request</h1><p>redirect_uri is missing.</p>",
+      );
+    // Like GitHub: the address must be one of the callback URLs registered for the app.
+    if (app.callbackUrls !== null && !app.callbackUrls.includes(redirectUri))
+      return sendHtml(
+        response,
+        400,
+        "<h1>Bad request</h1><p>The redirect_uri is not associated with this application.</p>",
       );
 
     const hidden = AUTHORIZE_PARAMS.flatMap((name) => {
@@ -236,7 +272,10 @@ export function createOAuthPart(
     response: ServerResponse,
   ) {
     const redirectUri = form.get("redirect_uri");
-    if (form.get("client_id") !== options.clientId || !redirectUri)
+    const app = registry.byClientId(form.get("client_id") ?? "");
+    if (app === undefined || !redirectUri)
+      return sendHtml(response, 400, "<h1>Bad request</h1>");
+    if (app.callbackUrls !== null && !app.callbackUrls.includes(redirectUri))
       return sendHtml(response, 400, "<h1>Bad request</h1>");
 
     const callback = new URL(redirectUri);
@@ -262,7 +301,7 @@ export function createOAuthPart(
     const code = randomToken("code");
     codes.set(code, {
       userId: user.id,
-      clientId: options.clientId,
+      clientId: app.clientId ?? "",
       redirectUri,
       scope: form.get("scope") ?? "",
       codeChallenge:
@@ -306,9 +345,11 @@ export function createOAuthPart(
             new URLSearchParams(body).toString(),
           );
 
+    const client = registry.byClientId(form.get("client_id") ?? "");
     if (
-      form.get("client_id") !== options.clientId ||
-      form.get("client_secret") !== options.clientSecret
+      client === undefined ||
+      client.clientSecret === null ||
+      form.get("client_secret") !== client.clientSecret
     )
       return reply({
         error: "incorrect_client_credentials",
@@ -319,7 +360,7 @@ export function createOAuthPart(
     const code = form.get("code") ?? "";
     const grant = codes.get(code);
     codes.delete(code); // A code works once.
-    if (!grant || grant.clientId !== options.clientId)
+    if (!grant || grant.clientId !== client.clientId)
       return reply({
         error: "bad_verification_code",
         error_description: "The code passed is incorrect or expired.",
@@ -344,7 +385,11 @@ export function createOAuthPart(
     }
 
     const accessToken = randomToken("gho_fake");
-    tokens.set(accessToken, { userId: grant.userId, scope: grant.scope });
+    tokens.set(accessToken, {
+      userId: grant.userId,
+      scope: grant.scope,
+      clientId: grant.clientId,
+    });
     issued.push(accessToken);
     reply({
       access_token: accessToken,
@@ -367,7 +412,7 @@ export function createOAuthPart(
   function authenticate(
     request: IncomingMessage,
     response: ServerResponse,
-  ): { user: FakeGithubUser; scope: string } | undefined {
+  ): { user: FakeGithubUser; scope: string; clientId: string } | undefined {
     const header = request.headers.authorization ?? "";
     const accessToken = /^(?:Bearer|token) (.+)$/i.exec(header)?.[1];
     const issuedToken = accessToken ? tokens.get(accessToken) : undefined;
@@ -376,7 +421,7 @@ export function createOAuthPart(
       sendJson(response, 401, { message: "Bad credentials" });
       return undefined;
     }
-    return { user, scope: issuedToken.scope };
+    return { user, scope: issuedToken.scope, clientId: issuedToken.clientId };
   }
 
   function sendProfile(request: IncomingMessage, response: ServerResponse) {
@@ -397,8 +442,11 @@ export function createOAuthPart(
   function sendEmails(request: IncomingMessage, response: ServerResponse) {
     const auth = authenticate(request, response);
     if (!auth) return;
-    // Like GitHub: the endpoint needs the user:email scope.
-    if (!/(^|[ ,])(user:email|user)([ ,]|$)/.test(auth.scope))
+    // Like GitHub: the endpoint needs the user:email scope (an OAuth app) or, for the user token of a
+    // GitHub App, the app's "Email addresses" account permission.
+    const app = registry.byClientId(auth.clientId);
+    const appMayRead = app?.accountPermissions.emails !== undefined;
+    if (!appMayRead && !/(^|[ ,])(user:email|user)([ ,]|$)/.test(auth.scope))
       return sendJson(response, 404, { message: "Not Found" });
     const { user } = auth;
     const emails =
