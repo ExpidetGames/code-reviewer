@@ -9,7 +9,6 @@ import { redirect } from "next/navigation";
 import { cache } from "react";
 import { getAccessGates } from "./access-gates-runtime.ts";
 import type { SessionUser } from "./access-policy.ts";
-import { getAccessPolicy } from "./access-runtime.ts";
 import { getAuth } from "./auth.ts";
 import {
   loginPath,
@@ -19,19 +18,14 @@ import {
 
 /**
  * What the current request is signed in as (see `SessionLookup`). Cached per request (React `cache`):
- * a layout and the page below it run side by side and both ask, but the session, the access policy
- * (which may ask GitHub) and the gates are looked up once.
+ * a layout and the page below it run side by side and both ask, but the session and the gates are
+ * looked up once.
  */
 export const currentLookup = cache(async (): Promise<SessionLookup> => {
   // Read the request first: that is what keeps this out of the static shell. Opening the auth
   // instance (and so the database) before it would run at build time.
   const requestHeaders = await headers();
-  return lookupSession(
-    getAuth(),
-    requestHeaders,
-    getAccessPolicy(),
-    getAccessGates(),
-  );
+  return lookupSession(getAuth(), requestHeaders, getAccessGates());
 });
 
 /**
@@ -51,7 +45,6 @@ export const requireUser = cache(async (): Promise<SessionUser> => {
  */
 export const requireSignedIn = cache(async (): Promise<SessionUser> => {
   const lookup = await currentLookup();
-  if (lookup.kind === "none" || lookup.kind === "denied")
-    redirect(loginPath(lookup));
+  if (lookup.kind === "none") redirect(loginPath(lookup));
   return lookup.user;
 });

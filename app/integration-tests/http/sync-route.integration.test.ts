@@ -16,7 +16,11 @@ import {
   type CookieJar,
 } from "../../src/test-support/auth-harness.ts";
 import { startSyncHarness } from "../../src/test-support/integration-sync-harness.ts";
-import { openGates } from "../../src/test-support/open-gates.ts";
+import type { AccessGates } from "../../src/auth/access-gates.ts";
+import {
+  noWorkspaceGates,
+  openGates,
+} from "../../src/test-support/open-gates.ts";
 
 type Auth = Awaited<ReturnType<typeof createAuthHarness>>;
 
@@ -30,11 +34,10 @@ async function startApp() {
   });
   github.fake.setRepositories(4242, [{ id: 7001, fullName: "acme/widgets" }]);
 
-  function through(settings: Auth = harness) {
+  function through(settings: Auth = harness, gates: AccessGates = openGates) {
     const proxy = createAccessProxy({
       getAuth: () => settings.auth,
-      getPolicy: () => settings.policy,
-      getGates: () => openGates,
+      getGates: () => gates,
     });
     return async function send(cookies?: CookieJar): Promise<Response> {
       const headers = new Headers();
@@ -47,12 +50,7 @@ async function startApp() {
       const handler = createSyncRouteHandler({
         // The same lookup `requireUser()` makes, without Next.js's request scope.
         requireUser: async () => {
-          const lookup = await lookupSession(
-            settings.auth,
-            headers,
-            settings.policy,
-            openGates,
-          );
+          const lookup = await lookupSession(settings.auth, headers, gates);
           if (lookup.kind !== "user") throw new Error("NEXT_REDIRECT");
           return lookup.user;
         },
@@ -78,20 +76,16 @@ describe("a request without a session", () => {
   });
 });
 
-describe("a signed in user who is not on the allow list", () => {
+describe("a signed in user who belongs to no workspace", () => {
   // CR-21-T12
   it("is answered with 403, GitHub is not called and nothing is stored", async () => {
     const app = await startApp();
     const { cookies } = await app.harness.signIn();
-    const removed = app.harness.restart({ allowedLogins: ["somebody-else"] });
 
-    const response = await app.through(removed)(cookies);
+    const response = await app.through(app.harness, noWorkspaceGates)(cookies);
 
     expect(response.status).toBe(403);
-    expect(await response.json()).toEqual({
-      error: "ACCESS_DENIED",
-      reason: "not_allowed",
-    });
+    expect(await response.json()).toEqual({ error: "no_workspace_access" });
     expect(app.github.fake.requests()).toEqual([]);
     expect(await app.github.repositories.list()).toEqual([]);
   });

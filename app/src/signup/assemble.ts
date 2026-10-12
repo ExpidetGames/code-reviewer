@@ -24,7 +24,7 @@ export type AssembleSignUpOptions = {
   hashPassword: (password: string) => Promise<string>;
   /** Better Auth's password check (`context.password.verify`). */
   verifyPassword: VerifyPassword;
-  githubConfigured: () => boolean;
+  githubConfigured: () => boolean | Promise<boolean>;
   /** The configured public address of the app. */
   baseUrl: string;
   currentUserId: (request: Request) => Promise<string | null>;

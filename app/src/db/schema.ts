@@ -33,6 +33,11 @@ export interface UsersTable {
    * fills in 0, so an insert (Better Auth's, a test's) may leave it out.
    */
   is_instance_admin: ColumnType<number, number | undefined, number>;
+  /**
+   * The verified primary email of the user's GitHub account when another account has it already, so an
+   * imported user's placeholder address could not be replaced (src/github-signin/decide.ts); otherwise null.
+   */
+  email_conflict: string | null;
   /** When the membership in the allowed GitHub organization was last confirmed (ISO 8601, UTC), or null. */
   org_checked_at: string | null;
   /** The GitHub organization that check was made for, or null. */

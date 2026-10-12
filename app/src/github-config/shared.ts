@@ -33,6 +33,14 @@ export function getGithubCredentialStore(): GithubCredentialStore {
   });
 }
 
+/** Whether the GitHub App's user authorization can sign people in: a client id and a secret that can be read. */
+export async function isGithubSignInConfigured(): Promise<boolean> {
+  return (
+    (await getGithubCredentialStore().load()).userAuthorization.state ===
+    "configured"
+  );
+}
+
 export function getGithubConfigService(): GithubConfigService {
   const db = getDatabase();
   // Every address the service uses comes from the configuration, never from a request header.

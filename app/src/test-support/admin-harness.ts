@@ -23,8 +23,6 @@ import type { SmtpTimeouts } from "../mail/smtp-delivery.ts";
 import { createTestMailService } from "../mail/test-mail.ts";
 import { createSecretStore } from "../secrets/store.ts";
 import { lookupSession } from "../auth/session-user.ts";
-import { createAccessPolicy } from "../auth/access-policy.ts";
-import { parseAccessConfig } from "../auth/access-config.ts";
 import { cookieHeader, remember, type CookieJar } from "./auth-harness.ts";
 import {
   createSetupHarness,
@@ -83,8 +81,6 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
     set mail(value: boolean) {
       setup.gateState.mail = value;
     },
-    /** What the access policy answers for a GitHub identity. */
-    githubAllowed: true,
   };
   const secrets = createSecretStore({ db, appSecret: SETUP_TEST_SECRET });
   const smtp = createSmtpConfigStore({ db, appSecret: SETUP_TEST_SECRET });
@@ -101,31 +97,13 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
     githubConfigured: () => flags.github,
     // A test switches the flag; a mail server saved through the portal counts as well.
     mailConfigured: () => Promise.resolve(flags.mail),
-    accessPolicy: () =>
-      Promise.resolve(
-        flags.githubAllowed
-          ? { allowed: true }
-          : { allowed: false, reason: "not_allowed" },
-      ),
   });
 
-  const policy = createAccessPolicy({
-    config: parseAccessConfig({}, []),
-    loginPins: {
-      pin: () => Promise.resolve(null),
-      revokeSessions: () => Promise.resolve(),
-    },
-  });
   // The headers of the request being served, as the page code reads them with `headers()`.
   const current = { headers: new Headers() };
   const handlers = createAdminRouteHandlers({
     access: async () => {
-      const lookup = await lookupSession(
-        auth,
-        current.headers,
-        policy,
-        setup.gates,
-      );
+      const lookup = await lookupSession(auth, current.headers, setup.gates);
       return adminAccessOf(lookup);
     },
     notFound: () => {

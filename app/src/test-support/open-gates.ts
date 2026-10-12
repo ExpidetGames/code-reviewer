@@ -8,3 +8,9 @@ export const openGates: AccessGates = {
   verificationRequired: () => Promise.resolve(false),
   hasWorkspace: () => Promise.resolve(true),
 };
+
+/** The gates of a person who belongs to no workspace (an account the sign-up or the sign in made, not yet invited). */
+export const noWorkspaceGates: AccessGates = {
+  verificationRequired: () => Promise.resolve(false),
+  hasWorkspace: () => Promise.resolve(false),
+};

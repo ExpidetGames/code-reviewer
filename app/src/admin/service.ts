@@ -6,7 +6,6 @@
 // decision record, and records the admin and the time in `instance_settings`. The secrets appear only
 // as their status (configured, or cannot be read), never as a value.
 import type { Kysely } from "kysely";
-import type { AccessPolicy } from "../auth/access-policy.ts";
 import {
   createInstanceSettingsRepository,
   type InstanceSettingKey,
@@ -23,7 +22,7 @@ import type { SecretStatus, SecretStore } from "../secrets/store.ts";
 import type { SetupIssue } from "../setup/errors.ts";
 import { parseSignUpRule } from "../setup/input.ts";
 import { CLOSED_RULE } from "../signup/rule.ts";
-import { githubIdentityPasses } from "./github-identity.ts";
+import { githubIdentityLinked } from "./github-identity.ts";
 import {
   checkSignInMethods,
   effectiveSignInMethods,
@@ -111,8 +110,8 @@ export type AdminService = {
 export type AdminServiceOptions = {
   db: Kysely<Database>;
   secrets: Pick<SecretStore, "statuses">;
-  /** Whether sign-in with GitHub can work: the GitHub integration is configured. */
-  githubConfigured: () => boolean;
+  /** Whether sign-in with GitHub can work: the GitHub App's user authorization is configured. */
+  githubConfigured: () => boolean | Promise<boolean>;
   /**
    * Counts as "mail can be sent" in addition to the saved mail server (tests only; the running server leaves
    * it out, so the settings are read once).
@@ -122,8 +121,6 @@ export type AdminServiceOptions = {
   smtp: SmtpConfigStore;
   /** The test mail button (src/mail/test-mail.ts). */
   testMail: TestMailService;
-  /** The rule that decides who may sign in with GitHub (the allow list), asked for the acting admin's identity. */
-  accessPolicy: AccessPolicy;
   now?: () => Date;
 };
 
@@ -147,7 +144,6 @@ export function createAdminService({
   testMail,
   githubConfigured,
   mailConfigured,
-  accessPolicy,
   now = () => new Date(),
 }: AdminServiceOptions): AdminService {
   const settings = createInstanceSettingsRepository(db, now);
@@ -194,7 +190,7 @@ export function createAdminService({
         updatedAt: meta?.updatedAt ?? null,
       });
 
-      const github = githubConfigured();
+      const github = await githubConfigured();
       const mail = canSend(mailServer) || (await mailConfigured?.()) === true;
       const storedMethods = methods?.value as SignInMethods | undefined;
       const effective = effectiveSignInMethods(storedMethods, github);
@@ -274,12 +270,8 @@ export function createAdminService({
         github: methods.github,
       };
       const checked = checkSignInMethods(wanted, {
-        githubConfigured: githubConfigured(),
-        actorHasGithubIdentity: await githubIdentityPasses(
-          db,
-          accessPolicy,
-          actorId,
-        ),
+        githubConfigured: await githubConfigured(),
+        actorHasGithubIdentity: await githubIdentityLinked(db, actorId),
       });
       if (!checked.ok) return checked;
       await settings.set("sign_in_methods", wanted, actorId);

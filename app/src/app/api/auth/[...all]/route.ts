@@ -5,6 +5,7 @@
 // src/auth/access.ts); what is reachable is limited in src/auth/http.ts.
 import { connection } from "next/server";
 import { getAuth } from "@/auth/auth";
+import { getGithubAuth } from "@/auth/github-auth";
 import { handleAuthRequest } from "@/auth/http";
 import { getSignInLimiter, getSignInMethods } from "@/auth/sign-in-runtime";
 
@@ -16,6 +17,7 @@ async function handle(request: Request): Promise<Response> {
     request,
     getSignInLimiter(),
     getSignInMethods,
+    getGithubAuth,
   );
 }
 

@@ -33,7 +33,6 @@ async function startGuardedRoute() {
   const harness = await createAuthHarness();
   const proxy = createAccessProxy({
     getAuth: () => harness.auth,
-    getPolicy: () => harness.policy,
     getGates: () => openGates,
   });
   for (const [name, value] of Object.entries(testGithubAppEnv()))

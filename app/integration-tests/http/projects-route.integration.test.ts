@@ -20,7 +20,11 @@ import {
   type CookieJar,
 } from "../../src/test-support/auth-harness.ts";
 import { defaultWorkspaceId } from "../../src/test-support/workspaces.ts";
-import { openGates } from "../../src/test-support/open-gates.ts";
+import type { AccessGates } from "../../src/auth/access-gates.ts";
+import {
+  noWorkspaceGates,
+  openGates,
+} from "../../src/test-support/open-gates.ts";
 
 type Harness = Awaited<ReturnType<typeof createAuthHarness>>;
 
@@ -59,11 +63,13 @@ async function startApp() {
    * What the server does with a request: the proxy first, the handler only if the proxy lets it by.
    * `settings` are the access settings in force (a restarted harness has other ones).
    */
-  function through(settings: Harness = harness) {
+  function through(
+    settings: Harness = harness,
+    gates: AccessGates = openGates,
+  ) {
     const proxy = createAccessProxy({
       getAuth: () => settings.auth,
-      getPolicy: () => settings.policy,
-      getGates: () => openGates,
+      getGates: () => gates,
     });
     return async function send(
       active: boolean,
@@ -79,12 +85,7 @@ async function startApp() {
       const handler = createProjectRouteHandler({
         // The same lookup `requireUser()` makes, without Next.js's request scope.
         requireUser: async () => {
-          const lookup = await lookupSession(
-            settings.auth,
-            headers,
-            settings.policy,
-            openGates,
-          );
+          const lookup = await lookupSession(settings.auth, headers, gates);
           if (lookup.kind !== "user") throw new Error("NEXT_REDIRECT");
           return lookup.user;
         },
@@ -129,20 +130,19 @@ describe("a request without a session", () => {
   });
 });
 
-describe("a signed in user who is not on the allow list", () => {
+describe("a signed in user who belongs to no workspace", () => {
   // CR-24-T11
   it("is answered with 403 when trying to activate, and creates no project", async () => {
     const app = await startApp();
     const { cookies } = await app.harness.signIn();
-    const removed = app.harness.restart({ allowedLogins: ["somebody-else"] });
 
-    const response = await app.through(removed)(true, cookies);
+    const response = await app.through(app.harness, noWorkspaceGates)(
+      true,
+      cookies,
+    );
 
     expect(response.status).toBe(403);
-    expect(await response.json()).toEqual({
-      error: "ACCESS_DENIED",
-      reason: "not_allowed",
-    });
+    expect(await response.json()).toEqual({ error: "no_workspace_access" });
     expect(await app.projectRows()).toEqual([]);
   });
 
@@ -152,9 +152,11 @@ describe("a signed in user who is not on the allow list", () => {
     const { cookies } = await app.harness.signIn();
     await app.service.activateProject(app.repository.id);
     const before = await app.projectRows();
-    const removed = app.harness.restart({ allowedLogins: ["somebody-else"] });
 
-    const response = await app.through(removed)(false, cookies);
+    const response = await app.through(app.harness, noWorkspaceGates)(
+      false,
+      cookies,
+    );
 
     expect(response.status).toBe(403);
     expect(await app.projectRows()).toEqual(before);

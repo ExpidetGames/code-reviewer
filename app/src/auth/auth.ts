@@ -1,9 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// The one Better Auth instance of the app: email with password (the instance admin the first-run
-// setup creates, and the accounts of the later sign-up) and, when the GitHub OAuth app is configured,
-// GitHub. Sessions live in our SQLite database for 30 days, and the four tables are the ones created
-// by migration 20261010123800_create_auth_tables.
+// The Better Auth instances of the app: email with password (the instance admin the first-run
+// setup creates, and the accounts of the later sign-up) and, when the GitHub App has its user
+// authorization configured, GitHub. Sessions live in our SQLite database for 30 days, and the four
+// tables are the ones created by migration 20261010123800_create_auth_tables.
+//
+// The credentials of the user authorization (client id and secret) live in the database and the admin can
+// replace them at any time, while Better Auth wants them when it is created. So the instance that serves
+// everything but the GitHub sign in is created once (`getAuth`), and the one that serves the start of a
+// GitHub sign in and its callback is created for the credentials in force (`getGithubAuth`): kept while they
+// are the same, made again when they change. Both share the database and the master key, so a session made
+// by one is read by the other.
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { BASE_ERROR_CODES, betterAuth } from "better-auth";
@@ -14,17 +21,18 @@ import type { Kysely } from "kysely";
 import { getDatabase } from "../db/startup.ts";
 import { getMailSender } from "../mail/shared.ts";
 import type { Database } from "../db/schema.ts";
-import { createAllowedLoginPinsRepository } from "../db/repositories/allowed-login-pins-repository.ts";
 import { loadAuthConfig, type AuthConfig } from "./config.ts";
-import { membershipChecker } from "./github-org.ts";
-import { githubProviderConfig } from "./github-provider.ts";
+import {
+  githubProviderConfig,
+  readSignInDecision,
+  type GithubProviderOptions,
+} from "./github-provider.ts";
 import {
   checkPassword,
   PASSWORD_ERROR_COPY,
   PASSWORD_MAX_LENGTH,
   PASSWORD_MIN_LENGTH,
 } from "./password-policy.ts";
-import { decideSignIn, readSignInAccess } from "./sign-in-access.ts";
 import { CREDENTIAL_PROVIDER_ID } from "./session-user.ts";
 import {
   EMAIL_NOT_VERIFIED_CODE,
@@ -41,9 +49,19 @@ const PASSWORD_FIELD_BY_PATH: Readonly<Record<string, string>> = {
   "/reset-password": "newPassword",
 };
 
+/** The user authorization of the GitHub App: what makes "Sign in with GitHub" work. */
+export type GithubSignInOptions = {
+  clientId: string;
+  clientSecret: string;
+  /** Who the person is, from the GitHub account and its addresses (src/github-signin/decider.ts). */
+  decide: GithubProviderOptions["decide"];
+};
+
 export type CreateAuthOptions = {
   db: Kysely<Database>;
   config: AuthConfig;
+  /** Left out: the sign in with GitHub does not exist on this instance of Better Auth. */
+  githubSignIn?: GithubSignInOptions;
   /** How long a call to GitHub may take. Only tests change the default. */
   githubRequestTimeoutMs?: number;
   /**
@@ -58,21 +76,10 @@ export type CreateAuthOptions = {
 export function createAuth({
   db,
   config,
+  githubSignIn,
   githubRequestTimeoutMs,
   verificationRequired,
 }: CreateAuthOptions) {
-  const org = config.access.org;
-  const githubOAuth = config.github.oauth;
-  const loginPins = createAllowedLoginPinsRepository(db);
-  const checkMembership =
-    org === null
-      ? undefined
-      : membershipChecker({
-          apiBaseUrl: config.github.apiBaseUrl,
-          org,
-          timeoutMs: githubRequestTimeoutMs,
-        });
-
   return betterAuth({
     appName: "Code Reviewer",
     baseURL: config.baseUrl,
@@ -102,8 +109,15 @@ export function createAuth({
           defaultValue: false,
           fieldName: "is_instance_admin",
         },
-        // When the membership in the allowed organization was last confirmed (ISO 8601). Written
-        // at sign in and by the 24 hour re-check (access-runtime.ts); read by the access policy.
+        // The GitHub address another account already has, when an imported user's placeholder address
+        // could not be replaced at the sign in (src/github-signin/decide.ts); empty otherwise.
+        emailConflict: {
+          type: "string",
+          required: false,
+          fieldName: "email_conflict",
+        },
+        // When the membership in the allowed organization was last confirmed (ISO 8601): written by the
+        // previous release's allow list, kept for the import of an existing installation.
         orgCheckedAt: {
           type: "string",
           required: false,
@@ -116,15 +130,17 @@ export function createAuth({
           fieldName: "org_checked_for",
         },
       },
-      // The gate for who may use this instance, run by Better Auth just before it creates a user
+      // The gate for who may sign in with GitHub, run by Better Auth just before it creates a user
       // or lets an existing one sign in, so a refused person leaves no user, account or session
-      // behind. The decision was made by the GitHub provider from the profile and the token. It
-      // fails closed: anything that is not a clear yes is a no. The `error` becomes the login
-      // page's `?error=` code (see login-errors.ts).
+      // behind. The decision was made by the GitHub provider from the profile and the addresses (the
+      // sign-up rule is applied to the verified primary address). It fails closed: anything that is not
+      // a clear yes is a no. The `error` becomes the login page's `?error=` code (see login-errors.ts).
       validateUserInfo: ({ source }) => {
-        const access = readSignInAccess(source.oauth?.profile);
-        if (access.allowed && source.oauth?.providerId === "github") return;
-        return { error: access.allowed ? "not_allowed" : access.reason };
+        const decision = readSignInDecision(source.oauth?.profile);
+        if (decision.allowed && source.oauth?.providerId === "github") return;
+        return {
+          error: decision.allowed ? "check_failed" : decision.reason,
+        };
       },
     },
     session: {
@@ -158,12 +174,14 @@ export function createAuth({
         createdAt: "created_at",
         updatedAt: "updated_at",
       },
-      // The user is the GitHub account (its id), never an email address. Without this, a second
-      // GitHub account that reports the same verified email (the first one gave it up) would be
-      // linked to the first account's user and inherit its access.
-      accountLinking: { enabled: false },
-      // The GitHub token is kept (the 24 hour organization re-check needs it), encrypted with the
-      // secret.
+      // The user is the GitHub account (its id). A GitHub account is linked to an existing user by an
+      // address only when GitHub reports that address as the verified primary one and the user's own is
+      // verified too (Better Auth's default for the local side); the decision before it (the GitHub provider,
+      // src/github-signin/decide.ts) refuses every other match and a user that has a GitHub account already.
+      // Better Auth's own endpoints for linking and unlinking stay switched off (`disabledPaths`): linking
+      // from an account's settings is ours (src/github-signin/link.ts).
+      accountLinking: { enabled: true },
+      // The GitHub token is kept, encrypted with the secret.
       encryptOAuthTokens: true,
     },
     verification: {
@@ -256,30 +274,19 @@ export function createAuth({
     },
 
     plugins: [
-      // GitHub sign in exists only while the GitHub OAuth app is configured.
-      ...(githubOAuth === null
+      // GitHub sign in exists only while the GitHub App's user authorization is configured.
+      ...(githubSignIn === undefined
         ? []
         : [
             genericOAuth({
               config: [
                 githubProviderConfig({
-                  clientId: githubOAuth.clientId,
-                  clientSecret: githubOAuth.clientSecret,
+                  clientId: githubSignIn.clientId,
+                  clientSecret: githubSignIn.clientSecret,
                   oauthBaseUrl: config.github.oauthBaseUrl,
                   apiBaseUrl: config.github.apiBaseUrl,
                   requestTimeoutMs: githubRequestTimeoutMs,
-                  requestOrgScope: org !== null,
-                  signInAccess: ({ login, githubId, accessToken }) =>
-                    decideSignIn({
-                      config: config.access,
-                      login,
-                      githubId,
-                      pins: loginPins,
-                      checkMembership: () =>
-                        checkMembership === undefined
-                          ? Promise.resolve("unavailable")
-                          : checkMembership(accessToken),
-                    }),
+                  decide: githubSignIn.decide,
                 }),
               ],
             }),
@@ -330,7 +337,8 @@ export type Auth = ReturnType<typeof createAuth>;
 
 // One instance per server process, created on the first request (not at import: `next build`
 // imports the route modules without a database or sign-in settings). Kept on globalThis because
-// the proxy and the route bundles do not share modules.
+// the proxy and the route bundles do not share modules. This is the instance of everything but the GitHub
+// sign in (see `getGithubAuth`).
 const globalKey = Symbol.for("code-reviewer.auth");
 type GlobalWithAuth = typeof globalThis & { [globalKey]?: Auth };
 

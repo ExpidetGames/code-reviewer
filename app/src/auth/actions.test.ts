@@ -22,6 +22,10 @@ vi.mock("./auth.ts", () => ({
     api: { signInEmail: mocks.signInEmail, signInSocial: mocks.signInSocial },
   }),
 }));
+vi.mock("./github-auth.ts", () => ({
+  getGithubAuth: () =>
+    Promise.resolve({ api: { signInSocial: mocks.signInSocial } }),
+}));
 vi.mock("./sign-in-runtime.ts", () => ({
   getSignInMethods: mocks.methods,
   getSignInLimiter: () => ({

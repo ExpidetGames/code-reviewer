@@ -36,9 +36,12 @@ vi.mock("../auth/auth.ts", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../auth/auth.ts")>()),
   getAuth: () => (request.harness as AuthHarness).auth,
 }));
-vi.mock("../auth/access-runtime.ts", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../auth/access-runtime.ts")>()),
-  getAccessPolicy: () => (request.harness as AuthHarness).policy,
+// The gates the pages ask (a verified address, a workspace): a test changes them with `startApp(harness, gates)`.
+const pageGates = vi.hoisted(() => ({
+  current: null as unknown,
+}));
+vi.mock("../auth/access-gates-runtime.ts", () => ({
+  getAccessGates: () => pageGates.current,
 }));
 
 import { signOut } from "../auth/actions.ts";
@@ -47,7 +50,8 @@ import RunsPage from "../app/(app)/runs/page.tsx";
 import RunDetailPage from "../app/(app)/runs/[id]/page.tsx";
 import SettingsPage from "../app/(app)/settings/page.tsx";
 import ProjectSettingsPage from "../app/(app)/projects/[repositoryId]/page.tsx";
-import { openGates } from "../test-support/open-gates.ts";
+import type { AccessGates } from "../auth/access-gates.ts";
+import { noWorkspaceGates, openGates } from "../test-support/open-gates.ts";
 
 const APP_PAGES = [
   { path: "/projects", render: ProjectsPage },
@@ -75,13 +79,16 @@ const APP_PAGES = [
   },
 ] as const;
 
-async function startApp(existing?: AuthHarness) {
+async function startApp(
+  existing?: AuthHarness,
+  gates: AccessGates = openGates,
+) {
   const harness = existing ?? (await createAuthHarness());
   request.harness = harness;
+  pageGates.current = gates;
   const proxy = createAccessProxy({
     getAuth: () => harness.auth,
-    getPolicy: () => harness.policy,
-    getGates: () => openGates,
+    getGates: () => gates,
   });
   function visit(path: string, cookies?: CookieJar) {
     const headers = new Headers();
@@ -98,6 +105,7 @@ async function startApp(existing?: AuthHarness) {
 afterEach(() => {
   request.headers = new Headers();
   request.harness = null;
+  pageGates.current = null;
   request.setCookies = [];
 });
 
@@ -139,16 +147,14 @@ describe("a visitor without a session", () => {
   );
 });
 
-describe("a signed in person who is not on the allow list", () => {
+describe("a signed in person who belongs to no workspace", () => {
   // CR-34-T12
   it.each(APP_PAGES)(
-    "is sent to the login page with the reason from $path, by the proxy and by the page itself",
+    "is sent to the page that says so from $path, by the proxy and by the page itself",
     async ({ path, render }) => {
       const signedIn = await startApp();
       const { cookies } = await signedIn.signIn();
-      const app = await startApp(
-        signedIn.restart({ allowedLogins: ["somebody-else"] }),
-      );
+      const app = await startApp(signedIn, noWorkspaceGates);
 
       const response = await app.visit(path, cookies);
       app.sendCookies(cookies);
@@ -156,11 +162,9 @@ describe("a signed in person who is not on the allow list", () => {
 
       expect(response.status).toBe(307);
       expect(response.headers.get("location")).toBe(
-        `${TEST_BASE_URL}/login?error=not_allowed`,
+        `${TEST_BASE_URL}/no-access`,
       );
-      expect(digest).toMatch(
-        /^NEXT_REDIRECT;[a-z]+;\/login\?error=not_allowed;/,
-      );
+      expect(digest).toMatch(/^NEXT_REDIRECT;[a-z]+;\/no-access;/);
     },
   );
 });

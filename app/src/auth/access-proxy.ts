@@ -14,7 +14,6 @@ import {
 } from "../admin/paths.ts";
 import { decideAccess, isPublicPath } from "./access.ts";
 import type { AccessGates } from "./access-gates.ts";
-import type { AccessPolicy } from "./access-policy.ts";
 import type { Auth } from "./auth.ts";
 import {
   lookupSession,
@@ -36,15 +35,12 @@ function digest(text: string): Buffer {
 
 export type AccessProxyDependencies = {
   getAuth: () => Pick<Auth, "api" | "$context">;
-  /** Called per request, so the policy is created on first use (not when the module is loaded). */
-  getPolicy: () => AccessPolicy;
   /** The verified-address and workspace gates (access-gates.ts); asked per request. */
   getGates: () => AccessGates;
 };
 
 export function createAccessProxy({
   getAuth,
-  getPolicy,
   getGates,
 }: AccessProxyDependencies) {
   // Per proxy, not per request; a request that comes from outside cannot know it.
@@ -92,12 +88,7 @@ export function createAccessProxy({
 
     let lookup: SessionLookup;
     try {
-      lookup = await lookupSession(
-        getAuth(),
-        request.headers,
-        getPolicy(),
-        getGates(),
-      );
+      lookup = await lookupSession(getAuth(), request.headers, getGates());
     } catch (error) {
       // The database or the sign in configuration is broken: refuse instead of letting it through.
       console.error(
@@ -152,12 +143,6 @@ export function createAccessProxy({
         return forward(request);
       }
       case "unauthorized":
-        // A user the policy turned away is known, so the answer is "forbidden", with the reason.
-        if (lookup.kind === "denied")
-          return NextResponse.json(
-            { error: "ACCESS_DENIED", reason: lookup.reason },
-            { status: 403, headers: { "cache-control": "no-store" } },
-          );
         // A signed in person who has to verify the address, or has no workspace yet, is known too.
         if (lookup.kind === "unverified")
           return NextResponse.json(

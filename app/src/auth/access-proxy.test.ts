@@ -50,7 +50,6 @@ function newProxy() {
   return createAccessProxy({
     // Never used: the session lookup is replaced above.
     getAuth: () => undefined as never,
-    getPolicy: () => undefined as unknown as AccessPolicy,
     // Never used either.
     getGates: () => undefined as never,
   });

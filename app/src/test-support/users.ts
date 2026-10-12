@@ -39,6 +39,7 @@ export async function insertUser(
       github_login: user.githubLogin ?? null,
       imported_at: user.importedAt ?? null,
       is_instance_admin: user.isInstanceAdmin === true ? 1 : 0,
+      email_conflict: null,
       org_checked_at: null,
       org_checked_for: null,
       created_at: user.createdAt ?? AT,

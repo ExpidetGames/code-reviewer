@@ -13,8 +13,9 @@
 //   automatically. (The workspaces issue replaces this check with the workspace pages; it is the
 //   interim guard that keeps a new account away from the data until then.) The instance admin is exempt.
 //
-// Accounts that sign in with GitHub only are not asked either question: their admission is the GitHub
-// allow list (access-policy.ts) until the GitHub issues replace it.
+// An account that signs in with GitHub only is asked the second question only: the address GitHub reports as
+// the verified primary one was verified at the sign in (an imported user's placeholder waits for it). Who may
+// have an account at all was decided when it was made, by the sign-up rule (src/github-signin/decide.ts).
 export type AccessGates = {
   /** Whether email and password accounts must have a verified address: the instance can send mail. */
   verificationRequired(): Promise<boolean>;

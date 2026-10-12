@@ -15,7 +15,7 @@ import {
 } from "../test-support/auth-harness.ts";
 import { concretePath, discoverRoutes } from "../test-support/routes.ts";
 import { createAccessProxy } from "./access-proxy.ts";
-import { openGates } from "../test-support/open-gates.ts";
+import { noWorkspaceGates, openGates } from "../test-support/open-gates.ts";
 
 // Every route of the app and whether it needs a session. A new route must be added here.
 const PUBLIC_ROUTES = [
@@ -87,7 +87,6 @@ async function createGuardedApp() {
   const harness = await createAuthHarness();
   const proxy = createAccessProxy({
     getAuth: () => harness.auth,
-    getPolicy: () => harness.policy,
     getGates: () => openGates,
   });
   function visit(path: string, cookies?: CookieJar, method = "GET") {
@@ -217,18 +216,12 @@ describe("a request with a valid session", () => {
     expect(passesThrough(await app.visit("/api/jobs", cookies))).toBe(true);
   });
 
-  it("is turned away when the access policy refuses the user", async () => {
+  it("is turned away when the user belongs to no workspace", async () => {
     const app = await createGuardedApp();
     const { cookies } = await app.signIn();
     const refusing = createAccessProxy({
       getAuth: () => app.auth,
-      getPolicy: () => (user) =>
-        Promise.resolve(
-          user.githubLogin === "octocat"
-            ? { allowed: false, reason: "not_allowed" }
-            : { allowed: true },
-        ),
-      getGates: () => openGates,
+      getGates: () => noWorkspaceGates,
     });
 
     const response = await refusing(
@@ -238,6 +231,7 @@ describe("a request with a valid session", () => {
     );
 
     expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(`${TEST_BASE_URL}/no-access`);
   });
 });
 
@@ -289,7 +283,6 @@ describe("a check that cannot be made", () => {
       getAuth: () => {
         throw new Error("the database is not initialized");
       },
-      getPolicy: () => () => Promise.resolve({ allowed: true }),
       getGates: () => openGates,
     });
     const error = vi

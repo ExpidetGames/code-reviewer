@@ -7,6 +7,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getAccessGates } from "./access-gates-runtime.ts";
 import { getAuth } from "./auth.ts";
+import { getGithubAuth } from "./github-auth.ts";
 import { pathAfterPasswordSignIn } from "./post-sign-in.ts";
 import { signInWithPasswordChecked } from "./password-sign-in.ts";
 import { getSignInLimiter, getSignInMethods } from "./sign-in-runtime.ts";
@@ -17,19 +18,27 @@ export async function signInWithGithub(): Promise<void> {
   if (!(await getSignInMethods()).github)
     redirect("/login?error=sign_in_method_disabled");
   let githubUrl: string | undefined;
+  let notConfigured = false;
   try {
-    const result = await getAuth().api.signInSocial({
+    const github = await getGithubAuth();
+    notConfigured = github === null;
+    const result = await github?.api.signInSocial({
       body: { provider: "github", callbackURL: "/" },
       headers: await headers(),
     });
-    githubUrl = result.url;
+    githubUrl = result?.url;
   } catch (error) {
     console.error(
       `[auth] could not start the GitHub sign in: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
   // redirect() works by throwing, so it stays outside the try block.
-  redirect(githubUrl ?? "/login?error=sign_in_unavailable");
+  redirect(
+    githubUrl ??
+      (notConfigured
+        ? "/login?error=github_not_configured"
+        : "/login?error=sign_in_unavailable"),
+  );
 }
 
 export async function signOut(): Promise<void> {

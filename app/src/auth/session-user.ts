@@ -1,14 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Reading the signed in user from request headers: asks Better Auth (which checks the session row
-// and its expiry in the database) and then the access policy. The proxy and the pages both use it,
-// so the answer is the same everywhere.
-import type {
-  AccessDenialReason,
-  AccessPolicy,
-  GithubSessionUser,
-  SessionUser,
-} from "./access-policy.ts";
+// and its expiry in the database) and then the gates (a verified address, a workspace). The proxy and
+// the pages both use it, so the answer is the same everywhere.
+import type { SessionUser } from "./access-policy.ts";
 import type { AccessGates } from "./access-gates.ts";
 import type { Auth } from "./auth.ts";
 import { GITHUB_PROVIDER_ID } from "./github-provider.ts";
@@ -23,20 +18,16 @@ export const CREDENTIAL_PROVIDER_ID = "credential";
  * - `no_workspace`: a valid session of an email and password account that belongs to no workspace, so
  *   it has no access to customer data (access-gates.ts).
  * - `none`: no valid session.
- * - `denied`: a valid session of a user who may not (any more) use the app; the reason is shown on
- *   the login page.
  */
 export type SessionLookup =
   | { kind: "user"; user: SessionUser }
   | { kind: "unverified"; user: SessionUser }
   | { kind: "no_workspace"; user: SessionUser }
-  | { kind: "none" }
-  | { kind: "denied"; reason: AccessDenialReason };
+  | { kind: "none" };
 
 export async function lookupSession(
   auth: Pick<Auth, "api" | "$context">,
   requestHeaders: Headers,
-  policy: AccessPolicy,
   gates: AccessGates,
 ): Promise<SessionLookup> {
   const session = await auth.api.getSession({ headers: requestHeaders });
@@ -58,11 +49,10 @@ export async function lookupSession(
     orgCheckedAt: session.user.orgCheckedAt ?? null,
     orgCheckedFor: session.user.orgCheckedFor ?? null,
   };
-  // An account with a password is admitted: such an account only exists because the first-run setup
-  // made it, or because the sign-up rule let it be created (src/signup/sign-up.ts evaluates that rule
-  // when the account is created, not on every request, so a stricter rule never locks anybody out). The
-  // GitHub allow list is about GitHub identities. Two gates stand in front of the app, though: a
-  // verified address, and a workspace (access-gates.ts).
+  // Who may have an account is decided when it is made (the first-run setup, or the sign-up rule for the
+  // sign-up and for the sign in with GitHub, evaluated then and not on every request, so a stricter rule
+  // never locks anybody out). What an account may use is the two gates in front of the app: a verified
+  // address, and a workspace (access-gates.ts).
   if (identities.password) {
     const blocked = await gateOf(
       {
@@ -74,16 +64,13 @@ export async function lookupSession(
     );
     return blocked === null ? { kind: "user", user } : { kind: blocked, user };
   }
+  // An account that signs in with GitHub only has no address to verify (GitHub's primary one was verified at
+  // the sign in, or an imported user's placeholder waits for it), so it is asked for a workspace only.
   if (githubLogin === null || identities.githubId === null)
     return { kind: "none" };
-  const decision = await policy({
-    ...user,
-    githubLogin,
-    githubId: identities.githubId,
-  } satisfies GithubSessionUser);
-  return decision.allowed
-    ? { kind: "user", user }
-    : { kind: "denied", reason: decision.reason };
+  if (!user.isInstanceAdmin && !(await gates.hasWorkspace(user.id)))
+    return { kind: "no_workspace", user };
+  return { kind: "user", user };
 }
 
 /**
@@ -128,8 +115,6 @@ export const NO_ACCESS_PAGE = "/no-access";
 /** Where a request that cannot be served goes: the login page, or the page that says what is missing. */
 export function loginPath(lookup: SessionLookup): string {
   switch (lookup.kind) {
-    case "denied":
-      return `/login?error=${lookup.reason}`;
     case "unverified":
       return VERIFY_EMAIL_PAGE;
     case "no_workspace":
