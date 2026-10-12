@@ -26,7 +26,8 @@ export type ResendDependencies = {
   mail: MailSender;
   limits: SignUpLimits;
   baseUrl: string;
-  defer: (work: Promise<void>) => void;
+  /** Runs work after the answer is sent; a function, so nothing of it starts before. */
+  defer: (work: () => Promise<void>) => void;
   now?: () => Date;
   log?: (message: string) => void;
 };
@@ -46,22 +47,29 @@ export async function resendVerification(
       retryAfterSeconds: permission.retryAfterSeconds,
     };
 
-  // Only an email and password account that waits for verification gets a link.
-  const waiting = await db
-    .selectFrom("users")
-    .innerJoin("accounts", "accounts.user_id", "users.id")
-    .select(["users.id", "users.email", "accounts.password"])
-    .where("users.email", "=", email)
-    .where("users.email_verified", "=", 0)
-    .where("accounts.provider_id", "=", CREDENTIAL_PROVIDER_ID)
-    .executeTakeFirst();
-  if (waiting?.password)
-    defer(
-      sendVerificationMail(
-        { db, mail, baseUrl, now, log },
-        { id: waiting.id, email: waiting.email },
-        waiting.password,
-      ),
-    );
+  // Only an email and password account that waits for verification gets a link. The look at the account
+  // waits for the answer too, so neither the answer nor its time tells whether there was one.
+  defer(async () => {
+    try {
+      const waiting = await db
+        .selectFrom("users")
+        .innerJoin("accounts", "accounts.user_id", "users.id")
+        .select(["users.id", "users.email", "accounts.password"])
+        .where("users.email", "=", email)
+        .where("users.email_verified", "=", 0)
+        .where("accounts.provider_id", "=", CREDENTIAL_PROVIDER_ID)
+        .executeTakeFirst();
+      if (waiting?.password)
+        await sendVerificationMail(
+          { db, mail, baseUrl, now, log },
+          { id: waiting.id, email: waiting.email },
+          waiting.password,
+        );
+    } catch {
+      (log ?? console.error)(
+        "[signup] VERIFICATION_MAIL_FAILED: a verification mail was not sent (error).",
+      );
+    }
+  });
   return { kind: "accepted" };
 }
