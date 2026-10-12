@@ -61,7 +61,7 @@ describe("the project list's calls", () => {
 
     expect(result).toEqual({ ok: true, data: { added: 1, errors: [] } });
     expect(calls).toEqual([
-      { url: "/api/w/acme/integrations/sync", method: "POST", body: null },
+      { url: "/api/admin/integrations/sync", method: "POST", body: null },
     ]);
   });
 });

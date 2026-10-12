@@ -66,7 +66,6 @@ describe("a fresh account in a single-tenant instance", () => {
       [`/api/w/${workspace.slug}/runs`, "GET"],
       [`/api/w/${workspace.slug}/review-settings`, "GET"],
       [`/api/w/${workspace.slug}/review-settings`, "PUT"],
-      [`/api/w/${workspace.slug}/integrations/sync`, "POST"],
       [`/api/w/${workspace.slug}/invitations`, "POST"],
       [`/api/w/${workspace.slug}/members/${portal.adminId}`, "DELETE"],
       [`/api/w/${workspace.slug}`, "PATCH"],

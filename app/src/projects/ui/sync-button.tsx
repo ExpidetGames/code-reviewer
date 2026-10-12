@@ -25,7 +25,7 @@ export function SyncButton({
   workspaceSlug,
   api: apiProp,
 }: {
-  /** The workspace of the page: the call is made in it. */
+  /** The workspace of the page (the client is made for it; the synchronization itself is the instance's). */
   workspaceSlug: string;
   api?: ProjectsApi;
 }) {

@@ -6,6 +6,7 @@
 // changes the global defaults that a project without its own value then follows. The details of each
 // piece (copy, validation, the routes) are proven as component and integration tests.
 import { expect, test } from "@playwright/test";
+import { syncFromGithubAsAdmin } from "../helpers/admin-api";
 import {
   addGithubAccount,
   addGithubInstallation,
@@ -53,13 +54,17 @@ test.describe("the project list and the settings pages", () => {
   test("@smoke a person syncs the repository, switches it on, changes a setting, reloads and finds it, and switches it off again", async ({
     page,
   }) => {
+    // The synchronization reads every connection of the instance: it is the instance admin's. The person
+    // here owns the workspace and does not run the instance, so the page has no button for them.
+    await syncFromGithubAsAdmin(e2eEnv.appUrl);
     await signInThroughTheForm(page, account);
     await expect(
       page.getByRole("heading", { level: 1, name: "Projects" }),
     ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Sync from GitHub" }),
+    ).toHaveCount(0);
 
-    await page.getByRole("button", { name: "Sync from GitHub" }).click();
-    await expect(page.getByRole("status")).toContainText(/new repositor/);
     const row = page.getByRole("listitem").filter({ hasText: REPOSITORY });
     await expect(row.getByText("Inactive")).toBeVisible();
 
@@ -98,6 +103,20 @@ test.describe("the project list and the settings pages", () => {
         .filter({ hasText: REPOSITORY })
         .getByText("Inactive"),
     ).toBeVisible();
+  });
+
+  // #101-WM-08
+  test("@smoke the instance admin finds the Sync from GitHub button on the Projects page and runs it", async ({
+    page,
+  }) => {
+    await page.goto("/login");
+    await page.getByLabel("Email address").fill(e2eEnv.adminEmail);
+    await page.getByLabel("Password").fill(e2eEnv.adminPassword);
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    await expect(page).toHaveURL(/\/w\/default\/projects$/);
+
+    await page.getByRole("button", { name: "Sync from GitHub" }).click();
+    await expect(page.getByRole("status")).toContainText(/repositor/);
   });
 
   // CR-34-T14

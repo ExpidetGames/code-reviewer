@@ -13,8 +13,12 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { createProjectsRepository } from "../../db/repositories/projects-repository.ts";
-import { describeConfigStatus } from "../../config-status/status.ts";
-import { githubAppInstallUrl } from "../../config-status/status.ts";
+import {
+  describeConfigStatus,
+  githubAppInstallUrl,
+  statusForMembers,
+  type ConfigAudience,
+} from "../../config-status/status.ts";
 import { testGithubAppEnv } from "../../test-support/github-app.ts";
 import { startSyncHarness } from "../../test-support/integration-sync-harness.ts";
 import { createProjectService } from "../service.ts";
@@ -30,7 +34,10 @@ const WORKING_ENV: Record<string, string | undefined> = {
   LLM_API_KEY: LLM_KEY,
 };
 
-async function openPage(env: Record<string, string | undefined> = WORKING_ENV) {
+async function openPage(
+  env: Record<string, string | undefined> = WORKING_ENV,
+  audience: ConfigAudience = "operator",
+) {
   const h = await startSyncHarness();
   h.fake.addInstallation({
     id: 4242,
@@ -58,10 +65,20 @@ async function openPage(env: Record<string, string | undefined> = WORKING_ENV) {
   await projects.activateProject(widgets!.id);
   const data = await loadProjectsPage({
     projects,
-    config: () => describeConfigStatus(env),
+    // What the page file does: the whole status for the instance admin, the reduced one for a member.
+    config: () =>
+      audience === "operator"
+        ? describeConfigStatus(env)
+        : statusForMembers(describeConfigStatus(env)),
     installUrl: () => githubAppInstallUrl(env),
   });
-  return render(<ProjectsPageContent workspaceSlug="acme" data={data} />);
+  return render(
+    <ProjectsPageContent
+      workspaceSlug="acme"
+      audience={audience}
+      data={data}
+    />,
+  );
 }
 
 describe("the Projects page", () => {
@@ -147,5 +164,37 @@ describe("the Projects page", () => {
       (toggle) => toggle.getAttribute("aria-checked") === "true",
     );
     expect(on?.disabled).toBe(false);
+  });
+
+  // #101-WM-08
+  it("tells a member that GitHub is not set up and to ask the instance admin, without a variable name, and still blocks activating", async () => {
+    const { container } = await openPage(
+      {
+        ...WORKING_ENV,
+        GITHUB_APP_ID: undefined,
+        GITHUB_APP_PRIVATE_KEY: undefined,
+        LLM_API_KEY: undefined,
+      },
+      "member",
+    );
+
+    expect(screen.getByText("GitHub is not set up yet")).toBeTruthy();
+    expect(screen.getByText("Reviews are not set up yet")).toBeTruthy();
+    expect(container.textContent).toContain("Ask your instance admin");
+    expect(container.textContent).not.toMatch(
+      /GITHUB_APP|LLM_|GitHub App not configured/,
+    );
+    const switches = screen.getAllByRole("switch") as HTMLButtonElement[];
+    const off = switches.filter(
+      (toggle) => toggle.getAttribute("aria-checked") === "false",
+    );
+    expect(off.every((toggle) => toggle.disabled)).toBe(true);
+  });
+
+  // #101-WM-08
+  it("shows a member of a working instance no hint at all", async () => {
+    const { container } = await openPage(WORKING_ENV, "member");
+
+    expect(container.querySelector(".notices")).toBeNull();
   });
 });

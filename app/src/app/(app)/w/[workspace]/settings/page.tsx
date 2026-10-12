@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Metadata } from "next";
-import { getConfigStatus } from "@/config-status/shared";
+import { getConfigStatusFor } from "@/config-status/shared";
+import { configAudienceOf } from "@/config-status/status";
 import { reviewSettingsServiceFor } from "@/review-settings/shared";
 import {
   GlobalSettingsPageContent,
@@ -21,7 +22,7 @@ export default async function SettingsPage({
   params,
 }: PageProps<"/w/[workspace]/settings">) {
   const { workspace: slug } = await params;
-  const { workspace, role } = await requireWorkspace(slug);
+  const { workspace, role, user } = await requireWorkspace(slug);
   return (
     <>
       <PageHeader title="Settings" description="How Code Reviewer behaves." />
@@ -44,6 +45,7 @@ export default async function SettingsPage({
         workspaceId={workspace.id}
         workspaceSlug={workspace.slug}
         canEdit={can(role, "manage_review_defaults")}
+        user={user}
       />
     </>
   );
@@ -53,18 +55,22 @@ async function SettingsContent({
   workspaceId,
   workspaceSlug,
   canEdit,
+  user,
 }: {
   workspaceId: string;
   workspaceSlug: string;
   canEdit: boolean;
+  user: { isInstanceAdmin: boolean };
 }) {
   const data = await loadGlobalSettingsPage({
     settings: reviewSettingsServiceFor(workspaceId),
-    config: getConfigStatus,
+    // Only the instance admin gets the names of the variables that are wrong.
+    config: () => getConfigStatusFor(user),
   });
   return (
     <GlobalSettingsPageContent
       workspaceSlug={workspaceSlug}
+      audience={configAudienceOf(user)}
       canEdit={canEdit}
       data={data}
     />

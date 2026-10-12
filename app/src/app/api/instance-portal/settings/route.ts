@@ -8,6 +8,7 @@ import { connection } from "next/server";
 import { createAdminRouteHandlers } from "@/admin/http";
 import { lookupAdmin } from "@/admin/session";
 import { getAdminService } from "@/admin/shared";
+import { getIntegrationSync } from "@/integrations/sync/shared";
 
 async function handlers() {
   // Needs the request and the database, so it never runs at build time.
@@ -17,6 +18,7 @@ async function handlers() {
     access: lookupAdmin,
     notFound,
     service: getAdminService(),
+    sync: getIntegrationSync,
   });
 }
 

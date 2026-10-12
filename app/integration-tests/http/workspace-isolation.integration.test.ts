@@ -187,16 +187,6 @@ const ENTRIES: Entry[] = [
     takesNoIds: true,
   },
   {
-    name: "POST integrations/sync",
-    route: "/api/w/[workspace]/integrations/sync",
-    method: "POST",
-    minRole: MINIMUM_ROLE.manage_connections,
-    path: () => "/integrations/sync",
-    params: () => ({}),
-    file: "integrations/sync/route.ts",
-    takesNoIds: true,
-  },
-  {
     name: "PATCH workspace",
     route: "/api/w/[workspace]",
     method: "PATCH",

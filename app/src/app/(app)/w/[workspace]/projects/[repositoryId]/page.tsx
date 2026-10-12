@@ -2,7 +2,8 @@
 
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { getConfigStatus } from "@/config-status/shared";
+import { getConfigStatusFor } from "@/config-status/shared";
+import { configAudienceOf } from "@/config-status/status";
 import { projectServiceFor } from "@/projects/shared";
 import {
   loadProjectSettingsPage,
@@ -23,12 +24,13 @@ export default async function ProjectSettingsPage({
   params,
 }: PageProps<"/w/[workspace]/projects/[repositoryId]">) {
   const { workspace: slug, repositoryId } = await params;
-  const { workspace } = await requireWorkspace(slug);
+  const { workspace, user } = await requireWorkspace(slug);
   return (
     <ProjectSettingsContent
       workspaceId={workspace.id}
       workspaceSlug={workspace.slug}
       repositoryId={repositoryId}
+      user={user}
     />
   );
 }
@@ -37,18 +39,25 @@ async function ProjectSettingsContent({
   workspaceId,
   workspaceSlug,
   repositoryId,
+  user,
 }: {
   workspaceId: string;
   workspaceSlug: string;
   repositoryId: string;
+  user: { isInstanceAdmin: boolean };
 }) {
   const data = await loadProjectSettingsPage(repositoryId, {
     projects: projectServiceFor(workspaceId),
     settings: reviewSettingsServiceFor(workspaceId),
-    config: getConfigStatus,
+    // Only the instance admin gets the names of the variables that are wrong.
+    config: () => getConfigStatusFor(user),
   });
   if (data.kind === "not_found") notFound();
   return (
-    <ProjectSettingsPageContent workspaceSlug={workspaceSlug} data={data} />
+    <ProjectSettingsPageContent
+      workspaceSlug={workspaceSlug}
+      audience={configAudienceOf(user)}
+      data={data}
+    />
   );
 }

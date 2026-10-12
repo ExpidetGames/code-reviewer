@@ -7,7 +7,10 @@
 import Link from "next/link";
 import { workspacePath } from "../../workspaces/paths.ts";
 import { ConfigNotices } from "../../config-status/notices.tsx";
-import type { ConfigStatus } from "../../config-status/status.ts";
+import type {
+  ConfigAudience,
+  ConfigStatus,
+} from "../../config-status/status.ts";
 import { PageHeader } from "../../ui/page-header.tsx";
 import { ReviewSettingsError } from "../../review-settings/errors.ts";
 import type { ManualReviewApi } from "../../manual-reviews/ui/api.ts";
@@ -67,12 +70,15 @@ const STATE_TEXT: Record<ProjectRowView["status"], string> = {
 
 export function ProjectSettingsPageContent({
   workspaceSlug,
+  audience = "member",
   data,
   api,
   manualReviewApi,
 }: {
   /** The workspace of the page: every link and call stays in it. */
   workspaceSlug: string;
+  /** Whether the person runs the instance (reads which variables are wrong) or is a member. */
+  audience?: ConfigAudience;
   data: Extract<ProjectSettingsPageData, { kind: "ready" }>;
   /** Only tests pass this: a server component cannot hand functions to the client form. */
   api?: SettingsApi;
@@ -94,7 +100,7 @@ export function ProjectSettingsPageContent({
           </Link>
         }
       />
-      <ConfigNotices status={data.config} />
+      <ConfigNotices status={data.config} audience={audience} />
       <p className="muted">{STATE_TEXT[row.status]}</p>
       {/* Keyed on the repository: a panel that Cache Components kept mounted for another project
           must not show its pull requests. Only an active project can be started by hand. */}

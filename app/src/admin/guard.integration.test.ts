@@ -56,13 +56,14 @@ afterEach(() => {
 });
 
 describe("the routes of the portal", () => {
-  it("are found on the file system: the pages of the five sections, the settings route and the test mail route", () => {
+  it("are found on the file system: the pages of the five sections, the settings route, the test mail route and the synchronization", () => {
     expect(adminRoutes.map(({ route }) => route).sort()).toEqual([
       "/admin",
       "/admin/integrations",
       "/admin/limits",
       "/admin/mail",
       "/admin/setup",
+      "/api/admin/integrations/sync",
       "/api/admin/mail/test",
       "/api/admin/settings",
     ]);
@@ -314,5 +315,68 @@ describe("the instance admin", () => {
     expect(await page.text()).toBe("reached");
     expect(data.status).toBe(200);
     expect(await data.json()).toMatchObject({ mailConfigured: true });
+  });
+});
+
+describe("the synchronization with GitHub", () => {
+  const SYNC = "/api/admin/integrations/sync";
+
+  // #101-WM-08
+  it("runs for the instance admin and answers with the instance-wide counts", async () => {
+    const { portal } = await startPortal();
+
+    const response = await portal.visit(SYNC, {
+      method: "POST",
+      cookies: portal.adminCookies,
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ added: 3, errors: [] });
+    expect(portal.syncCalls.count).toBe(1);
+  });
+
+  // #101-WM-08
+  it("is a path that does not exist for a signed in person who does not run the instance, and does not run", async () => {
+    const { portal, memberCookies } = await startPortal();
+
+    const throughTheProxy = await portal.visit(SYNC, {
+      method: "POST",
+      cookies: memberCookies,
+    });
+    // The proxy is not in front: the route asks for the admin itself.
+    const routeAlone = await portal.callRoute(
+      "/api/instance-portal/integrations/sync",
+      { method: "POST", cookies: memberCookies },
+    );
+
+    expect(isHidden(throughTheProxy)).toBe(true);
+    expect(routeAlone.status).toBe(404);
+    expect(portal.syncCalls.count).toBe(0);
+  });
+
+  // #101-WM-08
+  it("answers a visitor without a session with 401 and does not run", async () => {
+    const { portal } = await startPortal();
+
+    const response = await portal.visit(SYNC, { method: "POST" });
+
+    expect(response.status).toBe(401);
+    expect(portal.syncCalls.count).toBe(0);
+  });
+
+  it("does not run for a request from another site", async () => {
+    const { portal } = await startPortal();
+
+    const response = await portal.visit(SYNC, {
+      method: "POST",
+      cookies: portal.adminCookies,
+      headers: {
+        origin: "https://evil.example",
+        "sec-fetch-site": "cross-site",
+      },
+    });
+
+    expect(response.status).toBe(403);
+    expect(portal.syncCalls.count).toBe(0);
   });
 });

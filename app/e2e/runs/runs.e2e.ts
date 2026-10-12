@@ -11,6 +11,7 @@ import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { expect, test } from "@playwright/test";
+import { syncFromGithubAsAdmin } from "../helpers/admin-api";
 import { e2eEnv } from "../helpers/e2e-env";
 import {
   addGithubAccount,
@@ -127,8 +128,8 @@ test.describe("the runs pages", () => {
     page,
     request,
   }) => {
+    await syncFromGithubAsAdmin(e2eEnv.appUrl);
     await signInThroughTheForm(page, account);
-    await page.getByRole("button", { name: "Sync from GitHub" }).click();
     const row = page
       .getByRole("listitem")
       .filter({ hasText: WIDGETS.fullName });

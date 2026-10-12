@@ -230,7 +230,6 @@ test.describe("an Owner invites a colleague who accepts", () => {
         data: { email: "somebody@e2e.test", role: "member" },
       }),
       await page.request.patch("/api/w/default", { data: { name: "Mine" } }),
-      await page.request.post("/api/w/default/integrations/sync"),
       await page.request.patch("/api/w/default/members/anyone", {
         data: { role: "owner" },
       }),
@@ -239,6 +238,19 @@ test.describe("an Owner invites a colleague who accepts", () => {
       expect(refusal.status()).toBe(403);
       expect(await refusal.json()).toEqual({ error: "forbidden" });
     }
+    // The synchronization with GitHub reads every connection of the instance: it is the instance admin's, and
+    // for a Member (as for an Owner who does not run the instance) it is a path that does not exist.
+    const sync = await page.request.post("/api/admin/integrations/sync");
+    const missing = await page.request.post("/api/there-is-no-such-route");
+    expect(sync.status()).toBe(404);
+    expect(await sync.text()).toBe(await missing.text());
+    await page.goto("/w/default/projects");
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Projects" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Sync from GitHub" }),
+    ).toHaveCount(0);
     // Even their own role cannot be raised by them.
     const members = await page.request.get("/api/w/default/runs");
     expect(members.status()).toBe(200);

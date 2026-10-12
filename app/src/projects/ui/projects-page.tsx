@@ -4,7 +4,10 @@
 // `loadProjectsPage` gathers the data from the services (passed in, so a test uses real ones against
 // a test database), `ProjectsPageContent` renders it. The page file only wires the real services.
 import { ConfigNotices } from "../../config-status/notices.tsx";
-import type { ConfigStatus } from "../../config-status/status.ts";
+import type {
+  ConfigAudience,
+  ConfigStatus,
+} from "../../config-status/status.ts";
 import type { ProjectService } from "../service.ts";
 import type { ProjectsApi } from "./api.ts";
 import {
@@ -39,15 +42,21 @@ export async function loadProjectsPage(deps: {
 
 export const ACTIVATION_BLOCKED_TEXT =
   "The GitHub App is not configured, so projects cannot be activated yet.";
+/** The same for a member of a workspace, who is not the one to configure it. */
+export const ACTIVATION_BLOCKED_TEXT_FOR_MEMBERS =
+  "GitHub is not set up yet, so projects cannot be activated. Ask your instance admin.";
 
 export function ProjectsPageContent({
   workspaceSlug,
+  audience = "member",
   canManage = true,
   data,
   api,
 }: {
   /** The workspace of the page. */
   workspaceSlug: string;
+  /** Whether the person runs the instance (reads which variables are wrong) or is a member. */
+  audience?: ConfigAudience;
   /** Whether the person may switch projects on and off (an Admin or an Owner). */
   canManage?: boolean;
   data: ProjectsPageData;
@@ -55,14 +64,18 @@ export function ProjectsPageContent({
 }) {
   return (
     <>
-      <ConfigNotices status={data.config} />
+      <ConfigNotices status={data.config} audience={audience} />
       <ProjectList
         workspaceSlug={workspaceSlug}
         canManage={canManage}
         view={data.list}
         installUrl={data.installUrl}
         activationBlocked={
-          data.config.githubApp.configured ? null : ACTIVATION_BLOCKED_TEXT
+          data.config.githubApp.configured
+            ? null
+            : audience === "operator"
+              ? ACTIVATION_BLOCKED_TEXT
+              : ACTIVATION_BLOCKED_TEXT_FOR_MEMBERS
         }
         {...(api === undefined ? {} : { api })}
       />

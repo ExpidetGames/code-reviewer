@@ -79,13 +79,13 @@ const PROTECTED_ROUTES = [
 const PROTECTED_DATA_ROUTES = [
   "/api/instance-portal/settings",
   "/api/instance-portal/mail/test",
+  "/api/instance-portal/integrations/sync",
   "/api/backup/status",
   // Not about one workspace: creating one, accepting an invitation (src/auth/access.ts, NO_WORKSPACE_PATHS).
   "/api/workspaces",
   "/api/invitations/accept",
   // The data routes of a workspace: for its members only (src/workspaces/access-runtime.ts).
   "/api/w/[workspace]",
-  "/api/w/[workspace]/integrations/sync",
   "/api/w/[workspace]/invitations",
   "/api/w/[workspace]/invitations/[invitationId]",
   "/api/w/[workspace]/invitations/[invitationId]/resend",

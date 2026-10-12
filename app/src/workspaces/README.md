@@ -141,7 +141,11 @@ Deleting workspaces, transferring data, SSO and teams below the workspace are ou
 App installation to the workspace of the person who installed it is its own issue: until then the
 synchronization puts a connection that is new to the instance into the oldest workspace
 (`src/integrations/sync/default-workspace.ts`) and refuses (`WORKSPACE_NOT_AVAILABLE`) when there is none. The
-workspace LLM key is its own issue as well; the matrix already names `manage_llm_key`.
+workspace LLM key is its own issue as well; the matrix already names `manage_llm_key`. The same issue gives the
+synchronization with GitHub back to the workspaces (`manage_connections`, an Admin or an Owner): until then it is the
+instance admin's, because it reads every connection of the instance (`src/integrations/README.md`). In the same way the
+workspace pages tell a member only that GitHub or the reviews are not set up and to ask the instance admin; the names
+of the variables and the provider and model are the instance admin's to read (`src/config-status/`).
 
 ## Tests
 

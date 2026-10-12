@@ -14,7 +14,10 @@ vi.mock("next/navigation", () => ({
 }));
 
 import type { SessionUser } from "../../auth/access-policy.ts";
-import { describeConfigStatus } from "../../config-status/status.ts";
+import {
+  describeConfigStatus,
+  statusForMembers,
+} from "../../config-status/status.ts";
 import { createProjectsRepository } from "../../db/repositories/projects-repository.ts";
 import type { ManualReviewApi } from "../../manual-reviews/ui/api.ts";
 import { createReviewSettingsRouteHandlers } from "../../review-settings/http.ts";
@@ -389,5 +392,34 @@ describe("the settings page of a project", () => {
       "acme/<img src=x onerror=alert(1)>",
     );
     expect(container.querySelector("img")).toBeNull();
+  });
+
+  // #101-WM-08
+  it("tells a member that reviews are not set up and to ask the instance admin, naming no variable", async () => {
+    const app = await openProject();
+    const data = await loadProjectSettingsPage(app.first.id, {
+      projects: app.projects,
+      settings: app.service,
+      // What the page file does for a person who does not run the instance.
+      config: () =>
+        statusForMembers(
+          describeConfigStatus({ ...WORKING_ENV, LLM_API_KEY: undefined }),
+        ),
+    });
+    if (data.kind !== "ready") throw new Error("expected the form");
+
+    const { container } = render(
+      <ProjectSettingsPageContent
+        workspaceSlug="acme"
+        audience="member"
+        data={data}
+        api={app.api}
+        manualReviewApi={quietManualReviews}
+      />,
+    );
+
+    expect(screen.getByText("Reviews are not set up yet")).toBeTruthy();
+    expect(container.textContent).toContain("Ask your instance admin");
+    expect(container.textContent).not.toMatch(/GITHUB_APP|LLM_/);
   });
 });
