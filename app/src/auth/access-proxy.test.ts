@@ -228,6 +228,15 @@ describe("the instance admin's request for the portal", () => {
       mark,
     );
   });
+
+  // #156
+  it("is answered private and no-store, so a shared cache never keeps the prerendered answer", async () => {
+    lookupSession.mockResolvedValue(aUser(true));
+
+    const response = await newProxy()(request("/admin/setup"));
+
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+  });
 });
 
 describe("the header that serves the portal's files", () => {
