@@ -14,6 +14,9 @@ const setupAppPort = Number(process.env.E2E_SETUP_PORT) || appPort + 2;
 // outbox, which makes every other journey's admin ask for a verified address): the port after the third
 // one unless E2E_SIGNUP_PORT says otherwise.
 const signupAppPort = Number(process.env.E2E_SIGNUP_PORT) || appPort + 3;
+// The fifth app of the run, for the journeys of the workspaces in a multi-tenant instance (people create
+// workspaces and switch between them): the port after the fourth one unless E2E_MULTI_PORT says otherwise.
+const multiAppPort = Number(process.env.E2E_MULTI_PORT) || appPort + 4;
 // The fake GitHub gets a random port in a high range, so two checkouts never collide however their
 // E2E_PORT values are chosen. The choice is stored in the environment: Playwright loads this file
 // again in every worker process, which inherits the main process's environment.
@@ -40,6 +43,10 @@ export const e2eEnv = {
   /** The SQLite file of the fourth app, which the sign-up journey uses (fresh for every run). */
   signupDatabasePath: "test-results/e2e-signup-data/app.db",
   signupAppUrl: `http://127.0.0.1:${signupAppPort}`,
+  multiAppPort,
+  /** The SQLite file of the fifth app, which is multi-tenant (fresh for every run). */
+  multiDatabasePath: "test-results/e2e-multi-data/app.db",
+  multiAppUrl: `http://127.0.0.1:${multiAppPort}`,
   /**
    * The file the fourth app writes its mail to instead of sending it (one JSON message per line, fresh
    * for every run): the journey reads the verification link from it like from an inbox.
@@ -55,6 +62,7 @@ export const e2eEnv = {
     pipeline: "test-results/e2e-pipeline.log",
     setup: "test-results/e2e-setup.log",
     signup: "test-results/e2e-signup.log",
+    multi: "test-results/e2e-multi.log",
   },
   /** The instance admin the journeys create when they set an app up. A dummy, as everything here. */
   adminEmail: "admin@e2e.test",

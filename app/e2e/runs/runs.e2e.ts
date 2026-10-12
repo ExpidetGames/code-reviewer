@@ -198,7 +198,7 @@ test.describe("the runs pages", () => {
       .filter({ visible: true });
     await expect(project.getByText(/Last run: Succeeded/)).toBeVisible();
     await project.getByRole("link", { name: "All runs" }).click();
-    await expect(page).toHaveURL(/\/runs\?repository=/);
+    await expect(page).toHaveURL(/\/w\/default\/runs\?repository=/);
     await expect(
       page.getByRole("listitem").filter({ hasText: `${WIDGETS.fullName} #7` }),
     ).toBeVisible();
@@ -244,7 +244,7 @@ test.describe("the runs pages", () => {
       actorLogin: account.login,
     });
 
-    await page.goto("/runs");
+    await page.goto("/w/default/runs");
     const runs = page
       .getByRole("list", { name: "Runs" })
       .filter({ visible: true });
@@ -317,15 +317,15 @@ test.describe("the runs pages", () => {
   }) => {
     await signInThroughTheForm(page, account);
 
-    await page.goto("/runs/00000000-0000-4000-8000-000000000000");
+    await page.goto("/w/default/runs/00000000-0000-4000-8000-000000000000");
     await expect(
       page.getByText(/could not be found|not found/i).first(),
     ).toBeVisible();
     await expect(page.getByText(WIDGETS.fullName)).toHaveCount(0);
 
-    const list = await request.get("/api/runs", { maxRedirects: 0 });
+    const list = await request.get("/api/w/default/runs", { maxRedirects: 0 });
     const one = await request.get(
-      "/api/runs/00000000-0000-4000-8000-000000000000",
+      "/api/w/default/runs/00000000-0000-4000-8000-000000000000",
       {
         maxRedirects: 0,
       },
@@ -342,7 +342,7 @@ test.describe("the runs pages", () => {
       page,
     }) => {
       await signInThroughTheForm(page, account);
-      await page.goto("/runs");
+      await page.goto("/w/default/runs");
       await expect(
         page.getByRole("list", { name: "Runs" }).getByRole("listitem").first(),
       ).toBeVisible();

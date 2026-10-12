@@ -6,6 +6,7 @@
 // settled so a run that starts later shows up too. Everything in a run that came from outside (the
 // project name, the login) is rendered as text.
 import Link from "next/link";
+import { useMemo } from "react";
 import { workspacePath } from "../../workspaces/paths.ts";
 import { EmptyState } from "../../ui/empty-state.tsx";
 import { formatUtc } from "../../ui/format-time.ts";
@@ -115,7 +116,7 @@ export function RunsList({
   workspaceSlug,
   initial,
   filter,
-  api = browserRunsApi(workspaceSlug),
+  api: apiProp,
 }: {
   /** The workspace of the page: the polling and every link stay in it. */
   workspaceSlug: string;
@@ -123,6 +124,12 @@ export function RunsList({
   filter: RunsFilter;
   api?: RunsApi;
 }) {
+  // One client for the life of the component: a new one every render would restart what depends on it.
+  const defaultApi = useMemo(
+    () => browserRunsApi(workspaceSlug),
+    [workspaceSlug],
+  );
+  const api = apiProp ?? defaultApi;
   const { data, failed, failureCode, stopped } = useLiveSnapshot({
     initial,
     fetchLatest: () => api.list(filter),

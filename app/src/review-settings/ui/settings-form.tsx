@@ -128,11 +128,15 @@ export function SettingsForm({
   /** Only tests pass this: a server component cannot hand functions to this client component. */
   api?: SettingsApi;
 }) {
-  const api =
-    apiOverride ??
-    (initial.mode === "project" && repositoryId !== undefined
-      ? browserProjectSettingsApi(workspaceSlug, repositoryId)
-      : browserGlobalSettingsApi(workspaceSlug));
+  // One client for the life of the component: a new one every render would restart what depends on it.
+  const defaultApi = useMemo(
+    () =>
+      initial.mode === "project" && repositoryId !== undefined
+        ? browserProjectSettingsApi(workspaceSlug, repositoryId)
+        : browserGlobalSettingsApi(workspaceSlug),
+    [initial.mode, repositoryId, workspaceSlug],
+  );
+  const api = apiOverride ?? defaultApi;
   const prefix = useId();
   const [model, setModel] = useState(initial);
   const [state, setState] = useState(() => initialFormState(initial));

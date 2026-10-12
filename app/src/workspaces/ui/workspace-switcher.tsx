@@ -70,7 +70,7 @@ export function WorkspaceSwitcher({
       >
         <span className="muted small">Workspace</span>
         <span className="workspace-switcher-name">
-          {current?.name ?? "Choose"}
+          {current?.name ?? "Switch"}
         </span>
       </button>
       {open ? (

@@ -5,7 +5,7 @@
 // now, then says how many repositories are new and what went wrong, in sentences. The list refreshes
 // afterwards. (The app also syncs at start and whenever GitHub reports a change to an installation.)
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Button } from "../../ui/button.tsx";
 import { browserProjectsApi, type ProjectsApi } from "./api.ts";
 import { describeFailure, describeSyncProblem } from "./messages.ts";
@@ -23,12 +23,18 @@ function addedText(added: number): string {
 
 export function SyncButton({
   workspaceSlug,
-  api = browserProjectsApi(workspaceSlug),
+  api: apiProp,
 }: {
   /** The workspace of the page: the call is made in it. */
   workspaceSlug: string;
   api?: ProjectsApi;
 }) {
+  // One client for the life of the component: a new one every render would restart what depends on it.
+  const defaultApi = useMemo(
+    () => browserProjectsApi(workspaceSlug),
+    [workspaceSlug],
+  );
+  const api = apiProp ?? defaultApi;
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [outcome, setOutcome] = useState<Outcome | null>(null);

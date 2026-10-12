@@ -1,0 +1,242 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// Workspaces, roles and invitations in a real browser against a production build, single-tenant and without
+// a mail server (so an invitation is a link that is shown once): the Owner invites a colleague and copies the
+// link, a second browser opens it, creates an account with the invited address, signs in and accepts; the
+// new Member is refused every admin action, by the page and by the server; a person who signed up on their own
+// has no access to the workspace and is told to ask for an invitation. The rules behind are proven as
+// integration tests (src/workspaces/); this is the path a person takes.
+import {
+  expect,
+  test,
+  type Browser,
+  type BrowserContext,
+  type Page,
+} from "@playwright/test";
+import { e2eEnv } from "../helpers/e2e-env";
+
+const COLLEAGUE = "colleague@e2e.test";
+const FRESH = "fresh@e2e.test";
+const PASSWORD = "e2e-colleague-passphrase-cedar-9";
+
+async function signIn(page: Page, email: string, password: string) {
+  await page.goto("/login");
+  await page.getByLabel("Email address").fill(email);
+  await page.getByLabel("Password").fill(password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  // Signed in: the app has sent the person on from the login page.
+  await expect(page).not.toHaveURL(/\/login/);
+}
+
+async function signUp(page: Page, email: string) {
+  const form = page.getByRole("form", { name: "Sign-up form" });
+  await form.getByLabel("Email address").fill(email);
+  await form.getByLabel("Password", { exact: true }).fill(PASSWORD);
+  await form.getByLabel("Repeat the password").fill(PASSWORD);
+  await form.getByRole("button", { name: "Create account" }).click();
+  await expect(page.getByRole("status")).toContainText("the account is ready");
+}
+
+async function newPerson(browser: Browser): Promise<BrowserContext> {
+  return browser.newContext({ baseURL: e2eEnv.appUrl });
+}
+
+test.describe.configure({ mode: "serial" });
+
+test.describe("an Owner invites a colleague who accepts", () => {
+  let invitation = "";
+
+  // #101-WM-26, #101-WM-13
+  test("@smoke the Owner invites an address and copies the link, which is shown once", async ({
+    page,
+  }) => {
+    await signIn(page, e2eEnv.adminEmail, e2eEnv.adminPassword);
+    await expect(page).toHaveURL(/\/w\/default\/projects$/);
+    await page.getByRole("link", { name: "Members" }).first().click();
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Members" }),
+    ).toBeVisible();
+    await expect(page.getByText("You are an Owner")).toHaveCount(0);
+    await expect(page.getByText(e2eEnv.adminEmail).first()).toBeVisible();
+
+    const form = page.getByRole("form", { name: "Invite a person" });
+    await form.getByLabel("Email address").fill(COLLEAGUE);
+    await form.getByLabel("Role").selectOption("member");
+    await form.getByRole("button", { name: "Send invitation" }).click();
+
+    const link = form.getByLabel("Invitation link");
+    await expect(link).toBeVisible();
+    invitation = await link.inputValue();
+    expect(invitation).toMatch(/\/invitation\?token=[A-Za-z0-9_-]{43}$/);
+    // The invitation waits in the list, and the link is not in the page any more after a reload.
+    await page.reload();
+    await expect(
+      page.getByRole("list", { name: "Invitations" }).getByText(COLLEAGUE),
+    ).toBeVisible();
+    expect(await page.content()).not.toContain(invitation.split("token=")[1]);
+  });
+
+  // #101-WM-20, #101-WM-24
+  test("the colleague opens the link, creates an account with the invited address, signs in and accepts", async ({
+    browser,
+  }) => {
+    const context = await newPerson(browser);
+    const page = await context.newPage();
+
+    const response = await page.goto(invitation);
+    // The link carries a credential: the page asks for no referrer, in a header and in the page.
+    expect(response?.headers()["referrer-policy"]).toBe("no-referrer");
+    await expect(page.locator('meta[name="referrer"]')).toHaveAttribute(
+      "content",
+      "no-referrer",
+    );
+    await expect(page.getByText(COLLEAGUE).first()).toBeVisible();
+    // Opening the link accepts nothing.
+    await page.getByRole("link", { name: "Create an account" }).click();
+    await expect(page).toHaveURL(/\/sign-up\?invitation=/);
+    await signUp(page, COLLEAGUE);
+    await page.getByRole("link", { name: "Go to the sign-in" }).click();
+    await expect(page).toHaveURL(/\/login\?invitation=/);
+    await page.getByLabel("Email address").fill(COLLEAGUE);
+    await page.getByLabel("Password").fill(PASSWORD);
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+
+    // Signed in, back on the invitation: the button accepts it.
+    await expect(page).toHaveURL(/\/invitation\?token=/);
+    await page.getByRole("button", { name: /Accept the invitation/ }).click();
+    await expect(page).toHaveURL(/\/w\/default\/projects$/);
+    await expect(page.getByRole("button", { name: /Workspace/ })).toContainText(
+      "Default workspace",
+    );
+
+    // The link works once.
+    await page.goto(invitation);
+    await expect(
+      page.getByText("This invitation was used already."),
+    ).toBeVisible();
+    await context.close();
+  });
+
+  // #101-WM-27
+  test("the Owner finds the colleague among the members and the invitation gone from the list", async ({
+    page,
+  }) => {
+    await signIn(page, e2eEnv.adminEmail, e2eEnv.adminPassword);
+    await page.goto("/w/default/members");
+
+    await expect(
+      page.getByRole("list", { name: "Members" }).getByText(COLLEAGUE),
+    ).toBeVisible();
+    await expect(page.getByRole("list", { name: "Invitations" })).toHaveCount(
+      0,
+    );
+    await expect(
+      page.getByRole("combobox", { name: `Role of ${COLLEAGUE}` }),
+    ).toHaveValue("member");
+  });
+
+  // #101-WM-08, #101-WM-11
+  test("@smoke the new Member is refused every admin action, by the page and by the server", async ({
+    browser,
+  }) => {
+    const context = await newPerson(browser);
+    const page = await context.newPage();
+    await signIn(page, COLLEAGUE, PASSWORD);
+    await expect(page).toHaveURL(/\/w\/default\/projects$/);
+
+    await page.goto("/w/default/members");
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Members" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("form", { name: "Invite a person" }),
+    ).toHaveCount(0);
+    await expect(page.getByRole("combobox")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /^Remove / })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Leave" })).toBeVisible();
+    await page.goto("/w/default/settings");
+    await expect(page.getByText("Only an Owner can rename it.")).toBeVisible();
+
+    const refusals = [
+      await page.request.put("/api/w/default/review-settings", {
+        data: { settings: {} },
+      }),
+      await page.request.post("/api/w/default/invitations", {
+        data: { email: "somebody@e2e.test", role: "member" },
+      }),
+      await page.request.patch("/api/w/default", { data: { name: "Mine" } }),
+      await page.request.post("/api/w/default/integrations/sync"),
+      await page.request.patch("/api/w/default/members/anyone", {
+        data: { role: "owner" },
+      }),
+    ];
+    for (const refusal of refusals) {
+      expect(refusal.status()).toBe(403);
+      expect(await refusal.json()).toEqual({ error: "forbidden" });
+    }
+    // Even their own role cannot be raised by them.
+    const members = await page.request.get("/api/w/default/runs");
+    expect(members.status()).toBe(200);
+    await context.close();
+  });
+
+  // #101-WM-06, #101-WM-07
+  test("a workspace the person does not belong to is a page and a route that do not exist", async ({
+    browser,
+  }) => {
+    const context = await newPerson(browser);
+    const page = await context.newPage();
+    await signIn(page, COLLEAGUE, PASSWORD);
+    await expect(page).toHaveURL(/\/w\/default\/projects$/);
+
+    const foreign = await page.goto("/w/someone-elses/projects");
+    const missing = await page.goto("/there-is-no-such-page");
+    const foreignApi = await page.request.get("/api/w/someone-elses/runs");
+    const missingApi = await page.request.get("/api/there-is-no-such-route");
+
+    expect(foreign?.status()).toBe(404);
+    expect(missing?.status()).toBe(404);
+    expect(foreignApi.status()).toBe(404);
+    expect(missingApi.status()).toBe(404);
+    expect(await foreignApi.text()).toBe(await missingApi.text());
+    await context.close();
+  });
+});
+
+test.describe("a person who signs up on their own", () => {
+  // #101-WM-02
+  test("sees that an admin has to invite them, and nothing of the workspace", async ({
+    browser,
+  }) => {
+    const context = await newPerson(browser);
+    const page = await context.newPage();
+    await page.goto("/sign-up");
+    await signUp(page, FRESH);
+    await signIn(page, FRESH, PASSWORD);
+
+    await expect(page).toHaveURL(/\/no-access$/);
+    await expect(
+      page.getByText("Ask an admin of this instance for an invitation."),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("form", { name: "Create a workspace" }),
+    ).toHaveCount(0);
+    await page.goto("/w/default/projects");
+    await expect(page).toHaveURL(/\/no-access$/);
+    for (const path of [
+      "/api/w/default/runs",
+      "/api/w/default/review-settings",
+    ]) {
+      const response = await page.request.get(path);
+      expect(response.status()).toBe(403);
+      expect(await response.json()).toEqual({ error: "no_workspace_access" });
+    }
+    // Creating a workspace is not possible either.
+    const created = await page.request.post("/api/workspaces", {
+      data: { name: "Mine" },
+    });
+    expect(created.status()).toBe(409);
+    expect(await created.json()).toEqual({ error: "multi_tenant_required" });
+    await context.close();
+  });
+});

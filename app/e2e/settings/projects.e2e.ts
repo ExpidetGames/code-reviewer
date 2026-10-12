@@ -42,7 +42,7 @@ test.describe("the project list and the settings pages", () => {
   test.afterAll(async ({ browser }) => {
     const page = await browser.newPage({ baseURL: e2eEnv.appUrl });
     await signInThroughTheForm(page, account);
-    const response = await page.request.put("/api/review-settings", {
+    const response = await page.request.put("/api/w/default/review-settings", {
       data: { settings: {} },
     });
     expect(response.status()).toBe(200);

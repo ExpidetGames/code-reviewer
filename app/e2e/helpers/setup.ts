@@ -28,6 +28,7 @@ export function readSetupCode(logFile: string): string {
 export async function setUpApp(
   baseURL: string,
   logFile: string,
+  tenancy: "single" | "multi" = "single",
 ): Promise<void> {
   const client: APIRequestContext = await request.newContext({ baseURL });
   try {
@@ -37,7 +38,7 @@ export async function setUpApp(
     expect(accepted.status()).toBe(200);
     const completed = await client.post("/api/setup/complete", {
       data: {
-        tenancy: "single",
+        tenancy,
         signUp: { kind: "everyone" },
         admin: { email: e2eEnv.adminEmail, password: e2eEnv.adminPassword },
       },

@@ -2,7 +2,11 @@
 
 // Helpers for the journeys that sign in: add an account to the fake GitHub that Playwright started
 // next to the app, and walk through the sign in form the way a person does.
+import { execFile } from "node:child_process";
+import { resolve } from "node:path";
+import { promisify } from "node:util";
 import { expect, type APIRequestContext, type Page } from "@playwright/test";
+import type { WorkspaceRole } from "../../src/workspaces/roles";
 import { e2eEnv } from "./e2e-env";
 
 export type GithubAccount = {
@@ -23,10 +27,17 @@ export async function addGithubAccount(
   expect(response.status()).toBe(201);
 }
 
-/** Opens the app, signs in as `account` at the fake GitHub and waits for the signed in app (the user menu with their name). */
+/**
+ * Opens the app, signs in as `account` at the fake GitHub and waits for the signed in app (the user menu with
+ * their name). Being on the allow list admits a person to the app, it does not give them a workspace: the
+ * account is made a member of the workspace of the app (the first one) with `role`, the way the import of an
+ * existing installation does, and the app is opened again. Pass `role: null` for a journey about the
+ * account that has none.
+ */
 export async function signInThroughTheForm(
   page: Page,
   account: GithubAccount,
+  options: { role?: WorkspaceRole | null } = {},
 ): Promise<void> {
   await page.goto("/");
   await expect(page).toHaveURL(/\/login$/);
@@ -34,7 +45,54 @@ export async function signInThroughTheForm(
   await page
     .getByRole("button", { name: `Authorize ${account.login}` })
     .click();
+  const role = options.role === undefined ? "owner" : options.role;
+  if (role === null) {
+    await expect(userMenuButton(page, account)).toBeVisible();
+    return;
+  }
+  // Without a workspace the app shows the page that says so; with one it shows the projects.
+  await expect(page).toHaveURL(/\/(no-access|w\/[a-z0-9-]+\/projects)$/);
+  if (page.url().endsWith("/no-access")) {
+    await joinWorkspace(page, account, role);
+    await page.goto("/");
+  }
+  await expect(page).toHaveURL(/\/w\/[a-z0-9-]+\/projects$/);
   await expect(userMenuButton(page, account)).toBeVisible();
+}
+
+const run = promisify(execFile);
+
+/** The SQLite file of the app a page is open at (the apps of a run each have their own). */
+function databaseOf(page: Page): string {
+  const origin = new URL(page.url()).origin;
+  const file =
+    origin === e2eEnv.pipelineAppUrl
+      ? e2eEnv.pipelineDatabasePath
+      : origin === e2eEnv.signupAppUrl
+        ? e2eEnv.signupDatabasePath
+        : e2eEnv.databasePath;
+  return resolve(process.cwd(), file);
+}
+
+/** Makes the account a member of a workspace of the app the page is open at (the first one by default). */
+export async function joinWorkspace(
+  page: Page,
+  account: GithubAccount,
+  role: WorkspaceRole,
+  workspace?: string,
+): Promise<void> {
+  await run(
+    process.execPath,
+    [
+      "--no-warnings",
+      "--conditions=react-server",
+      resolve(process.cwd(), "src/test-support/e2e-membership-child.ts"),
+      "join",
+      databaseOf(page),
+      JSON.stringify({ login: account.login, role, workspace }),
+    ],
+    { cwd: process.cwd() },
+  );
 }
 
 /** The button of the user menu in the header, named after the person. */

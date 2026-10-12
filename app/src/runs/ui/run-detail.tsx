@@ -7,6 +7,7 @@
 // data; once it is settled it stops. Every text that came from outside is rendered as text, and the
 // one link made from stored data is the comment link, already checked to be a github.com address.
 import Link from "next/link";
+import { useMemo } from "react";
 import { formatUtc } from "../../ui/format-time.ts";
 import { workspacePath } from "../../workspaces/paths.ts";
 import { useLiveSnapshot } from "../../ui/use-live-snapshot.ts";
@@ -85,13 +86,19 @@ function CommentFacts({ run }: { run: RunDetailView }) {
 export function RunDetail({
   workspaceSlug,
   initial,
-  api = browserRunsApi(workspaceSlug),
+  api: apiProp,
 }: {
   /** The workspace of the page: the polling and every link stay in it. */
   workspaceSlug: string;
   initial: RunDetailSnapshot;
   api?: RunsApi;
 }) {
+  // One client for the life of the component: a new one every render would restart what depends on it.
+  const defaultApi = useMemo(
+    () => browserRunsApi(workspaceSlug),
+    [workspaceSlug],
+  );
+  const api = apiProp ?? defaultApi;
   const { data, failed, failureCode, stopped } = useLiveSnapshot({
     initial,
     fetchLatest: () => api.detail(initial.run.id),

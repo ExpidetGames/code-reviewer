@@ -83,6 +83,7 @@ export default defineConfig({
         /e2e\/jobs\//,
         /e2e\/setup\//,
         /e2e\/auth\/sign-up\.e2e\.ts$/,
+        /e2e\/workspaces\//,
       ],
     },
     {
@@ -106,6 +107,23 @@ export default defineConfig({
       testMatch: /e2e\/auth\/sign-up\.e2e\.ts$/,
       dependencies: ["prepare"],
     },
+    // The journey of the invitations changes who belongs to the workspace of the first app and needs its
+    // sign-up rule to be "everyone", which the admin portal journey changes for a while: it runs after
+    // every journey of that app.
+    {
+      name: "invitations",
+      use: browser,
+      testMatch: /e2e\/workspaces\/invite-and-accept\.e2e\.ts$/,
+      dependencies: ["chromium", "runs", "reviews"],
+    },
+    // The journeys of the workspaces in a multi-tenant instance have an app of their own (the fifth): people
+    // create workspaces there, and a single-tenant instance does not let them.
+    {
+      name: "multi",
+      use: { ...browser, baseURL: e2eEnv.multiAppUrl },
+      testMatch: /e2e\/workspaces\/multi-tenant\.e2e\.ts$/,
+      dependencies: ["prepare"],
+    },
     // The journey of the first-run setup has an app of its own that nobody has set up (the third
     // one), so it needs nothing to run first and disturbs nobody.
     {
@@ -123,7 +141,7 @@ export default defineConfig({
       dependencies: ["prepare"],
     },
   ],
-  // Five servers. The fake GitHub stands in for github.com (sign in) and api.github.com; the app
+  // Six servers. The fake GitHub stands in for github.com (sign in) and api.github.com; the app
   // under test is pointed at it by environment variables. The journeys always run against a
   // production build, never the dev server, with a fresh SQLite file in the (git-ignored)
   // test-results folder; the app migrates it on start. All values are fixed dummies.
@@ -217,6 +235,20 @@ export default defineConfig({
         TEST_MAIL_OUTBOX_FILE: e2eEnv.mailOutboxFile,
       },
       url: e2eEnv.signupAppUrl,
+      reuseExistingServer: false,
+      timeout: 60_000,
+    },
+    {
+      command:
+        "rm -rf test-results/e2e-multi-data && mkdir -p test-results/e2e-multi-data && " +
+        `pnpm start --hostname 127.0.0.1 --port ${e2eEnv.multiAppPort} > ${e2eEnv.logFiles.multi} 2>&1`,
+      env: {
+        ...appEnv,
+        DATABASE_PATH: e2eEnv.multiDatabasePath,
+        BETTER_AUTH_URL: e2eEnv.multiAppUrl,
+        ALLOWED_GITHUB_LOGINS: e2eEnv.allowedLogins,
+      },
+      url: e2eEnv.multiAppUrl,
       reuseExistingServer: false,
       timeout: 60_000,
     },

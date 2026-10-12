@@ -85,7 +85,7 @@ test.describe("signing up", () => {
     ).toBeVisible();
 
     // The data stays out of reach for an account without a workspace.
-    const api = await page.request.get("/api/runs");
+    const api = await page.request.get("/api/w/default/runs");
     expect(api.status()).toBe(403);
     expect(await api.json()).toEqual({ error: "no_workspace_access" });
 
@@ -151,7 +151,7 @@ test.describe("signing up", () => {
     await expect(
       page.getByRole("heading", { level: 1, name: "Admin" }),
     ).toBeVisible();
-    await page.goto("/projects");
+    await page.goto("/w/default/projects");
     await expect(page).toHaveURL(/\/verify-email$/);
   });
 

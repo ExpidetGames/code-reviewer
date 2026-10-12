@@ -361,7 +361,7 @@ async function expectNoCredentials(
   const tokens = await getIssuedInstallationTokens(request);
   expect(tokens.length).toBeGreaterThan(0);
   const secrets = [llmEnv.apiKey, e2eEnv.runnerToken, ...tokens];
-  const runs = await page.request.get("/api/runs");
+  const runs = await page.request.get("/api/w/default/runs");
   expect(runs.status()).toBe(200);
   const texts = {
     "the page": await page.content(),

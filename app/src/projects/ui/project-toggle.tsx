@@ -6,7 +6,7 @@
 // change. The state shown comes from the server; between the click and the refreshed data the
 // switch shows the new state, and it goes back by itself if the call fails.
 import { useRouter } from "next/navigation";
-import { useId, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { browserProjectsApi, type ProjectsApi } from "./api.ts";
 import { describeFailure } from "./messages.ts";
 
@@ -17,7 +17,7 @@ export function ProjectToggle({
   checked,
   blockedReason,
   canManage = true,
-  api = browserProjectsApi(workspaceSlug),
+  api: apiProp,
 }: {
   /** The workspace of the page: the call is made in it. */
   workspaceSlug: string;
@@ -33,6 +33,12 @@ export function ProjectToggle({
   canManage?: boolean;
   api?: ProjectsApi;
 }) {
+  // One client for the life of the component: a new one every render would restart what depends on it.
+  const defaultApi = useMemo(
+    () => browserProjectsApi(workspaceSlug),
+    [workspaceSlug],
+  );
+  const api = apiProp ?? defaultApi;
   const router = useRouter();
   const messageId = useId();
   // What the last successful call set; the page data catches up after the refresh.
