@@ -1,15 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
 
 "use client";
-// The user menu in the header: a button with the avatar and the name that opens a small panel with
-// the person, the color theme and "Sign out". It is a disclosure (a button that shows and hides a
-// panel), so it works with plain Tab and Enter: Escape closes it and puts the focus back on the
-// button, and so does a click or the focus moving outside.
+// The user menu in the header: a DropdownMenu with the person (name and login), the pages that
+// always belong to them (Account), the admin portal for the instance admin only, the color theme
+// (System, Light, Dark) and Sign out. Radix handles the keyboard, Escape, the click outside and the
+// focus return, so the menu works without a mouse.
 import Link from "next/link";
-import { useEffect, useId, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
-import { Button } from "../ui/button.tsx";
-import { ThemeToggle } from "../theme/theme-toggle.tsx";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  THEME_CHOICE_LABELS,
+  useThemeChoice,
+} from "../theme/use-theme-choice.ts";
+import type { ThemeChoice } from "../theme/theme.ts";
 import { UserAvatar } from "./user-avatar.tsx";
 import { displayName, type ShellUser } from "./user-display.ts";
 
@@ -21,94 +33,83 @@ export function UserMenu({
   /** The server action that ends the session; it redirects to the login page. */
   signOutAction: () => Promise<void>;
 }) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const panelId = useId();
   const name = displayName(user);
-
-  useEffect(() => {
-    if (!open) return;
-    function onPointerDown(event: PointerEvent) {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    }
-    document.addEventListener("pointerdown", onPointerDown);
-    return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, [open]);
+  const { choice, choices, choose } = useThemeChoice();
 
   return (
-    <div
-      ref={rootRef}
-      className="user-menu"
-      onKeyDown={(event) => {
-        if (event.key !== "Escape" || !open) return;
-        event.stopPropagation();
-        setOpen(false);
-        buttonRef.current?.focus();
-      }}
-      onBlur={(event) => {
-        const next = event.relatedTarget;
-        if (open && next instanceof Node && !rootRef.current?.contains(next))
-          setOpen(false);
-      }}
-    >
-      <button
-        ref={buttonRef}
-        type="button"
-        className="user-menu-button"
-        aria-expanded={open}
-        aria-controls={panelId}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <UserAvatar user={user} />
-        <span className="user-menu-name">{name}</span>
-      </button>
-      {open && (
-        <div id={panelId} className="user-menu-panel">
-          <div className="user-menu-person">
-            <strong>{name}</strong>
-            <span>@{user.login}</span>
-          </div>
-          <Link
-            href="/account"
-            className="nav-link"
-            onClick={() => setOpen(false)}
-          >
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className="flex min-h-11 min-w-11 cursor-pointer items-center gap-2 rounded-full border-0 bg-transparent p-1 pr-2 hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        >
+          <UserAvatar user={user} />
+          <span className="max-w-40 truncate text-sm font-medium text-foreground">
+            {name}
+          </span>
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-56">
+        <DropdownMenuLabel>
+          <span className="block truncate font-medium text-foreground">
+            {name}
+          </span>
+          <span className="block truncate text-xs text-muted-foreground">
+            @{user.login}
+          </span>
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem asChild>
+          <Link href="/account" className="text-foreground">
             Account
           </Link>
-          {user.isInstanceAdmin === true ? (
-            <Link
-              href="/admin"
-              className="nav-link"
-              onClick={() => setOpen(false)}
-            >
+        </DropdownMenuItem>
+        {user.isInstanceAdmin === true ? (
+          <DropdownMenuItem asChild>
+            <Link href="/admin" className="text-foreground">
               Admin
             </Link>
-          ) : null}
-          <div className="user-menu-section">
-            <span className="user-menu-label">Theme</span>
-            <ThemeToggle />
-          </div>
-          <form action={signOutAction}>
-            <SignOutButton />
-          </form>
-        </div>
-      )}
-    </div>
+          </DropdownMenuItem>
+        ) : null}
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel>Theme</DropdownMenuLabel>
+        <DropdownMenuRadioGroup
+          value={choice}
+          onValueChange={(value) => choose(value as ThemeChoice)}
+        >
+          {choices.map((option) => (
+            <DropdownMenuRadioItem key={option} value={option}>
+              {THEME_CHOICE_LABELS[option]}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+        <DropdownMenuSeparator />
+        <form action={signOutAction}>
+          <SignOutMenuItem />
+        </form>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
-// Disabled while the action runs: a second press would end an already ended session.
-function SignOutButton() {
+// Disabled while the action runs: a second press would end an already ended session. The item keeps
+// the menu open while the action is pending (`onSelect` prevents the default close), so the guard is
+// visible; the redirect replaces the page when the action finishes.
+function SignOutMenuItem() {
   const { pending } = useFormStatus();
   return (
-    <Button
-      type="submit"
-      variant="secondary"
-      className="btn-block"
+    <DropdownMenuItem
+      asChild
       disabled={pending}
+      onSelect={(event) => event.preventDefault()}
     >
-      Sign out
-    </Button>
+      <button
+        type="submit"
+        disabled={pending}
+        className="w-full appearance-none border-0 bg-transparent text-left font-medium text-foreground"
+      >
+        Sign out
+      </button>
+    </DropdownMenuItem>
   );
 }

@@ -141,7 +141,7 @@ test.describe("the admin portal", () => {
     await signInAsAdmin(page);
 
     await page.getByRole("button", { name: "admin", exact: true }).click();
-    await page.getByRole("link", { name: "Admin" }).click();
+    await page.getByRole("menuitem", { name: "Admin" }).click();
 
     await expect(page).toHaveURL(/\/admin$/);
     await expect(
@@ -152,11 +152,11 @@ test.describe("the admin portal", () => {
     const sections = page.getByRole("navigation", { name: "Admin" });
     await expect(sections.getByRole("link")).toHaveText([
       "Overview",
-      "Setup",
-      "Integrations",
       "Approvals",
-      "Mail",
+      "Setup",
       "Limits",
+      "Integrations",
+      "Mail",
     ]);
     await expect(
       sections.getByRole("link", { name: "Overview" }),
@@ -166,6 +166,42 @@ test.describe("the admin portal", () => {
     await expect(checklist.getByText("GitHub", { exact: true })).toBeVisible();
     await expect(checklist.getByText("Tenancy")).toBeVisible();
     await expect(checklist.getByText("Sign-up rule")).toBeVisible();
+  });
+
+  // #168-T05
+  test("@smoke the admin opens the sections from the drawer and it closes after a choice", async ({
+    page,
+  }) => {
+    // A narrow window on the one app of this project: set here, not with `test.use`, so the file
+    // keeps its single worker (its `beforeAll` imports the member once).
+    await page.setViewportSize({ width: 375, height: 812 });
+    await signInAsAdmin(page);
+    await page.goto("/admin");
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Admin" }),
+    ).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Admin" })).toHaveCount(
+      0,
+    );
+
+    await page.getByRole("button", { name: "Toggle Sidebar" }).click();
+    const nav = page.getByRole("navigation", { name: "Admin" });
+    await expect(nav.getByRole("link")).toHaveText([
+      "Overview",
+      "Approvals",
+      "Setup",
+      "Limits",
+      "Integrations",
+      "Mail",
+    ]);
+    await nav.getByRole("link", { name: "Mail" }).click();
+
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Mail" }),
+    ).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Admin" })).toHaveCount(
+      0,
+    );
   });
 
   // #156
@@ -267,7 +303,7 @@ test.describe("the admin portal", () => {
     );
     await page.goto("/w/default/projects");
     await page.getByRole("button", { name: member.name }).click();
-    await expect(page.getByRole("link", { name: "Admin" })).toHaveCount(0);
+    await expect(page.getByRole("menuitem", { name: "Admin" })).toHaveCount(0);
   });
 
   // #138
