@@ -20,6 +20,15 @@ import { LoginPageContent, type LoginPageData } from "./page.tsx";
 
 afterEach(cleanup);
 
+/** Whether `other` comes after `anchor` in document order. */
+function follows(anchor: Element, other: Element): boolean {
+  return (
+    (anchor.compareDocumentPosition(other) &
+      Node.DOCUMENT_POSITION_FOLLOWING) !==
+    0
+  );
+}
+
 function data(overrides: Partial<LoginPageData> = {}): LoginPageData {
   return {
     invitation: null,
@@ -48,6 +57,20 @@ describe("the login page", () => {
     expect(
       screen.getByRole("form", { name: "Sign in with GitHub" }),
     ).toBeTruthy();
+  });
+
+  // #170 review: the separator joins only the two sign-in methods, so the sign-up link follows them.
+  it("keeps the separator between the two sign-in methods and the sign-up link after them", () => {
+    render(<LoginPageContent data={data()} />);
+
+    const email = screen.getByRole("form", { name: "Sign in with email" });
+    const github = screen.getByRole("form", { name: "Sign in with GitHub" });
+    const separator = screen.getByText("or");
+    const createOne = screen.getByRole("link", { name: "Create one" });
+
+    expect(follows(email, separator)).toBe(true);
+    expect(follows(separator, github)).toBe(true);
+    expect(follows(github, createOne)).toBe(true);
   });
 
   // #170-T02

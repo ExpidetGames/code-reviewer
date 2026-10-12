@@ -136,18 +136,6 @@ export function LoginPageContent({ data }: { data: LoginPageData }) {
       ) : null}
       {/* Without the email form (GitHub only, an unusual instance) the error has no fields to sit above. */}
       {data.emailPassword ? null : errorAlert}
-      {data.signUpOpen ? (
-        <p className="text-sm text-muted-foreground">
-          No account yet?{" "}
-          <Link
-            className="underline underline-offset-4"
-            href={pathCarrying("/sign-up", data.invitation)}
-          >
-            Create one
-          </Link>
-          .
-        </p>
-      ) : null}
       {data.emailPassword && data.github ? (
         <FieldSeparator>or</FieldSeparator>
       ) : null}
@@ -164,6 +152,19 @@ export function LoginPageContent({ data }: { data: LoginPageData }) {
             Sign in with GitHub
           </Button>
         </form>
+      ) : null}
+      {/* The sign-up link is not a way to sign in: it follows the two methods, after the "or" that joins them. */}
+      {data.signUpOpen ? (
+        <p className="text-sm text-muted-foreground">
+          No account yet?{" "}
+          <Link
+            className="underline underline-offset-4"
+            href={pathCarrying("/sign-up", data.invitation)}
+          >
+            Create one
+          </Link>
+          .
+        </p>
       ) : null}
     </AuthCard>
   );
