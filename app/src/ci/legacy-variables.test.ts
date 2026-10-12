@@ -70,13 +70,22 @@ function runtimeSourceFiles(): { path: string; content: string }[] {
   return files;
 }
 
-// A read of `NAME` through the environment: `env.NAME`, `process.env.NAME`, `env["NAME"]` or the
-// provider loader's `value(env, "NAME")`. A bare mention (a comment, UI copy) does not match.
+// A read of `NAME` through the environment: `env.NAME` / `process.env.NAME`, the optional chaining
+// forms `env?.NAME` / `process.env?.NAME`, `env["NAME"]` / `env?.["NAME"]`, a destructured
+// `{ NAME } = env` / `= process.env`, or the provider loader's `value(env, "NAME")`. A bare mention
+// (a comment, UI copy) does not match.
 function reads(files: { path: string; content: string }[]): string[] {
   const hits: string[] = [];
   for (const { path, content } of files) {
     for (const name of LEGACY_VARIABLES) {
-      const access = String.raw`(?:\b(?:process\.)?env\s*\.\s*${name}\b|\benv\s*\[\s*["']${name}["']\s*\]|\bvalue\s*\(\s*env\s*,\s*["']${name}["']\s*\))`;
+      const access = [
+        String.raw`\b(?:process\.)?env\s*\.\s*${name}\b`,
+        String.raw`\b(?:process\.)?env\s*\?\s*\.\s*${name}\b`,
+        String.raw`\benv\s*\[\s*["']${name}["']\s*\]`,
+        String.raw`\benv\s*\?\s*\.\s*\[\s*["']${name}["']\s*\]`,
+        String.raw`\bvalue\s*\(\s*env\s*,\s*["']${name}["']\s*\)`,
+        String.raw`\{[^}]*\b${name}\b[^}]*\}\s*=\s*(?:process\.)?env\b`,
+      ].join("|");
       if (new RegExp(access).test(content)) hits.push(`${path}: ${name}`);
     }
   }
@@ -107,13 +116,30 @@ describe("the runtime source of the app", () => {
         path: "app/src/config-status/status.ts",
         content: 'const org = env["ALLOWED_GITHUB_ORG"];',
       },
+      {
+        path: "app/src/llm/config.ts",
+        content: "const { LLM_API_KEY } = process.env;",
+      },
+      {
+        path: "app/src/llm/status.ts",
+        content: "const id = process.env?.GITHUB_APP_ID;",
+      },
     ];
 
     expect(reads(planted)).toEqual([
       "app/src/llm/config.ts: LLM_API_KEY",
       "app/src/integrations/registry.ts: GITHUB_APP_SLUG",
       "app/src/config-status/status.ts: ALLOWED_GITHUB_ORG",
+      "app/src/llm/config.ts: LLM_API_KEY",
+      "app/src/llm/status.ts: GITHUB_APP_ID",
     ]);
+  });
+
+  // #159-T02 (the one documented exception: a legacy LLM_API_KEY may still sit in the environment of
+  // a running instance and redact.ts masks it, so the scan skips that file on purpose)
+  it("keeps the masking of a legacy LLM_API_KEY in runner-api/redact.ts as an explicit exception", () => {
+    expect(isRuntimeSource("app/src/runner-api/redact.ts")).toBe(false);
+    expect(isRuntimeSource("app/src/llm/config.ts")).toBe(true);
   });
 
   // #159-T02
