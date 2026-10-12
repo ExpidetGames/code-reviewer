@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Canned model answers that satisfy the output contract of each PR-Agent tool (the same answers as
-// runner/tests/engine/canned.py). They carry a marker text so a test can tell one answer from
-// another (the second review of a pull request must show new text), and nothing about them is a
+// Canned model answers that satisfy the output contract of the review tool (the same answer as
+// runner/tests/engine/canned.py). It carries a marker text so a test can tell one answer from
+// another (the second review of a pull request must show new text), and nothing about it is a
 // judgement of the diff: the tests check the shape and the place of what is posted, never the
-// quality of a review.
+// quality of a review. `/ask`, `/improve` and `/describe` were removed (#203).
 
 export function review(marker = "first run"): string {
   return `\`\`\`yaml
@@ -27,77 +27,9 @@ review:
 `;
 }
 
-export function improve(marker = "first run"): string {
-  return `\`\`\`yaml
-code_suggestions:
-- relevant_file: |
-    greeting.py
-  language: |
-    python
-  existing_code: |
-    return f"Hello, {name}!"
-  suggestion_content: |
-    Strip the name before it is used (${marker}).
-  improved_code: |
-    return f"Hello, {name.strip()}!"
-  one_sentence_summary: |
-    Strip the name before greeting (${marker})
-  label: |
-    enhancement
-\`\`\`
-`;
-}
-
-export function reflect(): string {
-  return `\`\`\`yaml
-code_suggestions:
-- suggestion_summary: |
-    Strip the name before greeting
-  relevant_file: |
-    greeting.py
-  relevant_lines_start: 2
-  relevant_lines_end: 2
-  suggestion_score: 8
-  why: |
-    A small and safe improvement.
-\`\`\`
-`;
-}
-
-export function describe(marker = "first run"): string {
-  return `\`\`\`yaml
-type:
-- Enhancement
-description: |
-  Adds a greeting helper and a farewell helper (${marker}).
-title: |
-  Add greeting and farewell helpers
-pr_files:
-- filename: |
-    greeting.py
-  changes_summary: |
-    Greets and says goodbye by name.
-  changes_title: |
-    Add helpers
-  label: |
-    enhancement
-\`\`\`
-`;
-}
-
-export function ask(marker = "first run"): string {
-  return `The helper builds a greeting from a name (${marker}).`;
-}
-
-/** The kinds of prompt the fake tells apart, one per PR-Agent tool. */
-export type PromptKind = "review" | "improve" | "reflect" | "describe" | "ask";
+/** The kinds of prompt the fake tells apart; `/review` is the only tool (#203). */
+export type PromptKind = "review";
 
 export function defaultReplies(): Record<PromptKind, string> {
-  return {
-    review: review(),
-    improve: improve(),
-    reflect: reflect(),
-    describe: describe(),
-    ask: ask(),
-  };
+  return { review: review() };
 }

@@ -148,9 +148,6 @@ final_update_message = true
 num_max_findings = 99
 inline_key_issues = false
 extra_instructions = "a legitimate repository option"
-
-[pr_description]
-final_update_message = true
 """
 
 
@@ -208,8 +205,6 @@ def test_every_protected_setting_keeps_the_value_of_the_runner(scope: Path) -> N
     assert current().get("config.max_model_tokens") == 163840
     assert current().get("config.fallback_models") == ["openrouter/vendor/fallback"]
     assert current().get("config.publish_output") is True
-    # CR-41: a repository file cannot bring the status comment after a description back.
-    assert current().get("pr_description.final_update_message") is False
     assert current().get("litellm.extra_headers") is None
     assert current().get("litellm.custom_llm_provider") in (None, "")
     assert not current().get("litellm.success_callback")

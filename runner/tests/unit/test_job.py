@@ -52,7 +52,6 @@ def test_a_valid_job_is_parsed_into_typed_fields() -> None:
     assert job.git.token == TOKEN
     assert job.git.bot_login == "code-reviewer[bot]"
     assert job.llm.api_key == API_KEY
-    assert job.args == ()
     assert job.env == {}
 
 
@@ -62,16 +61,17 @@ def test_the_bot_login_gets_the_bot_suffix_when_it_is_missing() -> None:
     assert job.git.bot_login == "code-reviewer[bot]"
 
 
-@pytest.mark.parametrize("command", ["review", "improve", "describe"])
-def test_every_allowed_command_is_accepted(command: str) -> None:
-    assert parse(valid_job(command=command)).command.value == command
+# #203-T14: /review is the only command; the removed ones are refused before PR-Agent is loaded.
+def test_the_review_command_is_accepted() -> None:
+    assert parse(valid_job(command="review")).command.value == "review"
 
 
-def test_ask_takes_the_question_as_its_only_argument() -> None:
-    job = parse(valid_job(command="ask", args=["What does this change do?"]))
+@pytest.mark.parametrize("command", ["ask", "improve", "describe"])
+def test_a_removed_command_is_an_invalid_command(command: str) -> None:
+    error = refusal(json.dumps(valid_job(command=command)))
 
-    assert job.command is Command.ASK
-    assert job.args == ("What does this change do?",)
+    assert error.code is ErrorCode.INVALID_COMMAND
+    assert command not in error.detail
 
 
 # CR-10-T04
@@ -140,16 +140,21 @@ def test_a_job_without_a_command_is_an_invalid_job() -> None:
     assert refusal(json.dumps(job)).code is ErrorCode.INVALID_JOB
 
 
-def test_arguments_are_only_allowed_for_ask_and_must_be_a_single_question() -> None:
-    assert refusal(json.dumps(valid_job(args=["--config.model=x"]))).code is ErrorCode.INVALID_JOB
-    assert refusal(json.dumps(valid_job(command="ask"))).code is ErrorCode.INVALID_JOB
-    assert refusal(json.dumps(valid_job(command="ask", args=[""]))).code is ErrorCode.INVALID_JOB
-    assert refusal(json.dumps(valid_job(command="ask", args=["a", "b"]))).code is (
+# #203-T14: /review takes no arguments, so any args (a removed command's leftover) is refused.
+def test_arguments_are_never_allowed_for_the_review_command() -> None:
+    assert refusal(json.dumps(valid_job(command="review", args=["--config.model=x"]))).code is (
         ErrorCode.INVALID_JOB
     )
-    assert refusal(json.dumps(valid_job(command="ask", args=["x" * 4001]))).code is (
-        ErrorCode.INVALID_JOB
-    )
+    assert refusal(json.dumps(valid_job(command="review", args=[]))).code is ErrorCode.INVALID_JOB
+
+
+# #203-T01: an old payload with an ask-style question is refused, and the question is not echoed.
+def test_a_question_from_a_removed_command_is_refused_and_never_echoed() -> None:
+    error = refusal(json.dumps(valid_job(command="review", args=[f"why {API_KEY}?"])))
+
+    assert error.code is ErrorCode.INVALID_JOB
+    assert "why" not in error.detail
+    assert API_KEY not in error.detail
 
 
 # CR-10-T09
@@ -270,14 +275,22 @@ def test_extra_environment_cannot_touch_credentials_endpoints_models_or_outputs(
     assert error.code is ErrorCode.INVALID_JOB
 
 
-def test_extra_environment_is_limited_to_the_settings_of_the_four_tools() -> None:
-    for key in (
-        "PR_REVIEWER__EXTRA_INSTRUCTIONS",
+def test_extra_environment_is_limited_to_the_settings_of_the_review_tool() -> None:
+    assert parse(valid_job(env={"PR_REVIEWER__EXTRA_INSTRUCTIONS": "x"})).env == {
+        "PR_REVIEWER__EXTRA_INSTRUCTIONS": "x"
+    }
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
         "PR_DESCRIPTION__EXTRA_INSTRUCTIONS",
         "PR_CODE_SUGGESTIONS__EXTRA_INSTRUCTIONS",
         "PR_QUESTIONS__ENABLE_HELP_TEXT",
-    ):
-        assert parse(valid_job(env={key: "x"})).env == {key: "x"}
+    ],
+)
+def test_extra_environment_refuses_the_settings_of_a_removed_tool(key: str) -> None:
+    assert refusal(json.dumps(valid_job(env={key: "x"}))).code is ErrorCode.INVALID_JOB
 
 
 def test_extra_environment_values_are_not_treated_as_secrets() -> None:

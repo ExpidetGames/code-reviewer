@@ -27,7 +27,7 @@ process (other secrets, stray CONFIG or GITHUB variables) reaches PR-Agent.
 import re
 from collections.abc import Callable, Mapping
 
-from code_reviewer_runner.job import RESERVED_OPTIONS, Command, Job, with_openrouter_prefix
+from code_reviewer_runner.job import RESERVED_OPTIONS, Job, with_openrouter_prefix
 from code_reviewer_runner.platforms import Platform, platform_for
 
 OPENROUTER_API_BASE = "https://openrouter.ai/api/v1"
@@ -80,9 +80,9 @@ def build_environment(job: Job, parent: Mapping[str, str]) -> dict[str, str]:
             "CONFIG__GIT_PROVIDER": platform.git_provider,
             platform.deployment_type_variable: platform.deployment_type,
             platform.base_url_variable: job.git.base_url,
-            # All three model roles are the job's model: PR-Agent uses the weak model for `ask`
-            # and `describe` and the reasoning model for self-reflection, and would otherwise
-            # fall back to vendor defaults (and send the LLM key to an unintended model).
+            # All three model roles are the job's model: PR-Agent uses the reasoning model for
+            # self-reflection and the weak model for some sub-tasks, and would otherwise fall back
+            # to vendor defaults (and send the LLM key to an unintended model).
             "CONFIG__MODEL": pinned_model,
             "CONFIG__MODEL_WEAK": pinned_model,
             "CONFIG__MODEL_REASONING": pinned_model,
@@ -129,8 +129,6 @@ def build_typed_settings(job: Job) -> dict[str, bool | int | str | list[str]]:
         "config.repo_context_from_default_branch": True,
         # A re-run edits the review in place; no second "updated to latest commit" comment.
         "pr_reviewer.final_update_message": False,
-        # The same for a description: no extra "updated to latest commit" comment after it.
-        "pr_description.final_update_message": False,
         # Review labels need write scope and surprise users.
         "pr_reviewer.enable_review_labels_security": False,
         "pr_reviewer.enable_review_labels_effort": False,
@@ -193,10 +191,8 @@ def build_option_settings(
 
 
 def build_request(job: Job) -> list[str]:
-    """The `request` argument of `PRAgent.handle_request`, in its list form."""
-    if job.command is not Command.ASK:
-        return [job.command.value]
-    # Imported here: PR-Agent must only be imported after the environment is in place.
-    from pr_agent.algo.utils import encode_user_text_arg
+    """The `request` argument of `PRAgent.handle_request`, in its list form.
 
-    return ["ask", encode_user_text_arg(job.args[0])]
+    `/review` is the only command (#203), and it takes no arguments, so the request is one word.
+    """
+    return [job.command.value]

@@ -141,7 +141,7 @@ def _lease_expiry_not_a_timestamp(claim: Document) -> None:
         pytest.param(_unsupported_platform, id="unsupported platform"),
         pytest.param(_command_not_allowed, id="command not allowed"),
         pytest.param(_arguments_for_a_review, id="arguments for a review"),
-        pytest.param(_foreign_environment_variable, id="variable outside the four tools"),
+        pytest.param(_foreign_environment_variable, id="variable outside the review tool"),
         pytest.param(_lease_expiry_not_a_timestamp, id="lease expiry not a timestamp"),
     ],
 )
@@ -152,15 +152,14 @@ def test_a_claim_response_that_breaks_a_rule_is_refused(mutate: Callable[[Docume
     assert not _accepts("ClaimResponse", claim)
 
 
-def test_an_ask_job_needs_exactly_its_question() -> None:
-    claim = _example("ClaimResponse")
+# #203-T13: only /review is accepted, and it takes no arguments.
+def test_only_the_review_command_and_no_arguments_are_accepted() -> None:
+    claim = copy.deepcopy(_example("ClaimResponse"))
     claim["job"]["input"]["command"] = "ask"
     assert not _accepts("ClaimResponse", claim)
 
+    claim["job"]["input"]["command"] = "review"
     claim["job"]["input"]["args"] = ["Why is this lock needed?"]
-    assert _accepts("ClaimResponse", claim)
-
-    claim["job"]["input"]["args"] = ["one", "two"]
     assert not _accepts("ClaimResponse", claim)
 
 

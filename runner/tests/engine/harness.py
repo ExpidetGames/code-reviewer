@@ -59,13 +59,7 @@ def visible_text(body: str) -> str:
 
 
 def default_replies() -> dict[str, str]:
-    return {
-        "review": canned.review(),
-        "improve": canned.improve(),
-        "reflect": canned.reflect(),
-        "describe": canned.describe(),
-        "ask": canned.ask(),
-    }
+    return {"review": canned.review()}
 
 
 @dataclass
@@ -221,7 +215,6 @@ class Engine:
     def job(
         self,
         command: str = "review",
-        args: list[str] | None = None,
         env: dict[str, str] | None = None,
         **overrides: Any,
     ) -> dict[str, Any]:
@@ -242,10 +235,6 @@ class Engine:
                 "maxTokens": 32000,
             },
         }
-        if command == "ask" and args is None:
-            args = ["What does the greeting helper do?"]
-        if args is not None:
-            job["args"] = args
         if env is not None:
             job["env"] = env
         job.update(overrides)

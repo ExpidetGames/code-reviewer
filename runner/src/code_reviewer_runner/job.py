@@ -6,8 +6,7 @@ Shape (basis of the runner contract v1, see the lead decisions for CR-10):
 
     {
       "prUrl": "https://github.com/<owner>/<repo>/pull/<n>",
-      "command": "review" | "improve" | "describe" | "ask",
-      "args": ["<question>"],                       // ask only
+      "command": "review",
       "git": {"provider": "github", "baseUrl": "https://api.github.com",
               "token": "<installation token>", "botLogin": "<app slug>[bot]"},
       "llm": {"provider": "openrouter", "model": "<vendor>/<model>", "apiKey": "<key>",
@@ -17,9 +16,12 @@ Shape (basis of the runner contract v1, see the lead decisions for CR-10):
       "env": {"PR_REVIEWER__EXTRA_INSTRUCTIONS": "<string>"}   // optional, tool settings only
     }
 
-Everything that decides where a credential or a request goes (GitHub and LLM endpoints, tokens, the
-model, output switches) has its own validated field above or is pinned by the runner; `env` can only
-carry the settings of the four tools. Values of `env` are text: PR-Agent never evaluates them (see
+`/review` is the only command (the product removed `/ask`, `/improve` and `/describe`); a job that
+names another command, or carries the `args` a removed command used, is refused with
+`invalid_command`/`invalid_job` before PR-Agent is loaded. Everything that decides where a
+credential or a request goes (GitHub and LLM endpoints, tokens, the model, output switches) has
+its own validated field above or is pinned by the runner; `env` can only carry the settings of the
+review tool. Values of `env` are text: PR-Agent never evaluates them (see
 `pr_agent_config.build_option_settings`).
 
 Validation never echoes a value from the job into its error detail: the job holds secrets, and the
@@ -34,14 +36,12 @@ from typing import Any, NoReturn
 from urllib.parse import SplitResult, urlsplit
 
 from code_reviewer_runner.platforms import PLATFORMS
-from code_reviewer_runner.question_images import remove_image_links
 from code_reviewer_runner.result import ErrorCode
 
 MAX_JOB_BYTES = 1024 * 1024
-MAX_QUESTION_CHARS = 4000
 MAX_SECRET_CHARS = 4096
 
-_TOP_LEVEL_FIELDS = {"prUrl", "command", "args", "git", "llm", "env"}
+_TOP_LEVEL_FIELDS = {"prUrl", "command", "git", "llm", "env"}
 _GIT_FIELDS = {"provider", "baseUrl", "token", "botLogin"}
 _LLM_FIELDS = {"provider", "model", "apiKey", "baseUrl", "maxTokens", "fallbackModels"}
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
@@ -57,20 +57,17 @@ _PR_PATH = re.compile(r"/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/pull/([1-9][0-9]{0,
 # the identity patch (identity_patch.py) both validate with it.
 BOT_LOGIN_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}(\[bot\])?")
 _MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,199}")
-# `env` may only set the options of the four tools. An allowlist instead of a list of forbidden
+# `env` may only set the options of the review tool. An allowlist instead of a list of forbidden
 # keys: PR-Agent has many sections (litellm, openai, azure, push_outputs, ...) that route requests
 # or credentials, and a new PR-Agent version can add more. One option name per key: a second `__`
 # would address a nested value.
-_ENV_KEY = re.compile(
-    r"(PR_REVIEWER|PR_DESCRIPTION|PR_CODE_SUGGESTIONS|PR_QUESTIONS)__[A-Z0-9]+(_[A-Z0-9]+)*"
-)
+_ENV_KEY = re.compile(r"PR_REVIEWER__[A-Z0-9]+(_[A-Z0-9]+)*")
 # The names of the options the runner sets itself (switches that decide what is published). A job
 # may not set them: the runner's value must win, and a repository file may not change them either
 # (see `repo_settings_guard.PROTECTED_SETTINGS`, which a test compares with this list).
 RESERVED_OPTIONS = frozenset(
     {
         "PR_REVIEWER__FINAL_UPDATE_MESSAGE",
-        "PR_DESCRIPTION__FINAL_UPDATE_MESSAGE",
         "PR_REVIEWER__ENABLE_REVIEW_LABELS_SECURITY",
         "PR_REVIEWER__ENABLE_REVIEW_LABELS_EFFORT",
     }
@@ -90,9 +87,6 @@ def without_openrouter_prefix(model: str) -> str:
 
 class Command(StrEnum):
     REVIEW = "review"
-    IMPROVE = "improve"
-    DESCRIBE = "describe"
-    ASK = "ask"
 
 
 class JobError(Exception):
@@ -127,7 +121,6 @@ class Job:
     command: Command
     git: GitAccess
     llm: LlmAccess
-    args: tuple[str, ...] = ()
     env: dict[str, str] = field(default_factory=lambda: {})
 
     @property
@@ -307,33 +300,13 @@ def _command(data: dict[str, Any]) -> Command:
         _refuse_command()
 
 
-def _args(data: dict[str, Any], command: Command) -> tuple[str, ...]:
-    raw = data.get("args")
-    if raw is None or raw == []:
-        if command is Command.ASK:
-            raise _invalid("args must hold the question for the ask command")
-        return ()
-    if command is not Command.ASK:
-        raise _invalid("args is only allowed for the ask command")
-    if not isinstance(raw, list) or len(raw) != 1:  # pyright: ignore[reportUnknownArgumentType]
-        raise _invalid("args must hold exactly one string, the question")
-    question: Any = raw[0]  # pyright: ignore[reportUnknownVariableType]
-    if not isinstance(question, str) or not question.strip() or len(question) > MAX_QUESTION_CHARS:
-        raise _invalid("the question must be a non-empty string of at most 4000 characters")
-    # The question is a comment of somebody else: PR-Agent would download an image it links to from
-    # here, so none reaches it (the app removes them too, this is the second line).
-    return (remove_image_links(question),)
-
-
 def _env(data: dict[str, Any]) -> dict[str, str]:
     if data.get("env") is None:
         return {}
     env: dict[str, str] = {}
     for key, value in _object(data["env"], "env").items():
         if not _ENV_KEY.fullmatch(key):
-            raise _invalid(
-                "env may only set options of the review, describe, improve and ask tools"
-            )
+            raise _invalid("env may only set options of the review tool")
         if key in RESERVED_OPTIONS:
             raise _invalid(f"env option {key} is set by the runner and cannot be set by a job")
         if not isinstance(value, str):
@@ -360,6 +333,5 @@ def parse_job(raw: str) -> Job:
         command=command,
         git=git,
         llm=llm,
-        args=_args(job, command),
         env=_env(job),
     )
