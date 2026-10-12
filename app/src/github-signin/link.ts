@@ -302,7 +302,7 @@ export function createGithubLinkService({
  * Links a GitHub identity nobody has to the account, unless the account has one already. The unique indexes
  * of `accounts` decide a race between two requests: the loser changes nothing and reports `false`.
  */
-async function linkNewIdentity(
+export async function linkNewIdentity(
   db: Kysely<Database>,
   input: { userId: string; githubId: string; login: string; now: Date },
 ): Promise<boolean> {
