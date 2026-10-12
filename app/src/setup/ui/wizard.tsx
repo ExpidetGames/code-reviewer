@@ -2,16 +2,25 @@
 
 "use client";
 // The three questions of the first-run setup: single or multi tenant, who may sign up, and the
-// instance admin account. The server judges every answer (and says so with a code per field); this
-// form only collects them, keeps them while the person goes back and forth, and shows the reasons.
+// instance admin account. Each step is one real form with an accessible name, its heading sits
+// outside that form, and a visible stepper says which step of three this is (#172). The server judges
+// every answer (and says so with a code per field); this form only collects them, keeps them while
+// the person goes back and forth, and shows the reasons.
 import { useId, useState, type FormEvent } from "react";
-import { Button } from "../../ui/button.tsx";
+import { Button } from "@/components/button.tsx";
+import { HelpDisclosure } from "@/components/help-disclosure.tsx";
+import { InfoHint } from "@/components/info-hint.tsx";
+import { FieldError } from "@/components/ui/field.tsx";
+import { Input } from "@/components/ui/input.tsx";
+import { Label } from "@/components/ui/label.tsx";
+import { Progress } from "@/components/ui/progress.tsx";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group.tsx";
+import { Textarea } from "@/components/ui/textarea.tsx";
+import { cn } from "@/lib/utils";
 import {
   PASSWORD_RULE_HINT,
   PASSWORDS_DO_NOT_MATCH,
 } from "../../auth/password-policy.ts";
-import { InfoHint } from "../../components/info-hint.tsx";
-import { HelpDisclosure } from "../../components/help-disclosure.tsx";
 import {
   FAIL_CLOSED_WARNING,
   SIGN_UP_RULE_OPTIONS,
@@ -21,6 +30,7 @@ import { browserSetupApi, type SetupApi, type WizardRequest } from "./api.ts";
 import {
   describeSetupFailure,
   describeSetupIssue,
+  FAIL_CLOSED_LINE,
   PASSWORD_REASON,
   stepOfField,
 } from "./messages.ts";
@@ -31,6 +41,111 @@ export function splitEntries(text: string): string[] {
     .split(/[\s,;]+/)
     .map((entry) => entry.trim())
     .filter((entry) => entry !== "");
+}
+
+/** The two answers of step 1, each with the one line that tells them apart. */
+const TENANCY_OPTIONS = [
+  {
+    value: "single",
+    title: "Single-tenant",
+    text: "One team. The instance has one workspace, and you are its owner. People you invite work in it.",
+  },
+  {
+    value: "multi",
+    title: "Multi-tenant",
+    text: "Several unrelated teams. Everyone who signs up creates a workspace of their own. You run the instance.",
+  },
+] as const;
+
+/** The label of the entry field of step 2, per rule. */
+const ENTRIES_LABEL = {
+  emails: "Email addresses",
+  domains: "Domains",
+} as const;
+
+/** The share of the wizard done after `step`, for the progress element (a percentage). */
+function progressPercent(step: 1 | 2 | 3): number {
+  return Math.round((step / 3) * 100);
+}
+
+function isTenancyKind(value: string): value is "single" | "multi" {
+  return value === "single" || value === "multi";
+}
+
+function isSignUpRuleKind(value: string): value is SignUpRuleKind {
+  return value === "everyone" || value === "emails" || value === "domains";
+}
+
+/**
+ * The heading of a step with the stepper under it: the question as the one `h1`, then "Step n of 3"
+ * as text and a progress element that carries the same step for assistive technology (#172).
+ */
+function StepHeading({
+  step,
+  children,
+}: {
+  step: 1 | 2 | 3;
+  children: string;
+}) {
+  return (
+    <div className="flex flex-col gap-3">
+      <h1 className="text-2xl font-semibold tracking-tight">{children}</h1>
+      <div className="flex flex-col gap-1.5">
+        <p className="text-sm text-muted-foreground" aria-live="polite">
+          Step {step} of 3
+        </p>
+        <Progress
+          value={progressPercent(step)}
+          aria-label="Setup progress"
+          aria-valuetext={`Step ${step} of 3`}
+        />
+      </div>
+    </div>
+  );
+}
+
+/** The radio cards of a step: one choice per option, the selected one marked with the accent. */
+function OptionCards({
+  name,
+  value,
+  options,
+  onSelect,
+}: {
+  name: string;
+  value: string;
+  options: ReadonlyArray<{ value: string; title: string; text: string }>;
+  onSelect: (value: string) => void;
+}) {
+  const ids = useId();
+  return (
+    <RadioGroup aria-label={name} value={value} onValueChange={onSelect}>
+      {options.map((option, index) => {
+        const id = `${ids}-${String(index)}`;
+        const selected = option.value === value;
+        return (
+          <Label
+            key={option.value}
+            htmlFor={id}
+            className={cn(
+              "flex cursor-pointer items-start gap-3 rounded-lg border border-border bg-card p-4 transition-colors",
+              "hover:border-ring focus-within:ring-2 focus-within:ring-ring/50",
+              selected && "border-primary bg-accent",
+            )}
+          >
+            <RadioGroupItem value={option.value} id={id} className="mt-0.5" />
+            <span className="flex flex-col gap-1">
+              <span className="font-medium text-foreground">
+                {option.title}
+              </span>
+              <span className="text-sm text-muted-foreground">
+                {option.text}
+              </span>
+            </span>
+          </Label>
+        );
+      })}
+    </RadioGroup>
+  );
 }
 
 export function Wizard({
@@ -120,220 +235,190 @@ export function Wizard({
     setProblem(describeSetupFailure(result.code));
   }
 
-  const heading = (
-    <p className="muted" aria-live="polite">
-      Step {step} of 3
-    </p>
-  );
-
   if (step === 1)
     return (
-      <div className="setup-form">
-        <h1>How is this instance used?</h1>
-        {heading}
-        <fieldset className="setup-options">
-          <legend className="sr-only">Tenancy</legend>
-          <label className="setup-option">
-            <input
-              type="radio"
-              name="tenancy"
-              checked={tenancy === "single"}
-              onChange={() => setTenancy("single")}
-            />
-            <span>
-              <strong>Single-tenant</strong>
-              <span className="muted">
-                One team. The instance has one workspace, and you are its owner.
-                People you invite work in it.
-              </span>
-            </span>
-          </label>
-          <label className="setup-option">
-            <input
-              type="radio"
-              name="tenancy"
-              checked={tenancy === "multi"}
-              onChange={() => setTenancy("multi")}
-            />
-            <span>
-              <strong>Multi-tenant</strong>
-              <span className="muted">
-                Several unrelated teams. Everyone who signs up creates a
-                workspace of their own. You run the instance.
-              </span>
-            </span>
-          </label>
-        </fieldset>
-        {fieldError("tenancy") ? (
-          <p role="alert" className="field-error">
-            {fieldError("tenancy")}
+      <div className="flex flex-col gap-6">
+        <StepHeading step={1}>How is this instance used?</StepHeading>
+        <form
+          aria-label="Tenancy"
+          onSubmit={(event) => {
+            event.preventDefault();
+            setStep(2);
+          }}
+          className="flex flex-col gap-4"
+        >
+          <OptionCards
+            name="Tenancy"
+            value={tenancy}
+            options={TENANCY_OPTIONS}
+            onSelect={(value) => {
+              if (isTenancyKind(value)) setTenancy(value);
+            }}
+          />
+          {fieldError("tenancy") ? (
+            <FieldError>{fieldError("tenancy")}</FieldError>
+          ) : null}
+          <p className="text-sm text-muted-foreground">
+            You can change this later in the admin area.
           </p>
-        ) : null}
-        <p className="muted">You can change this later in the admin area.</p>
-        <div className="form-actions">
-          <Button onClick={() => setStep(2)}>Next</Button>
-        </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button type="submit">Next</Button>
+          </div>
+        </form>
       </div>
     );
 
   if (step === 2)
     return (
-      <div className="setup-form">
-        <h1>Who may sign up?</h1>
-        {heading}
-        {existingInstallation ? (
-          <HelpDisclosure label="Why is this asked?">
-            The list of allowed GitHub logins and the organization of the
-            earlier version are not carried over as a rule: the people who
-            passed them became members, and you can invite the others. Choose
-            who may create an account from now on.
-          </HelpDisclosure>
-        ) : null}
-        <fieldset className="setup-options">
-          <legend className="sr-only">Sign-up rule</legend>
-          {SIGN_UP_RULE_OPTIONS.map(({ value, title, text }) => (
-            <label key={value} className="setup-option">
-              <input
-                type="radio"
-                name="rule"
-                checked={ruleKind === value}
-                onChange={() => setRuleKind(value)}
+      <div className="flex flex-col gap-6">
+        <StepHeading step={2}>Who may sign up?</StepHeading>
+        <form
+          aria-label="Sign-up rule"
+          onSubmit={(event) => {
+            event.preventDefault();
+            nextFromRule();
+          }}
+          className="flex flex-col gap-4"
+        >
+          {existingInstallation ? (
+            <HelpDisclosure label="Why is this asked?">
+              The list of allowed GitHub logins and the organization of the
+              earlier version are not carried over as a rule: the people who
+              passed them became members, and you can invite the others. Choose
+              who may create an account from now on.
+            </HelpDisclosure>
+          ) : null}
+          <OptionCards
+            name="Sign-up rule"
+            value={ruleKind}
+            options={SIGN_UP_RULE_OPTIONS}
+            onSelect={(value) => {
+              if (isSignUpRuleKind(value)) setRuleKind(value);
+            }}
+          />
+          {ruleKind === "everyone" ? null : (
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center gap-1.5">
+                <Label htmlFor={`${ids}-entries`}>
+                  {ENTRIES_LABEL[ruleKind]}
+                </Label>
+                <InfoHint label="Why this rule cannot verify anyone yet">
+                  {FAIL_CLOSED_WARNING}
+                </InfoHint>
+              </div>
+              <Textarea
+                id={`${ids}-entries`}
+                rows={4}
+                value={entriesText}
+                placeholder={
+                  ruleKind === "emails"
+                    ? "anna@example.com\nbob@example.org"
+                    : "example.com"
+                }
+                onChange={(event) => setEntriesText(event.target.value)}
+                aria-invalid={fieldError("signUp.entries") !== undefined}
               />
-              <span>
-                <strong>{title}</strong>
-                <span className="muted">{text}</span>
-              </span>
-            </label>
-          ))}
-        </fieldset>
-        {ruleKind === "everyone" ? null : (
-          <div className="field">
-            <label htmlFor={`${ids}-entries`} className="field-label">
-              {ruleKind === "emails" ? "Email addresses" : "Domains"}
-            </label>
-            <textarea
-              id={`${ids}-entries`}
-              rows={4}
-              value={entriesText}
-              placeholder={
-                ruleKind === "emails"
-                  ? "anna@example.com\nbob@example.org"
-                  : "example.com"
-              }
-              onChange={(event) => setEntriesText(event.target.value)}
-              aria-invalid={fieldError("signUp.entries") !== undefined}
-            />
-            <span className="muted">One per line, or separated by commas.</span>
-            {fieldError("signUp.entries") ? (
-              <p role="alert" className="field-error">
-                {fieldError("signUp.entries")}
+              <p className="text-sm text-muted-foreground">
+                {FAIL_CLOSED_LINE}
               </p>
-            ) : null}
-            <p className="alert alert-warning">
-              {FAIL_CLOSED_WARNING} You set either up in the admin area after
-              the setup. The entries are saved now.
-            </p>
+              {fieldError("signUp.entries") ? (
+                <FieldError>{fieldError("signUp.entries")}</FieldError>
+              ) : null}
+            </div>
+          )}
+          <div className="flex flex-wrap items-center gap-3">
+            <Button variant="secondary" onClick={() => setStep(1)}>
+              Back
+            </Button>
+            <Button type="submit">Next</Button>
           </div>
-        )}
-        <div className="form-actions">
-          <Button variant="secondary" onClick={() => setStep(1)}>
-            Back
-          </Button>
-          <Button onClick={nextFromRule}>Next</Button>
-        </div>
+        </form>
       </div>
     );
 
   return (
-    <form onSubmit={(event) => void finish(event)} className="setup-form">
-      <h1>Create the admin account</h1>
-      {heading}
-      <p className="muted">
-        The admin runs this instance: settings, integrations and mail. You sign
-        in with this email address and password.
-      </p>
-      <div className="field">
-        <label htmlFor={`${ids}-email`} className="field-label">
-          Email address
-        </label>
-        <input
-          id={`${ids}-email`}
-          type="email"
-          name="email"
-          autoComplete="username"
-          required
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          aria-invalid={fieldError("admin.email") !== undefined}
-        />
-        {fieldError("admin.email") ? (
-          <p role="alert" className="field-error">
-            {fieldError("admin.email")}
-          </p>
-        ) : null}
-      </div>
-      <div className="field">
-        <div className="field-head">
-          <label htmlFor={`${ids}-password`} className="field-label">
-            Password
-          </label>
-          <InfoHint label="What makes a good password">
-            {PASSWORD_REASON}
-          </InfoHint>
-        </div>
-        <input
-          id={`${ids}-password`}
-          type="password"
-          name="password"
-          autoComplete="new-password"
-          required
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          aria-invalid={fieldError("admin.password") !== undefined}
-          aria-describedby={`${ids}-reason`}
-        />
-        <span id={`${ids}-reason`} className="muted">
-          {PASSWORD_RULE_HINT}
-        </span>
-        {fieldError("admin.password") ? (
-          <p role="alert" className="field-error">
-            {fieldError("admin.password")}
-          </p>
-        ) : null}
-      </div>
-      <div className="field">
-        <label htmlFor={`${ids}-repeat`} className="field-label">
-          Repeat the password
-        </label>
-        <input
-          id={`${ids}-repeat`}
-          type="password"
-          name="repeat"
-          autoComplete="new-password"
-          required
-          value={repeat}
-          onChange={(event) => setRepeat(event.target.value)}
-          aria-invalid={fieldError("admin.repeat") !== undefined}
-        />
-        {fieldError("admin.repeat") ? (
-          <p role="alert" className="field-error">
-            {fieldError("admin.repeat")}
-          </p>
-        ) : null}
-      </div>
-      {problem === null ? null : (
-        <p role="alert" className="alert alert-error">
-          {problem}
+    <div className="flex flex-col gap-6">
+      <StepHeading step={3}>Create the admin account</StepHeading>
+      <form
+        aria-label="Admin account"
+        onSubmit={(event) => void finish(event)}
+        className="flex flex-col gap-4"
+      >
+        <p className="text-sm text-muted-foreground">
+          The admin runs this instance: settings, integrations and mail. You
+          sign in with this email address and password.
         </p>
-      )}
-      <div className="form-actions">
-        <Button variant="secondary" onClick={() => setStep(2)}>
-          Back
-        </Button>
-        <Button type="submit" disabled={pending}>
-          {pending ? "Finishing..." : "Finish setup"}
-        </Button>
-      </div>
-    </form>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor={`${ids}-email`}>Email address</Label>
+          <Input
+            id={`${ids}-email`}
+            type="email"
+            name="email"
+            autoComplete="username"
+            required
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            aria-invalid={fieldError("admin.email") !== undefined}
+          />
+          {fieldError("admin.email") ? (
+            <FieldError>{fieldError("admin.email")}</FieldError>
+          ) : null}
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <div className="flex items-center gap-1.5">
+            <Label htmlFor={`${ids}-password`}>Password</Label>
+            <InfoHint label="What makes a good password">
+              {PASSWORD_REASON}
+            </InfoHint>
+          </div>
+          <Input
+            id={`${ids}-password`}
+            type="password"
+            name="password"
+            autoComplete="new-password"
+            required
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            aria-invalid={fieldError("admin.password") !== undefined}
+            aria-describedby={`${ids}-reason`}
+          />
+          <p id={`${ids}-reason`} className="text-sm text-muted-foreground">
+            {PASSWORD_RULE_HINT}
+          </p>
+          {fieldError("admin.password") ? (
+            <FieldError>{fieldError("admin.password")}</FieldError>
+          ) : null}
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor={`${ids}-repeat`}>Repeat the password</Label>
+          <Input
+            id={`${ids}-repeat`}
+            type="password"
+            name="repeat"
+            autoComplete="new-password"
+            required
+            value={repeat}
+            onChange={(event) => setRepeat(event.target.value)}
+            aria-invalid={fieldError("admin.repeat") !== undefined}
+          />
+          {fieldError("admin.repeat") ? (
+            <FieldError>{fieldError("admin.repeat")}</FieldError>
+          ) : null}
+        </div>
+        {problem === null ? null : (
+          <p role="alert" className="text-sm text-destructive">
+            {problem}
+          </p>
+        )}
+        <div className="flex flex-wrap items-center gap-3">
+          <Button variant="secondary" onClick={() => setStep(2)}>
+            Back
+          </Button>
+          <Button type="submit" loading={pending}>
+            {pending ? "Finishing..." : "Finish setup"}
+          </Button>
+        </div>
+      </form>
+    </div>
   );
 }

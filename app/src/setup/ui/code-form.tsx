@@ -2,9 +2,13 @@
 
 "use client";
 // The form that asks for the setup code (what every page shows while the instance is not set up and
-// the visitor has no setup session). The code is in the log of the app; it is never shown here.
+// the visitor has no setup session). The code is in the log of the app; it is never shown here. The
+// heading sits outside the form and the form carries an accessible name (#172).
 import { useId, useState, type FormEvent } from "react";
-import { Button } from "../../ui/button.tsx";
+import { Button } from "@/components/button.tsx";
+import { Alert, AlertDescription } from "@/components/ui/alert.tsx";
+import { Input } from "@/components/ui/input.tsx";
+import { Label } from "@/components/ui/label.tsx";
 import { browserSetupApi, type SetupApi } from "./api.ts";
 import { describeSetupFailure } from "./messages.ts";
 
@@ -38,49 +42,69 @@ export function CodeForm({
   }
 
   return (
-    <form onSubmit={(event) => void submit(event)} className="setup-form">
-      <h1>Set up Code Reviewer</h1>
-      <p>
-        Enter the setup code to prove that you have access to this server. The
-        app printed it in its log when it started; look for the line{" "}
-        <code>Setup code:</code>. With Docker Compose:{" "}
-        <code>docker compose logs app</code>.
-      </p>
-      {existingInstallation ? (
-        <p className="alert alert-warning">
-          This instance has data from before the setup existed. It is kept, and
-          reviews keep running while you set up.
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-2">
+        <h1 className="text-2xl font-semibold tracking-tight">
+          Set up Code Reviewer
+        </h1>
+        <p className="text-sm text-muted-foreground">
+          Enter the setup code from the app log:{" "}
+          <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
+            docker compose logs app
+          </code>
         </p>
-      ) : null}
-      <div className="field">
-        <label htmlFor={inputId} className="field-label">
-          Setup code
-        </label>
-        <input
-          id={inputId}
-          name="code"
-          type="text"
-          inputMode="numeric"
-          autoComplete="one-time-code"
-          pattern="[0-9]{6}"
-          maxLength={6}
-          required
-          autoFocus
-          value={code}
-          onChange={(event) => setCode(event.target.value)}
-          aria-invalid={problem !== null}
-          aria-describedby={problem === null ? undefined : `${inputId}-error`}
-          className="setup-code-input"
-        />
       </div>
-      {problem === null ? null : (
-        <p id={`${inputId}-error`} role="alert" className="alert alert-error">
-          {problem}
-        </p>
-      )}
-      <Button type="submit" disabled={pending || code.trim().length !== 6}>
-        {pending ? "Checking..." : "Continue"}
-      </Button>
-    </form>
+      {existingInstallation ? (
+        <Alert variant="warning">
+          <AlertDescription>
+            This instance has data from before the setup existed. It is kept,
+            and reviews keep running while you set up.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      <form
+        aria-label="Setup code"
+        onSubmit={(event) => void submit(event)}
+        className="flex flex-col gap-4"
+      >
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor={inputId}>Setup code</Label>
+          <Input
+            id={inputId}
+            name="code"
+            type="text"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            pattern="[0-9]{6}"
+            maxLength={6}
+            required
+            autoFocus
+            value={code}
+            onChange={(event) => setCode(event.target.value)}
+            aria-invalid={problem !== null}
+            aria-describedby={problem === null ? undefined : `${inputId}-error`}
+            className="font-mono text-lg tracking-[0.4em]"
+          />
+          {problem === null ? null : (
+            <p
+              id={`${inputId}-error`}
+              role="alert"
+              className="text-sm text-destructive"
+            >
+              {problem}
+            </p>
+          )}
+        </div>
+        <div>
+          <Button
+            type="submit"
+            loading={pending}
+            disabled={code.trim().length !== 6}
+          >
+            {pending ? "Checking..." : "Continue"}
+          </Button>
+        </div>
+      </form>
+    </div>
   );
 }

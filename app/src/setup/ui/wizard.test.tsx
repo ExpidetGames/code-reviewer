@@ -1,16 +1,42 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // @vitest-environment jsdom
-// Pins down the wizard: three steps in order, the choices are kept while going back and forth, the
-// fail-closed hint is shown next to an email or domain rule, the password rule and its reason are
-// shown, and the problems the server reports are shown at the field and take the person to its step.
-import { cleanup, render, screen } from "@testing-library/react";
+// Pins down the wizard: three steps in order, each step one named form with the heading outside it
+// and a visible step count, the choices are kept while going back and forth, the fail-closed hint
+// and the password rule each fit one line with the long text in a hint, and the problems the server
+// reports are shown at the field and take the person to its step.
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { PASSWORD_RULE_HINT } from "../../auth/password-policy.ts";
+import { FAIL_CLOSED_WARNING } from "../../signup/ui/rule-copy.ts";
 import type { SetupApi } from "./api.ts";
+import { FAIL_CLOSED_LINE, PASSWORD_REASON } from "./messages.ts";
 import { splitEntries, Wizard } from "./wizard.tsx";
 
 afterEach(cleanup);
+
+function radio(name: RegExp): HTMLElement {
+  return screen.getByRole("radio", { name });
+}
+
+function isChecked(name: RegExp): boolean {
+  return radio(name).getAttribute("aria-checked") === "true";
+}
+
+/** Opens the InfoHint of that name and returns its text; the trigger opens on hover/focus (#167). */
+async function hintText(
+  user: ReturnType<typeof userEvent.setup>,
+  name: string,
+): Promise<string> {
+  const trigger = screen.getByRole("button", { name });
+  await user.hover(trigger);
+  await waitFor(() =>
+    expect(trigger.getAttribute("aria-describedby")).toBeTruthy(),
+  );
+  const describedBy = trigger.getAttribute("aria-describedby") as string;
+  return document.getElementById(describedBy)?.textContent ?? "";
+}
 
 function renderWizard(
   result: Awaited<ReturnType<SetupApi["complete"]>> = {
@@ -52,23 +78,11 @@ describe("the wizard of an update from before accounts", () => {
     );
     await user.click(screen.getByRole("button", { name: "Next" }));
 
-    expect(
-      (
-        screen.getByRole("radio", {
-          name: /A list of email addresses/,
-        }) as HTMLInputElement
-      ).checked,
-    ).toBe(true);
-    expect(
-      (screen.getByRole("radio", { name: /Everyone/ }) as HTMLInputElement)
-        .checked,
-    ).toBe(false);
+    expect(isChecked(/A list of email addresses/)).toBe(true);
+    expect(isChecked(/Everyone/)).toBe(false);
     expect(screen.getByText(/are not carried over as a rule/)).toBeTruthy();
     await user.click(screen.getByRole("radio", { name: /Everyone/ }));
-    expect(
-      (screen.getByRole("radio", { name: /Everyone/ }) as HTMLInputElement)
-        .checked,
-    ).toBe(true);
+    expect(isChecked(/Everyone/)).toBe(true);
     await user.click(
       screen.getByRole("radio", { name: /Allowed email domains/ }),
     );
@@ -104,10 +118,7 @@ describe("the wizard of an update from before accounts", () => {
     );
     await user.click(screen.getByRole("button", { name: "Next" }));
 
-    expect(
-      (screen.getByRole("radio", { name: /Everyone/ }) as HTMLInputElement)
-        .checked,
-    ).toBe(true);
+    expect(isChecked(/Everyone/)).toBe(true);
     expect(screen.queryByText(/not carried over/)).toBeNull();
   });
 });
@@ -149,10 +160,7 @@ describe("the wizard", () => {
     await toStep3(user);
     await user.click(screen.getByRole("button", { name: "Back" }));
     await user.click(screen.getByRole("button", { name: "Back" }));
-    expect(
-      (screen.getByRole("radio", { name: /Multi-tenant/ }) as HTMLInputElement)
-        .checked,
-    ).toBe(true);
+    expect(isChecked(/Multi-tenant/)).toBe(true);
     await toStep3(user);
     await fillAdmin(user);
 
@@ -171,8 +179,10 @@ describe("the wizard", () => {
       screen.getByRole("radio", { name: /list of email addresses/i }),
     );
     expect(screen.getByText(/nobody except you can sign up/)).toBeTruthy();
-    // The remedy comes from the shared owner so the wizard and the portal say the same thing (#169).
-    expect(screen.getByText(/mail server or GitHub/)).toBeTruthy();
+    // The longer shared warning is behind the hint, so the line stays one sentence (#172-T04).
+    expect(
+      await hintText(user, "Why this rule cannot verify anyone yet"),
+    ).toMatch(/mail server or GitHub/);
     await user.type(
       screen.getByLabelText("Email addresses"),
       "anna@example.com, bob@example.org",
@@ -276,6 +286,70 @@ describe("the wizard", () => {
       /Restart the app/,
     );
     expect(onDone).not.toHaveBeenCalled();
+  });
+});
+
+describe("the shape of the steps", () => {
+  // #172-T02
+  it("renders every step as exactly one form", async () => {
+    const { user } = renderWizard();
+
+    expect(screen.getAllByRole("form")).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getAllByRole("form")).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getAllByRole("form")).toHaveLength(1);
+  });
+
+  // #172-T03
+  it("shows the step count as text and on the progress element", async () => {
+    const { user } = renderWizard();
+
+    expect(screen.getByText("Step 1 of 3")).toBeTruthy();
+    expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe(
+      "33",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByText("Step 2 of 3")).toBeTruthy();
+    expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe(
+      "67",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByText("Step 3 of 3")).toBeTruthy();
+    expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe(
+      "100",
+    );
+  });
+
+  // #172-T04
+  it("shows the fail-closed warning as one line with the long text in a hint", async () => {
+    const { user } = renderWizard();
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.click(
+      screen.getByRole("radio", { name: /list of email addresses/i }),
+    );
+
+    expect(screen.getByText(FAIL_CLOSED_LINE)).toBeTruthy();
+    expect(screen.queryByText(FAIL_CLOSED_WARNING)).toBeNull();
+
+    expect(
+      await hintText(user, "Why this rule cannot verify anyone yet"),
+    ).toContain(FAIL_CLOSED_WARNING);
+  });
+
+  // #172-T04
+  it("shows the password rule as one line with the reason in a hint", async () => {
+    const { user } = renderWizard();
+    await toStep3(user);
+
+    expect(screen.getByText(PASSWORD_RULE_HINT)).toBeTruthy();
+    expect(screen.queryByText(PASSWORD_REASON)).toBeNull();
+
+    expect(await hintText(user, "What makes a good password")).toContain(
+      PASSWORD_REASON,
+    );
   });
 });
 
