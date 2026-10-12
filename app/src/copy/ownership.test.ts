@@ -8,6 +8,8 @@ import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
+  PASSWORD_MAX_LENGTH,
+  PASSWORD_MIN_LENGTH,
   PASSWORD_RULE_HINT,
   PASSWORDS_DO_NOT_MATCH,
 } from "../auth/password-policy.ts";
@@ -87,6 +89,9 @@ describe("the owners of the consolidated copy", () => {
     expect(filesContaining(PASSWORDS_DO_NOT_MATCH)).toEqual([
       "auth/password-policy.ts",
     ]);
+    // The numbers in the copy are the numbers the server checks.
+    expect(PASSWORD_RULE_HINT).toContain(String(PASSWORD_MIN_LENGTH));
+    expect(PASSWORD_RULE_HINT).toContain(String(PASSWORD_MAX_LENGTH));
     for (const form of [
       "signup/ui/sign-up-form.tsx",
       "auth/ui/reset-password-form.tsx",
