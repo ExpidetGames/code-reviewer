@@ -162,6 +162,7 @@ test.describe("invitations by mail", () => {
     expect(response?.headers()["referrer-policy"]).toBe("no-referrer");
     await expect(newcomer.getByText(NEWCOMER).first()).toBeVisible();
     await newcomer.getByRole("link", { name: "Create an account" }).click();
+    await expect(newcomer).toHaveURL(/\/sign-up\?invitation=/);
     await signUpAndConfirm(newcomer, NEWCOMER, newcomer.url());
     // With a mail server the invitations of a verified address are listed after the sign-in.
     await signIn(newcomer, NEWCOMER);
