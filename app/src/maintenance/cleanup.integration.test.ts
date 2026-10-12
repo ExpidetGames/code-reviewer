@@ -9,7 +9,10 @@ import {
   SIGN_IN_ACCOUNT_WINDOW_MS,
   SIGN_IN_GLOBAL_WINDOW_MS,
 } from "../auth/sign-in-limit.ts";
+import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
 import { createRateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
+import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
+import { createJobQueue } from "../jobs/job-queue.ts";
 import {
   PASSWORD_RESET_MAIL_GLOBAL_WINDOW_MS,
   PASSWORD_RESET_REQUEST_ADDRESS_WINDOW_MS,
@@ -20,9 +23,11 @@ import {
   VERIFY_TOKEN_WINDOW_MS,
 } from "../signup/limits.ts";
 import { createTestDatabase } from "../test-support/test-database.ts";
+import { defaultWorkspaceId } from "../test-support/workspaces.ts";
 import { WORKSPACE_WINDOWS_MS } from "../workspaces/rate-limits.ts";
 import {
   cleanUpExpiredRows,
+  JOB_CLAIMED_KEY_KEEP_MS,
   LONGEST_RATE_LIMIT_WINDOW_MS,
   PASSWORD_RESET_TOKEN_KEEP_MS,
   VERIFICATION_TOKEN_KEEP_MS,
@@ -190,6 +195,75 @@ describe("the cleanup of old rows", () => {
     ).toEqual(["expired-just-now", "pending", "used-recently"]);
   });
 
+  // #104-LK-07
+  it("removes the remembered LLM keys of jobs that finished a week ago, and keeps the rest", async () => {
+    const { db, now } = await setup();
+    const workspaceId = await defaultWorkspaceId(db);
+    const job = async (id: string, finishedAt: number | null) => {
+      const integration = await createIntegrationsRepository(
+        db,
+        workspaceId,
+        now,
+      ).create({
+        type: "github_app",
+        displayName: id,
+        externalId: `ext-${id}`,
+        config: {},
+      });
+      const repositories = createRepositoriesRepository(db, workspaceId, now);
+      await repositories.reconcile(integration.id, [
+        {
+          integrationId: integration.id,
+          externalId: `repo-${id}`,
+          fullName: `acme/${id}`,
+          url: `https://github.test/acme/${id}`,
+        },
+      ]);
+      const [repository] = await repositories.list({
+        integrationId: integration.id,
+      });
+      const enqueued = await createJobQueue(db, workspaceId, { now }).enqueue({
+        repositoryId: repository?.id ?? "",
+        prNumber: 7,
+        prUrl: `https://github.test/acme/${id}/pull/7`,
+        headSha: "a".repeat(40),
+        command: "review",
+        triggerKind: "webhook",
+        actorLogin: "octocat",
+      });
+      if (enqueued.status !== "created") throw new Error("seeding failed");
+      await db
+        .updateTable("jobs")
+        .set({ finished_at: finishedAt === null ? null : iso(finishedAt) })
+        .where("id", "=", enqueued.job.id)
+        .execute();
+      await db
+        .insertInto("job_claimed_keys")
+        .values({
+          job_id: enqueued.job.id,
+          ciphertext: id,
+          nonce: "n",
+          key_version: 1,
+          created_at: iso(START),
+        })
+        .execute();
+      return enqueued.job.id;
+    };
+    const keep = JOB_CLAIMED_KEY_KEEP_MS;
+    const old = await job("old", START - keep - 1);
+    const recent = await job("recent", START - keep + 1000);
+    const running = await job("running", null);
+
+    const result = await cleanUpExpiredRows(db, now);
+
+    expect(result.jobClaimedKeys).toBe(1);
+    const left = (
+      await db.selectFrom("job_claimed_keys").select("job_id").execute()
+    ).map((row) => row.job_id);
+    expect(left.sort()).toEqual([recent, running].sort());
+    expect(left).not.toContain(old);
+  });
+
   // #102-GH-02
   it("removes signed states that have expired and keeps the ones still valid", async () => {
     const { db, now } = await setup();
@@ -227,6 +301,7 @@ describe("the cleanup of old rows", () => {
       rateLimits: 0,
       verificationTokens: 0,
       passwordResetTokens: 0,
+      jobClaimedKeys: 0,
     });
   });
 });

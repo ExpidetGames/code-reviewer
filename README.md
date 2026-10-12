@@ -103,10 +103,17 @@ merges the two accounts. How it works: `app/src/auth/README.md`, `app/src/github
 
 ### LLM access
 
-One shared LLM account serves the whole instance: set `LLM_PROVIDER=openrouter` and `LLM_API_KEY`
-(optionally `LLM_MODEL`, `LLM_MAX_TOKENS`) as environment variables, see `app/.env.example`. Without
-them the app still starts and shows a configuration error; every job then fails with
-`llm_not_configured`. The default model is `anthropic/claude-haiku-5.5`. The key is never logged, stored or shown. How it works: `app/src/llm/README.md`.
+Every workspace brings its own LLM key (bring your own key): an Admin or an Owner enters it under
+**Settings, LLM access** of the workspace (provider OpenRouter, a write-only key, a "Test key" button). The key is
+stored encrypted in the database (with `APP_SECRET`; the operator of the instance holds that key and can technically
+decrypt it), never shown again, never logged, and reviews of a workspace use the key of that workspace only. A
+workspace without a key fails its reviews with `llm_not_configured` and shows "LLM not configured" with a link to
+the form. The default model is `anthropic/claude-haiku-5.5` (the model is a review setting).
+
+The legacy variables `LLM_PROVIDER` and `LLM_API_KEY` (optionally `LLM_MODEL`, `LLM_MAX_TOKENS`, see
+`app/.env.example`) still work on a single-tenant instance for a workspace that has no key of its own, until the
+import of an existing installation moves them into the default workspace; a multi-tenant instance ignores the key.
+How it works: `app/src/llm/README.md`.
 
 ### GitHub App
 
@@ -208,7 +215,7 @@ Open `http://localhost:3000`: a new instance asks for the **setup code**, which 
 | `RUNNER_TOKEN` | Required. Random, at least 32 characters: `openssl rand -hex 32` (the app and the runner share it) |
 | `BETTER_AUTH_URL` | The address people use, https beyond localhost (a local try-out needs nothing) |
 | The GitHub App | Not an environment variable: create it in the admin portal under Integrations ([docs/github-app.md](docs/github-app.md): one click, or by hand). `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_WEBHOOK_SECRET` and `GITHUB_APP_PRIVATE_KEY` of an installation from before accounts are read until the update imports them; `GITHUB_OAUTH_*` are no longer used |
-| `LLM_API_KEY` (and `LLM_PROVIDER`) | The LLM access shared by the team. Optional for starting the stack; without it review jobs fail |
+| `LLM_API_KEY` (and `LLM_PROVIDER`) | Legacy: an LLM key for a single-tenant instance whose workspace has no key of its own. Optional; the key is normally entered per workspace in the UI (Settings, LLM access) |
 
 `RUNNER_TOKEN` empty stops `docker compose up` with a message naming the variable, before any container
 is created. The production app refuses to start without `APP_SECRET` (or `BETTER_AUTH_SECRET`) and

@@ -14,27 +14,8 @@ afterEach(cleanup);
 const LLM_KEY = "dummy-llm-key-0123456789";
 
 describe("the instance status", () => {
-  // CR-34-T11
-  it("names provider and model when the LLM access works", () => {
-    const { container } = render(
-      <InstanceStatus
-        status={describeConfigStatus({
-          LLM_PROVIDER: "openrouter",
-          LLM_API_KEY: LLM_KEY,
-        })}
-        audience="operator"
-      />,
-    );
-
-    expect(screen.getByText(/Configured: /).textContent).toContain(
-      "openrouter",
-    );
-    expect(screen.getByText("anthropic/claude-haiku-5.5")).toBeTruthy();
-    expect(container.textContent).not.toContain(LLM_KEY);
-  });
-
   // CR-34-T09, CR-34-T10
-  it("names the variables of the parts that are not configured", () => {
+  it("names the variables of the GitHub App that are not configured, and says nothing of the LLM (a matter of the workspace)", () => {
     const { container } = render(
       <InstanceStatus
         status={describeConfigStatus({ LLM_PROVIDER: "openrouter" })}
@@ -42,12 +23,29 @@ describe("the instance status", () => {
       />,
     );
 
-    expect(screen.getByText("LLM_API_KEY")).toBeTruthy();
     expect(container.textContent).toMatch(/Missing:.*GITHUB_APP_ID/);
+    expect(container.textContent).not.toMatch(/LLM/);
+  });
+
+  it("names the GitHub App when it works, and never the LLM key", () => {
+    const { container } = render(
+      <InstanceStatus
+        status={describeConfigStatus({
+          LLM_PROVIDER: "openrouter",
+          LLM_API_KEY: LLM_KEY,
+          ...testGithubAppEnv(),
+        })}
+        audience="operator"
+      />,
+    );
+
+    expect(screen.getByText(/Configured/).textContent).toContain("Configured");
+    expect(container.textContent).not.toContain(LLM_KEY);
+    expect(container.textContent).not.toMatch(/openrouter/);
   });
 
   // #101-WM-08
-  it("tells a member only whether each part is set up, with no variable, provider, model or slug", () => {
+  it("tells a member only whether GitHub is set up, with no variable, provider, model or slug", () => {
     const broken = describeConfigStatus({ LLM_PROVIDER: "openrouter" });
     const { container } = render(<InstanceStatus status={broken} />);
 
@@ -60,7 +58,7 @@ describe("the instance status", () => {
   });
 
   // #101-WM-08
-  it("tells a member of a working instance that both parts are set up, and nothing about them", () => {
+  it("tells a member of a working instance that GitHub is set up, and nothing about it", () => {
     const working = describeConfigStatus({
       LLM_PROVIDER: "openrouter",
       LLM_API_KEY: LLM_KEY,
@@ -69,7 +67,7 @@ describe("the instance status", () => {
     });
     const { container } = render(<InstanceStatus status={working} />);
 
-    expect(container.textContent).toBe("GitHubSet upReviewsSet up");
+    expect(container.textContent).toBe("GitHubSet up");
     expect(container.textContent).not.toMatch(/secret-model|openrouter/);
   });
 

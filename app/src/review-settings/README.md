@@ -19,18 +19,18 @@ A save **replaces the whole set** of its layer: a field left out is inherited ag
 allow list may change both layers (no admin role in the MVP); `app_settings.updated_by` records who saved
 the global defaults last.
 
-| Field               | Meaning                                                                      | Built-in value                                 | Limits                                                           |
-| ------------------- | ---------------------------------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------- |
-| `model`             | The model (as the provider spells it, no prefix)                             | `LLM_MODEL`, else `anthropic/claude-haiku-5.5` | the pattern the runner accepts                                   |
-| `fallbackModel`     | Tried when the model fails; `null` = none                                    | none                                           | same pattern                                                     |
-| `extraInstructions` | Project rules for the model, free text                                       | none                                           | 4000 characters, no control characters                           |
-| `maxFindings`       | The most findings one review lists                                           | 5                                              | 1 to 30                                                          |
-| `maxTokens`         | Token budget of a review (`llm.maxTokens`)                                   | 100000 (PR-Agent's own: 32000)                 | 8000 to 2000000, not above the model's context window (if known) |
-| `largePrChunking`   | Review a large pull request in chunks instead of leaving files out           | on                                             | boolean                                                          |
-| `inlineKeyIssues`   | Also post every finding as an inline comment                                 | off                                            | boolean                                                          |
-| `autoReviewOnOpen`  | Review when a pull request is opened, reopened or marked ready               | on                                             | boolean                                                          |
-| `autoReviewOnPush`  | Review again when commits are pushed                                         | on                                             | boolean                                                          |
-| `allowedCommands`   | The comment commands people may use (`review`, `improve`, `describe`, `ask`) | all four                                       | any subset, no duplicates                                        |
+| Field               | Meaning                                                                                                                | Built-in value                                 | Limits                                                           |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------- |
+| `model`             | The model (as the provider spells it, no prefix); the key is not a review setting but the workspace's own (`src/llm/`) | `LLM_MODEL`, else `anthropic/claude-haiku-5.5` | the pattern the runner accepts                                   |
+| `fallbackModel`     | Tried when the model fails; `null` = none                                                                              | none                                           | same pattern                                                     |
+| `extraInstructions` | Project rules for the model, free text                                                                                 | none                                           | 4000 characters, no control characters                           |
+| `maxFindings`       | The most findings one review lists                                                                                     | 5                                              | 1 to 30                                                          |
+| `maxTokens`         | Token budget of a review (`llm.maxTokens`)                                                                             | 100000 (PR-Agent's own: 32000)                 | 8000 to 2000000, not above the model's context window (if known) |
+| `largePrChunking`   | Review a large pull request in chunks instead of leaving files out                                                     | on                                             | boolean                                                          |
+| `inlineKeyIssues`   | Also post every finding as an inline comment                                                                           | off                                            | boolean                                                          |
+| `autoReviewOnOpen`  | Review when a pull request is opened, reopened or marked ready                                                         | on                                             | boolean                                                          |
+| `autoReviewOnPush`  | Review again when commits are pushed                                                                                   | on                                             | boolean                                                          |
+| `allowedCommands`   | The comment commands people may use (`review`, `improve`, `describe`, `ask`)                                           | all four                                       | any subset, no duplicates                                        |
 
 The limits are `REVIEW_SETTING_LIMITS`; `validate.ts` checks every field and reports each problem as
 `{ field, code }` with a stable code (`REVIEW_SETTING_ISSUE_CODES`), never with the value.
@@ -100,6 +100,10 @@ behaviour for free text again (next section): the table in `runner-settings.test
 - `LLM_MAX_TOKENS` (`src/llm`) is not used here: the budget is a review setting now. It stays as the
   instance's hint for the context window of a model PR-Agent does not know (`contextWindowTokens`), and
   the budget of a review replaces it in a job.
+
+**The built-in model is visible to members.** The built-in value of `model` is the instance's `LLM_MODEL` (or the
+recommended default), and a member sees it in this form as "built-in value" (decided with #144: a model name is no
+secret). The provider and the key are not review settings: they are the workspace's LLM access (`src/llm/README.md`).
 
 ## Cost guard
 
