@@ -3,7 +3,11 @@
 // The copy of the configuration hints. The status holds variable names and stable codes; this turns
 // them into the sentences a person reads (the UI translates codes, never the other way round). Never
 // a value: a hint names what to fix, not what is there.
-import type { LlmConfigIssue, LlmConfigIssueCode } from "../llm/config.ts";
+import {
+  legacyConfigIsAbsent,
+  type LlmConfigIssue,
+  type LlmConfigIssueCode,
+} from "../llm/config.ts";
 import type { ConfigAudience, ConfigStatus } from "./status.ts";
 
 export type ConfigNotice = {
@@ -71,7 +75,8 @@ function llmNotice(issue: LlmConfigIssue): ConfigNotice {
 
 /**
  * What a member of a workspace is told: that a part is not set up and who to ask, and nothing of how the
- * instance is configured (no variable name, no warning about a setting that is ignored).
+ * instance is configured (no variable name, no warning about a setting that is ignored). Whether reviews can run
+ * is said by the workspace's own hint (`LlmAccessNotice`).
  */
 function describeNoticesForMembers(status: ConfigStatus): ConfigNotice[] {
   const notices: ConfigNotice[] = [];
@@ -82,14 +87,6 @@ function describeNoticesForMembers(status: ConfigStatus): ConfigNotice[] {
       title: "GitHub is not set up yet",
       detail:
         "Ask your instance admin to set it up. Repositories cannot be read from GitHub and projects cannot be activated until then.",
-    });
-  if (!status.llm.configured)
-    notices.push({
-      id: "llm",
-      severity: "error",
-      title: "Reviews are not set up yet",
-      detail:
-        "Ask your instance admin to set them up. Reviews cannot run until then.",
     });
   return notices;
 }
@@ -119,7 +116,14 @@ export function describeConfigNotices(
           : `${kind === "missing" ? "Missing" : "Not valid"}: ${variables.join(", ")}. Repositories cannot be read from GitHub and projects cannot be activated until this is fixed (an instance admin does that under Integrations in the admin portal).`,
     });
   }
-  const llmIssues = status.llm.configured ? [] : status.llm.issues;
+  // The LLM access is a matter of the workspace now (its own key, `src/llm/`), and its hint is shown by the
+  // workspace pages (`LlmAccessNotice`). An absent `LLM_*` configuration (neither the provider nor the key is
+  // set) is therefore no problem of the instance; a half set one, one that is set but wrong, and an optional
+  // variable that is ignored are still reported.
+  const llmIssues =
+    status.llm.configured || legacyConfigIsAbsent(status.llm.issues)
+      ? []
+      : status.llm.issues;
   for (const issue of [...llmIssues, ...status.llm.warnings])
     notices.push(llmNotice(issue));
   return notices;

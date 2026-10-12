@@ -55,11 +55,11 @@ with the session they hold.
 
 ## Roles and the permission matrix
 
-| Role   | Can                                                                                                                                                                                               |
-| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Member | See projects, runs, settings and the members; start reviews; change the settings of a project; leave                                                                                              |
-| Admin  | Also switch projects on and off (which repositories are reviewed), change the review defaults, manage connections and (later) the LLM key; invite, revoke and remove Members; see the invitations |
-| Owner  | Also invite with any role, revoke any invitation, change roles, remove Admins and Owners, rename the workspace                                                                                    |
+| Role   | Can                                                                                                                                                                                       |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Member | See projects, runs, settings and the members; start reviews; change the settings of a project; leave                                                                                      |
+| Admin  | Also switch projects on and off (which repositories are reviewed), change the review defaults, manage connections and the LLM key; invite, revoke and remove Members; see the invitations |
+| Owner  | Also invite with any role, revoke any invitation, change roles, remove Admins and Owners, rename the workspace                                                                            |
 
 `permissions.ts` is the matrix, `permissions.test.ts` pins it. Two judgments are written down here because
 the decision record leaves them to this issue: switching a project on or off needs an Admin (it is "which
@@ -141,8 +141,10 @@ Deleting workspaces, transferring data, SSO and teams below the workspace are ou
 is bound to a workspace by an Owner or Admin (`manage_connections`) through "Connect GitHub" on the Connections page; the
 rules are in `src/installation-binding/README.md`, and the synchronization of a workspace reads its own connections only
 (`POST /api/w/:workspace/integrations/sync`; the whole instance's stays the instance admin's). The workspace LLM key is
-its own issue; the matrix already names `manage_llm_key`. The workspace pages tell a member only that GitHub or the reviews are not set up and to ask the instance admin; the names
-of the variables and the provider and model are the instance admin's to read (`src/config-status/`).
+in place (`src/llm/`, `manage_llm_key`: an Admin or an Owner sets it, every member sees whether there is one). The workspace
+pages tell a member only that GitHub is not set up and to ask the instance admin; the names of the variables are the
+instance admin's to read (`src/config-status/`). Whether reviews have an LLM key is the workspace's own matter: the hint
+"LLM not configured" tells a Member to ask an Admin or an Owner of the workspace (`src/llm/ui/`).
 
 The Postgres issue (#105) has work here as well: creating a workspace and the last Owner rule lean on SQLite's
 serialized writers (`begin immediate`). On Postgres the creation needs a lock (or the handling of the unique

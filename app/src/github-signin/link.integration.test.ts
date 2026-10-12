@@ -202,6 +202,21 @@ describe("merging the instance admin with an imported operator", () => {
         decided_by: "operator",
       })
       .execute();
+    // The operator saved the LLM key of the workspace: who saved it is history that names the user too (#104).
+    await ctx.db
+      .insertInto("workspace_secrets")
+      .values({
+        workspace_id: ctx.workspace.id,
+        name: "llm_api_key",
+        binding: "openrouter",
+        ciphertext: "x",
+        nonce: "y",
+        key_version: 1,
+        last_four: null,
+        updated_by: "operator",
+        updated_at: "2026-10-11T08:00:00.000Z",
+      })
+      .execute();
     expect(await githubIdentityLinked(ctx.db, "admin")).toBe(false);
 
     const result = await ctx.link(ADMIN);
@@ -213,6 +228,14 @@ describe("merging the instance admin with an imported operator", () => {
         .select(["requested_by", "decided_by"])
         .execute(),
     ).toEqual([{ requested_by: "admin", decided_by: "admin" }]);
+    expect(
+      (
+        await ctx.db
+          .selectFrom("workspace_secrets")
+          .select("updated_by")
+          .executeTakeFirstOrThrow()
+      ).updated_by,
+    ).toBe("admin");
     const invitation = await ctx.db
       .selectFrom("invitations")
       .select(["invited_by", "accepted_by"])

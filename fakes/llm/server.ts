@@ -9,7 +9,10 @@
 // - a reply per kind of prompt (review, improve, reflect, describe, ask), chosen from the system
 //   prompt of the request, so one endpoint serves all four commands;
 // - an error for every request (429, 401, ...), optionally quoting the received key in the message
-//   like a provider that says "Incorrect API key provided".
+//   like a provider that says "Incorrect API key provided";
+// - `GET <api base>/key`, the cheap call that tells whether a key is accepted (the app's "test key"
+//   button): 200 for an accepted key, 401 for any other once `acceptKeys` names the accepted ones. The
+//   keys that arrived are recorded apart (`keyChecks`), so a test can see which key a check carried.
 //
 // The replies are canned (`canned.ts`). They satisfy the output contract of each PR-Agent tool and
 // say nothing about review quality. The engine suite of the runner has its own Python twin of this
@@ -42,6 +45,10 @@ export type FakeLlm = {
   failWith(error: FakeLlmError | null): void;
   /** Error messages quote the key that arrived, like a provider that says "Incorrect API key". */
   quoteKeyInErrors(on: boolean): void;
+  /** The only keys `GET /key` accepts; null (the default) accepts every key. */
+  acceptKeys(keys: string[] | null): void;
+  /** The whole `Authorization` header of every `GET /key` received, in order. */
+  keyChecks(): string[];
   /** Normal replies, no error, no recorded requests. */
   reset(): void;
   close(): Promise<void>;
@@ -98,6 +105,8 @@ export async function startLlmFake(
   let replies = defaultReplies();
   let error: FakeLlmError | null = null;
   let quoteKey = false;
+  let accepted: string[] | null = null;
+  let keyChecks: string[] = [];
 
   const server: Server = createServer((request, response) => {
     const chunks: Buffer[] = [];
@@ -107,6 +116,31 @@ export async function startLlmFake(
         response.writeHead(status, { "content-type": "application/json" });
         response.end(JSON.stringify(body));
       };
+      if (
+        request.method === "GET" &&
+        (request.url ?? "").split("?")[0]?.endsWith("/key")
+      ) {
+        const authorization = request.headers.authorization ?? "";
+        const key = authorization.split(" ").at(-1) ?? "";
+        keyChecks.push(authorization);
+        if (error !== null)
+          return send(error.status, {
+            error: {
+              message: quoteKey ? `${error.message}: ${key}` : error.message,
+              code: error.status,
+            },
+          });
+        if (accepted !== null && !accepted.includes(key))
+          return send(401, {
+            error: {
+              message: quoteKey
+                ? `Incorrect API key provided: ${key}`
+                : "No auth credentials found",
+              code: 401,
+            },
+          });
+        return send(200, { data: { label: "fake-key", limit: null } });
+      }
       if (
         request.method !== "POST" ||
         !(request.url ?? "").split("?")[0]?.endsWith("/chat/completions")
@@ -164,11 +198,17 @@ export async function startLlmFake(
     quoteKeyInErrors(on) {
       quoteKey = on;
     },
+    acceptKeys(keys) {
+      accepted = keys;
+    },
+    keyChecks: () => [...keyChecks],
     reset() {
       log = [];
       replies = defaultReplies();
       error = null;
       quoteKey = false;
+      accepted = null;
+      keyChecks = [];
     },
     async close() {
       await new Promise<void>((resolve, reject) => {

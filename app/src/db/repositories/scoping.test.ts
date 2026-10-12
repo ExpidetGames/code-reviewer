@@ -28,6 +28,7 @@ const SCOPED = [
   "repositories-repository.ts",
   "runs-repository.ts",
   "workspace-members-repository.ts",
+  "workspace-secrets-repository.ts",
 ] as const;
 
 /**
@@ -45,7 +46,10 @@ const SCOPED = [
  *   scoped installation-link-requests repository;
  * - unclaimed-installations: installations that no workspace has linked belong to no workspace by definition;
  * - runner-jobs: runners serve the whole instance, every statement is fenced by the lease token;
- * - jobs-claim: the one SQL statement of the runner side, not a repository.
+ * - jobs-claim: the one SQL statement of the runner side, not a repository;
+ * - job-claimed-keys: the encrypted LLM key handed out with the claim of a job. It is keyed by the job and read
+ *   only by the runner API when that job is completed (the job and its workspace are known there); it never
+ *   lists, and a key is only ever looked up by the id of a job the caller holds.
  */
 const INSTANCE_LEVEL = [
   "allowed-login-pins-repository.ts",
@@ -54,6 +58,7 @@ const INSTANCE_LEVEL = [
   "instance-settings-repository.ts",
   "integration-directory-repository.ts",
   "invitation-directory-repository.ts",
+  "job-claimed-keys-repository.ts",
   "jobs-claim.ts",
   "rate-limits-repository.ts",
   "runner-jobs-repository.ts",

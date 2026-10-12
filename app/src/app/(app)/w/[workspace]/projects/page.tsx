@@ -3,6 +3,7 @@
 import type { Metadata } from "next";
 import { getConfigStatusFor } from "@/config-status/shared";
 import { configAudienceOf } from "@/config-status/status";
+import { WorkspaceLlmNotice } from "@/llm/ui/workspace-llm-notice";
 import { projectServiceFor } from "@/projects/shared";
 import { lastRunSourceFor } from "@/runs/shared";
 import {
@@ -42,6 +43,7 @@ export default async function ProjectsPage({
         workspaceSlug={workspace.slug}
         canManage={canManage}
         canConnect={canConnect}
+        canManageLlmKey={can(role, "manage_llm_key")}
         user={user}
       />
     </>
@@ -53,12 +55,14 @@ async function ProjectsContent({
   workspaceSlug,
   canManage,
   canConnect,
+  canManageLlmKey,
   user,
 }: {
   workspaceId: string;
   workspaceSlug: string;
   canManage: boolean;
   canConnect: boolean;
+  canManageLlmKey: boolean;
   user: { isInstanceAdmin: boolean };
 }) {
   const data = await loadProjectsPage({
@@ -69,12 +73,19 @@ async function ProjectsContent({
     config: () => getConfigStatusFor(user),
   });
   return (
-    <ProjectsPageContent
-      workspaceSlug={workspaceSlug}
-      audience={configAudienceOf(user)}
-      canManage={canManage}
-      canConnect={canConnect}
-      data={data}
-    />
+    <>
+      <WorkspaceLlmNotice
+        workspaceId={workspaceId}
+        workspaceSlug={workspaceSlug}
+        canManage={canManageLlmKey}
+      />
+      <ProjectsPageContent
+        workspaceSlug={workspaceSlug}
+        audience={configAudienceOf(user)}
+        canManage={canManage}
+        canConnect={canConnect}
+        data={data}
+      />
+    </>
   );
 }

@@ -9,7 +9,8 @@ import { createRepositoriesRepository } from "../db/repositories/repositories-re
 import { getDatabase } from "../db/startup.ts";
 import { integrationRegistry } from "../integrations/registry.ts";
 import { getRunnerQueue } from "../jobs/shared.ts";
-import { getLlmAccess } from "../llm/shared.ts";
+import { resolveAppSecret } from "../crypto/app-secret.ts";
+import { getWorkspaceLlm } from "../llm/shared.ts";
 import { projectServiceFor } from "../projects/shared.ts";
 import { reviewSettingsServiceFor } from "../review-settings/shared.ts";
 import { createRunnerApi, type RunnerApi } from "./api.ts";
@@ -22,18 +23,23 @@ import { knownSecretsFromEnv } from "./redact.ts";
 import { errorResponse } from "./responses.ts";
 import { configuredRunnerToken } from "./token-auth.ts";
 
-// One list for the whole process, kept on globalThis because the route files may be bundled apart.
-const CLAIMED_KEYS = Symbol.for("code-reviewer.runner-api.claimed-keys");
-
+// The key each job was handed lives in the database (encrypted), so any app instance can mask a result.
 function getClaimedKeys(): ClaimedKeys {
-  const holder = globalThis as { [CLAIMED_KEYS]?: ClaimedKeys };
-  holder[CLAIMED_KEYS] ??= createClaimedKeys();
-  return holder[CLAIMED_KEYS];
+  return createClaimedKeys({
+    db: getDatabase(),
+    appSecret: () => {
+      const resolved = resolveAppSecret(process.env);
+      // The server does not start without it (src/auth/startup.ts); this is the second line.
+      if (!resolved.ok) throw new Error(resolved.problem);
+      return resolved.secret;
+    },
+  });
 }
 
 /** The runner API of the running server. */
 export function getRunnerApi(): RunnerApi {
   const db = getDatabase();
+  const llm = getWorkspaceLlm();
   return createRunnerApi({
     // Runners serve the whole instance: the queue is not scoped, and everything the claim looks up
     // for a job is looked up in the job's own workspace.
@@ -49,14 +55,18 @@ export function getRunnerApi(): RunnerApi {
     jobOptions: createReviewSettingsJobOptionsSource({
       settings: reviewSettingsServiceFor,
     }),
-    // The shared LLM configuration, read from the environment on every claim (src/llm).
-    loadLlm: () => getLlmAccess(),
+    // The LLM access of the workspace of the claimed job: its own key, never another workspace's (src/llm).
+    loadLlm: (workspaceId) => llm.accessFor(workspaceId),
     claimedKeys: getClaimedKeys(),
     now: () => new Date(),
     logger: consoleRunnerApiLogger,
     heartbeatIntervalSeconds: HEARTBEAT_INTERVAL_SECONDS,
     runnerToken: () => configuredRunnerToken(process.env),
-    knownSecrets: () => knownSecretsFromEnv(process.env),
+    // The runner token and the current LLM key of the job's workspace (the key of the claim is in the database).
+    knownSecrets: async (workspaceId) => [
+      ...knownSecretsFromEnv(process.env),
+      ...(await llm.currentKeysFor(workspaceId).catch(() => [])),
+    ],
   });
 }
 

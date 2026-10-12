@@ -122,14 +122,17 @@ function databaseOf(page: Page): string {
       ? e2eEnv.pipelineDatabasePath
       : origin === e2eEnv.signupAppUrl
         ? e2eEnv.signupDatabasePath
-        : e2eEnv.databasePath;
+        : origin === e2eEnv.multiAppUrl
+          ? e2eEnv.multiDatabasePath
+          : e2eEnv.databasePath;
   return resolve(process.cwd(), file);
 }
 
 /** Makes the account a member of a workspace of the app the page is open at (the first one by default). */
 export async function joinWorkspace(
   page: Page,
-  account: GithubAccount,
+  /** The account by its GitHub login, or by the address of an account that signed up with email. */
+  account: { login: string } | { email: string },
   role: WorkspaceRole,
   workspace?: string,
 ): Promise<void> {
@@ -141,7 +144,7 @@ export async function joinWorkspace(
       resolve(process.cwd(), "src/test-support/e2e-membership-child.ts"),
       "join",
       databaseOf(page),
-      JSON.stringify({ login: account.login, role, workspace }),
+      JSON.stringify({ ...account, role, workspace }),
     ],
     { cwd: process.cwd() },
   );

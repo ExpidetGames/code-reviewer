@@ -83,6 +83,7 @@ export default defineConfig({
         /e2e\/admin\/mail\.e2e\.ts$/,
         /e2e\/admin\/github-integration\.e2e\.ts$/,
         /e2e\/workspaces\//,
+        /e2e\/settings\/llm-key\.e2e\.ts$/,
       ],
     },
     {
@@ -138,6 +139,14 @@ export default defineConfig({
       name: "multi-mail",
       use: { ...browser, baseURL: e2eEnv.multiAppUrl },
       testMatch: /e2e\/workspaces\/invite-by-mail\.e2e\.ts$/,
+      dependencies: ["multi", "multi-llm"],
+    },
+    // The journey of the LLM key of a workspace uses the multi-tenant app as well (a workspace of its own, so it
+    // changes nothing for the others), before the mail server is configured there.
+    {
+      name: "multi-llm",
+      use: { ...browser, baseURL: e2eEnv.multiAppUrl },
+      testMatch: /e2e\/settings\/llm-key\.e2e\.ts$/,
       dependencies: ["multi"],
     },
     // The journey that connects GitHub installations to workspaces uses the multi-tenant app again, after the
@@ -290,6 +299,9 @@ export default defineConfig({
         ...appEnv,
         DATABASE_PATH: e2eEnv.multiDatabasePath,
         BETTER_AUTH_URL: e2eEnv.multiAppUrl,
+        // The "test key" button of the LLM key journey asks the fake LLM, not the provider.
+        LLM_API_BASE_URL: e2eEnv.llmFakeApiUrl,
+        ALLOW_TEST_LLM_ENDPOINTS: "true",
       },
       url: e2eEnv.multiAppUrl,
       reuseExistingServer: false,

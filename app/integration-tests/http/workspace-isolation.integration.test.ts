@@ -34,6 +34,7 @@ import {
   initializeDatabaseOnStart,
 } from "../../src/db/startup.ts";
 import { jobQueueFor } from "../../src/jobs/shared.ts";
+import { createWorkspaceLlm } from "../../src/llm/assemble.ts";
 import {
   TEST_APP_ID,
   testAppKeys,
@@ -189,6 +190,52 @@ const ENTRIES: Entry[] = [
     body: () => ({ settings: { maxFindings: 3 } }),
     params: () => ({}),
     file: "review-settings/route.ts",
+    takesNoIds: true,
+  },
+  {
+    name: "GET llm-key",
+    route: "/api/w/[workspace]/llm-key",
+    method: "GET",
+    minRole: MINIMUM_ROLE.view,
+    path: () => "/llm-key",
+    params: () => ({}),
+    file: "llm-key/route.ts",
+    takesNoIds: true,
+  },
+  {
+    name: "PUT llm-key",
+    route: "/api/w/[workspace]/llm-key",
+    method: "PUT",
+    minRole: MINIMUM_ROLE.manage_llm_key,
+    path: () => "/llm-key",
+    body: () => ({
+      provider: "openrouter",
+      apiKey: "sk-or-v1-key-written-by-the-isolation-test",
+    }),
+    params: () => ({}),
+    file: "llm-key/route.ts",
+    takesNoIds: true,
+  },
+  {
+    name: "DELETE llm-key",
+    route: "/api/w/[workspace]/llm-key",
+    method: "DELETE",
+    minRole: MINIMUM_ROLE.manage_llm_key,
+    path: () => "/llm-key",
+    params: () => ({}),
+    file: "llm-key/route.ts",
+    takesNoIds: true,
+  },
+  {
+    name: "POST llm-key/test",
+    route: "/api/w/[workspace]/llm-key/test",
+    method: "POST",
+    minRole: MINIMUM_ROLE.manage_llm_key,
+    path: () => "/llm-key/test",
+    // No key in the body and none stored for the person's own workspace: nothing is sent anywhere.
+    body: () => ({}),
+    params: () => ({}),
+    file: "llm-key/test/route.ts",
     takesNoIds: true,
   },
   {
@@ -351,6 +398,15 @@ async function seedWorkspace(
     actorLogin: `login-of-${slug}`,
   });
   if (job.status !== "created") throw new Error("seeding failed");
+  // The workspace's own LLM key, with a sentinel that must never show up in an answer for another workspace.
+  const keySentinel = `sk-or-v1-sentinel-key-of-${slug}-0123456789`;
+  await createWorkspaceLlm({
+    db,
+    appSecret: () => "isolation-test-secret-0123456789-0123456789",
+    env: () => ({}),
+  })
+    .keyServiceFor(workspace.id)
+    .save({ provider: "openrouter", apiKey: keySentinel }, null);
   const owner = await signedInMember(db, {
     id: names.owner,
     workspaceId: workspace.id,
@@ -369,6 +425,7 @@ async function seedWorkspace(
   return {
     workspace,
     owner,
+    keySentinel,
     ids: {
       integrationId: integration.id,
       repositoryId: repository.id,
@@ -490,6 +547,11 @@ async function start() {
         .selectAll()
         .where("workspace_id", "=", workspaceId)
         .execute(),
+      secrets: await db
+        .selectFrom("workspace_secrets")
+        .selectAll()
+        .where("workspace_id", "=", workspaceId)
+        .execute(),
     };
   }
   return { fake, alpha, beta, people, call, rowsOf, db };
@@ -513,6 +575,7 @@ const MARKERS = [
   "owner-beta",
   "invited-by-beta",
   "account-of-beta",
+  "sentinel-key-of-beta",
 ];
 
 describe("a member of one workspace asking for another by its address", () => {

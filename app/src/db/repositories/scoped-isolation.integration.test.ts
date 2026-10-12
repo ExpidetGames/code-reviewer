@@ -18,6 +18,7 @@ import { createInstallationLinkRequestsRepository } from "./installation-link-re
 import { createIntegrationsRepository } from "./integrations-repository.ts";
 import { createInvitationsRepository } from "./invitations-repository.ts";
 import { createWorkspaceMembersRepository } from "./workspace-members-repository.ts";
+import { createWorkspaceSecretsRepository } from "./workspace-secrets-repository.ts";
 import { createJobsRepository } from "./jobs-repository.ts";
 import { createProjectsRepository } from "./projects-repository.ts";
 import { createRepositoriesRepository } from "./repositories-repository.ts";
@@ -36,6 +37,7 @@ function reposOf(db: Kysely<Database>, workspaceId: string) {
     members: createWorkspaceMembersRepository(db, workspaceId),
     invitations: createInvitationsRepository(db, workspaceId),
     linkRequests: createInstallationLinkRequestsRepository(db, workspaceId),
+    workspaceSecrets: createWorkspaceSecretsRepository(db, workspaceId),
   };
 }
 type Repos = ReturnType<typeof reposOf>;
@@ -115,6 +117,15 @@ async function seed(db: Kysely<Database>, workspaceId: string, tag: string) {
       roleDetail: "forbidden",
     },
   });
+  await repos.workspaceSecrets.put({
+    name: "llm_api_key",
+    binding: `binding-${tag}`,
+    ciphertext: `ciphertext-${tag}`,
+    nonce: `nonce-${tag}`,
+    keyVersion: 1,
+    lastFour: null,
+    updatedBy: `user-${tag}`,
+  });
   return {
     workspaceId,
     userId: `user-${tag}`,
@@ -166,6 +177,12 @@ async function rowsOf(db: Kysely<Database>, workspaceId: string) {
       .selectAll()
       .where("workspace_id", "=", workspaceId)
       .orderBy("id")
+      .execute(),
+    workspaceSecrets: await db
+      .selectFrom("workspace_secrets")
+      .selectAll()
+      .where("workspace_id", "=", workspaceId)
+      .orderBy("name")
       .execute(),
     appSettings: await db
       .selectFrom("app_settings")
@@ -564,6 +581,32 @@ const CASES: Case[] = [
     name: "linkRequests.withdrawPending",
     run: (a, b) => a.linkRequests.withdrawPending(b.linkRequest.installationId),
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  // workspace secrets: the names are the same in every workspace, so the scope is what decides whose it is
+  {
+    name: "workspaceSecrets.get",
+    run: (a) => a.workspaceSecrets.get("llm_api_key"),
+    expectAnswer: (answer) =>
+      expect(answer).toMatchObject({ binding: "binding-a" }),
+  },
+  {
+    name: "workspaceSecrets.put",
+    run: (a) =>
+      a.workspaceSecrets.put({
+        name: "llm_api_key",
+        binding: "binding-a-changed",
+        ciphertext: "ciphertext-a-changed",
+        nonce: "nonce-a-changed",
+        keyVersion: 1,
+        lastFour: null,
+        updatedBy: null,
+      }),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
+    name: "workspaceSecrets.remove",
+    run: (a) => a.workspaceSecrets.remove("llm_api_key"),
+    expectAnswer: (answer) => expect(answer).toBe(true),
   },
   // runs
   {

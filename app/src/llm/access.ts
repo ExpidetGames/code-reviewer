@@ -23,11 +23,37 @@ export const LLM_NOT_CONFIGURED_ERROR = "llm_not_configured" as const;
  */
 export type LlmAccess = LlmConfig;
 
+/** Where the access of a job comes from (src/llm/resolve.ts, docs/decisions/0001-..., section 2.8). */
+export const LLM_ACCESS_SOURCES = [
+  /** The key the workspace entered itself (BYOK). */
+  "workspace",
+  /** The operator's key, when the operator offers included usage (a stub that is off, for now). */
+  "operator",
+  /** The legacy `LLM_*` variables of a single-tenant instance, until the import moves them. */
+  "environment",
+] as const;
+export type LlmAccessSource = (typeof LLM_ACCESS_SOURCES)[number];
+
+/** Why no access could be made. A stable code for the log and the UI, never a value. */
+export const LLM_NOT_CONFIGURED_REASONS = [
+  /** The workspace has no key and nothing else applies. */
+  "no_key",
+  /** The workspace's key is stored but cannot be read (another APP_SECRET, or a changed row). */
+  "key_unreadable",
+  /** The workspace's key was made for another provider than the one it would be sent to. */
+  "key_binding_mismatch",
+  /** Nothing from the workspace, and the legacy variables are set but not usable. */
+  "environment_misconfigured",
+] as const;
+export type LlmNotConfiguredReason =
+  (typeof LLM_NOT_CONFIGURED_REASONS)[number];
+
 export type LlmAccessResult =
-  | { ok: true; access: LlmAccess }
+  | { ok: true; access: LlmAccess; source: LlmAccessSource }
   | {
       ok: false;
       errorCode: typeof LLM_NOT_CONFIGURED_ERROR;
+      reason: LlmNotConfiguredReason;
       /** Which variables are wrong. Names and codes only, never a value. */
       issues: readonly LlmConfigIssue[];
     };
@@ -70,11 +96,14 @@ export function revealLlmAccess(access: LlmAccess): LlmAccess {
   };
 }
 
+/** The access of the legacy `LLM_*` variables (the instance's shared key). */
 export function resolveLlmAccess(state: LlmConfigState): LlmAccessResult {
-  if (state.status === "configured") return { ok: true, access: state.config };
+  if (state.status === "configured")
+    return { ok: true, access: state.config, source: "environment" };
   return {
     ok: false,
     errorCode: LLM_NOT_CONFIGURED_ERROR,
+    reason: "environment_misconfigured",
     issues: state.issues,
   };
 }

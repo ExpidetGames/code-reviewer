@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getConfigStatusFor } from "@/config-status/shared";
 import { configAudienceOf } from "@/config-status/status";
+import { WorkspaceLlmNotice } from "@/llm/ui/workspace-llm-notice";
 import { projectServiceFor } from "@/projects/shared";
 import {
   loadProjectSettingsPage,
@@ -11,6 +12,7 @@ import {
 } from "@/projects/ui/project-settings-page";
 import { reviewSettingsServiceFor } from "@/review-settings/shared";
 import { requireWorkspace } from "@/workspaces/access-runtime";
+import { can } from "@/workspaces/permissions";
 
 export const metadata: Metadata = { title: "Project settings" };
 
@@ -24,12 +26,13 @@ export default async function ProjectSettingsPage({
   params,
 }: PageProps<"/w/[workspace]/projects/[repositoryId]">) {
   const { workspace: slug, repositoryId } = await params;
-  const { workspace, user } = await requireWorkspace(slug);
+  const { workspace, role, user } = await requireWorkspace(slug);
   return (
     <ProjectSettingsContent
       workspaceId={workspace.id}
       workspaceSlug={workspace.slug}
       repositoryId={repositoryId}
+      canManageLlmKey={can(role, "manage_llm_key")}
       user={user}
     />
   );
@@ -39,11 +42,13 @@ async function ProjectSettingsContent({
   workspaceId,
   workspaceSlug,
   repositoryId,
+  canManageLlmKey,
   user,
 }: {
   workspaceId: string;
   workspaceSlug: string;
   repositoryId: string;
+  canManageLlmKey: boolean;
   user: { isInstanceAdmin: boolean };
 }) {
   const data = await loadProjectSettingsPage(repositoryId, {
@@ -54,10 +59,17 @@ async function ProjectSettingsContent({
   });
   if (data.kind === "not_found") notFound();
   return (
-    <ProjectSettingsPageContent
-      workspaceSlug={workspaceSlug}
-      audience={configAudienceOf(user)}
-      data={data}
-    />
+    <>
+      <WorkspaceLlmNotice
+        workspaceId={workspaceId}
+        workspaceSlug={workspaceSlug}
+        canManage={canManageLlmKey}
+      />
+      <ProjectSettingsPageContent
+        workspaceSlug={workspaceSlug}
+        audience={configAudienceOf(user)}
+        data={data}
+      />
+    </>
   );
 }

@@ -177,7 +177,7 @@ test.describe("the project list and the settings pages", () => {
       page.locator(".field", { has: budget() }).getByText("Built-in value"),
     ).toBeVisible();
 
-    await page.getByRole("link", { name: "Settings" }).click();
+    await page.getByRole("link", { name: "Settings", exact: true }).click();
     await expect(
       page.getByRole("heading", { level: 1, name: "Settings" }),
     ).toBeVisible();
@@ -200,33 +200,27 @@ test.describe("the project list and the settings pages", () => {
     await expect(budget()).toHaveValue("60000");
   });
 
-  // CR-34-T09, #101-WM-08
-  test("the Settings page tells the Owner only that reviews are not set up, and the instance admin which variable is missing, in a browser too", async ({
+  // CR-34-T09, #101-WM-08, #104-LK-13
+  test("the Settings page tells the Owner that the LLM is not configured and where to add a key, and nothing of the server's variables, in a browser too", async ({
     page,
     browser,
   }) => {
     await signInThroughTheForm(page, account);
 
-    await page.getByRole("link", { name: "Settings" }).click();
+    await page.getByRole("link", { name: "Settings", exact: true }).click();
     // The page left behind stays in the document, hidden, with its own copy of the hint.
     await expect(
       page.getByRole("heading", { level: 1, name: "Settings" }),
     ).toBeVisible();
 
-    // Somebody who owns the workspace and does not run the instance: what is wrong and who to ask.
+    // The workspace has no key: the hint links to the form, which an Owner can fill.
     await expect(
-      page.getByText("Reviews are not set up yet").filter({ visible: true }),
+      page.getByText("LLM not configured").filter({ visible: true }),
     ).toBeVisible();
-    await expect(
-      page
-        .getByText(/Ask your instance admin/)
-        .filter({ visible: true })
-        .first(),
-    ).toBeVisible();
-    await expect(page.getByText(/LLM_API_KEY/)).toHaveCount(0);
-    await expect(page.getByText(/GITHUB_APP/)).toHaveCount(0);
+    await expect(page.getByRole("form", { name: "LLM key" })).toBeVisible();
+    await expect(page.getByText(/LLM_API_KEY|GITHUB_APP/)).toHaveCount(0);
 
-    // The instance admin reads the variable that is missing.
+    // The instance admin no longer reads about a missing server variable: the key is the workspace's.
     const context = await browser.newContext({ baseURL: e2eEnv.appUrl });
     const admin = await context.newPage();
     await admin.goto("/login");
@@ -236,13 +230,9 @@ test.describe("the project list and the settings pages", () => {
     await expect(admin).toHaveURL(/\/w\/default\/projects$/);
     await admin.goto("/w/default/settings");
     await expect(
-      admin.getByText("LLM key missing").filter({ visible: true }),
+      admin.getByRole("heading", { level: 1, name: "Settings" }),
     ).toBeVisible();
-    await expect(
-      admin
-        .getByText(/Set LLM_API_KEY on the server/)
-        .filter({ visible: true }),
-    ).toBeVisible();
+    await expect(admin.getByText("LLM key missing")).toHaveCount(0);
     await context.close();
   });
 
