@@ -16,7 +16,9 @@ A pending email and password sign-up is removed a week after it was made (`UNVER
 password account and its links, so a stranger cannot leave addresses waiting forever and the table does not grow without bound. The address
 is free again: a new sign-up for it is an ordinary one (new account, new link, the old link no longer works). Only a plain pending sign-up
 qualifies: not verified, not the instance admin, not imported, a password account and no other identity (no GitHub), no workspace
-membership, no session, and at least one verification link made for it (so an account that was never asked to verify is left alone), the
-latest one more than a week ago (so an account that is asked to verify now gets the whole week). It runs only while the instance has a mail
+membership, no session, and a verification link made for it (so an account that was never asked to verify is left alone), the first one more than a
+week ago (so an account that is asked to verify now gets the whole week, and asking for more links, which anybody can do, does not postpone the
+removal). A link is valid for 24 hours and kept a week after that, so the first link is still there when the account is a week old (a test
+pins the two against each other and walks the hourly runs). It runs only while the instance has a mail
 server: without one nothing can be verified and every email and password account is usable unverified, so none is removed. The same applies
-if the mail settings cannot be read. The removal runs before the links are cleaned up, because the links are the evidence.
+if the mail settings cannot be read. The removal runs before the links are cleaned up, because the first link is the evidence.

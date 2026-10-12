@@ -8,8 +8,8 @@
 //   (`LONGEST_RATE_LIMIT_WINDOW_MS`, pinned by the test against every window constant), so no counter in
 //   force is ever removed and no limit starts early.
 // - A signed state (the single-use side of the round trips through GitHub) is removed once it has expired.
-// - A sign-up that was never verified is removed a week after its last verification link was made (and at
-//   the earliest a week after the sign-up), together with its password account, its links and its reset
+// - A sign-up that was never verified is removed a week after its first verification link was made (and at
+//   the earliest a week after the sign-up; more links do not postpone it), together with its password account, its links and its reset
 //   links (they cascade). Only a plain pending sign-up qualifies: see `expireUnverifiedAccounts`.
 // - A verification link is kept for a week after it expired or was used, so that someone who holds it
 //   (and its password) is told "used" or "expired" and not just "not valid". After that it is gone.
@@ -72,13 +72,13 @@ export type CleanupOptions = {
  * - is not verified, is not the instance admin and was not imported,
  * - has a password account and no other identity (no GitHub),
  * - belongs to no workspace and has no session,
- * - was sent at least one verification link (the person was asked to verify), the latest one more than
- *   the keep time ago (an account that is asked to verify now, for instance after a mail server was
- *   configured, gets the whole week),
+ * - was sent a verification link (the person was asked to verify), the first one more than the keep time
+ *   ago (an account that is asked to verify now, for instance after a mail server was configured, gets the
+ *   whole week; asking for more links later does not extend it),
  * - and was made more than the keep time ago.
  * Their rows in `accounts`, `email_verification_tokens`, `password_reset_tokens` and `signed_states` go
- * with them (`on delete cascade`). Runs before the links are cleaned up, which keep the evidence a day
- * longer than the account lives.
+ * with them (`on delete cascade`). Runs before the links are cleaned up. A link is kept 24 hours of validity plus a
+ * week, so the first link is still there when the account is a week old (pinned by a test).
  */
 async function expireUnverifiedAccounts(
   db: Kysely<Database>,
@@ -127,20 +127,14 @@ async function expireUnverifiedAccounts(
               .whereRef("sessions.user_id", "=", "users.id"),
           ),
         ),
+        // The first verification link was made more than the keep time ago. Anchored on the first link, not
+        // the latest one: asking for a new link (the resend is public) must not postpone the removal.
         eb.exists(
           eb
             .selectFrom("email_verification_tokens")
             .select("email_verification_tokens.token_hash")
-            .whereRef("email_verification_tokens.user_id", "=", "users.id"),
-        ),
-        eb.not(
-          eb.exists(
-            eb
-              .selectFrom("email_verification_tokens")
-              .select("email_verification_tokens.token_hash")
-              .whereRef("email_verification_tokens.user_id", "=", "users.id")
-              .where("email_verification_tokens.created_at", ">", cutoff),
-          ),
+            .whereRef("email_verification_tokens.user_id", "=", "users.id")
+            .where("email_verification_tokens.created_at", "<", cutoff),
         ),
       ]),
     )

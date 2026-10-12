@@ -14,7 +14,12 @@ import {
   SIGNUP_TEST_PASSWORD,
 } from "../test-support/signup-harness.ts";
 import { createTestDatabase } from "../test-support/test-database.ts";
-import { cleanUpExpiredRows, UNVERIFIED_ACCOUNT_KEEP_MS } from "./cleanup.ts";
+import { VERIFICATION_TOKEN_TTL_MS } from "../signup/verification-tokens.ts";
+import {
+  cleanUpExpiredRows,
+  UNVERIFIED_ACCOUNT_KEEP_MS,
+  VERIFICATION_TOKEN_KEEP_MS,
+} from "./cleanup.ts";
 
 const NOW = Date.parse("2026-10-12T08:00:00.000Z");
 const DAY = 24 * 60 * 60 * 1000;
@@ -223,8 +228,8 @@ describe("the expiry of sign-ups that never verified their address", () => {
       { id: "x", links: [] },
     ],
     [
-      "a sign-up that was sent a link within the last week",
-      { id: "x", links: [EXPIRED_AT, NOW - DAY] },
+      "a sign-up that was first sent a link within the last week",
+      { id: "x", links: [NOW - DAY] },
     ],
   ])("never removes %s", async (_name, person) => {
     const { db } = await createTestDatabase();
@@ -241,6 +246,55 @@ describe("the expiry of sign-ups that never verified their address", () => {
         (row) => row.user_id === "x",
       ),
     ).toBe(true);
+  });
+
+  // #141
+  it("is not postponed by new links: resends on day 3 and day 6 do not keep a pending sign-up past day 7", async () => {
+    const { db } = await createTestDatabase();
+    const created = NOW - UNVERIFIED_ACCOUNT_KEEP_MS - 1000;
+    await addPerson(db, {
+      id: "resent",
+      createdAt: created,
+      links: [created, created + 3 * DAY, created + 6 * DAY],
+    });
+
+    const result = await cleanUpExpiredRows(db, now, MAIL);
+
+    expect(result.unverifiedAccounts).toBe(1);
+    expect(await userIds(db)).toEqual([]);
+  });
+
+  // #141
+  it("still has the first link when the account is a week old, hour by hour through the cleanup runs", async () => {
+    // A link is valid for a day and kept a week after that, so the cleanup of links never takes the evidence
+    // away before the account is due.
+    expect(
+      VERIFICATION_TOKEN_TTL_MS + VERIFICATION_TOKEN_KEEP_MS,
+    ).toBeGreaterThan(UNVERIFIED_ACCOUNT_KEEP_MS + 60 * 60 * 1000);
+    const { db } = await createTestDatabase();
+    const signedUpAt = NOW;
+    await addPerson(db, {
+      id: "pending",
+      createdAt: signedUpAt,
+      links: [signedUpAt],
+    });
+    let removedAt: number | null = null;
+    for (let hour = 1; hour <= 9 * 24; hour += 1) {
+      const at = signedUpAt + hour * 60 * 60 * 1000;
+      await cleanUpExpiredRows(db, () => new Date(at), MAIL);
+      if ((await userIds(db)).length === 0) {
+        removedAt = at;
+        break;
+      }
+    }
+
+    expect(removedAt).not.toBeNull();
+    expect((removedAt ?? 0) - signedUpAt).toBeGreaterThan(
+      UNVERIFIED_ACCOUNT_KEEP_MS,
+    );
+    expect((removedAt ?? 0) - signedUpAt).toBeLessThanOrEqual(
+      UNVERIFIED_ACCOUNT_KEEP_MS + 60 * 60 * 1000,
+    );
   });
 
   // #141
