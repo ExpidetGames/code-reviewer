@@ -21,7 +21,7 @@ domains is only ever applied to addresses that can be verified. The decision is 
 
 With a mail server, nothing about an address. `POST /api/sign-up` answers the same (status, body, headers) for an address that is
 new, that already has an account and that the rule refuses, and does the same amount of work: the password is
-hashed in every case, and everything that depends on the address (the rule, the look at the account, the account, the link and the mail) is started only after the answer is on its way (Next's `after()`, as in the password reset request); an address with a verified account gets no mail. The request for a new link answers the same for
+hashed in every case, and everything that depends on the address (the rule, the look at the account, the account, the link and the mail) is started only after the answer is on its way (Next's `after()`, as in the password reset request); an address with a verified account gets no mail. Because the account is made after the answer, a failure to make it is not seen by the person: it is only logged, by the code `SIGN_UP_FAILED` (never with the address), and without a mail server the account exists a few milliseconds after the answer, not before it. The request for a new link answers the same for
 an address with an account that waits, with an account that does not, and with no account. What differs is only
 what does not depend on the address: that the sign-up is closed (`signup_closed`), that it is switched off
 (`sign_up_disabled`), that the form is wrong (`invalid_input` with the field and a code), that the instance has
