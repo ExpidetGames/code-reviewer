@@ -20,6 +20,9 @@ destructive`, sizes `sm | default | icon`, the `loading`/`loadingLabel` conventi
     in the DOM and is hidden while closed, the trigger announces `aria-expanded`/`aria-controls` and
     has a 44px target.
   - `@/components/status-region` — `role="status"`, `aria-live="polite"`.
+  - `@/components/needs-attention` — the one attention region of a screen: a labelled "Needs attention"
+    section with up to `maxRows` (default 2) `Alert` rows and the rest behind a `HelpDisclosure`.
+    Screens with notices (#173, #174, #178) use it instead of stacking separate notice regions.
   - `@/components/danger-zone` — a destructive `Card` with the confirmation in an `AlertDialog`.
   - `@/components/description-list` — a dense `<dl>` for run/instance facts.
   - `@/components/query-tabs` — the `Tabs` whose active tab lives in the query string. It calls
