@@ -6,7 +6,10 @@
 import "server-only";
 import { resolveAppSecret } from "../crypto/app-secret.ts";
 import { getDatabase } from "../db/startup.ts";
+import { createRateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
 import { createWorkspaceLlm, type WorkspaceLlmAssembly } from "./assemble.ts";
+import { llmApiBaseUrl } from "./endpoint.ts";
+import { createLlmKeyTestService, type LlmKeyTestService } from "./key-test.ts";
 
 export function getWorkspaceLlm(): WorkspaceLlmAssembly {
   return createWorkspaceLlm({
@@ -18,5 +21,16 @@ export function getWorkspaceLlm(): WorkspaceLlmAssembly {
       return resolved.secret;
     },
     env: () => process.env,
+  });
+}
+
+/**
+ * The "test key" service of the running server: counted in the shared `rate_limits` table, and connecting to
+ * the provider's own address only (src/llm/endpoint.ts: the test stack may point it at the fake LLM).
+ */
+export function getLlmKeyTester(): LlmKeyTestService {
+  return createLlmKeyTestService({
+    rateLimits: createRateLimitsRepository(getDatabase()),
+    baseUrlOf: (provider) => llmApiBaseUrl(process.env, provider).url,
   });
 }
