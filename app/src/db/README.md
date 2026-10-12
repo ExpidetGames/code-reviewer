@@ -287,6 +287,18 @@ invitation per workspace and address; an expired one is ended by the code before
 statement that ends or renews an invitation only touches an open one, and accepting only an open one that has
 not expired (`invitations-repository.integration.test.ts`).
 
+`installation_link_requests` and `unclaimed_installations` (migration `20261012150000_create_installation_binding`, section 2.9;
+`src/installation-binding/`): a request is a person's ask to link an installation whose organization role the app could not
+read, decided by the instance admin (scoped repository `installation-link-requests-repository.ts`, instance level
+`installation-link-request-directory-repository.ts`). Columns: `workspace_id`, `requested_by`, the requester's GitHub login,
+the installation id and its account (`account_login`, `account_type`, `account_id`), a `status` (pending, approved,
+denied, withdrawn; a check constraint), the evidence (`token_can_access` and `role_result` with `role_detail`; never a
+token), and the times and the admin who decided. A partial unique index allows one pending request per workspace and
+installation, and a pending request is refreshed instead of repeated. `unclaimed_installations` (instance level
+`unclaimed-installations-repository.ts`) notes the installations of the App that no workspace has linked (id, account, first and
+last seen, whether a webhook or a synchronization saw it). `integrations.status` gained the value `disconnected` (the column is
+text without a check). Both tables are in the merge of the instance admin with an imported operator (`USER_REFERENCES`).
+
 `app_meta` (a key/value table for facts about the installation) exists to prove the setup. Product
 tables come with the tickets that need them: add the migration, the row type in `schema.ts` and the
 repository in the same change.

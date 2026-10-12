@@ -137,14 +137,11 @@ characters without control or formatting characters (they end up in mails and pa
 
 ## Not here
 
-Deleting workspaces, transferring data, SSO and teams below the workspace are out of scope. Binding a GitHub
-App installation to the workspace of the person who installed it is its own issue: until then the
-synchronization puts a connection that is new to the instance into the oldest workspace
-(`src/integrations/sync/default-workspace.ts`) and refuses (`WORKSPACE_NOT_AVAILABLE`) when there is none. The
-workspace LLM key is its own issue as well; the matrix already names `manage_llm_key`. The same issue gives the
-synchronization with GitHub back to the workspaces (`manage_connections`, an Admin or an Owner): until then it is the
-instance admin's, because it reads every connection of the instance (`src/integrations/README.md`). In the same way the
-workspace pages tell a member only that GitHub or the reviews are not set up and to ask the instance admin; the names
+Deleting workspaces, transferring data, SSO and teams below the workspace are out of scope. A GitHub App installation
+is bound to a workspace by an Owner or Admin (`manage_connections`) through "Connect GitHub" on the Connections page; the
+rules are in `src/installation-binding/README.md`, and the synchronization of a workspace reads its own connections only
+(`POST /api/w/:workspace/integrations/sync`; the whole instance's stays the instance admin's). The workspace LLM key is
+its own issue; the matrix already names `manage_llm_key`. The workspace pages tell a member only that GitHub or the reviews are not set up and to ask the instance admin; the names
 of the variables and the provider and model are the instance admin's to read (`src/config-status/`).
 
 The Postgres issue (#105) has work here as well: creating a workspace and the last Owner rule lean on SQLite's

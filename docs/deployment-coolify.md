@@ -307,11 +307,11 @@ What to know:
   configured. The wizard says so next to the choice. Under the rule "everyone" people can sign up at
   `/sign-up` at once; with a mail server they have to confirm their address with a link first. A new
   account belongs to no workspace and sees no data until an admin invites it.
-- If `GITHUB_APP_*` is set, the synchronization with GitHub that ran at start could not put a new
-  installation into a workspace while the setup was open (its log line says `WORKSPACE_NOT_AVAILABLE`); it
-  runs again when the setup is finished, and a webhook about a new installation in that window answers 503,
-  so GitHub's "Redeliver" handles it later. With no `GITHUB_APP_*` variable nothing is attempted: GitHub is
-  simply not configured.
+- If `GITHUB_APP_*` is set, the synchronization with GitHub that ran at start lists the installations of the App.
+  It never makes a connection from the list: an installation is noted as unclaimed (the admin portal shows them
+  under **Approvals**) until a person of a workspace connects it, or, in a single-tenant instance whose App is
+  private, until it is found on the App's own account. Installations that were linked before the update keep their
+  workspace. With no `GITHUB_APP_*` variable nothing is attempted: GitHub is simply not configured.
 - An existing deployment that updates to this version also gets the code and the wizard (the data it has is
   kept). Until the wizard is finished only the web UI waits: the webhooks and the runner API keep working, so
   reviews do not stop.
@@ -532,10 +532,11 @@ Do this once with the whole team in the room; it is the acceptance test of the d
       team member opens `https://<domain>` and signs in with GitHub. A GitHub account that is
       not on the list is turned away ("Your GitHub account is not allowed to use this Code Reviewer
       instance.") and sees no project or run data.
-- [ ] **Install the GitHub App** on a team repository ([`github-app.md`](github-app.md), "Install the App"). The
-      `installation` delivery shows 202 under *Recent Deliveries*, and the repository appears in the app.
+- [ ] **Connect the GitHub App** on a team repository ([`github-app.md`](github-app.md), "Install the App"): an Owner or
+      Admin of the workspace presses **Connect GitHub** on the Connections page. The `installation` delivery shows 202
+      under *Recent Deliveries*, and the repository appears in the app.
 - [ ] **Activate the repository as a project.** Repositories are inactive until someone activates them. Open
-      the **Projects** page of the app, press **Sync from GitHub** (the button is for the instance admin) if the repository is missing, and switch the
+      the **Projects** page of the app, press **Sync from GitHub** (the button is for Owners and Admins of the workspace) if the repository is missing, and switch the
       repository on. (For scripts, the API call described in
       [`app/src/projects/README.md`](../app/src/projects/README.md) does the same and needs a signed-in session.)
 - [ ] **Open a test pull request** (not a draft) in that repository. The delivery shows 2xx, the run appears

@@ -12,6 +12,7 @@ import { syncFromGithubAsAdmin } from "../helpers/admin-api";
 import {
   addGithubAccount,
   addGithubInstallation,
+  GITHUB_APP_OWNER_ACCOUNT,
   addGithubPullRequest,
   signInThroughTheForm,
   type GithubAccount,
@@ -39,7 +40,7 @@ test.describe("starting a review by hand", () => {
       request,
       {
         id: INSTALLATION_ID,
-        account: { login: account.login, id: account.id, type: "User" },
+        account: GITHUB_APP_OWNER_ACCOUNT,
       },
       [WIDGETS],
     );

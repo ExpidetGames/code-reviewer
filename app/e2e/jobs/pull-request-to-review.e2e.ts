@@ -17,6 +17,7 @@ import { e2eEnv, llmEnv } from "../helpers/e2e-env";
 import {
   addGithubAccount,
   addGithubInstallation,
+  GITHUB_APP_OWNER_ACCOUNT,
   addGithubPullRequest,
   getIssuedInstallationTokens,
   getPullRequestComments,
@@ -77,7 +78,7 @@ test.describe("a pull request on its way to a review comment", () => {
       context.request,
       {
         id: INSTALLATION_ID,
-        account: { login: account.login, id: account.id, type: "User" },
+        account: GITHUB_APP_OWNER_ACCOUNT,
       },
       [WIDGETS, DORMANT],
     );
