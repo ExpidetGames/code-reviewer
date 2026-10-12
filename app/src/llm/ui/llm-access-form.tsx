@@ -196,7 +196,7 @@ export function LlmAccessForm({
           {stored === null
             ? "No key is saved."
             : changedProvider
-              ? "The saved key was made for another provider; enter the key for this provider."
+              ? "The saved key was made for another provider and is not carried over; enter the key for this provider."
               : keyStatus.state === "unreadable"
                 ? "The saved key cannot be read; enter it again."
                 : `A key is saved${keyStatus.state === "configured" && keyStatus.lastFour !== null ? ` (ends in ${keyStatus.lastFour})` : ""}.`}

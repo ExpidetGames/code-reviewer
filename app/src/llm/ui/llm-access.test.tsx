@@ -153,6 +153,16 @@ describe("the LLM access section for an Admin or an Owner", () => {
     );
   });
 
+  // #169: a key of a provider that is no longer offered is not carried over, so the field must be filled.
+  it("says that a key of another provider is not carried over", () => {
+    section({
+      keyStatus: { ...CONFIGURED, provider: "openai" as never },
+      summary: WORKS,
+    });
+
+    expect(screen.getByText(/and is not carried over/)).toBeTruthy();
+  });
+
   it("shows the reason the server gave for a key it refused, next to the field", async () => {
     const user = userEvent.setup();
     const api = fakeApi({
