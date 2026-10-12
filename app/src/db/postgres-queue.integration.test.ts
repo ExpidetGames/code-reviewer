@@ -182,4 +182,35 @@ describePostgres("the job queue on Postgres", () => {
     // The transaction survived: the claim skipped pull request 7 and took pull request 8.
     expect(claimed?.job.id).toBe(next.id);
   });
+
+  // #105-PG-09
+  it("claims on one instance and heartbeats and completes on another", async () => {
+    const postgres = await createPostgresTestDatabase();
+    const fixture = await createJobQueueFixture({ database: postgres.db });
+    const job = await fixture.enqueueNew({ prNumber: 7, headSha: sha("a") });
+
+    const first = connectPostgres(postgres.url);
+    const second = connectPostgres(postgres.url);
+    const claim = await createRunnerQueue(first.db, {
+      now: fixture.clock.now,
+    }).claimNext("runner-1");
+    expect(claim?.job.id).toBe(job.id);
+    const leaseToken = claim?.leaseToken ?? "";
+
+    // The state lives in the database, not in the process: another connection (another instance)
+    // continues the claim with the same lease token.
+    const other = createRunnerQueue(second.db, { now: fixture.clock.now });
+    expect((await other.heartbeat(job.id, leaseToken)).status).toBe("ok");
+    expect(
+      (
+        await other.complete(job.id, leaseToken, {
+          ok: true,
+          result: { note: "done" },
+        })
+      ).status,
+    ).toBe("completed");
+
+    await first.close();
+    await second.close();
+  });
 });

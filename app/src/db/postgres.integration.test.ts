@@ -6,11 +6,14 @@
 import { sql, type Kysely } from "kysely";
 import type { Migration, MigrationProvider } from "kysely/migration";
 import { describe, expect, it } from "vitest";
+import { checkHealth } from "../health/health.ts";
 import {
   hasPostgres,
   createPostgresTestDatabase,
 } from "../test-support/postgres-test-database.ts";
-import { createTestDatabase } from "../test-support/test-database.ts";
+import { createTestDatabase, track } from "../test-support/test-database.ts";
+import { DatabaseError } from "./errors.ts";
+import { openPostgresDatabase } from "./postgres.ts";
 import { startDatabase } from "./startup.ts";
 import type { Database } from "./schema.ts";
 
@@ -181,5 +184,35 @@ describePostgres("the migrations on Postgres", () => {
 
     expect(await migrationNames(empty.db)).toEqual(before);
     expect(await tableExists(empty.db, "broken")).toBe(false);
+  });
+});
+
+// No server needed: this proves what a start and the health check do when Postgres cannot be reached.
+describe("an unreachable Postgres", () => {
+  const url = "postgres://user:secret@127.0.0.1:1/app";
+
+  // #105-PG-14
+  it("fails the start with a readable code and never repeats the password", async () => {
+    let error: unknown;
+    try {
+      await startDatabase({ driver: "postgres", url, poolMax: 1 });
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(DatabaseError);
+    expect(error).toMatchObject({ code: "DATABASE_OPEN_FAILED" });
+    const message = error instanceof Error ? error.message : "";
+    expect(message).toContain("127.0.0.1");
+    expect(message).not.toContain("secret");
+  });
+
+  // #105-PG-14
+  it("reports the health check as an error, so /api/health answers 503", async () => {
+    const db = track(
+      openPostgresDatabase({ driver: "postgres", url, poolMax: 1 }),
+    );
+
+    expect(await checkHealth(() => db)).toEqual({ status: "error" });
   });
 });
