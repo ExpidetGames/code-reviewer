@@ -2,15 +2,19 @@
 
 "use client";
 // Asks for a password reset link by mail. The answer is the same for every address, and so is the copy: it
-// never says whether the address has an account.
+// never says whether the address has an account. A successful request leaves one success card instead of
+// the form (#170).
 import { useId, useState, type FormEvent } from "react";
-import { Button } from "../../ui/button.tsx";
-import { requestJson, type FetchLike } from "../../ui/json-request.ts";
+import { Button } from "../../components/button.tsx";
+import { Alert, AlertDescription } from "../../components/ui/alert.tsx";
+import { Field, FieldLabel } from "../../components/ui/field.tsx";
+import { Input } from "../../components/ui/input.tsx";
 import {
   CROSS_SITE_REQUEST,
   INVALID_EMAIL,
   UNAVAILABLE,
 } from "../../copy/messages.ts";
+import { requestJson, type FetchLike } from "../../ui/json-request.ts";
 import {
   describeTransportFailure,
   GENERIC_FAILURE,
@@ -65,29 +69,30 @@ export function ForgotPasswordForm({
     setProblem(describeForgotPasswordFailure(result.code));
   }
 
+  if (sent)
+    return (
+      <Alert variant="success" role="status">
+        <AlertDescription>
+          Check your inbox. If this address has an account that signs in with a
+          password, we sent it a link to choose a new password.
+        </AlertDescription>
+      </Alert>
+    );
+
   return (
     <form
       onSubmit={(event) => void submit(event)}
-      className="login-form"
+      className="flex flex-col gap-4"
       aria-label="Request a reset link"
     >
-      {problem ? (
-        <p role="alert" className="alert alert-error">
-          {problem}
-        </p>
-      ) : null}
-      {sent ? (
-        <p role="status" className="alert alert-success">
-          Check your inbox. If this address has an account that signs in with a
-          password, we sent it a link to choose a new password. The link works
-          once and for 30 minutes.
-        </p>
-      ) : null}
-      <div className="field">
-        <label htmlFor={id} className="field-label">
-          Email address
-        </label>
-        <input
+      {problem === null ? null : (
+        <Alert variant="destructive">
+          <AlertDescription>{problem}</AlertDescription>
+        </Alert>
+      )}
+      <Field>
+        <FieldLabel htmlFor={id}>Email address</FieldLabel>
+        <Input
           id={id}
           type="email"
           autoComplete="email"
@@ -95,9 +100,9 @@ export function ForgotPasswordForm({
           value={email}
           onChange={(event) => setEmail(event.target.value)}
         />
-      </div>
-      <Button type="submit" className="btn-block" disabled={pending}>
-        {pending ? "Sending..." : "Send me a link"}
+      </Field>
+      <Button type="submit" loading={pending} loadingLabel="Sending the link">
+        Send me a link
       </Button>
     </form>
   );
