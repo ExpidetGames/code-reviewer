@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // @vitest-environment jsdom
-// Pins down the overview of the portal: the checklist shows what is configured and what is not, the
-// notice for a sign-up rule that cannot work yet is there exactly when the state says so, and stored
-// credentials that cannot be read are announced.
+// Pins the overview of the portal (#180): the "Needs attention" region exists only while there is
+// something to act on, the "Setup" card shows one compact row per setting (a status icon, the value
+// summary a person would see on its own page, and a Configure link), and the notices that need action
+// keep their wording. The old "Setting" badge and the page description are gone.
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { GithubConfigView } from "../../github-config/service.ts";
@@ -35,10 +36,20 @@ function view(overrides: Partial<AdminSettingsView> = {}): AdminSettingsView {
   };
 }
 
-function item(title: string): HTMLElement {
-  const element = screen.getByText(title).closest("li");
-  if (element === null) throw new Error(`No checklist item ${title}`);
+function setupRegion(): HTMLElement {
+  return screen.getByRole("region", { name: "Setup" });
+}
+
+function row(title: string): HTMLElement {
+  const element = within(setupRegion())
+    .getByText(title, { exact: true })
+    .closest("li");
+  if (element === null) throw new Error(`No setup row ${title}`);
   return element;
+}
+
+function configuredLink(title: string): HTMLElement {
+  return within(row(title)).getByRole("link", { name: `Configure ${title}` });
 }
 
 function githubView(changes: Partial<GithubConfigView> = {}): GithubConfigView {
@@ -73,163 +84,57 @@ function githubView(changes: Partial<GithubConfigView> = {}): GithubConfigView {
   };
 }
 
-describe("the checklist", () => {
-  // #98-AD-03
-  it("lists the mail server, GitHub, the tenancy, the sign-up rule and the ways to sign in", () => {
+function smtpView(
+  password: AdminSettingsView["smtp"]["password"],
+): AdminSettingsView["smtp"] {
+  return {
+    value: {
+      host: "smtp.example.com",
+      port: 587,
+      security: "starttls",
+      user: "mailer",
+      senderAddress: "a@example.com",
+      senderName: null,
+      allowSelfSigned: false,
+      allowPlainTextLogin: false,
+    },
+    password,
+    updatedBy: null,
+    updatedAt: "2026-10-12T08:00:00.000Z",
+  };
+}
+
+describe("the needs attention region", () => {
+  // #180-T01
+  it("is not there while there is nothing to report", () => {
     render(<Overview settings={view()} />);
 
-    for (const title of [
-      "Mail server",
-      "GitHub",
-      "Tenancy",
-      "Sign-up rule",
-      "Ways to sign in",
-    ])
-      expect(item(title)).toBeTruthy();
-  });
-
-  // #98-AD-03
-  it("marks the mail server and GitHub as to do while they are not configured, with a link to the section", () => {
-    render(<Overview settings={view()} />);
-
-    expect(within(item("Mail server")).getByText("To do")).toBeTruthy();
     expect(
-      within(item("Mail server"))
-        .getByRole("link", { name: "Mail" })
-        .getAttribute("href"),
-    ).toBe("/admin/mail");
-    expect(within(item("GitHub")).getByText("To do")).toBeTruthy();
-    expect(
-      within(item("GitHub"))
-        .getByRole("link", { name: "Integrations" })
-        .getAttribute("href"),
-    ).toBe("/admin/integrations");
+      screen.queryByRole("region", { name: "Needs attention" }),
+    ).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("marks them as done once they are configured", () => {
-    render(
-      <Overview
-        settings={view({ mailConfigured: true, githubConfigured: true })}
-        github={githubView()}
-      />,
-    );
-
-    expect(within(item("Mail server")).getByText("Done")).toBeTruthy();
-    expect(within(item("GitHub")).getByText("Done")).toBeTruthy();
-    expect(within(item("GitHub")).getByText(/code-reviewer-acme/)).toBeTruthy();
-    expect(
-      within(item("GitHub")).getByText(/Signing in with GitHub is enabled/),
-    ).toBeTruthy();
-  });
-
-  // #102-GH-21
-  it("says that an App without the user authorization cannot sign people in yet", () => {
-    render(
-      <Overview
-        settings={view({ githubConfigured: false })}
-        github={githubView({
-          userAuthorization: { configured: false, clientId: null },
-        })}
-      />,
-    );
-
-    expect(within(item("GitHub")).getByText("Done")).toBeTruthy();
-    expect(within(item("GitHub")).getByText(/not enabled yet/)).toBeTruthy();
-  });
-
-  it("names what is wrong with the App's settings, as field names only", () => {
-    render(
-      <Overview
-        settings={view()}
-        github={githubView({
-          status: "problem",
-          problem: { kind: "invalid", fields: ["github_app_private_key"] },
-        })}
-      />,
-    );
-
-    expect(within(item("GitHub")).getByText("To do")).toBeTruthy();
-    expect(
-      within(item("GitHub")).getByText(/github_app_private_key/),
-    ).toBeTruthy();
-  });
-
-  // #102-GH-27
-  it("tells the admin how many users could not get their GitHub address", () => {
-    render(<Overview settings={view()} emailConflictCount={2} />);
-
-    expect(
-      screen.getByText(/2 users could not get their GitHub address/),
-    ).toBeTruthy();
-  });
-
-  // #100-review-4
-  it("says that a saved mail server cannot send because its password cannot be read, and what that stops", () => {
-    const smtp = {
-      value: {
-        host: "smtp.example.com",
-        port: 587,
-        security: "starttls" as const,
-        user: "mailer",
-        senderAddress: "a@example.com",
-        senderName: null,
-        allowSelfSigned: false,
-        allowPlainTextLogin: false,
-      },
-      password: "unreadable" as const,
-      updatedBy: null,
-      updatedAt: "2026-10-12T08:00:00.000Z",
-    };
-    render(<Overview settings={view({ smtp, mailConfigured: false })} />);
-
-    const mail = item("Mail server");
-    expect(within(mail).getByText("To do")).toBeTruthy();
-    expect(mail.textContent).toContain("password cannot be read");
-    expect(mail.textContent).toContain("nothing that needs mail is offered");
-    expect(
-      within(mail).getByRole("link", { name: "Mail" }).getAttribute("href"),
-    ).toBe("/admin/mail");
-  });
-
-  // #98-AD-03
-  it("states the tenancy with the number of workspaces and the sign-up rule in words", () => {
+  // #180-T01
+  it("appears with the sign-up rule that cannot work yet", () => {
     render(
       <Overview
         settings={view({
-          tenancy: { value: "multi", updatedBy: null, updatedAt: null },
-          workspaceCount: 2,
           signUpRule: {
-            value: { kind: "domains", entries: ["a.com", "b.com", "c.com"] },
+            value: { kind: "domains", entries: ["a.com"] },
             updatedBy: null,
             updatedAt: null,
           },
+          signUpRuleState: { failClosed: true },
         })}
       />,
     );
 
-    expect(item("Tenancy").textContent).toContain("Multi-tenant");
-    expect(item("Tenancy").textContent).toContain("2 workspaces");
-    expect(item("Sign-up rule").textContent).toContain(
-      "Only 3 listed domains.",
-    );
-  });
-});
-
-describe("the notices", () => {
-  // #97-SU-19
-  // #99-SR-22
-  it("warns that the sign-up rule cannot work yet exactly when the state says so", () => {
-    const closed = render(
-      <Overview settings={view({ signUpRuleState: { failClosed: true } })} />,
-    );
-    expect(screen.getByRole("note").textContent).toContain("does not work yet");
-    closed.unmount();
-
-    render(
-      <Overview settings={view({ signUpRuleState: { failClosed: false } })} />,
-    );
-
-    expect(screen.queryByRole("note")).toBeNull();
+    const attention = screen.getByRole("region", { name: "Needs attention" });
+    expect(
+      within(attention).getByText("This sign-up rule does not work yet."),
+    ).toBeTruthy();
+    expect(within(attention).getByRole("link", { name: "Setup" })).toBeTruthy();
   });
 
   it("announces stored credentials that cannot be read, without naming a value", () => {
@@ -250,14 +155,212 @@ describe("the notices", () => {
       />,
     );
 
-    expect(screen.getByRole("alert").textContent).toContain(
-      "A stored credential cannot be read.",
+    const attention = screen.getByRole("region", { name: "Needs attention" });
+    expect(
+      within(attention).getByText("A stored credential cannot be read."),
+    ).toBeTruthy();
+  });
+
+  // #102-GH-27
+  it("tells the admin how many users could not get their GitHub address", () => {
+    render(<Overview settings={view()} emailConflictCount={2} />);
+
+    const attention = screen.getByRole("region", { name: "Needs attention" });
+    expect(
+      within(attention).getByText(/2 users could not get their GitHub address/),
+    ).toBeTruthy();
+  });
+
+  // #180-T01
+  it("renders the Needs attention region before the Setup card", () => {
+    render(
+      <Overview settings={view({ signUpRuleState: { failClosed: true } })} />,
+    );
+
+    const attention = screen.getByRole("region", { name: "Needs attention" });
+    const setup = screen.getByRole("region", { name: "Setup" });
+    expect(
+      attention.compareDocumentPosition(setup) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  // #180-T01
+  it("shows the three attention rows open and no overflow disclosure", () => {
+    render(
+      <Overview
+        settings={view({
+          signUpRuleState: { failClosed: true },
+          secrets: [
+            {
+              name: "smtp_password",
+              state: "undecryptable",
+              code: "secret_undecryptable",
+              updatedAt: "2026-10-11T08:00:00.000Z",
+              updatedBy: null,
+            },
+          ],
+        })}
+        emailConflictCount={1}
+      />,
+    );
+
+    const attention = screen.getByRole("region", { name: "Needs attention" });
+    expect(
+      attention.querySelectorAll('[data-slot="attention-row"]'),
+    ).toHaveLength(3);
+    expect(
+      within(attention).queryByRole("button", { name: /more notice/ }),
+    ).toBeNull();
+  });
+});
+
+describe("the setup card", () => {
+  // #98-AD-03, #180-T02
+  it("lists the five settings with the value summary and a Configure link", () => {
+    render(<Overview settings={view()} />);
+
+    expect(row("Mail server").textContent).toContain("Not configured");
+    expect(configuredLink("Mail server").getAttribute("href")).toBe(
+      "/admin/mail",
+    );
+    expect(row("GitHub").textContent).toContain("Not configured");
+    expect(configuredLink("GitHub").getAttribute("href")).toBe(
+      "/admin/integrations",
+    );
+    expect(row("Tenancy").textContent).toContain("Single-tenant");
+    expect(configuredLink("Tenancy").getAttribute("href")).toBe("/admin/setup");
+    expect(row("Sign-up rule").textContent).toContain("Everyone");
+    expect(configuredLink("Sign-up rule").getAttribute("href")).toBe(
+      "/admin/setup",
+    );
+    expect(row("Ways to sign in").textContent).toContain("Email");
+    expect(configuredLink("Ways to sign in").getAttribute("href")).toBe(
+      "/admin/setup",
+    );
+
+    for (const title of [
+      "Mail server",
+      "GitHub",
+      "Tenancy",
+      "Sign-up rule",
+      "Ways to sign in",
+    ])
+      expect(
+        within(row(title)).getByRole("link", { name: `Configure ${title}` }),
+      ).toBeTruthy();
+  });
+
+  // #180-T02
+  it("shows what is configured as the value summary", () => {
+    render(
+      <Overview
+        settings={view({
+          mailConfigured: true,
+          githubConfigured: true,
+          tenancy: { value: "multi", updatedBy: null, updatedAt: null },
+          signUpRule: {
+            value: { kind: "domains", entries: ["a.com", "b.com"] },
+            updatedBy: null,
+            updatedAt: null,
+          },
+          signInMethods: {
+            value: { emailPassword: true, github: true },
+            effective: { emailPassword: true, github: true },
+            updatedBy: null,
+            updatedAt: null,
+          },
+        })}
+        github={githubView()}
+      />,
+    );
+
+    expect(row("Mail server").textContent).toContain("Configured");
+    expect(row("GitHub").textContent).toContain(
+      "Configured (code-reviewer-acme)",
+    );
+    expect(row("GitHub").textContent).toContain(
+      "Signing in with GitHub is enabled",
+    );
+    expect(row("Tenancy").textContent).toContain("Multi-tenant");
+    expect(row("Sign-up rule").textContent).toContain("Allowed email domains");
+    expect(row("Ways to sign in").textContent).toContain("Email + GitHub");
+  });
+
+  // #98-AD-03
+  it("states the tenancy with the number of workspaces", () => {
+    render(
+      <Overview
+        settings={view({
+          tenancy: { value: "multi", updatedBy: null, updatedAt: null },
+          workspaceCount: 2,
+        })}
+      />,
+    );
+
+    expect(row("Tenancy").textContent).toContain("Multi-tenant");
+    expect(row("Tenancy").textContent).toContain("2 workspaces");
+  });
+
+  // #180-T02
+  it("says in the sign-up rule row that the rule cannot work yet", () => {
+    render(
+      <Overview
+        settings={view({
+          signUpRule: {
+            value: { kind: "domains", entries: ["a.com"] },
+            updatedBy: null,
+            updatedAt: null,
+          },
+          signUpRuleState: { failClosed: true },
+        })}
+      />,
+    );
+
+    expect(row("Sign-up rule").textContent).toContain(
+      "This sign-up rule does not work yet.",
     );
   });
 
-  it("shows no alert when every stored credential can be read", () => {
-    render(<Overview settings={view()} />);
+  // #102-GH-21
+  it("says in the GitHub row that an App without the user authorization cannot sign people in yet", () => {
+    render(
+      <Overview
+        settings={view({ githubConfigured: false })}
+        github={githubView({
+          userAuthorization: { configured: false, clientId: null },
+        })}
+      />,
+    );
 
-    expect(screen.queryByRole("alert")).toBeNull();
+    expect(row("GitHub").textContent).toContain("not enabled yet");
+  });
+
+  it("names what is wrong with the App's settings, as field names only", () => {
+    render(
+      <Overview
+        settings={view()}
+        github={githubView({
+          status: "problem",
+          problem: { kind: "invalid", fields: ["github_app_private_key"] },
+        })}
+      />,
+    );
+
+    expect(row("GitHub").textContent).toContain("github_app_private_key");
+  });
+
+  // #100-review-4
+  it("says that a saved mail server cannot send because its password cannot be read", () => {
+    render(
+      <Overview
+        settings={view({ smtp: smtpView("unreadable"), mailConfigured: false })}
+      />,
+    );
+
+    expect(row("Mail server").textContent).toContain("password cannot be read");
+    expect(configuredLink("Mail server").getAttribute("href")).toBe(
+      "/admin/mail",
+    );
   });
 });
