@@ -25,6 +25,7 @@ import {
 } from "../../test-support/github-app.ts";
 import { startSyncHarness } from "../../test-support/integration-sync-harness.ts";
 import { createProjectService } from "../service.ts";
+import type { AttentionNotice } from "../../components/needs-attention.tsx";
 import { loadProjectsPage, ProjectsPageContent } from "./projects-page.tsx";
 import { defaultWorkspaceId } from "../../test-support/workspaces.ts";
 
@@ -46,6 +47,7 @@ const MISSING_GITHUB: GithubAppStatus = {
 async function openPage(
   github: GithubAppStatus = testGithubAppStatus(),
   audience: ConfigAudience = "operator",
+  llmNotice: AttentionNotice | null = null,
 ) {
   const h = await startSyncHarness();
   h.fake.addInstallation({
@@ -84,12 +86,30 @@ async function openPage(
     <ProjectsPageContent
       workspaceSlug="acme"
       audience={audience}
+      llmNotice={llmNotice}
       data={data}
     />,
   );
 }
 
 describe("the Projects page", () => {
+  // #173-T01
+  it("has exactly one Needs attention region, also with a configuration hint and the LLM hint", async () => {
+    await openPage(MISSING_GITHUB, "operator", {
+      id: "llm_access",
+      severity: "error",
+      title: "LLM not configured",
+      detail: "Reviews of this workspace cannot run until it has an LLM key.",
+    });
+
+    const regions = screen.getAllByRole("region", { name: "Needs attention" });
+    expect(regions).toHaveLength(1);
+    expect(
+      within(regions[0]!).getByText("GitHub App not configured"),
+    ).toBeTruthy();
+    expect(within(regions[0]!).getByText("LLM not configured")).toBeTruthy();
+  });
+
   // CR-34-T01
   it("lists the four repositories of two installations, the activated one with its switch on", async () => {
     await openPage();
@@ -116,7 +136,7 @@ describe("the Projects page", () => {
     await openPage();
 
     expect(
-      screen.queryByRole("region", { name: "Configuration problems" }),
+      screen.queryByRole("region", { name: "Needs attention" }),
     ).toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();
   });
@@ -142,15 +162,14 @@ describe("the Projects page", () => {
   it("names the missing GitHub App fields and disables switching a project on", async () => {
     const { container } = await openPage(MISSING_GITHUB);
 
-    const hint = screen
-      .getByText("GitHub App not configured")
-      .closest("div") as HTMLElement;
+    const region = screen.getByRole("region", { name: "Needs attention" });
+    expect(region.textContent).toContain("GitHub App not configured");
     for (const name of [
       "app_id",
       "github_app_webhook_secret",
       "github_app_private_key",
     ])
-      expect(hint.textContent).toContain(name);
+      expect(region.textContent).toContain(name);
     expect(container.innerHTML).not.toContain(
       WORKING_ENV.GITHUB_APP_PRIVATE_KEY ?? "x",
     );
@@ -186,8 +205,10 @@ describe("the Projects page", () => {
 
   // #101-WM-08
   it("shows a member of a working instance no hint at all", async () => {
-    const { container } = await openPage(undefined, "member");
+    await openPage(undefined, "member");
 
-    expect(container.querySelector(".notices")).toBeNull();
+    expect(
+      screen.queryByRole("region", { name: "Needs attention" }),
+    ).toBeNull();
   });
 });
