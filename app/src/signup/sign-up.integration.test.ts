@@ -228,6 +228,49 @@ describe("signing up under the rule everyone", () => {
     expect(harness.mail.to(ADDRESS)).toHaveLength(2);
   });
 
+  // #143
+  it("starts no work on any account before the answer is on its way, for a new address and one whose account waits for verification alike", async () => {
+    const harness = await createSignUpHarness({ mail: true });
+    await harness.signUp({ email: ADDRESS, password: SIGNUP_TEST_PASSWORD });
+    await harness.flush();
+    expect(harness.mail.outbox).toHaveLength(1);
+    const touched = new Set<string>();
+    // Every statement the database runs from here on is noted with the account tables it names.
+    const executor = harness.db.getExecutor();
+    const original = executor.transformQuery.bind(executor);
+    const spy = vi
+      .spyOn(executor, "transformQuery")
+      .mockImplementation((node, queryId) => {
+        const text = JSON.stringify(node);
+        for (const table of ["users", "accounts", "email_verification_tokens"])
+          if (text.includes(`"name":"${table}"`)) touched.add(table);
+        return original(node, queryId);
+      });
+
+    const waiting = await harness.signUp({
+      email: ADDRESS,
+      password: SIGNUP_TEST_PASSWORD,
+    });
+    const fresh = await harness.signUp({
+      email: "other@example.com",
+      password: SIGNUP_TEST_PASSWORD,
+    });
+    spy.mockRestore();
+
+    // The two answers are the same, and neither request looked at an account, made one or made a link.
+    expect(await readAnswer(waiting)).toEqual(await readAnswer(fresh));
+    expect([...touched]).toEqual([]);
+    expect(harness.waiting()).toBe(2);
+    expect(harness.mail.outbox).toHaveLength(1);
+    expect((await harness.counts()).users).toBe(2);
+    expect(await harness.user("other@example.com")).toBeUndefined();
+
+    // After the answer the work runs: the new account and one more link for each address.
+    await harness.flush();
+    expect(await harness.user("other@example.com")).toBeDefined();
+    expect(harness.mail.outbox).toHaveLength(3);
+  });
+
   it("still creates the account when the mail cannot be sent, and logs only a code", async () => {
     const harness = await createSignUpHarness({ mail: true });
     harness.mail.failNext();
