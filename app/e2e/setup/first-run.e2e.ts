@@ -10,6 +10,11 @@ import { readSetupCode } from "../helpers/setup";
 
 test.use({ baseURL: e2eEnv.setupAppUrl });
 
+/** The answer to the sign-in form (the server action posts to the login page). */
+const submits = (response: Response) =>
+  response.request().method() === "POST" &&
+  new URL(response.url()).pathname === "/login";
+
 test.describe("the first-run setup", () => {
   test.describe.configure({ mode: "serial" });
 
@@ -112,9 +117,6 @@ test.describe("the first-run setup", () => {
   }) => {
     await page.goto("/login");
     const email = page.getByLabel("Email address");
-    const submits = (response: Response) =>
-      response.request().method() === "POST" &&
-      new URL(response.url()).pathname === "/login";
     for (let attempt = 0; attempt < 6; attempt += 1) {
       await email.fill("nobody@e2e.test");
       await page.getByLabel("Password").fill("not-the-right-password-1");
