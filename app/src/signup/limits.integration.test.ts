@@ -8,6 +8,10 @@ import { createRateLimitsRepository } from "../db/repositories/rate-limits-repos
 import { createTestDatabase } from "../test-support/test-database.ts";
 import {
   createSignUpLimits,
+  PASSWORD_RESET_MAIL_GLOBAL_MAX,
+  PASSWORD_RESET_MAIL_GLOBAL_WINDOW_MS,
+  PASSWORD_RESET_REQUEST_ADDRESS_MAX,
+  PASSWORD_RESET_REQUEST_ADDRESS_WINDOW_MS,
   SIGN_UP_ADDRESS_MAX,
   SIGN_UP_ADDRESS_WINDOW_MS,
   SIGN_UP_GLOBAL_KEY,
@@ -210,5 +214,71 @@ describe("the limit on the use of a link", () => {
     expect(await limits.verifyToken(HASH)).toMatchObject({ allowed: false });
     advance(1000);
     expect(await limits.verifyToken(HASH)).toEqual({ allowed: true });
+  });
+});
+
+describe("the limits of the reset mail", () => {
+  // #100-SM-11
+  it("lets 5 requests per hour through for one address and refuses the 6th with the time to wait", async () => {
+    const { limits } = await fixture();
+
+    const results = await repeat(6, () => limits.resetRequest("a@example.com"));
+
+    expect(results.slice(0, PASSWORD_RESET_REQUEST_ADDRESS_MAX)).toEqual(
+      Array(PASSWORD_RESET_REQUEST_ADDRESS_MAX).fill({ allowed: true }),
+    );
+    expect(results[5]).toEqual({ allowed: false, retryAfterSeconds: 3600 });
+  });
+
+  // #100-SM-11
+  it("treats an address nobody owns exactly like a known one, and starts again when the window is over", async () => {
+    const { limits, advance } = await fixture();
+
+    const known = await repeat(8, () => limits.resetRequest("a@example.com"));
+    const unknown = await repeat(8, () =>
+      limits.resetRequest("nobody@example.com"),
+    );
+    advance(PASSWORD_RESET_REQUEST_ADDRESS_WINDOW_MS);
+
+    expect(unknown).toEqual(known);
+    expect(await limits.resetRequest("a@example.com")).toEqual({
+      allowed: true,
+    });
+  });
+
+  // #100-SM-11
+  it("is not used up by requests for addresses that have no account, which never reach the instance counter", async () => {
+    const { limits } = await fixture();
+    // A thousand junk requests for a thousand addresses.
+    for (let i = 0; i < 1000; i += 1)
+      await limits.resetRequest(`junk-${String(i)}@example.com`);
+
+    expect(await limits.resetMail()).toEqual({ allowed: true });
+  });
+
+  it("bounds the mails the instance sends for resets, whoever asks", async () => {
+    const { limits, advance } = await fixture();
+
+    const results = await repeat(PASSWORD_RESET_MAIL_GLOBAL_MAX + 1, () =>
+      limits.resetMail(),
+    );
+
+    expect(
+      results.slice(0, PASSWORD_RESET_MAIL_GLOBAL_MAX).every((r) => r.allowed),
+    ).toBe(true);
+    expect(results[PASSWORD_RESET_MAIL_GLOBAL_MAX]).toMatchObject({
+      allowed: false,
+    });
+    advance(PASSWORD_RESET_MAIL_GLOBAL_WINDOW_MS);
+    expect(await limits.resetMail()).toEqual({ allowed: true });
+  });
+
+  it("is a different counter from the verification mail", async () => {
+    const { limits } = await fixture();
+    await repeat(6, () => limits.mail("a@example.com"));
+
+    expect(await limits.resetRequest("a@example.com")).toEqual({
+      allowed: true,
+    });
   });
 });

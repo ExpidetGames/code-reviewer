@@ -7,6 +7,7 @@
 import "server-only";
 import type { Kysely } from "kysely";
 import { decodeJson, encodeJson, formatTimestamp } from "../codecs.ts";
+import type { SmtpSettings } from "../../mail/smtp-settings.ts";
 import type { Database } from "../schema.ts";
 
 /** The value of each setting, by key. A new setting adds its key and type here. */
@@ -32,6 +33,11 @@ export type InstanceSettingValues = {
   sign_in_methods: { emailPassword: boolean; github: boolean };
   /** The most workspaces one user may own (the limits page). No row: the default (10). */
   max_workspaces_per_user: number;
+  /**
+   * The mail server (src/mail/smtp-config.ts). No row: the instance has no mail server. The password is
+   * not here but in the secret store (`smtp_password`).
+   */
+  smtp: SmtpSettings;
 };
 export type InstanceSettingKey = keyof InstanceSettingValues;
 
@@ -59,6 +65,8 @@ export type InstanceSettingsRepository = {
     value: InstanceSettingValues[K],
     updatedBy: string | null,
   ): Promise<void>;
+  /** Deletes the setting (it reads as never saved again); false when there was none. */
+  remove(key: InstanceSettingKey): Promise<boolean>;
 };
 
 export function createInstanceSettingsRepository(
@@ -88,6 +96,14 @@ export function createInstanceSettingsRepository(
             updatedBy: row.updated_by,
             updatedAt: row.updated_at,
           };
+    },
+
+    async remove(key) {
+      const result = await db
+        .deleteFrom("instance_settings")
+        .where("key", "=", key)
+        .executeTakeFirst();
+      return Number(result.numDeletedRows) > 0;
     },
 
     async set(key, value, updatedBy) {

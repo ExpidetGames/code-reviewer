@@ -15,6 +15,10 @@ export const ADMIN_ERROR_CODES = [
   "invalid_input",
   /** Multi-tenant to single-tenant with more than one workspace; `count` says how many. */
   "too_many_workspaces",
+  /** The test mail was asked for too often; `Retry-After` says when to try again. */
+  "rate_limited",
+  /** The counters of a limit could not be read, so the request was not served. */
+  "unavailable",
   ...SIGN_IN_METHODS_ERROR_CODES,
 ] as const;
 export type AdminErrorCode = (typeof ADMIN_ERROR_CODES)[number];
@@ -25,6 +29,8 @@ export const ADMIN_ERROR_STATUS: Record<AdminErrorCode, number> = {
   body_too_large: 413,
   invalid_input: 422,
   too_many_workspaces: 409,
+  rate_limited: 429,
+  unavailable: 503,
   at_least_one_method: 422,
   github_not_configured: 409,
   admin_needs_github_identity: 409,

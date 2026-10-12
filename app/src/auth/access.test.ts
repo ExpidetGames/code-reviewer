@@ -65,6 +65,8 @@ describe("which paths are public", () => {
       { path: "/api/auth", match: "prefix" },
       { path: "/reset-password", match: "exact" },
       { path: "/api/password-reset", match: "exact" },
+      { path: "/forgot-password", match: "exact" },
+      { path: "/api/password-reset/request", match: "exact" },
       { path: "/sign-up", match: "exact" },
       { path: "/api/sign-up", match: "exact" },
       { path: "/verify-email", match: "exact" },

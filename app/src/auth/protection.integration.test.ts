@@ -30,6 +30,9 @@ const PUBLIC_ROUTES = [
   // A reset link carries its own credential, the token (src/auth/password-reset-http.ts).
   "/reset-password",
   "/api/password-reset",
+  // Asking for a reset link by mail: no session yet (src/auth/password-reset-request-http.ts).
+  "/forgot-password",
+  "/api/password-reset/request",
   // Signing up and verifying an address: no session yet (src/signup/http.ts).
   "/sign-up",
   "/api/sign-up",
@@ -62,6 +65,7 @@ const PROTECTED_ROUTES = [
 // Data routes: a visitor without a session gets 401 instead of a redirect.
 const PROTECTED_DATA_ROUTES = [
   "/api/instance-portal/settings",
+  "/api/instance-portal/mail/test",
   "/api/backup/status",
   "/api/repositories/[repositoryId]/project",
   "/api/repositories/[repositoryId]/project/settings",

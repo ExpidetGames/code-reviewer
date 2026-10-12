@@ -77,6 +77,16 @@ export function Overview({ settings }: { settings: AdminSettingsView }) {
           <Item done={settings.mailConfigured} title="Mail server">
             {settings.mailConfigured ? (
               "A mail server is configured."
+            ) : settings.smtp.value !== null ? (
+              <>
+                A mail server is saved, but no mail can be sent:{" "}
+                {settings.smtp.password === "unreadable"
+                  ? "the saved password cannot be read (it was saved with another APP_SECRET)."
+                  : "the login has no password."}{" "}
+                Until it is entered again, nothing that needs mail is offered
+                (confirming addresses, resetting a password by mail).{" "}
+                <Link href="/admin/mail">Mail</Link>
+              </>
             ) : (
               <>
                 Not configured. Without it nobody can verify an email address or

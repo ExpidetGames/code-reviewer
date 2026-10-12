@@ -1,21 +1,38 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// The inbox of the sign-up journey. The app under test writes the mail it would send to a file, one JSON
-// message per line (src/mail/outbox-sender.ts, switched on by the test stack only), and the journey reads
-// the verification link from it the way a person reads it from their mailbox. The mail goes out after the
-// answer to the request, so the journey waits for it.
-import { existsSync, readFileSync } from "node:fs";
+// The inbox of the journeys. The app under test sends its mail over SMTP to the fake SMTP server
+// (fakes/smtp), which the mail page's journey configures in the admin portal; the fake keeps every message and
+// shows them through a small control API. A journey reads the link out of a message the way a person reads it
+// from their mailbox. The mail goes out after the answer to the request, so the journeys wait for it.
 import { expect } from "@playwright/test";
 import { e2eEnv } from "./e2e-env";
 
-type Message = { to: string; subject: string; text: string };
+export type InboxMessage = {
+  from: string;
+  to: string[];
+  subject: string;
+  text: string;
+  html: string;
+  secure: boolean;
+  authenticatedAs: string | null;
+};
 
-export function readOutbox(file: string = e2eEnv.mailOutboxFile): Message[] {
-  if (!existsSync(file)) return [];
-  return readFileSync(file, "utf8")
-    .split("\n")
-    .filter((line) => line.trim() !== "")
-    .map((line) => JSON.parse(line) as Message);
+/** Every message the fake SMTP server accepted, oldest first (only those to `address` when given). */
+export async function readInbox(address?: string): Promise<InboxMessage[]> {
+  const query =
+    address === undefined ? "" : `?to=${encodeURIComponent(address)}`;
+  const response = await fetch(
+    `${e2eEnv.smtp.controlUrl}/__fake/messages${query}`,
+  );
+  if (!response.ok)
+    throw new Error(
+      `The fake SMTP server answered ${String(response.status)}.`,
+    );
+  return (await response.json()) as InboxMessage[];
+}
+
+function linkIn(message: InboxMessage | undefined): string {
+  return /https?:\/\/\S+/.exec(message?.text ?? "")?.[0] ?? "";
 }
 
 /** The link in the newest mail to `address`, once there is one. */
@@ -23,11 +40,8 @@ export async function verificationLinkTo(address: string): Promise<string> {
   let link = "";
   await expect
     .poll(
-      () => {
-        const message = readOutbox()
-          .filter((entry) => entry.to === address)
-          .at(-1);
-        link = /https?:\/\/\S+/.exec(message?.text ?? "")?.[0] ?? "";
+      async () => {
+        link = linkIn((await readInbox(address)).at(-1));
         return link;
       },
       { message: `a mail with a link to ${address}` },
@@ -44,10 +58,9 @@ export async function verificationLinksTo(
   let links: string[] = [];
   await expect
     .poll(
-      () => {
-        links = readOutbox()
-          .filter((entry) => entry.to === address)
-          .map((entry) => /https?:\/\/\S+/.exec(entry.text)?.[0] ?? "")
+      async () => {
+        links = (await readInbox(address))
+          .map((message) => linkIn(message))
           .filter((link) => link !== "");
         return links.length;
       },
@@ -55,4 +68,25 @@ export async function verificationLinksTo(
     )
     .toBeGreaterThanOrEqual(count);
   return links;
+}
+
+/** The newest message to `address` with this subject, once there is one. */
+export async function messageTo(
+  address: string,
+  subject: string,
+): Promise<InboxMessage> {
+  let found: InboxMessage | undefined;
+  await expect
+    .poll(
+      async () => {
+        found = (await readInbox(address))
+          .filter((message) => message.subject === subject)
+          .at(-1);
+        return found !== undefined;
+      },
+      { message: `a mail "${subject}" to ${address}` },
+    )
+    .toBe(true);
+  if (found === undefined) throw new Error("unreachable");
+  return found;
 }
