@@ -28,6 +28,14 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu.tsx";
+import {
+  Field,
+  FieldDescription,
+  FieldError,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from "./ui/field.tsx";
 import { Input } from "./ui/input.tsx";
 import { Label } from "./ui/label.tsx";
 import { Progress } from "./ui/progress.tsx";
@@ -62,6 +70,29 @@ import { Textarea } from "./ui/textarea.tsx";
 afterEach(cleanup);
 
 describe("form controls", () => {
+  it("builds a labelled field with a legend, a description and an error", () => {
+    render(
+      <FieldSet>
+        <FieldLegend>Model</FieldLegend>
+        <Field>
+          <FieldLabel htmlFor="model">Model id</FieldLabel>
+          <Input id="model" />
+          <FieldDescription>
+            Exactly as the provider spells it.
+          </FieldDescription>
+          <FieldError errors={[{ message: "This model is not known." }]} />
+        </Field>
+      </FieldSet>,
+    );
+
+    expect(screen.getByText("Model")).toBeTruthy();
+    expect(screen.getByLabelText("Model id").tagName).toBe("INPUT");
+    expect(screen.getByText("Exactly as the provider spells it.")).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain(
+      "This model is not known.",
+    );
+  });
+
   it("labels an input and a textarea", () => {
     render(
       <>
