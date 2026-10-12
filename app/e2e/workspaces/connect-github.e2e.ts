@@ -196,7 +196,7 @@ test.describe("connecting GitHub to a workspace", () => {
     await expect(connections).toContainText("Connected");
     await page.goto(`/w/${slug}/projects`);
     await expect(
-      page.getByRole("listitem").filter({ hasText: REPO_A }),
+      page.getByRole("row").filter({ hasText: REPO_A }),
     ).toBeVisible();
     await page.context().close();
   });
@@ -246,10 +246,10 @@ test.describe("connecting GitHub to a workspace", () => {
 
     await b.page.goto(`/w/${b.slug}/projects`);
     await expect(
-      b.page.getByRole("listitem").filter({ hasText: REPO_B }),
+      b.page.getByRole("row").filter({ hasText: REPO_B }),
     ).toBeVisible();
     await expect(
-      b.page.getByRole("listitem").filter({ hasText: REPO_A }),
+      b.page.getByRole("row").filter({ hasText: REPO_A }),
     ).toHaveCount(0);
     // The workspace of the first journey does not see these.
     const a = await browser.newContext({ baseURL: e2eEnv.multiAppUrl });
@@ -260,10 +260,10 @@ test.describe("connecting GitHub to a workspace", () => {
     await pageA.getByRole("button", { name: "Sign in", exact: true }).click();
     await expect(pageA).toHaveURL(/\/w\/connect-a\/projects$/);
     await expect(
-      pageA.getByRole("listitem").filter({ hasText: REPO_A }),
+      pageA.getByRole("row").filter({ hasText: REPO_A }),
     ).toBeVisible();
     await expect(
-      pageA.getByRole("listitem").filter({ hasText: REPO_B }),
+      pageA.getByRole("row").filter({ hasText: REPO_B }),
     ).toHaveCount(0);
     // Reading the connections again from GitHub does not bring a foreign installation in.
     await pageA.getByRole("button", { name: "Sync from GitHub" }).click();
@@ -271,7 +271,7 @@ test.describe("connecting GitHub to a workspace", () => {
       "No new repositories.",
     );
     await expect(
-      pageA.getByRole("listitem").filter({ hasText: REPO_B }),
+      pageA.getByRole("row").filter({ hasText: REPO_B }),
     ).toHaveCount(0);
     await a.close();
     await b.page.context().close();
@@ -345,7 +345,7 @@ test.describe("connecting GitHub to a workspace", () => {
     ).toContainText("Approved");
     await o.page.goto(`/w/${o.slug}/projects`);
     await expect(
-      o.page.getByRole("listitem").filter({ hasText: REPO_OPAQUE }),
+      o.page.getByRole("row").filter({ hasText: REPO_OPAQUE }),
     ).toBeVisible();
     await adminContext.close();
     await o.page.context().close();
