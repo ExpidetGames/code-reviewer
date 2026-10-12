@@ -271,6 +271,20 @@ test.describe("an Owner invites a colleague who accepts", () => {
     await signIn(page, colleague, PASSWORD);
     await expect(page).toHaveURL(/\/w\/default\/projects$/);
 
+    // The old addresses and the start page are real redirects (307) to the workspace of the person.
+    for (const [path, target] of [
+      ["/", "/w/default/projects"],
+      ["/projects", "/w/default/projects"],
+      ["/runs/some-run", "/w/default/runs/some-run"],
+      ["/settings", "/w/default/settings"],
+    ] as const) {
+      const redirect = await page.request.get(path, { maxRedirects: 0 });
+      expect(redirect.status(), path).toBe(307);
+      expect(new URL(redirect.headers().location ?? "").pathname, path).toBe(
+        target,
+      );
+    }
+
     const foreign = await page.goto("/w/someone-elses/projects");
     const missing = await page.goto("/there-is-no-such-page");
     const foreignApi = await page.request.get("/api/w/someone-elses/runs");

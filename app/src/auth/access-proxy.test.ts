@@ -546,6 +546,26 @@ describe("an address from before the workspace was in the address", () => {
   });
 
   // #101-WM-05
+  it.each([
+    ["a client-side navigation of the app (RSC)", "/", { rsc: "1" }, "GET"],
+    ["a prefetch", "/projects?_rsc=abc", {}, "GET"],
+    ["a request that is not a read", "/projects", {}, "POST"],
+  ])(
+    "leaves %s to the redirect of the page",
+    async (_what, path, headers, method) => {
+      lookupSession.mockResolvedValue(aUser(false));
+      const gate = firstWorkspaceSlug("acme");
+
+      const response = await newProxy({ firstWorkspaceSlug: gate })(
+        new NextRequest(`${BASE}${path}`, { method, headers }),
+      );
+
+      expect(response.status).not.toBe(307);
+      expect(gate).not.toHaveBeenCalled();
+    },
+  );
+
+  // #101-WM-05
   it("goes on to the page when the person has no workspace to lead to (the instance admin of a new multi-tenant instance)", async () => {
     lookupSession.mockResolvedValue(aUser(true));
 

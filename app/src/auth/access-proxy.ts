@@ -168,8 +168,15 @@ export function createAccessProxy({
     // `/settings`) leads to the same page of the first workspace of the person, with a real redirect. The
     // page behind it checks the membership like any other. (A person without a workspace, or who has to
     // verify the address, is sent where every other page sends them, below.)
+    // Only for a page that is asked for as a document (the address bar, a bookmark, a link from elsewhere):
+    // the browser follows a 307 there. The client-side navigation inside the app (a request for the page's
+    // data, `RSC: 1` and `_rsc`) keeps the redirect of the page itself, which the router follows in place; a
+    // 307 there makes the router fetch the target twice and the address stays where it was.
     if (
       lookup.kind === "user" &&
+      (request.method === "GET" || request.method === "HEAD") &&
+      !request.headers.has("rsc") &&
+      !request.nextUrl.searchParams.has("_rsc") &&
       legacyWorkspaceTarget(pathname, "x") !== null
     ) {
       let first: string | null;
