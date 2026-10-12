@@ -131,14 +131,14 @@ test.describe("connecting GitHub to a workspace", () => {
   test.beforeAll(async ({ request }) => {
     for (const account of [ownerA, ownerB, memberOfA, opaque])
       await addGithubAccount(request, account, null);
-    await addGithubInstallation(request, { id: 9300001, account: ORG_A }, [
-      { id: 9310001, fullName: REPO_A },
+    await addGithubInstallation(request, { id: 9700001, account: ORG_A }, [
+      { id: 9710001, fullName: REPO_A },
     ]);
-    await addGithubInstallation(request, { id: 9300002, account: ORG_B }, [
-      { id: 9310002, fullName: REPO_B },
+    await addGithubInstallation(request, { id: 9700002, account: ORG_B }, [
+      { id: 9710002, fullName: REPO_B },
     ]);
-    await addGithubInstallation(request, { id: 9300003, account: ORG_OPAQUE }, [
-      { id: 9310003, fullName: REPO_OPAQUE },
+    await addGithubInstallation(request, { id: 9700003, account: ORG_OPAQUE }, [
+      { id: 9710003, fullName: REPO_OPAQUE },
     ]);
     await addGithubOrgMember(request, {
       org: ORG_A.login,
