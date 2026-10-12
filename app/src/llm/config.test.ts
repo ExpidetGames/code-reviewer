@@ -1,164 +1,63 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Pins down how the shared LLM access is read from the environment: what is required, what the
-// defaults are, that a problem is reported as a state (the app starts anyway) with stable codes and
-// variable names, and that the key never shows up in anything but `config.apiKey`.
+// Pins down the instance's LLM defaults (`LLM_MODEL`, `LLM_MAX_TOKENS`) and the one rule for an LLM
+// key that the key routes, the legacy import and the workspace settings share. A wrong optional
+// value is ignored with a warning, never a value in the result. The legacy `LLM_PROVIDER` and
+// `LLM_API_KEY` are no longer read here (they were imported once, src/legacy-import/).
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_LLM_MODEL,
   LLM_CONFIG_ISSUE_CODES,
+  checkLlmApiKey,
   configuredLlmModel,
-  legacyConfigIsAbsent,
-  loadLlmConfig,
+  readLlmDefaults,
   type LlmConfigIssue,
 } from "./config.ts";
 
 const KEY = "dummy-llm-key-0123456789";
-const validEnv = { LLM_PROVIDER: "openrouter", LLM_API_KEY: KEY };
-
-function issuesOf(env: Record<string, string | undefined>): LlmConfigIssue[] {
-  const state = loadLlmConfig(env);
-  if (state.status !== "misconfigured")
-    throw new Error("expected a configuration error");
-  return [...state.issues];
-}
 
 function warningsOf(env: Record<string, string | undefined>): LlmConfigIssue[] {
-  const state = loadLlmConfig(env);
-  if (state.status !== "configured")
-    throw new Error("expected a working configuration");
-  return [...state.warnings];
+  return [...readLlmDefaults(env).warnings];
 }
 
-describe("loading the LLM configuration", () => {
-  // CR-26-T01
-  it("is configured when the provider and a key are set, and the model falls back to the default", () => {
-    const state = loadLlmConfig(validEnv);
-
-    expect(state.status).toBe("configured");
-    if (state.status !== "configured") return;
-    expect(state.config.provider).toBe("openrouter");
-    expect(state.config.apiKey).toBe(KEY);
-    expect(state.config.model).toBe(DEFAULT_LLM_MODEL);
-    expect(state.config.contextWindowTokens).toBeNull();
-    expect(state.warnings).toEqual([]);
-  });
-
+describe("reading the instance's LLM defaults", () => {
   it("uses the model of the model comparison as the default", () => {
     expect(DEFAULT_LLM_MODEL).toBe("anthropic/claude-haiku-5.5");
   });
 
+  it("falls back to the default model and no context window when nothing is set", () => {
+    const defaults = readLlmDefaults({});
+
+    expect(defaults.model).toBe(DEFAULT_LLM_MODEL);
+    expect(defaults.contextWindowTokens).toBeNull();
+    expect(defaults.warnings).toEqual([]);
+  });
+
   it("reads a model and a token limit when they are set", () => {
-    const state = loadLlmConfig({
-      ...validEnv,
+    const defaults = readLlmDefaults({
       LLM_MODEL: " qwen/qwen3-coder ",
       LLM_MAX_TOKENS: "120000",
     });
 
-    expect(state.status).toBe("configured");
-    if (state.status !== "configured") return;
-    expect(state.config.model).toBe("qwen/qwen3-coder");
-    expect(state.config.contextWindowTokens).toBe(120000);
+    expect(defaults.model).toBe("qwen/qwen3-coder");
+    expect(defaults.contextWindowTokens).toBe(120000);
   });
 
   it("treats a blank model or token limit as not set", () => {
-    const state = loadLlmConfig({
-      ...validEnv,
-      LLM_MODEL: "  ",
-      LLM_MAX_TOKENS: "",
-    });
+    const defaults = readLlmDefaults({ LLM_MODEL: "  ", LLM_MAX_TOKENS: "" });
 
-    expect(state.status).toBe("configured");
-    if (state.status !== "configured") return;
-    expect(state.config.model).toBe(DEFAULT_LLM_MODEL);
-    expect(state.config.contextWindowTokens).toBeNull();
-  });
-
-  it("accepts the provider name in any case and with surrounding spaces", () => {
-    expect(
-      loadLlmConfig({ ...validEnv, LLM_PROVIDER: "  OpenRouter " }).status,
-    ).toBe("configured");
-  });
-
-  // CR-26-T11
-  it("trims whitespace and a trailing line break from the key", () => {
-    const state = loadLlmConfig({
-      ...validEnv,
-      LLM_API_KEY: `  ${KEY}\n`,
-    });
-
-    expect(state.status).toBe("configured");
-    if (state.status !== "configured") return;
-    expect(state.config.apiKey).toBe(KEY);
-  });
-
-  // CR-26-T03
-  it.each([
-    ["missing", undefined],
-    ["empty", ""],
-    ["only spaces", "   \n\t "],
-  ])(
-    "reports a configuration error with the variable name when the key is %s",
-    (_label, value) => {
-      const issues = issuesOf({ ...validEnv, LLM_API_KEY: value });
-
-      expect(issues).toEqual([
-        { code: "LLM_API_KEY_MISSING", variable: "LLM_API_KEY" },
-      ]);
-    },
-  );
-
-  // CR-26-T04
-  it("reports a configuration error when the provider is missing", () => {
-    expect(issuesOf({ LLM_API_KEY: KEY })).toEqual([
-      { code: "LLM_PROVIDER_MISSING", variable: "LLM_PROVIDER" },
-    ]);
-    expect(issuesOf({ LLM_PROVIDER: "  ", LLM_API_KEY: KEY })).toEqual([
-      { code: "LLM_PROVIDER_MISSING", variable: "LLM_PROVIDER" },
-    ]);
-  });
-
-  // CR-26-T04
-  it("reports a configuration error when the provider is not known", () => {
-    expect(issuesOf({ ...validEnv, LLM_PROVIDER: "openai" })).toEqual([
-      { code: "LLM_PROVIDER_UNKNOWN", variable: "LLM_PROVIDER" },
-    ]);
-  });
-
-  it("reports the provider and the key together", () => {
-    expect(
-      issuesOf({ LLM_PROVIDER: "nope" }).map((issue) => issue.code),
-    ).toEqual(["LLM_PROVIDER_UNKNOWN", "LLM_API_KEY_MISSING"]);
-    expect(issuesOf({}).map((issue) => issue.code)).toEqual([
-      "LLM_PROVIDER_MISSING",
-      "LLM_API_KEY_MISSING",
-    ]);
-  });
-
-  it.each([
-    ["has a space inside", "abc def"],
-    ["has a line break inside", "abc\ndef"],
-    ["has a control character", "abc\u0000def"],
-    ["is longer than 4096 characters", "k".repeat(4097)],
-  ])("rejects a key that %s without echoing it", (_label, value) => {
-    const issues = issuesOf({ ...validEnv, LLM_API_KEY: value });
-
-    expect(issues).toEqual([
-      { code: "LLM_API_KEY_INVALID", variable: "LLM_API_KEY" },
-    ]);
-    expect(JSON.stringify(issues)).not.toContain(value);
+    expect(defaults.model).toBe(DEFAULT_LLM_MODEL);
+    expect(defaults.contextWindowTokens).toBeNull();
   });
 
   // A wrong optional variable never stops the reviews: the default is used and it is reported.
   it.each(["0", "999", "10000001", "12.5", "1e5", "-5", "12k"])(
     "ignores the token limit %s with a warning and keeps working",
     (value) => {
-      const state = loadLlmConfig({ ...validEnv, LLM_MAX_TOKENS: value });
+      const defaults = readLlmDefaults({ LLM_MAX_TOKENS: value });
 
-      expect(state.status).toBe("configured");
-      if (state.status !== "configured") return;
-      expect(state.config.contextWindowTokens).toBeNull();
-      expect(state.warnings).toEqual([
+      expect(defaults.contextWindowTokens).toBeNull();
+      expect(defaults.warnings).toEqual([
         { code: "LLM_MAX_TOKENS_INVALID", variable: "LLM_MAX_TOKENS" },
       ]);
     },
@@ -166,125 +65,69 @@ describe("loading the LLM configuration", () => {
 
   it("accepts the smallest and the largest token limit the runner accepts", () => {
     for (const value of ["1000", "10000000"])
-      expect(warningsOf({ ...validEnv, LLM_MAX_TOKENS: value })).toEqual([]);
+      expect(warningsOf({ LLM_MAX_TOKENS: value })).toEqual([]);
   });
 
   it.each(["bad model", "-start", "a".repeat(201), "mo\ndel"])(
-    "ignores the model name %j with a warning, uses the default model and keeps working",
+    "ignores the model name %j with a warning and uses the default model",
     (value) => {
-      const state = loadLlmConfig({ ...validEnv, LLM_MODEL: value });
+      const defaults = readLlmDefaults({ LLM_MODEL: value });
 
-      expect(state.status).toBe("configured");
-      if (state.status !== "configured") return;
-      expect(state.config.model).toBe(DEFAULT_LLM_MODEL);
-      expect(state.warnings).toEqual([
+      expect(defaults.model).toBe(DEFAULT_LLM_MODEL);
+      expect(defaults.warnings).toEqual([
         { code: "LLM_MODEL_INVALID", variable: "LLM_MODEL" },
       ]);
     },
   );
 
-  it("reports the warnings of a wrong optional variable next to a missing key", () => {
-    const state = loadLlmConfig({
-      LLM_PROVIDER: "openrouter",
-      LLM_MODEL: "x y",
-    });
-
-    expect(state).toMatchObject({
-      status: "misconfigured",
-      issues: [{ code: "LLM_API_KEY_MISSING" }],
-      warnings: [{ code: "LLM_MODEL_INVALID" }],
-    });
-  });
-
   it("only uses issue codes from the stable list", () => {
-    const state = loadLlmConfig({
-      LLM_PROVIDER: "x",
-      LLM_API_KEY: "a b",
+    const warnings = readLlmDefaults({
       LLM_MODEL: "x y",
       LLM_MAX_TOKENS: "z",
-    });
+    }).warnings;
 
-    for (const issue of [
-      ...state.warnings,
-      ...(state.status === "misconfigured" ? state.issues : []),
-    ])
+    expect(warnings).toHaveLength(2);
+    for (const issue of warnings)
       expect(LLM_CONFIG_ISSUE_CODES).toContain(issue.code);
-    expect(state.warnings).toHaveLength(2);
-  });
-
-  // CR-26-T07
-  it("keeps the key out of JSON, spreads and error states", () => {
-    const state = loadLlmConfig(validEnv);
-    if (state.status !== "configured") throw new Error("expected configured");
-
-    expect(JSON.stringify(state)).not.toContain(KEY);
-    expect(JSON.stringify({ ...state.config })).not.toContain(KEY);
-    expect(Object.keys(state.config)).not.toContain("apiKey");
-    const broken = loadLlmConfig({ ...validEnv, LLM_PROVIDER: KEY });
-    expect(JSON.stringify(broken)).not.toContain(KEY);
-  });
-
-  it("does not echo a wrong provider value, which could be a pasted key", () => {
-    const state = loadLlmConfig({ LLM_PROVIDER: KEY, LLM_API_KEY: KEY });
-
-    expect(JSON.stringify(state)).not.toContain(KEY);
-  });
-});
-
-describe("the legacy configuration being absent", () => {
-  // #104-LK-12
-  it("is absent only when neither the provider nor the key is set", () => {
-    expect(legacyConfigIsAbsent(issuesOf({}))).toBe(true);
-    expect(legacyConfigIsAbsent(issuesOf({ LLM_API_KEY: KEY }))).toBe(false);
-    expect(legacyConfigIsAbsent(issuesOf({ LLM_PROVIDER: "openrouter" }))).toBe(
-      false,
-    );
-    expect(
-      legacyConfigIsAbsent(
-        issuesOf({ LLM_PROVIDER: "openrouter", LLM_API_KEY: "has a space" }),
-      ),
-    ).toBe(false);
-  });
-
-  // #104-LK-12
-  it("needs both missing codes, not any two issues", () => {
-    const providerMissing: LlmConfigIssue = {
-      code: "LLM_PROVIDER_MISSING",
-      variable: "LLM_PROVIDER",
-    };
-    const keyMissing: LlmConfigIssue = {
-      code: "LLM_API_KEY_MISSING",
-      variable: "LLM_API_KEY",
-    };
-    const keyInvalid: LlmConfigIssue = {
-      code: "LLM_API_KEY_INVALID",
-      variable: "LLM_API_KEY",
-    };
-    const providerUnknown: LlmConfigIssue = {
-      code: "LLM_PROVIDER_UNKNOWN",
-      variable: "LLM_PROVIDER",
-    };
-
-    expect(legacyConfigIsAbsent([providerMissing, keyMissing])).toBe(true);
-    expect(legacyConfigIsAbsent([keyMissing, providerMissing])).toBe(true);
-    expect(legacyConfigIsAbsent([providerMissing, keyInvalid])).toBe(false);
-    expect(legacyConfigIsAbsent([providerUnknown, keyMissing])).toBe(false);
   });
 });
 
 describe("the model of the instance", () => {
-  it("is LLM_MODEL when it is set and valid, even while the key is missing", () => {
+  it("is LLM_MODEL when it is set and valid", () => {
     expect(configuredLlmModel({ LLM_MODEL: " qwen/qwen3-coder " })).toBe(
       "qwen/qwen3-coder",
     );
-    expect(
-      configuredLlmModel({ LLM_MODEL: "qwen/qwen3-coder", LLM_API_KEY: "" }),
-    ).toBe("qwen/qwen3-coder");
   });
 
   // #104-LK-10 (the model of a workspace key is the same built-in value)
   it("is the default model when LLM_MODEL is missing, blank or invalid", () => {
     for (const value of [undefined, "", "  ", "bad model"])
       expect(configuredLlmModel({ LLM_MODEL: value })).toBe(DEFAULT_LLM_MODEL);
+  });
+});
+
+describe("the one rule for an LLM key", () => {
+  it("trims whitespace and a trailing line break", () => {
+    expect(checkLlmApiKey(`  ${KEY}\n`)).toEqual({ ok: true, key: KEY });
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["empty", ""],
+    ["only spaces", "   \n\t "],
+  ])("reports a %s key", (_label, value) => {
+    expect(checkLlmApiKey(value)).toEqual({ ok: false, problem: "missing" });
+  });
+
+  it.each([
+    ["has a space inside", "abc def"],
+    ["has a line break inside", "abc\ndef"],
+    ["has a control character", "abc\u0000def"],
+    ["is longer than 4096 characters", "k".repeat(4097)],
+  ])("refuses a key that %s without echoing it", (_label, value) => {
+    const result = checkLlmApiKey(value);
+
+    expect(result).toEqual({ ok: false, problem: "invalid" });
+    expect(JSON.stringify(result)).not.toContain(value);
   });
 });

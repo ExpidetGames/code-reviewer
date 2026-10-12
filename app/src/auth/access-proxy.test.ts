@@ -8,6 +8,7 @@
 import { NextRequest } from "next/server";
 import { describe, expect, it, vi } from "vitest";
 import { PORTAL_DENIED_HEADER } from "../admin/paths.ts";
+import { SETUP_REWRITE_HEADER } from "../setup/paths.ts";
 import type { AccessGates } from "./access-gates.ts";
 import { PORTAL_REWRITE_HEADER, createAccessProxy } from "./access-proxy.ts";
 import type { SessionLookup } from "./session-user.ts";
@@ -40,8 +41,6 @@ function aUser(isInstanceAdmin: boolean): SessionLookup {
     githubLogin: null,
     githubId: null,
     image: null,
-    orgCheckedAt: null,
-    orgCheckedFor: null,
   };
   return { kind: "user", user };
 }
@@ -229,6 +228,15 @@ describe("the instance admin's request for the portal", () => {
       mark,
     );
   });
+
+  // #156
+  it("is answered private and no-store, so a shared cache never keeps the prerendered answer", async () => {
+    lookupSession.mockResolvedValue(aUser(true));
+
+    const response = await newProxy()(request("/admin/setup"));
+
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+  });
 });
 
 describe("the header that serves the portal's files", () => {
@@ -324,6 +332,32 @@ describe("the header that marks a request as one for a missing path", () => {
       expect(response.headers.get(REQUEST_HEADER(PORTAL_DENIED_HEADER))).toBe(
         null,
       );
+    },
+  );
+});
+
+describe("the header that serves the setup page", () => {
+  // #155
+  it.each([
+    ["a page", "/w/acme/projects"],
+    ["a public page", "/login"],
+    ["the setup page", "/setup"],
+  ])(
+    "is taken off a request that arrives with it from outside (%s)",
+    async (_name, path) => {
+      lookupSession.mockResolvedValue(aUser(false));
+
+      const response = await newProxy({
+        workspaceRole: () => Promise.resolve("member"),
+      })(request(path, { [SETUP_REWRITE_HEADER]: "1" }));
+
+      expect(
+        response.headers.get(REQUEST_HEADER(SETUP_REWRITE_HEADER)),
+      ).toBeNull();
+      // The proxy lists the request headers that go on; the one the client sent is not among them.
+      const kept = response.headers.get("x-middleware-override-headers");
+      expect(kept).not.toBeNull();
+      expect((kept ?? "").split(",")).not.toContain(SETUP_REWRITE_HEADER);
     },
   );
 });

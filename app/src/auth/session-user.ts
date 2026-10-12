@@ -47,8 +47,6 @@ export async function lookupSession(
     githubLogin,
     githubId: identities.githubId,
     image: session.user.image ?? null,
-    orgCheckedAt: session.user.orgCheckedAt ?? null,
-    orgCheckedFor: session.user.orgCheckedFor ?? null,
   };
   // Who may have an account is decided when it is made (the first-run setup, or the sign-up rule for the
   // sign-up and for the sign in with GitHub, evaluated then and not on every request, so a stricter rule

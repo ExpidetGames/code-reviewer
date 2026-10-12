@@ -92,12 +92,12 @@ hand; a contract test belongs to the runner API contracts (CR-28).
 no model name, `LLM_MAX_TOKENS` that is no number in range) does not stop the reviews: it is ignored, the default is
 used, and it is reported as a _warning_ (`LLM_MODEL_INVALID`, `LLM_MAX_TOKENS_INVALID`).
 
-| File         | Role                                                                                                                                                                                                                                                    |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `config.ts`  | `loadLlmConfig(env)`: the only place that knows the variable names (the import reads the legacy ones through it); `checkLlmApiKey` (the one rule for a key), `readLlmDefaults` (model and context window without a key). Returns a state, never throws. |
-| `access.ts`  | `LlmAccessResult` (with its `source` or its `reason`), `revealLlmAccess` (the one way to get the key out, `LLM_ACCESS_HAS_NO_KEY` without a key), `maskSecretInText` (masks secrets in a text).                                                         |
-| `status.ts`  | `describeLlmStatus(state)`: what the UI may know about a configuration (the instance status reports the model options only).                                                                                                                            |
-| `startup.ts` | `checkLlmConfigOnStart`: one warning for an optional variable that is ignored (`LLM_MODEL`, `LLM_MAX_TOKENS`) and the notes on the test endpoints. Says nothing about `LLM_PROVIDER` and `LLM_API_KEY`. Never stops the start.                          |
+| File         | Role                                                                                                                                                                                                                                                                                                                                                           |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `config.ts`  | `readLlmDefaults(env)`: the built-in model (`LLM_MODEL`) and the context window (`LLM_MAX_TOKENS`), a wrong one ignored with a warning; `configuredLlmModel`; `checkLlmApiKey` (the one rule for a key, shared with the key routes and the legacy import). The legacy `LLM_PROVIDER` / `LLM_API_KEY` are not read here (src/legacy-import/ imports them once). |
+| `access.ts`  | `LlmAccessResult` (with its `source` or its `reason`), `revealLlmAccess` (the one way to get the key out, `LLM_ACCESS_HAS_NO_KEY` without a key), `maskSecretInText` (masks secrets in a text).                                                                                                                                                                |
+| `status.ts`  | `LlmStatus`: what the UI may know about the instance's LLM defaults (the built-in model and the warnings about an ignored option). The key is a matter of each workspace.                                                                                                                                                                                      |
+| `startup.ts` | `checkLlmConfigOnStart`: one warning for an optional variable that is ignored (`LLM_MODEL`, `LLM_MAX_TOKENS`) and the notes on the test endpoints. Says nothing about `LLM_PROVIDER` and `LLM_API_KEY`. Never stops the start.                                                                                                                                 |
 
 ## Rules
 
@@ -121,7 +121,7 @@ claimed-keys.ts`) and not in memory, so any app instance can mask a result after
 
 ## Testing
 
-`resolve.test.ts`, `config.test.ts`, `access.test.ts`, `status.test.ts`, `startup.test.ts`, `endpoint.test.ts` and
+`resolve.test.ts`, `config.test.ts`, `access.test.ts`, `startup.test.ts`, `endpoint.test.ts` and
 `../instrumentation.test.ts` (unit, no database); `workspace-key.integration.test.ts`,
 `key-test.integration.test.ts` (real SQLite, the fake LLM over real HTTP); `ui/*.test.tsx`;
 `integration-tests/http/llm-key-route.integration.test.ts` (the real route files: roles, isolation, the request,

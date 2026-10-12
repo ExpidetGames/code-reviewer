@@ -18,6 +18,7 @@ import {
   legacyWorkspaceTarget,
   workspaceSlugOfPath,
 } from "../workspaces/paths.ts";
+import { SETUP_REWRITE_HEADER } from "../setup/paths.ts";
 import { decideAccess, isNoWorkspacePath, isPublicPath } from "./access.ts";
 import type { AccessGates } from "./access-gates.ts";
 import type { Auth } from "./auth.ts";
@@ -62,21 +63,24 @@ export function createAccessProxy({
   }
 
   /**
-   * The headers of a request that goes on. The two headers that tell `next.config.ts` what to do with a
-   * request are the proxy's alone: one that arrives from outside is taken off every request the proxy sees
-   * (not the static files it leaves out, which the rewrites leave out as well), so nobody can have an
-   * answer rewritten to a missing path (and a cache between us and them cannot be made to keep that
-   * answer), or be served the files of the portal. The portal's header stays on a request that carries the
-   * mark. Next.js does not run the proxy again on the path a rewrite of `next.config.ts` leads to, so no
-   * request of the proxy's own comes back; the mark is kept for the case that it ever does.
+   * The headers of a request that goes on. The three headers that tell `next.config.ts` what to do with
+   * a request are the proxy's alone: one that arrives from outside is taken off every request the proxy
+   * sees (not the static files it leaves out, which the rewrites leave out as well), so nobody can have
+   * an answer rewritten to a missing path or to the setup page (and a cache between us and them cannot
+   * be made to keep that answer), or be served the files of the portal. The portal's header stays on a
+   * request that carries the mark. Next.js does not run the proxy again on the path a rewrite of
+   * `next.config.ts` leads to, so no request of the proxy's own comes back; the mark is kept for the
+   * case that it ever does.
    */
   function cleanedHeaders(request: NextRequest): Headers | null {
     const carriesDenied = request.headers.has(PORTAL_DENIED_HEADER);
     const carriesPortal =
       request.headers.has(PORTAL_REWRITE_HEADER) && !hasRewriteMark(request);
-    if (!carriesDenied && !carriesPortal) return null;
+    const carriesSetupRewrite = request.headers.has(SETUP_REWRITE_HEADER);
+    if (!carriesDenied && !carriesPortal && !carriesSetupRewrite) return null;
     const headers = new Headers(request.headers);
     headers.delete(PORTAL_DENIED_HEADER);
+    headers.delete(SETUP_REWRITE_HEADER);
     if (carriesPortal) headers.delete(PORTAL_REWRITE_HEADER);
     return headers;
   }
@@ -237,7 +241,12 @@ export function createAccessProxy({
           const marked =
             cleanedHeaders(request) ?? new Headers(request.headers);
           marked.set(PORTAL_REWRITE_HEADER, rewriteMark);
-          return NextResponse.next({ request: { headers: marked } });
+          const response = NextResponse.next({ request: { headers: marked } });
+          // A portal answer is for the admin alone. A prefetch is answered from Next.js's prerender
+          // cache with a year of shared caching (`s-maxage=31536000`), so an admin-only answer must not
+          // sit in a shared cache: private and no-store.
+          response.headers.set("cache-control", "private, no-store");
+          return response;
         }
         return forward(request);
       }

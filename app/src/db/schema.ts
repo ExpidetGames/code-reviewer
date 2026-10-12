@@ -83,7 +83,7 @@ export interface VerificationsTable {
   updated_at: string;
 }
 
-/** Which GitHub account a login on the allow list is bound to (src/auth/login-pins.ts). */
+/** Which GitHub account a login on the allow list is bound to; used by the update to accounts (`src/legacy-import/`). */
 export interface AllowedLoginPinsTable {
   /** The lower-cased GitHub login. */
   login: string;

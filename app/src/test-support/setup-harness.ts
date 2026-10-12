@@ -15,6 +15,7 @@ import { completeSetup } from "../setup/complete.ts";
 import { createCredentialCheck } from "../setup/credential-check.ts";
 import { createSetupGate } from "../setup/gate-proxy.ts";
 import { createSetupRouteHandlers } from "../setup/http.ts";
+import { SETUP_PAGE, SETUP_REWRITE_HEADER } from "../setup/paths.ts";
 import { createSetupStateReader, readSetupState } from "../setup/state.ts";
 import { startSetupOnStart } from "../setup/start.ts";
 import { SETUP_SESSION_COOKIE } from "../setup/setup-session.ts";
@@ -182,12 +183,23 @@ function assemble(
     if (rewrite !== null) return outcome;
     if (!passed) return outcome;
 
-    const url = new URL(`${SETUP_TEST_BASE_URL}${path}`);
+    // A page request the gate marked is served from the setup page by next.config.ts (the proxy builds
+    // no address, src/setup/paths.ts); model that rewrite here, the way admin-harness.ts models the
+    // portal's. The setup page is not a handler in this harness, so "setup-page" stands for it, and a
+    // test can tell it from a request that merely got through.
+    const setupMarked =
+      outcome.headers.get(`x-middleware-request-${SETUP_REWRITE_HEADER}`) !==
+      null;
+    const url = new URL(
+      `${SETUP_TEST_BASE_URL}${setupMarked ? SETUP_PAGE : path}`,
+    );
     let response: Response;
     if (url.pathname === "/api/setup/code" && method === "POST")
       response = await handlers.submitCode(build());
     else if (url.pathname === "/api/setup/complete" && method === "POST")
       response = await handlers.complete(build());
+    else if (url.pathname === SETUP_PAGE)
+      response = new Response("setup-page", { status: 200 });
     else response = new Response("reached", { status: 200 });
     if (init.cookies) remember(init.cookies, response);
     return response;

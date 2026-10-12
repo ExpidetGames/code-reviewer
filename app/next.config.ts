@@ -9,6 +9,7 @@ import {
   PORTAL_REWRITE_HEADER,
   PROXY_SKIPPED_PATHS,
 } from "./src/admin/paths.ts";
+import { SETUP_PAGE, SETUP_REWRITE_HEADER } from "./src/setup/paths.ts";
 
 const nextConfig: NextConfig = {
   // A self-contained server (`.next/standalone/server.js`) with only the files it needs, for the
@@ -33,6 +34,16 @@ const nextConfig: NextConfig = {
       // (src/admin/paths.ts). Next.js answers it as a path that does not exist, the same as any other,
       // with nothing of the portal in the answer.
       beforeFiles: [
+        // A page request the setup gate marked (src/setup/paths.ts) is served from the setup page in
+        // place of the page that was asked for, without the proxy building an address (bug #155: the
+        // address carried the client's `X-Forwarded-Proto` and Next.js forwarded the rewrite to another
+        // origin, which answered 500). Only what the proxy sees: it takes the header off a request from
+        // outside, and does not see Next.js's static files, the image route and the favicon.
+        {
+          source: `/:path((?!${PROXY_SKIPPED_PATHS}).*)`,
+          has: [{ type: "header", key: SETUP_REWRITE_HEADER }],
+          destination: SETUP_PAGE,
+        },
         // The instance admin's request for the portal (`/admin`, `/api/admin`) is marked by the proxy and
         // served from the files of the portal. Not a rewrite made by the proxy: see PORTAL_REWRITE_HEADER.
         // Nobody else carries the header (the proxy takes it off), and the pages and routes of the portal
