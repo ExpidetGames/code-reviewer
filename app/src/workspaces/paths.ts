@@ -54,6 +54,25 @@ export function workspaceApiPath(slug: string, rest = ""): string {
   return `${API_PREFIX}${slug}${rest}`;
 }
 
+/**
+ * Where an address from before the workspace was in the address leads, for the workspace `slug`: `/` is the
+ * start page of the workspace, `/projects`, `/projects/<id>`, `/runs`, `/runs/<id>` and `/settings` are the
+ * same page below `/w/<slug>`. `null` for any other address (also for a longer name that merely starts with
+ * one of them). The rest of the address is carried as it came, so an encoded id stays encoded.
+ */
+export function legacyWorkspaceTarget(
+  pathname: string,
+  slug: string,
+): string | null {
+  if (pathname === "/") return workspaceHome(slug);
+  for (const section of ["projects", "runs", "settings"]) {
+    const root = `/${section}`;
+    if (pathname === root || pathname.startsWith(`${root}/`))
+      return workspacePath(slug, pathname);
+  }
+  return null;
+}
+
 /** Where a workspace opens when no page is named. */
 export function workspaceHome(slug: string): string {
   return workspacePath(slug, "/projects");

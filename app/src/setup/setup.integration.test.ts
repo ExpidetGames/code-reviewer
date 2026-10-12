@@ -391,7 +391,9 @@ describe("the wizard", () => {
     expect(await settings.get("tenancy")).toBe("single");
     expect(await settings.get("setup_completed_at")).not.toBeNull();
     // The cookie the response set is a working session of the admin.
-    const protectedPage = await harness.visit("/projects", { cookies });
+    const protectedPage = await harness.visit("/w/default/projects", {
+      cookies,
+    });
     expect(await protectedPage.text()).toBe("reached");
   });
 

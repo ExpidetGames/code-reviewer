@@ -11,7 +11,9 @@ import { workspaceHome } from "@/workspaces/paths";
 
 // The start page has no content of its own: a signed in person goes to the first workspace they belong to
 // (the one they joined first), or, with none, to the page that says what to do (accept an invitation, create
-// a workspace, or ask for an invitation). Visitors without a session never get here, the proxy sends them to
+// a workspace, or ask for an invitation). The proxy does this first with a real 307 (src/auth/access-proxy.ts,
+// a redirect from here is a 200 with a meta refresh, because the page streams); this is what is left for a
+// person with no workspace to lead to. Visitors without a session never get here, the proxy sends them to
 // /login first.
 export default function Home() {
   return (

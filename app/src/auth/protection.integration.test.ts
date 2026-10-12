@@ -220,7 +220,7 @@ describe("a request without a session", () => {
       ["better-auth.session_token", "not-a-real-token.forged-signature"],
     ]);
 
-    const response = await app.visit("/", forged);
+    const response = await app.visit("/w/default/projects", forged);
 
     expect(response.status).toBe(307);
   });
@@ -231,7 +231,9 @@ describe("a request with a valid session", () => {
     const app = await createGuardedApp();
     const { cookies } = await app.signIn();
 
-    expect(passesThrough(await app.visit("/", cookies))).toBe(true);
+    expect(passesThrough(await app.visit("/w/default/projects", cookies))).toBe(
+      true,
+    );
     expect(passesThrough(await app.visit("/api/jobs", cookies))).toBe(true);
   });
 
@@ -265,7 +267,9 @@ describe("a session that has ended", () => {
     const app = await createGuardedApp();
     const { cookies } = await app.signIn();
     const oldCookies = new Map(cookies);
-    expect(passesThrough(await app.visit("/", oldCookies))).toBe(true);
+    expect(
+      passesThrough(await app.visit("/w/default/projects", oldCookies)),
+    ).toBe(true);
 
     const signOut = await app.request("/api/auth/sign-out", {
       method: "POST",
@@ -273,7 +277,7 @@ describe("a session that has ended", () => {
     });
     expect(signOut.status).toBe(200);
 
-    const page = await app.visit("/", oldCookies);
+    const page = await app.visit("/w/default/projects", oldCookies);
     const data = await app.visit("/api/jobs", oldCookies);
     expect(page.status).toBe(307);
     expect(page.headers.get("location")).toBe(`${TEST_BASE_URL}/login`);
@@ -291,10 +295,12 @@ describe("a session that has ended", () => {
     vi.useFakeTimers({ toFake: ["Date"], now: new Date() });
 
     vi.setSystemTime(Date.now() + 29 * day);
-    expect(passesThrough(await app.visit("/", cookies))).toBe(true);
+    expect(passesThrough(await app.visit("/w/default/projects", cookies))).toBe(
+      true,
+    );
 
     vi.setSystemTime(Date.now() + 1 * day + 1000);
-    const page = await app.visit("/", cookies);
+    const page = await app.visit("/w/default/projects", cookies);
     expect(page.status).toBe(307);
     expect(page.headers.get("location")).toBe(`${TEST_BASE_URL}/login`);
     expect((await app.visit("/api/jobs", cookies)).status).toBe(401);

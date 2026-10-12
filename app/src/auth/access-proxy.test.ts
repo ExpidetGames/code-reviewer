@@ -226,7 +226,7 @@ describe("a request for the files of the portal by their own address", () => {
 describe("the header that marks a request as one for a missing path", () => {
   // #138
   it.each([
-    ["a page", "/projects"],
+    ["a page", "/w/acme/projects"],
     ["a public page", "/login"],
     ["the portal's address", "/admin/setup"],
   ])(
@@ -234,9 +234,9 @@ describe("the header that marks a request as one for a missing path", () => {
     async (_name, path) => {
       lookupSession.mockResolvedValue(aUser(true));
 
-      const response = await newProxy()(
-        request(path, { [PORTAL_DENIED_HEADER]: "1" }),
-      );
+      const response = await newProxy({
+        workspaceRole: () => Promise.resolve("member"),
+      })(request(path, { [PORTAL_DENIED_HEADER]: "1" }));
 
       // The proxy lists the request headers that go on; without a list the request goes on as it came.
       const kept = response.headers.get("x-middleware-override-headers");
@@ -487,5 +487,97 @@ describe("a route that is the instance admin's alone, outside the portal", () =>
     const response = await newProxy({ workspaceRole: vi.fn() })(request(path));
 
     expect(isMarkedAsMissing(response), path).toBe(true);
+  });
+});
+
+describe("an address from before the workspace was in the address", () => {
+  const firstWorkspaceSlug = (slug: string | null) =>
+    vi.fn((...args: [string]) => {
+      void args;
+      return Promise.resolve(slug);
+    });
+
+  // #101-WM-05
+  it.each([
+    ["/", "/w/acme/projects"],
+    ["/projects", "/w/acme/projects"],
+    ["/projects/42", "/w/acme/projects/42"],
+    ["/projects/a%2Fb", "/w/acme/projects/a%2Fb"],
+    ["/runs", "/w/acme/runs"],
+    ["/runs/r-1", "/w/acme/runs/r-1"],
+    ["/settings", "/w/acme/settings"],
+  ])(
+    "is a real 307 redirect to the same page of the first workspace of the person (%s)",
+    async (path, target) => {
+      lookupSession.mockResolvedValue(aUser(false));
+      const gate = firstWorkspaceSlug("acme");
+
+      const response = await newProxy({ firstWorkspaceSlug: gate })(
+        request(`${path}?tab=2`),
+      );
+
+      expect(response.status).toBe(307);
+      const location = new URL(response.headers.get("location") ?? "");
+      expect(location.origin).toBe(BASE);
+      expect(location.pathname + location.search).toBe(`${target}?tab=2`);
+      expect(gate).toHaveBeenCalledWith("u1");
+    },
+  );
+
+  // #101-WM-05
+  it.each([
+    "/projectsx",
+    "/runs-old",
+    "/settings2",
+    "/w/acme/projects",
+    "/api/w/acme/runs",
+    "/no-access",
+  ])("leaves %s alone", async (path) => {
+    lookupSession.mockResolvedValue(aUser(false));
+    const gate = firstWorkspaceSlug("acme");
+
+    const response = await newProxy({
+      firstWorkspaceSlug: gate,
+      workspaceRole: () => Promise.resolve("member"),
+    })(request(path));
+
+    expect(response.status).not.toBe(307);
+    expect(gate).not.toHaveBeenCalled();
+  });
+
+  // #101-WM-05
+  it("goes on to the page when the person has no workspace to lead to (the instance admin of a new multi-tenant instance)", async () => {
+    lookupSession.mockResolvedValue(aUser(true));
+
+    const response = await newProxy({
+      firstWorkspaceSlug: firstWorkspaceSlug(null),
+    })(request("/projects"));
+
+    expect(wentOnUntouched(response)).toBe(true);
+  });
+
+  // #101-WM-05
+  it("does not redirect a visitor without a session, who is sent to the sign-in as before", async () => {
+    lookupSession.mockResolvedValue({ kind: "none" } satisfies SessionLookup);
+    const gate = firstWorkspaceSlug("acme");
+
+    const response = await newProxy({ firstWorkspaceSlug: gate })(
+      request("/projects"),
+    );
+
+    expect(new URL(response.headers.get("location") ?? "").pathname).toBe(
+      "/login",
+    );
+    expect(gate).not.toHaveBeenCalled();
+  });
+
+  it("refuses with 503 when the workspace cannot be read", async () => {
+    lookupSession.mockResolvedValue(aUser(false));
+
+    const response = await newProxy({
+      firstWorkspaceSlug: () => Promise.reject(new Error("database is down")),
+    })(request("/projects"));
+
+    expect(response.status).toBe(503);
   });
 });

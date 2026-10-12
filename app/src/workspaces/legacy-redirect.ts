@@ -2,7 +2,9 @@
 
 // The old addresses of the pages (`/projects`, `/runs/<id>`, `/settings`, from before the workspace was in the
 // address) still work as bookmarks: they lead to the same page in the first workspace of the signed in
-// person. Nothing is shown from here: the page they lead to checks the membership like any other, so an old
+// person. The proxy does this first, with a real 307 (src/auth/access-proxy.ts); these pages are what is left
+// for a request the proxy let through (a person without a workspace, who is sent to the page that says what to
+// do). A redirect from a page after Suspense would be a 200 with a meta refresh. Nothing is shown from here: the page they lead to checks the membership like any other, so an old
 // link to something that is not in that workspace ends on the not-found page.
 import "server-only";
 import { redirect } from "next/navigation";

@@ -30,4 +30,9 @@ export type AccessGates = {
    * workspace address.
    */
   workspaceRole(userId: string, slug: string): Promise<WorkspaceRole | null>;
+  /**
+   * The slug of the first workspace the user joined, or null when they belong to none. Asked by the proxy
+   * to send an address from before the workspace was in the address (`/`, `/projects`, ...) on with a redirect.
+   */
+  firstWorkspaceSlug(userId: string): Promise<string | null>;
 };

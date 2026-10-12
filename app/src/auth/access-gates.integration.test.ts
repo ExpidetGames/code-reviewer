@@ -121,7 +121,7 @@ describe("an email and password account whose address is not verified while the 
       .where("id", "=", "person-1")
       .execute();
 
-    const response = await portal.visit("/projects", { cookies });
+    const response = await portal.visit("/w/default/projects", { cookies });
 
     expect(await response.text()).toBe("reached");
   });
@@ -134,7 +134,7 @@ describe("an email and password account whose address is not verified while the 
       member: true,
     });
 
-    const response = await portal.visit("/projects", { cookies });
+    const response = await portal.visit("/w/default/projects", { cookies });
 
     expect(await response.text()).toBe("reached");
   });
@@ -146,12 +146,12 @@ describe("an email and password account whose address is not verified while the 
       verified: false,
       member: true,
     });
-    expect(await (await portal.visit("/projects", { cookies })).text()).toBe(
-      "reached",
-    );
+    expect(
+      await (await portal.visit("/w/default/projects", { cookies })).text(),
+    ).toBe("reached");
 
     portal.flags.mail = true;
-    const response = await portal.visit("/projects", { cookies });
+    const response = await portal.visit("/w/default/projects", { cookies });
 
     expect(await location(response)).toBe("/verify-email");
   });
@@ -165,7 +165,7 @@ describe("an email and password account whose address is not verified while the 
     });
 
     portal.flags.mail = false;
-    const response = await portal.visit("/projects", { cookies });
+    const response = await portal.visit("/w/default/projects", { cookies });
 
     expect(await response.text()).toBe("reached");
   });
@@ -192,7 +192,7 @@ describe("the instance admin whose address is not verified while the instance ca
   it("is asked to verify everywhere else", async () => {
     const portal = await start({ mail: true });
 
-    const page = await portal.visit("/projects", {
+    const page = await portal.visit("/w/default/projects", {
       cookies: portal.adminCookies,
     });
     const data = await portal.visit("/api/w/default/runs", {
@@ -220,7 +220,7 @@ describe("the instance admin whose address is not verified while the instance ca
   it("is not asked to verify when the instance cannot send mail", async () => {
     const portal = await start({ mail: false });
 
-    const response = await portal.visit("/projects", {
+    const response = await portal.visit("/w/default/projects", {
       cookies: portal.adminCookies,
     });
 
@@ -236,7 +236,7 @@ describe("the instance admin whose address is not verified while the instance ca
       .where("id", "=", portal.adminId)
       .execute();
 
-    const response = await portal.visit("/projects", {
+    const response = await portal.visit("/w/default/projects", {
       cookies: portal.adminCookies,
     });
 
@@ -247,7 +247,8 @@ describe("the instance admin whose address is not verified while the instance ca
     const portal = await start({ mail: false });
     await portal.db.deleteFrom("workspace_members").execute();
 
-    const response = await portal.visit("/projects", {
+    // Any page that is not about a workspace (a workspace address is for its members only).
+    const response = await portal.visit("/anything", {
       cookies: portal.adminCookies,
     });
 
@@ -323,7 +324,7 @@ describe("an email and password account without a workspace", () => {
       member: false,
     });
 
-    await portal.visit("/projects", { cookies });
+    await portal.visit("/w/default/projects", { cookies });
 
     const members = await portal.db
       .selectFrom("workspace_members")
@@ -346,7 +347,7 @@ describe("an email and password account without a workspace", () => {
       "member",
     );
 
-    const response = await portal.visit("/projects", { cookies });
+    const response = await portal.visit("/w/default/projects", { cookies });
 
     expect(await response.text()).toBe("reached");
   });
@@ -358,7 +359,7 @@ describe("an email and password account without a workspace", () => {
       member: false,
     });
 
-    const response = await portal.visit("/projects", { cookies });
+    const response = await portal.visit("/w/default/projects", { cookies });
 
     expect(await location(response)).toBe("/verify-email");
   });
@@ -374,6 +375,7 @@ describe("an account that signs in with GitHub", () => {
       hasWorkspace: () => Promise.resolve(workspace),
       workspaceRole: () =>
         Promise.resolve(workspace ? ("member" as const) : null),
+      firstWorkspaceSlug: () => Promise.resolve(workspace ? "default" : null),
     });
     const lookup = (workspace: boolean) =>
       lookupSession(
@@ -397,7 +399,7 @@ describe("a gate that cannot be read", () => {
     });
     await portal.db.schema.dropTable("workspace_members").execute();
 
-    const response = await portal.visit("/projects", { cookies });
+    const response = await portal.visit("/w/default/projects", { cookies });
 
     expect(response.status).toBe(503);
   });

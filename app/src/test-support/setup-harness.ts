@@ -133,6 +133,10 @@ function assemble(
       );
       return membership?.role ?? null;
     },
+    async firstWorkspaceSlug(userId) {
+      const [first] = await createWorkspacesRepository(db).listForUser(userId);
+      return first?.workspace.slug ?? null;
+    },
   };
   // The allow list is for GitHub identities; none is configured here, and nobody signs in with GitHub.
   const problems: string[] = [];

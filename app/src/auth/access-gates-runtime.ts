@@ -21,5 +21,10 @@ export function getAccessGates(): AccessGates {
       ).findMembership(userId, slug);
       return membership?.role ?? null;
     },
+    async firstWorkspaceSlug(userId) {
+      const [first] =
+        await createWorkspacesRepository(getDatabase()).listForUser(userId);
+      return first?.workspace.slug ?? null;
+    },
   };
 }

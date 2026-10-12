@@ -178,7 +178,7 @@ describe("an account that carries the login of the bound account", () => {
     const { harness, owner, squatter } = await ownerAndSquatterWithSessions();
     const visit = visitor(harness);
 
-    const page = await visit("/", squatter);
+    const page = await visit("/w/default/projects", squatter);
 
     expect(page.status).toBe(307);
     const location = new URL(page.headers.get("location") ?? "");
@@ -188,9 +188,9 @@ describe("an account that carries the login of the bound account", () => {
     const { sessions } = await tableCounts(harness);
     expect(sessions).toHaveLength(1);
     // The next requests are plain unauthenticated requests: no session is left to refuse.
-    const again = await visit("/", squatter);
+    const again = await visit("/w/default/projects", squatter);
     expect(new URL(again.headers.get("location") ?? "").search).toBe("");
-    expect(passesThrough(await visit("/", owner))).toBe(true);
+    expect(passesThrough(await visit("/w/default/projects", owner))).toBe(true);
     expect(passesThrough(await visit("/api/jobs", owner))).toBe(true);
   });
 
@@ -218,7 +218,9 @@ describe("an account that carries the login of the bound account", () => {
     const visit = visitor(harness);
 
     for (let i = 0; i < 4; i += 1)
-      expect(passesThrough(await visit("/", squatter))).toBe(false);
+      expect(passesThrough(await visit("/w/default/projects", squatter))).toBe(
+        false,
+      );
 
     expect(await pinsOf(harness).find("octocat")).toBe("1001");
   });
@@ -232,7 +234,9 @@ describe("an account that carries the login of the bound account", () => {
     const { cookies } = await harness.signIn(1001);
     await harness.db.deleteFrom("allowed_login_pins").execute();
 
-    expect(passesThrough(await visitor(harness)("/", cookies))).toBe(true);
+    expect(
+      passesThrough(await visitor(harness)("/w/default/projects", cookies)),
+    ).toBe(true);
 
     expect(await pinsOf(harness).find("octocat")).toBe("1001");
   });
@@ -482,9 +486,13 @@ describe("organization mode", () => {
 
     expect(member.response.headers.get("location")).toBe("/");
     expect(errorCodeOf(stranger.response)).toBe("not_allowed");
-    expect(passesThrough(await visit("/", member.cookies))).toBe(true);
+    expect(
+      passesThrough(await visit("/w/default/projects", member.cookies)),
+    ).toBe(true);
     vi.setSystemTime(Date.now() + 25 * HOUR);
-    expect(passesThrough(await visit("/", member.cookies))).toBe(true);
+    expect(
+      passesThrough(await visit("/w/default/projects", member.cookies)),
+    ).toBe(true);
   });
 
   // CR-42 decision 5
@@ -504,9 +512,11 @@ describe("organization mode", () => {
     harness.github.addOrgMember("my-org", "octocat");
     const member = await harness.signIn(2002);
     expect(member.response.headers.get("location")).toBe("/");
-    expect(passesThrough(await visitor(harness)("/", member.cookies))).toBe(
-      true,
-    );
+    expect(
+      passesThrough(
+        await visitor(harness)("/w/default/projects", member.cookies),
+      ),
+    ).toBe(true);
     expect(await pinsOf(harness).find("octocat")).toBe("1001");
   });
 });

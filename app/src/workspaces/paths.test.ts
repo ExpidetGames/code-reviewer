@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isWorkspaceSlug,
+  legacyWorkspaceTarget,
   workspaceApiPath,
   workspaceHome,
   workspacePath,
@@ -71,5 +72,31 @@ describe("building an address", () => {
     expect(workspacePath("acme")).toBe("/w/acme");
     expect(workspaceApiPath("acme", "/runs")).toBe("/api/w/acme/runs");
     expect(workspaceHome("acme")).toBe("/w/acme/projects");
+  });
+});
+
+describe("the target of an address from before the workspace was in the address", () => {
+  it.each([
+    ["/", "/w/acme/projects"],
+    ["/projects", "/w/acme/projects"],
+    ["/projects/7/settings", "/w/acme/projects/7/settings"],
+    ["/runs", "/w/acme/runs"],
+    ["/runs/abc", "/w/acme/runs/abc"],
+    ["/settings", "/w/acme/settings"],
+  ])("leads %s to %s", (pathname, target) => {
+    expect(legacyWorkspaceTarget(pathname, "acme")).toBe(target);
+  });
+
+  it.each([
+    "/projectsx",
+    "/run",
+    "/settings-old",
+    "/w/acme/projects",
+    "/api/w/acme/runs",
+    "//projects",
+    "/login",
+    "",
+  ])("leads %j nowhere", (pathname) => {
+    expect(legacyWorkspaceTarget(pathname, "acme")).toBeNull();
   });
 });

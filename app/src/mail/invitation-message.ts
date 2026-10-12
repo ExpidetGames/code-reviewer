@@ -8,6 +8,7 @@
 // line (`oneLine`) before they go into the subject or the text, so a name with a line break cannot start a
 // new mail header (an extra `Bcc:`) or a new paragraph, and both are escaped in the HTML.
 import { oneLine } from "../workspaces/names.ts";
+import { escapeHtml } from "./html.ts";
 import type { MailMessage } from "./sender.ts";
 
 /** The path the link opens; the page behind it asks for one more click before it accepts. */
@@ -17,14 +18,6 @@ export function invitationLink(baseUrl: string, token: string): string {
   const url = new URL(INVITATION_PATH, baseUrl);
   url.searchParams.set("token", token);
   return url.toString();
-}
-
-function escapeHtml(text: string): string {
-  return text
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
 }
 
 export function invitationMessage({

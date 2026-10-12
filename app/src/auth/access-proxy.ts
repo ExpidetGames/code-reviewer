@@ -13,7 +13,10 @@ import {
   isInternalPortalPath,
   portalRewriteTarget,
 } from "../admin/paths.ts";
-import { workspaceSlugOfPath } from "../workspaces/paths.ts";
+import {
+  legacyWorkspaceTarget,
+  workspaceSlugOfPath,
+} from "../workspaces/paths.ts";
 import { decideAccess, isNoWorkspacePath, isPublicPath } from "./access.ts";
 import type { AccessGates } from "./access-gates.ts";
 import type { AccessPolicy } from "./access-policy.ts";
@@ -159,6 +162,35 @@ export function createAccessProxy({
           headers: { "cache-control": "no-store" },
         });
       }
+    }
+
+    // An address from before the workspace was in the address (the start page, `/projects`, `/runs/<id>`,
+    // `/settings`) leads to the same page of the first workspace of the person, with a real redirect. The
+    // page behind it checks the membership like any other. (A person without a workspace, or who has to
+    // verify the address, is sent where every other page sends them, below.)
+    if (
+      lookup.kind === "user" &&
+      legacyWorkspaceTarget(pathname, "x") !== null
+    ) {
+      let first: string | null;
+      try {
+        first = await getGates().firstWorkspaceSlug(lookup.user.id);
+      } catch (error) {
+        console.error(
+          `[auth] could not check the workspace: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return new NextResponse("Service unavailable", {
+          status: 503,
+          headers: { "cache-control": "no-store" },
+        });
+      }
+      const target =
+        first === null ? null : legacyWorkspaceTarget(pathname, first);
+      if (target !== null)
+        return NextResponse.redirect(
+          new URL(`${target}${request.nextUrl.search}`, request.url),
+          307,
+        );
     }
 
     const decision = decideAccess({

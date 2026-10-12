@@ -65,10 +65,12 @@ describe("a login that is removed from ALLOWED_GITHUB_LOGINS", () => {
   it("loses access on the next request: pages go to the login page with the message, data routes get 403", async () => {
     const before = await createAuthHarness({ allowedLogins: ["octocat"] });
     const { cookies } = await before.signIn("octocat");
-    expect(passesThrough(await visitor(before)("/", cookies))).toBe(true);
+    expect(
+      passesThrough(await visitor(before)("/w/default/projects", cookies)),
+    ).toBe(true);
     const after = before.restart({ allowedLogins: ["hubot"] });
 
-    const page = await visitor(after)("/", cookies);
+    const page = await visitor(after)("/w/default/projects", cookies);
     const data = await visitor(after)("/api/jobs", cookies);
 
     expect(loginRedirect(page)).toBe("/login?error=not_allowed");
@@ -84,11 +86,15 @@ describe("a login that is removed from ALLOWED_GITHUB_LOGINS", () => {
     const before = await createAuthHarness({ allowedLogins: ["octocat"] });
     const { cookies } = await before.signIn("octocat");
     const removed = before.restart({ allowedLogins: [] });
-    expect((await visitor(removed)("/", cookies)).status).toBe(307);
+    expect(
+      (await visitor(removed)("/w/default/projects", cookies)).status,
+    ).toBe(307);
 
     const restored = before.restart({ allowedLogins: ["OctoCat"] });
 
-    expect(passesThrough(await visitor(restored)("/", cookies))).toBe(true);
+    expect(
+      passesThrough(await visitor(restored)("/w/default/projects", cookies)),
+    ).toBe(true);
   });
 
   // CR-19-T03
@@ -97,7 +103,7 @@ describe("a login that is removed from ALLOWED_GITHUB_LOGINS", () => {
     const { cookies } = await before.signIn("octocat");
     const after = before.restart({ allowedLogins: [] });
 
-    const page = await visitor(after)("/", cookies);
+    const page = await visitor(after)("/w/default/projects", cookies);
 
     expect(loginRedirect(page)).toBe("/login?error=not_allowed");
   });
@@ -119,7 +125,9 @@ describe("a member of the allowed organization", () => {
 
     vi.setSystemTime(Date.now() + 23 * HOUR);
 
-    expect(passesThrough(await visit("/", cookies))).toBe(true);
+    expect(passesThrough(await visit("/w/default/projects", cookies))).toBe(
+      true,
+    );
     expect(await membershipRequests(harness)).toBe(asked);
   });
 
@@ -129,7 +137,9 @@ describe("a member of the allowed organization", () => {
 
     vi.setSystemTime(Date.now() + 25 * HOUR);
 
-    expect(passesThrough(await visit("/", cookies))).toBe(true);
+    expect(passesThrough(await visit("/w/default/projects", cookies))).toBe(
+      true,
+    );
     expect(await membershipRequests(harness)).toBe(asked + 1);
     const user = await harness.db
       .selectFrom("users")
@@ -139,7 +149,9 @@ describe("a member of the allowed organization", () => {
 
     // The new check is trusted for another day.
     vi.setSystemTime(Date.now() + 2 * HOUR);
-    expect(passesThrough(await visit("/", cookies))).toBe(true);
+    expect(passesThrough(await visit("/w/default/projects", cookies))).toBe(
+      true,
+    );
     expect(await membershipRequests(harness)).toBe(asked + 1);
   });
 
@@ -150,11 +162,11 @@ describe("a member of the allowed organization", () => {
     harness.github.removeOrgMember("my-org", "octocat");
 
     vi.setSystemTime(Date.now() + 25 * HOUR);
-    const page = await visit("/", cookies);
+    const page = await visit("/w/default/projects", cookies);
 
     expect(loginRedirect(page)).toBe("/login?error=not_allowed");
     expect(await sessionCount(harness)).toBe(0);
-    const next = await visit("/", cookies);
+    const next = await visit("/w/default/projects", cookies);
     expect(loginRedirect(next)).toBe("/login");
   });
 
@@ -164,7 +176,7 @@ describe("a member of the allowed organization", () => {
       harness.github.revokeToken(token);
 
     vi.setSystemTime(Date.now() + 25 * HOUR);
-    const page = await visit("/", cookies);
+    const page = await visit("/w/default/projects", cookies);
 
     expect(loginRedirect(page)).toBe("/login?error=sign_in_again");
     expect(await sessionCount(harness)).toBe(0);
@@ -179,7 +191,7 @@ describe("a member of the allowed organization", () => {
       .execute();
 
     vi.setSystemTime(Date.now() + 25 * HOUR);
-    const page = await visit("/", cookies);
+    const page = await visit("/w/default/projects", cookies);
 
     expect(loginRedirect(page)).toBe("/login?error=sign_in_again");
     expect(await sessionCount(harness)).toBe(0);
@@ -191,7 +203,7 @@ describe("a member of the allowed organization", () => {
 
     vi.setSystemTime(Date.now() + 25 * HOUR);
     const asked = await membershipRequests(harness);
-    const failed = await visit("/", cookies);
+    const failed = await visit("/w/default/projects", cookies);
     const failedData = await visit("/api/jobs", cookies);
 
     expect(loginRedirect(failed)).toBe("/login?error=check_failed");
@@ -201,13 +213,15 @@ describe("a member of the allowed organization", () => {
 
     harness.github.failMembershipEndpoint(null);
     vi.setSystemTime(Date.now() + 10_000);
-    expect(loginRedirect(await visit("/", cookies))).toBe(
+    expect(loginRedirect(await visit("/w/default/projects", cookies))).toBe(
       "/login?error=check_failed",
     );
     expect(await membershipRequests(harness)).toBe(asked + 1);
 
     vi.setSystemTime(Date.now() + 11_000);
-    expect(passesThrough(await visit("/", cookies))).toBe(true);
+    expect(passesThrough(await visit("/w/default/projects", cookies))).toBe(
+      true,
+    );
     expect(await membershipRequests(harness)).toBe(asked + 2);
   });
 
@@ -216,7 +230,7 @@ describe("a member of the allowed organization", () => {
     const other = harness.restart({ allowedOrg: "other-org" });
     const asked = await membershipRequests(harness);
 
-    const page = await visitor(other)("/", cookies);
+    const page = await visitor(other)("/w/default/projects", cookies);
 
     expect(loginRedirect(page)).toBe("/login?error=not_allowed");
     expect(await membershipRequests(harness)).toBe(asked + 1);
@@ -228,7 +242,9 @@ describe("a member of the allowed organization", () => {
     harness.github.addOrgMember("other-org", "octocat");
     const other = harness.restart({ allowedOrg: "other-org" });
 
-    expect(passesThrough(await visitor(other)("/", cookies))).toBe(true);
+    expect(
+      passesThrough(await visitor(other)("/w/default/projects", cookies)),
+    ).toBe(true);
 
     const user = await harness.db
       .selectFrom("users")
@@ -248,7 +264,7 @@ describe("a member of the allowed organization", () => {
     harness.github.failMembershipEndpoint({ kind: "delay", delayMs: 6000 });
     vi.setSystemTime(Date.now() + 25 * HOUR);
 
-    const page = await visitor(harness)("/", cookies);
+    const page = await visitor(harness)("/w/default/projects", cookies);
 
     expect(loginRedirect(page)).toBe("/login?error=check_failed");
   });
@@ -259,9 +275,9 @@ describe("a member of the allowed organization", () => {
     vi.setSystemTime(Date.now() + 25 * HOUR);
 
     const responses = await Promise.all([
-      visit("/", cookies),
+      visit("/w/default/projects", cookies),
       visit("/api/jobs", cookies),
-      visit("/", cookies),
+      visit("/w/default/projects", cookies),
     ]);
 
     expect(responses.every(passesThrough)).toBe(true);
@@ -275,7 +291,7 @@ describe("a member of the allowed organization", () => {
       allowedOrg: undefined,
     });
 
-    const page = await visitor(withoutOrg)("/", cookies);
+    const page = await visitor(withoutOrg)("/w/default/projects", cookies);
 
     expect(loginRedirect(page)).toBe("/login?error=not_allowed");
   });
@@ -288,15 +304,17 @@ describe("a person who signed in before the organization was configured", () => 
     before.github.addOrgMember("my-org", "octocat");
     const orgMode = before.restart({ allowedLogins: [], allowedOrg: "my-org" });
 
-    const page = await visitor(orgMode)("/", cookies);
+    const page = await visitor(orgMode)("/w/default/projects", cookies);
 
     expect(loginRedirect(page)).toBe("/login?error=sign_in_again");
     expect(await sessionCount(orgMode)).toBe(0);
     const again = await orgMode.signIn("octocat");
     expect(again.response.headers.get("location")).toBe("/");
-    expect(passesThrough(await visitor(orgMode)("/", again.cookies))).toBe(
-      true,
-    );
+    expect(
+      passesThrough(
+        await visitor(orgMode)("/w/default/projects", again.cookies),
+      ),
+    ).toBe(true);
   });
 });
 
@@ -311,7 +329,9 @@ describe("a listed login when the organization is configured as well", () => {
     vi.useFakeTimers({ toFake: ["Date"], now: new Date() });
     vi.setSystemTime(Date.now() + 48 * HOUR);
 
-    expect(passesThrough(await visitor(harness)("/", cookies))).toBe(true);
+    expect(
+      passesThrough(await visitor(harness)("/w/default/projects", cookies)),
+    ).toBe(true);
     expect(await membershipRequests(harness)).toBe(0);
   });
 });
