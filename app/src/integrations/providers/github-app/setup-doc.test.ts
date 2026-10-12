@@ -8,6 +8,14 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { JOB_TOKEN_PERMISSIONS } from "./job-access.ts";
+import {
+  ACCOUNT_PERMISSIONS,
+  buildAppManifest,
+  GITHUB_APP_PATHS,
+  ORGANIZATION_PERMISSIONS,
+  REPOSITORY_PERMISSIONS,
+  SUBSCRIBED_EVENTS,
+} from "./manifest.ts";
 import { WEBHOOK_READ_FIELDS } from "./webhook-fields.ts";
 
 const repoRoot = fileURLToPath(new URL("../../../../../", import.meta.url));
@@ -25,22 +33,90 @@ function section(heading: string): string {
 
 const ACCESS_TEXT = { read: "Read-only", write: "Read and write" } as const;
 
-describe("the GitHub App setup guide", () => {
-  // CR-38-T01
-  it("lists exactly the repository permissions the code works with, at the same access level", () => {
-    const listed: Record<string, string> = {};
-    for (const row of section("Permissions").matchAll(
-      /^\|[^|]*\(`(\w+)`\)[^|]*\|\s*(Read-only|Read and write)\s*\|/gm,
-    ))
-      listed[row[1] as string] = row[2] as string;
+/** The text below the heading `### <heading>` up to the next heading, within a section. */
+function subsection(text: string, heading: string): string {
+  const start = text.indexOf(`\n### ${heading}\n`);
+  if (start === -1) throw new Error(`no "${heading}" subsection`);
+  const rest = text.slice(start + 1);
+  const next = rest.indexOf("\n### ", 3);
+  return next === -1 ? rest : rest.slice(0, next);
+}
 
-    const expected = Object.fromEntries(
-      Object.entries(JOB_TOKEN_PERMISSIONS).map(([name, level]) => [
-        name,
-        ACCESS_TEXT[level],
-      ]),
+/** `| Name (`api_name`) | Read-only |` rows of a table, by API name. */
+function permissionRows(text: string): Record<string, string> {
+  const listed: Record<string, string> = {};
+  for (const row of text.matchAll(
+    /^\|[^|]*\(`(\w+)`\)[^|]*\|\s*(Read-only|Read and write)\s*\|/gm,
+  ))
+    listed[row[1] as string] = row[2] as string;
+  return listed;
+}
+
+const expectedRows = (
+  permissions: Readonly<Record<string, "read" | "write">>,
+) =>
+  Object.fromEntries(
+    Object.entries(permissions).map(([name, level]) => [
+      name,
+      ACCESS_TEXT[level],
+    ]),
+  );
+
+describe("the GitHub App setup guide", () => {
+  // #102-GH-18
+  it("lists exactly the repository permissions the code works with, at the same access level", () => {
+    const listed = permissionRows(
+      subsection(section("Permissions"), "Repository permissions"),
     );
-    expect(listed).toEqual(expected);
+
+    expect(listed).toEqual(expectedRows(JOB_TOKEN_PERMISSIONS));
+    expect(REPOSITORY_PERMISSIONS).toEqual(JOB_TOKEN_PERMISSIONS);
+  });
+
+  // #102-GH-18
+  it("lists the account permission and the organization permission the manifest asks for, read-only", () => {
+    const permissions = section("Permissions");
+
+    expect(
+      permissionRows(subsection(permissions, "Account permissions")),
+    ).toEqual(expectedRows(ACCOUNT_PERMISSIONS));
+    expect(
+      permissionRows(subsection(permissions, "Organization permissions")),
+    ).toEqual(expectedRows(ORGANIZATION_PERMISSIONS));
+  });
+
+  // #102-GH-18
+  it("is what the manifest asks for, permission by permission and event by event", () => {
+    const permissions = section("Permissions");
+    const documented = {
+      ...permissionRows(subsection(permissions, "Repository permissions")),
+      ...permissionRows(subsection(permissions, "Account permissions")),
+      ...permissionRows(subsection(permissions, "Organization permissions")),
+    };
+    const manifest = buildAppManifest({
+      publicUrl: "https://reviews.example.test",
+      tenancy: "single",
+      name: "Code Reviewer",
+    });
+
+    expect(documented).toEqual(
+      expectedRows(
+        manifest.default_permissions as Record<string, "read" | "write">,
+      ),
+    );
+    expect(manifest.default_events).toEqual([...SUBSCRIBED_EVENTS]);
+    // The events a person ticks are documented as ticked.
+    for (const event of SUBSCRIBED_EVENTS)
+      expect(section("Events")).toMatch(
+        new RegExp(`\`${event}\`[^\\n]*tick`, "i"),
+      );
+  });
+
+  // #102-GH-18
+  it("gives the addresses of the manifest: the webhook, the callback of the sign in and the setup address", () => {
+    expect(guide).toContain(GITHUB_APP_PATHS.webhook);
+    expect(guide).toContain(GITHUB_APP_PATHS.signInCallback);
+    expect(guide).toContain(GITHUB_APP_PATHS.installationSetup);
   });
 
   // CR-38-T01
@@ -71,7 +147,7 @@ describe("the GitHub App setup guide", () => {
   });
 
   // CR-38-T01
-  it("names every environment variable the loader reads, and no write permission beyond the list", () => {
+  it("names every environment variable the loader still reads for an installation that was not imported, and no write permission beyond the list", () => {
     for (const name of [
       "GITHUB_APP_ID",
       "GITHUB_APP_SLUG",
@@ -82,5 +158,7 @@ describe("the GitHub App setup guide", () => {
       expect(guide, name).toContain(name);
     // The MVP asks for no Checks permission (decision of the project lead).
     expect(section("Permissions")).not.toMatch(/\(`checks`\)/);
+    // The variables of the separate OAuth app are documented as no longer used.
+    expect(guide).toMatch(/GITHUB_OAUTH_CLIENT_ID[^.]*not used any more/s);
   });
 });
