@@ -25,7 +25,11 @@ const lines = createInterface({ input: process.stdin });
 lines.once("line", async (line) => {
   const startAt = Number(line.split(" ")[1]);
   while (Date.now() < startAt);
-  const db = openDatabase({ path: databasePath, busyTimeoutMs: 5000 });
+  const db = openDatabase({
+    driver: "sqlite",
+    path: databasePath,
+    busyTimeoutMs: 5000,
+  });
   try {
     const options = { now: () => new Date(nowIso) };
     if (command === "claim") {

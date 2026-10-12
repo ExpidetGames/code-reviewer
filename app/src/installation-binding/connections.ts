@@ -29,7 +29,7 @@ import { IntegrationError } from "../integrations/errors.ts";
 import type { IntegrationRegistry } from "../integrations/registry.ts";
 import type { IntegrationSyncService } from "../integrations/sync/service.ts";
 import {
-  sharedKeyedLock,
+  defaultKeyedLock,
   type KeyedLock,
 } from "../integrations/sync/keyed-lock.ts";
 import type { BindingErrorCode } from "./errors.ts";
@@ -95,7 +95,7 @@ export function createConnections({
   db,
   registry,
   sync,
-  lock = sharedKeyedLock(),
+  lock = defaultKeyedLock(db),
   now,
   log = (line) => console.error(line),
 }: ConnectionsOptions): Connections {

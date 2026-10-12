@@ -101,7 +101,9 @@ describe("two app instances starting on the same empty file", () => {
     expect(results.flatMap((result) => result.applied ?? []).sort()).toEqual(
       expected,
     );
-    const db = track(openDatabase({ path, busyTimeoutMs: 1000 }));
+    const db = track(
+      openDatabase({ driver: "sqlite", path, busyTimeoutMs: 1000 }),
+    );
     const { rows } = await sql<{
       name: string;
     }>`select name from kysely_migration order by name`.execute(db);

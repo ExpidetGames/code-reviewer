@@ -82,7 +82,7 @@ export async function createLegacyInstallation(
   path: string,
   seed: LegacySeed,
 ): Promise<void> {
-  const db = openDatabase({ path, busyTimeoutMs: 5000 });
+  const db = openDatabase({ driver: "sqlite", path, busyTimeoutMs: 5000 });
   try {
     await migrateToLatest(db, previousReleaseMigrations);
     await seedLegacyRows(db, seed);

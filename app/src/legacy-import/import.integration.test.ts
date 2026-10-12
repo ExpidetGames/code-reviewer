@@ -67,7 +67,9 @@ async function installation(
     ...seed,
   });
   // The first start of the new version: the migrations, then the import.
-  const db = track(openDatabase({ path, busyTimeoutMs: 5000 }));
+  const db = track(
+    openDatabase({ driver: "sqlite", path, busyTimeoutMs: 5000 }),
+  );
   await migrateToLatest(db);
   const lines: string[] = [];
   const exits: number[] = [];

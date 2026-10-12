@@ -15,6 +15,11 @@ import type { BackupRunRecord } from "./run-state.ts";
 const STALE_AFTER_MS = 36 * 60 * 60 * 1000;
 
 export type BackupStatus = {
+  /**
+   * False when the app does not back up this database: with Postgres the operator does it, and the
+   * rest of the picture (schedule, target, files) is empty on purpose.
+   */
+  applicable: boolean;
   schedule: { enabled: boolean; timeUtc: string | null };
   target: { usable: boolean; errorCode: BackupErrorCode | null };
   lastRun: BackupRunRecord | null;
@@ -27,6 +32,17 @@ export type BackupStatus = {
   stale: boolean;
 };
 
+/** What a Postgres instance answers: the app schedules no backup, the operator's tooling does. */
+const NOT_APPLICABLE: BackupStatus = {
+  applicable: false,
+  schedule: { enabled: false, timeUtc: null },
+  target: { usable: false, errorCode: null },
+  lastRun: null,
+  newestBackup: null,
+  backupCount: 0,
+  stale: false,
+};
+
 export function readBackupStatus({
   config,
   lastRun,
@@ -36,10 +52,12 @@ export function readBackupStatus({
   lastRun: BackupRunRecord | null;
   now: Date;
 }): BackupStatus {
+  if (!config.applies) return NOT_APPLICABLE;
   const backups = listBackups(config.backupDir);
   const newest = backups[0];
   const enabled = config.time !== null;
   return {
+    applicable: true,
     schedule: {
       enabled,
       timeUtc: config.time ? formatBackupTime(config.time) : null,

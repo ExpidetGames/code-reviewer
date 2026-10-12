@@ -78,7 +78,9 @@ describe("the database of the previous release in the smoke test of the update",
   // #106-IM-20
   it("migrates to the latest schema with every row kept, in one default workspace", async () => {
     const path = await loadFixture();
-    const db = track(openDatabase({ path, busyTimeoutMs: 5000 }));
+    const db = track(
+      openDatabase({ driver: "sqlite", path, busyTimeoutMs: 5000 }),
+    );
 
     await migrateToLatest(db);
 
