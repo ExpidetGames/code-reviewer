@@ -291,13 +291,39 @@ describe("the wizard", () => {
 
 describe("the shape of the steps", () => {
   // #172-T02
-  it("renders every step as exactly one form", async () => {
+  it("renders every step as exactly one form named by its heading, which sits outside it", async () => {
     const { user } = renderWizard();
 
+    const firstHeading = screen.getByRole("heading", {
+      level: 1,
+      name: "How is this instance used?",
+    });
+    const firstForm = screen.getByRole("form", {
+      name: "How is this instance used?",
+    });
+    expect(firstForm.contains(firstHeading)).toBe(false);
     expect(screen.getAllByRole("form")).toHaveLength(1);
+
     await user.click(screen.getByRole("button", { name: "Next" }));
+
+    const secondHeading = screen.getByRole("heading", {
+      level: 1,
+      name: "Who may sign up?",
+    });
+    const secondForm = screen.getByRole("form", { name: "Who may sign up?" });
+    expect(secondForm.contains(secondHeading)).toBe(false);
     expect(screen.getAllByRole("form")).toHaveLength(1);
+
     await user.click(screen.getByRole("button", { name: "Next" }));
+
+    const thirdHeading = screen.getByRole("heading", {
+      level: 1,
+      name: "Create the admin account",
+    });
+    const thirdForm = screen.getByRole("form", {
+      name: "Create the admin account",
+    });
+    expect(thirdForm.contains(thirdHeading)).toBe(false);
     expect(screen.getAllByRole("form")).toHaveLength(1);
   });
 
@@ -349,6 +375,56 @@ describe("the shape of the steps", () => {
 
     expect(await hintText(user, "What makes a good password")).toContain(
       PASSWORD_REASON,
+    );
+  });
+
+  // #172-T04 (rulebook R20)
+  it("moves focus to the field the server refuses", async () => {
+    const { user } = renderWizard({
+      ok: false,
+      status: 422,
+      code: "invalid_input",
+      issues: [{ field: "admin.password", code: "password_too_common" }],
+    });
+    await toStep3(user);
+    await fillAdmin(user, "password1234");
+
+    await user.click(screen.getByRole("button", { name: "Finish setup" }));
+
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByLabelText("Password")),
+    );
+  });
+
+  // #172-T04 (rulebook R20)
+  it("moves focus to a field of an earlier step it goes back to", async () => {
+    const { user } = renderWizard({
+      ok: false,
+      status: 422,
+      code: "invalid_input",
+      issues: [{ field: "signUp.entries", code: "entry_invalid" }],
+    });
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.click(
+      screen.getByRole("radio", { name: /list of email addresses/i }),
+    );
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.type(
+      screen.getByLabelText("Email addresses"),
+      "anna@example.com",
+    );
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await fillAdmin(user);
+
+    await user.click(screen.getByRole("button", { name: "Finish setup" }));
+
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Who may sign up?" }),
+    ).toBeTruthy();
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByLabelText("Email addresses"),
+      ),
     );
   });
 });

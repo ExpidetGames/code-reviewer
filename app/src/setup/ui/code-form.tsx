@@ -7,8 +7,8 @@
 import { useId, useState, type FormEvent } from "react";
 import { Button } from "@/components/button.tsx";
 import { Alert, AlertDescription } from "@/components/ui/alert.tsx";
+import { Field, FieldError, FieldLabel } from "@/components/ui/field.tsx";
 import { Input } from "@/components/ui/input.tsx";
-import { Label } from "@/components/ui/label.tsx";
 import { browserSetupApi, type SetupApi } from "./api.ts";
 import { describeSetupFailure } from "./messages.ts";
 
@@ -67,8 +67,8 @@ export function CodeForm({
         onSubmit={(event) => void submit(event)}
         className="flex flex-col gap-4"
       >
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor={inputId}>Setup code</Label>
+        <Field>
+          <FieldLabel htmlFor={inputId}>Setup code</FieldLabel>
           <Input
             id={inputId}
             name="code"
@@ -86,15 +86,9 @@ export function CodeForm({
             className="font-mono text-lg tracking-[0.4em]"
           />
           {problem === null ? null : (
-            <p
-              id={`${inputId}-error`}
-              role="alert"
-              className="text-sm text-destructive"
-            >
-              {problem}
-            </p>
+            <FieldError id={`${inputId}-error`}>{problem}</FieldError>
           )}
-        </div>
+        </Field>
         <div>
           <Button
             type="submit"

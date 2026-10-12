@@ -2,17 +2,22 @@
 
 "use client";
 // The three questions of the first-run setup: single or multi tenant, who may sign up, and the
-// instance admin account. Each step is one real form with an accessible name, its heading sits
-// outside that form, and a visible stepper says which step of three this is (#172). The server judges
-// every answer (and says so with a code per field); this form only collects them, keeps them while
-// the person goes back and forth, and shows the reasons.
-import { useId, useState, type FormEvent } from "react";
+// instance admin account. Each step is one real form named by its heading (`aria-labelledby`), which
+// sits outside that form, and a visible stepper says which step of three this is (#172). The server
+// judges every answer (and says so with a code per field); this form only collects them, keeps them
+// while the person goes back and forth, and shows the reasons.
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { Button } from "@/components/button.tsx";
 import { HelpDisclosure } from "@/components/help-disclosure.tsx";
 import { InfoHint } from "@/components/info-hint.tsx";
-import { FieldError } from "@/components/ui/field.tsx";
+import { Alert, AlertDescription } from "@/components/ui/alert.tsx";
+import {
+  Field,
+  FieldDescription,
+  FieldError,
+  FieldLabel,
+} from "@/components/ui/field.tsx";
 import { Input } from "@/components/ui/input.tsx";
-import { Label } from "@/components/ui/label.tsx";
 import { Progress } from "@/components/ui/progress.tsx";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group.tsx";
 import { Textarea } from "@/components/ui/textarea.tsx";
@@ -76,20 +81,59 @@ function isSignUpRuleKind(value: string): value is SignUpRuleKind {
   return value === "everyone" || value === "emails" || value === "domains";
 }
 
+/** The control that carries the problem of a field, so the first one can be focused (rulebook R20). */
+function controlId(ids: string, field: string): string {
+  switch (field) {
+    case "tenancy":
+      return `${ids}-tenancy`;
+    case "signUp.kind":
+      return `${ids}-rule`;
+    case "signUp.entries":
+      return `${ids}-entries`;
+    case "admin.email":
+      return `${ids}-email`;
+    case "admin.password":
+      return `${ids}-password`;
+    case "admin.repeat":
+      return `${ids}-repeat`;
+    default:
+      return "";
+  }
+}
+
+/** Focuses the control of `id`; a radio group has no input of its own, so the first radio gets it. */
+function focusControl(id: string) {
+  const element = document.getElementById(id);
+  if (element === null) return;
+  if (
+    element instanceof HTMLInputElement ||
+    element instanceof HTMLTextAreaElement
+  ) {
+    element.focus();
+    return;
+  }
+  element.querySelector<HTMLElement>('[role="radio"]')?.focus();
+}
+
 /**
- * The heading of a step with the stepper under it: the question as the one `h1`, then "Step n of 3"
- * as text and a progress element that carries the same step for assistive technology (#172).
+ * The heading of a step with the stepper under it: the question as the one `h1` (named by `id`, so
+ * the step's form can be named by it), then "Step n of 3" as text and a progress element that
+ * carries the same step for assistive technology (#172).
  */
 function StepHeading({
+  id,
   step,
   children,
 }: {
+  id: string;
   step: 1 | 2 | 3;
   children: string;
 }) {
   return (
     <div className="flex flex-col gap-3">
-      <h1 className="text-2xl font-semibold tracking-tight">{children}</h1>
+      <h1 id={id} className="text-2xl font-semibold tracking-tight">
+        {children}
+      </h1>
       <div className="flex flex-col gap-1.5">
         <p className="text-sm text-muted-foreground" aria-live="polite">
           Step {step} of 3
@@ -104,13 +148,19 @@ function StepHeading({
   );
 }
 
-/** The radio cards of a step: one choice per option, the selected one marked with the accent. */
+/**
+ * The radio cards of a step, built on the kit `Field` parts: one choice per option, the selected one
+ * marked with the accent. The `RadioGroup` keeps its own accessible name (`name`), apart from the
+ * form's, which is the step heading.
+ */
 function OptionCards({
+  id,
   name,
   value,
   options,
   onSelect,
 }: {
+  id: string;
   name: string;
   value: string;
   options: ReadonlyArray<{ value: string; title: string; text: string }>;
@@ -118,30 +168,40 @@ function OptionCards({
 }) {
   const ids = useId();
   return (
-    <RadioGroup aria-label={name} value={value} onValueChange={onSelect}>
+    <RadioGroup
+      id={id}
+      aria-label={name}
+      value={value}
+      onValueChange={onSelect}
+      className="gap-2"
+    >
       {options.map((option, index) => {
-        const id = `${ids}-${String(index)}`;
+        const optionId = `${ids}-${String(index)}`;
         const selected = option.value === value;
         return (
-          <Label
+          <Field
             key={option.value}
-            htmlFor={id}
             className={cn(
-              "flex cursor-pointer items-start gap-3 rounded-lg border border-border bg-card p-4 transition-colors",
+              "gap-1 rounded-lg border border-border bg-card p-4 transition-colors",
               "hover:border-ring focus-within:ring-2 focus-within:ring-ring/50",
               selected && "border-primary bg-accent",
             )}
           >
-            <RadioGroupItem value={option.value} id={id} className="mt-0.5" />
-            <span className="flex flex-col gap-1">
+            <FieldLabel
+              htmlFor={optionId}
+              className="flex w-full cursor-pointer items-start gap-3"
+            >
+              <RadioGroupItem
+                value={option.value}
+                id={optionId}
+                className="mt-0.5"
+              />
               <span className="font-medium text-foreground">
                 {option.title}
               </span>
-              <span className="text-sm text-muted-foreground">
-                {option.text}
-              </span>
-            </span>
-          </Label>
+            </FieldLabel>
+            <FieldDescription className="pl-7">{option.text}</FieldDescription>
+          </Field>
         );
       })}
     </RadioGroup>
@@ -165,6 +225,7 @@ export function Wizard({
   onDone?: (redirectTo: string) => void;
 }) {
   const ids = useId();
+  const headingId = `${ids}-heading`;
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [tenancy, setTenancy] = useState<"single" | "multi">("single");
   const [ruleKind, setRuleKind] = useState<SignUpRuleKind>(
@@ -179,6 +240,16 @@ export function Wizard({
   const [fieldProblems, setFieldProblems] = useState<Record<string, string>>(
     {},
   );
+  // The field a refusal named: set in `finish`, read (and cleared) in the effect below, so focus
+  // lands on it once the step that holds it has rendered (rulebook R20).
+  const focusTarget = useRef<string | null>(null);
+
+  useEffect(() => {
+    const field = focusTarget.current;
+    if (field === null) return;
+    focusTarget.current = null;
+    focusControl(controlId(ids, field));
+  });
 
   function fieldError(field: string): string | undefined {
     return fieldProblems[field];
@@ -229,7 +300,10 @@ export function Wizard({
         problems[issue.field] = describeSetupIssue(issue.field, issue.code);
       setFieldProblems(problems);
       const first = result.issues[0];
-      if (first !== undefined) setStep(stepOfField(first.field));
+      if (first !== undefined) {
+        setStep(stepOfField(first.field));
+        focusTarget.current = first.field;
+      }
       return;
     }
     setProblem(describeSetupFailure(result.code));
@@ -238,9 +312,11 @@ export function Wizard({
   if (step === 1)
     return (
       <div className="flex flex-col gap-6">
-        <StepHeading step={1}>How is this instance used?</StepHeading>
+        <StepHeading id={headingId} step={1}>
+          How is this instance used?
+        </StepHeading>
         <form
-          aria-label="Tenancy"
+          aria-labelledby={headingId}
           onSubmit={(event) => {
             event.preventDefault();
             setStep(2);
@@ -248,6 +324,7 @@ export function Wizard({
           className="flex flex-col gap-4"
         >
           <OptionCards
+            id={`${ids}-tenancy`}
             name="Tenancy"
             value={tenancy}
             options={TENANCY_OPTIONS}
@@ -258,9 +335,9 @@ export function Wizard({
           {fieldError("tenancy") ? (
             <FieldError>{fieldError("tenancy")}</FieldError>
           ) : null}
-          <p className="text-sm text-muted-foreground">
+          <FieldDescription>
             You can change this later in the admin area.
-          </p>
+          </FieldDescription>
           <div className="flex flex-wrap items-center gap-3">
             <Button type="submit">Next</Button>
           </div>
@@ -271,9 +348,11 @@ export function Wizard({
   if (step === 2)
     return (
       <div className="flex flex-col gap-6">
-        <StepHeading step={2}>Who may sign up?</StepHeading>
+        <StepHeading id={headingId} step={2}>
+          Who may sign up?
+        </StepHeading>
         <form
-          aria-label="Sign-up rule"
+          aria-labelledby={headingId}
           onSubmit={(event) => {
             event.preventDefault();
             nextFromRule();
@@ -289,6 +368,7 @@ export function Wizard({
             </HelpDisclosure>
           ) : null}
           <OptionCards
+            id={`${ids}-rule`}
             name="Sign-up rule"
             value={ruleKind}
             options={SIGN_UP_RULE_OPTIONS}
@@ -297,11 +377,11 @@ export function Wizard({
             }}
           />
           {ruleKind === "everyone" ? null : (
-            <div className="flex flex-col gap-1.5">
+            <Field>
               <div className="flex items-center gap-1.5">
-                <Label htmlFor={`${ids}-entries`}>
+                <FieldLabel htmlFor={`${ids}-entries`}>
                   {ENTRIES_LABEL[ruleKind]}
-                </Label>
+                </FieldLabel>
                 <InfoHint label="Why this rule cannot verify anyone yet">
                   {FAIL_CLOSED_WARNING}
                 </InfoHint>
@@ -317,14 +397,15 @@ export function Wizard({
                 }
                 onChange={(event) => setEntriesText(event.target.value)}
                 aria-invalid={fieldError("signUp.entries") !== undefined}
+                aria-describedby={`${ids}-entries-hint`}
               />
-              <p className="text-sm text-muted-foreground">
+              <FieldDescription id={`${ids}-entries-hint`}>
                 {FAIL_CLOSED_LINE}
-              </p>
+              </FieldDescription>
               {fieldError("signUp.entries") ? (
                 <FieldError>{fieldError("signUp.entries")}</FieldError>
               ) : null}
-            </div>
+            </Field>
           )}
           <div className="flex flex-wrap items-center gap-3">
             <Button variant="secondary" onClick={() => setStep(1)}>
@@ -338,18 +419,20 @@ export function Wizard({
 
   return (
     <div className="flex flex-col gap-6">
-      <StepHeading step={3}>Create the admin account</StepHeading>
+      <StepHeading id={headingId} step={3}>
+        Create the admin account
+      </StepHeading>
       <form
-        aria-label="Admin account"
+        aria-labelledby={headingId}
         onSubmit={(event) => void finish(event)}
         className="flex flex-col gap-4"
       >
-        <p className="text-sm text-muted-foreground">
+        <FieldDescription>
           The admin runs this instance and signs in with this email address and
           password.
-        </p>
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor={`${ids}-email`}>Email address</Label>
+        </FieldDescription>
+        <Field>
+          <FieldLabel htmlFor={`${ids}-email`}>Email address</FieldLabel>
           <Input
             id={`${ids}-email`}
             type="email"
@@ -363,10 +446,10 @@ export function Wizard({
           {fieldError("admin.email") ? (
             <FieldError>{fieldError("admin.email")}</FieldError>
           ) : null}
-        </div>
-        <div className="flex flex-col gap-1.5">
+        </Field>
+        <Field>
           <div className="flex items-center gap-1.5">
-            <Label htmlFor={`${ids}-password`}>Password</Label>
+            <FieldLabel htmlFor={`${ids}-password`}>Password</FieldLabel>
             <InfoHint label="What makes a good password">
               {PASSWORD_REASON}
             </InfoHint>
@@ -382,15 +465,15 @@ export function Wizard({
             aria-invalid={fieldError("admin.password") !== undefined}
             aria-describedby={`${ids}-reason`}
           />
-          <p id={`${ids}-reason`} className="text-sm text-muted-foreground">
+          <FieldDescription id={`${ids}-reason`}>
             {PASSWORD_RULE_HINT}
-          </p>
+          </FieldDescription>
           {fieldError("admin.password") ? (
             <FieldError>{fieldError("admin.password")}</FieldError>
           ) : null}
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor={`${ids}-repeat`}>Repeat the password</Label>
+        </Field>
+        <Field>
+          <FieldLabel htmlFor={`${ids}-repeat`}>Repeat the password</FieldLabel>
           <Input
             id={`${ids}-repeat`}
             type="password"
@@ -404,11 +487,11 @@ export function Wizard({
           {fieldError("admin.repeat") ? (
             <FieldError>{fieldError("admin.repeat")}</FieldError>
           ) : null}
-        </div>
+        </Field>
         {problem === null ? null : (
-          <p role="alert" className="text-sm text-destructive">
-            {problem}
-          </p>
+          <Alert variant="destructive">
+            <AlertDescription>{problem}</AlertDescription>
+          </Alert>
         )}
         <div className="flex flex-wrap items-center gap-3">
           <Button variant="secondary" onClick={() => setStep(2)}>
