@@ -114,4 +114,25 @@ describe("the account page", () => {
       screen.getByRole("button", { name: "What merging does" }),
     ).toBeTruthy();
   });
+
+  it("hides the merge explanation while signing in with GitHub is not available", () => {
+    render(
+      <AccountPageContent
+        {...BASE}
+        isInstanceAdmin
+        githubSignInAvailable={false}
+        account={{
+          email: "ada@example.com",
+          verified: true,
+          placeholder: false,
+          emailConflict: null,
+          identity: null,
+        }}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "What merging does" }),
+    ).toBeNull();
+  });
 });

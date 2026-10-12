@@ -5,7 +5,6 @@ import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { currentLookup } from "@/auth/session";
 import { loginPath } from "@/auth/session-user";
-import { Breadcrumbs } from "@/components/breadcrumbs";
 import { PageHeader } from "@/components/page-header";
 import { loadAccountView } from "@/workspaces/account-view";
 import { InvitationsView } from "@/workspaces/ui/invitations-view";
@@ -22,14 +21,7 @@ export default async function InvitationsPage() {
   const view = await loadAccountView(lookup.user.id);
   return (
     <>
-      <PageHeader
-        title="Invitations"
-        breadcrumb={
-          <Breadcrumbs
-            items={[{ label: "Home", href: "/" }, { label: "Invitations" }]}
-          />
-        }
-      />
+      <PageHeader title="Invitations" />
       <div className="pt-6">
         <InvitationsView pending={view.pending} />
       </div>

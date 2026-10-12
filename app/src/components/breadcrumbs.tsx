@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// The breadcrumb trail of a non-root page (#179): a thin wrapper over the copied shadcn breadcrumb
-// so every screen marks its location the same way. Ancestors are links, the last crumb is the current
-// page (`aria-current="page"`, no link). It goes into the `breadcrumb` slot of `PageHeader`.
+// The breadcrumb trail of a page below an area root (#179): a thin wrapper over the copied shadcn
+// breadcrumb so every screen marks its location the same way. The trail starts at the area root,
+// ancestors are links, and only the last crumb is the current page (`aria-current="page"`, no link).
+// An earlier crumb without an `href` stays plain text. An area root itself carries no breadcrumb (the
+// brand link already goes home). It goes into the `breadcrumb` slot of `PageHeader`.
 import Link from "next/link";
 import { Fragment } from "react";
 import {
@@ -38,8 +40,10 @@ export function Breadcrumbs({
             <Fragment key={`${String(index)}:${item.label}`}>
               {index > 0 ? <BreadcrumbSeparator /> : null}
               <BreadcrumbItem>
-                {current || item.href === undefined ? (
+                {current ? (
                   <BreadcrumbPage>{item.label}</BreadcrumbPage>
+                ) : item.href === undefined ? (
+                  <span className="text-foreground">{item.label}</span>
                 ) : (
                   <BreadcrumbLink asChild>
                     <Link href={item.href}>{item.label}</Link>

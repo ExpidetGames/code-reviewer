@@ -6,7 +6,6 @@
 // sit behind a disclosure. The hint about a placeholder address that could not be replaced
 // (docs/decisions/0001-editions-setup-and-accounts.md, section 2.5) is shown here, and to the instance
 // admin in the portal.
-import { Breadcrumbs } from "../../components/breadcrumbs.tsx";
 import { HelpDisclosure } from "../../components/help-disclosure.tsx";
 import { Alert, AlertDescription } from "../../components/ui/alert.tsx";
 import { Badge } from "../../components/ui/badge.tsx";
@@ -97,7 +96,7 @@ function GithubCard({
             surface="account"
             available={githubSignInAvailable}
             unavailableReason="Signing in with GitHub is not set up on this instance."
-            merge={isInstanceAdmin}
+            merge={isInstanceAdmin && githubSignInAvailable}
           />
         ) : (
           <p className="text-sm text-muted-foreground">
@@ -126,7 +125,7 @@ export function AccountPageContent({
   account: AccountView;
   /** The GitHub App's user authorization is configured, so linking can work. */
   githubSignInAvailable: boolean;
-  /** Whether the person runs this instance; only then can linking merge two accounts. */
+  /** Whether the person runs this instance; only then, and while GitHub sign-in works, can linking merge. */
   isInstanceAdmin?: boolean;
   /** `?github=` and `?github_error=` of the page's address. */
   outcome: { ok: string | null; error: string | null };
@@ -137,15 +136,7 @@ export function AccountPageContent({
     outcome.error === null ? null : describeGithubOutcomeError(outcome.error);
   return (
     <>
-      <PageHeader
-        title="Account"
-        description={`Signed in as ${name}.`}
-        breadcrumb={
-          <Breadcrumbs
-            items={[{ label: "Home", href: "/" }, { label: "Account" }]}
-          />
-        }
-      />
+      <PageHeader title="Account" description={`Signed in as ${name}.`} />
       <div className="flex max-w-[44rem] flex-col gap-6 pt-6">
         {success !== null ? (
           <Alert variant="success" role="status">
