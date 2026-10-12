@@ -70,3 +70,14 @@ from a closed list, never an address from the request.
 
 `sign-in.integration.test.ts` (the sign in end to end through Better Auth and the fake GitHub), `link.integration.test.ts`
 (linking, the merge, the state, the handlers). Journey: `e2e/admin/github-integration.e2e.ts`.
+
+## An invitation link through the sign in
+
+A person who opens an invitation link without a session reaches `/login?invitation=<token>`. The GitHub button of that page
+posts the token along (`signInWithGithub`, `src/auth/actions.ts`), and the action hands `/invitation?token=<token>` to Better
+Auth as the callback address, which Better Auth keeps with its own state (the browser carries nothing it could change on the
+way). Only a value shaped like a link token is carried and the only place it leads to is the invitation page (`src/auth/invitation-return.ts`), so
+the parameter is no open redirect; Better Auth also refuses a callback address that leaves the site. The invitation page
+accepts only for the address the invitation is bound to, so the account that comes back from GitHub (its verified primary
+address) has to match. The tests: `src/auth/actions.test.ts` and `sign-in.integration.test.ts`, and the journey in
+`e2e/workspaces/invite-and-accept.e2e.ts`.
