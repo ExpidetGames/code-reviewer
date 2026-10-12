@@ -24,6 +24,9 @@
 //   mail, or the sign-up rule names addresses) that address is verified; the instance admin needs no
 //   verification. Without a mail server and under the rule "everyone" nothing can be verified, and the
 //   link itself is the proof of the address.
+// - The sign-up rule is checked again when the invitation is accepted (and when it is sent again): an
+//   invitation made under "everyone" does not bring in an address that a tightened rule refuses
+//   (`email_not_allowed`, `signup_closed`). The instance admin is exempt, as from the sign-up itself.
 // - By the link (the token), or, with a mail server only, from the list of the invitations waiting for a
 //   verified address. Without a mail server invitations are never found by an address.
 // - One guarded statement uses the invitation up, so of two requests with one link only one succeeds;
@@ -286,6 +289,24 @@ export function createInvitationService(
     return { kind: "link", link: input.link, reason: "mail_failed" };
   }
 
+  /**
+   * The sign-up rule as it is now, for an address: a refusal while the rule cannot be evaluated safely
+   * (`signup_closed`) or does not let the address in (`email_not_allowed`). Used when an invitation is made, when
+   * it is sent again and when it is accepted, so an invitation never outlives the rule it was made under. An
+   * instance without email sign-up (GitHub only) is no refusal here: the invited person signs in with GitHub and
+   * the rule is applied to their verified address.
+   */
+  function ruleRefusal(
+    state: SignUpFacts,
+    email: string,
+  ): InvitationFailure | null {
+    const availability = signUpAvailability(state);
+    if (!availability.open && availability.error === "signup_closed")
+      return { ok: false, error: "signup_closed" };
+    const verdict = evaluateSignUpRule(state.rule, email);
+    return verdict.ok ? null : { ok: false, error: verdict.error };
+  }
+
   /** The role of a person in a workspace, from the database right now. */
   async function roleOf(workspaceId: string, userId: string) {
     return (await createWorkspaceMembersRepository(db, workspaceId).get(userId))
@@ -326,12 +347,8 @@ export function createInvitationService(
       // The rule: the one of the sign-up, evaluated now. While it cannot be evaluated safely nobody is
       // invited; an instance without email sign-up (GitHub only) still invites, because the invited
       // person signs in with GitHub and the rule is applied to their verified address.
-      const state = await facts();
-      const availability = signUpAvailability(state);
-      if (!availability.open && availability.error === "signup_closed")
-        return { ok: false, error: "signup_closed" };
-      const verdict = evaluateSignUpRule(state.rule, email);
-      if (!verdict.ok) return { ok: false, error: verdict.error };
+      const refusal = ruleRefusal(await facts(), email);
+      if (refusal !== null) return refusal;
 
       const token = newToken();
       const created = await db
@@ -421,6 +438,11 @@ export function createInvitationService(
         return { ok: false, error: "invitation_not_found" };
       if (!canInviteAs(actorRole, found.role))
         return { ok: false, error: "forbidden" };
+
+      // The rule may have been tightened since the invitation was made: no new link for an address that the
+      // rule does not let in any more (revoking it is still possible).
+      const refusal = ruleRefusal(await facts(), found.email);
+      if (refusal !== null) return refusal;
 
       const permission = await limits.invite({
         userId: actorId,
@@ -581,6 +603,14 @@ export function createInvitationService(
       if (failure !== null) return failure;
       if (address !== found.email)
         return { ok: false, error: "email_mismatch" };
+
+      // The rule is the one of now, not the one the invitation was made under: an invitation made under
+      // "everyone" does not let in an address that a tightened rule refuses. The instance admin is exempt, as
+      // they are from the sign-up itself (their account exists whatever the rule says).
+      if (!acceptor.isInstanceAdmin) {
+        const refusal = ruleRefusal(state, found.email);
+        if (refusal !== null) return refusal;
+      }
 
       // The address has to be verified: always while a mail server exists, and always under a rule that
       // names addresses (it means nothing for an address nobody verified). The instance admin is exempt.

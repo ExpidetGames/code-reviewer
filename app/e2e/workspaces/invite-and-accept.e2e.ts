@@ -6,6 +6,7 @@
 // new Member is refused every admin action, by the page and by the server; a person who signed up on their own
 // has no access to the workspace and is told to ask for an invitation. The rules behind are proven as
 // integration tests (src/workspaces/); this is the path a person takes.
+import { randomBytes } from "node:crypto";
 import {
   expect,
   request,
@@ -16,7 +17,6 @@ import {
 } from "@playwright/test";
 import { e2eEnv } from "../helpers/e2e-env";
 
-const COLLEAGUE = "colleague@e2e.test";
 const FRESH = "fresh@e2e.test";
 const PASSWORD = "e2e-colleague-passphrase-cedar-9";
 
@@ -63,9 +63,42 @@ async function openTheSignUp(): Promise<void> {
   }
 }
 
+/**
+ * An address no other test (and no earlier attempt of the same test, a retry runs the test again against the same
+ * app) has used: every journey that needs a person makes its own, so none depends on another and a retry cannot
+ * collide with what the first attempt left behind.
+ */
+function uniqueAddress(prefix: string): string {
+  return `${prefix}-${randomBytes(4).toString("hex")}@e2e.test`;
+}
+
+/** The Owner invites an address through the API, the way the members page does, and returns the link. */
+async function inviteAsOwner(email: string): Promise<string> {
+  const client = await request.newContext({ baseURL: e2eEnv.appUrl });
+  try {
+    const signedIn = await client.post("/api/auth/sign-in/email", {
+      data: { email: e2eEnv.adminEmail, password: e2eEnv.adminPassword },
+    });
+    expect(signedIn.status()).toBe(200);
+    const invited = await client.post("/api/w/default/invitations", {
+      data: { email, role: "member" },
+    });
+    expect(invited.status(), await invited.text()).toBe(200);
+    const body = (await invited.json()) as {
+      delivery: { kind: string; link?: string };
+    };
+    expect(body.delivery.kind).toBe("link");
+    return body.delivery.link as string;
+  } finally {
+    await client.dispose();
+  }
+}
+
 test.describe.configure({ mode: "serial" });
 
 test.describe("an Owner invites a colleague who accepts", () => {
+  // The address the first journey invites (a new one per attempt) and the link it gets, which the next ones use.
+  let colleague = "";
   let invitation = "";
 
   test.beforeAll(openTheSignUp);
@@ -74,6 +107,7 @@ test.describe("an Owner invites a colleague who accepts", () => {
   test("@smoke the Owner invites an address and copies the link, which is shown once", async ({
     page,
   }) => {
+    colleague = uniqueAddress("colleague");
     await signIn(page, e2eEnv.adminEmail, e2eEnv.adminPassword);
     await expect(page).toHaveURL(/\/w\/default\/projects$/);
     await page.getByRole("link", { name: "Members" }).first().click();
@@ -84,7 +118,7 @@ test.describe("an Owner invites a colleague who accepts", () => {
     await expect(page.getByText(e2eEnv.adminEmail).first()).toBeVisible();
 
     const form = page.getByRole("form", { name: "Invite a person" });
-    await form.getByLabel("Email address").fill(COLLEAGUE);
+    await form.getByLabel("Email address").fill(colleague);
     await form.getByLabel("Role").selectOption("member");
     await form.getByRole("button", { name: "Send invitation" }).click();
 
@@ -95,7 +129,7 @@ test.describe("an Owner invites a colleague who accepts", () => {
     // The invitation waits in the list, and the link is not in the page any more after a reload.
     await page.reload();
     await expect(
-      page.getByRole("list", { name: "Invitations" }).getByText(COLLEAGUE),
+      page.getByRole("list", { name: "Invitations" }).getByText(colleague),
     ).toBeVisible();
     expect(await page.content()).not.toContain(invitation.split("token=")[1]);
   });
@@ -114,14 +148,14 @@ test.describe("an Owner invites a colleague who accepts", () => {
       "content",
       "no-referrer",
     );
-    await expect(page.getByText(COLLEAGUE).first()).toBeVisible();
+    await expect(page.getByText(colleague).first()).toBeVisible();
     // Opening the link accepts nothing.
     await page.getByRole("link", { name: "Create an account" }).click();
     await expect(page).toHaveURL(/\/sign-up\?invitation=/);
-    await signUp(page, COLLEAGUE);
+    await signUp(page, colleague);
     await page.getByRole("link", { name: "Go to the sign-in" }).click();
     await expect(page).toHaveURL(/\/login\?invitation=/);
-    await page.getByLabel("Email address").fill(COLLEAGUE);
+    await page.getByLabel("Email address").fill(colleague);
     await page.getByLabel("Password").fill(PASSWORD);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
 
@@ -149,13 +183,13 @@ test.describe("an Owner invites a colleague who accepts", () => {
     await page.goto("/w/default/members");
 
     await expect(
-      page.getByRole("list", { name: "Members" }).getByText(COLLEAGUE),
+      page.getByRole("list", { name: "Members" }).getByText(colleague),
     ).toBeVisible();
     await expect(page.getByRole("list", { name: "Invitations" })).toHaveCount(
       0,
     );
     await expect(
-      page.getByRole("combobox", { name: `Role of ${COLLEAGUE}` }),
+      page.getByRole("combobox", { name: `Role of ${colleague}` }),
     ).toHaveValue("member");
   });
 
@@ -163,9 +197,16 @@ test.describe("an Owner invites a colleague who accepts", () => {
   test("@smoke the new Member is refused every admin action, by the page and by the server", async ({
     browser,
   }) => {
+    // Its own Member, invited and accepted here: the journey needs nothing from the ones before it.
+    const member = uniqueAddress("member");
+    const link = await inviteAsOwner(member);
     const context = await newPerson(browser);
     const page = await context.newPage();
-    await signIn(page, COLLEAGUE, PASSWORD);
+    await page.goto("/sign-up");
+    await signUp(page, member);
+    await signIn(page, member, PASSWORD);
+    await page.goto(link);
+    await page.getByRole("button", { name: /Accept the invitation/ }).click();
     await expect(page).toHaveURL(/\/w\/default\/projects$/);
 
     await page.goto("/w/default/members");
@@ -210,7 +251,7 @@ test.describe("an Owner invites a colleague who accepts", () => {
   }) => {
     const context = await newPerson(browser);
     const page = await context.newPage();
-    await signIn(page, COLLEAGUE, PASSWORD);
+    await signIn(page, colleague, PASSWORD);
     await expect(page).toHaveURL(/\/w\/default\/projects$/);
 
     const foreign = await page.goto("/w/someone-elses/projects");

@@ -357,6 +357,145 @@ describe("the sign-up rule and invitations", () => {
   });
 });
 
+describe("a rule that was tightened after the invitation was made", () => {
+  async function invitedUnderEveryone(options: { mail: boolean }) {
+    const context = await setup({ mail: options.mail });
+    const { h, workspace, owner } = context;
+    const person = await h.addUser("person", { email: "person@example.test" });
+    const made = await inviteForToken(h, workspace, owner.id, person.email);
+    return { ...context, person, made };
+  }
+
+  // #101-WM-14
+  it("refuses to accept: invited under everyone, then the rule names other addresses, then the link does not bring the person in", async () => {
+    const { h, workspace, person, made } = await invitedUnderEveryone({
+      mail: true,
+    });
+    await h.settings.set(
+      "sign_up_rule",
+      { kind: "emails", entries: ["somebody-else@example.test"] },
+      null,
+    );
+
+    expect(await h.invitations.accept({ token: made.token }, person)).toEqual({
+      ok: false,
+      error: "email_not_allowed",
+    });
+    expect(await h.roleOf(workspace.id, person.id)).toBeUndefined();
+    // Nothing was used up: the invitation is still open for a rule that lets the address in again.
+    expect(await h.invitationRows(workspace.id)).toMatchObject([
+      { accepted_at: null },
+    ]);
+    await h.settings.set(
+      "sign_up_rule",
+      { kind: "domains", entries: ["example.test"] },
+      null,
+    );
+    expect(
+      await h.invitations.accept({ token: made.token }, person),
+    ).toMatchObject({ ok: true });
+  });
+
+  // #101-WM-14
+  it("refuses a domain rule that no longer names the domain of the address", async () => {
+    const { h, person, made } = await invitedUnderEveryone({ mail: true });
+    await h.settings.set(
+      "sign_up_rule",
+      { kind: "domains", entries: ["company.test"] },
+      null,
+    );
+
+    expect(await h.invitations.accept({ token: made.token }, person)).toEqual({
+      ok: false,
+      error: "email_not_allowed",
+    });
+  });
+
+  // #101-WM-14
+  it("refuses with signup_closed when the rule names addresses and there is no mail server to verify them", async () => {
+    const { h, person, made } = await invitedUnderEveryone({ mail: false });
+    await h.settings.set(
+      "sign_up_rule",
+      { kind: "emails", entries: ["person@example.test"] },
+      null,
+    );
+
+    expect(await h.invitations.accept({ token: made.token }, person)).toEqual({
+      ok: false,
+      error: "signup_closed",
+    });
+  });
+
+  // #101-WM-14
+  it("refuses to accept from the list of the account in the same way", async () => {
+    const { h, person, made } = await invitedUnderEveryone({ mail: true });
+    await h.settings.set(
+      "sign_up_rule",
+      { kind: "emails", entries: ["somebody-else@example.test"] },
+      null,
+    );
+
+    expect(
+      await h.invitations.accept({ invitationId: made.invitation.id }, person),
+    ).toEqual({ ok: false, error: "email_not_allowed" });
+  });
+
+  // #101-WM-14
+  it("leaves the instance admin out: their account exists whatever the rule says", async () => {
+    const { h, workspace, owner } = await setup({ mail: true });
+    const root = await h.addUser("root", {
+      email: "root@example.test",
+      isInstanceAdmin: true,
+    });
+    const { token } = await inviteForToken(h, workspace, owner.id, root.email);
+    await h.settings.set(
+      "sign_up_rule",
+      { kind: "emails", entries: ["somebody-else@example.test"] },
+      null,
+    );
+
+    expect(await h.invitations.accept({ token }, root)).toMatchObject({
+      ok: true,
+    });
+    expect(await h.roleOf(workspace.id, root.id)).toBe("member");
+  });
+
+  // #101-WM-14
+  it("sends no new link for an address the rule does not let in any more, and a revoke still works", async () => {
+    const { h, workspace, owner } = await setup({ mail: true });
+    const made = await inviteForToken(
+      h,
+      workspace,
+      owner.id,
+      "person@example.test",
+    );
+    const mails = h.mail.outbox.length;
+    await h.settings.set(
+      "sign_up_rule",
+      { kind: "emails", entries: ["somebody-else@example.test"] },
+      null,
+    );
+
+    const resent = await h.invitations.resend({
+      workspaceId: workspace.id,
+      workspaceName: workspace.name,
+      actorId: owner.id,
+      inviterName: "Someone",
+      invitationId: made.invitation.id,
+    });
+
+    expect(resent).toEqual({ ok: false, error: "email_not_allowed" });
+    expect(h.mail.outbox).toHaveLength(mails);
+    expect(
+      await h.invitations.revoke({
+        workspaceId: workspace.id,
+        actorId: owner.id,
+        invitationId: made.invitation.id,
+      }),
+    ).toEqual({ ok: true });
+  });
+});
+
 describe("addresses that are members or invited already", () => {
   // #101-WM-15
   it("refuses the address of a member, whatever its spelling", async () => {
@@ -833,7 +972,7 @@ describe("accepting an invitation by its link", () => {
   });
 
   // #99-follow-up
-  it("requires a verified address under a rule that names addresses, also when the mail server is gone again", async () => {
+  it("requires a verified address under a rule that names addresses", async () => {
     const { h, workspace, owner } = await setup({
       mail: true,
       rule: { kind: "emails", entries: ["person@example.test"] },
@@ -848,11 +987,31 @@ describe("accepting an invitation by its link", () => {
       owner.id,
       person.email,
     );
-    h.mail.configured = false;
 
     expect(await h.invitations.accept({ token }, person)).toEqual({
       ok: false,
       error: "email_not_verified",
+    });
+    expect(await h.roleOf(workspace.id, person.id)).toBeUndefined();
+  });
+
+  it("is closed again, with the rule's own answer, when the mail server is gone under a rule that names addresses", async () => {
+    const { h, workspace, owner } = await setup({
+      mail: true,
+      rule: { kind: "emails", entries: ["person@example.test"] },
+    });
+    const person = await h.addUser("person", { email: "person@example.test" });
+    const { token } = await inviteForToken(
+      h,
+      workspace,
+      owner.id,
+      person.email,
+    );
+    h.mail.configured = false;
+
+    expect(await h.invitations.accept({ token }, person)).toEqual({
+      ok: false,
+      error: "signup_closed",
     });
     expect(await h.roleOf(workspace.id, person.id)).toBeUndefined();
   });
