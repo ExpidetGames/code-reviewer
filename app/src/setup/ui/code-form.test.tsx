@@ -23,6 +23,14 @@ function renderForm(result: Awaited<ReturnType<SetupApi["submitCode"]>>) {
   return { submitCode, onAccepted };
 }
 
+/**
+ * The code input, named by its role rather than by label text: the form carries the same accessible
+ * name ("Setup code"), so `getByLabelText` would find both elements (#172).
+ */
+function codeInput(): HTMLElement {
+  return screen.getByRole("textbox", { name: "Setup code" });
+}
+
 describe("the setup code form", () => {
   // #97-SU-05
   it("sends the code and goes on when it is accepted", async () => {
@@ -32,7 +40,7 @@ describe("the setup code form", () => {
       data: { ok: true },
     });
 
-    await user.type(screen.getByLabelText("Setup code"), "482913");
+    await user.type(codeInput(), "482913");
     await user.click(screen.getByRole("button", { name: "Continue" }));
 
     expect(submitCode).toHaveBeenCalledWith("482913");
@@ -43,7 +51,7 @@ describe("the setup code form", () => {
     const user = userEvent.setup();
     const { submitCode } = renderForm({ ok: true, data: { ok: true } });
 
-    await user.type(screen.getByLabelText("Setup code"), "4829");
+    await user.type(codeInput(), "4829");
 
     expect(screen.getByRole("button", { name: "Continue" })).toHaveProperty(
       "disabled",
@@ -62,7 +70,7 @@ describe("the setup code form", () => {
       issues: [],
     });
 
-    await user.type(screen.getByLabelText("Setup code"), "482914");
+    await user.type(codeInput(), "482914");
     await user.click(screen.getByRole("button", { name: "Continue" }));
 
     const alert = await screen.findByRole("alert");
@@ -77,7 +85,7 @@ describe("the setup code form", () => {
     const user = userEvent.setup();
     renderForm({ ok: false, status: 423, code: "setup_locked", issues: [] });
 
-    await user.type(screen.getByLabelText("Setup code"), "000000");
+    await user.type(codeInput(), "000000");
     await user.click(screen.getByRole("button", { name: "Continue" }));
 
     expect((await screen.findByRole("alert")).textContent).toMatch(
@@ -90,5 +98,19 @@ describe("the setup code form", () => {
 
     expect(screen.getByText(/docker compose logs app/)).toBeTruthy();
     expect(screen.getByText(/data from before the setup existed/)).toBeTruthy();
+  });
+
+  // #172-T01
+  it("keeps the heading outside the form and gives the form a name", () => {
+    render(<CodeForm api={{ submitCode: vi.fn(), complete: vi.fn() }} />);
+
+    const form = screen.getByRole("form", { name: "Setup code" });
+    const heading = screen.getByRole("heading", {
+      level: 1,
+      name: "Set up Code Reviewer",
+    });
+
+    expect(form.contains(heading)).toBe(false);
+    expect(form.contains(codeInput())).toBe(true);
   });
 });
