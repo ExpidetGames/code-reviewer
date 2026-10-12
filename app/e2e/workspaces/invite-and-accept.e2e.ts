@@ -16,6 +16,7 @@ import {
   type Page,
 } from "@playwright/test";
 import { e2eEnv } from "../helpers/e2e-env";
+import { addGithubAccount } from "../helpers/github-fake";
 
 const FRESH = "fresh@e2e.test";
 const PASSWORD = "e2e-colleague-passphrase-cedar-9";
@@ -172,6 +173,39 @@ test.describe("an Owner invites a colleague who accepts", () => {
     await expect(
       page.getByText("This invitation was used already."),
     ).toBeVisible();
+    await context.close();
+  });
+
+  // #102-GH-11, #101 follow-up: the invitation travels through the sign in with GitHub
+  test("an invitee signs in with GitHub from the invitation and lands on it, accepts it and is a member", async ({
+    browser,
+    request,
+  }) => {
+    const email = uniqueAddress("octo");
+    const id = 7_200_000 + Math.floor(Math.random() * 90_000);
+    const account = {
+      id,
+      login: `invitee-${String(id)}`,
+      name: "Invited With GitHub",
+      email,
+    };
+    await addGithubAccount(request, account, null);
+    const link = await inviteAsOwner(email);
+    const context = await newPerson(browser);
+    const page = await context.newPage();
+
+    await page.goto(link);
+    await page.getByRole("link", { name: "Sign in" }).first().click();
+    await expect(page).toHaveURL(/\/login\?invitation=/);
+    await page.getByRole("button", { name: "Sign in with GitHub" }).click();
+    await page
+      .getByRole("button", { name: `Authorize ${account.login}` })
+      .click();
+
+    // Back on the invitation, not on a page that says there is no workspace.
+    await expect(page).toHaveURL(/\/invitation\?token=/);
+    await page.getByRole("button", { name: /Accept the invitation/ }).click();
+    await expect(page).toHaveURL(/\/w\/default\/projects$/);
     await context.close();
   });
 

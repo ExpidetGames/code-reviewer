@@ -121,7 +121,7 @@ test.describe("the GitHub integration of the admin portal", () => {
     await signInWithGithub(page, newcomer);
     await expect(page).toHaveURL(/\/no-access$/);
     await expect(
-      page.getByRole("heading", { name: "No access yet" }),
+      page.getByRole("heading", { name: "No workspace yet" }),
     ).toBeVisible();
   });
 

@@ -41,7 +41,7 @@ const DATABASES: Record<AppUnderTest, string> = {
 export async function importGithubUser(
   account: GithubAccount,
   app: AppUnderTest,
-  role: "owner" | "admin" | "member" = "member",
+  role: "owner" | "admin" | "member" = "owner",
 ): Promise<void> {
   await run(
     process.execPath,
@@ -71,7 +71,7 @@ export async function addGithubAccount(
   request: APIRequestContext,
   account: GithubAccount,
   app: AppUnderTest | null = "main",
-  role: "owner" | "admin" | "member" = "member",
+  role: "owner" | "admin" | "member" = "owner",
 ): Promise<void> {
   const response = await request.post(`${e2eEnv.githubUrl}/__fake/users`, {
     data: account,
