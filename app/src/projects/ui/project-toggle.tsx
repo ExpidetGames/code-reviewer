@@ -5,8 +5,13 @@
 // route, shows what went wrong as a sentence (never a raw code) and refreshes the page data after a
 // change. The state shown comes from the server; between the click and the refreshed data the
 // switch shows the new state, and it goes back by itself if the call fails.
+//
+// A switch that cannot be switched on explains itself through `aria-describedby` and a small hint
+// next to it, instead of a paragraph on every row (#173-T03).
 import { useRouter } from "next/navigation";
 import { useId, useMemo, useState } from "react";
+import { InfoHint } from "../../components/info-hint.tsx";
+import { Switch } from "../../components/ui/switch.tsx";
 import { browserProjectsApi, type ProjectsApi } from "./api.ts";
 import { describeFailure } from "./messages.ts";
 
@@ -47,6 +52,9 @@ export function ProjectToggle({
   const [problem, setProblem] = useState<string | null>(null);
   const on = confirmed ?? checked;
   const blocked = (!on && blockedReason !== null) || !canManage;
+  const blockedText = canManage
+    ? blockedReason
+    : "Only Admins and Owners can switch a project on or off.";
 
   async function toggle() {
     if (pending || blocked) return;
@@ -62,31 +70,31 @@ export function ProjectToggle({
     router.refresh();
   }
 
-  const describedBy = problem !== null || blocked ? messageId : undefined;
+  const description = problem ?? (blocked ? blockedText : null);
   return (
-    <div className="project-toggle">
-      <button
-        type="button"
-        role="switch"
-        aria-checked={on}
-        aria-label={`Review ${fullName}`}
-        aria-describedby={describedBy}
-        className="switch"
-        disabled={pending || blocked}
-        onClick={() => void toggle()}
-      >
-        <span className="switch-thumb" aria-hidden="true" />
-      </button>
+    <div className="flex flex-col items-start gap-1">
+      <div className="flex items-center gap-1">
+        <Switch
+          checked={on}
+          onCheckedChange={() => void toggle()}
+          disabled={pending || blocked}
+          aria-label={`Review ${fullName}`}
+          aria-describedby={description === null ? undefined : messageId}
+        />
+        {problem === null && blocked && blockedText !== null ? (
+          <InfoHint label={`Why ${fullName} cannot be switched on`}>
+            {blockedText}
+          </InfoHint>
+        ) : null}
+      </div>
       {problem !== null ? (
-        <p id={messageId} role="alert" className="field-error">
+        <p id={messageId} role="alert" className="text-sm text-destructive">
           {problem}
         </p>
-      ) : blocked ? (
-        <p id={messageId} className="muted small">
-          {canManage
-            ? blockedReason
-            : "Only Admins and Owners can switch a project on or off."}
-        </p>
+      ) : blocked && blockedText !== null ? (
+        <span id={messageId} className="sr-only">
+          {blockedText}
+        </span>
       ) : null}
     </div>
   );

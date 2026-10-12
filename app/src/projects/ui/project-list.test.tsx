@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // @vitest-environment jsdom
-// Pins down what the project list shows: the empty state with the steps to connect GitHub,
-// "No run yet" for a project without a run, the status of the last run, the switch with its state,
-// and text from GitHub rendered as text. The calls behind the switch are in project-toggle.test.tsx.
+// Pins down what the project list shows: each repository as a row of the compact table (name,
+// installation, state, last run and switch), the empty state with one title and one primary action
+// whose walkthrough sits behind a disclosure, the switch that explains itself through
+// `aria-describedby`, and text from GitHub rendered as text that truncates.
+// The calls behind the switch are in project-toggle.test.tsx.
 import { cleanup, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({
@@ -47,18 +50,36 @@ function renderList(
   );
 }
 
+/** The rows of repositories: every `row` but the header row. */
+function repositoryRows(): HTMLElement[] {
+  return screen.getAllByRole("row").slice(1);
+}
+
 describe("the project list without repositories", () => {
-  // CR-34-T02, #103-IB-18
-  it("explains in steps how to connect GitHub and links to the connections of the workspace", () => {
+  // #173-T02, CR-34-T02, #103-IB-18
+  it("shows one title and one primary action, with the walkthrough behind a disclosure", async () => {
+    const user = userEvent.setup();
     renderList([]);
 
     expect(
       screen.getByRole("heading", { name: "No repositories yet" }),
     ).toBeTruthy();
-    const link = screen.getByRole("link", { name: "Connections" });
-    expect(link.getAttribute("href")).toBe("/w/acme/connections");
-    expect(screen.getAllByRole("listitem")).toHaveLength(3);
+    const action = screen.getByRole("link", { name: "Connect GitHub" });
+    expect(action.getAttribute("href")).toBe("/w/acme/connections");
+
+    const trigger = screen.getByRole("button", {
+      name: "How to connect GitHub",
+    });
+    const steps = document.getElementById(
+      trigger.getAttribute("aria-controls")!,
+    );
+    expect(steps?.hasAttribute("hidden")).toBe(true);
+    expect(steps?.querySelectorAll("li")).toHaveLength(3);
     expect(screen.queryByRole("switch")).toBeNull();
+
+    await user.click(trigger);
+
+    expect(steps?.hasAttribute("hidden")).toBe(false);
   });
 
   // CR-34-T02, #103-IB-15
@@ -67,6 +88,9 @@ describe("the project list without repositories", () => {
 
     expect(screen.getByText(/An Owner or Admin of the workspace/)).toBeTruthy();
     expect(screen.getByRole("link", { name: "Connections" })).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: "How to connect GitHub" }),
+    ).toBeNull();
     expect(screen.queryAllByRole("listitem")).toHaveLength(0);
   });
 });
@@ -89,7 +113,7 @@ describe("the project list with repositories", () => {
       }),
     ]);
 
-    const item = screen.getByRole("listitem");
+    const item = repositoryRows()[0]!;
     expect(within(item).getByText(/Succeeded/)).toBeTruthy();
     expect(within(item).getByText("2026-10-10 12:34 UTC")).toBeTruthy();
     expect(within(item).getByText("Active")).toBeTruthy();
@@ -114,9 +138,9 @@ describe("the project list with repositories", () => {
       }),
     ]);
 
-    const [waiting, replaced] = screen.getAllByRole("listitem");
-    expect(waiting?.textContent).toContain("Last run: Waiting");
-    expect(replaced?.textContent).toContain("Last run: Replaced");
+    const [waiting, replaced] = repositoryRows();
+    expect(waiting?.textContent).toContain("Waiting");
+    expect(replaced?.textContent).toContain("Replaced");
   });
 
   it("links the last run to the runs of that project", () => {
@@ -189,15 +213,26 @@ describe("the project list with repositories", () => {
       ).toBe(`/w/acme/projects/${id}`);
   });
 
-  // CR-34-T10
-  it("keeps a project that is off from being switched on while the GitHub App is not configured, and says why", () => {
+  // CR-34-T10, #173-T03
+  it("keeps a project that is off from being switched on while the GitHub App is not configured, and describes the switch with the reason", () => {
     renderList([row()], {
       activationBlocked: "Configure the GitHub App first.",
     });
 
     const toggle = screen.getByRole("switch") as HTMLButtonElement;
     expect(toggle.disabled).toBe(true);
-    expect(screen.getByText("Configure the GitHub App first.")).toBeTruthy();
+    const describedBy = toggle.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    const reason = document.getElementById(describedBy!);
+    expect(reason?.textContent).toBe("Configure the GitHub App first.");
+    // The reason is announced with the switch and shown in the hint, not a paragraph on the row.
+    expect(reason?.tagName).toBe("SPAN");
+    expect(reason?.className).toContain("sr-only");
+    expect(
+      screen.getByRole("button", {
+        name: "Why acme/widgets cannot be switched on",
+      }),
+    ).toBeTruthy();
   });
 
   // CR-34-T10
@@ -230,15 +265,15 @@ describe("the project list with repositories", () => {
     ).toBeTruthy();
   });
 
-  // CR-34-T13
-  it("renders a repository name with HTML as text and runs nothing", () => {
-    const hostile =
-      'acme/<img src=x onerror="window.pwned=1"><script>window.pwned=1</script>';
+  // CR-34-T13, #173-T04
+  it("renders a very long repository name with HTML as text, runs nothing and truncates it", () => {
+    const hostile = `acme/${"a".repeat(200)}<img src=x onerror="window.pwned=1"><script>window.pwned=1</script>`;
     const { container } = renderList([
       row({ fullName: hostile, installation: "<b>acme</b>" }),
     ]);
 
-    expect(screen.getByText(hostile)).toBeTruthy();
+    const name = screen.getByRole("link", { name: hostile });
+    expect(name.className).toContain("truncate");
     expect(screen.getByText(/<b>acme<\/b>/)).toBeTruthy();
     expect(container.querySelector("img")).toBeNull();
     expect(container.querySelector("script")).toBeNull();

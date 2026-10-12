@@ -114,9 +114,9 @@ describe("the Projects page", () => {
   it("lists the four repositories of two installations, the activated one with its switch on", async () => {
     await openPage();
 
-    const items = within(
-      screen.getByRole("list", { name: "Repositories" }),
-    ).getAllByRole("listitem");
+    const items = within(screen.getByRole("table", { name: "Repositories" }))
+      .getAllByRole("row")
+      .slice(1);
     expect(items).toHaveLength(4);
     const on = screen
       .getAllByRole("switch")
