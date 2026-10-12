@@ -12,6 +12,7 @@ import {
 function fixture(
   run: () => Promise<{
     rateLimits: number;
+    unverifiedAccounts: number;
     verificationTokens: number;
     passwordResetTokens: number;
     jobClaimedKeys: number;
@@ -32,6 +33,7 @@ describe("the cleanup timer", () => {
     const f = fixture(() =>
       Promise.resolve({
         rateLimits: 0,
+        unverifiedAccounts: 0,
         verificationTokens: 0,
         passwordResetTokens: 0,
         jobClaimedKeys: 0,
@@ -54,6 +56,7 @@ describe("the cleanup timer", () => {
     const some = fixture(() =>
       Promise.resolve({
         rateLimits: 3,
+        unverifiedAccounts: 2,
         verificationTokens: 1,
         passwordResetTokens: 0,
         jobClaimedKeys: 0,
@@ -62,6 +65,7 @@ describe("the cleanup timer", () => {
     const none = fixture(() =>
       Promise.resolve({
         rateLimits: 0,
+        unverifiedAccounts: 0,
         verificationTokens: 0,
         passwordResetTokens: 0,
         jobClaimedKeys: 0,
@@ -73,7 +77,7 @@ describe("the cleanup timer", () => {
     await vi.waitFor(() => expect(some.log.info).toHaveBeenCalledTimes(1));
 
     expect(String(some.log.info.mock.calls[0]?.[0])).toContain(
-      "3 old rate limit counters, 1 old verification links and 0 old reset links",
+      "3 old rate limit counters, 2 unverified accounts, 1 old verification links and 0 old reset links",
     );
     expect(none.log.info).not.toHaveBeenCalled();
   });
@@ -86,6 +90,7 @@ describe("the cleanup timer", () => {
         ? Promise.reject(new Error("secret detail"))
         : Promise.resolve({
             rateLimits: 0,
+            unverifiedAccounts: 0,
             verificationTokens: 0,
             passwordResetTokens: 0,
             jobClaimedKeys: 0,
@@ -107,6 +112,7 @@ describe("the cleanup timer", () => {
     const f = fixture(() =>
       Promise.resolve({
         rateLimits: 0,
+        unverifiedAccounts: 0,
         verificationTokens: 0,
         passwordResetTokens: 0,
         jobClaimedKeys: 0,
@@ -122,6 +128,7 @@ describe("the cleanup timer", () => {
     const f = fixture(() =>
       Promise.resolve({
         rateLimits: 0,
+        unverifiedAccounts: 0,
         verificationTokens: 0,
         passwordResetTokens: 0,
         jobClaimedKeys: 0,

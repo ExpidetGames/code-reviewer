@@ -5,6 +5,7 @@
 // timer. A failing run is logged by its code and tried again at the next hour; it never stops the app.
 import "server-only";
 import { getDatabase } from "../db/startup.ts";
+import { getMailSender } from "../mail/shared.ts";
 import { cleanUpExpiredRows, type CleanupResult } from "./cleanup.ts";
 
 export const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
@@ -27,7 +28,11 @@ function defaultSetTimer(callback: () => void, intervalMs: number): () => void {
 
 /** Runs the cleanup now and again at every interval. */
 export function startCleanup({
-  run = () => cleanUpExpiredRows(getDatabase()),
+  run = () =>
+    cleanUpExpiredRows(getDatabase(), undefined, {
+      // Read when it matters, never remembered: the admin can add or remove the mail server at any time.
+      mailConfigured: () => getMailSender().isConfigured(),
+    }),
   setTimer = defaultSetTimer,
   log = console,
 }: StartOptions = {}): CleanupTimer {
@@ -36,13 +41,14 @@ export function startCleanup({
       const removed = await run();
       if (
         removed.rateLimits +
+          removed.unverifiedAccounts +
           removed.verificationTokens +
           removed.passwordResetTokens +
           removed.jobClaimedKeys >
         0
       )
         log.info(
-          `[maintenance] removed ${String(removed.rateLimits)} old rate limit counters, ${String(removed.verificationTokens)} old verification links and ${String(removed.passwordResetTokens)} old reset links and ${String(removed.jobClaimedKeys)} remembered job keys.`,
+          `[maintenance] removed ${String(removed.rateLimits)} old rate limit counters, ${String(removed.unverifiedAccounts)} unverified accounts, ${String(removed.verificationTokens)} old verification links and ${String(removed.passwordResetTokens)} old reset links and ${String(removed.jobClaimedKeys)} remembered job keys.`,
         );
     } catch {
       log.error(
