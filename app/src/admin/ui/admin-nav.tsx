@@ -10,7 +10,7 @@
 // section meanwhile. The admin check lives in the admin layout, before any of this renders.
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Fragment, Suspense } from "react";
+import { Fragment, Suspense, useEffect, useRef } from "react";
 import {
   Sidebar,
   SidebarContent,
@@ -21,6 +21,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarSeparator,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import { SIDEBAR_LINK_CLASS } from "@/shell/nav-items.ts";
 import { ADMIN_NAV_GROUPS, isCurrentSection } from "./nav-items.ts";
@@ -35,22 +36,9 @@ export function SectionLinks({ pathname }: { pathname: string | null }) {
             <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu className="m-0 list-none p-0">
-                {group.items.map((item) => {
-                  const current = isCurrentSection(pathname, item);
-                  return (
-                    <SidebarMenuItem key={item.href}>
-                      <SidebarMenuButton asChild isActive={current}>
-                        <Link
-                          href={item.href}
-                          aria-current={current ? "page" : undefined}
-                          className={SIDEBAR_LINK_CLASS}
-                        >
-                          {item.label}
-                        </Link>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
+                {group.items.map((item) => (
+                  <AdminLink key={item.href} item={item} pathname={pathname} />
+                ))}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
@@ -60,8 +48,44 @@ export function SectionLinks({ pathname }: { pathname: string | null }) {
   );
 }
 
+function AdminLink({
+  item,
+  pathname,
+}: {
+  item: (typeof ADMIN_NAV_GROUPS)[number]["items"][number];
+  pathname: string | null;
+}) {
+  const { setOpenMobile } = useSidebar();
+  const current = isCurrentSection(pathname, item);
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton asChild isActive={current}>
+        <Link
+          href={item.href}
+          aria-current={current ? "page" : undefined}
+          className={SIDEBAR_LINK_CLASS}
+          onClick={() => setOpenMobile(false)}
+        >
+          {item.label}
+        </Link>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  );
+}
+
 function CurrentSectionLinks() {
-  return <SectionLinks pathname={usePathname()} />;
+  const pathname = usePathname();
+  const { setOpenMobile } = useSidebar();
+  const shownPath = useRef(pathname);
+
+  // A page change by any other way than a link (back and forward) closes the drawer too.
+  useEffect(() => {
+    if (shownPath.current === pathname) return;
+    shownPath.current = pathname;
+    setOpenMobile(false);
+  }, [pathname, setOpenMobile]);
+
+  return <SectionLinks pathname={pathname} />;
 }
 
 export function AdminNav() {
