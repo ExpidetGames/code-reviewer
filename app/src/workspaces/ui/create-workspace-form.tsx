@@ -2,8 +2,13 @@
 
 "use client";
 // Creates a workspace (multi-tenant instances): a name, and the person becomes its Owner and lands in it.
+// The name is checked on the server (1 to 80 characters, no line breaks); the field does not carry a
+// second, hard-coded limit (#171).
 import { useId, useState, type FormEvent } from "react";
-import { Button } from "../../ui/button.tsx";
+import { Button } from "@/components/button";
+import { Alert } from "@/components/ui/alert";
+import { Field, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
 import { workspaceHome } from "../paths.ts";
 import { browserAccountApi, type AccountApi } from "./api.ts";
 import { describeWorkspaceFailure } from "./messages.ts";
@@ -38,30 +43,28 @@ export function CreateWorkspaceForm({
   return (
     <form
       onSubmit={(event) => void submit(event)}
-      className="login-form"
+      className="flex flex-col gap-4"
       aria-label="Create a workspace"
     >
-      {problem !== null ? (
-        <p role="alert" className="alert alert-error">
-          {problem}
-        </p>
-      ) : null}
-      <div className="field">
-        <label htmlFor={id} className="field-label">
-          Name of the workspace
-        </label>
-        <input
+      {problem !== null ? <Alert variant="destructive">{problem}</Alert> : null}
+      <Field>
+        <FieldLabel htmlFor={id}>Name of the workspace</FieldLabel>
+        <Input
           id={id}
           type="text"
           autoComplete="off"
           required
-          maxLength={80}
           value={name}
           onChange={(event) => setName(event.target.value)}
         />
-      </div>
-      <Button type="submit" className="btn-block" disabled={pending}>
-        {pending ? "Creating..." : "Create the workspace"}
+      </Field>
+      <Button
+        type="submit"
+        loading={pending}
+        loadingLabel="Creating"
+        className="w-full"
+      >
+        Create the workspace
       </Button>
     </form>
   );

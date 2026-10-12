@@ -89,7 +89,11 @@ test.describe("signing up", () => {
     expect(api.status()).toBe(403);
     expect(await api.json()).toEqual({ error: "no_workspace_access" });
 
-    await page.getByRole("button", { name: "Sign out" }).click();
+    // Signing out lives in the user menu of the header now that the page is inside the app frame.
+    await page
+      .getByRole("button", { name: ADDRESS.split("@")[0] ?? "" })
+      .click();
+    await page.getByRole("menuitem", { name: "Sign out" }).click();
     await expect(page).toHaveURL(/\/login$/);
   });
 

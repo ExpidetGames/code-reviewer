@@ -5,14 +5,12 @@
 // new link. The token is in the address, so the page asks the browser not to pass the address on as a
 // referrer. Read at request time, behind a boundary.
 import type { Metadata } from "next";
-import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
-import { signOut } from "@/auth/actions";
 import { currentLookup } from "@/auth/session";
-import { Button } from "@/ui/button";
-import { ResendForm } from "@/signup/ui/resend-form";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { VerifyEmailForm } from "@/signup/ui/verify-email-form";
+import { VerifyEmailHelp } from "@/signup/ui/verify-email-help";
 
 export const metadata: Metadata = {
   title: "Confirm your email address",
@@ -24,13 +22,19 @@ export default function VerifyEmailPage({
   searchParams,
 }: PageProps<"/verify-email">) {
   return (
-    <main className="auth-page">
-      <div className="card auth-card">
-        <h1>Confirm your email address</h1>
-        <Suspense fallback={null}>
-          <VerifyOrExplain searchParams={searchParams} />
-        </Suspense>
-      </div>
+    <main className="flex min-h-svh items-center justify-center bg-background p-4">
+      <Card className="w-full max-w-md">
+        <CardHeader>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+            Confirm your email address
+          </h1>
+        </CardHeader>
+        <CardContent>
+          <Suspense fallback={null}>
+            <VerifyOrExplain searchParams={searchParams} />
+          </Suspense>
+        </CardContent>
+      </Card>
     </main>
   );
 }
@@ -54,32 +58,5 @@ async function VerifyOrExplain({
   } catch {
     // The page works without knowing who is asking.
   }
-  return (
-    <>
-      <p>
-        Open the link in the email we sent to the address you signed up with and
-        enter the password you chose then. The account can be used once the
-        address is confirmed. A link works once and for 24 hours. If a link does
-        not accept your password, sign up again with the same address and the
-        password you want to use: that sends a link of its own.
-      </p>
-      <ResendForm initialEmail={email ?? ""} />
-      {isAdmin ? (
-        <p className="muted small">
-          You are the admin of this instance, so you can still{" "}
-          <Link href="/admin">open the admin portal</Link> to check the mail
-          settings.
-        </p>
-      ) : null}
-      {email === null ? (
-        <Link href="/login">Back to the sign-in</Link>
-      ) : (
-        <form action={signOut}>
-          <Button type="submit" variant="ghost" className="btn-block">
-            Sign out
-          </Button>
-        </form>
-      )}
-    </>
-  );
+  return <VerifyEmailHelp email={email} isAdmin={isAdmin} />;
 }

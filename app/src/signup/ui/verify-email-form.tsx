@@ -8,7 +8,11 @@
 // is never shown or kept.
 import Link from "next/link";
 import { useId, useState, type FormEvent } from "react";
-import { Button } from "../../ui/button.tsx";
+import { Button } from "@/components/button";
+import { StatusRegion } from "@/components/status-region";
+import { Alert } from "@/components/ui/alert";
+import { Field, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
 import { requestJson, type FetchLike } from "../../ui/json-request.ts";
 import { describeSignUpFailure } from "./messages.ts";
 
@@ -28,12 +32,14 @@ export function VerifyEmailForm({
 
   if (done)
     return (
-      <>
-        <p role="status" className="alert alert-success">
+      <div className="flex flex-col gap-4">
+        <StatusRegion className="text-success">
           Your email address is confirmed.
-        </p>
-        <Link href="/login">Sign in</Link>
-      </>
+        </StatusRegion>
+        <Link href="/login" className="underline underline-offset-4">
+          Sign in
+        </Link>
+      </div>
     );
 
   async function confirm(event: FormEvent) {
@@ -57,23 +63,13 @@ export function VerifyEmailForm({
   return (
     <form
       onSubmit={(event) => void confirm(event)}
-      className="login-form"
+      className="flex flex-col gap-4"
       aria-label="Confirm email address"
     >
-      {problem ? (
-        <p role="alert" className="alert alert-error">
-          {problem}
-        </p>
-      ) : null}
-      <p>
-        Confirm that this email address is yours. Enter the password you chose
-        when you signed up with this link.
-      </p>
-      <div className="field">
-        <label htmlFor={id} className="field-label">
-          Password
-        </label>
-        <input
+      {problem ? <Alert variant="destructive">{problem}</Alert> : null}
+      <Field>
+        <FieldLabel htmlFor={id}>Password</FieldLabel>
+        <Input
           id={id}
           type="password"
           autoComplete="current-password"
@@ -81,9 +77,14 @@ export function VerifyEmailForm({
           value={password}
           onChange={(event) => setPassword(event.target.value)}
         />
-      </div>
-      <Button type="submit" className="btn-block" disabled={pending}>
-        {pending ? "Confirming..." : "Confirm email address"}
+      </Field>
+      <Button
+        type="submit"
+        loading={pending}
+        loadingLabel="Confirming"
+        className="w-full"
+      >
+        Confirm email address
       </Button>
       {problem ? <Link href="/verify-email">Ask for a new link</Link> : null}
     </form>

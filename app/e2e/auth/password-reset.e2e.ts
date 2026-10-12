@@ -98,7 +98,10 @@ test.describe("resetting a password by mail", () => {
     await expect(page).toHaveURL(/\/no-access$/);
 
     // The link works once.
-    await page.getByRole("button", { name: "Sign out" }).click();
+    await page
+      .getByRole("button", { name: ADDRESS.split("@")[0] ?? "" })
+      .click();
+    await page.getByRole("menuitem", { name: "Sign out" }).click();
     await page.goto(link);
     await page
       .getByLabel("New password")

@@ -13,15 +13,15 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 import { signOut } from "@/auth/actions";
 import { currentLookup } from "@/auth/session";
-import { Button } from "@/ui/button";
-import { canonicalEmail } from "@/signup/rule";
+import { Button } from "@/components/button";
+import { Alert } from "@/components/ui/alert";
+import { Card, CardContent } from "@/components/ui/card";
 import { getInvitationService } from "@/workspaces/shared";
-import { AcceptInvitation } from "@/workspaces/ui/accept-invitation";
+import { InvitationView } from "@/workspaces/ui/invitation-view";
 import { describeInvitationState } from "@/workspaces/ui/messages";
-import { ROLE_LABEL } from "@/workspaces/ui/role-copy";
 
 export const metadata: Metadata = {
-  title: "Invitation",
+  title: "You have an invitation",
   referrer: "no-referrer",
   robots: { index: false, follow: false },
 };
@@ -30,13 +30,14 @@ export default function InvitationPage({
   searchParams,
 }: PageProps<"/invitation">) {
   return (
-    <main className="auth-page">
-      <div className="card auth-card">
-        <h1>Invitation</h1>
-        <Suspense fallback={null}>
-          <InvitationContent searchParams={searchParams} />
-        </Suspense>
-      </div>
+    <main className="flex min-h-svh items-center justify-center bg-background p-4">
+      <Card className="w-full max-w-md">
+        <CardContent>
+          <Suspense fallback={null}>
+            <InvitationContent searchParams={searchParams} />
+          </Suspense>
+        </CardContent>
+      </Card>
     </main>
   );
 }
@@ -49,15 +50,17 @@ async function InvitationContent({
   const result = await getInvitationService().preview(token);
   if (!result.ok)
     return (
-      <>
-        <p role="alert" className="alert alert-warning">
-          {describeInvitationState(result.error)}
-        </p>
-        <Link href="/">Go to the start page</Link>
-      </>
+      <div className="flex flex-col gap-4">
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+          You have an invitation
+        </h1>
+        <Alert variant="warning">{describeInvitationState(result.error)}</Alert>
+        <Button asChild className="w-full">
+          <Link href="/">Go to the start page</Link>
+        </Button>
+      </div>
     );
   const { workspaceName, role, email } = result.preview;
-  const link = `invitation=${encodeURIComponent(String(token))}`;
 
   // Who is looking: the page works without knowing, but a signed in person can accept right here.
   let signedInAs: string | null = null;
@@ -74,46 +77,13 @@ async function InvitationContent({
   }
 
   return (
-    <>
-      <p>
-        You are invited to join <strong>{workspaceName}</strong> at Code
-        Reviewer as {role === "admin" ? "an" : "a"} {ROLE_LABEL[role]}. The
-        invitation is for <strong>{email}</strong>.
-      </p>
-      {signedInAs === null ? (
-        <>
-          <p>
-            Sign in, or create an account, with that address to accept. The
-            invitation works once.
-          </p>
-          <Link href={`/login?${link}`} className="btn btn-primary btn-block">
-            Sign in
-          </Link>
-          <Link
-            href={`/sign-up?${link}`}
-            className="btn btn-secondary btn-block"
-          >
-            Create an account
-          </Link>
-        </>
-      ) : canonicalEmail(signedInAs) === email ? (
-        <AcceptInvitation
-          which={{ token: String(token) }}
-          workspaceName={workspaceName}
-        />
-      ) : (
-        <>
-          <p role="alert" className="alert alert-warning">
-            You are signed in as another address than the one this invitation is
-            for. Sign out and sign in with {email}.
-          </p>
-          <form action={signOut}>
-            <Button type="submit" variant="secondary" className="btn-block">
-              Sign out
-            </Button>
-          </form>
-        </>
-      )}
-    </>
+    <InvitationView
+      token={String(token)}
+      workspaceName={workspaceName}
+      role={role}
+      email={email}
+      signedInAs={signedInAs}
+      signOutAction={signOut}
+    />
   );
 }
