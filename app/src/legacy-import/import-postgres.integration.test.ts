@@ -7,6 +7,7 @@
 import { sql, type Kysely } from "kysely";
 import { describe, expect, it } from "vitest";
 import type { Database } from "../db/schema.ts";
+import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
 import {
   connectPostgres,
@@ -67,6 +68,14 @@ describePostgres("the import of a legacy installation on Postgres", () => {
     const postgres = await createPostgresTestDatabase();
     await addUser(postgres.db, "user-1", "alice");
     await addUser(postgres.db, "user-2", "bob");
+    // Seed the marker (the value a legacy install reads as "none") before any transaction: the
+    // guards below then do nothing on their own, so only `select ... for update` serializes the two
+    // instances. Removing it alone makes this test red.
+    await createInstanceSettingsRepository(postgres.db).set(
+      "import_state",
+      "none",
+      null,
+    );
 
     const first = connectPostgres(postgres.url);
     const second = connectPostgres(
