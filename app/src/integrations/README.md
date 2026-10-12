@@ -292,8 +292,10 @@ Overlapping triggers: work on the same installation runs one after the other, an
 GitHub's current state inside the lock, so repeating or overlapping triggers end in the same state.
 `defaultKeyedLock` (`keyed-lock.ts`) picks the lock: on SQLite the in-process one (`sharedKeyedLock`,
 kept on `globalThis` because Next.js may load `instrumentation.ts` and the route handlers as separate
-module graphs), on Postgres a transaction-scoped advisory lock keyed on the installation, so two app
-instances serialize too (PG-12). The webhook route and the button use `getIntegrationSync()`
+module graphs), on Postgres a session-level advisory lock keyed on the installation, held on a
+dedicated connection of its own (never the main pool: the job keeps doing its own database work while
+the lock is held), so two app instances serialize too (PG-12). The webhook route and the button use
+`getIntegrationSync()`
 (`sync/shared.ts`), the process-wide service, never their own `createIntegrationSync`. A full sync
 works from a list that can be older than a delivery, so it never decides from the list alone: before it
 disables a row the list does not mention, and before it suspends or resumes one, it asks GitHub about

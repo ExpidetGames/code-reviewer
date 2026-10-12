@@ -6,10 +6,12 @@
 //
 // On SQLite the lock is in-process (`sharedKeyedLock`, kept on `globalThis`): the single writer and
 // `begin immediate` already serialize writers across processes. On Postgres several app instances run
-// at once, so the lock must be in the database: `createPostgresKeyedLock` takes a transaction-scoped
-// advisory lock keyed on the installation, which every instance sees. `defaultKeyedLock` picks.
-import { sql, type Kysely } from "kysely";
+// at once, so the lock is in the database: `createPostgresKeyedLock` holds a session-level advisory
+// lock keyed on the installation, on a connection of its own, which every instance sees.
+// `defaultKeyedLock` picks.
+import type { Kysely } from "kysely";
 import { databaseDriver } from "../../db/driver.ts";
+import { withPostgresAdvisoryLock } from "../../db/postgres.ts";
 import type { Database } from "../../db/schema.ts";
 
 export type KeyedLock = {
@@ -47,20 +49,17 @@ export function sharedKeyedLock(): KeyedLock {
 }
 
 /**
- * The database lock of the large topology: a transaction-scoped Postgres advisory lock keyed on
+ * The database lock of the large topology: a session-level Postgres advisory lock keyed on
  * `hashtextextended(key, 0)` (the installation). Two app instances that take the same key run one
- * after the other, whichever process they are in. The lock ends with its transaction, so a crash
- * cannot leave it held, and the job itself runs outside that transaction (it may take its own).
+ * after the other, whichever process they are in. The lock is held on a dedicated connection of its
+ * own (`withPostgresAdvisoryLock`), never the main pool: the job keeps doing its own database work
+ * while the lock is held, and a held pooled connection would deadlock an about-`poolMax` burst of
+ * syncs. The lock is released and the connection closed when the job ends, also when it throws.
  */
 export function createPostgresKeyedLock(db: Kysely<Database>): KeyedLock {
   return {
     run<T>(key: string, job: () => Promise<T>): Promise<T> {
-      return db.transaction().execute(async (trx) => {
-        await sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`.execute(
-          trx,
-        );
-        return job();
-      });
+      return withPostgresAdvisoryLock(db, key, job);
     },
   };
 }

@@ -5,9 +5,10 @@
 // throwaway container by hand). Every test gets a database of its own, created empty and dropped
 // afterwards, so tests never share a schema and a parallel worker cannot interfere.
 import { randomUUID } from "node:crypto";
-import { Kysely, PostgresDialect } from "kysely";
+import type { Kysely } from "kysely";
 import { Pool } from "pg";
 import { migrateToLatest } from "../db/migrate.ts";
+import { openPostgresDatabase } from "../db/postgres.ts";
 import type { Database } from "../db/schema.ts";
 import { cleanUpAfterTest } from "./test-database.ts";
 
@@ -70,9 +71,11 @@ export async function createPostgresTestDatabase(
   await admin.end();
 
   const url = withDatabase(base, database);
-  const pool = new Pool({ connectionString: url, max: options.poolMax ?? 4 });
-  pool.on("error", () => undefined);
-  const db = new Kysely<Database>({ dialect: new PostgresDialect({ pool }) });
+  const db = openPostgresDatabase({
+    driver: "postgres",
+    url,
+    poolMax: options.poolMax ?? 4,
+  });
 
   const drop = async (): Promise<void> => {
     await db.destroy();
@@ -97,9 +100,7 @@ export function connectPostgres(
   url: string,
   poolMax = 4,
 ): { db: Kysely<Database>; close: () => Promise<void> } {
-  const pool = new Pool({ connectionString: url, max: poolMax });
-  pool.on("error", () => undefined);
-  const db = new Kysely<Database>({ dialect: new PostgresDialect({ pool }) });
+  const db = openPostgresDatabase({ driver: "postgres", url, poolMax });
   const close = async (): Promise<void> => {
     await db.destroy();
   };

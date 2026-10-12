@@ -136,4 +136,52 @@ describePostgres("the sync lock on Postgres", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]?.external_id).toBe("7001");
   });
+
+  // #105-PG-12 (review): the lock must not hold a pooled connection, or the job's own DB work
+  // deadlocks the main pool when about `poolMax` runs happen at once.
+  it("completes many concurrent runs on a pool of two, keeping the same key exclusive", async () => {
+    const postgres = await createPostgresTestDatabase({ poolMax: 2 });
+    const lock = defaultKeyedLock(postgres.db);
+
+    let onSameKey = 0;
+    let mostOnSameKey = 0;
+    const run = (key: string, index: number) =>
+      lock.run(key, async () => {
+        if (key === "same") {
+          onSameKey += 1;
+          mostOnSameKey = Math.max(mostOnSameKey, onSameKey);
+        }
+        // Real database work on the main pool while the lock is held.
+        const { rows } = await sql<{ one: number }>`
+          select 1 as one`.execute(postgres.db);
+        if (rows[0]?.one !== 1) throw new Error("unexpected database answer");
+        if (key === "same") onSameKey -= 1;
+        return index;
+      });
+
+    const results = await Promise.all([
+      run("same", 0),
+      run("same", 1),
+      run("a", 2),
+      run("b", 3),
+      run("c", 4),
+      run("d", 5),
+    ]);
+
+    expect(results).toHaveLength(6);
+    expect(mostOnSameKey).toBe(1);
+  });
+
+  // #105-PG-12 (review): a throwing job releases its lock.
+  it("releases the lock when the job throws", async () => {
+    const postgres = await createPostgresTestDatabase();
+    const lock = defaultKeyedLock(postgres.db);
+
+    await expect(
+      lock.run("key", async () => {
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    await expect(lock.run("key", async () => "free")).resolves.toBe("free");
+  });
 });
