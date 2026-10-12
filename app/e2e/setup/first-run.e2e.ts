@@ -4,7 +4,7 @@
 // enter it in the browser, answer the three questions, and land in /admin signed in. The app has a
 // database of its own that nobody has set up (the third app of the run, see playwright.config.ts).
 // The journeys run in order: they share that one instance.
-import { expect, test } from "@playwright/test";
+import { expect, test, type Response } from "@playwright/test";
 import { e2eEnv } from "../helpers/e2e-env";
 import { readSetupCode } from "../helpers/setup";
 
@@ -111,10 +111,22 @@ test.describe("the first-run setup", () => {
     page,
   }) => {
     await page.goto("/login");
+    const email = page.getByLabel("Email address");
+    const submits = (response: Response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname === "/login";
     for (let attempt = 0; attempt < 6; attempt += 1) {
-      await page.getByLabel("Email address").fill("nobody@e2e.test");
+      await email.fill("nobody@e2e.test");
       await page.getByLabel("Password").fill("not-the-right-password-1");
+      // The address of the answer is the same for every attempt that fails (`/login?error=invalid_credentials`),
+      // and so is the sentence, so neither says that this attempt has landed. The form does: once the
+      // server has answered this attempt and the page has taken the answer in, the form is empty again.
+      // (Waiting for the address alone let the next attempt start while the last one was still on its way,
+      // and the form was cleared under it, so the sixth attempt was never made.)
+      const answered = page.waitForResponse(submits);
       await page.getByRole("button", { name: "Sign in", exact: true }).click();
+      await answered;
+      await expect(email).toHaveValue("");
       await expect(page).toHaveURL(/\/login\?error=/);
     }
 
