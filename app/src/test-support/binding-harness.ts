@@ -10,6 +10,17 @@ import type {
   FakeGithub,
   FakeInstallation,
 } from "../../../fakes/github/server.ts";
+import {
+  webhookDelivery,
+  webhookFixture,
+} from "../../../fakes/github/webhooks.ts";
+import { createIntegrationDirectory } from "../db/repositories/integration-directory-repository.ts";
+import { createWebhookDeliveriesRepository } from "../db/repositories/webhook-deliveries-repository.ts";
+import {
+  createGithubAppWebhookHandler,
+  type WorkspaceCollaborators,
+} from "../webhooks/github-app-handler.ts";
+import { createRecordingReviewTriggerIntake } from "./recording-review-trigger-intake.ts";
 import { createInstallationLinkRequestDirectory } from "../db/repositories/installation-link-request-directory-repository.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import { createUnclaimedInstallationsRepository } from "../db/repositories/unclaimed-installations-repository.ts";
@@ -208,6 +219,49 @@ export async function createBindingHarness(
     });
   }
 
+  /**
+   * The route of the GitHub App webhook over the same database, registry and synchronization. `workspace`
+   * gives the collaborators of a delivery's workspace (default: no project is active anywhere, so a review
+   * trigger ends there).
+   */
+  function webhook(
+    workspace: (workspaceId: string) => WorkspaceCollaborators = () => ({
+      projects: { hasActiveProject: async () => false },
+      settingsFor: async () => undefined,
+      intake: createRecordingReviewTriggerIntake(),
+    }),
+  ) {
+    const handler = createGithubAppWebhookHandler({
+      registry,
+      integrations: createIntegrationDirectory(db),
+      deliveries: createWebhookDeliveriesRepository(db),
+      sync,
+      workspace,
+      automatic: { debounceMs: 0, now },
+      logger: { info: () => undefined, error: () => undefined },
+    });
+    return {
+      handler,
+      /** A signed delivery of a recorded payload, or of the payload a test changed. */
+      async deliver(
+        fixture: string,
+        change: (payload: Record<string, unknown>) => void = () => undefined,
+      ): Promise<{ status: number; outcome: string | null }> {
+        const payload = webhookFixture(fixture);
+        change(payload);
+        const response = await handler(
+          webhookDelivery({
+            event: fixture.split(".")[0] as string,
+            payload,
+            secret: "a-webhook-secret-of-the-test",
+          }),
+        );
+        const body = (await response.json()) as { outcome?: string };
+        return { status: response.status, outcome: body.outcome ?? null };
+      },
+    };
+  }
+
   /** An account of the fake GitHub (and, for an organization, who belongs to it and in which role). */
   function githubUser(id: number, login: string) {
     github.addUser({
@@ -318,6 +372,7 @@ export async function createBindingHarness(
     person,
     accessOf,
     handlers,
+    webhook,
     githubUser,
     install,
     walk,
