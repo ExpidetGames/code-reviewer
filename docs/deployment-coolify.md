@@ -532,7 +532,7 @@ Do this once with the whole team in the room; it is the acceptance test of the d
       team member opens `https://<domain>` and signs in with GitHub. A GitHub account that is
       not on the list is turned away ("Your GitHub account is not allowed to use this Code Reviewer
       instance.") and sees no project or run data.
-- [ ] **Connect the GitHub App** on a team repository ([`github-app.md`](github-app.md), "Install the App"): an Owner or
+- [ ] **Install the GitHub App** on a team repository and connect it ([`github-app.md`](github-app.md), "Install the App"): an Owner or
       Admin of the workspace presses **Connect GitHub** on the Connections page. The `installation` delivery shows 202
       under *Recent Deliveries*, and the repository appears in the app.
 - [ ] **Activate the repository as a project.** Repositories are inactive until someone activates them. Open
