@@ -11,7 +11,7 @@ import { createIntegrationDirectory } from "../db/repositories/integration-direc
 import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
 import { createGithubCredentialStore } from "../github-config/credentials.ts";
-import type { GithubAppConfig } from "../integrations/providers/github-app/config.ts";
+import type { GithubAppConfig } from "../integrations/registry.ts";
 import { createDefaultIntegrationRegistry } from "../integrations/registry.ts";
 import {
   createIntegrationSync,
