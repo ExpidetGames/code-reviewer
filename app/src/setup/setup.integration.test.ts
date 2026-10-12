@@ -155,9 +155,11 @@ describe("the gate on a fresh installation", () => {
       method: "POST",
     });
 
-    expect(page.headers.get("x-middleware-rewrite")).toBe(
-      `${SETUP_TEST_BASE_URL}/setup`,
-    );
+    // The proxy builds no address for the page: it marks the request and next.config.ts serves the
+    // setup page (bug #155), so a client's X-Forwarded-Proto cannot make Next.js forward the rewrite
+    // to another origin (a 500).
+    expect(page.status).toBe(200);
+    expect(await page.text()).toBe("setup-page");
     for (const response of [projects, webhook, claim]) {
       expect(response.status).toBe(503);
       expect(await response.json()).toEqual({ error: "setup_required" });
@@ -170,7 +172,7 @@ describe("the gate on a fresh installation", () => {
     const { harness } = await started();
 
     expect(await (await harness.visit("/api/health")).text()).toBe("reached");
-    expect(await (await harness.visit("/setup")).text()).toBe("reached");
+    expect(await (await harness.visit("/setup")).text()).toBe("setup-page");
   });
 });
 
@@ -639,9 +641,7 @@ describe("an existing installation that is not set up", () => {
 
     expect(start.setUp).toBe(false);
     expect(start.printed).toHaveLength(1);
-    expect((await harness.visit("/")).headers.get("x-middleware-rewrite")).toBe(
-      `${SETUP_TEST_BASE_URL}/setup`,
-    );
+    expect(await (await harness.visit("/")).text()).toBe("setup-page");
     expect((await harness.visit("/api/projects")).status).toBe(503);
     expect(
       await (
@@ -686,9 +686,7 @@ describe("an existing installation that is not set up", () => {
         "setup_completed_at",
       ),
     ).toBeUndefined();
-    expect(
-      (await restarted.visit("/")).headers.get("x-middleware-rewrite"),
-    ).toBe(`${SETUP_TEST_BASE_URL}/setup`);
+    expect(await (await restarted.visit("/")).text()).toBe("setup-page");
     expect((await restarted.submitCode("135790")).response.status).toBe(200);
     expect(
       await restarted.db.selectFrom("users").select("id").execute(),

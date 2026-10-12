@@ -13,6 +13,7 @@ import { createRepositoriesRepository } from "../db/repositories/repositories-re
 import { createGithubCredentialStore } from "../github-config/credentials.ts";
 import type { GithubAppConfig } from "../integrations/registry.ts";
 import { createDefaultIntegrationRegistry } from "../integrations/registry.ts";
+import { loadGithubAppConfig } from "../integrations/registry.ts";
 import {
   createIntegrationSync,
   type InstallationChangeResult,
@@ -76,8 +77,7 @@ export async function startSyncHarness(
     };
   }
   const registry = createDefaultIntegrationRegistry({
-    env: github.env,
-    ...(loadConfig === undefined ? {} : { loadConfig }),
+    loadConfig: loadConfig ?? (() => loadGithubAppConfig(github.env)),
     githubClient: {
       now: github.clock.now,
       requestTimeoutMs: options.requestTimeoutMs ?? 5000,
