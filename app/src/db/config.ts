@@ -34,10 +34,10 @@ export type PostgresDatabaseConfig = {
 export type DatabaseConfig = SqliteDatabaseConfig | PostgresDatabaseConfig;
 
 /**
- * Whether a `DATABASE_URL` value names Postgres. Pure, so code that must not throw on an invalid URL
- * (the backup settings) can still ask which engine is configured.
+ * Whether a `DATABASE_URL` value names Postgres. Case- and whitespace-insensitive, and pure so
+ * `loadDatabaseConfig` can branch before it parses anything.
  */
-export function isPostgresUrl(value: string | undefined): boolean {
+function isPostgresUrl(value: string | undefined): boolean {
   const url = value?.trim().toLowerCase() ?? "";
   return url.startsWith("postgres://") || url.startsWith("postgresql://");
 }
@@ -49,8 +49,6 @@ export function loadDatabaseConfig(
   if (!url) return sqliteConfig(env);
   if (isPostgresUrl(url)) return postgresConfig(url, env);
   const lower = url.toLowerCase();
-  if (lower.startsWith("postgres://") || lower.startsWith("postgresql://"))
-    return postgresConfig(url, env);
   if (lower.startsWith("sqlite:"))
     return {
       driver: "sqlite",
