@@ -12,6 +12,21 @@ import type { Database } from "../db/schema.ts";
 import type { AccessConfig } from "./access-config.ts";
 import { AuthConfigError, loadAuthConfig } from "./config.ts";
 
+/**
+ * One line, or null: the allow list variables of the earlier sign in are still set, and nothing reads
+ * them to decide who may sign in. The sign-up rule in the admin portal decides; the update to accounts
+ * (#106) reads them once. Names the variables, never their values.
+ */
+export function allowListIgnoredWarning(
+  env: Readonly<Record<string, string | undefined>>,
+): string | null {
+  const set =
+    (env.ALLOWED_GITHUB_LOGINS ?? "").trim() !== "" ||
+    (env.ALLOWED_GITHUB_ORG ?? "").trim() !== "";
+  if (!set) return null;
+  return "[auth] ALLOW_LIST_IGNORED: ALLOWED_GITHUB_LOGINS and ALLOWED_GITHUB_ORG are ignored: the sign-up rule in the admin portal decides who may sign up. The import of the update to accounts will carry them over once.";
+}
+
 type StartOptions = {
   env?: Readonly<Record<string, string | undefined>>;
   log?: (message: string) => void;
@@ -38,6 +53,8 @@ export function checkAuthConfigOnStart({
     if (deprecated !== null) warn(deprecated);
     const conflict = conflictingAppSecretWarning(env);
     if (conflict !== null) warn(conflict);
+    const allowList = allowListIgnoredWarning(env);
+    if (allowList !== null) warn(allowList);
   } catch (error) {
     if (!(error instanceof AuthConfigError)) throw error;
     log(`[auth] ${error.code}: ${error.message}`);

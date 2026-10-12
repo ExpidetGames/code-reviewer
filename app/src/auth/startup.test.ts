@@ -11,8 +11,70 @@ import { checkAuthConfigOnStart, syncLoginPinsOnStart } from "./startup.ts";
 const validEnv = {
   APP_SECRET: "x".repeat(40),
   BETTER_AUTH_URL: "http://localhost:3000",
-  ALLOWED_GITHUB_LOGINS: "octocat",
 };
+
+describe("the allow list variables of the earlier sign in", () => {
+  // #102-GH-ALLOW-LIST
+  it.each([
+    ["ALLOWED_GITHUB_LOGINS", "octocat,hubot"],
+    ["ALLOWED_GITHUB_ORG", "acme"],
+  ])(
+    "warns once that %s is ignored, without printing its value",
+    (name, value) => {
+      const warn = vi.fn();
+      const exit = vi.fn();
+
+      checkAuthConfigOnStart({
+        env: { ...validEnv, [name]: value },
+        log: vi.fn(),
+        warn,
+        exit,
+      });
+
+      expect(exit).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledTimes(1);
+      const line = String(warn.mock.calls[0]?.[0]);
+      expect(line).toContain("ALLOWED_GITHUB_LOGINS");
+      expect(line).toContain("ALLOWED_GITHUB_ORG");
+      expect(line).toMatch(/ignored/i);
+      expect(line).toMatch(/sign-up rule/i);
+      expect(line).not.toContain(value);
+      expect(line).not.toContain("\n");
+    },
+  );
+
+  // #102-GH-ALLOW-LIST
+  it("warns once, not twice, when both are set", () => {
+    const warn = vi.fn();
+
+    checkAuthConfigOnStart({
+      env: {
+        ...validEnv,
+        ALLOWED_GITHUB_LOGINS: "octocat",
+        ALLOWED_GITHUB_ORG: "acme",
+      },
+      log: vi.fn(),
+      warn,
+      exit: vi.fn(),
+    });
+
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  // #102-GH-ALLOW-LIST
+  it("says nothing when they are unset, empty or blank", () => {
+    const warn = vi.fn();
+
+    checkAuthConfigOnStart({
+      env: { ...validEnv, ALLOWED_GITHUB_LOGINS: "", ALLOWED_GITHUB_ORG: "  " },
+      log: vi.fn(),
+      warn,
+      exit: vi.fn(),
+    });
+
+    expect(warn).not.toHaveBeenCalled();
+  });
+});
 
 describe("checking the sign in configuration when the server starts", () => {
   it("lets a complete configuration start", () => {
@@ -116,25 +178,6 @@ describe("checking the sign in configuration when the server starts", () => {
     expect(line).toContain("deprecated");
     expect(line).not.toContain(secret);
   });
-
-  // CR-42-T09
-  it.each(["octocat:1001", "OctoCat:1001", "  octocat:1001  "])(
-    "starts without a warning for the valid entry %j",
-    (entry) => {
-      const warn = vi.fn();
-      const exit = vi.fn();
-
-      checkAuthConfigOnStart({
-        env: { ...validEnv, ALLOWED_GITHUB_LOGINS: `hubot,${entry}` },
-        log: vi.fn(),
-        warn,
-        exit,
-      });
-
-      expect(exit).not.toHaveBeenCalled();
-      expect(warn).not.toHaveBeenCalled();
-    },
-  );
 });
 
 describe("bringing the login bindings in line with the list when the server starts", () => {
