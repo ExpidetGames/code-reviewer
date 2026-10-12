@@ -25,15 +25,23 @@ The command line for a lost admin password is `src/admin-cli/` (below).
 - Signed in, not an instance admin: **the answer of a path that does not exist**, in every detail. This is
   by construction, not by imitation: `/admin/**` and `/api/admin/**` are not routes of the app. The files
   of the portal live below `/instance-portal` and `/api/instance-portal`, and only the proxy
-  (`src/auth/access-proxy.ts`) rewrites the instance admin's request there (`paths.ts`,
-  `portalRewriteTarget`). For everybody else the request goes on untouched and Next.js answers it itself:
+  (`src/auth/access-proxy.ts`) sends the instance admin's request there (`paths.ts`,
+  `portalRewriteTarget`): it lets the request go on with `PORTAL_REWRITE_HEADER` and `next.config.ts` rewrites
+  `/admin/**` and `/api/admin/**` to the files when the header is present. The proxy builds no address for
+  the rewrite, so what a client sends as `X-Forwarded-Proto` or `Host` cannot change where it leads (a rewrite
+  to an address whose origin is not the one Next.js made of the request is a request to another server, and
+  failed with 500 when the server was started with a `HOSTNAME` other than `0.0.0.0`/`localhost` and the
+  client, or a reverse proxy, said `https`). For everybody else the request goes on untouched and Next.js answers it itself:
   same status, same headers (including the `Cache-Control` that keeps it out of shared caches), same
   behavior for an RSC request, a prefetch, a write and a posted Server Function, and no rewrite header.
   A 404 built by hand, or a rewrite to a not-found route made by the proxy, would show
   (`x-middleware-rewrite`, a year of shared caching of the prerendered not-found); the e2e journey compares
   the full header set (names as written) and body against a missing path.
-- Next.js runs the proxy a second time on the path a rewrite leads to. The admin's rewrite carries a header
-  with a value only that process knows (`PORTAL_REWRITE_HEADER`, compared with `timingSafeEqual`), so the
+- The header is the proxy's alone: it takes it off every request it sees that arrives with it from outside
+  (the one exception is a request that carries the mark, below), so nobody else is served the portal's files.
+  Next.js does not run the proxy a second time on the path a rewrite of `next.config.ts` leads to (it did for
+  a rewrite made by the proxy). The header's value is a secret of the running proxy (`PORTAL_REWRITE_HEADER`,
+  compared with `timingSafeEqual`), so, should the proxy see the rewritten path, the
   files by their own address (`/instance-portal`, `/api/instance-portal`) are a missing path for everybody,
   the admin included. The proxy does not answer such a request itself (its answer would carry
   `x-middleware-rewrite` and lower-case header names, and `Cache-Control` would not be the one of Next.js's
@@ -142,6 +150,6 @@ The command runs without Next.js and imports only its own folder and better-sqli
   their own address, for a page, an RSC request and prefetch, JSON, HEAD, OPTIONS, writes and a posted Server
   Function, as a member and as the admin.
 - `src/auth/access-proxy.test.ts`: the rewrite mark (random per proxy, constant-time comparison, any length
-  refused) and the marking of the files by their own address. `portal-rewrites.test.ts`: the two rewrites of
-  `next.config.ts`.
+  refused) and the marking of the files by their own address. `portal-rewrites.test.ts`: the rewrites of
+  `next.config.ts` (the portal's, in front of the one for a missing path).
 - The image smoke test (`docker/smoke/app.sh`) runs `admin reset-password` in the built image.
