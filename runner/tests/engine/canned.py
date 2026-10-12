@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Canned model answers that satisfy the output contract of each PR-Agent tool.
 
 They carry a marker text so a test can tell one answer from another (the second review of a pull

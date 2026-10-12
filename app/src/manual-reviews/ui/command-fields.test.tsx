@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // @vitest-environment jsdom
 // Pins down the choice of the command: the four commands are offered, the question field exists
 // for `ask` only, and a command the project switched off is shown but cannot be picked.

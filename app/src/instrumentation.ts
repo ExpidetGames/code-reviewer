@@ -1,36 +1,60 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Runs once when the Next.js server starts and must finish before the server accepts requests.
-// The sign in and deployment settings are checked and the database is opened and migrated here, so a missing
-// setting or a broken migration stops the start; then the pins of the allow list are brought in line
-// with the settings. Last, the repositories are synchronized with GitHub in the background: that
-// never delays or stops the start. The LLM settings are only reported, never a reason to stop.
+// The sign in, deployment and backup settings are checked and the database is opened and migrated here, so a missing
+// setting or a broken migration stops the start. An installation from before accounts is backed up first
+// (before the migrations touch it) and imported right after them (src/legacy-import/); a backup or an import that
+// fails ends the start. While the instance is not set up, the setup code is printed. Last, the repositories are
+// synchronized with GitHub in the background: that never delays or stops the start. The LLM options are only
+// reported, never a reason to stop.
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
   const { checkAuthConfigOnStart } = await import("./auth/startup.ts");
   checkAuthConfigOnStart();
-  // Production only: the runner token and the GitHub App credentials (docker compose passes them).
+  // Production only: the runner token (docker compose passes it). GitHub is optional.
   const { checkDeploymentConfigOnStart } = await import("./deploy/startup.ts");
   await checkDeploymentConfigOnStart();
-  // A missing LLM key only warns: everything but running a review works without it.
+  // An invalid BACKUP_TIME ends the start here, before the database is opened and before the sync
+  // is started in the background (production only).
+  const { checkBackupConfigOnStart, startBackupSchedulerOnStart } =
+    await import("./backup/startup.ts");
+  checkBackupConfigOnStart();
+  // A wrong LLM option only warns: everything but running a review works without it.
   const { checkLlmConfigOnStart } = await import("./llm/startup.ts");
   checkLlmConfigOnStart();
+  // An installation from before accounts is backed up before anything touches it. If that fails the start ends
+  // here, with the database as the previous release left it.
+  const { backupBeforeUpdateOnStart } =
+    await import("./legacy-import/backup-step.ts");
+  backupBeforeUpdateOnStart();
   const { getDatabase, initializeDatabaseOnStart } =
     await import("./db/startup.ts");
   await initializeDatabaseOnStart();
-  // After the migrations: the pins of the allow list need their table.
-  const { loadAuthConfig } = await import("./auth/config.ts");
-  const { syncLoginPinsOnStart } = await import("./auth/startup.ts");
-  await syncLoginPinsOnStart({
-    db: getDatabase(),
-    config: loadAuthConfig(process.env).access,
-  });
+  // After the migrations: the data, the GitHub App and the LLM key of an existing installation move into the
+  // new model once, in one transaction. A failure ends the start and leaves nothing behind.
+  const { importOnStart } = await import("./legacy-import/startup.ts");
+  await importOnStart({ db: getDatabase() });
+  // While the instance is not set up: a fresh setup code, printed once to this log and kept (as a
+  // hash) in the memory of this process. Nothing is printed once it is set up.
+  const { startSetupOnStart } = await import("./setup/start.ts");
+  const { getSetupCodeStore } = await import("./setup/shared.ts");
+  await startSetupOnStart({ db: getDatabase(), store: getSetupCodeStore() });
   const { warnAboutRunnerToken } = await import("./runner-api/startup.ts");
   warnAboutRunnerToken(process.env);
   const { warnAboutDebounce } = await import("./webhooks/debounce-config.ts");
   warnAboutDebounce(process.env);
-  const { runStartupSync } = await import("./integrations/sync/startup.ts");
-  void runStartupSync();
+  // Without a GitHub App in the database and without any variable the instance is simply not connected
+  // to GitHub (yet): there is nothing to read, so nothing is attempted and nothing is reported as failed.
+  const { getGithubCredentialStore } =
+    await import("./github-config/shared.ts");
+  if ((await getGithubCredentialStore().load()).source !== "none") {
+    const { runStartupSync } = await import("./integrations/sync/startup.ts");
+    void runStartupSync();
+  }
+  // Old counters and spent verification links are removed now and every hour (production only).
+  const { startCleanupOnStart } = await import("./maintenance/startup.ts");
+  startCleanupOnStart();
   // Last: the daily backup timer (production only). It needs nothing from the app's own connection,
   // and a problem with it never stops the app from serving.
-  const { startBackupSchedulerOnStart } = await import("./backup/startup.ts");
   startBackupSchedulerOnStart();
 }

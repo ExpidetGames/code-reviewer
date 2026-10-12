@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The wiring of the running server: the real database, the real clock and the secrets the app knows
 // (to take them out of a log should one slip through). Pages and routes ask for the service here;
 // tests build their own with `createRunsService`.
@@ -12,15 +14,18 @@ import {
   type RunsService,
 } from "./runs-service.ts";
 
-export function getRunsService(): RunsService {
+/** The runs service of one workspace. */
+export function runsServiceFor(workspaceId: string): RunsService {
   return createRunsService({
-    runs: createRunsRepository(getDatabase()),
+    runs: createRunsRepository(getDatabase(), workspaceId),
     // Read on every call: the keys can change while the server runs.
     redact: (text) => redactText(text, knownSecretsFromEnv(process.env)),
   });
 }
 
-/** The status of each repository's last run, for the project list. */
-export function getLastRunSource(): LastRunSource {
-  return createLastRunSource({ runs: createRunsRepository(getDatabase()) });
+/** The status of each repository's last run in one workspace, for the project list. */
+export function lastRunSourceFor(workspaceId: string): LastRunSource {
+  return createLastRunSource({
+    runs: createRunsRepository(getDatabase(), workspaceId),
+  });
 }

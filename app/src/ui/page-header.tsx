@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The heading block at the top of a page: the one h1 of the page, an optional line below it and
 // optional actions (buttons) on the right.
 import type { ReactNode } from "react";

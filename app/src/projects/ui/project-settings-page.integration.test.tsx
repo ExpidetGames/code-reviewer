@@ -1,5 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // @vitest-environment jsdom
-// Pins down the settings page of a project with real data: a repository that is not a project yet,
+// Pins down the settings page of a project with real data: a repository that was never activated,
 // a project that follows the defaults, the effect of changing the global defaults, a value saved on
 // the project, and text from GitHub rendered as text. Real SQLite, the real services and routes'
 // handlers; the rendering is the real component tree.
@@ -12,7 +14,10 @@ vi.mock("next/navigation", () => ({
 }));
 
 import type { SessionUser } from "../../auth/access-policy.ts";
-import { describeConfigStatus } from "../../config-status/status.ts";
+import {
+  describeConfigStatus,
+  statusForMembers,
+} from "../../config-status/status.ts";
 import { createProjectsRepository } from "../../db/repositories/projects-repository.ts";
 import type { ManualReviewApi } from "../../manual-reviews/ui/api.ts";
 import { createReviewSettingsRouteHandlers } from "../../review-settings/http.ts";
@@ -24,6 +29,7 @@ import {
   loadProjectSettingsPage,
   ProjectSettingsPageContent,
 } from "./project-settings-page.tsx";
+import { defaultWorkspaceId } from "../../test-support/workspaces.ts";
 
 afterEach(cleanup);
 
@@ -56,7 +62,7 @@ const WORKING_ENV = {
 async function openProject(options: { activate?: boolean } = {}) {
   const s = await setupReviewSettings();
   const projects = createProjectService({
-    projects: createProjectsRepository(s.db),
+    projects: createProjectsRepository(s.db, await defaultWorkspaceId(s.db)),
   });
   if (options.activate !== false) await projects.activateProject(s.first.id);
   const handlers = createReviewSettingsRouteHandlers({
@@ -65,19 +71,24 @@ async function openProject(options: { activate?: boolean } = {}) {
     service: s.service,
   });
   // The form's API client, wired to the real handlers instead of the network.
-  const api = createProjectSettingsApi(async (url, init) => {
-    const request = new Request(`https://app.test${url}`, {
-      ...init,
-      headers: {
-        ...(init?.headers as Record<string, string>),
-        "sec-fetch-site": "same-origin",
-      },
-    });
-    if (init?.method === "PUT") return handlers.putProject(request, s.first.id);
-    if (init?.method === "DELETE")
-      return handlers.deleteProject(request, s.first.id);
-    return handlers.getProject(request, s.first.id);
-  }, s.first.id);
+  const api = createProjectSettingsApi(
+    async (url, init) => {
+      const request = new Request(`https://app.test${url}`, {
+        ...init,
+        headers: {
+          ...(init?.headers as Record<string, string>),
+          "sec-fetch-site": "same-origin",
+        },
+      });
+      if (init?.method === "PUT")
+        return handlers.putProject(request, s.first.id);
+      if (init?.method === "DELETE")
+        return handlers.deleteProject(request, s.first.id);
+      return handlers.getProject(request, s.first.id);
+    },
+    "acme",
+    s.first.id,
+  );
   async function load(repositoryId = s.first.id) {
     return loadProjectSettingsPage(repositoryId, {
       projects,
@@ -88,26 +99,69 @@ async function openProject(options: { activate?: boolean } = {}) {
   return { ...s, projects, api, load };
 }
 
-describe("the settings page of a repository that is not a project yet", () => {
-  // CR-34-T04
-  it("says to switch it on first and offers no form", async () => {
+describe("the settings page of a repository that was never activated", () => {
+  // #80
+  it("shows the form with the default settings and says that no reviews run until it is activated", async () => {
     const app = await openProject({ activate: false });
     const data = await app.load();
-    if (data.kind === "not_found") throw new Error("expected the repository");
+    if (data.kind !== "ready") throw new Error("expected the form");
 
     render(
       <ProjectSettingsPageContent
+        workspaceSlug="acme"
         data={data}
         api={app.api}
         manualReviewApi={quietManualReviews}
       />,
     );
 
-    expect(data.kind).toBe("no_project");
     expect(
-      screen.getByText("This repository is not a project yet"),
+      screen.getByText(
+        /Inactive: no reviews run until the project is activated/,
+      ),
     ).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /Save/ })).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Save project settings" }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Review now" })).toBeNull();
+    expect(await app.projectRows()).toEqual([]);
+  });
+
+  // #80
+  it("saves a setting without activating the repository, and the saved value is there after activation", async () => {
+    const user = userEvent.setup();
+    const app = await openProject({ activate: false });
+    const data = await app.load();
+    if (data.kind !== "ready") throw new Error("expected the form");
+    render(
+      <ProjectSettingsPageContent
+        workspaceSlug="acme"
+        data={data}
+        api={app.api}
+        manualReviewApi={quietManualReviews}
+      />,
+    );
+
+    const findings = screen.getByLabelText("Most findings per review");
+    await user.clear(findings);
+    await user.type(findings, "11");
+    await user.click(
+      screen.getByRole("button", { name: "Save project settings" }),
+    );
+
+    expect((await screen.findByRole("status")).textContent).toMatch(/Saved\./);
+    expect(await app.projectRows()).toMatchObject([
+      { active: 0, settings: expect.stringContaining('"maxFindings":11') },
+    ]);
+    expect(
+      await app.projects.getActiveProjectForRepository(app.first.id),
+    ).toBeUndefined();
+
+    await app.projects.activateProject(app.first.id);
+    const after = await app.load();
+    if (after.kind !== "ready") throw new Error("expected the form");
+    expect(after.row.status).toBe("active");
+    expect(after.model.effective.maxFindings).toBe(11);
   });
 
   it("is not found for a repository id nobody knows", async () => {
@@ -147,6 +201,7 @@ describe("the settings page of a project", () => {
     expect(data.model.effective.maxTokens).toBe(50_000);
     render(
       <ProjectSettingsPageContent
+        workspaceSlug="acme"
         data={data}
         api={app.api}
         manualReviewApi={quietManualReviews}
@@ -169,6 +224,7 @@ describe("the settings page of a project", () => {
     if (before.kind !== "ready") throw new Error("expected a project");
     const view = render(
       <ProjectSettingsPageContent
+        workspaceSlug="acme"
         data={before}
         api={app.api}
         manualReviewApi={quietManualReviews}
@@ -183,6 +239,7 @@ describe("the settings page of a project", () => {
     if (after.kind !== "ready") throw new Error("expected a project");
     view.rerender(
       <ProjectSettingsPageContent
+        workspaceSlug="acme"
         data={after}
         api={app.api}
         manualReviewApi={quietManualReviews}
@@ -207,6 +264,7 @@ describe("the settings page of a project", () => {
     if (data.kind !== "ready") throw new Error("expected a project");
     render(
       <ProjectSettingsPageContent
+        workspaceSlug="acme"
         data={data}
         api={app.api}
         manualReviewApi={quietManualReviews}
@@ -239,6 +297,7 @@ describe("the settings page of a project", () => {
     // A budget the model cannot hold: the client check passes, the service refuses.
     render(
       <ProjectSettingsPageContent
+        workspaceSlug="acme"
         data={data}
         api={app.api}
         manualReviewApi={quietManualReviews}
@@ -270,6 +329,7 @@ describe("the settings page of a project", () => {
 
     render(
       <ProjectSettingsPageContent
+        workspaceSlug="acme"
         data={data}
         api={app.api}
         manualReviewApi={{
@@ -295,6 +355,7 @@ describe("the settings page of a project", () => {
 
     render(
       <ProjectSettingsPageContent
+        workspaceSlug="acme"
         data={data}
         api={app.api}
         manualReviewApi={quietManualReviews}
@@ -320,6 +381,7 @@ describe("the settings page of a project", () => {
 
     const { container } = render(
       <ProjectSettingsPageContent
+        workspaceSlug="acme"
         data={data}
         api={app.api}
         manualReviewApi={quietManualReviews}
@@ -330,5 +392,33 @@ describe("the settings page of a project", () => {
       "acme/<img src=x onerror=alert(1)>",
     );
     expect(container.querySelector("img")).toBeNull();
+  });
+
+  // #101-WM-08
+  it("tells a member nothing about the LLM variables of the instance (the workspace notice says whether reviews have a key)", async () => {
+    const app = await openProject();
+    const data = await loadProjectSettingsPage(app.first.id, {
+      projects: app.projects,
+      settings: app.service,
+      // What the page file does for a person who does not run the instance.
+      config: () =>
+        statusForMembers(
+          describeConfigStatus({ ...WORKING_ENV, LLM_API_KEY: undefined }),
+        ),
+    });
+    if (data.kind !== "ready") throw new Error("expected the form");
+
+    const { container } = render(
+      <ProjectSettingsPageContent
+        workspaceSlug="acme"
+        audience="member"
+        data={data}
+        api={app.api}
+        manualReviewApi={quietManualReviews}
+      />,
+    );
+
+    expect(screen.queryByText("Reviews are not set up yet")).toBeNull();
+    expect(container.textContent).not.toMatch(/GITHUB_APP|LLM_/);
   });
 });

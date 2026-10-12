@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // A program the job queue tests run as a separate OS process (node runs this file directly,
 // TypeScript types are stripped): a second app instance or runner API handler working on the same
 // database file. Every command prints "ready", waits for a line "go <epoch ms>", spins until that
@@ -10,7 +12,9 @@
 import { createInterface } from "node:readline";
 import { openDatabase } from "../db/connection.ts";
 import { createJobQueue } from "../jobs/job-queue.ts";
+import { createRunnerQueue } from "../jobs/runner-queue.ts";
 import type { EnqueueJobInput } from "../jobs/job-types.ts";
+import { defaultWorkspaceId } from "./workspaces.ts";
 
 const [command, databasePath, nowIso, argument] = process.argv.slice(2);
 if (!databasePath || !nowIso)
@@ -23,9 +27,11 @@ lines.once("line", async (line) => {
   while (Date.now() < startAt);
   const db = openDatabase({ path: databasePath, busyTimeoutMs: 5000 });
   try {
-    const queue = createJobQueue(db, { now: () => new Date(nowIso) });
+    const options = { now: () => new Date(nowIso) };
     if (command === "claim") {
-      const claimed = await queue.claimNext(String(argument));
+      const claimed = await createRunnerQueue(db, options).claimNext(
+        String(argument),
+      );
       console.log(
         JSON.stringify({
           job: claimed?.job ?? null,
@@ -34,6 +40,7 @@ lines.once("line", async (line) => {
       );
     } else if (command === "enqueue") {
       const input = JSON.parse(String(argument)) as EnqueueJobInput;
+      const queue = createJobQueue(db, await defaultWorkspaceId(db), options);
       console.log(JSON.stringify(await queue.enqueue(input)));
     } else {
       throw new Error(`Unknown command: ${command}`);

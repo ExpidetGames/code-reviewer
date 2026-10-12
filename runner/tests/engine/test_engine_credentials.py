@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Pins down where the two credentials of a job go through the real PR-Agent: the LLM key reaches
 the fake LLM in the Authorization header that LiteLLM's OpenRouter handler builds, the GitHub token
 reaches only the fake GitHub, and neither is in the body of any request. A change in how PR-Agent

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // One backup run: a consistent, verified copy of the SQLite database in the backup directory.
 //
 // A plain copy of a live WAL database is not a backup: the newest writes may still be in the -wal

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The content of the Runs page: the filter, then the list. `loadRunsPage` gathers the data from the
 // services (passed in, so a test uses real ones against a test database), `RunsPageContent` renders
 // it. The page file only wires the real services. The filter is the address (`?repository=...&status=...`),
@@ -6,7 +8,9 @@
 import Link from "next/link";
 import type { JobStatus } from "../../jobs/job-status.ts";
 import type { ProjectService } from "../../projects/service.ts";
+import { noRunsYet, type LastRunSource } from "../../projects/ui/list-view.ts";
 import { EmptyState } from "../../ui/empty-state.tsx";
+import { workspacePath } from "../../workspaces/paths.ts";
 import { RUN_STATUS_ORDER, RUN_STATUS_PRESENTATION } from "../run-status.ts";
 import { parseRunsFilter, type RunsService } from "../runs-service.ts";
 import type { RunsSnapshot } from "../run-view.ts";
@@ -19,7 +23,7 @@ export type RunsPageData =
       kind: "ready";
       filter: RunsFilter;
       snapshot: RunsSnapshot;
-      /** The projects the filter offers: repositories that have a project. */
+      /** The projects the filter offers: repositories that are switched on or have had runs. */
       projects: { id: string; name: string }[];
     };
 
@@ -33,6 +37,8 @@ export async function loadRunsPage(
   deps: {
     runs: Pick<RunsService, "list">;
     projects: Pick<ProjectService, "listProjects">;
+    /** Which repositories have runs; without it only switched-on projects are offered. */
+    lastRuns?: LastRunSource;
   },
 ): Promise<RunsPageData> {
   const parsed = parseRunsFilter({
@@ -45,12 +51,24 @@ export async function loadRunsPage(
     deps.runs.list(filter),
     deps.projects.listProjects(),
   ]);
+  // A repository that only holds saved settings (never switched on) can have no runs: leave it out.
+  // A project that was switched off keeps its place as long as it has runs, and the repository the
+  // address names stays so the select can show it.
+  const withRuns = await (deps.lastRuns ?? noRunsYet)(
+    entries.map((entry) => entry.repository.id),
+  );
   return {
     kind: "ready",
     filter,
     snapshot,
     projects: entries
-      .filter((entry) => entry.project !== null)
+      .filter(
+        (entry) =>
+          entry.project?.active === true ||
+          withRuns.has(entry.repository.id) ||
+          (entry.project !== null &&
+            entry.repository.id === filter.repositoryId),
+      )
       .map((entry) => ({
         id: entry.repository.id,
         name: entry.repository.fullName,
@@ -63,16 +81,22 @@ function filterKey(filter: RunsFilter): string {
 }
 
 function RunsFilterForm({
+  workspaceSlug,
   filter,
   projects,
 }: {
+  workspaceSlug: string;
   filter: RunsFilter;
   projects: { id: string; name: string }[];
 }) {
   const active =
     filter.repositoryId !== undefined || filter.status !== undefined;
   return (
-    <form method="get" action="/runs" className="runs-filter">
+    <form
+      method="get"
+      action={workspacePath(workspaceSlug, "/runs")}
+      className="runs-filter"
+    >
       <label>
         Project
         <select name="repository" defaultValue={filter.repositoryId ?? ""}>
@@ -99,7 +123,10 @@ function RunsFilterForm({
         Apply filter
       </button>
       {active ? (
-        <Link href="/runs" className="btn btn-ghost">
+        <Link
+          href={workspacePath(workspaceSlug, "/runs")}
+          className="btn btn-ghost"
+        >
           Reset filter
         </Link>
       ) : null}
@@ -108,9 +135,12 @@ function RunsFilterForm({
 }
 
 export function RunsPageContent({
+  workspaceSlug,
   data,
   api,
 }: {
+  /** The workspace of the page: every link and call stays in it. */
+  workspaceSlug: string;
   data: RunsPageData;
   /** Only tests pass this: a server component cannot hand functions to the client list. */
   api?: RunsApi;
@@ -120,7 +150,10 @@ export function RunsPageContent({
       <EmptyState
         title="This filter is not valid"
         action={
-          <Link href="/runs" className="btn btn-secondary">
+          <Link
+            href={workspacePath(workspaceSlug, "/runs")}
+            className="btn btn-secondary"
+          >
             Reset filter
           </Link>
         }
@@ -134,6 +167,7 @@ export function RunsPageContent({
           "Reset filter" or Back and Forward they must start over with the filter of the address. */}
       <RunsFilterForm
         key={`filter:${filterKey(data.filter)}`}
+        workspaceSlug={workspaceSlug}
         filter={data.filter}
         projects={data.projects}
       />
@@ -141,6 +175,7 @@ export function RunsPageContent({
           address, and so its data, changes. */}
       <RunsList
         key={`list:${filterKey(data.filter)}`}
+        workspaceSlug={workspaceSlug}
         initial={data.snapshot}
         filter={data.filter}
         {...(api === undefined ? {} : { api })}

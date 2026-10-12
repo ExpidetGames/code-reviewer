@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down listing the open pull requests of a project and starting a command for one of them,
 // with the real service, the real GitHub App provider and client against the fake GitHub, the real
 // job queue and a real SQLite file. The rules are those of the other triggers: an active project, a
@@ -157,16 +159,19 @@ describe("listing the open pull requests of a project", () => {
     },
   );
 
-  it("reports an integration that was removed as the app not being installed, without asking GitHub", async () => {
-    const { h, service, repository, integration } = await start();
-    await h.integrations.setStatus(integration.id, "disabled");
-    const before = h.fake.requests().length;
+  it.each(["disabled", "disconnected"] as const)(
+    "reports an integration that was removed or disconnected (%s) as the app not being installed, without asking GitHub",
+    async (status) => {
+      const { h, service, repository, integration } = await start();
+      await h.integrations.setStatus(integration.id, status);
+      const before = h.fake.requests().length;
 
-    expect(
-      await failureOf(service.listOpenPullRequests(repository.id)),
-    ).toMatchObject({ code: "MANUAL_REVIEW_APP_NOT_INSTALLED" });
-    expect(h.fake.requests()).toHaveLength(before);
-  });
+      expect(
+        await failureOf(service.listOpenPullRequests(repository.id)),
+      ).toMatchObject({ code: "MANUAL_REVIEW_APP_NOT_INSTALLED" });
+      expect(h.fake.requests()).toHaveLength(before);
+    },
+  );
 
   // CR-33-T13
   it("answers not found for a repository without an active project and does not ask GitHub", async () => {

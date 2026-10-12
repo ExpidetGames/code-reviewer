@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """One process per job: start it, bound what it can write, and end it together with its children.
 
 The job goes in on stdin (never in the arguments, never in the environment), the result comes out

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down what happens when syncs and deliveries overlap in time. GitHub's answer is slowed down
 // (it reflects the moment the request arrived and reaches the app later), so a sync that is not
 // ordered against a delivery, or that trusts an old snapshot, ends in a wrong state. Also pins down
@@ -8,6 +10,7 @@ import { startSyncHarness } from "../../test-support/integration-sync-harness.ts
 import { createIntegrationRegistry } from "../registry.ts";
 import { createIntegrationSync } from "./service.ts";
 import { createTestDatabase } from "../../test-support/test-database.ts";
+import { markInstanceSetUp } from "../../test-support/workspaces.ts";
 
 type Harness = Awaited<ReturnType<typeof startSyncHarness>>;
 
@@ -147,6 +150,7 @@ describe("overlapping syncs and deliveries", () => {
 describe("a failure for one installation", () => {
   it("is reported with the installation's id and does not stop the others", async () => {
     const { db } = await createTestDatabase();
+    const workspaceId = await markInstanceSetUp(db);
     const base = fakeIntegrationProvider();
     const provider = {
       ...base,
@@ -178,6 +182,7 @@ describe("a failure for one installation", () => {
       db,
       registry: createIntegrationRegistry({ github_app: provider }),
       log: (line) => lines.push(line),
+      placeNewConnection: async () => workspaceId,
     });
 
     const summary = await sync.syncAll();

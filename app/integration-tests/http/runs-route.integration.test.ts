@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down who may read the runs and what they get: the access proxy (real Better Auth, real
 // database) in front of the handlers of `GET /api/runs` and `GET /api/runs/:id`. A request without a
 // session gets 401, one from a signed in user who is no longer on the allow list gets 403, and in
@@ -10,7 +12,7 @@ import { lookupSession } from "../../src/auth/session-user.ts";
 import { createIntegrationsRepository } from "../../src/db/repositories/integrations-repository.ts";
 import { createRepositoriesRepository } from "../../src/db/repositories/repositories-repository.ts";
 import { createRunsRepository } from "../../src/db/repositories/runs-repository.ts";
-import { createJobQueue } from "../../src/jobs/job-queue.ts";
+import { createTestQueue } from "../../src/test-support/jobs.ts";
 import { createRunsRouteHandlers } from "../../src/runs/http.ts";
 import { createRunsService } from "../../src/runs/runs-service.ts";
 import {
@@ -19,6 +21,12 @@ import {
   createAuthHarness,
   type CookieJar,
 } from "../../src/test-support/auth-harness.ts";
+import { defaultWorkspaceId } from "../../src/test-support/workspaces.ts";
+import type { AccessGates } from "../../src/auth/access-gates.ts";
+import {
+  noWorkspaceGates,
+  openGates,
+} from "../../src/test-support/open-gates.ts";
 
 type Harness = Awaited<ReturnType<typeof createAuthHarness>>;
 
@@ -26,13 +34,19 @@ const SECRET_LOG_MARKER = "a-log-line-of-this-run";
 
 async function startApp() {
   const harness = await createAuthHarness();
-  const integration = await createIntegrationsRepository(harness.db).create({
+  const integration = await createIntegrationsRepository(
+    harness.db,
+    await defaultWorkspaceId(harness.db),
+  ).create({
     type: "github_app",
     displayName: "acme",
     externalId: "4242",
     config: {},
   });
-  const repositories = createRepositoriesRepository(harness.db);
+  const repositories = createRepositoriesRepository(
+    harness.db,
+    await defaultWorkspaceId(harness.db),
+  );
   await repositories.reconcile(integration.id, [
     {
       integrationId: integration.id,
@@ -45,7 +59,10 @@ async function startApp() {
   if (repository === undefined) throw new Error("seeding failed");
 
   // One finished run, made through the queue the way the runner API makes it.
-  const queue = createJobQueue(harness.db);
+  const queue = createTestQueue(
+    harness.db,
+    await defaultWorkspaceId(harness.db),
+  );
   const created = await queue.enqueue({
     repositoryId: repository.id,
     prNumber: 7,
@@ -69,14 +86,20 @@ async function startApp() {
   });
 
   const service = createRunsService({
-    runs: createRunsRepository(harness.db),
+    runs: createRunsRepository(
+      harness.db,
+      await defaultWorkspaceId(harness.db),
+    ),
   });
 
   /** What the server does with a request: the proxy first, the handler only if the proxy lets it by. */
-  function through(settings: Harness = harness) {
+  function through(
+    settings: Harness = harness,
+    gates: AccessGates = openGates,
+  ) {
     const proxy = createAccessProxy({
       getAuth: () => settings.auth,
-      getPolicy: () => settings.policy,
+      getGates: () => gates,
     });
     return async function send(
       path: string,
@@ -91,11 +114,7 @@ async function startApp() {
       const handlers = createRunsRouteHandlers({
         // The same lookup `requireUser()` makes, without Next.js's request scope.
         requireUser: async () => {
-          const lookup = await lookupSession(
-            settings.auth,
-            headers,
-            settings.policy,
-          );
+          const lookup = await lookupSession(settings.auth, headers, gates);
           if (lookup.kind !== "user") throw new Error("NEXT_REDIRECT");
           return lookup.user;
         },
@@ -129,15 +148,17 @@ describe("a request without a session", () => {
   });
 });
 
-describe("a signed in user who is not on the allow list", () => {
+describe("a signed in user who belongs to no workspace", () => {
   // CR-35-T16
   it("is answered with 403 for the list and for one run, and nothing of a run is in the answer", async () => {
     const app = await startApp();
     const { cookies } = await app.harness.signIn();
-    const removed = app.harness.restart({ allowedLogins: ["somebody-else"] });
 
     for (const path of ["/api/runs", `/api/runs/${app.job.id}`]) {
-      const response = await app.through(removed)(path, cookies);
+      const response = await app.through(app.harness, noWorkspaceGates)(
+        path,
+        cookies,
+      );
       const text = await response.text();
 
       expect(response.status).toBe(403);

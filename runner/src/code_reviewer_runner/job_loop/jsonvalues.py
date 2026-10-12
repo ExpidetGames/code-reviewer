@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Typed access to JSON values that come from outside (the app's answers, a process's output)."""
 
 from typing import Any, cast

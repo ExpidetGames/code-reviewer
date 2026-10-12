@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down what the pages may know about the instance's configuration: which GitHub App variables
 // are missing or wrong (by name only), whether the LLM access works, and the address people use to
 // install the GitHub App. Never a value: the private key, the webhook secret and the LLM key must
@@ -5,7 +7,12 @@
 import { generateKeyPairSync } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { findGithubAppConfigProblem } from "../integrations/registry.ts";
-import { describeConfigStatus, githubAppInstallUrl } from "./status.ts";
+import {
+  configAudienceOf,
+  describeConfigStatus,
+  githubAppInstallUrl,
+  statusForMembers,
+} from "./status.ts";
 
 const KEY = generateKeyPairSync("rsa", {
   modulusLength: 2048,
@@ -95,16 +102,27 @@ describe("describing the configuration for the pages", () => {
     }
   });
 
-  // CR-34-T09
-  it("reports a missing LLM key with the variable name", () => {
+  // #106-IM-01
+  it("reports nothing about an LLM key: it is a matter of each workspace, and the variables are not read", () => {
     const status = describeConfigStatus({
       ...COMPLETE,
       LLM_API_KEY: undefined,
+      LLM_PROVIDER: undefined,
+    });
+
+    expect(status.llm).toMatchObject({ configured: true, warnings: [] });
+  });
+
+  // CR-34-T09 (a wrong option is still a warning)
+  it("reports a wrong model option as a warning with the variable name", () => {
+    const status = describeConfigStatus({
+      ...COMPLETE,
+      LLM_MODEL: "not a model",
     });
 
     expect(status.llm).toMatchObject({
-      configured: false,
-      issues: [{ code: "LLM_API_KEY_MISSING", variable: "LLM_API_KEY" }],
+      configured: true,
+      warnings: [{ code: "LLM_MODEL_INVALID", variable: "LLM_MODEL" }],
     });
   });
 
@@ -136,5 +154,44 @@ describe("describing the configuration for the pages", () => {
     expect(githubAppInstallUrl(COMPLETE)).toBe(
       "https://github.com/apps/code-reviewer-test/installations/new",
     );
+  });
+});
+
+describe("the status for members", () => {
+  // #101-WM-08
+  it("keeps whether each part works and nothing else: no variable, slug, provider, model or warning", () => {
+    const broken = describeConfigStatus({
+      LLM_PROVIDER: "openrouter",
+      LLM_MODEL: "not a model",
+    });
+    const working = describeConfigStatus({
+      ...COMPLETE,
+      LLM_MODEL: "vendor/secret-model",
+    });
+
+    expect(statusForMembers(broken)).toEqual({
+      githubApp: {
+        configured: false,
+        kind: "missing",
+        variables: [],
+        slug: null,
+      },
+      llm: {
+        configured: true,
+        provider: "openrouter",
+        model: "",
+        warnings: [],
+      },
+    });
+    const shown = statusForMembers(working);
+    expect(shown.githubApp.configured).toBe(true);
+    expect(shown.llm.configured).toBe(true);
+    expect(JSON.stringify(shown)).not.toMatch(/secret-model|LLM_|GITHUB_APP/);
+  });
+
+  // #101-WM-08
+  it("is for everybody but the instance admin", () => {
+    expect(configAudienceOf({ isInstanceAdmin: true })).toBe("operator");
+    expect(configAudienceOf({ isInstanceAdmin: false })).toBe("member");
   });
 });

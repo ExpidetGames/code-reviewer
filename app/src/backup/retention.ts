@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Which backups to keep. Pure: file names and a clock in, two lists out; nothing here touches the
 // disk, so the rule can be tested exhaustively.
 //

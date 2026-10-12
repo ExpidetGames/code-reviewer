@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down that the webhook route only starts work for a repository with an active project: a
 // signed pull request or comment command delivery for a repository without a project, with a
 // deactivated one, or with one whose repository disappeared is answered 202 `project_not_active` and
@@ -9,6 +11,7 @@ import {
   webhookFixture,
   type WebhookDeliveryOptions,
 } from "../../../fakes/github/webhooks.ts";
+import { createProjectsRepository } from "../../src/db/repositories/projects-repository.ts";
 import {
   fixturePullRequest,
   startWebhookHarness,
@@ -86,6 +89,26 @@ describe("a pull request delivery for a repository that is not a project", () =>
     const h = await startWebhookHarness();
     await h.seedInstallation();
     await h.projects.deactivateProject(await repositoryIdOf(h));
+
+    const response = await h.deliver("pull_request.opened");
+
+    expect(response.status).toBe(202);
+    expect(await json(response)).toEqual({
+      status: "accepted",
+      outcome: "project_not_active",
+    });
+    expect(h.intake.calls).toBe(0);
+  });
+
+  // #80
+  it("is answered 202 project_not_active without a trigger when the project only exists because settings were saved", async () => {
+    const h = await startWebhookHarness();
+    await h.seedInstallation({ activateProject: false });
+    const saved = await createProjectsRepository(
+      h.db,
+      h.workspaceId,
+    ).updateSettings(await repositoryIdOf(h), { maxFindings: 2 });
+    expect(saved).toMatchObject({ active: false });
 
     const response = await h.deliver("pull_request.opened");
 

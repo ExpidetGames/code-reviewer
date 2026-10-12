@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the two journeys that make the app usable: signing in with GitHub (against the fake
 // GitHub, as a person does through the form) and signing out again. Every other behavior of the
 // sign in is proven at a lower level.
@@ -28,12 +30,28 @@ test.describe("signing in and out", () => {
   }) => {
     await signInThroughTheForm(page, account);
 
-    await expect(page).toHaveURL(/\/projects$/);
+    await expect(page).toHaveURL(/\/w\/default\/projects$/);
     await expect(userMenuButton(page, account)).toBeVisible();
 
     await page.reload();
 
     await expect(userMenuButton(page, account)).toBeVisible();
+  });
+
+  // #102-GH-26
+  test("an imported user's placeholder address is replaced by the verified address of the GitHub account at the first sign in", async ({
+    page,
+  }) => {
+    await signInThroughTheForm(page, account);
+
+    await page.goto("/account");
+
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Your account" }),
+    ).toBeVisible();
+    await expect(page.getByText(account.email ?? "")).toBeVisible();
+    await expect(page.getByText("Verified", { exact: true })).toBeVisible();
+    await expect(page.getByText(`@${account.login}`)).toBeVisible();
   });
 
   // CR-18-T02

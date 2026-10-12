@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Signs the short-lived JWT that authenticates the app itself to GitHub (RS256, `iss` is the app id).
 import { createSign } from "node:crypto";
 

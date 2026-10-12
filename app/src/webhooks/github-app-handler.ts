@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The handler behind `POST /api/webhooks/github-app`. It is a function of its collaborators, so the
 // route file only wires the real ones in (`shared.ts`) and tests wire fakes in.
 //
@@ -10,7 +12,9 @@
 //   4. relevance an event the app does not use is answered at once                 202
 //   5. claim     the delivery id is claimed; a succeeded id is a duplicate         202
 //                an id another request is handling right now                        409
-//   6. identify  `identifyWebhook` names the installation; the integration is loaded
+//   6. identify  `identifyWebhook` names the installation; the integration is loaded, and with it
+//                the workspace the delivery belongs to (everything after this runs in that
+//                workspace: its projects, its settings, its job queue)
 //   7. translate `parseEvent`: a review trigger, an installation change or "ignored"
 //   8. act       trigger -> the repository must have an active project, then the trigger
 //                policy (automatic-review-policy.ts: drafts, settings, the debounce of a push;
@@ -27,7 +31,7 @@
 // code, which `after()` could not do.
 import "server-only";
 import type { WebhookDeliveriesRepository } from "../db/repositories/webhook-deliveries-repository.ts";
-import type { IntegrationsRepository } from "../db/repositories/integrations-repository.ts";
+import type { IntegrationDirectory } from "../db/repositories/integration-directory-repository.ts";
 import { hasSafeMessage } from "../integrations/errors.ts";
 import type { IntegrationRegistry } from "../integrations/registry.ts";
 import type { IntegrationSyncService } from "../integrations/sync/service.ts";
@@ -82,8 +86,19 @@ const DELIVERY_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
  */
 export type ProjectGate = Pick<ProjectService, "hasActiveProject">;
 
-/** What the trigger policy needs besides the trigger: the project's settings, the wait and the clock. */
+/** What the trigger policy needs besides the trigger: the wait, the head check and the clock. */
 export type AutomaticReviewDeps = {
+  /** How long a push waits before its review may start. */
+  debounceMs: number;
+  /** How long the check against GitHub's current head may take (default 5 seconds). */
+  headCheckTimeoutMs?: number;
+  now(): Date;
+};
+
+/** The collaborators that act inside one workspace. */
+export type WorkspaceCollaborators = {
+  /** Which repositories of the workspace are reviewed at all. */
+  projects: ProjectGate;
   /**
    * The settings a review of the repository's project uses (project over global over built-in), or
    * `undefined` when the repository has no project.
@@ -92,24 +107,30 @@ export type AutomaticReviewDeps = {
     integrationId: string,
     repositoryExternalId: string,
   ): Promise<ReviewSettings | undefined>;
-  /** How long a push waits before its review may start. */
-  debounceMs: number;
-  /** How long the check against GitHub's current head may take (default 5 seconds). */
-  headCheckTimeoutMs?: number;
-  now(): Date;
+  intake: ReviewTriggerIntake;
 };
 
 export type GithubAppWebhookDeps = {
   registry: IntegrationRegistry;
-  integrations: Pick<IntegrationsRepository, "findByExternalId">;
+  /**
+   * Finds the integration an installation id belongs to, in any workspace: the delivery names the
+   * installation before anybody knows the workspace, and the integration says which one it is.
+   */
+  integrations: Pick<IntegrationDirectory, "findByExternalId">;
   deliveries: WebhookDeliveriesRepository;
   /** The process-wide sync service (`getIntegrationSync()`), never one created for the route. */
   sync: Pick<IntegrationSyncService, "handleInstallationChange">;
-  projects: ProjectGate;
+  /** The collaborators of one workspace; called with the workspace of the delivery's integration. */
+  workspace: (workspaceId: string) => WorkspaceCollaborators;
   automatic: AutomaticReviewDeps;
-  intake: ReviewTriggerIntake;
   logger?: WebhookLogger;
   maxBodyBytes?: number;
+  /**
+   * Whether anybody has started to configure the GitHub App. An instance that is not connected to
+   * GitHub is in its normal state, not broken: a delivery that cannot be verified is then refused
+   * as always, but the log does not call it an error. Default: configured.
+   */
+  githubAppConfigured?: () => boolean | Promise<boolean>;
 };
 
 export type WebhookHandler = (request: Request) => Promise<Response>;
@@ -129,12 +150,28 @@ class HeadCheckTimeout extends Error {
   readonly code = "HEAD_CHECK_TIMEOUT";
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+/**
+ * Runs `run` with a signal that fires after `ms`. The slow request is aborted (the connection is
+ * closed), and the answer is not waited for either, for a provider that ignores the signal. The
+ * timeout is rejected before the signal fires, so the failure is always HEAD_CHECK_TIMEOUT and
+ * never the provider's own code for an aborted request.
+ */
+function withTimeout<T>(
+  run: (signal: AbortSignal) => Promise<T>,
+  ms: number,
+): Promise<T> {
+  const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new HeadCheckTimeout()), ms);
+    timer = setTimeout(() => {
+      const failure = new HeadCheckTimeout();
+      reject(failure);
+      controller.abort(failure);
+    }, ms);
   });
-  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+  // `run` may throw before it returns a promise: that is a rejection too, and the timer is cleared.
+  const attempt = (async () => run(controller.signal))();
+  return Promise.race([attempt, timeout]).finally(() => clearTimeout(timer));
 }
 
 /** The stable code of an error, or its class name: never its message, which may name a response. */
@@ -155,6 +192,8 @@ function describeError(error: unknown): string {
 function standIn(externalId: string): Integration {
   return {
     id: "unknown",
+    // The stand-in is only handed to `parseEvent`, which reads nothing of it but the platform ids.
+    workspaceId: "unknown",
     type: TYPE,
     displayName: "",
     externalId,
@@ -184,15 +223,7 @@ function loggedUnverifiableFor(): WeakSet<WebhookLogger> {
 export function createGithubAppWebhookHandler(
   deps: GithubAppWebhookDeps,
 ): WebhookHandler {
-  const {
-    registry,
-    integrations,
-    deliveries,
-    sync,
-    projects,
-    automatic,
-    intake,
-  } = deps;
+  const { registry, integrations, deliveries, sync, automatic } = deps;
   const logger = deps.logger ?? consoleWebhookLogger;
   const maxBodyBytes = deps.maxBodyBytes ?? WEBHOOK_MAX_BODY_BYTES;
 
@@ -230,7 +261,13 @@ export function createGithubAppWebhookHandler(
   > {
     try {
       const pullRequest = await withTimeout(
-        provider.getPullRequest(integration, trigger.repo, trigger.prNumber),
+        (signal) =>
+          provider.getPullRequest(
+            integration,
+            trigger.repo,
+            trigger.prNumber,
+            signal,
+          ),
         automatic.headCheckTimeoutMs ?? HEAD_CHECK_TIMEOUT_MS,
       );
       return { kind: "found", pullRequest };
@@ -262,9 +299,13 @@ export function createGithubAppWebhookHandler(
     );
     const isInstallationEvent = INSTALLATION_EVENTS.has(eventName);
 
-    // A suspended or removed installation reviews nothing; its own events still go through (they are
-    // how it comes back).
-    if (integration?.status === "disabled" && !isInstallationEvent)
+    // A suspended, removed or disconnected installation reviews nothing; its own events still go through
+    // (they are how a suspended one comes back).
+    if (
+      integration !== undefined &&
+      integration.status !== "active" &&
+      !isInstallationEvent
+    )
       return "integration_disabled";
     // Only an installation event can introduce an installation we do not know yet.
     if (integration === undefined && !isInstallationEvent)
@@ -291,7 +332,10 @@ export function createGithubAppWebhookHandler(
           `the installation could not be synchronized (${result.summary.errors.map((error) => error.code).join(", ")})`,
           503,
         );
-      return "installation_changed";
+      // An installation no workspace has linked is only noted; nothing else is done for it.
+      return result.outcome === "unclaimed"
+        ? "installation_unclaimed"
+        : "installation_changed";
     }
 
     // A payload that lacks what the app reads cannot be handled, now or on a redelivery: the sender
@@ -302,6 +346,11 @@ export function createGithubAppWebhookHandler(
     // Only an installation event reaches here without a row, and it never yields a review trigger;
     // the check keeps that true even if a provider changes.
     if (integration === undefined) return "unknown_installation";
+
+    // From here on the delivery is the business of the workspace the installation is linked to.
+    const { projects, settingsFor, intake } = deps.workspace(
+      integration.workspaceId,
+    );
 
     // A closed pull request starts nothing; the jobs still waiting for it are dropped. Only for a
     // repository with an active project (deactivating a project drops its waiting jobs already).
@@ -351,10 +400,7 @@ export function createGithubAppWebhookHandler(
 
     // The settings of the project decide for a command (which ones people may use) and for an
     // automatic trigger (the policy below).
-    const settings = await automatic.settingsFor(
-      integration.id,
-      trigger.repo.externalId,
-    );
+    const settings = await settingsFor(integration.id, trigger.repo.externalId);
     if (settings === undefined) return "project_not_active";
 
     // A comment command is not subject to the policy for automatic reviews (drafts, the automatic
@@ -438,7 +484,10 @@ export function createGithubAppWebhookHandler(
       // A delivery that cannot be verified is refused like a forged one; callers learn nothing about
       // the configuration. The operator reads the cause in the log.
       const logged = loggedUnverifiableFor();
-      if (!logged.has(logger)) {
+      if (
+        !logged.has(logger) &&
+        ((await deps.githubAppConfigured?.()) ?? true)
+      ) {
         logged.add(logger);
         logger.error(
           `[webhook] deliveries cannot be verified: ${describeError(error)}`,

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // @vitest-environment jsdom
 // Pins down the Projects page with real data: the list is built from a real SQLite file filled by the
 // sync against the fake GitHub, and the configuration hints follow the environment. The hints name
@@ -11,12 +13,16 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { createProjectsRepository } from "../../db/repositories/projects-repository.ts";
-import { describeConfigStatus } from "../../config-status/status.ts";
-import { githubAppInstallUrl } from "../../config-status/status.ts";
+import {
+  describeConfigStatus,
+  statusForMembers,
+  type ConfigAudience,
+} from "../../config-status/status.ts";
 import { testGithubAppEnv } from "../../test-support/github-app.ts";
 import { startSyncHarness } from "../../test-support/integration-sync-harness.ts";
 import { createProjectService } from "../service.ts";
 import { loadProjectsPage, ProjectsPageContent } from "./projects-page.tsx";
+import { defaultWorkspaceId } from "../../test-support/workspaces.ts";
 
 afterEach(cleanup);
 
@@ -27,7 +33,10 @@ const WORKING_ENV: Record<string, string | undefined> = {
   LLM_API_KEY: LLM_KEY,
 };
 
-async function openPage(env: Record<string, string | undefined> = WORKING_ENV) {
+async function openPage(
+  env: Record<string, string | undefined> = WORKING_ENV,
+  audience: ConfigAudience = "operator",
+) {
   const h = await startSyncHarness();
   h.fake.addInstallation({
     id: 4242,
@@ -47,7 +56,7 @@ async function openPage(env: Record<string, string | undefined> = WORKING_ENV) {
   ]);
   await h.sync.syncAll();
   const projects = createProjectService({
-    projects: createProjectsRepository(h.db),
+    projects: createProjectsRepository(h.db, await defaultWorkspaceId(h.db)),
   });
   const widgets = (await h.repositories.list()).find(
     (repo) => repo.fullName === "acme/widgets",
@@ -55,10 +64,19 @@ async function openPage(env: Record<string, string | undefined> = WORKING_ENV) {
   await projects.activateProject(widgets!.id);
   const data = await loadProjectsPage({
     projects,
-    config: () => describeConfigStatus(env),
-    installUrl: () => githubAppInstallUrl(env),
+    // What the page file does: the whole status for the instance admin, the reduced one for a member.
+    config: () =>
+      audience === "operator"
+        ? describeConfigStatus(env)
+        : statusForMembers(describeConfigStatus(env)),
   });
-  return render(<ProjectsPageContent data={data} />);
+  return render(
+    <ProjectsPageContent
+      workspaceSlug="acme"
+      audience={audience}
+      data={data}
+    />,
+  );
 }
 
 describe("the Projects page", () => {
@@ -93,14 +111,16 @@ describe("the Projects page", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  // CR-34-T09
-  it("shows 'LLM key missing' without any key value when no LLM key is set", async () => {
+  // #104-LK-13 (the hint about the workspace's LLM key is src/llm/ui/llm-access-notice.tsx)
+  it("does not report an absent LLM variable, and shows no key value", async () => {
     const { container } = await openPage({
       ...WORKING_ENV,
       LLM_API_KEY: undefined,
+      LLM_PROVIDER: undefined,
     });
 
-    expect(screen.getByText("LLM key missing")).toBeTruthy();
+    expect(screen.queryByText("LLM key missing")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
     expect(container.textContent).not.toContain(LLM_KEY);
   });
 
@@ -144,5 +164,37 @@ describe("the Projects page", () => {
       (toggle) => toggle.getAttribute("aria-checked") === "true",
     );
     expect(on?.disabled).toBe(false);
+  });
+
+  // #101-WM-08
+  it("tells a member that GitHub is not set up and to ask the instance admin, without a variable name, and still blocks activating", async () => {
+    const { container } = await openPage(
+      {
+        ...WORKING_ENV,
+        GITHUB_APP_ID: undefined,
+        GITHUB_APP_PRIVATE_KEY: undefined,
+        LLM_API_KEY: undefined,
+      },
+      "member",
+    );
+
+    expect(screen.getByText("GitHub is not set up yet")).toBeTruthy();
+    expect(screen.queryByText("Reviews are not set up yet")).toBeNull();
+    expect(container.textContent).toContain("Ask your instance admin");
+    expect(container.textContent).not.toMatch(
+      /GITHUB_APP|LLM_|GitHub App not configured/,
+    );
+    const switches = screen.getAllByRole("switch") as HTMLButtonElement[];
+    const off = switches.filter(
+      (toggle) => toggle.getAttribute("aria-checked") === "false",
+    );
+    expect(off.every((toggle) => toggle.disabled)).toBe(true);
+  });
+
+  // #101-WM-08
+  it("shows a member of a working instance no hint at all", async () => {
+    const { container } = await openPage(WORKING_ENV, "member");
+
+    expect(container.querySelector(".notices")).toBeNull();
   });
 });

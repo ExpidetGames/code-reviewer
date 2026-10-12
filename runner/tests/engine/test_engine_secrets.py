@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Pins down that no credential of a job is found anywhere after a run: not on stdout or stderr, not
 in the log tail, not in a posted comment or the new text of the pull request, not in a file the job
 left behind, not in the command line or the environment of the process. The fakes make this a hard

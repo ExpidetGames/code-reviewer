@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // A login is a name, not an identity: GitHub frees an old username after a rename, and somebody
 // else can register it. So a login on `ALLOWED_GITHUB_LOGINS` is bound ("pinned") to the numeric
 // GitHub id of the account that first used it, and only that account is admitted through the list

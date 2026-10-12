@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down `POST /api/runners/v1/claim` through the real handler: a real SQLite file with the job
 // queue, the real GitHub App provider against the fake GitHub, and the API wired to both. It covers
 // what a runner is handed and when (credentials only at claim time, one token per claim, the guard,
@@ -315,9 +317,7 @@ describe("when the credentials are created", () => {
 
 describe("a job that cannot be handed out", () => {
   it("fails the job with llm_not_configured and creates no credentials when the LLM key is missing", async () => {
-    const h = await startRunnerApiHarness({
-      env: { LLM_API_KEY: undefined },
-    });
+    const h = await startRunnerApiHarness({ llmKey: null });
     const job = await h.enqueueNew();
 
     const response = await h.claim();
@@ -468,6 +468,25 @@ describe("a job that cannot be handed out", () => {
     });
   });
 
+  // #103-IB-14
+  it("fails a job whose integration was disconnected by its workspace, and creates no credential for it", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await h.enqueueNew();
+    await h.db
+      .updateTable("integrations")
+      .set({ status: "disconnected" })
+      .execute();
+
+    const response = await h.claim();
+
+    expect(response.status).toBe(204);
+    expect(await h.queue.get(job.id)).toMatchObject({
+      status: "failed",
+      errorCode: "git_connection_disabled",
+    });
+    expect(h.issuedJobTokens()).toStrictEqual([]);
+  });
+
   it("fails an ask job without a question, so the runner is not handed a job it must refuse", async () => {
     const h = await startRunnerApiHarness();
     const job = await h.enqueueNew({ command: "ask", args: "   " });
@@ -529,7 +548,7 @@ describe("a job that cannot be handed out", () => {
 
   it("trims a key with white space around it before it is handed out", async () => {
     const h = await startRunnerApiHarness({
-      env: { LLM_API_KEY: ` ${TEST_LLM_API_KEY}\n` },
+      llmKey: ` ${TEST_LLM_API_KEY}\n`,
     });
     await h.enqueueNew();
 

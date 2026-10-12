@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down that the login protection and the webhook route work together: the access proxy (real
 // Better Auth, real database) lets a request without a session reach `/api/webhooks/github-app`, and
 // the real route file answers it exactly as it does without the protection in front. The guard must
@@ -13,6 +15,7 @@ import {
 import { createAccessProxy } from "../../src/auth/access-proxy.ts";
 import {
   closeDatabase,
+  getDatabase,
   initializeDatabaseOnStart,
 } from "../../src/db/startup.ts";
 import { createAuthHarness } from "../../src/test-support/auth-harness.ts";
@@ -20,7 +23,9 @@ import {
   TEST_WEBHOOK_SECRET,
   testGithubAppEnv,
 } from "../../src/test-support/github-app.ts";
+import { saveGithubAppFromEnv } from "../../src/test-support/server-credentials.ts";
 import { createTestDirectory } from "../../src/test-support/test-database.ts";
+import { openGates } from "../../src/test-support/open-gates.ts";
 
 type Route = typeof import("../../src/app/api/webhooks/github-app/route.ts");
 
@@ -30,15 +35,17 @@ async function startGuardedRoute() {
   const harness = await createAuthHarness();
   const proxy = createAccessProxy({
     getAuth: () => harness.auth,
-    getPolicy: () => harness.policy,
+    getGates: () => openGates,
   });
-  for (const [name, value] of Object.entries(testGithubAppEnv()))
+  const env = testGithubAppEnv();
+  for (const [name, value] of Object.entries(env))
     if (value !== undefined) vi.stubEnv(name, value);
   await initializeDatabaseOnStart({
     env: {
       DATABASE_PATH: join(await createTestDirectory(), "app.db"),
     },
   });
+  await saveGithubAppFromEnv(getDatabase(), env);
   vi.resetModules();
   const route: Route =
     await import("../../src/app/api/webhooks/github-app/route.ts");
@@ -81,6 +88,7 @@ afterEach(async () => {
   await closeDatabase();
 });
 
+// #102-GH-10 (regression): unchanged by the move of the GitHub App into the database.
 describe("the webhook route behind the login protection", () => {
   // CR-43-T02
   it("is reached by a signed delivery without a session and answers as it does without the protection", async () => {

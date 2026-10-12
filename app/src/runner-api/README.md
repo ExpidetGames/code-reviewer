@@ -16,13 +16,21 @@ The runner (Python, `runner/`) asks the app for work over HTTP: it **claims** a 
 | `claim.ts`                         | The claim: guard, settings, pull request, credentials, the response                                                                                                                                             |
 | `report.ts`                        | Heartbeat and complete                                                                                                                                                                                          |
 | `requests.ts`                      | The checks on job id, `X-Runner-Id` and the two request bodies (hand written, kept in line with the contract by the compatibility test)                                                                         |
-| `token-auth.ts`, `startup.ts`      | The `RUNNER_TOKEN` check (constant time, at least 32 characters) and the hint at server start                                                                                                                   |
+| `token-auth.ts`, `startup.ts`      | The `RUNNER_TOKEN` check (constant time, at least 32 characters) and the warning at a start without the production check                                                                                        |
 | `redact.ts`                        | Removes anything that looks like a credential from a result before it is stored                                                                                                                                 |
 | `responses.ts`                     | Every answer: `Cache-Control: no-store`, the error form `{ error: { code, message } }`                                                                                                                          |
 | `claim-guard.ts`, `job-options.ts` | The two hooks (below); `project-claim-guard.ts` and `review-settings-job-options.ts` are what the running server plugs in                                                                                       |
-| `claimed-keys.ts`                  | In memory only: the LLM key handed out with the claim of each job, so a rotated key can still be masked in its result                                                                                           |
+| `claimed-keys.ts`                  | In the database, encrypted (`job_claimed_keys`): the LLM key handed out with the claim of each job, so a rotated key can still be masked in its result by whichever app instance completes it                   |
 | `contract.ts`                      | The TypeScript types and code lists of the contract                                                                                                                                                             |
 | `shared.ts`                        | The wiring of the running server (`getRunnerApi()`, `withRunnerApi`); the route files under `src/app/api/runners/v1/` only call `withRunnerApi`, which answers a failure while setting up in the usual 500 form |
+
+## Workspaces
+
+The runner token belongs to the instance, not to a workspace: a claim hands out the oldest due job of any
+workspace (`createRunnerQueue`, not scoped). Everything the claim then looks up for that job (repository,
+connection, project, review settings) is looked up in the workspace of the job (`job.workspaceId`), so the
+credentials are those of the job's own connection. Nothing of this shows in the contract: the answers
+are the same as for a single workspace.
 
 ## Authentication
 
@@ -37,7 +45,7 @@ through (`src/auth/access.ts`): this token is the authentication.
 
 `X-Runner-Id` is a free-form name (letters, digits and `._:@-`, up to 64 characters) that ends up in
 `jobs.runner_id` and in the logs. There is no rate limit on failed attempts: that is why the token must
-be long and random (`openssl rand -hex 32`); the server logs one warning at start if it is missing or short. It is bookkeeping, not a security boundary: what proves that a runner
+be long and random (`openssl rand -hex 32`); a production start with a missing or short token is refused (`DEPLOY_CONFIG_INVALID`, `src/deploy/startup.ts`), any other start logs one warning. It is bookkeeping, not a security boundary: what proves that a runner
 holds a job is the **lease token**.
 
 ## The lease token
@@ -70,13 +78,15 @@ Every answer, including `204`, carries `Cache-Control: no-store`.
 for that job, in this order:
 
 1. **The claim guard** may refuse it (below).
-2. **LLM access** must be configured: the shared LLM configuration of `src/llm` (`getLlmAccess()`, read
-   from the environment on every claim): `LLM_PROVIDER` (required, `openrouter`) and `LLM_API_KEY`
-   (required); `LLM_MODEL` (default `anthropic/claude-haiku-5.5`) and `LLM_MAX_TOKENS` are optional.
-   Otherwise the job ends as `failed` with `llm_not_configured`. **Operations:** this fails every job a
-   runner claims, up to 25 per request, for good; fixing the setting later does not revive them (they
-   have to be queued again, for example by a new commit or a comment). Set `LLM_PROVIDER` and
-   `LLM_API_KEY` before the first runner connects.
+2. **LLM access** of the job's own workspace (`llm.accessFor(job.workspaceId)`, `src/llm/resolve.ts`): the key the
+   workspace entered itself, or, if the operator offers included usage (off), the operator's, or, on a
+   single-tenant instance, the legacy `LLM_PROVIDER`/`LLM_API_KEY` variables. The key of another workspace is
+   never looked at, and a workspace without a key does not get one: the job ends as `failed` with
+   `llm_not_configured` (the log line names the reason, `no_key`, `key_unreadable`, `key_binding_mismatch`, or the
+   legacy variables that are wrong). **Operations:** this fails every job of that workspace a runner claims, up to 25
+   per request, for good; entering a key later does not revive them (they have to be queued again, for example
+   by a new commit or a comment). The key is remembered, encrypted, in the database before the response leaves
+   (`claimed-keys.ts`); if that fails the job is given back and the runner gets a 500 without a key.
    **Options** of the job come next (`JobOptionsSource`, below): the model and token budget of the
    review settings replace the instance's model and context window (`llm.model`, `llm.maxTokens`), and
    the other options go into `env`. `llm.baseUrl` and `llm.fallbackModels` are never sent (the LLM
@@ -115,7 +125,8 @@ The body is `{ leaseToken, result }`. `result` is what `code-reviewer-run-job` p
   result).
 - **No secrets are stored.** The runner redacts its own log. As a second line, `redact.ts` removes
   anything that looks like a credential (GitHub tokens, provider keys, bearer credentials) and the exact
-  LLM key and runner token from `logTail`, `errorMessage` and `commentUrl` before they are stored. The
+  LLM key of the claim (from the database, so any app instance knows it), the current key of the job's workspace
+  and the runner token from `logTail`, `errorMessage` and `commentUrl` before they are stored. The
   git token is not known to the app after the claim, so it can only be recognised by its shape.
 - **A runner that is shut down** reports `ok: false, errorCode: "runner_shutdown"`. That is not a result:
   the job is given back with `release` (it waits again, one attempt counted, the same cap as a lapsed
@@ -127,7 +138,7 @@ The body is `{ leaseToken, result }`. `result` is what `code-reviewer-run-job` p
   not a different result.
 - A body over 64 KiB is refused with `413` before it is parsed.
 
-## Hooks that other tickets fill in
+## Hooks
 
 - **`ClaimGuard`** (`claim-guard.ts`): `check(job)` returns `{ allow: true }` or
   `{ allow: false, errorCode, outcome? }`. The running server uses `createProjectClaimGuard`
@@ -163,7 +174,7 @@ The body is `{ leaseToken, result }`. `result` is what `code-reviewer-run-job` p
   (capped, oldest first; a restart forgets it, and masking then falls back to the current key and to the
   shape of a credential), because a key is never written to the database.
 
-## Before this is used in production
+## Where the trigger policy lives
 
 The trigger policy (CR-31: drafts, the review settings, the debounce of a push, the check against
 the current head commit, dropping the waiting jobs of a closed pull request) and the project gate

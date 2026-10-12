@@ -1,8 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the calls the project list makes: which route, which method and which body, for
 // activating, deactivating and running the sync. The routes themselves are proven where they live.
 import { describe, expect, it } from "vitest";
 import type { FetchLike } from "../../ui/json-request.ts";
-import { createProjectsApi } from "./api.ts";
+import { createInstanceSyncApi, createProjectsApi } from "./api.ts";
 
 function recorder(body: unknown = {}) {
   const calls: Array<{ url: string; method: string; body: string | null }> = [];
@@ -14,7 +16,7 @@ function recorder(body: unknown = {}) {
     });
     return new Response(JSON.stringify(body), { status: 200 });
   };
-  return { calls, api: createProjectsApi(fetchImpl) };
+  return { calls, api: createProjectsApi(fetchImpl, "acme") };
 }
 
 describe("the project list's calls", () => {
@@ -27,7 +29,7 @@ describe("the project list's calls", () => {
     expect(result.ok).toBe(true);
     expect(calls).toEqual([
       {
-        url: "/api/repositories/repo-1/project",
+        url: "/api/w/acme/repositories/repo-1/project",
         method: "PUT",
         body: '{"active":true}',
       },
@@ -48,18 +50,41 @@ describe("the project list's calls", () => {
 
     await api.setActive("a/b?c", true);
 
-    expect(calls[0]?.url).toBe("/api/repositories/a%2Fb%3Fc/project");
+    expect(calls[0]?.url).toBe("/api/w/acme/repositories/a%2Fb%3Fc/project");
   });
 
   // CR-21-T03
-  it("runs the sync with POST and no body", async () => {
+  it("runs the sync of the workspace with POST and no body", async () => {
     const { api, calls } = recorder({ added: 1, errors: [] });
 
     const result = await api.sync();
 
     expect(result).toEqual({ ok: true, data: { added: 1, errors: [] } });
     expect(calls).toEqual([
-      { url: "/api/integrations/sync", method: "POST", body: null },
+      {
+        url: "/api/w/acme/integrations/sync",
+        method: "POST",
+        body: null,
+      },
+    ]);
+  });
+});
+
+describe("the instance's call", () => {
+  // #103-IB-13
+  it("runs the synchronization of the whole instance on the route of the admin portal", async () => {
+    const calls: Array<{ url: string; method: string }> = [];
+    const api = createInstanceSyncApi(async (url, init) => {
+      calls.push({ url, method: init?.method ?? "GET" });
+      return new Response(JSON.stringify({ added: 0, errors: [] }), {
+        status: 200,
+      });
+    });
+
+    await api.sync();
+
+    expect(calls).toEqual([
+      { url: "/api/admin/integrations/sync", method: "POST" },
     ]);
   });
 });

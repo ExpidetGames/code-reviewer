@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Stable error codes of the job queue. Callers branch on `code`, never on the message.
 export const JOB_ERROR_CODE_SET = [
   /** `enqueue` was given a value that is not valid; `fieldErrors` names the fields. */

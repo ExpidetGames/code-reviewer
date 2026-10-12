@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 "use client";
 // The frame around every signed in page: skip link, header with the brand, the main navigation and
 // the user menu, and the main landmark for the page. On a narrow screen the navigation sits behind
@@ -18,9 +20,12 @@ import { CurrentNavLinks, NavLinks } from "./nav-links.tsx";
 
 export function AppShell({
   userMenu,
+  workspaceSwitcher,
   children,
 }: {
   userMenu: ReactNode;
+  /** The workspaces of the signed in person; it needs the session, so it arrives as a slot too. */
+  workspaceSwitcher?: ReactNode;
   children: ReactNode;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -69,7 +74,7 @@ export function AppShell({
             <span className="menu-icon" aria-hidden="true" />
             Menu
           </button>
-          <Link href="/projects" className="brand" onClick={closeMenu}>
+          <Link href="/" className="brand" onClick={closeMenu}>
             Code Reviewer
           </Link>
           <nav
@@ -85,7 +90,10 @@ export function AppShell({
               <CurrentNavLinks onNavigate={closeMenu} />
             </Suspense>
           </nav>
-          <div className="header-end">{userMenu}</div>
+          <div className="header-end">
+            {workspaceSwitcher}
+            {userMenu}
+          </div>
         </div>
       </header>
       <main id={mainId} className="app-main" tabIndex={-1}>

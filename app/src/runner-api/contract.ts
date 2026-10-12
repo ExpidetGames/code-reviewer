@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The TypeScript side of contracts/runner-api.v1.json. The JSON file is the source of the format;
 // these types and sets are written by hand and kept in line with it by
 // integration-tests/compatibility/runner-api-contract.integration.test.ts (the sets are compared

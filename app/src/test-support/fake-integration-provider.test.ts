@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the fake provider that other tickets build on, and the conformance suite itself: the
 // fake must pass it, and providers that break the contract must fail exactly the matching checks.
 import { describe, expect, it } from "vitest";
@@ -106,6 +108,19 @@ describe("the conformance suite", () => {
       "reports a delivery that is not relevant as ignored",
       "returns pull requests as normalized pull request references",
       "reports an unknown pull request with a stable error code",
+      "stops a pull request read when the abort signal has already fired",
+    ]);
+  });
+
+  it("fails a provider that ignores an aborted signal", async () => {
+    const deaf: IntegrationProvider = {
+      ...fakeIntegrationProvider(),
+      getPullRequest: (integration, repo, prNumber) =>
+        fakeIntegrationProvider().getPullRequest(integration, repo, prNumber),
+    };
+
+    expect(await failedChecks(deaf)).toEqual([
+      "stops a pull request read when the abort signal has already fired",
     ]);
   });
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down how the database settings are read from the environment: defaults, overrides and the
 // refusal of a busy timeout that cannot be used.
 import { describe, expect, it } from "vitest";

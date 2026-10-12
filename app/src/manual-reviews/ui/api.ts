@@ -1,6 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The calls the start panel makes to the app's own routes: load the open pull requests
-// (`GET /api/repositories/:id/pull-requests`) and start a command
-// (`POST /api/repositories/:id/reviews`, src/manual-reviews/http.ts). Browser side; no secrets here.
+// (`GET /api/w/:workspace/repositories/:id/pull-requests`) and start a command
+// (`POST /api/w/:workspace/repositories/:id/reviews`, src/manual-reviews/http.ts). The workspace is the one
+// of the page that makes the call. Browser side; no secrets here.
+import { workspaceApiPath } from "../../workspaces/paths.ts";
 import {
   requestJson,
   type FetchLike,
@@ -26,9 +30,15 @@ export type ManualReviewApi = {
   ): Promise<RequestResult<StartedReview>>;
 };
 
-export function createManualReviewApi(fetchImpl: FetchLike): ManualReviewApi {
+export function createManualReviewApi(
+  fetchImpl: FetchLike,
+  workspaceSlug: string,
+): ManualReviewApi {
   const base = (repositoryId: string) =>
-    `/api/repositories/${encodeURIComponent(repositoryId)}`;
+    workspaceApiPath(
+      workspaceSlug,
+      `/repositories/${encodeURIComponent(repositoryId)}`,
+    );
   return {
     listPullRequests: (repositoryId) =>
       requestJson<OpenPullRequests>(
@@ -47,6 +57,6 @@ export function createManualReviewApi(fetchImpl: FetchLike): ManualReviewApi {
 }
 
 /** The real thing, for the components; tests hand in their own. */
-export const browserManualReviewApi: ManualReviewApi = createManualReviewApi(
-  (url, init) => fetch(url, init),
-);
+export function browserManualReviewApi(workspaceSlug: string): ManualReviewApi {
+  return createManualReviewApi((url, init) => fetch(url, init), workspaceSlug);
+}

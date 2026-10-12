@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """The result of one job: the stable error codes and the JSON the runner prints on stdout."""
 
 import json

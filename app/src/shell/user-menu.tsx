@@ -1,8 +1,11 @@
+// SPDX-License-Identifier: Apache-2.0
+
 "use client";
 // The user menu in the header: a button with the avatar and the name that opens a small panel with
 // the person, the color theme and "Sign out". It is a disclosure (a button that shows and hides a
 // panel), so it works with plain Tab and Enter: Escape closes it and puts the focus back on the
 // button, and so does a click or the focus moving outside.
+import Link from "next/link";
 import { useEffect, useId, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { Button } from "../ui/button.tsx";
@@ -66,6 +69,22 @@ export function UserMenu({
             <strong>{name}</strong>
             <span>@{user.login}</span>
           </div>
+          <Link
+            href="/account"
+            className="nav-link"
+            onClick={() => setOpen(false)}
+          >
+            Account
+          </Link>
+          {user.isInstanceAdmin === true ? (
+            <Link
+              href="/admin"
+              className="nav-link"
+              onClick={() => setOpen(false)}
+            >
+              Admin
+            </Link>
+          ) : null}
           <div className="user-menu-section">
             <span className="user-menu-label">Theme</span>
             <ThemeToggle />

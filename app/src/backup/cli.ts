@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The command line of the backup, for a Coolify scheduled task, a manual run and the restore guide:
 //
 //   node backup/cli.ts backup             back up DATABASE_PATH into BACKUP_DIR, then rotate
@@ -68,6 +70,14 @@ function restore(
     if (result.previousKeptAs !== null)
       out(
         `[restore] the previous database was kept as ${result.previousKeptAs}`,
+      );
+    // Its -journal, -wal and -shm, or (without a database) the leftover files that were alone.
+    const others = result.keptAside.filter(
+      (path) => path !== result.previousKeptAs,
+    );
+    if (others.length > 0)
+      out(
+        `[restore] ${result.previousKeptAs === null ? "no database was in place; leftover files were kept as" : "its side files were kept as"} ${others.join(", ")}`,
       );
     return 0;
   } catch (error) {

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down how the GitHub App settings are read from the environment: what is required, which
 // problems are reported by variable name only, and that the secrets stay out of logs and JSON.
 import { createVerify, generateKeyPairSync } from "node:crypto";

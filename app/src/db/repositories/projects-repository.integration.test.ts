@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the projects table against a real SQLite file: activating a repository creates its one
 // project, deactivating keeps the row and its settings, activating again reuses the row, a repository
 // the platform no longer lists cannot be activated but keeps its project row, and two simultaneous
@@ -6,16 +8,18 @@ import { sql } from "kysely";
 import { describe, expect, it, vi } from "vitest";
 import type { RepoRef } from "../../integrations/types.ts";
 import { createTestDatabase } from "../../test-support/test-database.ts";
+import { defaultWorkspaceId } from "../../test-support/workspaces.ts";
 import { createIntegrationsRepository } from "./integrations-repository.ts";
 import { createProjectsRepository } from "./projects-repository.ts";
 import { createRepositoriesRepository } from "./repositories-repository.ts";
 
 async function setup() {
   const { db } = await createTestDatabase();
+  const workspaceId = await defaultWorkspaceId(db);
   let tick = 0;
   const now = () => new Date(Date.UTC(2026, 9, 10, 12, 0, tick++));
-  const integrations = createIntegrationsRepository(db, now);
-  const repositories = createRepositoriesRepository(db, now);
+  const integrations = createIntegrationsRepository(db, workspaceId, now);
+  const repositories = createRepositoriesRepository(db, workspaceId, now);
   const integration = await integrations.create({
     type: "github_app",
     displayName: "acme",
@@ -41,9 +45,9 @@ async function setup() {
     remote,
     first,
     second,
-    projects: createProjectsRepository(db, now),
+    projects: createProjectsRepository(db, workspaceId, now),
     projectsWithWarning: (warn: (message: string) => void) =>
-      createProjectsRepository(db, now, undefined, warn),
+      createProjectsRepository(db, workspaceId, now, undefined, warn),
     rows: () => db.selectFrom("projects").selectAll().execute(),
   };
 }
@@ -501,14 +505,83 @@ describe("updating the settings of a project", () => {
     expect((await projects.get(second.id))?.settings).toEqual({});
   });
 
-  it("returns undefined and writes nothing for a repository without a project", async () => {
+  // #80
+  it("creates an inactive project for a repository that has none, so settings can be saved before activation", async () => {
     const { projects, first, rows } = await setup();
 
-    expect(
-      await projects.updateSettings(first.id, { maxFindings: 2 }),
-    ).toBeUndefined();
+    const saved = await projects.updateSettings(first.id, { maxFindings: 2 });
+
+    expect(saved).toMatchObject({
+      repositoryId: first.id,
+      active: false,
+      settings: { maxFindings: 2 },
+    });
+    expect(await rows()).toHaveLength(1);
+    expect(await projects.findActiveForRepository(first.id)).toBeUndefined();
+    const listed = (await projects.list()).find(
+      (entry) => entry.repository.id === first.id,
+    );
+    expect(listed?.status).toBe("inactive");
+  });
+
+  // #80
+  it("keeps settings saved before the first activation when the project is activated", async () => {
+    const { projects, first, rows } = await setup();
+    await projects.updateSettings(first.id, { maxFindings: 2 });
+
+    const result = await projects.activate(first.id);
+
+    expect(result).toMatchObject({
+      kind: "activated",
+      outcome: "reactivated",
+      project: { active: true, settings: { maxFindings: 2 } },
+    });
+    expect(await rows()).toHaveLength(1);
+  });
+
+  // #80
+  it("stores settings for a repository of a suspended installation as an inactive project that cannot be activated", async () => {
+    const { projects, integrations, integration, first } = await setup();
+    await integrations.setStatus(integration.id, "disabled");
+
+    const saved = await projects.updateSettings(first.id, { maxFindings: 2 });
+
+    expect(saved).toMatchObject({
+      active: false,
+      settings: { maxFindings: 2 },
+    });
+    expect(await projects.activate(first.id)).toEqual({
+      kind: "integration_unavailable",
+    });
+  });
+
+  // #80
+  it("ends a first save racing with an activation in one active project that keeps the saved settings", async () => {
+    const { projects, first, rows } = await setup();
+
+    await Promise.all([
+      projects.updateSettings(first.id, { maxFindings: 2 }),
+      projects.activate(first.id),
+    ]);
+
+    const stored = await rows();
+    expect(stored).toHaveLength(1);
+    expect((await projects.get(first.id))?.active).toBe(true);
+    // Whichever ran first, the row ends up switched on.
+    expect(stored[0]?.active).toBe(1);
+  });
+
+  // #80
+  it("writes nothing for an unknown repository or one the platform no longer lists and that has no project", async () => {
+    const { projects, first, rows, repositories, integration, remote } =
+      await setup();
+    await repositories.reconcile(integration.id, [remote(2)]);
+
     expect(
       await projects.updateSettings("no-such-repository", {}),
+    ).toBeUndefined();
+    expect(
+      await projects.updateSettings(first.id, { maxFindings: 2 }),
     ).toBeUndefined();
     expect(await rows()).toEqual([]);
   });

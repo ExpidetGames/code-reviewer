@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // What the project list shows, worked out from the project service: one row per repository the
 // GitHub App can read (plus the ones that disappeared but kept a project), with its installation,
 // its state and the status of its last run. Plain data: the components render it and the page only
@@ -35,8 +37,6 @@ export type ProjectRowView = {
   /** The installation the repository comes from (the account that installed the app). */
   installation: string;
   status: ProjectStatus;
-  /** Whether the repository has a project at all (the settings page needs one). */
-  hasProject: boolean;
   /** Whether the project is switched on (also for a repository that is unavailable). */
   switchedOn: boolean;
   lastRun: LastRun | null;
@@ -54,7 +54,6 @@ function toRowView(
     url: webAddress(repository.url),
     installation: repository.integration.displayName,
     status,
-    hasProject: project !== null,
     switchedOn: project?.active ?? false,
     lastRun,
   };

@@ -1,5 +1,7 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // @vitest-environment jsdom
-// Pins down what the project list shows: the empty state with the steps to install the GitHub App,
+// Pins down what the project list shows: the empty state with the steps to connect GitHub,
 // "No run yet" for a project without a run, the status of the last run, the switch with its state,
 // and text from GitHub rendered as text. The calls behind the switch are in project-toggle.test.tsx.
 import { cleanup, render, screen, within } from "@testing-library/react";
@@ -21,7 +23,6 @@ function row(overrides: Partial<ProjectRowView> = {}): ProjectRowView {
     url: "https://github.com/acme/widgets",
     installation: "acme",
     status: "inactive",
-    hasProject: false,
     switchedOn: false,
     lastRun: null,
     ...overrides,
@@ -31,54 +32,49 @@ function row(overrides: Partial<ProjectRowView> = {}): ProjectRowView {
 function renderList(
   rows: ProjectRowView[],
   options: {
-    installUrl?: string | null;
+    canConnect?: boolean;
     activationBlocked?: string | null;
   } = {},
 ) {
   const view: ProjectListView = { rows };
   return render(
     <ProjectList
+      workspaceSlug="acme"
       view={view}
-      installUrl={options.installUrl ?? null}
+      canConnect={options.canConnect ?? true}
       activationBlocked={options.activationBlocked ?? null}
     />,
   );
 }
 
 describe("the project list without repositories", () => {
-  // CR-34-T02
-  it("explains in steps how to install the GitHub App and links to the installation page", () => {
-    renderList([], {
-      installUrl: "https://github.com/apps/code-reviewer/installations/new",
-    });
+  // CR-34-T02, #103-IB-18
+  it("explains in steps how to connect GitHub and links to the connections of the workspace", () => {
+    renderList([]);
 
     expect(
       screen.getByRole("heading", { name: "No repositories yet" }),
     ).toBeTruthy();
-    const link = screen.getByRole("link", {
-      name: "GitHub App installation page",
-    });
-    expect(link.getAttribute("href")).toBe(
-      "https://github.com/apps/code-reviewer/installations/new",
-    );
+    const link = screen.getByRole("link", { name: "Connections" });
+    expect(link.getAttribute("href")).toBe("/w/acme/connections");
     expect(screen.getAllByRole("listitem")).toHaveLength(3);
     expect(screen.queryByRole("switch")).toBeNull();
   });
 
-  // CR-34-T02
-  it("still explains the steps when the app's address is not configured, naming the variable", () => {
-    renderList([]);
+  // CR-34-T02, #103-IB-15
+  it("tells a person who cannot connect GitHub to ask an Owner or Admin, without the steps", () => {
+    renderList([], { canConnect: false });
 
-    expect(screen.queryByRole("link")).toBeNull();
-    expect(screen.getByText(/GITHUB_APP_SLUG/)).toBeTruthy();
-    expect(screen.getAllByRole("listitem")).toHaveLength(3);
+    expect(screen.getByText(/An Owner or Admin of the workspace/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Connections" })).toBeTruthy();
+    expect(screen.queryAllByRole("listitem")).toHaveLength(0);
   });
 });
 
 describe("the project list with repositories", () => {
   // CR-34-T03
   it("says that a project without a run has no run yet, not an empty field", () => {
-    renderList([row({ hasProject: true, switchedOn: true, status: "active" })]);
+    renderList([row({ switchedOn: true, status: "active" })]);
 
     expect(screen.getByText("No run yet")).toBeTruthy();
   });
@@ -87,7 +83,6 @@ describe("the project list with repositories", () => {
   it("shows the status and the time of the last run next to the switch that is on", () => {
     renderList([
       row({
-        hasProject: true,
         switchedOn: true,
         status: "active",
         lastRun: { status: "succeeded", at: "2026-10-10T12:34:56Z" },
@@ -128,7 +123,6 @@ describe("the project list with repositories", () => {
     renderList([
       row({
         repositoryId: "repo with space",
-        hasProject: true,
         switchedOn: true,
         status: "active",
         lastRun: { status: "failed", at: "2026-10-10T12:34:56Z" },
@@ -137,7 +131,7 @@ describe("the project list with repositories", () => {
 
     expect(
       screen.getByRole("link", { name: "All runs" }).getAttribute("href"),
-    ).toBe("/runs?repository=repo%20with%20space");
+    ).toBe("/w/acme/runs?repository=repo%20with%20space");
   });
 
   // CR-34-T01
@@ -147,7 +141,6 @@ describe("the project list with repositories", () => {
       row({
         repositoryId: "b",
         fullName: "acme/b",
-        hasProject: true,
         switchedOn: true,
         status: "active",
       }),
@@ -172,21 +165,28 @@ describe("the project list with repositories", () => {
     ]);
   });
 
-  it("links the name to the settings only once the repository has a project", () => {
+  // #80
+  it("links the name of every repository to its settings, also one that was never activated", () => {
     renderList([
-      row({ repositoryId: "a", fullName: "acme/a" }),
+      row({ repositoryId: "a", fullName: "acme/a", status: "inactive" }),
       row({
         repositoryId: "b",
         fullName: "acme/b",
-        hasProject: true,
-        status: "inactive",
+        switchedOn: true,
+        status: "active",
+      }),
+      row({
+        repositoryId: "c",
+        fullName: "acme/c",
+        switchedOn: true,
+        status: "unavailable",
       }),
     ]);
 
-    expect(screen.queryByRole("link", { name: "acme/a" })).toBeNull();
-    expect(
-      screen.getByRole("link", { name: "acme/b" }).getAttribute("href"),
-    ).toBe("/projects/b");
+    for (const id of ["a", "b", "c"])
+      expect(
+        screen.getByRole("link", { name: `acme/${id}` }).getAttribute("href"),
+      ).toBe(`/w/acme/projects/${id}`);
   });
 
   // CR-34-T10
@@ -202,10 +202,9 @@ describe("the project list with repositories", () => {
 
   // CR-34-T10
   it("lets a project that is on be switched off even while the GitHub App is not configured", () => {
-    renderList(
-      [row({ hasProject: true, switchedOn: true, status: "active" })],
-      { activationBlocked: "Configure the GitHub App first." },
-    );
+    renderList([row({ switchedOn: true, status: "active" })], {
+      activationBlocked: "Configure the GitHub App first.",
+    });
 
     expect((screen.getByRole("switch") as HTMLButtonElement).disabled).toBe(
       false,
@@ -214,7 +213,7 @@ describe("the project list with repositories", () => {
 
   it("does not offer to switch on a repository the app can no longer read, and says what happens if it comes back", () => {
     renderList([
-      row({ status: "unavailable", hasProject: true, switchedOn: true }),
+      row({ status: "unavailable", switchedOn: true }),
       row({ repositoryId: "x", fullName: "acme/x", status: "unavailable" }),
     ]);
 

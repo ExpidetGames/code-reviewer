@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The interface behind which everything platform specific lives. Jobs, the runner API and the UI
 // call these methods and see normalized types only. See README.md in this folder.
 import type { ConfigValidationResult } from "./config-schema.ts";
@@ -40,6 +42,13 @@ export interface IntegrationProvider {
    * created" delivery for a connection without a row is verified before a row is created.
    */
   findConnection?(externalId: string): Promise<DiscoveredConnection | null>;
+
+  /**
+   * Only where the platform has an account that the app itself belongs to (GitHub App: its owner): the id and
+   * the name of that account, as the platform reports them for the app's own credentials, or null when it does
+   * not say. A connection on that account is the app's "own" (the single-tenant auto-attach asks).
+   */
+  ownerAccount?(): Promise<{ externalId: string; login: string } | null>;
 
   /** Every repository of the connection the app may see. Rejects when it cannot list all of them. */
   listRepositories(integration: Integration): Promise<RepoRef[]>;
@@ -86,16 +95,22 @@ export interface IntegrationProvider {
   /** Credentials for one job on one repository; short-lived where the platform allows it. */
   jobAccess(integration: Integration, repo: RepoRef): Promise<GitAccess>;
 
-  /** One pull request of a repository, for example to start a review by hand. */
+  /**
+   * One pull request of a repository, for example to start a review by hand. When `signal` fires, the
+   * request to the platform is aborted (not just no longer waited for) and the call rejects with
+   * `INTEGRATION_ACCESS_UNAVAILABLE`.
+   */
   getPullRequest(
     integration: Integration,
     repo: RepoRef,
     prNumber: number,
+    signal?: AbortSignal,
   ): Promise<PullRequestRef>;
 
-  /** The open pull requests of a repository (drafts included, marked as such). */
+  /** The open pull requests of a repository (drafts included, marked as such). Aborts like `getPullRequest`. */
   listOpenPullRequests(
     integration: Integration,
     repo: RepoRef,
+    signal?: AbortSignal,
   ): Promise<PullRequestRef[]>;
 }

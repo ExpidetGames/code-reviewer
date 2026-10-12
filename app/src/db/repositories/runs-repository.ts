@@ -1,4 +1,7 @@
-// The read side of the jobs table for the pages: the runs list, one run, and the latest run of each
+// SPDX-License-Identifier: Apache-2.0
+
+// The read side of the jobs table of ONE workspace (the factory takes the workspace id; see
+// ../workspace-scope.ts) for the pages: the runs list, one run, and the latest run of each
 // repository. It only reads: every change to a job goes through the job queue
 // (`jobs-repository.ts`), which holds the rules. A run is a job together with the name of its
 // repository, so the pages need no second lookup. The list is read without the columns it never
@@ -10,6 +13,7 @@ import type { JobStatus } from "../../jobs/job-status.ts";
 import type { Job } from "../../jobs/job-types.ts";
 import type { RunRowSource } from "../../runs/run-view.ts";
 import type { Database } from "../schema.ts";
+import type { WorkspaceId } from "../workspace-scope.ts";
 import { decodeJobVocabulary, toJob } from "./jobs-repository.ts";
 
 /** A job with the `owner/name` of the repository it is about. */
@@ -48,7 +52,10 @@ export type RunsRepository = {
   >;
 };
 
-export function createRunsRepository(db: Kysely<Database>): RunsRepository {
+export function createRunsRepository(
+  db: Kysely<Database>,
+  workspaceId: WorkspaceId,
+): RunsRepository {
   return {
     async list(filter) {
       let query = db
@@ -68,7 +75,8 @@ export function createRunsRepository(db: Kysely<Database>): RunsRepository {
           "jobs.finished_at",
           "jobs.error_code",
           "repositories.full_name as project",
-        ]);
+        ])
+        .where("jobs.workspace_id", "=", workspaceId);
       if (filter.repositoryId !== undefined)
         query = query.where("jobs.repository_id", "=", filter.repositoryId);
       if (filter.status !== undefined)
@@ -111,6 +119,7 @@ export function createRunsRepository(db: Kysely<Database>): RunsRepository {
         .innerJoin("repositories", "repositories.id", "jobs.repository_id")
         .selectAll("jobs")
         .select("repositories.full_name as project")
+        .where("jobs.workspace_id", "=", workspaceId)
         .where("jobs.id", "=", id)
         .executeTakeFirst();
       if (row === undefined) return undefined;
@@ -132,6 +141,7 @@ export function createRunsRepository(db: Kysely<Database>): RunsRepository {
             "claimed_at",
             "finished_at",
           ])
+          .where("workspace_id", "=", workspaceId)
           .where("repository_id", "=", repositoryId)
           .orderBy("created_at", "desc")
           .orderBy("id", "desc")

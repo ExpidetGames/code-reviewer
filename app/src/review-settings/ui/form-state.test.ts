@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the logic behind the settings form without a browser: how the saved settings become
 // form values, how the values become the request (only the fields the person set), and which problem
 // each wrong value gets. A problem is a field and a stable code; the sentence is the form's job.

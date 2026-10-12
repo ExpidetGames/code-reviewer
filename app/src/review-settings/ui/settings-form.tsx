@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 "use client";
 // The review settings form, for the global defaults and for one project. Every field shows the value
 // that is in force and where it comes from. Changing a field sets it for this layer; "Use default"
@@ -107,21 +109,34 @@ function sourceText(
 }
 
 export function SettingsForm({
+  workspaceSlug,
   initial,
   repositoryId,
+  readOnly = false,
   api: apiOverride,
 }: {
+  /** The workspace of the page: the call is made in it. */
+  workspaceSlug: string;
   initial: SettingsFormModel;
   /** The repository of the project being edited; required for a project form. */
   repositoryId?: string;
+  /**
+   * The values are shown and cannot be changed: the person's role does not allow it (the route refuses a
+   * save in any case, src/workspaces/permissions.ts).
+   */
+  readOnly?: boolean;
   /** Only tests pass this: a server component cannot hand functions to this client component. */
   api?: SettingsApi;
 }) {
-  const api =
-    apiOverride ??
-    (initial.mode === "project" && repositoryId !== undefined
-      ? browserProjectSettingsApi(repositoryId)
-      : browserGlobalSettingsApi);
+  // One client for the life of the component: a new one every render would restart what depends on it.
+  const defaultApi = useMemo(
+    () =>
+      initial.mode === "project" && repositoryId !== undefined
+        ? browserProjectSettingsApi(workspaceSlug, repositoryId)
+        : browserGlobalSettingsApi(workspaceSlug),
+    [initial.mode, repositoryId, workspaceSlug],
+  );
+  const api = apiOverride ?? defaultApi;
   const prefix = useId();
   const [model, setModel] = useState(initial);
   const [state, setState] = useState(() => initialFormState(initial));
@@ -326,7 +341,7 @@ export function SettingsForm({
         ))}
       </datalist>
 
-      <fieldset disabled={busy}>
+      <fieldset disabled={busy || readOnly}>
         <legend>Model</legend>
         {field(
           "model",
@@ -353,7 +368,7 @@ export function SettingsForm({
         <CostSummary cost={cost} />
       </fieldset>
 
-      <fieldset disabled={busy}>
+      <fieldset disabled={busy || readOnly}>
         <legend>Review</legend>
         {field(
           "maxFindings",
@@ -393,7 +408,7 @@ export function SettingsForm({
         )}
       </fieldset>
 
-      <fieldset disabled={busy}>
+      <fieldset disabled={busy || readOnly}>
         <legend>When to review</legend>
         {checkbox(
           "autoReviewOnOpen",
@@ -456,47 +471,53 @@ export function SettingsForm({
         </p>
       ) : null}
 
-      <div className="form-actions">
-        <Button type="submit" disabled={busy}>
-          {busy
-            ? "Saving..."
-            : model.mode === "project"
-              ? "Save project settings"
-              : "Save defaults"}
-        </Button>
-        {api.reset !== undefined && !confirmingReset ? (
-          <Button
-            variant="ghost"
-            disabled={busy}
-            onClick={() => setConfirmingReset(true)}
-          >
-            Use the defaults for everything
+      {readOnly ? (
+        <p className="muted small">
+          Only Admins and Owners can change these values.
+        </p>
+      ) : (
+        <div className="form-actions">
+          <Button type="submit" disabled={busy}>
+            {busy
+              ? "Saving..."
+              : model.mode === "project"
+                ? "Save project settings"
+                : "Save defaults"}
           </Button>
-        ) : null}
-        {api.reset !== undefined && confirmingReset ? (
-          <span className="confirm" role="group" aria-label="Confirm reset">
-            <span>
-              Remove every value of this project and follow the defaults?
-            </span>
+          {api.reset !== undefined && !confirmingReset ? (
             <Button
-              variant="destructive"
+              variant="ghost"
               disabled={busy}
-              onClick={() => void resetAll()}
+              onClick={() => setConfirmingReset(true)}
             >
-              Yes, use the defaults
+              Use the defaults for everything
             </Button>
-            <Button variant="ghost" onClick={() => setConfirmingReset(false)}>
-              Cancel
-            </Button>
-          </span>
-        ) : null}
-        {model.lastSaved !== null ? (
-          <span className="muted small">
-            Last saved {model.lastSaved.at.slice(0, 16).replace("T", " ")} UTC
-            {model.lastSaved.by !== null ? ` by ${model.lastSaved.by}` : ""}.
-          </span>
-        ) : null}
-      </div>
+          ) : null}
+          {api.reset !== undefined && confirmingReset ? (
+            <span className="confirm" role="group" aria-label="Confirm reset">
+              <span>
+                Remove every value of this project and follow the defaults?
+              </span>
+              <Button
+                variant="destructive"
+                disabled={busy}
+                onClick={() => void resetAll()}
+              >
+                Yes, use the defaults
+              </Button>
+              <Button variant="ghost" onClick={() => setConfirmingReset(false)}>
+                Cancel
+              </Button>
+            </span>
+          ) : null}
+          {model.lastSaved !== null ? (
+            <span className="muted small">
+              Last saved {model.lastSaved.at.slice(0, 16).replace("T", " ")} UTC
+              {model.lastSaved.by !== null ? ` by ${model.lastSaved.by}` : ""}.
+            </span>
+          ) : null}
+        </div>
+      )}
     </form>
   );
 }

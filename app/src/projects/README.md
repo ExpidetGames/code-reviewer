@@ -9,8 +9,8 @@ becomes a project only when somebody activates it. New repositories are **not** 
 | `service.ts` | `createProjectService`: `activateProject`, `deactivateProject`, `getActiveProjectForRepository`, `hasActiveProject`, `listProjects`                                                                                                                                                                      |
 | `errors.ts`  | `ProjectError` and the stable codes `PROJECT_REQUEST_INVALID` (400), `PROJECT_REPOSITORY_NOT_FOUND` (404), `PROJECT_REPOSITORY_UNAVAILABLE` (409), `PROJECT_INTEGRATION_UNAVAILABLE` (409), `PROJECT_CROSS_SITE_REQUEST` (403), `PROJECT_BODY_TOO_LARGE` (413), `PROJECT_CONTENT_TYPE_UNSUPPORTED` (415) |
 | `hooks.ts`   | `ProjectHooks.onProjectDeactivated`, the seam the jobs module plugs into; the default does nothing                                                                                                                                                                                                       |
-| `http.ts`    | The handler behind `PUT /api/repositories/:repositoryId/project` (`src/app/api/repositories/[repositoryId]/project/route.ts`)                                                                                                                                                                            |
-| `shared.ts`  | The wiring of the running server: `getProjectService()` and `getProjectHooks()`                                                                                                                                                                                                                          |
+| `http.ts`    | The handler behind `PUT /api/w/:workspace/repositories/:repositoryId/project` (`src/app/api/w/[workspace]/repositories/[repositoryId]/project/route.ts`)                                                                                                                                                 |
+| `shared.ts`  | The wiring of the running server: `projectServiceFor(workspaceId)`, `getProjectService()` (the workspace the signed-in user works in) and `getProjectHooks(workspaceId)`                                                                                                                                 |
 
 The table is `projects` (`src/db/migrations/20261010190000_create_projects.ts`); the only code that
 touches it is `src/db/repositories/projects-repository.ts`.
@@ -20,10 +20,11 @@ touches it is `src/db/repositories/projects-repository.ts`.
 | Status        | Meaning                                                                                           |
 | ------------- | ------------------------------------------------------------------------------------------------- |
 | `active`      | A project row exists with `active = 1` and the platform still lists the repository                |
-| `inactive`    | No project row yet, or the project was deactivated                                                |
+| `inactive`    | No project row yet, a row only holding settings saved before activation, or a deactivated project |
 | `unavailable` | The platform no longer lists the repository (removed from the installation, installation deleted) |
 
-- The row is created by the first activation and **never deleted**. Deactivating sets `active = 0`;
+- The row is created by the first activation or by the first save of settings (`updateSettings`
+  creates it with `active = 0`, so settings can be saved before activation) and **never deleted**. Deactivating sets `active = 0`;
   activating again switches the same row back on, so its settings (`projects.settings`, JSON text,
   the review setting overrides, `src/review-settings/README.md`) survive and there is never a second row (`repository_id` is unique).
 - A repository that disappears from GitHub keeps its project row untouched, **including `active = 1`**.
@@ -54,8 +55,8 @@ touches it is `src/db/repositories/projects-repository.ts`.
 
 Deactivating a project stops new reviews and discards its **waiting** (unclaimed) jobs; a job that a
 runner already holds (running) finishes. This module knows nothing about jobs. The jobs module
-implements `ProjectHooks.onProjectDeactivated(event, executor)` (`createJobProjectHooks` in
-`src/jobs/project-hooks.ts`, which cancels the waiting jobs of the repository) and `getProjectHooks()` in
+implements `ProjectHooks.onProjectDeactivated(event, executor)` (`createJobProjectHooks(workspaceId)` in
+`src/jobs/project-hooks.ts`, which cancels the waiting jobs of the repository) and `getProjectHooks(workspaceId)` in
 `shared.ts` returns it:
 
 - It runs in the transaction that switches the project off. Write with `executor` (never the outer
@@ -86,7 +87,10 @@ first.
 
 ## The route
 
-`PUT /api/repositories/:repositoryId/project` with the JSON body `{ "active": true }` (activate) or
+The workspace is the one in the address, for a member only (`src/workspaces/README.md`); switching a project
+on or off needs an Admin or an Owner (`manage_projects`), a Member sees the switch and cannot use it.
+
+`PUT /api/w/:workspace/repositories/:repositoryId/project` with the JSON body `{ "active": true }` (activate) or
 `{ "active": false }` (deactivate). Both are idempotent.
 
 - Answers `200` with `{ repositoryId, projectId, active, changed }` (`projectId` is `null` for a
@@ -111,17 +115,17 @@ first.
 
 ## The pages
 
-The Projects page (`src/app/(app)/projects/page.tsx`) and the settings page of one project
-(`src/app/(app)/projects/[repositoryId]/page.tsx`) are built from `src/projects/ui/`:
+The Projects page (`src/app/(app)/w/[workspace]/projects/page.tsx`) and the settings page of one project
+(`src/app/(app)/w/[workspace]/projects/[repositoryId]/page.tsx`) are built from `src/projects/ui/`:
 
-| File                           | Role                                                                                                                                                                                                                                                                                               |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ui/list-view.ts`              | `loadProjectList` / `loadProjectRow`: one row per repository from `listProjects()` (or one from `findProject()`), with the status of its last run. `LastRunSource` is the seam for the jobs table (wired by `getLastRunSource()` in `src/runs/shared.ts`); without one the list says "No run yet". |
-| `ui/project-list.tsx`          | The list: name (a link to the settings once there is a project), installation, state, last run and the switch; the empty state with the install steps (`no-repositories.tsx`).                                                                                                                     |
-| `ui/project-toggle.tsx`        | The switch. Calls `PUT /api/repositories/:id/project` and refreshes; a refusal is shown as a sentence (`ui/messages.ts`), never as a code. Off projects cannot be switched on while the GitHub App is not configured.                                                                              |
-| `ui/sync-button.tsx`           | "Sync from GitHub": `POST /api/integrations/sync`, says how many repositories are new and what went wrong at GitHub.                                                                                                                                                                               |
-| `ui/projects-page.tsx`         | `loadProjectsPage` gathers the data from the services, `ProjectsPageContent` renders the hints and the list.                                                                                                                                                                                       |
-| `ui/project-settings-page.tsx` | The settings page of a project: the form of `src/review-settings/ui` for the overrides; a repository without a project says how to make it one; an unknown id shows the not-found page (status 200: under Cache Components the data sits behind `<Suspense>`).                                     |
+| File                           | Role                                                                                                                                                                                                                                                                                                                                        |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ui/list-view.ts`              | `loadProjectList` / `loadProjectRow`: one row per repository from `listProjects()` (or one from `findProject()`), with the status of its last run. `LastRunSource` is the seam for the jobs table (wired by `getLastRunSource()` in `src/runs/shared.ts`); without one the list says "No run yet".                                          |
+| `ui/project-list.tsx`          | The list: name (a link to the settings for every repository, inactive ones too), installation, state, last run and the switch; the empty state with the install steps (`no-repositories.tsx`).                                                                                                                                              |
+| `ui/project-toggle.tsx`        | The switch. Calls `PUT /api/w/:workspace/repositories/:id/project` and refreshes; a refusal is shown as a sentence (`ui/messages.ts`), never as a code. Off projects cannot be switched on while the GitHub App is not configured.                                                                                                          |
+| `ui/sync-button.tsx`           | "Sync from GitHub" for an Owner or Admin of the workspace: `POST /api/w/:workspace/integrations/sync` reads the workspace's own connections, says how many repositories are new and what went wrong at GitHub. `InstanceSyncButton` is the instance admin's, on the Approvals page of the portal (`POST /api/admin/integrations/sync`).     |
+| `ui/projects-page.tsx`         | `loadProjectsPage` gathers the data from the services, `ProjectsPageContent` renders the hints and the list.                                                                                                                                                                                                                                |
+| `ui/project-settings-page.tsx` | The settings page of a project: the form of `src/review-settings/ui` for the overrides; every repository of the list has a settings page, also an inactive one (it says that no reviews run until the project is activated); an unknown id shows the not-found page (status 200: under Cache Components the data sits behind `<Suspense>`). |
 
 The components never touch the database: pages call the services (`getProjectService()`,
 `getReviewSettingsService()`), the browser calls the routes above. Everything that comes from GitHub

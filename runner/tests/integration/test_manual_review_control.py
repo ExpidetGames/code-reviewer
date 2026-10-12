@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """The control command of the manual review script (CR-11-T05) as a real process."""
 
 import importlib.util

@@ -1,7 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the start of the backup scheduler: only in production, with a clear line for what is
 // scheduled, a loud one when the target does not work, and a stop on an invalid setting.
 import { describe, expect, it, vi } from "vitest";
-import { startBackupSchedulerOnStart } from "./startup.ts";
+import {
+  checkBackupConfigOnStart,
+  startBackupSchedulerOnStart,
+} from "./startup.ts";
 
 function recorder() {
   const lines: string[] = [];
@@ -101,5 +106,56 @@ describe("starting the backup scheduler", () => {
       expect.stringContaining("error [backup] BACKUP_CONFIG_INVALID"),
     ]);
     expect(startScheduler).not.toHaveBeenCalled();
+  });
+});
+
+describe("checking the backup settings at the start of the server", () => {
+  // CR-76-T03
+  it("ends the start naming BACKUP_TIME and the expected format when it is invalid", () => {
+    const exit = vi.fn();
+    const { lines, log } = recorder();
+
+    checkBackupConfigOnStart({
+      env: { ...PRODUCTION, BACKUP_TIME: "25:99" },
+      log,
+      exit,
+    });
+
+    expect(exit).toHaveBeenCalledWith(1);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("error [backup] BACKUP_CONFIG_INVALID");
+    expect(lines[0]).toContain("BACKUP_TIME");
+    expect(lines[0]).toContain("HH:MM");
+  });
+
+  // CR-76-T03
+  it.each(["02:30", "off", ""])(
+    "lets the start go on with BACKUP_TIME %j",
+    (time) => {
+      const exit = vi.fn();
+      const { lines, log } = recorder();
+
+      checkBackupConfigOnStart({
+        env: { ...PRODUCTION, BACKUP_TIME: time },
+        log,
+        exit,
+      });
+
+      expect(exit).not.toHaveBeenCalled();
+      expect(lines).toEqual([]);
+    },
+  );
+
+  // CR-76-T03
+  it("checks nothing outside production", () => {
+    const exit = vi.fn();
+
+    checkBackupConfigOnStart({
+      env: { NODE_ENV: "development", BACKUP_TIME: "teatime" },
+      log: recorder().log,
+      exit,
+    });
+
+    expect(exit).not.toHaveBeenCalled();
   });
 });

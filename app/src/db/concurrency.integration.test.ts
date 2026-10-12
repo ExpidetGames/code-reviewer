@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down how the database behaves next to a second connection or a second app instance: writes
 // wait for a lock that is released in time, fail clearly when it is not, and two instances starting
 // on one empty file migrate it exactly once. The other side is a real OS process, because

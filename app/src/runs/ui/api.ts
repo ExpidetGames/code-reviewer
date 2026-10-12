@@ -1,5 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The calls the runs pages make to the app's own routes while they poll: the list
-// (`GET /api/runs`, src/runs/http.ts) and one run (`GET /api/runs/:id`). Browser side; no secrets.
+// (`GET /api/w/:workspace/runs`, src/runs/http.ts) and one run (`GET /api/w/:workspace/runs/:id`). The
+// workspace is the one of the page that makes the call. Browser side; no secrets.
+import { workspaceApiPath } from "../../workspaces/paths.ts";
 import {
   requestJson,
   type FetchLike,
@@ -18,7 +22,10 @@ export type RunsApi = {
   detail(id: string): Promise<RequestResult<RunDetailSnapshot>>;
 };
 
-export function createRunsApi(fetchImpl: FetchLike): RunsApi {
+export function createRunsApi(
+  fetchImpl: FetchLike,
+  workspaceSlug: string,
+): RunsApi {
   return {
     list(filter) {
       const query = new URLSearchParams();
@@ -26,25 +33,26 @@ export function createRunsApi(fetchImpl: FetchLike): RunsApi {
         query.set("repository", filter.repositoryId);
       if (filter.status !== undefined) query.set("status", filter.status);
       const text = query.toString();
+      const path = workspaceApiPath(workspaceSlug, "/runs");
       return requestJson<RunsSnapshot>(
         fetchImpl,
         "GET",
-        text === "" ? "/api/runs" : `/api/runs?${text}`,
+        text === "" ? path : `${path}?${text}`,
       );
     },
     detail: (id) =>
       requestJson<RunDetailSnapshot>(
         fetchImpl,
         "GET",
-        `/api/runs/${encodeURIComponent(id)}`,
+        workspaceApiPath(workspaceSlug, `/runs/${encodeURIComponent(id)}`),
       ),
   };
 }
 
 /** The real thing, for the components; tests hand in their own. */
-export const browserRunsApi: RunsApi = createRunsApi((url, init) =>
-  fetch(url, init),
-);
+export function browserRunsApi(workspaceSlug: string): RunsApi {
+  return createRunsApi((url, init) => fetch(url, init), workspaceSlug);
+}
 
 /** How often the pages ask again: quickly while a run can change, slowly to notice new runs. */
 export const RUNS_POLL = {

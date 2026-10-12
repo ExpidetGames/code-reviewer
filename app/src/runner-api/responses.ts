@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Every answer of the runner API is built here, so the headers and the shape of an error are the
 // same everywhere: `Cache-Control: no-store` (a claim carries credentials, and nothing a runner gets
 // may be cached by a proxy), and errors as `{ error: { code, message } }` with a stable code.

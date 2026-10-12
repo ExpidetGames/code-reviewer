@@ -1,8 +1,10 @@
-// Pins down the parts of the Dockerfiles and .dockerignore files that must not drift: runtime
+// SPDX-License-Identifier: Apache-2.0
+
+// Pins down the parts of the Dockerfiles and their ignore files that must not drift: runtime
 // versions that have to match the rest of the repository, digest pinning, the unprivileged user and
 // the files kept out of the build context. Whether the built images really behave (start, serve,
 // create the database) is proven by the smoke tests in docker/smoke/, which CI runs.
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
@@ -86,7 +88,10 @@ describe("Dockerfile runtime versions", () => {
     for (const from of froms) {
       const [, base, , name] = from.split(" ");
       expect(
-        base === "${NODE_IMAGE}" || stages.includes(base ?? ""),
+        // "scratch" is the empty image of the stage that only holds the license files.
+        base === "${NODE_IMAGE}" ||
+          base === "scratch" ||
+          stages.includes(base ?? ""),
         from,
       ).toBe(true);
       if (name) stages.push(name);
@@ -184,6 +189,26 @@ describe("Dockerfile app runtime", () => {
     expect(prepare).toContain("better-sqlite3");
   });
 
+  // #98-AD-17
+  it("ships the operator's command line and puts the short name admin on the PATH", () => {
+    const lines = instructions(appDockerfile);
+
+    expect(lines).toContain(
+      "COPY --from=builder --chown=root:root /build/src/admin-cli ./admin-cli",
+    );
+    const prepare = lines.find((line) =>
+      line.includes("admin-cli/package.json"),
+    );
+    expect(prepare).toContain('{"type":"module"}');
+    expect(prepare).toContain("/usr/local/bin/admin");
+    expect(prepare).toContain("chmod 755 /usr/local/bin/admin");
+    expect(prepare).toContain("exec node /srv/app/admin-cli/cli.ts");
+    // The wrapper is made before the switch to the unprivileged user, so it belongs to root.
+    expect(lines.indexOf(prepare ?? "")).toBeLessThan(
+      lines.findIndex((line) => line.startsWith("USER ")),
+    );
+  });
+
   // CR-17-T04
   it("gives the unprivileged user a writable Next.js cache directory below the otherwise root-owned application", () => {
     const lines = instructions(appDockerfile);
@@ -212,10 +237,59 @@ describe("Dockerfile app runtime", () => {
   });
 });
 
-describe(".dockerignore files", () => {
+describe("license files in the images", () => {
+  const LICENSE_FILES = "LICENSE NOTICE THIRD_PARTY_LICENSES.md";
+
+  // #118-T03
+  it.each(dockerfiles)(
+    "copies LICENSE, NOTICE and THIRD_PARTY_LICENSES.md of the repository root into the $name image under /licenses",
+    ({ source }) => {
+      const lines = instructions(source);
+      const finalStage =
+        lines
+          .join("\n")
+          .split(/^FROM /m)
+          .at(-1) ?? "";
+
+      expect(lines).toContain("FROM scratch AS licenses");
+      expect(lines).toContain(`COPY ${LICENSE_FILES} /`);
+      expect(
+        finalStage
+          .split("\n")
+          .some(
+            (line) =>
+              line.startsWith("COPY --from=licenses ") &&
+              line.endsWith(" / /licenses/"),
+          ),
+      ).toBe(true);
+    },
+  );
+
+  // #118-T03
+  it.each(dockerfiles)(
+    "builds the $name image from the repository root, so the license files are part of the build context",
+    ({ name, source }) => {
+      const copies = instructions(source).filter(
+        (line) => line.startsWith("COPY ") && !line.startsWith("COPY --from="),
+      );
+
+      // Every COPY from the context names its folder; none is relative to the folder of the Dockerfile.
+      for (const copy of copies) {
+        expect(copy, copy).toMatch(
+          new RegExp(
+            `^COPY (${name}/|${LICENSE_FILES.replace(/\./g, "\\.")} )`,
+          ),
+        );
+      }
+      expect(copies.length).toBeGreaterThan(1);
+    },
+  );
+});
+
+describe("Dockerfile ignore files", () => {
   const files = [
-    { name: "app", path: "app/.dockerignore" },
-    { name: "runner", path: "runner/.dockerignore" },
+    { name: "app", path: "app/Dockerfile.dockerignore" },
+    { name: "runner", path: "runner/Dockerfile.dockerignore" },
   ] as const;
 
   function patterns(path: string): string[] {
@@ -225,28 +299,52 @@ describe(".dockerignore files", () => {
       .filter((line) => line !== "" && !line.startsWith("#"));
   }
 
+  // #118-T03
+  it.each(files)(
+    "keeps everything but the $name folder and the license files out of the build context",
+    ({ name, path }) => {
+      const entries = patterns(path);
+
+      // Default deny first, then the parts that are let back in (the last matching rule wins).
+      expect(entries.slice(0, 5)).toEqual([
+        "*",
+        `!${name}`,
+        "!LICENSE",
+        "!NOTICE",
+        "!THIRD_PARTY_LICENSES.md",
+      ]);
+    },
+  );
+
+  it("is the file BuildKit reads for the Dockerfile next to it, and no .dockerignore is left in the folders", () => {
+    for (const { name } of files) {
+      expect(
+        statSync(`${repoRoot}${name}/Dockerfile.dockerignore`).isFile(),
+      ).toBe(true);
+      expect(existsSync(`${repoRoot}${name}/.dockerignore`)).toBe(false);
+    }
+  });
+
   // CR-17-T09
   it.each(files)(
     "keeps environment files, keys and local databases out of the $name build context",
     ({ path }) => {
       const entries = patterns(path);
 
-      // Without **/ a pattern only matches the root of the context, not public/x.pem.
+      // Without **/ a pattern only matches the root of the context, not app/public/x.pem.
       for (const pattern of [
-        ".env",
-        ".env.*",
         "**/.env",
         "**/.env.*",
         "**/*.pem",
         "**/*.key",
         "**/*.p12",
         "**/*.db",
-        ".git",
         "**/.git",
       ]) {
         expect(entries, pattern).toContain(pattern);
       }
       expect(entries).not.toContain("!.env.example");
+      expect(entries.filter((entry) => entry.startsWith("!"))).toHaveLength(4);
     },
   );
 
@@ -256,8 +354,45 @@ describe(".dockerignore files", () => {
     ({ name, path }) => {
       const entries = patterns(path);
 
-      expect(entries).toContain(name === "app" ? "node_modules" : ".venv");
-      expect(entries).toContain(name === "app" ? "e2e" : "tests");
+      expect(entries).toContain(
+        name === "app" ? "**/node_modules" : "runner/.venv",
+      );
+      expect(entries).toContain(name === "app" ? "app/e2e" : "runner/tests");
+    },
+  );
+});
+
+describe("root .dockerignore for the classic builder", () => {
+  function patterns(path: string): string[] {
+    return read(path)
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line !== "" && !line.startsWith("#"));
+  }
+  const root = patterns(".dockerignore");
+
+  // #118-T03 (review of PR #136)
+  it("lets only the app and runner folders and the license files into the build context", () => {
+    expect(root.slice(0, 6)).toEqual([
+      "*",
+      "!app",
+      "!runner",
+      "!LICENSE",
+      "!NOTICE",
+      "!THIRD_PARTY_LICENSES.md",
+    ]);
+    expect(root.filter((entry) => entry.startsWith("!"))).toHaveLength(5);
+  });
+
+  // #118-T03 (review of PR #136)
+  it.each(["app", "runner"])(
+    "excludes everything that the %s ignore file excludes, because the classic builder reads only this file",
+    (name) => {
+      const own = patterns(`${name}/Dockerfile.dockerignore`).filter(
+        (entry) => entry !== "*" && !entry.startsWith("!"),
+      );
+
+      expect(own.filter((entry) => !root.includes(entry))).toEqual([]);
     },
   );
 });

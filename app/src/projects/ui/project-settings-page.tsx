@@ -1,11 +1,16 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The content of the settings page of one project: what the project is, the configuration hints and
 // the form with the overrides. `loadProjectSettingsPage` gathers the data from the services (passed
-// in), `ProjectSettingsPageContent` renders it. A repository that is not a project yet has no
-// settings to show: the page says how to make it one.
+// in), `ProjectSettingsPageContent` renders it. Every repository the list shows has a settings page,
+// activated or not: the settings can be saved first and take effect once the project is switched on.
 import Link from "next/link";
+import { workspacePath } from "../../workspaces/paths.ts";
 import { ConfigNotices } from "../../config-status/notices.tsx";
-import type { ConfigStatus } from "../../config-status/status.ts";
-import { EmptyState } from "../../ui/empty-state.tsx";
+import type {
+  ConfigAudience,
+  ConfigStatus,
+} from "../../config-status/status.ts";
 import { PageHeader } from "../../ui/page-header.tsx";
 import { ReviewSettingsError } from "../../review-settings/errors.ts";
 import type { ManualReviewApi } from "../../manual-reviews/ui/api.ts";
@@ -23,7 +28,6 @@ import { loadProjectRow } from "./list-view.ts";
 
 export type ProjectSettingsPageData =
   | { kind: "not_found" }
-  | { kind: "no_project"; row: ProjectRowView; config: ConfigStatus }
   | {
       kind: "ready";
       row: ProjectRowView;
@@ -36,41 +40,46 @@ export async function loadProjectSettingsPage(
   deps: {
     projects: Pick<ProjectService, "findProject">;
     settings: Pick<ReviewSettingsService, "getProjectSettings">;
-    config: () => ConfigStatus;
+    config: () => ConfigStatus | Promise<ConfigStatus>;
   },
 ): Promise<ProjectSettingsPageData> {
   const row = await loadProjectRow(repositoryId, { projects: deps.projects });
   if (row === undefined) return { kind: "not_found" };
-  const config = deps.config();
-  if (!row.hasProject) return { kind: "no_project", row, config };
+  const config = await deps.config();
   try {
     const view = await deps.settings.getProjectSettings(repositoryId);
     return { kind: "ready", row, model: modelFromProjectView(view), config };
   } catch (error) {
-    // The project vanished between the two reads; it cannot, as rows are never deleted, but the
-    // page then says what is true instead of failing.
+    // The repository vanished between the two reads (it stopped being listed and had no project).
     if (
       error instanceof ReviewSettingsError &&
       error.code === "REVIEW_SETTINGS_PROJECT_NOT_FOUND"
     )
-      return { kind: "no_project", row, config };
+      return { kind: "not_found" };
     throw error;
   }
 }
 
 const STATE_TEXT: Record<ProjectRowView["status"], string> = {
   active: "Active: new pull requests are reviewed.",
-  inactive: "Inactive: no new reviews start. The settings below are kept.",
+  inactive:
+    "Inactive: no reviews run until the project is activated. You can save settings now; they apply once it is switched on.",
   unavailable:
     "Unavailable: the GitHub App can no longer read this repository. Its settings are kept.",
 };
 
 export function ProjectSettingsPageContent({
+  workspaceSlug,
+  audience = "member",
   data,
   api,
   manualReviewApi,
 }: {
-  data: Exclude<ProjectSettingsPageData, { kind: "not_found" }>;
+  /** The workspace of the page: every link and call stays in it. */
+  workspaceSlug: string;
+  /** Whether the person runs the instance (reads which variables are wrong) or is a member. */
+  audience?: ConfigAudience;
+  data: Extract<ProjectSettingsPageData, { kind: "ready" }>;
   /** Only tests pass this: a server component cannot hand functions to the client form. */
   api?: SettingsApi;
   /** Same, for the "Review now" panel. */
@@ -83,45 +92,39 @@ export function ProjectSettingsPageContent({
         title={row.fullName}
         description="Review settings of this project."
         actions={
-          <Link href="/projects" className="btn btn-secondary">
+          <Link
+            href={workspacePath(workspaceSlug, "/projects")}
+            className="btn btn-secondary"
+          >
             All projects
           </Link>
         }
       />
-      <ConfigNotices status={data.config} />
-      {data.kind === "no_project" ? (
-        <EmptyState title="This repository is not a project yet">
-          Switch it on in the project list. It then starts with the default
-          settings, and you can change them here.
-        </EmptyState>
+      <ConfigNotices status={data.config} audience={audience} />
+      <p className="muted">{STATE_TEXT[row.status]}</p>
+      {/* Keyed on the repository: a panel that Cache Components kept mounted for another project
+          must not show its pull requests. Only an active project can be started by hand. */}
+      {row.status === "active" ? (
+        <StartReviewPanel
+          key={row.repositoryId}
+          workspaceSlug={workspaceSlug}
+          repositoryId={row.repositoryId}
+          {...(manualReviewApi === undefined ? {} : { api: manualReviewApi })}
+        />
       ) : (
-        <>
-          <p className="muted">{STATE_TEXT[row.status]}</p>
-          {/* Keyed on the repository: a panel that Cache Components kept mounted for another project
-              must not show its pull requests. Only an active project can be started by hand. */}
-          {row.status === "active" ? (
-            <StartReviewPanel
-              key={row.repositoryId}
-              repositoryId={row.repositoryId}
-              {...(manualReviewApi === undefined
-                ? {}
-                : { api: manualReviewApi })}
-            />
-          ) : (
-            <p className="muted small">
-              Reviews can be started by hand only while the project is active.
-            </p>
-          )}
-          {/* Keyed on the server data: with Cache Components a page that was left stays mounted, and
-              when it is shown again with fresh data the form must start from that data. */}
-          <SettingsForm
-            key={JSON.stringify(data.model)}
-            initial={data.model}
-            repositoryId={row.repositoryId}
-            {...(api === undefined ? {} : { api })}
-          />
-        </>
+        <p className="muted small">
+          Reviews can be started by hand only while the project is active.
+        </p>
       )}
+      {/* Keyed on the server data: with Cache Components a page that was left stays mounted, and
+          when it is shown again with fresh data the form must start from that data. */}
+      <SettingsForm
+        key={JSON.stringify(data.model)}
+        workspaceSlug={workspaceSlug}
+        initial={data.model}
+        repositoryId={row.repositoryId}
+        {...(api === undefined ? {} : { api })}
+      />
     </>
   );
 }

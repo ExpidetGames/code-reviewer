@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The wiring of the running server: the real database and the hooks other modules plug in. The one
 // place that decides what happens when a project is deactivated: the job queue cancels the waiting
 // jobs of the repository.
@@ -9,14 +11,14 @@ import type { ProjectHooks } from "./hooks.ts";
 import { createProjectService, type ProjectService } from "./service.ts";
 
 /** What other modules do when a project is switched off: the job queue cancels its waiting jobs. */
-export function getProjectHooks(): ProjectHooks {
-  return createJobProjectHooks();
+export function getProjectHooks(workspaceId: string): ProjectHooks {
+  return createJobProjectHooks(workspaceId);
 }
 
-/** The project service for the current request. */
-export function getProjectService(): ProjectService {
+/** The project service of one workspace. */
+export function projectServiceFor(workspaceId: string): ProjectService {
   return createProjectService({
-    projects: createProjectsRepository(getDatabase()),
-    hooks: getProjectHooks(),
+    projects: createProjectsRepository(getDatabase(), workspaceId),
+    hooks: getProjectHooks(workspaceId),
   });
 }

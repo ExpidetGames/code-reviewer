@@ -1,11 +1,20 @@
+// SPDX-License-Identifier: Apache-2.0
+
 "use client";
-// The "Sync from GitHub" button: asks the app to read the installations and repositories from GitHub
-// now, then says how many repositories are new and what went wrong, in sentences. The list refreshes
-// afterwards. (The app also syncs at start and whenever GitHub reports a change to an installation.)
+// The "Sync from GitHub" button: asks the app to read the repositories from GitHub now, then says how many
+// repositories are new and what went wrong, in sentences. The list refreshes afterwards. (The app also syncs
+// at start and whenever GitHub reports a change to an installation.) `SyncButton` reads the connections of the
+// workspace of the page (an Admin or an Owner); `InstanceSyncButton` reads the whole instance (the instance
+// admin, in the admin portal) and notes the installations nobody has linked.
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Button } from "../../ui/button.tsx";
-import { browserProjectsApi, type ProjectsApi } from "./api.ts";
+import {
+  browserInstanceSyncApi,
+  browserProjectsApi,
+  type InstanceSyncApi,
+  type ProjectsApi,
+} from "./api.ts";
 import { describeFailure, describeSyncProblem } from "./messages.ts";
 
 type Outcome =
@@ -19,11 +28,7 @@ function addedText(added: number): string {
     : `${String(added)} new repositories.`;
 }
 
-export function SyncButton({
-  api = browserProjectsApi,
-}: {
-  api?: ProjectsApi;
-}) {
+function SyncControl({ api }: { api: Pick<ProjectsApi, "sync"> }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
@@ -69,4 +74,29 @@ export function SyncButton({
       </div>
     </div>
   );
+}
+
+export function SyncButton({
+  workspaceSlug,
+  api: apiProp,
+}: {
+  /** The workspace of the page: the synchronization reads the connections of this workspace. */
+  workspaceSlug: string;
+  api?: ProjectsApi;
+}) {
+  // One client for the life of the component: a new one every render would restart what depends on it.
+  const defaultApi = useMemo(
+    () => browserProjectsApi(workspaceSlug),
+    [workspaceSlug],
+  );
+  return <SyncControl api={apiProp ?? defaultApi} />;
+}
+
+/** The synchronization of the whole instance, for the instance admin's portal. */
+export function InstanceSyncButton({
+  api = browserInstanceSyncApi,
+}: {
+  api?: InstanceSyncApi;
+}) {
+  return <SyncControl api={api} />;
 }

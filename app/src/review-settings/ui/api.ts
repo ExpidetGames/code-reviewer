@@ -1,5 +1,9 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The calls the settings form makes to the app's own routes (src/review-settings/http.ts): save the
-// global defaults or the overrides of one project, and reset a project to the defaults. Browser side.
+// defaults of the workspace or the overrides of one project, and reset a project to the defaults. The
+// workspace is the one of the page that makes the call. Browser side.
+import { workspaceApiPath } from "../../workspaces/paths.ts";
 import {
   requestJson,
   type FetchLike,
@@ -13,18 +17,30 @@ export type SettingsApi = {
   reset?: () => Promise<RequestResult<unknown>>;
 };
 
-export function createGlobalSettingsApi(fetchImpl: FetchLike): SettingsApi {
+export function createGlobalSettingsApi(
+  fetchImpl: FetchLike,
+  workspaceSlug: string,
+): SettingsApi {
   return {
     save: (settings) =>
-      requestJson(fetchImpl, "PUT", "/api/review-settings", { settings }),
+      requestJson(
+        fetchImpl,
+        "PUT",
+        workspaceApiPath(workspaceSlug, "/review-settings"),
+        { settings },
+      ),
   };
 }
 
 export function createProjectSettingsApi(
   fetchImpl: FetchLike,
+  workspaceSlug: string,
   repositoryId: string,
 ): SettingsApi {
-  const url = `/api/repositories/${encodeURIComponent(repositoryId)}/project/settings`;
+  const url = workspaceApiPath(
+    workspaceSlug,
+    `/repositories/${encodeURIComponent(repositoryId)}/project/settings`,
+  );
   return {
     save: (settings) => requestJson(fetchImpl, "PUT", url, { settings }),
     reset: () => requestJson(fetchImpl, "DELETE", url),
@@ -33,8 +49,13 @@ export function createProjectSettingsApi(
 
 const browserFetch: FetchLike = (url, init) => fetch(url, init);
 
-export const browserGlobalSettingsApi = createGlobalSettingsApi(browserFetch);
+export function browserGlobalSettingsApi(workspaceSlug: string): SettingsApi {
+  return createGlobalSettingsApi(browserFetch, workspaceSlug);
+}
 
-export function browserProjectSettingsApi(repositoryId: string): SettingsApi {
-  return createProjectSettingsApi(browserFetch, repositoryId);
+export function browserProjectSettingsApi(
+  workspaceSlug: string,
+  repositoryId: string,
+): SettingsApi {
+  return createProjectSettingsApi(browserFetch, workspaceSlug, repositoryId);
 }

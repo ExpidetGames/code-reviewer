@@ -1,13 +1,14 @@
 # Review settings
 
-What a review can be tuned by, with sensible built-in values, global defaults for the whole instance
+What a review can be tuned by, with sensible built-in values, global defaults for the whole workspace
 and overrides per project. The settings end up in the runner job (`llm.model`, `llm.maxTokens`, `env`)
 through one pure function.
 
 ## Layers
 
 From weakest to strongest: **built-in values** (`settings.ts`, with the model from `LLM_MODEL`, see
-`src/llm/README.md`), **global defaults** (`app_settings`, key `review_defaults`) and the **overrides of
+`src/llm/README.md`), **global defaults** (`app_settings`, key `review_defaults`, one set per workspace: changing them in one workspace
+does not touch another, and a workspace that never saved any uses the built-in values) and the **overrides of
 one project** (`projects.settings`). A layer only holds the fields somebody changed, the rest is
 inherited when the settings are read (`resolveReviewSettings` in `effective.ts`, which also says where
 each field comes from). So a changed global default reaches every project that does not override the
@@ -18,18 +19,18 @@ A save **replaces the whole set** of its layer: a field left out is inherited ag
 allow list may change both layers (no admin role in the MVP); `app_settings.updated_by` records who saved
 the global defaults last.
 
-| Field               | Meaning                                                                      | Built-in value                                 | Limits                                                           |
-| ------------------- | ---------------------------------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------- |
-| `model`             | The model (as the provider spells it, no prefix)                             | `LLM_MODEL`, else `anthropic/claude-haiku-5.5` | the pattern the runner accepts                                   |
-| `fallbackModel`     | Tried when the model fails; `null` = none                                    | none                                           | same pattern                                                     |
-| `extraInstructions` | Project rules for the model, free text                                       | none                                           | 4000 characters, no control characters                           |
-| `maxFindings`       | The most findings one review lists                                           | 5                                              | 1 to 30                                                          |
-| `maxTokens`         | Token budget of a review (`llm.maxTokens`)                                   | 100000 (PR-Agent's own: 32000)                 | 8000 to 2000000, not above the model's context window (if known) |
-| `largePrChunking`   | Review a large pull request in chunks instead of leaving files out           | on                                             | boolean                                                          |
-| `inlineKeyIssues`   | Also post every finding as an inline comment                                 | off                                            | boolean                                                          |
-| `autoReviewOnOpen`  | Review when a pull request is opened, reopened or marked ready               | on                                             | boolean                                                          |
-| `autoReviewOnPush`  | Review again when commits are pushed                                         | on                                             | boolean                                                          |
-| `allowedCommands`   | The comment commands people may use (`review`, `improve`, `describe`, `ask`) | all four                                       | any subset, no duplicates                                        |
+| Field               | Meaning                                                                                                                | Built-in value                                 | Limits                                                           |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------- |
+| `model`             | The model (as the provider spells it, no prefix); the key is not a review setting but the workspace's own (`src/llm/`) | `LLM_MODEL`, else `anthropic/claude-haiku-5.5` | the pattern the runner accepts                                   |
+| `fallbackModel`     | Tried when the model fails; `null` = none                                                                              | none                                           | same pattern                                                     |
+| `extraInstructions` | Project rules for the model, free text                                                                                 | none                                           | 4000 characters, no control characters                           |
+| `maxFindings`       | The most findings one review lists                                                                                     | 5                                              | 1 to 30                                                          |
+| `maxTokens`         | Token budget of a review (`llm.maxTokens`)                                                                             | 100000 (PR-Agent's own: 32000)                 | 8000 to 2000000, not above the model's context window (if known) |
+| `largePrChunking`   | Review a large pull request in chunks instead of leaving files out                                                     | on                                             | boolean                                                          |
+| `inlineKeyIssues`   | Also post every finding as an inline comment                                                                           | off                                            | boolean                                                          |
+| `autoReviewOnOpen`  | Review when a pull request is opened, reopened or marked ready                                                         | on                                             | boolean                                                          |
+| `autoReviewOnPush`  | Review again when commits are pushed                                                                                   | on                                             | boolean                                                          |
+| `allowedCommands`   | The comment commands people may use (`review`, `improve`, `describe`, `ask`)                                           | all four                                       | any subset, no duplicates                                        |
 
 The limits are `REVIEW_SETTING_LIMITS`; `validate.ts` checks every field and reports each problem as
 `{ field, code }` with a stable code (`REVIEW_SETTING_ISSUE_CODES`), never with the value.
@@ -100,6 +101,10 @@ behaviour for free text again (next section): the table in `runner-settings.test
   instance's hint for the context window of a model PR-Agent does not know (`contextWindowTokens`), and
   the budget of a review replaces it in a job.
 
+**The built-in model is visible to members.** The built-in value of `model` is the instance's `LLM_MODEL` (or the
+recommended default), and a member sees it in this form as "built-in value" (decided with #144: a model name is no
+secret). The provider and the key are not review settings: they are the workspace's LLM access (`src/llm/README.md`).
+
 ## Cost guard
 
 `estimateReviewCost(settings)` (`cost.ts`) answers what a typical review is expected to cost with the
@@ -122,27 +127,36 @@ and never warns. `exceedsContext` lists the models whose context window is small
 
 ## Routes
 
-Both are protected by the proxy (401/403) and by `requireUser()` (called first). A change must come from
+All of them belong to the workspace in the address (`src/workspaces/README.md`): the defaults are the defaults
+of that workspace (`app_settings` is per workspace), every member reads them and changing them needs an
+Admin or an Owner (`manage_review_defaults`); the settings of a project are read and changed by every member
+(`change_project_settings`). They are protected by the proxy (401, 403 and the answer of a missing path for
+a workspace that is not the person's) and by `withWorkspace(...)` (called first). A change must come from
 this site (`Sec-Fetch-Site`/`Origin`), be `application/json` and at most 64 KB.
 
-| Route                                                     | Does                                                                                                            |
-| --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `GET /api/review-settings`                                | the global defaults: `overrides`, `effective`, `sources`, `builtIn`, `cost`, `limits`, `updatedAt`, `updatedBy` |
-| `PUT /api/review-settings`                                | body `{ "settings": { ... } }`, replaces the global defaults                                                    |
-| `GET /api/repositories/:repositoryId/project/settings`    | the project's `overrides`, `effective`, `sources`, `inherited`, `cost`, `limits`                                |
-| `PUT /api/repositories/:repositoryId/project/settings`    | body `{ "settings": { ... } }`, replaces the project's overrides                                                |
-| `DELETE /api/repositories/:repositoryId/project/settings` | removes the project's overrides                                                                                 |
+| Route                                                                  | Does                                                                                                            |
+| ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `GET /api/w/:workspace/review-settings`                                | the global defaults: `overrides`, `effective`, `sources`, `builtIn`, `cost`, `limits`, `updatedAt`, `updatedBy` |
+| `PUT /api/w/:workspace/review-settings`                                | body `{ "settings": { ... } }`, replaces the global defaults                                                    |
+| `GET /api/w/:workspace/repositories/:repositoryId/project/settings`    | the project's `overrides`, `effective`, `sources`, `inherited`, `cost`, `limits`                                |
+| `PUT /api/w/:workspace/repositories/:repositoryId/project/settings`    | body `{ "settings": { ... } }`, replaces the project's overrides                                                |
+| `DELETE /api/w/:workspace/repositories/:repositoryId/project/settings` | removes the project's overrides                                                                                 |
+
+A repository that was never activated can be read (the defaults, `projectId` null, `active` false) and
+saved: the first save creates its project with `active = 0`, so the settings are in place when it is
+activated; reviews still start only for active projects (webhook intake, manual start and claim are
+unchanged). A reset of such a repository writes nothing.
 
 Refusals are `{ "error": <code> }` (`errors.ts`): `400 REVIEW_SETTINGS_INVALID` (plus
 `"issues": [{ "field", "code" }]`), `400 REVIEW_SETTINGS_REQUEST_INVALID` (not JSON, or no `settings`
 object), `403 REVIEW_SETTINGS_CROSS_SITE_REQUEST`, `413 REVIEW_SETTINGS_BODY_TOO_LARGE`,
-`415 REVIEW_SETTINGS_CONTENT_TYPE_UNSUPPORTED`, `404 REVIEW_SETTINGS_PROJECT_NOT_FOUND` (the repository has
-no project: it was never activated). The settings pages (below) call these routes from the browser.
+`415 REVIEW_SETTINGS_CONTENT_TYPE_UNSUPPORTED`, `404 REVIEW_SETTINGS_PROJECT_NOT_FOUND` (there is no such
+repository, or the platform no longer lists it and it has no project). The settings pages (below) call these routes from the browser.
 
 ## The pages
 
 `/settings` holds the instance state (GitHub App, LLM access) and the form for the global defaults;
-`/projects/:repositoryId` holds the same form for one project. The form (`ui/settings-form.tsx`) shows
+`/w/:workspace/projects/:repositoryId` holds the same form for one project. The form (`ui/settings-form.tsx`) shows
 the value in force and where it comes from (built-in, global, this project); changing a field sets it
 for the layer, "Use default" takes it back; a save sends only the fields that are set and replaces the
 layer. `ui/form-state.ts` checks the values with `validateReviewSettingsPatch` before sending, so a

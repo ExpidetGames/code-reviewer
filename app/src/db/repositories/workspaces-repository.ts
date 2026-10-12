@@ -1,0 +1,229 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// Access to the workspaces table: the owners of customer data. Instance level (it is the table that
+// scoping starts from, so it takes no workspace). It also answers the questions that start from a user
+// rather than a workspace (which workspaces does this person belong to, in which role); the members of
+// one workspace are in workspace-members-repository.ts. See src/workspaces/README.md.
+import "server-only";
+import type { Kysely } from "kysely";
+import { formatTimestamp } from "../codecs.ts";
+import { isWorkspaceRole, type WorkspaceRole } from "../../workspaces/roles.ts";
+import type { Database, WorkspacesTable } from "../schema.ts";
+
+export type Workspace = {
+  id: string;
+  name: string;
+  slug: string;
+  createdBy: string | null;
+  createdAt: string;
+};
+
+/** A workspace a user belongs to, with the role they have in it. */
+export type Membership = { workspace: Workspace; role: WorkspaceRole };
+
+export type WorkspacesRepository = {
+  get(id: string): Promise<Workspace | undefined>;
+  /** The oldest workspace, which is the default one the migration made; undefined when there is none. */
+  findDefault(): Promise<Workspace | undefined>;
+  /** Whether a workspace has this slug. */
+  slugExists(slug: string): Promise<boolean>;
+  /** The workspaces the user is a member of, in the order they joined (then by id). */
+  listForUser(userId: string): Promise<Membership[]>;
+  /**
+   * The workspace with this slug, if (and only if) the user is a member of it, with their role. A workspace
+   * the user does not belong to answers exactly like one that does not exist.
+   */
+  findMembership(userId: string, slug: string): Promise<Membership | undefined>;
+  /** The same by workspace id. */
+  findMembershipById(
+    userId: string,
+    workspaceId: string,
+  ): Promise<Membership | undefined>;
+  /** How many workspaces the user is an Owner of (what the limit "workspaces per user" counts). */
+  countOwnedBy(userId: string): Promise<number>;
+  /** Whether the user is a member of at least one workspace. */
+  hasMembership(userId: string): Promise<boolean>;
+  /** Changes the name; the slug stays. Returns false for an id nobody has. */
+  rename(workspaceId: string, name: string): Promise<boolean>;
+  create(input: {
+    name: string;
+    slug: string;
+    createdBy: string | null;
+  }): Promise<Workspace>;
+  /** Makes the user a member with the role. A user who is a member already keeps their role. */
+  addMember(
+    workspaceId: string,
+    userId: string,
+    role: WorkspaceRole,
+  ): Promise<void>;
+  /** Whether the workspace has at least one Owner. */
+  hasOwner(workspaceId: string): Promise<boolean>;
+};
+
+export const DEFAULT_WORKSPACE_SLUG = "default";
+
+function toWorkspace(row: WorkspacesTable): Workspace {
+  return {
+    id: row.id,
+    name: row.name,
+    slug: row.slug,
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+  };
+}
+
+export function createWorkspacesRepository(
+  db: Kysely<Database>,
+  now: () => Date = () => new Date(),
+  newId: () => string = () => crypto.randomUUID(),
+): WorkspacesRepository {
+  /** The workspaces joined with one membership each; the caller says whose. */
+  function memberships() {
+    return db
+      .selectFrom("workspace_members")
+      .innerJoin(
+        "workspaces",
+        "workspaces.id",
+        "workspace_members.workspace_id",
+      )
+      .select([
+        "workspaces.id as id",
+        "workspaces.name as name",
+        "workspaces.slug as slug",
+        "workspaces.created_by as created_by",
+        "workspaces.created_at as created_at",
+        "workspace_members.role as role",
+      ]);
+  }
+
+  function toMembership(row: WorkspacesTable & { role: string }): Membership {
+    if (!isWorkspaceRole(row.role))
+      throw new Error(`The database holds an unknown role "${row.role}".`);
+    return { workspace: toWorkspace(row), role: row.role };
+  }
+
+  async function findDefault() {
+    const row = await db
+      .selectFrom("workspaces")
+      .selectAll()
+      .orderBy("created_at")
+      .orderBy("id")
+      .limit(1)
+      .executeTakeFirst();
+    return row === undefined ? undefined : toWorkspace(row);
+  }
+
+  return {
+    async get(id) {
+      const row = await db
+        .selectFrom("workspaces")
+        .selectAll()
+        .where("id", "=", id)
+        .executeTakeFirst();
+      return row === undefined ? undefined : toWorkspace(row);
+    },
+
+    findDefault,
+
+    async slugExists(slug) {
+      const row = await db
+        .selectFrom("workspaces")
+        .select("id")
+        .where("slug", "=", slug)
+        .executeTakeFirst();
+      return row !== undefined;
+    },
+
+    async listForUser(userId) {
+      const rows = await memberships()
+        .where("workspace_members.user_id", "=", userId)
+        .orderBy("workspace_members.created_at")
+        .orderBy("workspaces.id")
+        .execute();
+      return rows.map(toMembership);
+    },
+
+    async findMembership(userId, slug) {
+      const row = await memberships()
+        .where("workspace_members.user_id", "=", userId)
+        .where("workspaces.slug", "=", slug)
+        .executeTakeFirst();
+      return row === undefined ? undefined : toMembership(row);
+    },
+
+    async findMembershipById(userId, workspaceId) {
+      const row = await memberships()
+        .where("workspace_members.user_id", "=", userId)
+        .where("workspaces.id", "=", workspaceId)
+        .executeTakeFirst();
+      return row === undefined ? undefined : toMembership(row);
+    },
+
+    async countOwnedBy(userId) {
+      const row = await db
+        .selectFrom("workspace_members")
+        .select((eb) => eb.fn.countAll<number>().as("count"))
+        .where("user_id", "=", userId)
+        .where("role", "=", "owner")
+        .executeTakeFirstOrThrow();
+      return Number(row.count);
+    },
+
+    async hasMembership(userId) {
+      const row = await db
+        .selectFrom("workspace_members")
+        .select("user_id")
+        .where("user_id", "=", userId)
+        .limit(1)
+        .executeTakeFirst();
+      return row !== undefined;
+    },
+
+    async rename(workspaceId, name) {
+      const result = await db
+        .updateTable("workspaces")
+        .set({ name })
+        .where("id", "=", workspaceId)
+        .executeTakeFirst();
+      return Number(result.numUpdatedRows) === 1;
+    },
+
+    async create(input) {
+      const row: WorkspacesTable = {
+        id: newId(),
+        name: input.name,
+        slug: input.slug,
+        created_by: input.createdBy,
+        created_at: formatTimestamp(now()),
+      };
+      await db.insertInto("workspaces").values(row).execute();
+      return toWorkspace(row);
+    },
+
+    async addMember(workspaceId, userId, role) {
+      await db
+        .insertInto("workspace_members")
+        .values({
+          workspace_id: workspaceId,
+          user_id: userId,
+          role,
+          created_at: formatTimestamp(now()),
+        })
+        .onConflict((conflict) =>
+          conflict.columns(["workspace_id", "user_id"]).doNothing(),
+        )
+        .execute();
+    },
+
+    async hasOwner(workspaceId) {
+      const row = await db
+        .selectFrom("workspace_members")
+        .select("user_id")
+        .where("workspace_id", "=", workspaceId)
+        .where("role", "=", "owner")
+        .limit(1)
+        .executeTakeFirst();
+      return row !== undefined;
+    },
+  };
+}

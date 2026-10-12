@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The vocabulary of the job queue: what a job is and what goes in and out. Everything here is plain
 // data; the rules live in job-status.ts, job-input.ts and job-queue.ts.
 import type { ReviewCommand } from "../integrations/types.ts";
@@ -15,6 +17,8 @@ export type JobTriggerKind = (typeof JOB_TRIGGER_KINDS)[number];
 /** A job as the rest of the app sees it. Timestamps are ISO 8601 text in UTC. */
 export type Job = {
   id: string;
+  /** The workspace of the job's repository; the runner API scopes everything it looks up with it. */
+  workspaceId: string;
   repositoryId: string;
   prNumber: number;
   prUrl: string;

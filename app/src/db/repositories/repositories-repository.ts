@@ -1,11 +1,16 @@
-// Access to the repositories table. The only code that reads or writes it. A repository is never
+// SPDX-License-Identifier: Apache-2.0
+
+// Access to the repositories table of ONE workspace (the factory takes the workspace id; see
+// ../workspace-scope.ts). The only code that reads or writes it. A repository is never
 // deleted: when the platform stops listing it, it becomes inactive, and it becomes active again
 // (same row) if it comes back.
 import "server-only";
 import type { Kysely } from "kysely";
 import type { RepoRef } from "../../integrations/types.ts";
 import { decodeBoolean, encodeBoolean, formatTimestamp } from "../codecs.ts";
+import { IntegrationError } from "../../integrations/errors.ts";
 import type { Database, RepositoriesTable } from "../schema.ts";
+import type { WorkspaceId } from "../workspace-scope.ts";
 
 /** A repository as stored: a RepoRef plus the row's identity and its active flag. */
 export type StoredRepository = {
@@ -68,6 +73,7 @@ function toStored(row: RepositoriesTable): StoredRepository {
 
 export function createRepositoriesRepository(
   db: Kysely<Database>,
+  workspaceId: WorkspaceId,
   now: () => Date = () => new Date(),
   newId: () => string = () => crypto.randomUUID(),
 ): RepositoriesRepository {
@@ -80,7 +86,10 @@ export function createRepositoriesRepository(
 
   return {
     async list(filter = {}) {
-      let query = db.selectFrom("repositories").selectAll();
+      let query = db
+        .selectFrom("repositories")
+        .selectAll()
+        .where("workspace_id", "=", workspaceId);
       if (filter.integrationId !== undefined)
         query = query.where("integration_id", "=", filter.integrationId);
       if (filter.active !== undefined)
@@ -97,6 +106,7 @@ export function createRepositoriesRepository(
       const row = await db
         .selectFrom("repositories")
         .selectAll()
+        .where("workspace_id", "=", workspaceId)
         .where("id", "=", id)
         .executeTakeFirst();
       return row === undefined ? undefined : toStored(row);
@@ -106,6 +116,7 @@ export function createRepositoriesRepository(
       const row = await db
         .selectFrom("repositories")
         .selectAll()
+        .where("workspace_id", "=", workspaceId)
         .where("integration_id", "=", integrationId)
         .where("external_id", "=", externalId)
         .executeTakeFirst();
@@ -118,12 +129,25 @@ export function createRepositoriesRepository(
       for (const repo of remote) wanted.set(repo.externalId, repo);
 
       return inTransaction(async (trx) => {
+        // An integration of another workspace is not there for this one.
+        const integration = await trx
+          .selectFrom("integrations")
+          .select("id")
+          .where("workspace_id", "=", workspaceId)
+          .where("id", "=", integrationId)
+          .executeTakeFirst();
+        if (integration === undefined)
+          throw new IntegrationError(
+            "INTEGRATION_NOT_FOUND",
+            `No integration with id ${integrationId}.`,
+          );
         const timestamp = formatTimestamp(now());
         const existing = new Map(
           (
             await trx
               .selectFrom("repositories")
               .selectAll()
+              .where("workspace_id", "=", workspaceId)
               .where("integration_id", "=", integrationId)
               .execute()
           ).map((row) => [row.external_id, row]),
@@ -143,6 +167,7 @@ export function createRepositoriesRepository(
               .insertInto("repositories")
               .values({
                 id: newId(),
+                workspace_id: workspaceId,
                 integration_id: integrationId,
                 external_id: repo.externalId,
                 full_name: repo.fullName,
@@ -171,6 +196,7 @@ export function createRepositoriesRepository(
               active: encodeBoolean(true),
               updated_at: timestamp,
             })
+            .where("workspace_id", "=", workspaceId)
             .where("id", "=", row.id)
             .execute();
           if (wasInactive) result.reactivated += 1;
@@ -183,6 +209,7 @@ export function createRepositoriesRepository(
           await trx
             .updateTable("repositories")
             .set({ active: encodeBoolean(false), updated_at: timestamp })
+            .where("workspace_id", "=", workspaceId)
             .where("id", "=", row.id)
             .execute();
           result.deactivated += 1;
@@ -198,6 +225,7 @@ export function createRepositoriesRepository(
           active: encodeBoolean(false),
           updated_at: formatTimestamp(now()),
         })
+        .where("workspace_id", "=", workspaceId)
         .where("integration_id", "=", integrationId)
         .where("active", "=", encodeBoolean(true))
         .executeTakeFirst();

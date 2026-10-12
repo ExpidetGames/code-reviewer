@@ -14,6 +14,7 @@ opens a database or writes SQL. The one exception is `src/backup/` (backup and r
 | `schema.ts`                 | Row types of every table (`Database`)                                                                                                                                        |
 | `codecs.ts`                 | The only code that knows how JSON, booleans and timestamps are stored                                                                                                        |
 | `repositories/`             | One small module per table (or aggregate); the only code that queries it. Exception: `users`, `sessions`, `accounts` and `verifications` belong to Better Auth (`src/auth/`) |
+| `workspace-scope.ts`        | `WorkspaceId`, the type of the workspace parameter every scoped repository takes (see "Workspace scoping")                                                                   |
 | `errors.ts`                 | `DatabaseError` with stable codes (`DATABASE_CONFIG_INVALID`, `DATABASE_DIRECTORY_UNAVAILABLE`, `DATABASE_OPEN_FAILED`, `DATABASE_LOCKED`, `MIGRATION_FAILED`)               |
 
 ## Why better-sqlite3
@@ -81,6 +82,146 @@ never hold one open across an `await` on something slow (network, model, subproc
   the start with a clear message that names the path. The directory is not created for you: a wrong
   `DATABASE_PATH` or an unmounted volume must not silently create a new, empty database.
 
+### Workspaces and the migration that introduced them
+
+Migrations `20261011160000_create_workspaces`, `20261011160100_add_workspace_to_customer_data` and
+`20261011160200_prepare_users_for_accounts` (docs/decisions/0001-editions-setup-and-accounts.md, sections
+2.6, 2.7, 2.10):
+
+- `workspaces` (id, name, unique slug, created by, created at) and `workspace_members` (workspace, user,
+  role, created at; primary key (workspace, user); the role is restricted to `owner`, `admin`, `member`
+  by a check constraint, the same list as `WORKSPACE_ROLES` in `src/workspaces/roles.ts`).
+- `workspace_id` (required) on `integrations`, `repositories`, `jobs` and `app_settings`; a project
+  belongs to a workspace through its repository. `repositories` and `jobs` repeat it so that no query
+  needs a join to scope. Two composite foreign keys make the database itself refuse a link across
+  workspaces: a repository must name an integration of its own workspace, a job a repository of its own.
+  `app_settings` is per workspace (primary key (workspace, key)): the review defaults of one workspace
+  are not those of another. The unique index `(type, external_id)` on `integrations` stays global: one
+  installation is linked to one workspace only.
+- `users.github_login` is optional (a user can exist without a GitHub account); `users.imported_at` is
+  null except for users the import of an existing installation marks.
+- **Backfill.** A database that holds data (a row in `users`, `integrations`, `repositories`, `projects`,
+  `jobs` or `app_settings`) gets one workspace, "Default workspace" (slug `default`), and every row of
+  the four tables moves into it; no row is lost or changed otherwise. A database without data gets no
+  workspace: the first-run setup makes it. **The migration creates no membership**; who becomes a member
+  is decided by the import of an existing installation (`src/legacy-import/`, it looks at the allow list of that
+  day).
+- **How the tables are rebuilt.** SQLite cannot add a NOT NULL column that references another table,
+  and the usual rebuild recipe needs `PRAGMA foreign_keys = OFF`, which does nothing inside the
+  migration transaction. So the chain `integrations`, `repositories`, `projects`, `jobs`, `job_comments`
+  is rebuilt parents first (rename to `*_old`, create, copy), the old tables are dropped leaf first and
+  the indexes are created last. No foreign key is violated at any point. `users` is not rebuilt (its
+  children cascade on delete): `github_login` is replaced by a nullable copy of itself.
+- **Time budget.** The migration of a database with 10 000 jobs that each hold a result of about 2 KB
+  must finish within 10 seconds in one transaction (`workspace-migration.integration.test.ts`). It
+  takes about 0.4 seconds on a laptop; the budget is generous so that a slow CI machine does not make
+  the test flaky. The size of the results matters: dropping `jobs_old` deletes its rows, and for every
+  row SQLite looks for rows that refer to it through `superseded_by`. Without the index
+  `jobs_old_superseded_by` that is a scan per row, and this very database took 44 to 47 seconds. Any
+  later change that rebuilds a table with a self-reference needs the same index. If you make the
+  migration slower, say why here.
+
+### Instance settings, rate limits and the instance admin flag
+
+Migrations `20261011170000_create_instance_settings`, `20261011170100_create_rate_limits` and
+`20261011170200_add_instance_admin_flag_to_users` (docs/decisions/0001-editions-setup-and-accounts.md,
+sections 2.2, 2.3 and 2.10):
+
+- `instance_settings` (key, JSON value, `updated_by` user id or null, `updated_at`): the settings of the
+  whole instance (`instance-settings-repository.ts`, typed by key). The first-run setup state is two
+  explicit rows, `setup_completed_at` and `import_state`; a database from before them reads as null and
+  `none` (`src/setup/README.md`). `tenancy` and `sign_up_rule` are written by the setup; `import_state`, `github_app`,
+  `sign_in_methods` and `import_notice` (what the import could not migrate, for the admin portal) by the import of an
+  existing installation (`src/legacy-import/`).
+- `rate_limits` (key, `window_started_at`, `count`): shared counters with a window for the endpoints that
+  must limit the same way whichever app instance a request reaches (`rate-limits-repository.ts`, `hit` is
+  one statement, so attempts that arrive together are all counted). The email and password sign in
+  uses it (`src/auth/sign-in-limit.ts`); the setup code has its own counters in memory, by design.
+- `users.is_instance_admin` (0 or 1, default 0): set for the account the setup creates.
+
+None of these is customer data, so none is workspace scoped (`scoping.test.ts` lists them as instance
+level).
+
+### Secrets, password reset tokens and email verification tokens
+
+Migrations `20261011200000_create_secrets` and `20261011200100_create_password_reset_tokens` (sections 2.3
+and 2.7):
+
+- `secrets` (name, ciphertext, nonce, `key_version`, `last_four`, `updated_by`, `updated_at`): the encrypted
+  credentials of the instance, one row per name (`secrets-repository.ts`, used through `src/secrets/`). The
+  name is the row id that is bound into the ciphertext.
+- `password_reset_tokens` (`token_hash`, `user_id`, `created_at`, `expires_at`, `used_at`): single-use reset
+  links; only the SHA-256 hash of the token is kept (`src/auth/password-reset.ts`). A row goes with its user.
+- `email_verification_tokens` (`token_hash`, `user_id`, `email`, `password_hash`, `created_at`, `expires_at`, `used_at`), migration
+  `20261011210000_create_email_verification_tokens` (section 2.5): single-use verification links, valid 24 hours;
+  only the SHA-256 hash of the token is kept, and a link is bound to the address it was made for and to the password hash of the sign-up that made it
+  (`src/signup/`). A row goes with its user.
+- `instance_settings` gained two keys: `sign_in_methods` and `max_workspaces_per_user` (typed in
+  `instance-settings-repository.ts`, which also reads a value with who saved it and when).
+  A third key, `smtp`, holds the mail server's settings (the password is in `secrets`, never here); the repository
+  can also `remove` a setting. A fourth, `github_app`, holds the GitHub App's non-secret settings (app id, slug,
+  client id, the "private app" flag, where it came from; the private key, webhook secret and client secret are in
+  `secrets`, `src/github-config/`).
+
+### Signed states, the address conflict and the accounts indexes
+
+Migrations `20261012120000_create_signed_states`, `20261012120100_add_users_email_conflict` and
+`20261012120200_unique_accounts` (sections 2.4, 2.5 and 2.9):
+
+- `signed_states` (`id` = the nonce, `purpose`, `user_id`, `session_hash`, `code_verifier`, `data`, `created_at`,
+  `expires_at`, `used_at`): the single-use side of the signed `state` values of the round trips through GitHub (the
+  manifest flow, linking a GitHub identity), `src/signed-state/`. A row goes with its user and is removed by the
+  clean-up once it has expired.
+- `users.email_conflict`: GitHub's verified primary address when another account has it already, so an imported
+  user's placeholder address could not be replaced (`src/github-signin/decide.ts`). Null otherwise.
+- Unique indexes on `accounts`: `(provider_id, account_id)` (an identity belongs to one user) and `(user_id,
+provider_id)` (a user has one identity per way to sign in), so linking a GitHub identity is safe when two requests
+  race.
+
+### Workspace secrets and the remembered keys of jobs
+
+Migrations `20261012140000_create_workspace_secrets` and `20261012140100_create_job_claimed_keys` (sections 2.7, 2.8
+and 2.10):
+
+- `workspace_secrets` (`workspace_id`, `name`, `binding`, `ciphertext`, `nonce`, `key_version`, `last_four`,
+  `updated_by`, `updated_at`; primary key (workspace, name)): the encrypted credentials of one workspace, today its LLM
+  key (`workspace-secrets-repository.ts`, scoped, used through `src/secrets/workspace-store.ts`). The workspace id
+  and the name are bound into the ciphertext; `binding` is the provider the key was entered for. A row goes with
+  its workspace.
+- `job_claimed_keys` (`job_id`, `ciphertext`, `nonce`, `key_version`, `created_at`): the LLM key handed to a runner
+  with the claim of a job, encrypted, so any app instance can mask a result (`job-claimed-keys-repository.ts`,
+  instance level; `src/runner-api/claimed-keys.ts`). A row goes with its job and with the cleanup a week after the
+  job finished.
+
+## Workspace scoping
+
+Every repository that reads or writes customer data is created for one workspace:
+`createIntegrationsRepository(db, workspaceId, ...)`, and the same for repositories, projects,
+app settings, jobs and runs. Every query it runs filters or sets `workspace_id`, and an id of another
+workspace is simply not there: fetching, changing or deleting it behaves like a missing id.
+`WorkspaceId` is a plain string; a repository takes it as its second parameter, always named
+`workspaceId`.
+
+- `repositories/scoping.test.ts` reads the source of the repositories and fails when a module is
+  neither scoped nor on the explicit list of instance level modules, or when an exported function of a
+  scoped one takes a database connection without a `workspaceId`.
+- `repositories/scoped-isolation.integration.test.ts` calls every method of every scoped repository
+  with the scope of one workspace against the ids of another and checks that nothing comes back and
+  nothing changes. It has a row for every method; a method without one fails the test.
+
+Not scoped, each for a reason (the list is in `scoping.test.ts`):
+
+| Module                                                               | Why                                                                                                                                                                                                                                                                               |
+| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app-meta`, `allowed-login-pins`, `webhook-deliveries`, `workspaces` | Not customer data (facts about the installation, the sign-in allow list, delivery ids, the owners themselves)                                                                                                                                                                     |
+| `integration-directory-repository.ts`                                | Reads integrations of any workspace. A webhook names an installation before anybody knows the workspace, and the synchronization walks every connection. It only reads, and the answer carries `workspaceId`; everything done next goes through scoped repositories               |
+| `runner-jobs-repository.ts`                                          | The lease side of the job queue (claim, heartbeat, complete, release, expiry). Runners serve the whole instance with one token, so a claim hands out the oldest due job of any workspace; every change is fenced by the lease token, and the job it returns carries `workspaceId` |
+
+A signed-in user works in the workspace named by the address (`/w/<slug>`) and only in one they are a member
+of (`src/workspaces/README.md`); the repositories of members and invitations below follow the same rule,
+and the question "which invitations wait for this address?" is answered by the instance level
+`invitation-directory-repository.ts`, which only reads.
+
 ## Portable schema conventions
 
 The MVP runs on SQLite only, but the schema stays portable so that Postgres remains possible later.
@@ -121,8 +262,8 @@ string or a timestamp string format. Route handlers and server code get the conn
 `getDatabase()` (`startup.ts`) and pass it in; tests pass in a database from
 `src/test-support/test-database.ts`.
 
-`integrations` (migration `20261010134000_create_integrations`, repository `integrations-repository.ts`) holds the connections to
-git platforms; see `src/integrations/README.md`. It keeps no secret of a GitHub App, and the
+`integrations` (migration `20261010134000_create_integrations`, repository `integrations-repository.ts`, plus the
+instance level `integration-directory-repository.ts`) holds the connections to git platforms; see `src/integrations/README.md`. It keeps no secret of a GitHub App, and the
 repository refuses secret-looking keys in `config`.
 
 `repositories` (migration `20261010143000_create_repositories`, repository `repositories-repository.ts`)
@@ -132,20 +273,49 @@ complete list in one transaction.
 
 `projects` (migration `20261010190000_create_projects`, repository `projects-repository.ts`) holds
 the repositories that are reviewed: one row per repository (`repository_id` unique), created by the
-first activation, switched off with `active = 0`, never deleted; see `src/projects/README.md`.
+first activation or the first save of settings (then off), switched off with `active = 0`, never deleted; see `src/projects/README.md`.
 
 `webhook_deliveries` (migration `20261010170000_create_webhook_deliveries`, repository
 `webhook-deliveries-repository.ts`) holds the delivery ids the webhook route has accepted, so a
 redelivery produces no second trigger; rows are pruned after 7 days; see `src/webhooks/README.md`.
 
-`jobs` (migration `20261010191500_create_jobs`, repository `jobs-repository.ts`, claim in
-`jobs-claim.ts`) is the job queue (the index `jobs_repository_recent`, migration `20261011100000_add_jobs_repository_recent_index`, serves the runs pages: newest job of a repository, `runs-repository.ts`); the rules (dedupe, supersession, leases, attempts, timeouts) are
+`jobs` (migration `20261010191500_create_jobs`, rebuilt by `20261011160100_add_workspace_to_customer_data`;
+the scoped repository `jobs-repository.ts` creates, drops and reads jobs, the instance level
+`runner-jobs-repository.ts` with the claim in `jobs-claim.ts` hands them to runners) is the job queue (the index `jobs_repository_recent`, migration `20261011100000_add_jobs_repository_recent_index`, serves the runs pages: newest job of a repository, `runs-repository.ts`); the rules (dedupe, supersession, leases, attempts, timeouts) are
 in `src/jobs/README.md`. `jobs-claim.ts` holds the one statement written for SQLite (see its head
 comment); everything else is query builder code.
 
-`app_settings` (migration `20261010201500_create_app_settings`, repository `app-settings-repository.ts`) holds
-settings of the whole instance, one row per setting with a JSON value; the first is `review_defaults`, the
-global default values of the review settings (`src/review-settings/README.md`).
+`app_settings` (migration `20261010201500_create_app_settings`, rebuilt per workspace by
+`20261011160100_add_workspace_to_customer_data`, repository `app-settings-repository.ts`) holds settings of
+one workspace, one row per setting with a JSON value; the first is `review_defaults`, the default values of
+the review settings of the workspace (`src/review-settings/README.md`).
+
+`workspaces` and `workspace_members` (migration `20261011160000_create_workspaces`, repositories
+`workspaces-repository.ts` for the questions that start from a user and `workspace-members-repository.ts` for
+the members of one workspace) are described under "Workspaces and the migration that introduced them" above
+and in `src/workspaces/README.md`.
+
+`invitations` (migration `20261012100000_create_invitations`, scoped repository `invitations-repository.ts`,
+instance level `invitation-directory-repository.ts`): the links that bring a person into a workspace. Columns:
+`workspace_id`, the canonical `email` it is bound to, the `role` (the same check as `workspace_members`),
+`token_hash` (SHA-256 of the 256 bit token, unique; the token itself is never stored, a resend replaces the
+hash), `invited_by`, `created_at`, `expires_at` (7 days), and the ways it ends: `accepted_at` with
+`accepted_by`, or `revoked_at`. A partial unique index allows one open (neither accepted nor revoked)
+invitation per workspace and address; an expired one is ended by the code before a new one is made. Every
+statement that ends or renews an invitation only touches an open one, and accepting only an open one that has
+not expired (`invitations-repository.integration.test.ts`).
+
+`installation_link_requests` and `unclaimed_installations` (migration `20261012150000_create_installation_binding`, section 2.9;
+`src/installation-binding/`): a request is a person's ask to link an installation whose organization role the app could not
+read, decided by the instance admin (scoped repository `installation-link-requests-repository.ts`, instance level
+`installation-link-request-directory-repository.ts`). Columns: `workspace_id`, `requested_by`, the requester's GitHub login,
+the installation id and its account (`account_login`, `account_type`, `account_id`), a `status` (pending, approved,
+denied, withdrawn; a check constraint), the evidence (`token_can_access` and `role_result` with `role_detail`; never a
+token), and the times and the admin who decided. A partial unique index allows one pending request per workspace and
+installation, and a pending request is refreshed instead of repeated. `unclaimed_installations` (instance level
+`unclaimed-installations-repository.ts`) notes the installations of the App that no workspace has linked (id, account, first and
+last seen, whether a webhook or a synchronization saw it). `integrations.status` gained the value `disconnected` (the column is
+text without a check). Both tables are in the merge of the instance admin with an imported operator (`USER_REFERENCES`).
 
 `app_meta` (a key/value table for facts about the installation) exists to prove the setup. Product
 tables come with the tickets that need them: add the migration, the row type in `schema.ts` and the

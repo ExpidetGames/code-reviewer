@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The pull requests a person can pick from: one radio button per open pull request with number,
 // title and author. Titles and names come from GitHub and are only ever rendered as text. With
 // nothing open the list says so.

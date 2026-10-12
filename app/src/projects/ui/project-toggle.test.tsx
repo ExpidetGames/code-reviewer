@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // @vitest-environment jsdom
 // Pins down the switch of a project: pressing it calls the project route with the other state, shows
 // the new state and refreshes the page data; a refusal is shown as a sentence and the switch goes
@@ -38,6 +40,7 @@ function renderToggle(
 ) {
   return render(
     <ProjectToggle
+      workspaceSlug="acme"
       repositoryId="repo-1"
       fullName="acme/widgets"
       checked={props.checked ?? false}

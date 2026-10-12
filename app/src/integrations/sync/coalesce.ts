@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Makes overlapping full syncs share one run. A full sync reads every installation and repository
 // from GitHub; a person with two tabs, a double click on two pages or the start-up sync meeting the
 // button would otherwise start one run each. The second caller gets the run that is already going

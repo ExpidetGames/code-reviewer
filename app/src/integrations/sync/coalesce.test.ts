@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down that overlapping full syncs share one run: the second caller gets the running one, a call
 // after it finished starts a new one, and a failed run does not stay in the way.
 import { describe, expect, it } from "vitest";

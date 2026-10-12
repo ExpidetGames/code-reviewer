@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The shared secret of the runner API. One token for every runner in the MVP, set as RUNNER_TOKEN.
 import "server-only";
 import { createHash, timingSafeEqual } from "node:crypto";

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Starting a review by hand: which pull requests a person can pick, and the start itself. The start
 // follows the same rules as the other triggers (an active project, a command the project allows) and
 // asks the platform, never the browser, for the facts of the pull request: whether it is open and
@@ -159,7 +161,7 @@ export function createManualReviewService(
     if (repository === undefined) throw NOT_FOUND();
     const integration = await deps.integrations.get(repository.integrationId);
     if (integration === undefined) throw NOT_FOUND();
-    if (integration.status === "disabled") throw NOT_INSTALLED();
+    if (integration.status !== "active") throw NOT_INSTALLED();
     const project = await deps.projects.getActiveProjectForRepository(
       repository.id,
     );

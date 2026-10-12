@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // What happens when the app server starts: open the database (creating the file if needed), bring
 // the schema to the latest version, and keep the connection for the rest of the process.
 // `instrumentation.ts` calls initializeDatabaseOnStart; everything else here is testable on its own.

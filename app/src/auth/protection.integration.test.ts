@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down who gets in: the access proxy in front of every route, driven with real requests
 // against a real Better Auth instance and a real SQLite file. Without a valid session a page sends
 // the person to the login page and a data route answers 401; a signed out, expired or forged
@@ -13,12 +15,33 @@ import {
 } from "../test-support/auth-harness.ts";
 import { concretePath, discoverRoutes } from "../test-support/routes.ts";
 import { createAccessProxy } from "./access-proxy.ts";
+import { noWorkspaceGates, openGates } from "../test-support/open-gates.ts";
 
 // Every route of the app and whether it needs a session. A new route must be added here.
 const PUBLIC_ROUTES = [
   "/login",
   "/api/health",
+  // The first-run setup: protected by the setup code and the setup session, and gone (404) once the
+  // instance is set up (src/setup/gate.ts).
+  "/setup",
+  "/api/setup/code",
+  "/api/setup/complete",
   "/api/auth/[...all]",
+  // A reset link carries its own credential, the token (src/auth/password-reset-http.ts).
+  "/reset-password",
+  "/api/password-reset",
+  // Asking for a reset link by mail: no session yet (src/auth/password-reset-request-http.ts).
+  "/forgot-password",
+  "/api/password-reset/request",
+  // Signing up and verifying an address: no session yet (src/signup/http.ts).
+  "/sign-up",
+  "/api/sign-up",
+  "/verify-email",
+  "/api/verify-email",
+  "/api/verify-email/resend",
+  // An invitation link: whoever holds it opens the page, which only shows what the invitation is about;
+  // accepting is a POST that needs a session (src/workspaces/README.md).
+  "/invitation",
   // GitHub signs its deliveries; the route checks the signature itself (src/webhooks/README.md).
   "/api/webhooks/github-app",
   // The runner sends its own shared token (src/runner-api/README.md).
@@ -28,23 +51,74 @@ const PUBLIC_ROUTES = [
 ] as const;
 const PROTECTED_ROUTES = [
   "/",
-  "/projects",
-  "/projects/[repositoryId]",
-  "/runs",
-  "/runs/[id]",
+  // The files of the admin portal; people use /admin, which is rewritten to them for the instance admin
+  // and does not exist for anybody else (src/admin/guard.integration.test.ts).
+  "/instance-portal",
+  "/instance-portal/approvals",
+  "/instance-portal/integrations",
+  "/instance-portal/limits",
+  "/instance-portal/mail",
+  "/instance-portal/setup",
+  "/account",
+  // The binding of a GitHub installation to a workspace: where GitHub sends the browser after an installation
+  // (the Setup URL of the App; a route that redirects) and where a flow ends when no workspace can be named
+  // (src/installation-binding/).
+  "/github/connected",
+  "/github/result",
+  // The old addresses of the pages, which lead to the first workspace of the person.
+  "/projects/[[...rest]]",
+  "/runs/[[...rest]]",
   "/settings",
+  // A person without a workspace reaches these (src/auth/access.ts, NO_WORKSPACE_PATHS).
+  "/no-access",
+  "/invitations",
+  "/workspaces/new",
+  // The pages of a workspace: for its members only (src/workspaces/access-runtime.ts).
+  "/w/[workspace]",
+  "/w/[workspace]/connections",
+  "/w/[workspace]/members",
+  "/w/[workspace]/projects",
+  "/w/[workspace]/projects/[repositoryId]",
+  "/w/[workspace]/runs",
+  "/w/[workspace]/runs/[id]",
+  "/w/[workspace]/settings",
 ] as const;
 // Data routes: a visitor without a session gets 401 instead of a redirect.
 const PROTECTED_DATA_ROUTES = [
+  "/api/account/github/link",
+  "/api/instance-portal/approvals/[id]",
+  "/api/instance-portal/settings",
+  "/api/instance-portal/mail/test",
+  "/api/instance-portal/github",
+  "/api/instance-portal/github/check",
+  "/api/instance-portal/github/link",
+  "/api/instance-portal/github/manifest",
+  "/api/instance-portal/github/manifest/callback",
+  "/api/instance-portal/integrations/sync",
   "/api/backup/status",
-  "/api/repositories/[repositoryId]/project",
-  "/api/repositories/[repositoryId]/project/settings",
-  "/api/repositories/[repositoryId]/pull-requests",
-  "/api/repositories/[repositoryId]/reviews",
-  "/api/review-settings",
-  "/api/integrations/sync",
-  "/api/runs",
-  "/api/runs/[id]",
+  // Not about one workspace: creating one, accepting an invitation (src/auth/access.ts, NO_WORKSPACE_PATHS).
+  "/api/workspaces",
+  "/api/invitations/accept",
+  // The data routes of a workspace: for its members only (src/workspaces/access-runtime.ts).
+  "/api/w/[workspace]",
+  "/api/w/[workspace]/github/connect",
+  "/api/w/[workspace]/github/installations",
+  "/api/w/[workspace]/github/installations/choose",
+  "/api/w/[workspace]/integrations/[integrationId]",
+  "/api/w/[workspace]/integrations/sync",
+  "/api/w/[workspace]/invitations",
+  "/api/w/[workspace]/invitations/[invitationId]",
+  "/api/w/[workspace]/invitations/[invitationId]/resend",
+  "/api/w/[workspace]/llm-key",
+  "/api/w/[workspace]/llm-key/test",
+  "/api/w/[workspace]/members/[userId]",
+  "/api/w/[workspace]/repositories/[repositoryId]/project",
+  "/api/w/[workspace]/repositories/[repositoryId]/project/settings",
+  "/api/w/[workspace]/repositories/[repositoryId]/pull-requests",
+  "/api/w/[workspace]/repositories/[repositoryId]/reviews",
+  "/api/w/[workspace]/review-settings",
+  "/api/w/[workspace]/runs",
+  "/api/w/[workspace]/runs/[id]",
 ] as const;
 // Files the proxy matcher leaves out on purpose (src/proxy.ts), so no session rule applies to them.
 const OUTSIDE_THE_PROXY = ["/favicon.ico"] as const;
@@ -53,7 +127,7 @@ async function createGuardedApp() {
   const harness = await createAuthHarness();
   const proxy = createAccessProxy({
     getAuth: () => harness.auth,
-    getPolicy: () => harness.policy,
+    getGates: () => openGates,
   });
   function visit(path: string, cookies?: CookieJar, method = "GET") {
     const headers = new Headers();
@@ -167,7 +241,7 @@ describe("a request without a session", () => {
       ["better-auth.session_token", "not-a-real-token.forged-signature"],
     ]);
 
-    const response = await app.visit("/", forged);
+    const response = await app.visit("/w/default/projects", forged);
 
     expect(response.status).toBe(307);
   });
@@ -178,21 +252,18 @@ describe("a request with a valid session", () => {
     const app = await createGuardedApp();
     const { cookies } = await app.signIn();
 
-    expect(passesThrough(await app.visit("/", cookies))).toBe(true);
+    expect(passesThrough(await app.visit("/w/default/projects", cookies))).toBe(
+      true,
+    );
     expect(passesThrough(await app.visit("/api/jobs", cookies))).toBe(true);
   });
 
-  it("is turned away when the access policy refuses the user", async () => {
+  it("is turned away when the user belongs to no workspace", async () => {
     const app = await createGuardedApp();
     const { cookies } = await app.signIn();
     const refusing = createAccessProxy({
       getAuth: () => app.auth,
-      getPolicy: () => (user) =>
-        Promise.resolve(
-          user.githubLogin === "octocat"
-            ? { allowed: false, reason: "not_allowed" }
-            : { allowed: true },
-        ),
+      getGates: () => noWorkspaceGates,
     });
 
     const response = await refusing(
@@ -202,6 +273,7 @@ describe("a request with a valid session", () => {
     );
 
     expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(`${TEST_BASE_URL}/no-access`);
   });
 });
 
@@ -211,7 +283,9 @@ describe("a session that has ended", () => {
     const app = await createGuardedApp();
     const { cookies } = await app.signIn();
     const oldCookies = new Map(cookies);
-    expect(passesThrough(await app.visit("/", oldCookies))).toBe(true);
+    expect(
+      passesThrough(await app.visit("/w/default/projects", oldCookies)),
+    ).toBe(true);
 
     const signOut = await app.request("/api/auth/sign-out", {
       method: "POST",
@@ -219,7 +293,7 @@ describe("a session that has ended", () => {
     });
     expect(signOut.status).toBe(200);
 
-    const page = await app.visit("/", oldCookies);
+    const page = await app.visit("/w/default/projects", oldCookies);
     const data = await app.visit("/api/jobs", oldCookies);
     expect(page.status).toBe(307);
     expect(page.headers.get("location")).toBe(`${TEST_BASE_URL}/login`);
@@ -237,10 +311,12 @@ describe("a session that has ended", () => {
     vi.useFakeTimers({ toFake: ["Date"], now: new Date() });
 
     vi.setSystemTime(Date.now() + 29 * day);
-    expect(passesThrough(await app.visit("/", cookies))).toBe(true);
+    expect(passesThrough(await app.visit("/w/default/projects", cookies))).toBe(
+      true,
+    );
 
     vi.setSystemTime(Date.now() + 1 * day + 1000);
-    const page = await app.visit("/", cookies);
+    const page = await app.visit("/w/default/projects", cookies);
     expect(page.status).toBe(307);
     expect(page.headers.get("location")).toBe(`${TEST_BASE_URL}/login`);
     expect((await app.visit("/api/jobs", cookies)).status).toBe(401);
@@ -253,7 +329,7 @@ describe("a check that cannot be made", () => {
       getAuth: () => {
         throw new Error("the database is not initialized");
       },
-      getPolicy: () => () => Promise.resolve({ allowed: true }),
+      getGates: () => openGates,
     });
     const error = vi
       .spyOn(console, "error")

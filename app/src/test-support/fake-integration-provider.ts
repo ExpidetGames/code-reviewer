@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // A stand-in for a real integration provider, so that jobs, the runner API and the UI can be built
 // and tested without GitHub. It speaks a small made-up "platform format" in its webhooks (see
 // `fakeWebhookRequest`) and translates it into the normalized types, exactly like a real provider.
@@ -18,6 +20,15 @@ import type {
   RepoRef,
   ReviewTrigger,
 } from "../integrations/types.ts";
+
+/** What a provider does for a signal that has fired: no request, the neutral "unavailable" code. */
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted)
+    throw new IntegrationError(
+      "INTEGRATION_ACCESS_UNAVAILABLE",
+      "The request was aborted.",
+    );
+}
 
 export const FAKE_WEBHOOK_SECRET = "fake-webhook-secret";
 export const FAKE_SIGNATURE_HEADER = "x-fake-signature-256";
@@ -111,6 +122,7 @@ export function fakeIntegration(
 ): Integration {
   return {
     id: "integration-1",
+    workspaceId: "workspace-1",
     type: "github_app",
     displayName: "Fake integration",
     externalId: "installation-1",
@@ -300,8 +312,9 @@ export function fakeIntegrationProvider(
       });
     },
 
-    async getPullRequest(integration, repo, prNumber) {
+    async getPullRequest(integration, repo, prNumber, signal) {
       record("getPullRequest", integration, repo, prNumber);
+      throwIfAborted(signal);
       const found = pullRequests.find((pr) => pr.number === prNumber);
       if (found === undefined)
         throw new IntegrationError(
@@ -311,8 +324,9 @@ export function fakeIntegrationProvider(
       return { ...found, url: `${repo.url}/pull/${found.number}` };
     },
 
-    async listOpenPullRequests(integration, repo) {
+    async listOpenPullRequests(integration, repo, signal) {
       record("listOpenPullRequests", integration, repo);
+      throwIfAborted(signal);
       return pullRequests
         .filter((pr) => pr.state === "open")
         .map((pr) => ({ ...pr, url: `${repo.url}/pull/${pr.number}` }));

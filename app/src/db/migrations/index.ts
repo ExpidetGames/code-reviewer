@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The ordered list of migrations. Kysely runs them in the alphabetical order of these keys, so
 // every key after the first starts with a UTC timestamp, `YYYYMMDDHHMMSS_what_it_does`; "0001" sorts
 // before all of them. A migration that has run is never edited: add a new one instead. Registered
@@ -16,6 +18,22 @@ import { migration as createJobs } from "./20261010191500_create_jobs.ts";
 import { migration as createAppSettings } from "./20261010201500_create_app_settings.ts";
 import { migration as createJobComments } from "./20261011090000_create_job_comments.ts";
 import { migration as addJobsRepositoryRecentIndex } from "./20261011100000_add_jobs_repository_recent_index.ts";
+import { migration as createWorkspaces } from "./20261011160000_create_workspaces.ts";
+import { migration as addWorkspaceToCustomerData } from "./20261011160100_add_workspace_to_customer_data.ts";
+import { migration as prepareUsersForAccounts } from "./20261011160200_prepare_users_for_accounts.ts";
+import { migration as createInstanceSettings } from "./20261011170000_create_instance_settings.ts";
+import { migration as createRateLimits } from "./20261011170100_create_rate_limits.ts";
+import { migration as addInstanceAdminFlagToUsers } from "./20261011170200_add_instance_admin_flag_to_users.ts";
+import { migration as createSecrets } from "./20261011200000_create_secrets.ts";
+import { migration as createPasswordResetTokens } from "./20261011200100_create_password_reset_tokens.ts";
+import { migration as createEmailVerificationTokens } from "./20261011210000_create_email_verification_tokens.ts";
+import { migration as createInvitations } from "./20261012100000_create_invitations.ts";
+import { migration as createSignedStates } from "./20261012120000_create_signed_states.ts";
+import { migration as addUsersEmailConflict } from "./20261012120100_add_users_email_conflict.ts";
+import { migration as uniqueAccounts } from "./20261012120200_unique_accounts.ts";
+import { migration as createWorkspaceSecrets } from "./20261012140000_create_workspace_secrets.ts";
+import { migration as createJobClaimedKeys } from "./20261012140100_create_job_claimed_keys.ts";
+import { migration as createInstallationBinding } from "./20261012150000_create_installation_binding.ts";
 
 const migrations: Record<string, Migration> = {
   "0001_create_app_meta": createAppMeta,
@@ -32,6 +50,24 @@ const migrations: Record<string, Migration> = {
   "20261011090000_create_job_comments": createJobComments,
   "20261011100000_add_jobs_repository_recent_index":
     addJobsRepositoryRecentIndex,
+  "20261011160000_create_workspaces": createWorkspaces,
+  "20261011160100_add_workspace_to_customer_data": addWorkspaceToCustomerData,
+  "20261011160200_prepare_users_for_accounts": prepareUsersForAccounts,
+  "20261011170000_create_instance_settings": createInstanceSettings,
+  "20261011170100_create_rate_limits": createRateLimits,
+  "20261011170200_add_instance_admin_flag_to_users":
+    addInstanceAdminFlagToUsers,
+  "20261011200000_create_secrets": createSecrets,
+  "20261011200100_create_password_reset_tokens": createPasswordResetTokens,
+  "20261011210000_create_email_verification_tokens":
+    createEmailVerificationTokens,
+  "20261012100000_create_invitations": createInvitations,
+  "20261012120000_create_signed_states": createSignedStates,
+  "20261012120100_add_users_email_conflict": addUsersEmailConflict,
+  "20261012120200_unique_accounts": uniqueAccounts,
+  "20261012140000_create_workspace_secrets": createWorkspaceSecrets,
+  "20261012140100_create_job_claimed_keys": createJobClaimedKeys,
+  "20261012150000_create_installation_binding": createInstallationBinding,
 };
 
 export const migrationProvider: MigrationProvider = {

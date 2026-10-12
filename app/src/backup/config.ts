@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The backup settings from the environment. The only place that knows the variable names of the
 // backup (DATABASE_PATH is the database layer's own variable, read here with the same default).
 //

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Helpers shared by the unit tests that run PR-Agent's real settings code (not a test file)."""
 
 import copy

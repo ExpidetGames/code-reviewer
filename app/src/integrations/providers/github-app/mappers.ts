@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Turns GitHub's pull request JSON into the app's PullRequestRef. Returns null when a field the app
 // needs is missing, so the caller can report an unexpected answer instead of passing on garbage.
 import { isRecord } from "./guards.ts";

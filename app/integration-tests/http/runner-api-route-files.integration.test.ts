@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the real route files of the runner API with the wiring the running server uses: the
 // database opened at start, the registry configured from the environment, the settings read from
 // RUNNER_TOKEN and LLM_*. A pull request delivery goes in through the webhook route and comes out
@@ -22,8 +24,17 @@ import {
   testAppKeys,
   testGithubAppEnv,
 } from "../../src/test-support/github-app.ts";
-import { getProjectService } from "../../src/projects/shared.ts";
+import { projectServiceFor } from "../../src/projects/shared.ts";
+import {
+  saveDefaultWorkspaceLlmKey,
+  saveGithubAppFromEnv,
+} from "../../src/test-support/server-credentials.ts";
 import { createTestDirectory } from "../../src/test-support/test-database.ts";
+import {
+  defaultWorkspaceId,
+  linkTestInstallation,
+  markInstanceSetUp,
+} from "../../src/test-support/workspaces.ts";
 
 const RUNNER_TOKEN = "route-file-runner-token-91ac-5d2e8b7f0c14";
 const LLM_KEY = "route-file-llm-key-77de";
@@ -51,8 +62,8 @@ async function startRoutes() {
       ALLOW_TEST_GITHUB_ENDPOINTS: "true",
     }),
     RUNNER_TOKEN,
-    LLM_PROVIDER: "openrouter",
-    LLM_API_KEY: LLM_KEY,
+    // The master key: the key of a claim is remembered encrypted in the database.
+    APP_SECRET: "route-file-app-secret-0123456789-0123456789",
     LLM_MODEL: "vendor/test-model",
   };
   for (const [name, value] of Object.entries(env))
@@ -61,7 +72,15 @@ async function startRoutes() {
   await initializeDatabaseOnStart({
     env: { DATABASE_PATH: join(directory, "app.db") },
   });
-  // The registry reads the environment on first use, so every test loads the routes anew.
+  // A deployment that is in use has been set up (the first-run setup decides about workspaces).
+  await markInstanceSetUp(getDatabase());
+  await saveGithubAppFromEnv(getDatabase(), env);
+  await saveDefaultWorkspaceLlmKey(
+    getDatabase(),
+    env.APP_SECRET ?? "",
+    LLM_KEY,
+  );
+  // The registry reads the credentials on first use, so every test loads the routes anew.
   vi.resetModules();
   return {
     fake,
@@ -121,6 +140,12 @@ describe("the runner API route files", () => {
       account: { login: "acme", id: 5001, type: "Organization" },
     });
     routes.fake.setRepositories(4242, [{ id: 7001, fullName: "acme/widgets" }]);
+    // A person of the workspace linked the installation (the binding); nothing is made from a delivery alone.
+    await linkTestInstallation(
+      getDatabase(),
+      await defaultWorkspaceId(getDatabase()),
+      { id: "4242", accountLogin: "acme", accountId: 5001 },
+    );
     routes.fake.addPullRequest("acme/widgets", {
       number: 7,
       title: "Add widget caching",
@@ -147,9 +172,13 @@ describe("the runner API route files", () => {
       ).toBe(202);
       if (event === "installation") {
         // The repository must be a project before its pull requests are reviewed.
-        const [repository] =
-          await createRepositoriesRepository(getDatabase()).list();
-        await getProjectService().activateProject(repository!.id);
+        const [repository] = await createRepositoriesRepository(
+          getDatabase(),
+          await defaultWorkspaceId(getDatabase()),
+        ).list();
+        await projectServiceFor(
+          await defaultWorkspaceId(getDatabase()),
+        ).activateProject(repository!.id);
       }
     }
 

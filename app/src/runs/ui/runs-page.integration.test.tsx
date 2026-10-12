@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // @vitest-environment jsdom
 // Pins down the Runs page and the page of one run with real data: runs made through the job queue in
 // a real SQLite file, the filter from the address, and the not-found case. Rendering is the real
@@ -6,16 +8,18 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { createProjectsRepository } from "../../db/repositories/projects-repository.ts";
 import { createProjectService } from "../../projects/service.ts";
+import { createLastRunSource } from "../runs-service.ts";
 import { createRunsFixture } from "../../test-support/runs.ts";
 import { loadRunDetailPage, RunDetailPageContent } from "./run-detail-page.tsx";
 import { loadRunsPage, RunsPageContent } from "./runs-page.tsx";
+import { defaultWorkspaceId } from "../../test-support/workspaces.ts";
 
 afterEach(cleanup);
 
 async function openRuns() {
   const f = await createRunsFixture();
   const projects = createProjectService({
-    projects: createProjectsRepository(f.db),
+    projects: createProjectsRepository(f.db, await defaultWorkspaceId(f.db)),
   });
   await projects.activateProject(f.repositoryId);
   await projects.activateProject(f.otherRepositoryId);
@@ -31,17 +35,20 @@ async function openRuns() {
   const widgetsWaiting = await f.waiting({
     repositoryId: f.otherRepositoryId,
   });
+  const lastRuns = createLastRunSource({ runs: f.runsRepository });
   async function page(
     searchParams: Record<string, string | string[] | undefined> = {},
   ) {
     const data = await loadRunsPage(searchParams, {
       runs: f.runs,
       projects,
+      lastRuns,
     });
-    return render(<RunsPageContent data={data} />);
+    return render(<RunsPageContent workspaceSlug="acme" data={data} />);
   }
   return {
     f,
+    projects,
     page,
     gadgetsFailed,
     gadgetsDone,
@@ -114,7 +121,7 @@ describe("the Runs page", () => {
     ]);
     expect(
       screen.getByRole("link", { name: "Reset filter" }).getAttribute("href"),
-    ).toBe("/runs");
+    ).toBe("/w/acme/runs");
   });
 
   it("moves the selects with the address when the filter is reset or the person goes back", async () => {
@@ -125,11 +132,12 @@ describe("the Runs page", () => {
       loadRunsPage(searchParams, {
         runs: app.f.runs,
         projects: createProjectService({
-          projects: createProjectsRepository(app.f.db),
+          projects: createProjectsRepository(app.f.db, app.f.workspaceId),
         }),
       });
     const { rerender } = render(
       <RunsPageContent
+        workspaceSlug="acme"
         data={await data({
           repository: app.f.repositoryId,
           status: "failed",
@@ -143,12 +151,61 @@ describe("the Runs page", () => {
     expect(values()).toEqual([app.f.repositoryId, "failed"]);
 
     // "Reset filter" is a link to /runs: the page renders again with no filter.
-    rerender(<RunsPageContent data={await data({})} />);
+    rerender(<RunsPageContent workspaceSlug="acme" data={await data({})} />);
     expect(values()).toEqual(["", ""]);
 
     // Back brings the filter back.
-    rerender(<RunsPageContent data={await data({ status: "succeeded" })} />);
+    rerender(
+      <RunsPageContent
+        workspaceSlug="acme"
+        data={await data({ status: "succeeded" })}
+      />,
+    );
     expect(values()).toEqual(["", "succeeded"]);
+  });
+
+  // #80
+  it("does not offer a repository that only holds saved settings, as it can never have runs", async () => {
+    const f = await createRunsFixture();
+    const projects = createProjectService({
+      projects: createProjectsRepository(f.db, f.workspaceId),
+    });
+    await createProjectsRepository(f.db, f.workspaceId).updateSettings(
+      f.repositoryId,
+      {
+        maxFindings: 2,
+      },
+    );
+    const data = await loadRunsPage(
+      {},
+      {
+        runs: f.runs,
+        projects,
+        lastRuns: createLastRunSource({ runs: f.runsRepository }),
+      },
+    );
+
+    render(<RunsPageContent workspaceSlug="acme" data={data} />);
+
+    const project = screen.getByLabelText("Project") as HTMLSelectElement;
+    expect([...project.options].map((option) => option.text)).toEqual([
+      "All projects",
+    ]);
+  });
+
+  // #80
+  it("still offers a project that was switched off after it had runs", async () => {
+    const app = await openRuns();
+    await app.projects.deactivateProject(app.f.repositoryId);
+
+    await app.page();
+
+    const project = screen.getByLabelText("Project") as HTMLSelectElement;
+    expect([...project.options].map((option) => option.text)).toEqual([
+      "All projects",
+      "acme/gadgets",
+      "acme/widgets",
+    ]);
   });
 
   // CR-35-T03
@@ -169,11 +226,11 @@ describe("the Runs page", () => {
   it("says there are no runs yet before the first one", async () => {
     const f = await createRunsFixture();
     const projects = createProjectService({
-      projects: createProjectsRepository(f.db),
+      projects: createProjectsRepository(f.db, await defaultWorkspaceId(f.db)),
     });
     const data = await loadRunsPage({}, { runs: f.runs, projects });
 
-    render(<RunsPageContent data={data} />);
+    render(<RunsPageContent workspaceSlug="acme" data={data} />);
 
     expect(screen.getByRole("heading", { name: "No runs yet" })).toBeTruthy();
   });
@@ -205,7 +262,7 @@ describe("the page of one run", () => {
     const data = await loadRunDetailPage(job.id, { runs: app.f.runs });
     if (data.kind !== "ready") throw new Error("the run was not found");
 
-    render(<RunDetailPageContent data={data} />);
+    render(<RunDetailPageContent workspaceSlug="acme" data={data} />);
 
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
       `acme/gadgets #${job.prNumber}`,

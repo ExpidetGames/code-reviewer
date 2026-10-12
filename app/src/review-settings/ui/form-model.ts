@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // What a settings form needs to show, as plain data that survives JSON: the page builds it from the
 // service's view on the server, and the browser builds it again from the answer of a save. The same
 // form serves the global defaults and one project; the only difference is the layer below the one

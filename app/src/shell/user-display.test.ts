@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down what the user menu shows about a person: the name or, without one, the login; at most
 // two initials that always fit the avatar circle; and only https avatar addresses.
 import { describe, expect, it } from "vitest";

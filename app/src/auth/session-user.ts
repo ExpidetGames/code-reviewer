@@ -1,65 +1,126 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Reading the signed in user from request headers: asks Better Auth (which checks the session row
-// and its expiry in the database) and then the access policy. The proxy and the pages both use it,
-// so the answer is the same everywhere.
-import type {
-  AccessDenialReason,
-  AccessPolicy,
-  SessionUser,
-} from "./access-policy.ts";
+// and its expiry in the database) and then the gates (a verified address, a workspace). The proxy and
+// the pages both use it, so the answer is the same everywhere.
+import type { SessionUser } from "./access-policy.ts";
+import type { AccessGates } from "./access-gates.ts";
 import type { Auth } from "./auth.ts";
 import { GITHUB_PROVIDER_ID } from "./github-provider.ts";
 
+/** The `accounts.provider_id` Better Auth gives an email and password identity. */
+export const CREDENTIAL_PROVIDER_ID = "credential";
+
 /**
  * - `user`: a valid session of a user who may use the app.
+ * - `unverified`: a valid session of an email and password account whose address must be verified
+ *   first (a mail server is configured). Only the instance admin may still use `/admin`.
+ * - `no_workspace`: a valid session of an account that belongs to no workspace, so it has no access to
+ *   customer data (access-gates.ts). It can still reach the few places made for exactly this: accepting an
+ *   invitation, creating a workspace, the page that explains (`NO_WORKSPACE_PATHS`, access.ts).
  * - `none`: no valid session.
- * - `denied`: a valid session of a user who may not (any more) use the app; the reason is shown on
- *   the login page.
  */
 export type SessionLookup =
   | { kind: "user"; user: SessionUser }
-  | { kind: "none" }
-  | { kind: "denied"; reason: AccessDenialReason };
+  | { kind: "unverified"; user: SessionUser }
+  | { kind: "no_workspace"; user: SessionUser }
+  | { kind: "none" };
 
 export async function lookupSession(
   auth: Pick<Auth, "api" | "$context">,
   requestHeaders: Headers,
-  policy: AccessPolicy,
+  gates: AccessGates,
 ): Promise<SessionLookup> {
   const session = await auth.api.getSession({ headers: requestHeaders });
   if (!session) return { kind: "none" };
-  // The stable identity of the account: the id GitHub gave it, kept in `accounts.account_id`. The
-  // login can change; this cannot. A user without a GitHub account cannot exist (GitHub is the only
-  // way in), so such a session is treated as no session at all.
-  const githubId = await findGithubId(auth, session.user.id);
-  if (githubId === null) return { kind: "none" };
+  const identities = await findIdentities(auth, session.user.id);
+  // The stable identity of a GitHub account is the id GitHub gave it, kept in `accounts.account_id`.
+  // The login can change; this cannot. A user with no identity at all cannot sign in.
+  if (!identities.password && identities.githubId === null)
+    return { kind: "none" };
+  const githubLogin = session.user.githubLogin || null;
   const user: SessionUser = {
     id: session.user.id,
     name: session.user.name,
-    githubLogin: session.user.githubLogin,
-    githubId,
+    email: session.user.email,
+    isInstanceAdmin: session.user.isInstanceAdmin === true,
+    githubLogin,
+    githubId: identities.githubId,
     image: session.user.image ?? null,
     orgCheckedAt: session.user.orgCheckedAt ?? null,
     orgCheckedFor: session.user.orgCheckedFor ?? null,
   };
-  const decision = await policy(user);
-  return decision.allowed
-    ? { kind: "user", user }
-    : { kind: "denied", reason: decision.reason };
+  // Who may have an account is decided when it is made (the first-run setup, or the sign-up rule for the
+  // sign-up and for the sign in with GitHub, evaluated then and not on every request, so a stricter rule
+  // never locks anybody out). What an account may use is the two gates in front of the app: a verified
+  // address, and a workspace (access-gates.ts).
+  if (identities.password) {
+    const blocked = await gateOf(
+      {
+        id: user.id,
+        emailVerified: session.user.emailVerified,
+        isInstanceAdmin: user.isInstanceAdmin,
+      },
+      gates,
+    );
+    return blocked === null ? { kind: "user", user } : { kind: blocked, user };
+  }
+  // An account that signs in with GitHub only has no address to verify (GitHub's primary one was verified at
+  // the sign in, or an imported user's placeholder waits for it), so it is asked for a workspace only.
+  if (githubLogin === null || identities.githubId === null)
+    return { kind: "none" };
+  if (!user.isInstanceAdmin && !(await gates.hasWorkspace(user.id)))
+    return { kind: "no_workspace", user };
+  return { kind: "user", user };
 }
 
-async function findGithubId(
+/**
+ * Which gate (access-gates.ts) an email and password account is stopped by, or null when it passes both:
+ * its address has to be verified while the instance can send mail, and (unless it is the instance admin)
+ * it has to belong to a workspace. The verification is asked first.
+ */
+export async function gateOf(
+  account: { id: string; emailVerified: boolean; isInstanceAdmin: boolean },
+  gates: AccessGates,
+): Promise<"unverified" | "no_workspace" | null> {
+  if (!account.emailVerified && (await gates.verificationRequired()))
+    return "unverified";
+  if (!account.isInstanceAdmin && !(await gates.hasWorkspace(account.id)))
+    return "no_workspace";
+  return null;
+}
+
+async function findIdentities(
   auth: Pick<Auth, "$context">,
   userId: string,
-): Promise<string | null> {
+): Promise<{ password: boolean; githubId: string | null }> {
   const context = await auth.$context;
   const accounts = await context.internalAdapter.findAccounts(userId);
-  const account = accounts.find(
+  const github = accounts.find(
     (candidate) => candidate.providerId === GITHUB_PROVIDER_ID,
   );
-  return account?.accountId ? account.accountId : null;
+  return {
+    password: accounts.some(
+      (candidate) =>
+        candidate.providerId === CREDENTIAL_PROVIDER_ID &&
+        Boolean(candidate.password),
+    ),
+    githubId: github?.accountId ? github.accountId : null,
+  };
 }
 
-/** The login page address for a request that has no usable session. */
+/** The address of the page that explains why a signed in person cannot use the app yet. */
+export const VERIFY_EMAIL_PAGE = "/verify-email";
+export const NO_ACCESS_PAGE = "/no-access";
+
+/** Where a request that cannot be served goes: the login page, or the page that says what is missing. */
 export function loginPath(lookup: SessionLookup): string {
-  return lookup.kind === "denied" ? `/login?error=${lookup.reason}` : "/login";
+  switch (lookup.kind) {
+    case "unverified":
+      return VERIFY_EMAIL_PAGE;
+    case "no_workspace":
+      return NO_ACCESS_PAGE;
+    default:
+      return "/login";
+  }
 }

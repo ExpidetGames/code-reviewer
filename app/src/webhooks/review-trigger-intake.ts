@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Where the webhook route hands a review trigger over. The route knows nothing about jobs: it
 // translates a delivery into a `ReviewTrigger` and calls the intake. The intake of the running app
 // is `createJobQueueReviewTriggerIntake` (job-queue-intake.ts), wired in `shared.ts`. The trigger

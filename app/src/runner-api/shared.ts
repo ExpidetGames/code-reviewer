@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The wiring of the runner API on the running server: the real database, queue, registry and
 // settings from the environment. This is the one place that decides which claim guard and which
 // source of job options are used (see README.md for what replaces them when the projects land).
@@ -6,10 +8,11 @@ import { createIntegrationsRepository } from "../db/repositories/integrations-re
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
 import { getDatabase } from "../db/startup.ts";
 import { integrationRegistry } from "../integrations/registry.ts";
-import { getJobQueue } from "../jobs/shared.ts";
-import { getLlmAccess } from "../llm/shared.ts";
-import { getProjectService } from "../projects/shared.ts";
-import { getReviewSettingsService } from "../review-settings/shared.ts";
+import { getRunnerQueue } from "../jobs/shared.ts";
+import { resolveAppSecret } from "../crypto/app-secret.ts";
+import { getWorkspaceLlm } from "../llm/shared.ts";
+import { projectServiceFor } from "../projects/shared.ts";
+import { reviewSettingsServiceFor } from "../review-settings/shared.ts";
 import { createRunnerApi, type RunnerApi } from "./api.ts";
 import { createClaimedKeys, type ClaimedKeys } from "./claimed-keys.ts";
 import { createProjectClaimGuard } from "./project-claim-guard.ts";
@@ -20,37 +23,50 @@ import { knownSecretsFromEnv } from "./redact.ts";
 import { errorResponse } from "./responses.ts";
 import { configuredRunnerToken } from "./token-auth.ts";
 
-// One list for the whole process, kept on globalThis because the route files may be bundled apart.
-const CLAIMED_KEYS = Symbol.for("code-reviewer.runner-api.claimed-keys");
-
+// The key each job was handed lives in the database (encrypted), so any app instance can mask a result.
 function getClaimedKeys(): ClaimedKeys {
-  const holder = globalThis as { [CLAIMED_KEYS]?: ClaimedKeys };
-  holder[CLAIMED_KEYS] ??= createClaimedKeys();
-  return holder[CLAIMED_KEYS];
+  return createClaimedKeys({
+    db: getDatabase(),
+    appSecret: () => {
+      const resolved = resolveAppSecret(process.env);
+      // The server does not start without it (src/auth/startup.ts); this is the second line.
+      if (!resolved.ok) throw new Error(resolved.problem);
+      return resolved.secret;
+    },
+  });
 }
 
 /** The runner API of the running server. */
 export function getRunnerApi(): RunnerApi {
   const db = getDatabase();
+  const llm = getWorkspaceLlm();
   return createRunnerApi({
-    queue: getJobQueue(),
-    repositories: createRepositoriesRepository(db),
-    integrations: createIntegrationsRepository(db),
+    // Runners serve the whole instance: the queue is not scoped, and everything the claim looks up
+    // for a job is looked up in the job's own workspace.
+    queue: getRunnerQueue(),
+    repositories: (workspaceId) =>
+      createRepositoriesRepository(db, workspaceId),
+    integrations: (workspaceId) =>
+      createIntegrationsRepository(db, workspaceId),
     registry: integrationRegistry,
     // A job runs only while its repository has an active project; see claim-guard.ts.
-    guard: createProjectClaimGuard({ projects: getProjectService() }),
+    guard: createProjectClaimGuard({ projects: projectServiceFor }),
     // The review settings of the project over the global defaults; see job-options.ts.
     jobOptions: createReviewSettingsJobOptionsSource({
-      settings: getReviewSettingsService(),
+      settings: reviewSettingsServiceFor,
     }),
-    // The shared LLM configuration, read from the environment on every claim (src/llm).
-    loadLlm: () => getLlmAccess(),
+    // The LLM access of the workspace of the claimed job: its own key, never another workspace's (src/llm).
+    loadLlm: (workspaceId) => llm.accessFor(workspaceId),
     claimedKeys: getClaimedKeys(),
     now: () => new Date(),
     logger: consoleRunnerApiLogger,
     heartbeatIntervalSeconds: HEARTBEAT_INTERVAL_SECONDS,
     runnerToken: () => configuredRunnerToken(process.env),
-    knownSecrets: () => knownSecretsFromEnv(process.env),
+    // The runner token and the current LLM key of the job's workspace (the key of the claim is in the database).
+    knownSecrets: async (workspaceId) => [
+      ...knownSecretsFromEnv(process.env),
+      ...(await llm.currentKeysFor(workspaceId).catch(() => [])),
+    ],
   });
 }
 

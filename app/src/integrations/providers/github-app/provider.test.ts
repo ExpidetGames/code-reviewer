@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the GitHub App provider with an in-memory client: the shared conformance suite, how
 // webhook deliveries are verified and translated, who may trigger a command, and the job access it
 // hands out. The HTTP client itself is tested against the fake GitHub API.
@@ -621,6 +623,31 @@ describe("pull requests", () => {
 
     expect(await provider.listOpenPullRequests(integration, widgets)).toEqual([
       FAKE_PULL_REQUEST,
+    ]);
+  });
+
+  it("hands the abort signal of the caller to the client when reading one pull request", async () => {
+    const { provider, client } = setup();
+    const signal = new AbortController().signal;
+
+    await provider.getPullRequest(integration, widgets, 7, signal);
+
+    expect(client.calls).toEqual([
+      { method: "getPullRequest", args: ["4242", "acme/widgets", 7, signal] },
+    ]);
+  });
+
+  it("hands the abort signal of the caller to the client when listing the open pull requests", async () => {
+    const { provider, client } = setup();
+    const signal = new AbortController().signal;
+
+    await provider.listOpenPullRequests(integration, widgets, signal);
+
+    expect(client.calls).toEqual([
+      {
+        method: "listOpenPullRequests",
+        args: ["4242", "acme/widgets", signal],
+      },
     ]);
   });
 });

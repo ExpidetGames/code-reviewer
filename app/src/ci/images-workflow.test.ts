@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down how the container images are built and published: the image jobs of the CI workflow
 // (.github/workflows/ci.yml) only build and smoke test, and the publish workflow
 // (.github/workflows/publish-images.yml) is the only place that holds the right to push to GHCR.
@@ -71,19 +73,32 @@ function buildSteps(job: Job): Step[] {
 }
 
 const IMAGES = [
-  { job: "image-app", context: "app", smoke: "docker/smoke/app.sh" },
-  { job: "image-runner", context: "runner", smoke: "docker/smoke/runner.sh" },
+  {
+    job: "image-app",
+    context: "app",
+    dockerfile: "app/Dockerfile",
+    smoke: "docker/smoke/app.sh",
+  },
+  {
+    job: "image-runner",
+    context: "runner",
+    dockerfile: "runner/Dockerfile",
+    smoke: "docker/smoke/runner.sh",
+  },
 ] as const;
 
 describe("CI image jobs", () => {
   // CR-17-T01
   it.each(IMAGES)(
     "builds the $context image on pull requests, loads it into the local daemon and does not push",
-    ({ job, context }) => {
+    ({ job, dockerfile }) => {
       const builds = buildSteps(jobNamed(ci.workflow, job));
 
       expect(builds).toHaveLength(1);
-      expect(builds[0]?.with?.context).toBe(context);
+      // The build context is the repository root, because the images carry the license files of
+      // the root (#118-T03).
+      expect(builds[0]?.with?.context).toBe(".");
+      expect(builds[0]?.with?.file).toBe(dockerfile);
       expect(builds[0]?.with?.load).toBe(true);
       expect(builds[0]?.with?.push).toBe(false);
     },
@@ -168,10 +183,13 @@ describe("Publish workflow triggers", () => {
       lines.findIndex((line) => line.startsWith(text));
 
     expect(Object.keys(publish.workflow.jobs)).toEqual(["publish"]);
-    expect(buildSteps(publishJob).map((step) => step.with?.context)).toEqual([
-      "app",
-      "runner",
+    expect(buildSteps(publishJob).map((step) => step.with?.file)).toEqual([
+      "app/Dockerfile",
+      "runner/Dockerfile",
     ]);
+    for (const build of buildSteps(publishJob)) {
+      expect(build.with?.context).toBe(".");
+    }
     for (const { smoke } of IMAGES) {
       expect(indexOf(smoke), smoke).toBeGreaterThanOrEqual(0);
     }

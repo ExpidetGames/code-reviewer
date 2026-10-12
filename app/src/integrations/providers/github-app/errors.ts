@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 import type { SafeMessageError } from "../../errors.ts";
 
 // Stable error codes of the GitHub App provider. Callers branch on `code`, never on the message. A

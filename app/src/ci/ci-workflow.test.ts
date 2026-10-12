@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the structure of the CI workflow (.github/workflows/ci.yml) so that a refactor cannot
 // quietly drop a check, swallow a failure, widen permissions or unpin an action. It reads the
 // file as YAML; how GitHub actually runs it is verified by the CI runs themselves.
@@ -27,6 +29,7 @@ type Job = {
   permissions?: Record<string, string>;
   defaults?: { run?: { "working-directory"?: string } };
   steps?: Step[];
+  outputs?: Record<string, string>;
 } & Record<string, unknown>;
 type Workflow = {
   on: {
@@ -77,13 +80,9 @@ function jobNamed(id: string): Job {
 }
 
 describe("CI workflow triggers and jobs", () => {
-  // CR-16-T01
-  it("runs on pull requests into development, main and epic branches and on pushes to development and main", () => {
-    expect(workflow.on.pull_request?.branches).toEqual([
-      "development",
-      "main",
-      "CR-*",
-    ]);
+  // CR-16-T01, trigger changed by #129
+  it("runs on pull requests into development and main and on pushes to development and main", () => {
+    expect(workflow.on.pull_request?.branches).toEqual(["development", "main"]);
     expect(workflow.on.push?.branches).toEqual(["development", "main"]);
   });
 
@@ -107,14 +106,31 @@ describe("CI workflow triggers and jobs", () => {
     const lines = commandLines(jobNamed("runner-fast"));
 
     for (const command of [
-      "uv run ruff check .",
-      "uv run ruff format --check .",
+      "uv run ruff check . ../fakes",
+      "uv run ruff format --check . ../fakes",
       "uv run pyright",
       "uv run pytest -m unit",
       'uv run pytest -m "integration or contract"',
     ]) {
       expect(lines, command).toContain(command);
     }
+  });
+
+  // #124
+  it("lints and type-checks the Python under fakes/ with the runner's tools, in make verify and in CI", () => {
+    const makefile = readFileSync(`${repoRoot}Makefile`, "utf8");
+    const pyproject = readFileSync(`${repoRoot}runner/pyproject.toml`, "utf8");
+
+    // CI and make verify run the same commands (`$(RUNNER) run` is `uv run` inside runner/).
+    expect(makefile).toContain("$(RUNNER) run ruff check . ../fakes\n");
+    expect(makefile).toContain(
+      "$(RUNNER) run ruff format --check . ../fakes\n",
+    );
+    // Pyright takes its files from the pyproject include, for both entry points.
+    const include = /\[tool\.pyright\][^[]*?include = \[([^\]]*)\]/.exec(
+      pyproject,
+    );
+    expect(include?.[1]).toContain('"../fakes"');
   });
 
   // CR-41-T15
@@ -158,6 +174,51 @@ describe("CI workflow triggers and jobs", () => {
     expect(lines).toContain("pnpm test:e2e --grep-invert @flaky");
   });
 
+  // CR-47 (the journey with the real runner)
+  it("installs the runner and the tiktoken encoding before the browser journeys, from the lockfile and the cache", () => {
+    const job = jobNamed("e2e");
+    const names = steps(job).map((step) => step.name ?? step.uses ?? "");
+    const install = steps(job).find((step) => step.run === "uv sync --locked");
+    const prime = steps(job).find((step) =>
+      step.run?.includes("scripts/prime_tiktoken_cache.py"),
+    );
+    const firstJourney = names.findIndex((name) =>
+      name.startsWith("Run the smoke journeys"),
+    );
+
+    expect(install?.["working-directory"]).toBe("runner");
+    expect(prime?.["working-directory"]).toBe("runner");
+    const position = (prefix: string) =>
+      names.findIndex((name) => name.startsWith(prefix));
+    // uv before it is used, the cache restored before the script that fills it, both before the
+    // journeys.
+    expect(position("astral-sh/setup-uv@")).toBeGreaterThanOrEqual(0);
+    expect(position("astral-sh/setup-uv@")).toBeLessThan(
+      position("Install the runner"),
+    );
+    expect(position("Restore the tiktoken encoding")).toBeGreaterThanOrEqual(0);
+    expect(position("Restore the tiktoken encoding")).toBeLessThan(
+      position("Prime the tiktoken cache"),
+    );
+    expect(position("Install the runner")).toBeLessThan(firstJourney);
+    expect(position("Prime the tiktoken cache")).toBeLessThan(firstJourney);
+    expect(
+      steps(job).some(
+        (step) =>
+          step.uses?.startsWith("actions/cache@") &&
+          step.with?.path === "/tmp/data-gym-cache",
+      ),
+    ).toBe(true);
+  });
+
+  // CR-47 (the journey with the real runner)
+  it("runs the browser journeys for runner changes too, because one of them runs the real runner", () => {
+    const condition = String(jobNamed("e2e").if);
+
+    expect(condition).toContain("needs.changes.outputs.app == 'true'");
+    expect(condition).toContain("needs.changes.outputs.runner == 'true'");
+  });
+
   // CR-16-T01
   it("lints the workflow files with actionlint", () => {
     const commands = runCommands(jobNamed("actionlint")).join("\n");
@@ -177,16 +238,24 @@ describe("CI compose job", () => {
       step.uses?.startsWith("docker/build-push-action@"),
     );
 
-    expect(builds.map((step) => step.with?.context).sort()).toEqual([
-      "app",
-      "runner",
+    expect(builds.map((step) => step.with?.file).sort()).toEqual([
+      "app/Dockerfile",
+      "runner/Dockerfile",
     ]);
     for (const build of builds) {
+      expect(build.with?.context).toBe(".");
       expect(build.with?.load).toBe(true);
       expect(build.with?.push).toBe(false);
     }
     expect(commandLines(job)).toContain(
       "docker/smoke/compose.sh code-reviewer-app:ci code-reviewer-runner:ci",
+    );
+  });
+
+  // #106-IM-20
+  it("also starts the image it built on the database and the environment of the previous release", () => {
+    expect(commandLines(jobNamed("compose"))).toContain(
+      "docker/smoke/upgrade.sh code-reviewer-app:ci",
     );
   });
 
@@ -198,6 +267,80 @@ describe("CI compose job", () => {
     expect(condition).toContain("github.base_ref == 'main'");
     expect(condition).toContain("needs.changes.outputs.app == 'true'");
     expect(condition).toContain("needs.changes.outputs.runner == 'true'");
+  });
+});
+
+describe("CI license job", () => {
+  // #118-T01
+  it("installs both parts from their lockfiles and runs the dependency license check", () => {
+    const job = jobNamed("licenses");
+    const lines = commandLines(job);
+
+    expect(lines).toContain("pnpm install --frozen-lockfile");
+    expect(lines).toContain("uv sync --locked");
+    expect(lines).toContain("pnpm licenses:check");
+    // Installing comes first: the check reads the metadata of what is installed.
+    expect(lines.indexOf("pnpm licenses:check")).toBeGreaterThan(
+      lines.indexOf("uv sync --locked"),
+    );
+    expect(lines.indexOf("pnpm licenses:check")).toBeGreaterThan(
+      lines.indexOf("pnpm install --frozen-lockfile"),
+    );
+    expect(
+      steps(job).find((step) => step.run === "uv sync --locked")?.[
+        "working-directory"
+      ],
+    ).toBe("runner");
+  });
+
+  // #118-T01
+  it("runs for code changes of either part and for every pull request into main and push", () => {
+    const condition = String(jobNamed("licenses").if);
+
+    expect(condition).toContain("github.event_name == 'push'");
+    expect(condition).toContain("github.base_ref == 'main'");
+    expect(condition).toContain("needs.changes.outputs.app == 'true'");
+    expect(condition).toContain("needs.changes.outputs.runner == 'true'");
+  });
+
+  // #118-T01, #118-T04
+  it("also checks the SPDX headers and the tests of the license policy, because the app tests that hold them are skipped for a runner-only pull request", () => {
+    const lines = commandLines(jobNamed("licenses"));
+
+    expect(lines).toContain("pnpm spdx:check");
+    expect(lines).toContain(
+      "pnpm exec vitest run --project unit src/ci/license-check",
+    );
+  });
+
+  // #118-T01
+  it("runs for a change that only touches THIRD_PARTY_LICENSES.md, which the Markdown exclusions of the app and runner filters skip", () => {
+    const filterStep = steps(jobNamed("changes")).find(
+      (step) => step.id === "filter",
+    );
+    const filters = parse(String(filterStep?.with?.filters)) as Record<
+      string,
+      string[]
+    >;
+
+    expect(filters.licenses).toEqual(["THIRD_PARTY_LICENSES.md"]);
+    expect(jobNamed("changes").outputs).toHaveProperty("licenses");
+    expect(String(jobNamed("licenses").if)).toContain(
+      "needs.changes.outputs.licenses == 'true'",
+    );
+  });
+
+  // #118-T01
+  it("is a required part of the aggregate check, so a red license check blocks the merge", () => {
+    expect(jobNamed("ci-passed").needs).toContain("licenses");
+  });
+
+  // #118-T01
+  it("is part of make verify, so the check can be run before opening a pull request", () => {
+    const makefile = readFileSync(`${repoRoot}Makefile`, "utf8");
+
+    expect(makefile).toMatch(/^verify: .*\bcheck-licenses\b/m);
+    expect(makefile).toMatch(/^check-licenses:\n\t\$\(APP\) licenses:check$/m);
   });
 });
 
@@ -253,6 +396,7 @@ describe("CI workflow aggregate check", () => {
       "runner-fast",
       "engine",
       "e2e",
+      "licenses",
       "compose",
       "actionlint",
     ]) {

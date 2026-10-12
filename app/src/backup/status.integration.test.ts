@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down what the status route tells the people who run the instance: whether backups are
 // scheduled, whether the target works right now, how the last scheduled run went, and which backup
 // is the newest. It reads the real directory, so the picture is true after an app restart too.

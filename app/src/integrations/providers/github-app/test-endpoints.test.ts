@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down that the sign in and the GitHub App read the same test endpoint variables with the same
 // rule (this file lives in the provider folder because it needs the GitHub App settings).
 // GITHUB_API_BASE_URL and GITHUB_OAUTH_BASE_URL point at the fake GitHub, and only together with
@@ -10,7 +12,7 @@ import { testGithubAppEnv } from "../../../test-support/github-app.ts";
 import { loadGithubAppConfig } from "./config.ts";
 
 const signInEnv = {
-  BETTER_AUTH_SECRET: "x".repeat(40),
+  APP_SECRET: "x".repeat(40),
   BETTER_AUTH_URL: "http://localhost:3000",
   GITHUB_OAUTH_CLIENT_ID: "id",
   GITHUB_OAUTH_CLIENT_SECRET: "secret-value",

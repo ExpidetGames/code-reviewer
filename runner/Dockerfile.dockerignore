@@ -1,0 +1,51 @@
+# The ignore file of runner/Dockerfile (BuildKit reads <Dockerfile>.dockerignore next to the
+# Dockerfile). The build context is the repository root: the image needs pyproject.toml, uv.lock,
+# .python-version and src/ of runner/ and the three license files, nothing else. This keeps the
+# context small and keeps secrets, tests and local data out of the image.
+
+# Default deny: only these parts of the repository are part of the build context. Everything below
+# is relative to the repository root.
+*
+!runner
+!LICENSE
+!NOTICE
+!THIRD_PARTY_LICENSES.md
+
+# Never in an image: environment files, keys, certificates, local databases. These match at any
+# depth (a pattern without a leading **/ only matches in the root of the context).
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/*.db
+**/*.sqlite
+**/*.sqlite3
+
+# Version control and editor files
+**/.git
+runner/.gitignore
+runner/.vscode
+runner/.idea
+**/.DS_Store
+
+# Host virtual environment and caches (the image builds its own)
+runner/.venv
+**/.venv
+runner/venv
+**/__pycache__
+**/*.py[cod]
+**/*.egg-info
+runner/.pytest_cache
+runner/.ruff_cache
+runner/.mypy_cache
+runner/.pyright
+
+# Tests
+runner/tests
+runner/test-results
+
+# Docker files themselves
+runner/Dockerfile
+runner/Dockerfile.dockerignore

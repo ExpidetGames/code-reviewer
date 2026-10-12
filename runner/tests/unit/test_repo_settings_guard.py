@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Pins down that a repository cannot take over what the host decides. A reviewed repository may
 ship a `.pr_agent.toml`; PR-Agent merges it into its settings, and in 0.47.0 only part of the
 host-level keys are protected. These tests feed a malicious file through PR-Agent's real

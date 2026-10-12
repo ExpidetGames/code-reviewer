@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The automatic reviews of CR-31, end to end up to the queue: a signed `pull_request` delivery goes
 // through the real webhook handler, the real GitHub App provider (against the fake GitHub), the real
 // trigger policy with the real review settings, and the real job queue on a real SQLite file. Time
@@ -16,7 +18,7 @@ import { createRepositoriesRepository } from "../../src/db/repositories/reposito
 import type { IntegrationProvider } from "../../src/integrations/provider.ts";
 import { IntegrationError } from "../../src/integrations/errors.ts";
 import { createIntegrationRegistry } from "../../src/integrations/registry.ts";
-import { createJobQueue } from "../../src/jobs/job-queue.ts";
+import { createTestQueue } from "../../src/test-support/jobs.ts";
 import { createReviewSettingsService } from "../../src/review-settings/service.ts";
 import { builtInReviewSettings } from "../../src/review-settings/settings.ts";
 import { TEST_WEBHOOK_SECRET } from "../../src/test-support/github-app.ts";
@@ -28,6 +30,7 @@ import { createAutomaticReviewSettingsSource } from "../../src/webhooks/automati
 import { AUTOMATIC_REVIEW_DEBOUNCE_MS } from "../../src/webhooks/automatic-review-policy.ts";
 import { createGithubAppWebhookHandler } from "../../src/webhooks/github-app-handler.ts";
 import { createJobQueueReviewTriggerIntake } from "../../src/webhooks/job-queue-intake.ts";
+import { defaultWorkspaceId } from "../../src/test-support/workspaces.ts";
 
 const HEAD_1 = FIXTURE_HEAD_SHA;
 const HEAD_2 = "c0ffee00c0ffee00c0ffee00c0ffee00c0ffee00";
@@ -69,21 +72,34 @@ async function startHarness(
     activateProject?: boolean;
     debounceMs?: number;
     headCheckTimeoutMs?: number;
+    /** How long one request to the fake GitHub may take (the harness default: 5 seconds). */
+    requestTimeoutMs?: number;
     wrapProvider?: (provider: IntegrationProvider) => IntegrationProvider;
   } = {},
 ) {
-  const h = await startWebhookHarness(
-    options.wrapProvider === undefined
+  const h = await startWebhookHarness({
+    ...(options.wrapProvider === undefined
       ? {}
-      : { wrapProvider: options.wrapProvider },
-  );
+      : { wrapProvider: options.wrapProvider }),
+    ...(options.requestTimeoutMs === undefined
+      ? {}
+      : { requestTimeoutMs: options.requestTimeoutMs }),
+  });
   const clock = { now: new Date(START) };
   const now = () => new Date(clock.now);
-  const queue = createJobQueue(h.db, { now });
-  const repositories = createRepositoriesRepository(h.db);
+  const queue = createTestQueue(h.db, await defaultWorkspaceId(h.db), {
+    now,
+  });
+  const repositories = createRepositoriesRepository(
+    h.db,
+    await defaultWorkspaceId(h.db),
+  );
   const settings = createReviewSettingsService({
-    appSettings: createAppSettingsRepository(h.db),
-    projects: createProjectsRepository(h.db),
+    appSettings: createAppSettingsRepository(
+      h.db,
+      await defaultWorkspaceId(h.db),
+    ),
+    projects: createProjectsRepository(h.db, await defaultWorkspaceId(h.db)),
     builtIn: () => builtInReviewSettings("test/model"),
   });
   const routeLog: string[] = [];
@@ -101,19 +117,21 @@ async function startHarness(
     integrations: h.integrations,
     deliveries: h.deliveries,
     sync: h.sync,
-    projects: h.projects,
-    automatic: {
+    workspace: () => ({
+      projects: h.projects,
       settingsFor: createAutomaticReviewSettingsSource({
         repositories,
         settings,
       }),
+      intake,
+    }),
+    automatic: {
       debounceMs: options.debounceMs ?? AUTOMATIC_REVIEW_DEBOUNCE_MS,
       ...(options.headCheckTimeoutMs === undefined
         ? {}
         : { headCheckTimeoutMs: options.headCheckTimeoutMs }),
       now,
     },
-    intake,
     logger: {
       info: (line) => routeLog.push(line),
       error: (line) => routeLog.push(line),
@@ -403,6 +421,79 @@ describe("a pull request that is pushed to", () => {
       { headSha: HEAD_1, status: "queued" },
     ]);
     expect(t.routeLog.join("\n")).toContain("HEAD_CHECK_TIMEOUT");
+  });
+
+  it("aborts the head check request when the timeout fires, and still enqueues the push", async () => {
+    let received: AbortSignal | undefined;
+    let abortedWhenFired = false;
+    const t = await startHarness({
+      headCheckTimeoutMs: 20,
+      wrapProvider: (provider) => ({
+        ...provider,
+        // Like a real client: stays open until the signal aborts it.
+        getPullRequest: (_integration, _repo, _prNumber, signal) => {
+          received = signal;
+          return new Promise((_resolve, reject) => {
+            signal?.addEventListener("abort", () => {
+              abortedWhenFired = true;
+              reject(new Error("aborted"));
+            });
+          });
+        },
+      }),
+    });
+
+    const response = await t.send("pull_request.synchronize");
+
+    expect(await body(response)).toMatchObject({ outcome: "trigger_enqueued" });
+    expect(received).toBeDefined();
+    expect(abortedWhenFired).toBe(true);
+    expect(await t.jobs()).toMatchObject([
+      { headSha: HEAD_1, status: "queued" },
+    ]);
+    expect(t.routeLog.join("\n")).toContain("HEAD_CHECK_TIMEOUT");
+  });
+
+  it("closes the connection to GitHub when the head check times out, and still enqueues the push", async () => {
+    // The client's own timeout is far longer than the head check's: only the head check's signal can
+    // close the connection within the wait below.
+    const t = await startHarness({
+      headCheckTimeoutMs: 100,
+      requestTimeoutMs: 60_000,
+    });
+    // The pull request read never gets an answer.
+    t.h.fake.fail({ pathIncludes: "/pulls/", hang: true });
+
+    const response = await t.send("pull_request.synchronize");
+
+    expect(await body(response)).toMatchObject({ outcome: "trigger_enqueued" });
+    const deadline = Date.now() + 5000;
+    while (t.h.fake.abortedRequests().length === 0 && Date.now() < deadline)
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(t.h.fake.abortedRequests()).toEqual([
+      { method: "GET", path: "/repos/acme/widgets/pulls/7" },
+    ]);
+    expect(await t.jobs()).toMatchObject([
+      { headSha: HEAD_1, status: "queued" },
+    ]);
+  });
+
+  it("does not abort the head check request when GitHub answers in time", async () => {
+    let received: AbortSignal | undefined;
+    const t = await startHarness({
+      wrapProvider: (provider) => ({
+        ...provider,
+        getPullRequest: (integration, repo, prNumber, signal) => {
+          received = signal;
+          return provider.getPullRequest(integration, repo, prNumber, signal);
+        },
+      }),
+    });
+
+    const response = await t.send("pull_request.synchronize");
+
+    expect(await body(response)).toMatchObject({ outcome: "trigger_enqueued" });
+    expect(received?.aborted).toBe(false);
   });
 
   it.each(["pull_request.reopened", "pull_request.ready_for_review"])(

@@ -1,10 +1,15 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Reads the sign-in settings from the environment. The only place that knows the variable names.
 // A problem is reported with the variable names only, never with a value (they include secrets).
+// The credentials of the sign in with GitHub (the GitHub App's client id and secret) are not here: they
+// live in the database and the admin portal edits them (src/github-config/).
 import {
   ALLOW_TEST_GITHUB_ENDPOINTS_FLAG,
   resolveGithubEndpoint,
   testGithubEndpointsAllowed,
 } from "../github-endpoints.ts";
+import { resolveAppSecret } from "../crypto/app-secret.ts";
 import { parseAccessConfig, type AccessConfig } from "./access-config.ts";
 
 export const AUTH_ERROR_CODES = ["AUTH_CONFIG_INVALID"] as const;
@@ -21,21 +26,24 @@ export class AuthConfigError extends Error {
 
 export type AuthConfig = {
   /**
-   * Signs the session cookie and encrypts the stored GitHub access token. Rotating it signs
-   * everybody out and makes the stored tokens unreadable (they are replaced at the next sign in).
+   * The master key of the instance: `APP_SECRET`, or `BETTER_AUTH_SECRET` (its deprecated name) when
+   * that is not set. Signs the session cookie and encrypts the stored GitHub access token. Rotating
+   * it signs everybody out and makes the stored tokens unreadable (they are replaced at the next
+   * sign in).
    */
   secret: string;
-  /** Origin of this app as users reach it; the GitHub OAuth callback is `<baseUrl>/api/auth/callback/github`. */
+  /** Origin of this app as users reach it; the callback of the GitHub sign in is `<baseUrl>/api/auth/callback/github`. */
   baseUrl: string;
   github: {
-    clientId: string;
-    clientSecret: string;
     /** Authorize and token endpoints live below this URL (`/login/oauth/...`). */
     oauthBaseUrl: string;
     /** `/user` and `/user/emails` live below this URL. */
     apiBaseUrl: string;
   };
-  /** Who may use this instance (`ALLOWED_GITHUB_LOGINS`, `ALLOWED_GITHUB_ORG`). */
+  /**
+   * The allow list of the earlier sign in (`ALLOWED_GITHUB_LOGINS`, `ALLOWED_GITHUB_ORG`). Nothing enforces it any
+   * more; the import of an existing installation reads it once.
+   */
   access: AccessConfig;
   /** Whether the cookies get the `Secure` attribute: exactly when `BETTER_AUTH_URL` is https. */
   secureCookies: boolean;
@@ -44,19 +52,14 @@ export type AuthConfig = {
 export const DEFAULT_GITHUB_OAUTH_BASE_URL = "https://github.com";
 export const DEFAULT_GITHUB_API_BASE_URL = "https://api.github.com";
 
-const MIN_SECRET_LENGTH = 32;
-
 type Env = Readonly<Record<string, string | undefined>>;
 
 export function loadAuthConfig(env: Env): AuthConfig {
   const problems: string[] = [];
 
-  const secret = required(env, "BETTER_AUTH_SECRET", problems);
-  if (secret !== undefined && secret.length < MIN_SECRET_LENGTH) {
-    problems.push(
-      `BETTER_AUTH_SECRET must be at least ${MIN_SECRET_LENGTH} characters long`,
-    );
-  }
+  const resolvedSecret = resolveAppSecret(env);
+  if (!resolvedSecret.ok) problems.push(resolvedSecret.problem);
+  const secret = resolvedSecret.ok ? resolvedSecret.secret : undefined;
   const baseUrl = originOf(
     required(env, "BETTER_AUTH_URL", problems),
     "BETTER_AUTH_URL",
@@ -75,8 +78,6 @@ export function loadAuthConfig(env: Env): AuthConfig {
     );
   }
   const allowTestEndpoints = testGithubEndpointsAllowed(env);
-  const clientId = required(env, "GITHUB_OAUTH_CLIENT_ID", problems);
-  const clientSecret = required(env, "GITHUB_OAUTH_CLIENT_SECRET", problems);
   const oauthBaseUrl = optionalBaseUrl(
     env,
     "GITHUB_OAUTH_BASE_URL",
@@ -92,15 +93,12 @@ export function loadAuthConfig(env: Env): AuthConfig {
     problems,
   );
 
-  const access = parseAccessConfig(env, problems);
+  // The allow list no longer decides anything (the sign-up rule and the workspaces do); the import of an existing
+  // installation reads it once (src/legacy-import/). A value that cannot be read is not a reason to stop the
+  // start, so its problems go nowhere.
+  const access = parseAccessConfig(env, []);
 
-  if (
-    problems.length > 0 ||
-    secret === undefined ||
-    baseUrl === undefined ||
-    clientId === undefined ||
-    clientSecret === undefined
-  ) {
+  if (problems.length > 0 || secret === undefined || baseUrl === undefined) {
     throw new AuthConfigError(
       `The sign-in configuration is incomplete or invalid: ${problems.join("; ")}.`,
     );
@@ -109,7 +107,10 @@ export function loadAuthConfig(env: Env): AuthConfig {
   return {
     secret,
     baseUrl,
-    github: { clientId, clientSecret, oauthBaseUrl, apiBaseUrl },
+    github: {
+      oauthBaseUrl,
+      apiBaseUrl,
+    },
     access,
     secureCookies: baseUrl.startsWith("https://"),
   };

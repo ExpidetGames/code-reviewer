@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // @vitest-environment jsdom
 // Pins down the "Review now" panel with a stand-in for the routes: it loads the open pull requests,
 // starts a command only for a picked pull request, validates the question of `ask` before it sends
@@ -82,7 +84,9 @@ function fakeApi(
 
 async function renderPanel(api: ManualReviewApi) {
   const user = userEvent.setup();
-  render(<StartReviewPanel repositoryId="repo-1" api={api} />);
+  render(
+    <StartReviewPanel workspaceSlug="acme" repositoryId="repo-1" api={api} />,
+  );
   return user;
 }
 
@@ -155,12 +159,14 @@ describe("loading the pull requests", () => {
       list([{ number: 7 }, { number: 8 }]),
     ]);
     const { unmount } = render(
-      <StartReviewPanel repositoryId="repo-1" api={api} />,
+      <StartReviewPanel workspaceSlug="acme" repositoryId="repo-1" api={api} />,
     );
     await screen.findByRole("radio", { name: /#7/ });
     unmount();
 
-    render(<StartReviewPanel repositoryId="repo-1" api={api} />);
+    render(
+      <StartReviewPanel workspaceSlug="acme" repositoryId="repo-1" api={api} />,
+    );
 
     expect(await screen.findByRole("radio", { name: /#8/ })).toBeTruthy();
     expect(listPullRequests).toHaveBeenCalledTimes(2);
@@ -205,7 +211,7 @@ describe("starting a command", () => {
     );
     expect(
       screen.getByRole("link", { name: "View the run" }).getAttribute("href"),
-    ).toBe("/runs/run-42");
+    ).toBe("/w/acme/runs/run-42");
   });
 
   // CR-33-T10
@@ -404,7 +410,9 @@ describe("starting a command", () => {
         },
       ]),
     ]);
-    render(<StartReviewPanel repositoryId="repo-1" api={api} />);
+    render(
+      <StartReviewPanel workspaceSlug="acme" repositoryId="repo-1" api={api} />,
+    );
 
     await screen.findByRole("radio");
 

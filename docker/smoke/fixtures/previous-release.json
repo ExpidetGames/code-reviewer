@@ -1,0 +1,21 @@
+{
+  "secret": "smoke-previous-release-secret-0123456789-abcdef",
+  "users": [
+    { "login": "smoke-alice", "githubId": 9001, "createdAt": "2026-09-01T10:00:00.000Z" },
+    { "login": "smoke-bob", "githubId": 9002, "createdAt": "2026-09-02T10:00:00.000Z" },
+    { "login": "smoke-eve", "githubId": 9003, "createdAt": "2026-09-03T10:00:00.000Z" }
+  ],
+  "pins": [{ "login": "smoke-alice", "githubId": 9001 }],
+  "installations": [
+    {
+      "id": 9100,
+      "accountLogin": "smoke-org",
+      "accountId": 9200,
+      "repositories": [
+        { "id": 9300, "fullName": "smoke-org/widgets", "project": true },
+        { "id": 9301, "fullName": "smoke-org/gadgets" }
+      ]
+    }
+  ],
+  "jobsPerProject": 2
+}

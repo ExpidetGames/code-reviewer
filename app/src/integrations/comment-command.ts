@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Reads a comment on a pull request as a command. The text of a comment is untrusted input: only the
 // command word and (for /ask) the question are taken from it, and the question is cut to a fixed
 // length. Nothing here knows which git platform the comment came from.

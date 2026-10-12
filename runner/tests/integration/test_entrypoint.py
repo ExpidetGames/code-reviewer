@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+
 """Pins down that the installed console script starts as a real process, which is what the
 container and the compose stack run. Unit tests cover the logic; this proves the packaging."""
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down the runtime guards for the normalized types. They are what keeps a raw platform payload
 // from travelling through the app disguised as a RepoRef, ReviewTrigger or GitAccess.
 import { describe, expect, it } from "vitest";

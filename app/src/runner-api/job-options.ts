@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Where the per-repository options of a job come from: the review settings of its project (CR-25,
 // `review-settings-job-options.ts`). The claim asks once per job, so the options can differ per
 // repository: the extra options of the four PR-Agent tools (`env`) and the model and the token budget

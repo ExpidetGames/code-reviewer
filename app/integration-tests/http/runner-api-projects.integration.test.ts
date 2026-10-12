@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Pins down how the runner API and the job queue are wired to the projects and the settings (CR-46):
 // the claim only hands out jobs of repositories with an active project, deactivating a project
 // cancels its waiting jobs, the options of a job are the review settings of its project, and the LLM
@@ -11,7 +13,6 @@ import {
   startRunnerApiHarness,
   TEST_LLM_API_KEY,
   TEST_LLM_MODEL,
-  TEST_RUNNER_TOKEN,
 } from "../../src/test-support/runner-api-harness.ts";
 import {
   createContractValidator,
@@ -316,7 +317,8 @@ describe("the LLM access of a claimed job", () => {
   // CR-46-T05
   it("is missing the key: no job is handed out, the job fails with a stable code and the log holds no key", async () => {
     const h = await startWiredHarness({
-      env: { LLM_API_KEY: undefined, LLM_MODEL: "vendor/secret-model-name" },
+      llmKey: null,
+      env: { LLM_MODEL: "vendor/secret-model-name" },
     });
     const job = await h.enqueueNew();
 
@@ -329,44 +331,6 @@ describe("the LLM access of a claimed job", () => {
     });
     expect(h.issuedJobTokens()).toStrictEqual([]);
     expect(h.logLines().join("\n")).not.toContain(TEST_LLM_API_KEY);
-  });
-
-  // CR-46-T05
-  it("is not configured when the provider is missing although the key is set, and no log line holds the key", async () => {
-    const h = await startWiredHarness({
-      env: { LLM_PROVIDER: undefined },
-    });
-    const job = await h.enqueueNew();
-
-    const response = await h.claim();
-
-    expect(response.status).toBe(204);
-    expect(await h.queue.get(job.id)).toMatchObject({
-      status: "failed",
-      errorCode: "llm_not_configured",
-    });
-    expect(h.issuedJobTokens()).toStrictEqual([]);
-    const log = h.logLines().join("\n");
-    // The operator sees which variable is wrong, and never a value.
-    expect(log).toContain(
-      "llm_not_configured (LLM_PROVIDER: LLM_PROVIDER_MISSING)",
-    );
-    expect(log).not.toContain(TEST_LLM_API_KEY);
-    expect(log).not.toContain(TEST_RUNNER_TOKEN);
-  });
-
-  it("is not configured with a provider the runner does not know", async () => {
-    const h = await startWiredHarness({
-      env: { LLM_PROVIDER: "someone-else" },
-    });
-    const job = await h.enqueueNew();
-
-    await h.claim();
-
-    expect(await h.queue.get(job.id)).toMatchObject({
-      status: "failed",
-      errorCode: "llm_not_configured",
-    });
   });
 
   // CR-46-T06
@@ -418,7 +382,7 @@ describe("the LLM access of a claimed job", () => {
     await h.enqueueNew();
     const { job } = await h.claimed();
     const rotated = "rotated-llm-api-key-3b7d19e4a0";
-    h.env.LLM_API_KEY = rotated;
+    await h.setLlmKey(rotated);
 
     const response = await h.complete(job.id, job.leaseToken, {
       logTail: `auth with ${TEST_LLM_API_KEY} failed; the new key ${rotated} is set`,

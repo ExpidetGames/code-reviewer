@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The runner API contract (contracts/runner-api.v1.json) as validators, for tests that check a real
 // answer or request against the file. The file is read from disk, not copied: it is the one source.
 import { readFileSync, readdirSync } from "node:fs";

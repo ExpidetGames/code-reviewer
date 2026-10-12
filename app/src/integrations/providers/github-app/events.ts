@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Translates a verified GitHub delivery into what it means for the app (an IntegrationEvent). Reads
 // only the fields listed in `webhook-fields.ts`. A genuine delivery of no interest is `ignored` with a
 // reason for the logs; a payload that lacks fields the app reads is `invalid_payload`; a closed pull

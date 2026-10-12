@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // The runs for the pages: which runs exist, one run, and the last run of each repository. A thin layer
 // over the read side of the jobs table (`runs-repository.ts`) that turns stored jobs into the views
 // the browser may see (`run-view.ts`) and checks what comes in from a URL. The clock is passed in so a
