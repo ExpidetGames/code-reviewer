@@ -9,7 +9,8 @@ import {
   parseStoredOverrides,
   validateReviewSettingsPatch,
 } from "./validate.ts";
-import { REVIEW_SETTING_LIMITS } from "./settings.ts";
+import { REVIEW_SETTING_LIMITS, builtInReviewSettings } from "./settings.ts";
+import { isCommandAllowed, resolveReviewSettings } from "./effective.ts";
 
 function issuesOf(input: unknown) {
   const result = validateReviewSettingsPatch(input);
@@ -251,6 +252,62 @@ describe("reading stored review settings", () => {
   it("treats anything that is not an object as no overrides", () => {
     for (const stored of [null, undefined, [], "x", 4])
       expect(parseStoredOverrides(stored)).toEqual({});
+  });
+});
+
+// #203-T08: a stored allowedCommands list is the critical seam. A field dropped by a generic reader
+// would let an enabled lower layer win, so the removed-only case must stay `[]` and effective.
+describe("the legacy allowedCommands seam", () => {
+  it.each([
+    [["ask"], []],
+    [["improve", "describe"], []],
+    [["review", "ask"], ["review"]],
+    [["ask", "review", "improve"], ["review"]],
+    [[], []],
+    [["review"], ["review"]],
+  ])("intersects the stored list %j to %j", (stored, expected) => {
+    expect(parseStoredOverrides({ allowedCommands: stored })).toEqual({
+      allowedCommands: expected,
+    });
+  });
+
+  it("leaves a missing field to inherit and ignores a list that is not an array", () => {
+    expect(parseStoredOverrides({ maxFindings: 4 })).toEqual({
+      maxFindings: 4,
+    });
+    expect(parseStoredOverrides({ allowedCommands: "review" })).toEqual({});
+    expect(parseStoredOverrides({ allowedCommands: null })).toEqual({});
+  });
+
+  it("keeps review switched off when a stored global list only named removed commands", () => {
+    const builtIn = builtInReviewSettings("vendor/model");
+
+    const { settings } = resolveReviewSettings({
+      builtIn,
+      global: parseStoredOverrides({ allowedCommands: ["ask"] }),
+    });
+
+    expect(settings.allowedCommands).toEqual([]);
+    expect(isCommandAllowed(settings, "review")).toBe(false);
+  });
+
+  it("lets a removed-only project list override an inherited review permission", () => {
+    const builtIn = builtInReviewSettings("vendor/model");
+
+    const { settings } = resolveReviewSettings({
+      builtIn,
+      global: { allowedCommands: ["review"] },
+      project: parseStoredOverrides({ allowedCommands: ["ask"] }),
+    });
+
+    expect(settings.allowedCommands).toEqual([]);
+    expect(isCommandAllowed(settings, "review")).toBe(false);
+  });
+
+  it("refuses a removed command on a new settings write", () => {
+    expect(issuesOf({ allowedCommands: ["ask"] })).toEqual([
+      { field: "allowedCommands", code: "INVALID_FORMAT" },
+    ]);
   });
 });
 
