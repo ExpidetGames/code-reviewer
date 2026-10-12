@@ -174,7 +174,7 @@ test.describe("the admin portal", () => {
   }) => {
     await signInAsAdmin(page);
 
-    // What the browser asks for ahead of a navigation into the portal, and what the server answers.
+    // What the browser asks for ahead of a navigation inside the portal, and what the server answers.
     const prefetches = new Map<string, string>();
     page.on("response", (response) => {
       const url = new URL(response.url());
@@ -184,15 +184,18 @@ test.describe("the admin portal", () => {
       prefetches.set(url.pathname, response.headers()["cache-control"] ?? "");
     });
 
-    // The menu offers the portal to the admin; the portal's own navigation offers its sections.
-    await page.getByRole("button", { name: "admin", exact: true }).click();
-    await page.getByRole("link", { name: "Admin" }).click();
-    await expect(page).toHaveURL(/\/admin$/);
-    await expect.poll(() => prefetches.has("/admin")).toBe(true);
+    // Straight to the portal: driving it through the user-menu link races that link's own prefetch
+    // (the navigation can win, so no prefetch for `/admin` is ever recorded). The portal's navigation
+    // offers its sections, and the browser prefetches them.
+    const portal = await page.goto("/admin");
+    expect(portal?.status()).toBe(200);
+    const nav = page.getByRole("navigation", { name: "Admin" });
+    await expect(nav).toBeVisible();
+    await nav.getByRole("link", { name: "Setup" }).hover();
     await expect.poll(() => prefetches.has("/admin/setup")).toBe(true);
 
-    // A prefetch answer is for one signed in admin (the frame and the session data): no shared cache
-    // may keep it, and never for the year of a prerendered answer.
+    // A prefetch answer is an admin-only answer: no shared cache may keep it, and never for the year
+    // of a prerendered answer.
     for (const [path, cacheControl] of prefetches) {
       expect(cacheControl, path).toContain("private");
       expect(cacheControl, path).toContain("no-store");
