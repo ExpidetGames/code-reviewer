@@ -32,13 +32,13 @@ runner-api-llm-key.integration.test.ts`).
 
 ## The key of a workspace
 
-| File               | Role                                                                                                                                                                                                  |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `workspace-key.ts` | `createWorkspaceLlmKeyService`: `status`, `save`, `remove`, `reveal`, `forJob`, on the encrypted store of the workspace (`src/secrets/workspace-store.ts`)                                            |
-| `http.ts`          | The handlers of `GET\|PUT\|DELETE /api/w/:workspace/llm-key` and `POST /api/w/:workspace/llm-key/test` (the route files are below `src/app/api/w/[workspace]/llm-key/`)                               |
-| `key-test.ts`      | The "Test key" button: one call to the provider (`GET /key` of OpenRouter, which costs nothing), the failure classes, the limits                                                                      |
-| `endpoint.ts`      | The provider's API address. Not configurable by a person; the test stack points it at the fake LLM with `LLM_API_BASE_URL` together with `ALLOW_TEST_LLM_ENDPOINTS=true`, which anything else ignores |
-| `ui/`              | The settings section (`LlmAccessSection`, form), the hint "LLM not configured" with its link (`LlmAccessNotice`), the copy for the codes                                                              |
+| File               | Role                                                                                                                                                                                                                                                                |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workspace-key.ts` | `createWorkspaceLlmKeyService`: `status`, `save`, `remove`, `reveal`, `forJob`, on the encrypted store of the workspace (`src/secrets/workspace-store.ts`)                                                                                                          |
+| `http.ts`          | The handlers of `GET\|PUT\|DELETE /api/w/:workspace/llm-key` and `POST /api/w/:workspace/llm-key/test` (the route files are below `src/app/api/w/[workspace]/llm-key/`)                                                                                             |
+| `key-test.ts`      | The "Test key" button: one call to the provider (`GET /key` of OpenRouter, which costs nothing), the failure classes, the limits                                                                                                                                    |
+| `endpoint.ts`      | The provider's API address. Not configurable by a person; the test stack points it at the fake LLM with `LLM_API_BASE_URL` together with `ALLOW_TEST_LLM_ENDPOINTS=true`, which anything else ignores                                                               |
+| `ui/`              | The settings section (`LlmAccessSection`, form), the hint "LLM not configured": `llmAccessAttention` builds it as an `AttentionNotice` so a page can merge it into its one "Needs attention" strip, `LlmAccessNotice` renders it on its own; the copy for the codes |
 
 - **Storage.** Table `workspace_secrets`, AES-256-GCM with a key derived from `APP_SECRET`; the additional
   authenticated data is the table, the **workspace id** and the name `llm_api_key`, so a row copied to another

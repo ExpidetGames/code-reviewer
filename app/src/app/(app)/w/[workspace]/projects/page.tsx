@@ -3,7 +3,8 @@
 import type { Metadata } from "next";
 import { getConfigStatusFor } from "@/config-status/shared";
 import { configAudienceOf } from "@/config-status/status";
-import { WorkspaceLlmNotice } from "@/llm/ui/workspace-llm-notice";
+import { getWorkspaceLlm } from "@/llm/shared";
+import { llmAccessAttention } from "@/llm/ui/llm-access-notice";
 import { projectServiceFor } from "@/projects/shared";
 import { lastRunSourceFor } from "@/runs/shared";
 import {
@@ -11,7 +12,7 @@ import {
   ProjectsPageContent,
 } from "@/projects/ui/projects-page";
 import { SyncButton } from "@/projects/ui/sync-button";
-import { PageHeader } from "@/ui/page-header";
+import { PageHeader } from "@/components/page-header";
 import { requireWorkspace } from "@/workspaces/access-runtime";
 import { can } from "@/workspaces/permissions";
 
@@ -72,20 +73,20 @@ async function ProjectsContent({
     // Only the instance admin gets the names of the variables that are wrong.
     config: () => getConfigStatusFor(user),
   });
+  // The workspace's LLM hint is a row of the page's one "Needs attention" strip, not its own region.
+  const llmNotice = llmAccessAttention({
+    workspaceSlug,
+    summary: await getWorkspaceLlm().summaryFor(workspaceId),
+    canManage: canManageLlmKey,
+  });
   return (
-    <>
-      <WorkspaceLlmNotice
-        workspaceId={workspaceId}
-        workspaceSlug={workspaceSlug}
-        canManage={canManageLlmKey}
-      />
-      <ProjectsPageContent
-        workspaceSlug={workspaceSlug}
-        audience={configAudienceOf(user)}
-        canManage={canManage}
-        canConnect={canConnect}
-        data={data}
-      />
-    </>
+    <ProjectsPageContent
+      workspaceSlug={workspaceSlug}
+      audience={configAudienceOf(user)}
+      canManage={canManage}
+      canConnect={canConnect}
+      llmNotice={llmNotice}
+      data={data}
+    />
   );
 }
