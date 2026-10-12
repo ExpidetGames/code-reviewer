@@ -252,6 +252,13 @@ describe("CI compose job", () => {
     );
   });
 
+  // #106-IM-20
+  it("also starts the image it built on the database and the environment of the previous release", () => {
+    expect(commandLines(jobNamed("compose"))).toContain(
+      "docker/smoke/upgrade.sh code-reviewer-app:ci",
+    );
+  });
+
   // CR-37 (compose smoke test)
   it("runs on pull requests that touch the app or the runner, and on every pull request into main", () => {
     const condition = jobNamed("compose").if ?? "";

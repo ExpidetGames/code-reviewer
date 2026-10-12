@@ -27,6 +27,7 @@ import {
   testGithubAppEnv,
 } from "../../src/test-support/github-app.ts";
 import { signedInMember } from "../../src/test-support/session-lookup.ts";
+import { saveGithubAppFromEnv } from "../../src/test-support/server-credentials.ts";
 import { createTestDirectory } from "../../src/test-support/test-database.ts";
 import {
   defaultWorkspaceId,
@@ -74,6 +75,10 @@ async function startRoute() {
   });
   // A deployment that is in use has been set up (the first-run setup decides about workspaces).
   await markInstanceSetUp(getDatabase());
+  await saveGithubAppFromEnv(getDatabase(), {
+    ...env,
+    APP_SECRET: "sync-route-test-secret-0123456789-0123456789",
+  });
   session.lookupAdmin.mockResolvedValue(
     adminAccessOf(
       await signedInMember(getDatabase(), {

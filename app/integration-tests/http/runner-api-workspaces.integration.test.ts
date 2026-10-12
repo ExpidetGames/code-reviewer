@@ -9,7 +9,10 @@ import { createIntegrationsRepository } from "../../src/db/repositories/integrat
 import { createRepositoriesRepository } from "../../src/db/repositories/repositories-repository.ts";
 import { createJobQueue } from "../../src/jobs/job-queue.ts";
 import { sha } from "../../src/test-support/jobs.ts";
-import { startRunnerApiHarness } from "../../src/test-support/runner-api-harness.ts";
+import {
+  startRunnerApiHarness,
+  TEST_LLM_API_KEY,
+} from "../../src/test-support/runner-api-harness.ts";
 import { addWorkspace } from "../../src/test-support/workspaces.ts";
 
 /** A second workspace with its own connection (installation 4343) and repository "other/tools". */
@@ -17,6 +20,11 @@ async function addSecondWorkspace(
   h: Awaited<ReturnType<typeof startRunnerApiHarness>>,
 ) {
   const workspaceId = await addWorkspace(h.db, "other");
+  // Every workspace brings its own key.
+  const key = await h.llm
+    .keyServiceFor(workspaceId)
+    .save({ provider: "openrouter", apiKey: TEST_LLM_API_KEY }, null);
+  if (!key.ok) throw new Error("seeding failed");
   const integration = await createIntegrationsRepository(
     h.db,
     workspaceId,

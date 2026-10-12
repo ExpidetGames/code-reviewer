@@ -27,6 +27,7 @@ import {
   testAppKeys,
   testGithubAppEnv,
 } from "../../src/test-support/github-app.ts";
+import { saveGithubAppFromEnv } from "../../src/test-support/server-credentials.ts";
 import { createTestDirectory } from "../../src/test-support/test-database.ts";
 import { signedInMember } from "../../src/test-support/session-lookup.ts";
 import { defaultWorkspaceId } from "../../src/test-support/workspaces.ts";
@@ -60,6 +61,7 @@ async function startRoutes() {
     env: { DATABASE_PATH: join(await createTestDirectory(), "app.db") },
   });
   const db = getDatabase();
+  await saveGithubAppFromEnv(db, env);
   const integration = await createIntegrationsRepository(
     db,
     await defaultWorkspaceId(db),

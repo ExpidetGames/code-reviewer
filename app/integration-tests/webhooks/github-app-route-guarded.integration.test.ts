@@ -15,6 +15,7 @@ import {
 import { createAccessProxy } from "../../src/auth/access-proxy.ts";
 import {
   closeDatabase,
+  getDatabase,
   initializeDatabaseOnStart,
 } from "../../src/db/startup.ts";
 import { createAuthHarness } from "../../src/test-support/auth-harness.ts";
@@ -22,6 +23,7 @@ import {
   TEST_WEBHOOK_SECRET,
   testGithubAppEnv,
 } from "../../src/test-support/github-app.ts";
+import { saveGithubAppFromEnv } from "../../src/test-support/server-credentials.ts";
 import { createTestDirectory } from "../../src/test-support/test-database.ts";
 import { openGates } from "../../src/test-support/open-gates.ts";
 
@@ -35,13 +37,15 @@ async function startGuardedRoute() {
     getAuth: () => harness.auth,
     getGates: () => openGates,
   });
-  for (const [name, value] of Object.entries(testGithubAppEnv()))
+  const env = testGithubAppEnv();
+  for (const [name, value] of Object.entries(env))
     if (value !== undefined) vi.stubEnv(name, value);
   await initializeDatabaseOnStart({
     env: {
       DATABASE_PATH: join(await createTestDirectory(), "app.db"),
     },
   });
+  await saveGithubAppFromEnv(getDatabase(), env);
   vi.resetModules();
   const route: Route =
     await import("../../src/app/api/webhooks/github-app/route.ts");

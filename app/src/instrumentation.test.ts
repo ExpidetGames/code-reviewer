@@ -1,17 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Pins down the start of the server: the LLM configuration is checked, a missing key only warns and
-// the rest of the start (database, pins, sync) goes on. The other modules of the start are replaced
-// by recorders; the LLM check is the real one, and so is the runner token check (it must stay quiet).
+// Pins down the start of the server: the LLM options are checked, a wrong one only warns and the rest of
+// the start (backup of an old database, database, import, setup code, sync) goes on in this order. The
+// other modules of the start are replaced by recorders; the LLM check is the real one, and so is the runner
+// token check (it must stay quiet).
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const calls: string[] = [];
 vi.mock("./auth/startup.ts", () => ({
   checkAuthConfigOnStart: () => void calls.push("auth-check"),
-  syncLoginPinsOnStart: async () => void calls.push("pins"),
 }));
-vi.mock("./auth/config.ts", () => ({
-  loadAuthConfig: () => ({ access: {} }),
+// An installation from before accounts is backed up before the migrations and imported right after them; the
+// real ones are tested in src/legacy-import/.
+vi.mock("./legacy-import/backup-step.ts", () => ({
+  backupBeforeUpdateOnStart: () => void calls.push("update-backup"),
+}));
+vi.mock("./legacy-import/startup.ts", () => ({
+  importOnStart: async () => void calls.push("import"),
 }));
 // Stands for the production deployment check: it needs a moment to finish, and records only then. In
 // every other environment the real check does nothing, so the stand-in records nothing either.
@@ -77,20 +82,20 @@ afterEach(() => {
 
 describe("starting the server", () => {
   // CR-26-T03
-  it("warns about a legacy LLM key that is set but wrong and still starts", async () => {
-    vi.stubEnv("LLM_PROVIDER", "openrouter");
-    vi.stubEnv("LLM_API_KEY", "a key with spaces");
+  it("warns about a wrong LLM option and still starts, in the order backup of an old database, migrations, import, setup code", async () => {
+    vi.stubEnv("LLM_MODEL", "a model with spaces");
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
     await register();
 
     expect(warn).toHaveBeenCalledTimes(1);
-    expect(String(warn.mock.calls[0]?.[0])).toContain("LLM_API_KEY_INVALID");
+    expect(String(warn.mock.calls[0]?.[0])).toContain("LLM_MODEL_INVALID");
     expect(calls).toEqual([
       "auth-check",
       "backup-check",
+      "update-backup",
       "database",
-      "pins",
+      "import",
       "setup",
       "sync",
       "cleanup",
@@ -122,13 +127,25 @@ describe("starting the server", () => {
       "auth-check",
       "deploy-check",
       "backup-check",
+      "update-backup",
       "database",
-      "pins",
+      "import",
       "setup",
       "sync",
       "cleanup",
       "backup",
     ]);
+  });
+
+  // #106-IM-17
+  it("takes the backup of an old database before the migrations touch it, and imports after them and before the setup code is printed", async () => {
+    await register();
+
+    expect(calls.indexOf("update-backup")).toBeLessThan(
+      calls.indexOf("database"),
+    );
+    expect(calls.indexOf("import")).toBeGreaterThan(calls.indexOf("database"));
+    expect(calls.indexOf("import")).toBeLessThan(calls.indexOf("setup"));
   });
 
   // #97-SU-01

@@ -10,8 +10,8 @@ import {
   githubAppInstallUrl as githubAppInstallUrlOfEnv,
   githubAppInstallUrlFor,
 } from "../integrations/registry.ts";
-import { loadLlmConfig } from "../llm/config.ts";
-import { describeLlmStatus, type LlmStatus } from "../llm/status.ts";
+import { readLlmDefaults } from "../llm/config.ts";
+import type { LlmStatus } from "../llm/status.ts";
 
 type Env = Readonly<Record<string, string | undefined>>;
 
@@ -69,6 +69,22 @@ function githubAppStatusFromEnv(env: Env): GithubAppStatus {
 }
 
 /**
+ * The LLM part: the key is a matter of each workspace (src/llm/), so the instance has nothing to report about
+ * one; what it has is the built-in model and the options of `LLM_MODEL` and `LLM_MAX_TOKENS`, and a wrong one is
+ * a warning. (`LLM_PROVIDER` and `LLM_API_KEY` of an installation from before accounts were imported once and
+ * are not read.)
+ */
+function llmStatusOf(env: Env): LlmStatus {
+  const defaults = readLlmDefaults(env);
+  return {
+    configured: true,
+    provider: "openrouter",
+    model: defaults.model,
+    warnings: defaults.warnings,
+  };
+}
+
+/**
  * `github` is the status the server read from the database (`githubAppStatusOf`); left out, it is judged
  * from the variables in `env`.
  */
@@ -78,7 +94,7 @@ export function describeConfigStatus(
 ): ConfigStatus {
   return {
     githubApp: github ?? githubAppStatusFromEnv(env),
-    llm: describeLlmStatus(loadLlmConfig(env)),
+    llm: llmStatusOf(env),
   };
 }
 

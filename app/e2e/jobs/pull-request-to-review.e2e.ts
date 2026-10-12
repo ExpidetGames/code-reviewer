@@ -86,6 +86,9 @@ test.describe("a pull request on its way to a review comment", () => {
     );
     await syncFromGithubAsAdmin(baseURL);
     await signInThroughTheForm(page, account);
+    // The LLM key of the workspace, saved the way an Owner does it in the settings (the server has none in its
+    // environment). The last journey of the group replaces it and puts this one back.
+    await saveWorkspaceKey(page, llmEnv.apiKey);
     const row = page
       .getByRole("listitem")
       .filter({ hasText: WIDGETS.fullName });
@@ -183,7 +186,7 @@ test.describe("a pull request on its way to a review comment", () => {
     expect(comments[0]?.body).toContain("Missing input check (first run)");
     expect(comments[0]?.revision).toBe(1);
 
-    // The model was asked once, with the key of the instance, about the diff of the fake GitHub.
+    // The model was asked once, with the key of the workspace, about the diff of the fake GitHub.
     const asked = fakeLlm().requests();
     expect(asked).toHaveLength(1);
     expect(asked[0]?.authorization).toBe(`Bearer ${llmEnv.apiKey}`);
@@ -356,7 +359,7 @@ test.describe("a pull request on its way to a review comment", () => {
   });
 
   // #104-LK-13
-  test("a key saved for the workspace in the settings is the key a review is asked with, instead of the key of the server", async ({
+  test("a key saved for the workspace in the settings is the key a review is asked with, instead of the key saved before", async ({
     page,
     request,
   }) => {
@@ -398,19 +401,26 @@ test.describe("a pull request on its way to a review comment", () => {
         RUN_TIMEOUT,
       );
 
-      // The model was asked with the key of the workspace and not with the one of the environment.
+      // The model was asked with the key that was saved last and not with the one saved before.
       const asked = fakeLlm().requests();
       expect(asked).toHaveLength(1);
       expect(asked[0]?.authorization).toBe(`Bearer ${WORKSPACE_KEY}`);
       expect(asked[0]?.authorization).not.toContain(llmEnv.apiKey);
       await expectNoCredentials(page, request, runnerOutput(), [WORKSPACE_KEY]);
     } finally {
-      // The other journeys of this group, and a retry of the group, use the key of the environment.
-      const removed = await page.request.delete("/api/w/default/llm-key");
-      expect(removed.status()).toBe(200);
+      // A retry of the group starts with the key the other journeys use.
+      await saveWorkspaceKey(page, llmEnv.apiKey);
     }
   });
 });
+
+/** Saves the LLM key of the first workspace, as an Owner does in the settings (the account is signed in). */
+async function saveWorkspaceKey(page: Page, apiKey: string): Promise<void> {
+  const saved = await page.request.put("/api/w/default/llm-key", {
+    data: { provider: llmEnv.provider, apiKey },
+  });
+  expect(saved.status(), await saved.text()).toBe(200);
+}
 
 /** The LLM key and every installation token are nowhere in the page, the runner's output or the run data. */
 async function expectNoCredentials(

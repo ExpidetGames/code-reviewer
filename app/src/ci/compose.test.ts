@@ -289,6 +289,92 @@ describe("compose secrets", () => {
   });
 });
 
+// ---- the variables of the previous release (the update imports them once) ----
+
+const LEGACY_IMPORTED = [
+  "GITHUB_APP_ID",
+  "GITHUB_APP_SLUG",
+  "GITHUB_APP_PRIVATE_KEY",
+  "GITHUB_APP_WEBHOOK_SECRET",
+  "ALLOWED_GITHUB_LOGINS",
+  "ALLOWED_GITHUB_ORG",
+  "LLM_PROVIDER",
+  "LLM_API_KEY",
+] as const;
+
+/** The comment block above `NAME=` (or `# NAME=`) in .env.example, up to the blank line before it. */
+function commentOf(name: string): string {
+  const lines = envExample.split("\n");
+  const index = lines.findIndex((line) =>
+    new RegExp(`^#?\\s?${name}=`).test(line),
+  );
+  if (index < 0) throw new Error(`.env.example does not document ${name}`);
+  const comment: string[] = [];
+  for (let i = index - 1; i >= 0 && (lines[i] ?? "").startsWith("#"); i -= 1)
+    comment.unshift(lines[i] ?? "");
+  // A block that documents several variables shares the comment above its first line.
+  return comment.map((line) => line.replace(/^#\s?/, "")).join(" ");
+}
+
+describe("the update from a version before accounts", () => {
+  // #106-IM-21
+  it("requires no GitHub, LLM or sign-in setting in any compose file: they are passed on empty", () => {
+    for (const file of ["compose.yml", "compose.coolify.yml"]) {
+      const app = (parse(read(file)) as Compose).services.app;
+      for (const [key, value] of Object.entries(app?.environment ?? {})) {
+        if (!/^(GITHUB_|LLM_|ALLOWED_)/.test(key)) continue;
+        expect(String(value), `${file} ${key}`).not.toContain(":?");
+      }
+    }
+  });
+
+  // #106-IM-21
+  it("passes the master key under both names and leaves it to the app, which refuses to start without one", () => {
+    for (const file of ["compose.yml", "compose.coolify.yml"]) {
+      const app = (parse(read(file)) as Compose).services.app;
+      expect(app?.environment?.APP_SECRET, file).toBe("${APP_SECRET:-}");
+      expect(app?.environment?.BETTER_AUTH_SECRET, file).toBe(
+        "${BETTER_AUTH_SECRET:-}",
+      );
+    }
+    expect(envExample).toMatch(/^APP_SECRET=$/m);
+    expect(commentOf("APP_SECRET")).toMatch(/Required/);
+    expect(commentOf("APP_SECRET")).toMatch(/refuses to start without it/);
+  });
+
+  // #106-IM-21
+  it.each(LEGACY_IMPORTED)(
+    "says in .env.example that %s is imported once and ignored afterwards",
+    (name) => {
+      // The comment above the variable, or the introduction of its section, says "imports ... once".
+      const section = envExample.slice(
+        0,
+        envExample.search(new RegExp(`^#?\\s?${name}=`, "m")),
+      );
+      const nearby = `${commentOf(name)}\n${section.slice(-2600)}`;
+
+      expect(nearby).toMatch(/\bonce\b/i);
+    },
+  );
+
+  // #106-IM-21
+  it("marks the GitHub OAuth app variables as no longer used", () => {
+    for (const name of [
+      "GITHUB_OAUTH_CLIENT_ID",
+      "GITHUB_OAUTH_CLIENT_SECRET",
+    ]) {
+      expect(envExample).toMatch(new RegExp(`^${name}=$`, "m"));
+    }
+    expect(commentOf("GITHUB_OAUTH_CLIENT_ID")).toMatch(/No longer used/);
+    expect(commentOf("GITHUB_OAUTH_CLIENT_ID")).toMatch(/not\s+imported/);
+  });
+
+  // #106-IM-21
+  it("tells an installation to add APP_SECRET with the same value as BETTER_AUTH_SECRET", () => {
+    expect(commentOf("BETTER_AUTH_SECRET")).toMatch(/SAME value/);
+  });
+});
+
 // ---- .env.example against compose.yml and the code ----
 
 // Variables that the code reads but an operator never sets: the runtime or the image provides them.

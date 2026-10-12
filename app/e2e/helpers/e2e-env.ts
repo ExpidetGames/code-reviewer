@@ -17,6 +17,9 @@ const signupAppPort = Number(process.env.E2E_SIGNUP_PORT) || appPort + 3;
 // The fifth app of the run, for the journeys of the workspaces in a multi-tenant instance (people create
 // workspaces and switch between them): the port after the fourth one unless E2E_MULTI_PORT says otherwise.
 const multiAppPort = Number(process.env.E2E_MULTI_PORT) || appPort + 4;
+// The app of the journey of the update from the previous release (e2e/upgrade/): the journey starts and restarts
+// it itself, on the port after the fifth app unless E2E_UPGRADE_PORT says otherwise.
+const upgradeAppPort = Number(process.env.E2E_UPGRADE_PORT) || appPort + 5;
 // The fake GitHub gets a random port in a high range, so two checkouts never collide however their
 // E2E_PORT values are chosen. The choice is stored in the environment: Playwright loads this file
 // again in every worker process, which inherits the main process's environment.
@@ -57,6 +60,8 @@ export const e2eEnv = {
   /** The SQLite file of the fifth app, which is multi-tenant (fresh for every run). */
   multiDatabasePath: "test-results/e2e-multi-data/app.db",
   multiAppUrl: `http://127.0.0.1:${multiAppPort}`,
+  upgradeAppPort,
+  upgradeAppUrl: `http://127.0.0.1:${upgradeAppPort}`,
   /**
    * The fake SMTP server (fakes/smtp): the journey of the mail page configures the fourth app to send to it
    * (host, STARTTLS port, TLS port, a login), and every journey that reads a mail reads the "inbox" from its
@@ -130,3 +135,19 @@ export function githubAppPrivateKey(): string {
     throw new Error("playwright.config.ts did not make the GitHub App key.");
   return key;
 }
+
+/**
+ * What the journey of the update from the previous release (e2e/upgrade/) needs besides the shared values: where
+ * its files are (relative to the app folder, fresh for every run) and the secrets of the installation that is
+ * updated. The master key is the one the previous release ran with (`BETTER_AUTH_SECRET`); the LLM key is the
+ * one of its environment. Dummies that must never show up in a log.
+ */
+export const upgradeEnv = {
+  directory: "test-results/e2e-upgrade",
+  databasePath: "test-results/e2e-upgrade/data/app.db",
+  backupDir: "test-results/e2e-upgrade/backups",
+  legacySecret: "e2e-legacy-better-auth-secret-0123456789-abcdef",
+  llmKey: "e2e-legacy-llm-key-0123456789-0123456789-abcdef",
+  oauthClientId: "e2e-legacy-oauth-client-id",
+  oauthClientSecret: "e2e-legacy-oauth-client-secret-0123456789",
+};

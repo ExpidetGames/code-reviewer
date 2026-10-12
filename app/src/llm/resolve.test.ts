@@ -2,25 +2,15 @@
 
 import { describe, expect, it } from "vitest";
 import { createLlmAccess } from "./access.ts";
-import { loadLlmConfig } from "./config.ts";
 import { resolveWorkspaceLlmAccess, type ResolveLlmInput } from "./resolve.ts";
 
 const WORKSPACE_KEY = "sk-or-v1-workspace-key-aaaaaaaaaaaaaaaa";
-const ENVIRONMENT_KEY = "sk-or-v1-environment-key-bbbbbbbbbbbbb";
 const OPERATOR_KEY = "sk-or-v1-operator-key-cccccccccccccccc";
-
-const noEnvironment = loadLlmConfig({});
-const environment = loadLlmConfig({
-  LLM_PROVIDER: "openrouter",
-  LLM_API_KEY: ENVIRONMENT_KEY,
-  LLM_MODEL: "vendor/env-model",
-});
 
 function input(overrides: Partial<ResolveLlmInput> = {}): ResolveLlmInput {
   return {
     key: { state: "none" },
     operator: null,
-    environment: { allowed: true, state: noEnvironment },
     defaults: { model: "vendor/default-model", contextWindowTokens: null },
     ...overrides,
   };
@@ -82,7 +72,7 @@ describe("which LLM access a workspace gets", () => {
   });
 
   // #104-LK-01
-  it("prefers the workspace key over the operator's and over the environment", () => {
+  it("prefers the workspace key over the operator's", () => {
     const operator = createLlmAccess({
       provider: "openrouter",
       model: "m/m",
@@ -94,7 +84,6 @@ describe("which LLM access a workspace gets", () => {
       input({
         key: { state: "key", binding: "openrouter", apiKey: WORKSPACE_KEY },
         operator,
-        environment: { allowed: true, state: environment },
       }),
     );
 
@@ -105,52 +94,20 @@ describe("which LLM access a workspace gets", () => {
     });
   });
 
-  // #104-LK-12
-  it("falls back to the legacy environment variables when the workspace has no key", () => {
-    const result = resolveWorkspaceLlmAccess(
-      input({ environment: { allowed: true, state: environment } }),
-    );
-
-    expect(result).toMatchObject({
-      ok: true,
-      source: "environment",
-      access: { apiKey: ENVIRONMENT_KEY, model: "vendor/env-model" },
-    });
-  });
-
-  // #104-LK-12
-  it("does not use the legacy environment variables where they are not allowed (multi-tenant)", () => {
-    const result = resolveWorkspaceLlmAccess(
-      input({ environment: { allowed: false, state: environment } }),
-    );
-
-    expect(result).toMatchObject({ ok: false, reason: "no_key" });
-  });
-
-  it("reports legacy variables that are set but wrong, by variable name and code only", () => {
-    const wrong = loadLlmConfig({
-      LLM_PROVIDER: "openrouter",
-      LLM_API_KEY: "has a space inside",
-    });
-
-    const result = resolveWorkspaceLlmAccess(
-      input({ environment: { allowed: true, state: wrong } }),
-    );
-
-    expect(result).toEqual({
+  // #106-LK-12
+  it("does not look at the legacy environment variables any more: a workspace without a key has none", () => {
+    // The variables were imported into the default workspace once (src/legacy-import/); the resolver has no
+    // input for them, so no environment can give a workspace a key.
+    expect(resolveWorkspaceLlmAccess(input())).toMatchObject({
       ok: false,
-      errorCode: "llm_not_configured",
-      reason: "environment_misconfigured",
-      issues: [{ code: "LLM_API_KEY_INVALID", variable: "LLM_API_KEY" }],
+      reason: "no_key",
     });
-    expect(JSON.stringify(result)).not.toContain("has a space");
   });
 
   it("fails closed for a workspace key that cannot be read, instead of using another key", () => {
     const result = resolveWorkspaceLlmAccess(
       input({
         key: { state: "unreadable" },
-        environment: { allowed: true, state: environment },
       }),
     );
 
@@ -166,7 +123,6 @@ describe("which LLM access a workspace gets", () => {
           binding: "some-other-provider",
           apiKey: WORKSPACE_KEY,
         },
-        environment: { allowed: true, state: environment },
       }),
     );
 

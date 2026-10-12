@@ -279,14 +279,6 @@ describe("the LLM access section for an Admin or an Owner", () => {
     expect(container.textContent).toMatch(/operator of this instance/);
     expect(container.textContent).toMatch(/technically decrypt/);
   });
-
-  it("names the legacy key of the server when reviews use it", () => {
-    const { container } = section({
-      summary: { configured: true, source: "environment" },
-    });
-
-    expect(container.textContent).toMatch(/LLM_API_KEY variable/);
-  });
 });
 
 describe("the LLM access section for a Member", () => {

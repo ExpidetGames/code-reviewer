@@ -5,16 +5,15 @@
 // replaces every read of the `GITHUB_APP_*` variables.
 //
 // - The database comes first: the settings in `instance_settings` (key `github_app`) and the private key,
-//   the webhook secret and the client secret in the encrypted secret store. The environment is only a
-//   fallback for an installation that has not been imported yet (the import issue removes it); the OAuth
-//   app's `GITHUB_OAUTH_*` variables are never read.
+//   the webhook secret and the client secret in the encrypted secret store. There is no environment fallback:
+//   the `GITHUB_APP_*` variables of an installation from before accounts were imported once
+//   (src/legacy-import/) and are not read; the OAuth app's `GITHUB_OAUTH_*` variables never were.
 // - Nothing is remembered between calls: every `load` reads the database, so a webhook secret or a key the
 //   admin replaced counts from the next request on every app instance.
 // - Saving writes the secrets and the settings in one transaction. A secret is write-only: what leaves
 //   this module is its status, and the value only goes to code on the server inside a `SecretValue`.
 import type { Kysely } from "kysely";
 import {
-  anyGithubAppVariableSet,
   GithubAppConfigError,
   loadGithubAppConfig,
   type GithubAppConfig,
@@ -57,8 +56,8 @@ export type UserAuthorizationState =
 
 export type GithubSnapshot = {
   /** Where the settings came from. `none`: nothing is configured. */
-  source: "database" | "environment" | "none";
-  /** The stored non-secret settings; null for the environment and for nothing. */
+  source: "database" | "none";
+  /** The stored non-secret settings; null for nothing. */
   stored: StoredGithubApp | null;
   /** The slug when it is known and well formed, for the install link; otherwise null. */
   slug: string | null;
@@ -113,8 +112,9 @@ export type GithubCredentialStoreOptions = {
   /** The master key (`APP_SECRET`). */
   appSecret: string;
   /**
-   * The process environment: the fallback of an installation that has not been imported, and the test only
-   * address overrides (`GITHUB_API_BASE_URL`, `ALLOW_TEST_GITHUB_ENDPOINTS`). Default: `process.env`.
+   * The process environment, for the test only address overrides (`GITHUB_API_BASE_URL`,
+   * `ALLOW_TEST_GITHUB_ENDPOINTS`) and nothing else: the `GITHUB_APP_*` variables are never read. Default:
+   * `process.env`.
    */
   env?: Env;
   now?: () => Date;
@@ -138,13 +138,6 @@ function problemFrom(error: GithubAppConfigError): GithubConfigProblem {
       ),
     ],
   };
-}
-
-const SLUG_PATTERN = /^[A-Za-z0-9][A-Za-z0-9-]*$/;
-
-function slugOf(env: Env): string | null {
-  const slug = env.GITHUB_APP_SLUG?.trim();
-  return slug !== undefined && SLUG_PATTERN.test(slug) ? slug : null;
 }
 
 export function createGithubCredentialStore({
@@ -236,33 +229,11 @@ export function createGithubCredentialStore({
           updatedBy: row.updatedBy,
           updatedAt: row.updatedAt,
         };
-      // Only an installation that has not been imported has the variables as its source.
-      if (!anyGithubAppVariableSet(env))
-        return {
-          source: "none",
-          stored: null,
-          slug: null,
-          app: { ok: false, kind: "missing", fields: [] },
-          userAuthorization: { state: "none" },
-          updatedBy: null,
-          updatedAt: null,
-        };
-      let app: GithubAppState;
-      try {
-        app = { ok: true, config: loadGithubAppConfig(env) };
-      } catch (error) {
-        if (!(error instanceof GithubAppConfigError)) throw error;
-        app = {
-          ok: false,
-          kind: error.problem,
-          fields: [...error.variables],
-        };
-      }
       return {
-        source: "environment",
+        source: "none",
         stored: null,
-        slug: app.ok ? app.config.slug : slugOf(env),
-        app,
+        slug: null,
+        app: { ok: false, kind: "missing", fields: [] },
         userAuthorization: { state: "none" },
         updatedBy: null,
         updatedAt: null,

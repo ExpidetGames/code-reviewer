@@ -40,7 +40,10 @@ export type AuthConfig = {
     /** `/user` and `/user/emails` live below this URL. */
     apiBaseUrl: string;
   };
-  /** Who may use this instance (`ALLOWED_GITHUB_LOGINS`, `ALLOWED_GITHUB_ORG`). */
+  /**
+   * The allow list of the earlier sign in (`ALLOWED_GITHUB_LOGINS`, `ALLOWED_GITHUB_ORG`). Nothing enforces it any
+   * more; the import of an existing installation reads it once.
+   */
   access: AccessConfig;
   /** Whether the cookies get the `Secure` attribute: exactly when `BETTER_AUTH_URL` is https. */
   secureCookies: boolean;
@@ -90,7 +93,10 @@ export function loadAuthConfig(env: Env): AuthConfig {
     problems,
   );
 
-  const access = parseAccessConfig(env, problems);
+  // The allow list no longer decides anything (the sign-up rule and the workspaces do); the import of an existing
+  // installation reads it once (src/legacy-import/). A value that cannot be read is not a reason to stop the
+  // start, so its problems go nowhere.
+  const access = parseAccessConfig(env, []);
 
   if (problems.length > 0 || secret === undefined || baseUrl === undefined) {
     throw new AuthConfigError(
