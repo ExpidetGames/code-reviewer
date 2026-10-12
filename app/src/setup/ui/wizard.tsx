@@ -6,6 +6,17 @@
 // form only collects them, keeps them while the person goes back and forth, and shows the reasons.
 import { useId, useState, type FormEvent } from "react";
 import { Button } from "../../ui/button.tsx";
+import {
+  PASSWORD_RULE_HINT,
+  PASSWORDS_DO_NOT_MATCH,
+} from "../../auth/password-policy.ts";
+import { InfoHint } from "../../components/info-hint.tsx";
+import { HelpDisclosure } from "../../components/help-disclosure.tsx";
+import {
+  FAIL_CLOSED_WARNING,
+  SIGN_UP_RULE_OPTIONS,
+  type SignUpRuleKind,
+} from "../../signup/ui/rule-copy.ts";
 import { browserSetupApi, type SetupApi, type WizardRequest } from "./api.ts";
 import {
   describeSetupFailure,
@@ -14,8 +25,6 @@ import {
   stepOfField,
 } from "./messages.ts";
 
-type RuleKind = "everyone" | "emails" | "domains";
-
 /** The entries a person typed: one per line, or separated by commas, semicolons or spaces. */
 export function splitEntries(text: string): string[] {
   return text
@@ -23,9 +32,6 @@ export function splitEntries(text: string): string[] {
     .map((entry) => entry.trim())
     .filter((entry) => entry !== "");
 }
-
-const FAIL_CLOSED_HINT =
-  "Until emails can be verified, nobody except you can sign up under this rule. A mail server or GitHub as the only sign-in method makes it work; you set either up in the admin area after the setup. The entries are saved now.";
 
 export function Wizard({
   existingInstallation = false,
@@ -46,7 +52,7 @@ export function Wizard({
   const ids = useId();
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [tenancy, setTenancy] = useState<"single" | "multi">("single");
-  const [ruleKind, setRuleKind] = useState<RuleKind>(
+  const [ruleKind, setRuleKind] = useState<SignUpRuleKind>(
     existingInstallation ? "emails" : "everyone",
   );
   const [entriesText, setEntriesText] = useState("");
@@ -82,7 +88,7 @@ export function Wizard({
     setProblem(null);
     if (password !== repeat) {
       setFieldProblems({
-        "admin.repeat": "The two passwords are not the same.",
+        "admin.repeat": PASSWORDS_DO_NOT_MATCH,
       });
       return;
     }
@@ -176,40 +182,22 @@ export function Wizard({
         <h1>Who may sign up?</h1>
         {heading}
         {existingInstallation ? (
-          <p className="muted">
+          <HelpDisclosure label="Why is this asked?">
             The list of allowed GitHub logins and the organization of the
             earlier version are not carried over as a rule: the people who
             passed them became members, and you can invite the others. Choose
             who may create an account from now on.
-          </p>
+          </HelpDisclosure>
         ) : null}
         <fieldset className="setup-options">
           <legend className="sr-only">Sign-up rule</legend>
-          {(
-            [
-              [
-                "everyone",
-                "Everyone",
-                "Anyone who can reach this instance may create an account.",
-              ],
-              [
-                "emails",
-                "A list of email addresses",
-                "Only the addresses you list.",
-              ],
-              [
-                "domains",
-                "Allowed email domains",
-                "Anyone with an address at one of the domains you list (example.com, not its subdomains).",
-              ],
-            ] as const
-          ).map(([kind, title, text]) => (
-            <label key={kind} className="setup-option">
+          {SIGN_UP_RULE_OPTIONS.map(({ value, title, text }) => (
+            <label key={value} className="setup-option">
               <input
                 type="radio"
                 name="rule"
-                checked={ruleKind === kind}
-                onChange={() => setRuleKind(kind)}
+                checked={ruleKind === value}
+                onChange={() => setRuleKind(value)}
               />
               <span>
                 <strong>{title}</strong>
@@ -241,7 +229,9 @@ export function Wizard({
                 {fieldError("signUp.entries")}
               </p>
             ) : null}
-            <p className="alert alert-warning">{FAIL_CLOSED_HINT}</p>
+            <p className="alert alert-warning">
+              {FAIL_CLOSED_WARNING} The entries are saved now.
+            </p>
           </div>
         )}
         <div className="form-actions">
@@ -282,9 +272,14 @@ export function Wizard({
         ) : null}
       </div>
       <div className="field">
-        <label htmlFor={`${ids}-password`} className="field-label">
-          Password
-        </label>
+        <div className="flex items-center gap-1">
+          <label htmlFor={`${ids}-password`} className="field-label">
+            Password
+          </label>
+          <InfoHint label="What makes a good password">
+            {PASSWORD_REASON}
+          </InfoHint>
+        </div>
         <input
           id={`${ids}-password`}
           type="password"
@@ -297,7 +292,7 @@ export function Wizard({
           aria-describedby={`${ids}-reason`}
         />
         <span id={`${ids}-reason`} className="muted">
-          {PASSWORD_REASON}
+          {PASSWORD_RULE_HINT}
         </span>
         {fieldError("admin.password") ? (
           <p role="alert" className="field-error">

@@ -3,13 +3,21 @@
 // The copy for what the admin data route answers: one sentence per stable code (src/admin/errors.ts) and
 // for the fields of the forms. The codes are the contract, these sentences are only what the page shows.
 import {
+  CROSS_SITE_REQUEST,
+  ENTRIES_REQUIRED,
+  ENTRY_INVALID,
+  INVALID_VALUES,
+  TOO_MANY_ENTRIES,
+  UNAVAILABLE,
+} from "../../copy/messages.ts";
+import {
   describeTransportFailure,
   GENERIC_FAILURE,
 } from "../../ui/transport-messages.ts";
 import type { RequestIssue } from "../../ui/json-request.ts";
 
 const FAILURE_COPY: Record<string, string> = {
-  cross_site_request: "The request did not come from this page. Reload it.",
+  cross_site_request: CROSS_SITE_REQUEST,
   too_many_workspaces:
     "This instance has more than one workspace, so it cannot become single-tenant. Remove the extra workspaces first.",
   at_least_one_method:
@@ -18,10 +26,10 @@ const FAILURE_COPY: Record<string, string> = {
     "GitHub sign-in cannot be switched on before GitHub is configured.",
   admin_needs_github_identity:
     "Before GitHub is the only way to sign in, link your own GitHub account to your admin account (Integrations). Otherwise you could not sign in afterwards.",
-  invalid_input: "Some of the values are not valid. Check the fields.",
+  invalid_input: INVALID_VALUES,
   rate_limited:
     "Too many test mails in a short time. Wait a few minutes and try again.",
-  unavailable: "This is not available right now. Please try again later.",
+  unavailable: UNAVAILABLE,
 };
 
 /** The sentence for a failed change. `count` is the number of workspaces for `too_many_workspaces`. */
@@ -39,11 +47,11 @@ export function describeAdminFailure(code: string, count?: number): string {
 export function describeAdminIssue(issue: RequestIssue): string {
   switch (issue.code) {
     case "entries_required":
-      return "Enter at least one entry.";
+      return ENTRIES_REQUIRED;
     case "entry_invalid":
-      return "One of the entries is not valid. Emails look like name@example.com, domains like example.com.";
+      return ENTRY_INVALID;
     case "too_many_entries":
-      return "There are too many entries (500 at most).";
+      return TOO_MANY_ENTRIES;
     case "number_out_of_range":
       return "Enter a whole number from 1 to 1000.";
     case "smtp_invalid":

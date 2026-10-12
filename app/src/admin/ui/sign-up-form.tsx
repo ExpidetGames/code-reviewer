@@ -7,14 +7,16 @@
 // section 2.5).
 import { useId, useState, type FormEvent } from "react";
 import { Button } from "../../ui/button.tsx";
+import {
+  SIGN_UP_RULE_OPTIONS,
+  type SignUpRuleKind,
+} from "../../signup/ui/rule-copy.ts";
 import type { AdminSettingsView } from "../service.ts";
 import type { AdminApi } from "./api.ts";
 import { LastChanged } from "./last-changed.tsx";
 import { describeAdminIssue } from "./messages.ts";
 import { FailClosedNotice } from "./notices.tsx";
 import { SaveResult, useSave } from "./use-save.tsx";
-
-type RuleKind = "everyone" | "emails" | "domains";
 
 /** The entries a person typed: one per line, or separated by commas, semicolons or spaces. */
 export function splitEntries(text: string): string[] {
@@ -34,7 +36,7 @@ export function SignUpRuleForm({
 }) {
   const ids = useId();
   const rule = settings.signUpRule.value;
-  const [kind, setKind] = useState<RuleKind>(rule.kind);
+  const [kind, setKind] = useState<SignUpRuleKind>(rule.kind);
   const [entriesText, setEntriesText] = useState(
     rule.kind === "everyone" ? "" : rule.entries.join("\n"),
   );
@@ -54,23 +56,6 @@ export function SignUpRuleForm({
     status?.kind === "failed"
       ? status.issues.find((issue) => issue.field === "signUp.entries")
       : undefined;
-  const options: Array<{ value: RuleKind; title: string; text: string }> = [
-    {
-      value: "everyone",
-      title: "Everyone",
-      text: "Anybody can create an account.",
-    },
-    {
-      value: "emails",
-      title: "A list of email addresses",
-      text: "Only these addresses can create an account.",
-    },
-    {
-      value: "domains",
-      title: "Allowed email domains",
-      text: "Addresses at these domains (not their subdomains) can create an account.",
-    },
-  ];
 
   return (
     <form onSubmit={submit} className="settings-form" aria-labelledby={ids}>
@@ -78,7 +63,7 @@ export function SignUpRuleForm({
       {settings.signUpRuleState.failClosed ? <FailClosedNotice /> : null}
       <fieldset className="setup-options">
         <legend className="sr-only">Sign-up rule</legend>
-        {options.map((option) => (
+        {SIGN_UP_RULE_OPTIONS.map((option) => (
           <label key={option.value} className="setup-option">
             <input
               type="radio"

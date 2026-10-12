@@ -9,14 +9,9 @@ import { formatUtc } from "../../ui/format-time.ts";
 import { NoRepositories } from "./no-repositories.tsx";
 import { ProjectToggle } from "./project-toggle.tsx";
 import type { ProjectsApi } from "./api.ts";
+import { PROJECT_STATE_LABEL } from "./messages.ts";
 import { RUN_STATUS_PRESENTATION } from "../../runs/run-status.ts";
 import type { LastRun, ProjectListView, ProjectRowView } from "./list-view.ts";
-
-const STATE_COPY: Record<ProjectRowView["status"], string> = {
-  active: "Active",
-  inactive: "Inactive",
-  unavailable: "Unavailable",
-};
 
 function LastRunStatus({
   run,
@@ -115,7 +110,7 @@ export function ProjectList({
           </div>
           <div className="project-status">
             <span className={`badge badge-${row.status}`}>
-              {STATE_COPY[row.status]}
+              {PROJECT_STATE_LABEL[row.status]}
             </span>
             <span className="small">
               Last run:{" "}

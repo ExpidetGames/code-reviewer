@@ -291,7 +291,8 @@ describe("the LLM access section for a Member", () => {
     });
 
     expect(screen.queryByLabelText("API key")).toBeNull();
-    expect(screen.queryByRole("button")).toBeNull();
+    // The only control left is the help disclosure (#169); there is no form.
+    expect(container.querySelector("form")).toBeNull();
     expect(container.textContent).toContain(
       "Reviews of this workspace have an LLM key.",
     );

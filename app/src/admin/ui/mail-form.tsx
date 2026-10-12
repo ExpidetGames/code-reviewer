@@ -8,6 +8,10 @@
 // (src/mail/smtp-settings.ts); the form shows the reasons it gets back.
 import { useId, useState, type FormEvent } from "react";
 import { Button } from "../../ui/button.tsx";
+import {
+  STORED_ENCRYPTED_HINT,
+  UNREADABLE_SECRET_CAUSE,
+} from "../../secrets/messages.ts";
 import type { AdminSettingsView } from "../service.ts";
 import { browserAdminApi, type AdminApi, type SmtpChange } from "./api.ts";
 import { LastChanged } from "./last-changed.tsx";
@@ -157,9 +161,9 @@ export function MailForm({
       </p>
       {passwordState === "unreadable" ? (
         <p role="alert" className="alert alert-error">
-          <strong>The saved password cannot be read.</strong> It was saved with
-          another APP_SECRET, or the stored value was changed. Enter the
-          password again and save. Until then no mail can be sent.
+          <strong>The saved password cannot be read.</strong>{" "}
+          {UNREADABLE_SECRET_CAUSE} Enter the password again and save. Until
+          then no mail can be sent.
         </p>
       ) : null}
 
@@ -293,7 +297,7 @@ export function MailForm({
               : passwordState === "unreadable"
                 ? "The saved password cannot be read. Enter it again."
                 : "No password is saved."}{" "}
-            It is stored encrypted and is never shown again.
+            {STORED_ENCRYPTED_HINT}
           </p>
           {error("password")}
           {passwordState !== "none" ? (

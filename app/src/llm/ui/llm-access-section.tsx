@@ -6,6 +6,7 @@
 // below, whose built-in value is the instance's default model (`LLM_MODEL`, or the recommended one); the
 // name of that model is not a secret and every member sees it in that form.
 import { LlmAccessForm } from "./llm-access-form.tsx";
+import { HelpDisclosure } from "../../components/help-disclosure.tsx";
 import type { WorkspaceLlmSummary } from "../assemble.ts";
 import type { WorkspaceLlmKeyStatus } from "../workspace-key.ts";
 import type { LlmKeyApi } from "./api.ts";
@@ -46,10 +47,13 @@ export function LlmAccessSection({
       <h2 id="llm-access-heading">LLM access</h2>
       <p className="muted">
         Reviews run with the API key of this workspace, and the provider bills
-        that account. The key is stored encrypted on this server and is never
-        shown again. The operator of this instance holds the key that encrypts
-        it and can technically decrypt it.
+        that account.
       </p>
+      <HelpDisclosure label="How the key is stored">
+        The key is stored encrypted on this server and is never shown again. The
+        operator of this instance holds the key that encrypts it and can
+        technically decrypt it.
+      </HelpDisclosure>
       <SourceNote summary={summary} />
       {canManage ? (
         <LlmAccessForm

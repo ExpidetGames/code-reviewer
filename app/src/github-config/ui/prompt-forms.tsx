@@ -9,9 +9,14 @@ import { useRouter } from "next/navigation";
 import { useId, useState, type FormEvent } from "react";
 import { Button } from "../../ui/button.tsx";
 import type { RequestIssue } from "../../ui/json-request.ts";
+import { STORED_ENCRYPTED_HINT } from "../../secrets/messages.ts";
 import type { GithubConfigView } from "../service.ts";
 import { browserGithubApi, type GithubApi } from "./api.ts";
-import { describeGithubFailure, describeGithubIssue } from "./messages.ts";
+import {
+  describeGithubFailure,
+  describeGithubIssue,
+  PRIVATE_APP_WHERE_HINT,
+} from "./messages.ts";
 
 type Status =
   | { kind: "saved" }
@@ -105,7 +110,7 @@ export function UserAuthorizationForm({
         <p className="muted small">
           {view.secrets.clientSecret === "configured"
             ? "A secret is saved. Leave the field empty to keep it while the client id is unchanged."
-            : "It is stored encrypted and is never shown again."}
+            : STORED_ENCRYPTED_HINT}
         </p>
         {issueFor("clientSecret") ? (
           <p className="field-error">
@@ -165,8 +170,7 @@ export function PrivateAppForm({
       <p className="muted">
         GitHub does not report it, and it is not known for this App. Until you
         answer, new installations are never attached to a workspace without the
-        explicit &quot;Connect GitHub&quot; step. Look at &quot;Where can this
-        GitHub App be installed?&quot; in the App&apos;s settings.
+        explicit &quot;Connect GitHub&quot; step. {PRIVATE_APP_WHERE_HINT}
       </p>
       <div className="form-actions">
         <Button disabled={pending} onClick={() => void answer(true)}>

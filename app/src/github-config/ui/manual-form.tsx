@@ -11,9 +11,14 @@
 import { useId, useState, type FormEvent } from "react";
 import { Button } from "../../ui/button.tsx";
 import type { RequestIssue } from "../../ui/json-request.ts";
+import { STORED_ENCRYPTED_HINT } from "../../secrets/messages.ts";
 import type { GithubConfigView } from "../service.ts";
 import { browserGithubApi, type GithubApi } from "./api.ts";
-import { describeGithubFailure, describeGithubIssue } from "./messages.ts";
+import {
+  describeGithubFailure,
+  describeGithubIssue,
+  PRIVATE_APP_WHERE_HINT,
+} from "./messages.ts";
 import { useRouter } from "next/navigation";
 
 type Status =
@@ -178,8 +183,8 @@ export function ManualForm({
           />
           <p id={`${ids}-privateKey-hint`} className="muted small">
             {SECRET_HINT[view.secrets.privateKey]} The content of the .pem file,
-            with real line breaks or on one line with \n. It is stored encrypted
-            and is never shown again.
+            with real line breaks or on one line with \n.{" "}
+            {STORED_ENCRYPTED_HINT}
           </p>
           {error("privateKey")}
         </div>
@@ -231,9 +236,8 @@ export function ManualForm({
             <span>On any account (a public App)</span>
           </label>
           <p className="muted small">
-            Look at &quot;Where can this GitHub App be installed?&quot; in the
-            App&apos;s settings. GitHub does not report it. It decides whether a
-            new installation may be attached to the one workspace of a
+            {PRIVATE_APP_WHERE_HINT} GitHub does not report it. It decides
+            whether a new installation may be attached to the one workspace of a
             single-tenant instance without asking, so there is no default.
           </p>
           {error("privateApp")}
@@ -265,8 +269,7 @@ export function ManualForm({
             )}
           />
           <p id={`${ids}-clientSecret-hint`} className="muted small">
-            {SECRET_HINT[view.secrets.clientSecret]} It is stored encrypted and
-            is never shown again.
+            {SECRET_HINT[view.secrets.clientSecret]} {STORED_ENCRYPTED_HINT}
           </p>
           {error("clientSecret")}
         </div>

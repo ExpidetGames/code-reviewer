@@ -4,6 +4,10 @@
 // a save that failed as a whole means. The service answers with stable codes (a field and a code per
 // problem); this is where a code becomes a sentence next to its field. A code is never shown.
 import { REVIEW_SETTING_LIMITS, type ReviewSettingField } from "../settings.ts";
+import {
+  CROSS_SITE_REQUEST_RELOAD_PAGE,
+  REQUEST_NOT_UNDERSTOOD,
+} from "../../copy/messages.ts";
 import type { ReviewSettingIssueCode } from "../validate.ts";
 import type { ReviewSettingsErrorCode } from "../errors.ts";
 import {
@@ -86,13 +90,10 @@ export function describeIssue(
 const SAVE_FAILURE_COPY: Record<ReviewSettingsErrorCode, string> = {
   REVIEW_SETTINGS_INVALID:
     "Some settings are not valid. Fix the marked fields and save again.",
-  REVIEW_SETTINGS_REQUEST_INVALID:
-    "The request was not understood. Reload the page and try again.",
-  REVIEW_SETTINGS_CROSS_SITE_REQUEST:
-    "The request did not come from this page. Reload the page and try again.",
+  REVIEW_SETTINGS_REQUEST_INVALID: REQUEST_NOT_UNDERSTOOD,
+  REVIEW_SETTINGS_CROSS_SITE_REQUEST: CROSS_SITE_REQUEST_RELOAD_PAGE,
   REVIEW_SETTINGS_BODY_TOO_LARGE: "The settings are too large to save.",
-  REVIEW_SETTINGS_CONTENT_TYPE_UNSUPPORTED:
-    "The request was not understood. Reload the page and try again.",
+  REVIEW_SETTINGS_CONTENT_TYPE_UNSUPPORTED: REQUEST_NOT_UNDERSTOOD,
   REVIEW_SETTINGS_PROJECT_NOT_FOUND:
     "This repository was not found. Reload the Projects page and try again.",
 };
