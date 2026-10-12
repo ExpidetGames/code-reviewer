@@ -17,8 +17,9 @@ import {
   describeConfigStatus,
   statusForMembers,
   type ConfigAudience,
+  type GithubAppStatus,
 } from "../../config-status/status.ts";
-import { testGithubAppEnv } from "../../test-support/github-app.ts";
+import { testGithubAppStatus } from "../../test-support/github-app.ts";
 import { setupReviewSettings } from "../../test-support/review-settings-harness.ts";
 import { createReviewSettingsRouteHandlers } from "../http.ts";
 import { createGlobalSettingsApi } from "./api.ts";
@@ -30,14 +31,15 @@ import {
 afterEach(cleanup);
 
 const LLM_KEY = "dummy-llm-key-0123456789";
-const WORKING_ENV = {
-  ...testGithubAppEnv(),
-  LLM_PROVIDER: "openrouter",
-  LLM_API_KEY: LLM_KEY,
+const MISSING_GITHUB: GithubAppStatus = {
+  configured: false,
+  kind: "missing",
+  variables: ["app_id"],
+  slug: null,
 };
 
 async function openSettings(
-  env: Record<string, string | undefined> = WORKING_ENV,
+  github: GithubAppStatus = testGithubAppStatus(),
   audience: ConfigAudience = "operator",
 ) {
   const s = await setupReviewSettings();
@@ -64,8 +66,8 @@ async function openSettings(
     // What the page file does: the whole status for the instance admin, the reduced one for a member.
     config: () =>
       audience === "operator"
-        ? describeConfigStatus(env)
-        : statusForMembers(describeConfigStatus(env)),
+        ? describeConfigStatus({}, github)
+        : statusForMembers(describeConfigStatus({}, github)),
   });
   const view = render(
     <GlobalSettingsPageContent
@@ -122,11 +124,7 @@ describe("the Settings page", () => {
 
   // #104-LK-13 (the hint about the workspace's LLM key is src/llm/ui/llm-access-notice.tsx)
   it("does not report an absent LLM variable as a problem of the instance, and shows no key value", async () => {
-    const app = await openSettings({
-      ...WORKING_ENV,
-      LLM_API_KEY: undefined,
-      LLM_PROVIDER: undefined,
-    });
+    const app = await openSettings();
 
     expect(screen.queryByText("LLM key missing")).toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();
@@ -143,10 +141,7 @@ describe("the Settings page", () => {
 
   // #101-WM-08
   it("tells a member only that a part is not set up, in the hints and in the instance block, and nothing of how it is configured", async () => {
-    const app = await openSettings(
-      { ...WORKING_ENV, LLM_API_KEY: undefined, GITHUB_APP_ID: undefined },
-      "member",
-    );
+    const app = await openSettings(MISSING_GITHUB, "member");
 
     const text = app.view.container.textContent ?? "";
     expect(screen.queryByText("Reviews are not set up yet")).toBeNull();
@@ -157,7 +152,7 @@ describe("the Settings page", () => {
 
   // #101-WM-08
   it("keeps the provider and the model from a member of a working instance", async () => {
-    const app = await openSettings(WORKING_ENV, "member");
+    const app = await openSettings(undefined, "member");
 
     const text = app.view.container.textContent ?? "";
     expect(text).not.toMatch(/openrouter|claude/);

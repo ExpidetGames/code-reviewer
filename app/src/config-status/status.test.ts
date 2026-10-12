@@ -1,16 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Pins down what the pages may know about the instance's configuration: which GitHub App variables
-// are missing or wrong (by name only), whether the LLM access works, and the address people use to
-// install the GitHub App. Never a value: the private key, the webhook secret and the LLM key must
-// not be in anything this returns.
+// Pins down what the pages may know about the instance's configuration: the GitHub App status comes
+// from the credentials the server read (`githubAppStatusOf`), never from the environment, and the
+// instance LLM part is the model options only. Never a value: the private key, the webhook secret and
+// the LLM key must not be in anything this returns.
 import { generateKeyPairSync } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { findGithubAppConfigProblem } from "../integrations/registry.ts";
+import type { GithubSnapshot } from "../github-config/credentials.ts";
+import { loadGithubAppConfig } from "../integrations/registry.ts";
 import {
   configAudienceOf,
   describeConfigStatus,
-  githubAppInstallUrl,
+  githubAppStatusOf,
+  installUrlOf,
   statusForMembers,
 } from "./status.ts";
 
@@ -22,136 +24,123 @@ const KEY = generateKeyPairSync("rsa", {
 const LLM_KEY = "dummy-llm-key-0123456789";
 const SECRET = "dummy-webhook-secret-value";
 
-const COMPLETE = {
-  GITHUB_APP_ID: "424242",
-  GITHUB_APP_SLUG: "code-reviewer-test",
-  GITHUB_APP_PRIVATE_KEY: KEY,
-  GITHUB_APP_WEBHOOK_SECRET: SECRET,
-  LLM_PROVIDER: "openrouter",
-  LLM_API_KEY: LLM_KEY,
-};
+function snapshotOf(app: GithubSnapshot["app"], slug: string | null) {
+  return {
+    source: app.ok ? "database" : "none",
+    stored: null,
+    slug,
+    app,
+    userAuthorization: { state: "none" },
+    updatedBy: null,
+    updatedAt: null,
+  } satisfies GithubSnapshot;
+}
 
-describe("describing the configuration for the pages", () => {
-  // CR-34-T11
-  it("reports a complete configuration as working", () => {
-    const status = describeConfigStatus(COMPLETE);
+const CONFIGURED = githubAppStatusOf(
+  snapshotOf(
+    {
+      ok: true,
+      config: loadGithubAppConfig({
+        GITHUB_APP_ID: "424242",
+        GITHUB_APP_SLUG: "code-reviewer-test",
+        GITHUB_APP_PRIVATE_KEY: KEY,
+        GITHUB_APP_WEBHOOK_SECRET: SECRET,
+      }),
+    },
+    "code-reviewer-test",
+  ),
+);
 
-    expect(status.githubApp).toEqual({
+describe("the GitHub App status from the credentials", () => {
+  it("reports a stored App as configured with its slug", () => {
+    expect(CONFIGURED).toEqual({
       configured: true,
       slug: "code-reviewer-test",
     });
-    expect(status.llm).toMatchObject({ configured: true });
   });
 
-  // CR-34-T10
-  it("names the missing GitHub App variables and nothing else", () => {
-    const status = describeConfigStatus({
-      ...COMPLETE,
-      GITHUB_APP_ID: undefined,
-      GITHUB_APP_PRIVATE_KEY: undefined,
-      GITHUB_APP_WEBHOOK_SECRET: "   ",
-    });
-
-    expect(status.githubApp).toEqual({
+  it("names the fields that are missing or not usable, never a value", () => {
+    expect(
+      githubAppStatusOf(
+        snapshotOf(
+          { ok: false, kind: "missing", fields: ["github_app_private_key"] },
+          null,
+        ),
+      ),
+    ).toEqual({
       configured: false,
       kind: "missing",
-      variables: [
-        "GITHUB_APP_ID",
-        "GITHUB_APP_WEBHOOK_SECRET",
-        "GITHUB_APP_PRIVATE_KEY (or GITHUB_APP_PRIVATE_KEY_PATH)",
-      ],
-      slug: "code-reviewer-test",
+      variables: ["github_app_private_key"],
+      slug: null,
     });
   });
+});
 
-  // CR-34-T10
-  it("names a GitHub App variable that is present but not usable", () => {
-    const status = describeConfigStatus({
-      ...COMPLETE,
-      GITHUB_APP_PRIVATE_KEY: "not a key",
+describe("describing the configuration for the pages", () => {
+  // #159-T01
+  it("takes the GitHub App from the given status and never from the environment", () => {
+    const status = describeConfigStatus(
+      {
+        GITHUB_APP_ID: "1",
+        GITHUB_APP_SLUG: "../evil",
+        GITHUB_APP_PRIVATE_KEY: "not a key",
+        LLM_PROVIDER: "openrouter",
+        LLM_API_KEY: LLM_KEY,
+      },
+      { configured: true, slug: "from-the-database" },
+    );
+
+    expect(status.githubApp).toEqual({
+      configured: true,
+      slug: "from-the-database",
     });
-
-    expect(status.githubApp).toMatchObject({
-      configured: false,
-      kind: "invalid",
-      variables: ["GITHUB_APP_PRIVATE_KEY"],
+    // The legacy provider and key are not read: the instance LLM part is always configured.
+    expect(status.llm).toEqual({
+      configured: true,
+      provider: "openrouter",
+      model: "anthropic/claude-haiku-5.5",
+      warnings: [],
     });
-  });
-
-  // CR-53-T02
-  it("reports the same kind of problem and variable names as the start check", () => {
-    const cases = [
-      COMPLETE,
-      {},
-      { ...COMPLETE, GITHUB_APP_ID: undefined, GITHUB_APP_SLUG: undefined },
-      { ...COMPLETE, GITHUB_APP_PRIVATE_KEY: "not a key" },
-      { ...COMPLETE, GITHUB_APP_WEBHOOK_SECRET: "   " },
-    ];
-
-    for (const env of cases) {
-      const problem = findGithubAppConfigProblem(env);
-      const { githubApp } = describeConfigStatus(env);
-
-      if (problem === null) expect(githubApp.configured).toBe(true);
-      else
-        expect(githubApp).toMatchObject({
-          configured: false,
-          kind: problem.kind,
-          variables: problem.variables,
-        });
-    }
-  });
-
-  // #106-IM-01
-  it("reports nothing about an LLM key: it is a matter of each workspace, and the variables are not read", () => {
-    const status = describeConfigStatus({
-      ...COMPLETE,
-      LLM_API_KEY: undefined,
-      LLM_PROVIDER: undefined,
-    });
-
-    expect(status.llm).toMatchObject({ configured: true, warnings: [] });
   });
 
   // CR-34-T09 (a wrong option is still a warning)
   it("reports a wrong model option as a warning with the variable name", () => {
-    const status = describeConfigStatus({
-      ...COMPLETE,
-      LLM_MODEL: "not a model",
-    });
+    const status = describeConfigStatus(
+      { LLM_MODEL: "not a model" },
+      { configured: false, kind: "missing", variables: [], slug: null },
+    );
 
-    expect(status.llm).toMatchObject({
-      configured: true,
-      warnings: [{ code: "LLM_MODEL_INVALID", variable: "LLM_MODEL" }],
-    });
+    expect(status.llm.warnings).toEqual([
+      { code: "LLM_MODEL_INVALID", variable: "LLM_MODEL" },
+    ]);
   });
 
   // CR-34-T09, CR-34-T10
   it("contains no secret value, however the configuration looks", () => {
-    const broken = JSON.stringify(
-      describeConfigStatus({
-        ...COMPLETE,
-        GITHUB_APP_ID: "has space",
-        LLM_PROVIDER: LLM_KEY,
-      }),
+    const text = JSON.stringify(
+      describeConfigStatus(
+        {
+          LLM_API_KEY: LLM_KEY,
+          LLM_MODEL: `bad model ${LLM_KEY}`,
+          LLM_MAX_TOKENS: LLM_KEY,
+        },
+        { configured: true, slug: "code-reviewer-test" },
+      ),
     );
-    const working = JSON.stringify(describeConfigStatus(COMPLETE));
 
-    for (const text of [broken, working]) {
-      expect(text).not.toContain(LLM_KEY);
-      expect(text).not.toContain(SECRET);
-      expect(text).not.toContain("PRIVATE KEY");
-    }
+    expect(text).not.toContain(LLM_KEY);
+    expect(text).not.toContain(SECRET);
+    expect(text).not.toContain("PRIVATE KEY");
   });
 
   it("offers no install address while the slug is missing or not a name", () => {
-    expect(githubAppInstallUrl({})).toBeNull();
-    expect(githubAppInstallUrl({ GITHUB_APP_SLUG: "../evil" })).toBeNull();
+    expect(installUrlOf({ configured: true, slug: "" })).toBeNull();
+    expect(installUrlOf({ configured: true, slug: "../evil" })).toBeNull();
   });
 
   // CR-34-T02
   it("builds the install address from the slug", () => {
-    expect(githubAppInstallUrl(COMPLETE)).toBe(
+    expect(installUrlOf(CONFIGURED)).toBe(
       "https://github.com/apps/code-reviewer-test/installations/new",
     );
   });
@@ -160,14 +149,19 @@ describe("describing the configuration for the pages", () => {
 describe("the status for members", () => {
   // #101-WM-08
   it("keeps whether each part works and nothing else: no variable, slug, provider, model or warning", () => {
-    const broken = describeConfigStatus({
-      LLM_PROVIDER: "openrouter",
-      LLM_MODEL: "not a model",
-    });
-    const working = describeConfigStatus({
-      ...COMPLETE,
-      LLM_MODEL: "vendor/secret-model",
-    });
+    const broken = describeConfigStatus(
+      { LLM_MODEL: "not a model" },
+      {
+        configured: false,
+        kind: "missing",
+        variables: ["github_app_private_key"],
+        slug: "code-reviewer-test",
+      },
+    );
+    const working = describeConfigStatus(
+      { LLM_MODEL: "vendor/secret-model" },
+      CONFIGURED,
+    );
 
     expect(statusForMembers(broken)).toEqual({
       githubApp: {

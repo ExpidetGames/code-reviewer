@@ -23,7 +23,7 @@ import type { ManualReviewApi } from "../../manual-reviews/ui/api.ts";
 import { createReviewSettingsRouteHandlers } from "../../review-settings/http.ts";
 import { createProjectSettingsApi } from "../../review-settings/ui/api.ts";
 import { setupReviewSettings } from "../../test-support/review-settings-harness.ts";
-import { testGithubAppEnv } from "../../test-support/github-app.ts";
+import { testGithubAppStatus } from "../../test-support/github-app.ts";
 import { createProjectService } from "../service.ts";
 import {
   loadProjectSettingsPage,
@@ -51,12 +51,6 @@ const quietManualReviews: ManualReviewApi = {
     code: "UNEXPECTED_RESPONSE",
     issues: [],
   }),
-};
-
-const WORKING_ENV = {
-  ...testGithubAppEnv(),
-  LLM_PROVIDER: "openrouter",
-  LLM_API_KEY: "dummy-llm-key-0123456789",
 };
 
 async function openProject(options: { activate?: boolean } = {}) {
@@ -93,7 +87,7 @@ async function openProject(options: { activate?: boolean } = {}) {
     return loadProjectSettingsPage(repositoryId, {
       projects,
       settings: s.service,
-      config: () => describeConfigStatus(WORKING_ENV),
+      config: () => describeConfigStatus({}, testGithubAppStatus()),
     });
   }
   return { ...s, projects, api, load };
@@ -402,9 +396,7 @@ describe("the settings page of a project", () => {
       settings: app.service,
       // What the page file does for a person who does not run the instance.
       config: () =>
-        statusForMembers(
-          describeConfigStatus({ ...WORKING_ENV, LLM_API_KEY: undefined }),
-        ),
+        statusForMembers(describeConfigStatus({}, testGithubAppStatus())),
     });
     if (data.kind !== "ready") throw new Error("expected the form");
 

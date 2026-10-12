@@ -41,8 +41,6 @@ function aUser(isInstanceAdmin: boolean): SessionLookup {
     githubLogin: null,
     githubId: null,
     image: null,
-    orgCheckedAt: null,
-    orgCheckedFor: null,
   };
   return { kind: "user", user };
 }
