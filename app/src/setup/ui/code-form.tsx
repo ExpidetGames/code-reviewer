@@ -49,7 +49,7 @@ export function CodeForm({
         </h1>
         <p className="text-sm text-muted-foreground">
           Enter the setup code from the app log:{" "}
-          <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
+          <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-sm">
             docker compose logs app
           </code>
         </p>
