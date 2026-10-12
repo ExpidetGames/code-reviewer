@@ -284,9 +284,10 @@ test.describe("an Owner invites a colleague who accepts", () => {
         headers: { accept: "text/html,application/xhtml+xml,*/*;q=0.8" },
       });
       expect(redirect.status(), path).toBe(307);
-      expect(new URL(redirect.headers().location ?? "").pathname, path).toBe(
-        target,
-      );
+      expect(
+        new URL(redirect.headers().location ?? "", "http://app.test").pathname,
+        path,
+      ).toBe(target);
     }
 
     const foreign = await page.goto("/w/someone-elses/projects");
