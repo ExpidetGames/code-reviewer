@@ -178,3 +178,22 @@ describe("the stylesheet", () => {
     expect(afterTokens).not.toMatch(/#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(/);
   });
 });
+
+describe("the Tailwind theme", () => {
+  const theme = readFileSync(
+    join(import.meta.dirname, "..", "app", "theme.css"),
+    "utf8",
+  );
+
+  // #166-T05
+  it("wires the dark variant to the data-theme attribute and follows the system setting", () => {
+    // The `dark:` variant reacts to the attribute `theme.ts` writes, not to shadcn's `.dark` class.
+    expect(theme).toMatch(/@custom-variant dark/);
+    expect(theme).toMatch(/\[data-theme="dark"\]/);
+    // The system state (no attribute) changes the tokens through the media query, and the explicit
+    // dark choice pins them, so a stored choice and no choice both end up with the right values.
+    expect(theme).toMatch(/@media \(prefers-color-scheme: dark\)/);
+    expect(theme).toMatch(/:root:not\(\[data-theme\]\)/);
+    expect(theme).toMatch(/:root\[data-theme="dark"\]\s*{/);
+  });
+});

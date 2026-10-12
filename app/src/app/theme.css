@@ -1,0 +1,247 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+
+/*
+ * The design tokens of Code Reviewer, in the naming that shadcn/ui and Tailwind CSS v4 use.
+ *
+ * Every color of the app lives in this one file. The light values are the defaults in `:root`; the
+ * `prefers-color-scheme` block is the "system" state and the `data-theme="dark"` block is the
+ * explicit choice (`src/theme/theme.ts` writes that attribute on <html>). Components never write a
+ * color value: `@theme inline` below exposes each token as a Tailwind utility
+ * (`bg-primary`, `text-muted-foreground`, `border-input`, ...). A CI check
+ * (`app/src/ci/colors`) fails on a color literal outside this file.
+ *
+ * Tailwind is imported here without its preflight reset on purpose. The legacy `globals.css` still
+ * styles the whole application during the incremental migration (the component kit #167 and the
+ * cleanup #185 move the screens over and bring the reset with them), so leaving the reset out keeps
+ * the current appearance unchanged. `app/src/app/globals.css` is the one documented exception of
+ * the color guard until the cleanup removes it.
+ *
+ * Start palette: the indigo accent and neutrals of the UI redesign plan, with contrast-checked
+ * values (body text >= 4.5:1, non-text >= 3:1), checked by `app/src/ci/colors/tokens.test.ts`.
+ */
+@layer theme, base, components, utilities;
+
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+@import "tw-animate-css";
+
+/*
+ * The app's dark mode is `data-theme="dark"` on <html>, not shadcn's `.dark` class. The system
+ * state carries no attribute and changes the tokens through `prefers-color-scheme` below, so a
+ * component only needs this variant for the rare explicit choice.
+ */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+:root {
+  --radius: 0.5rem;
+  --font-sans:
+    system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  /* Backgrounds and text */
+  --background: #ffffff;
+  --foreground: #14161c;
+  --card: #ffffff;
+  --card-foreground: var(--foreground);
+  --popover: #ffffff;
+  --popover-foreground: var(--foreground);
+
+  /* Controls and accents */
+  --primary: #4a44cf;
+  --primary-foreground: #ffffff;
+  --primary-hover: #3f39b8;
+  --secondary: #f4f5f8;
+  --secondary-foreground: #14161c;
+  --muted: #f4f5f8;
+  --muted-foreground: #565d6b;
+  --accent: #ecebfb;
+  --accent-foreground: #37309e;
+  --destructive: #b3261e;
+  --destructive-foreground: #ffffff;
+  --border: #e3e5ec;
+  --input: #7d828f;
+  --ring: var(--primary);
+
+  /* Status, for run states and notices: the text color sits on the matching soft surface */
+  --success: #0f6b3a;
+  --success-foreground: #ffffff;
+  --success-soft: #e6f4ec;
+  --warning: #7a4a00;
+  --warning-foreground: #ffffff;
+  --warning-soft: #fbf0d8;
+  --danger: #b3261e;
+  --danger-soft: #fbeae8;
+  --info: var(--primary);
+  --info-foreground: var(--primary-foreground);
+  --info-soft: var(--accent);
+
+  /* Charts (the sidebar and chart sets that shadcn blocks expect) */
+  --chart-1: #4a44cf;
+  --chart-2: #0f766e;
+  --chart-3: #b45309;
+  --chart-4: #be123c;
+  --chart-5: #475569;
+  --sidebar: var(--card);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--accent-foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+}
+
+/* The "system" state: no data-theme, so the operating system decides. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --background: #0b0c0f;
+    --foreground: #eceef3;
+    --card: #15171c;
+    --card-foreground: var(--foreground);
+    --popover: #15171c;
+    --popover-foreground: var(--foreground);
+    --primary: #8d87f5;
+    --primary-foreground: #12132a;
+    --primary-hover: #a29df8;
+    --secondary: #1d2027;
+    --secondary-foreground: #eceef3;
+    --muted: #1d2027;
+    --muted-foreground: #9ca3b0;
+    --accent: #23234a;
+    --accent-foreground: #c3bffb;
+    --destructive: #f2b8b5;
+    --destructive-foreground: #3a0a07;
+    --border: #2b2f38;
+    --input: #666e7d;
+    --ring: var(--primary);
+    --success: #6ed49a;
+    --success-foreground: #10281b;
+    --success-soft: #10281b;
+    --warning: #e5b34a;
+    --warning-foreground: #2b2310;
+    --warning-soft: #2b2310;
+    --danger: #f2a7a1;
+    --danger-soft: #33161a;
+    --info: var(--primary);
+    --info-foreground: var(--primary-foreground);
+    --info-soft: var(--accent);
+    --chart-1: #8d87f5;
+    --chart-2: #2dd4bf;
+    --chart-3: #fbbf24;
+    --chart-4: #fb7185;
+    --chart-5: #94a3b8;
+    --sidebar: var(--card);
+    --sidebar-foreground: var(--foreground);
+    --sidebar-primary: var(--primary);
+    --sidebar-primary-foreground: var(--primary-foreground);
+    --sidebar-accent: var(--accent);
+    --sidebar-accent-foreground: var(--accent-foreground);
+    --sidebar-border: var(--border);
+    --sidebar-ring: var(--ring);
+  }
+}
+
+/* The explicit choice: the toggle pins the mode regardless of the system setting. */
+:root[data-theme="dark"] {
+  --background: #0b0c0f;
+  --foreground: #eceef3;
+  --card: #15171c;
+  --card-foreground: var(--foreground);
+  --popover: #15171c;
+  --popover-foreground: var(--foreground);
+  --primary: #8d87f5;
+  --primary-foreground: #12132a;
+  --primary-hover: #a29df8;
+  --secondary: #1d2027;
+  --secondary-foreground: #eceef3;
+  --muted: #1d2027;
+  --muted-foreground: #9ca3b0;
+  --accent: #23234a;
+  --accent-foreground: #c3bffb;
+  --destructive: #f2b8b5;
+  --destructive-foreground: #3a0a07;
+  --border: #2b2f38;
+  --input: #666e7d;
+  --ring: var(--primary);
+  --success: #6ed49a;
+  --success-foreground: #10281b;
+  --success-soft: #10281b;
+  --warning: #e5b34a;
+  --warning-foreground: #2b2310;
+  --warning-soft: #2b2310;
+  --danger: #f2a7a1;
+  --danger-soft: #33161a;
+  --info: var(--primary);
+  --info-foreground: var(--primary-foreground);
+  --info-soft: var(--accent);
+  --chart-1: #8d87f5;
+  --chart-2: #2dd4bf;
+  --chart-3: #fbbf24;
+  --chart-4: #fb7185;
+  --chart-5: #94a3b8;
+  --sidebar: var(--card);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--accent-foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+}
+
+/*
+ * Each token becomes a Tailwind color utility. `inline` keeps the utility pointing at the variable
+ * (`background-color: var(--primary)`), so the mode blocks above change every utility at once.
+ */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-hover: var(--primary-hover);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-info-soft: var(--info-soft);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}

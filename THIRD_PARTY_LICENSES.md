@@ -4,9 +4,10 @@ code-review.com is licensed under the Apache License, Version 2.0 (see `LICENSE`
 This file lists the third party software that the project depends on, the license notices that
 those licenses require us to keep, and the result of the last license review of the dependencies.
 
-None of this software is copied into the repository. The app installs its packages with pnpm and
-the runner installs its packages with uv, both from the lockfiles, and both container images are
-built from the same lockfiles.
+None of this software is copied into the repository, except the shadcn/ui components (see that
+section): they are copied under `app/src/components/ui/` and keep their MIT header and notice. The
+app installs its packages with pnpm and the runner installs its packages with uv, both from the
+lockfiles, and both container images are built from the same lockfiles.
 
 Both container images (app and runner) carry `LICENSE`, `NOTICE` and this file in `/licenses`; the
 image smoke tests check that they are there and identical to the files of the repository.
@@ -46,9 +47,48 @@ SOFTWARE.
 When the pinned version changes, check that the license text and the copyright line above still
 match the license shipped in the new release.
 
+## shadcn/ui
+
+- Source: https://github.com/shadcn-ui/ui, https://ui.shadcn.com
+- License: MIT. Unlike the dependencies above, shadcn/ui components are **copied into the
+  repository** under `app/src/components/ui/` (that is how shadcn/ui is used), so the MIT notice
+  must travel with them. Each copied file keeps a `// SPDX-License-Identifier: MIT` header with a
+  provenance line; every other source file stays Apache-2.0 (`app/src/ci/spdx-headers/rules.ts`).
+- Components copied so far: none. The component-kit issue (#167) and the screen issues copy the
+  first ones; this section lists them as they arrive. `app/src/lib/utils.ts` (`cn`) follows
+  shadcn/ui's helper but is a two-line composition and stays Apache-2.0.
+
+```text
+MIT License
+
+Copyright (c) 2023 shadcn
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+The Tailwind CSS v4 packages the app installs (`tailwindcss`, `@tailwindcss/postcss`) and the
+shadcn runtime dependencies (`clsx`, `tailwind-merge`, `class-variance-authority`, `lucide-react`,
+`tw-animate-css`) are MIT/Apache-2.0/ISC and need no exception.
+
 ## Dependency license review
 
-Last review: 2026-10-11, against `app/pnpm-lock.yaml` (pnpm 10) and `runner/uv.lock` (pr-agent 0.47.0).
+Last review: 2026-10-12, against `app/pnpm-lock.yaml` (pnpm 10) and `runner/uv.lock` (pr-agent 0.47.0).
 The licenses were read from the package metadata that pnpm and uv install.
 
 A scan runs in CI (the job "Licenses: dependency check", locally `make check-licenses`; it is part of
@@ -94,6 +134,7 @@ were read from the npm registry when the entries were added and are judged like 
 | `@napi-rs/wasm-runtime` | MIT | WebAssembly fallback of native packages |
 | `@next/swc-*` | MIT | Next.js compiler binaries for other platforms |
 | `@rolldown/binding-*` | MIT | Rolldown binaries for other platforms |
+| `@tailwindcss/oxide-*` | MIT | Tailwind CSS Oxide engine binaries for other platforms; only the one for the current platform is installed |
 | `@tybys/wasm-util` | MIT | WebAssembly fallback of native packages |
 | `@unrs/resolver-binding-*` | MIT | Resolver binaries for other platforms |
 | `fsevents` | MIT | File watching on macOS only, an optional dependency of watchers |

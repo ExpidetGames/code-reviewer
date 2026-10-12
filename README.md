@@ -169,11 +169,13 @@ the real runner and PR-Agent against the fakes.
 
 ## Supported browsers
 
-The web UI is built for current Chrome and Edge (123 or newer), Firefox (120 or newer) and Safari
-17.5 or newer. The color tokens use `light-dark()` and `color-mix()` without a fallback, so an older
-browser shows the page without its colors; there is no polyfill on purpose (a team tool, always
-up to date browsers). The navigation menu on narrow screens and the user menu need JavaScript; the
-sign in, the sign out and the three places themselves are plain links and forms.
+The web UI is built for Tailwind CSS v4's browsers: Chrome and Edge 111 or newer, Firefox 128 or
+newer and Safari 16.4 or newer. The color tokens are plain custom properties per mode in
+`theme.css` (no `light-dark()`), and the stylesheets use `color-mix()` and `:has()` without a
+fallback, so an older browser shows the page without its colors; there is no polyfill on purpose (a
+team tool, always up to date browsers). The navigation menu on narrow screens and the user menu
+need JavaScript; the sign in, the sign out and the three places themselves are plain links and
+forms.
 
 ## Run the runner locally
 

@@ -83,6 +83,25 @@ describe("spdx-headers cli", () => {
     expect(run(["--check"], root).exitCode).toBe(0);
   });
 
+  // #166-T03
+  it("--write adds MIT to a copied component below app/src/components/ui/ and Apache-2.0 to every other file", () => {
+    const root = repository({
+      "app/src/components/ui/button.tsx": "export {};\n",
+      "app/src/button.tsx": "export {};\n",
+    });
+
+    const written = run(["--write"], root);
+
+    expect(written.exitCode).toBe(0);
+    expect(
+      readFileSync(join(root, "app/src/components/ui/button.tsx"), "utf8"),
+    ).toBe("// SPDX-License-Identifier: MIT\n\nexport {};\n");
+    expect(readFileSync(join(root, "app/src/button.tsx"), "utf8")).toBe(
+      `// ${HEADER}\n\nexport {};\n`,
+    );
+    expect(run(["--check"], root).exitCode).toBe(0);
+  });
+
   it("--write run twice changes nothing the second time", () => {
     const root = repository({ "a.ts": "export {};\n" });
     run(["--write"], root);
