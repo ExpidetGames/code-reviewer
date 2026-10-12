@@ -182,9 +182,10 @@ test.describe("the project list and the settings pages", () => {
     await expect(budget()).toHaveValue("60000");
   });
 
-  // CR-34-T09
-  test("the Settings page says that the LLM key is missing, in a browser too", async ({
+  // CR-34-T09, #101-WM-08
+  test("the Settings page tells the Owner only that reviews are not set up, and the instance admin which variable is missing, in a browser too", async ({
     page,
+    browser,
   }) => {
     await signInThroughTheForm(page, account);
 
@@ -194,12 +195,37 @@ test.describe("the project list and the settings pages", () => {
       page.getByRole("heading", { level: 1, name: "Settings" }),
     ).toBeVisible();
 
+    // Somebody who owns the workspace and does not run the instance: what is wrong and who to ask.
     await expect(
-      page.getByText("LLM key missing").filter({ visible: true }),
+      page.getByText("Reviews are not set up yet").filter({ visible: true }),
     ).toBeVisible();
     await expect(
-      page.getByText(/Set LLM_API_KEY on the server/).filter({ visible: true }),
+      page
+        .getByText(/Ask your instance admin/)
+        .filter({ visible: true })
+        .first(),
     ).toBeVisible();
+    await expect(page.getByText(/LLM_API_KEY/)).toHaveCount(0);
+    await expect(page.getByText(/GITHUB_APP/)).toHaveCount(0);
+
+    // The instance admin reads the variable that is missing.
+    const context = await browser.newContext({ baseURL: e2eEnv.appUrl });
+    const admin = await context.newPage();
+    await admin.goto("/login");
+    await admin.getByLabel("Email address").fill(e2eEnv.adminEmail);
+    await admin.getByLabel("Password").fill(e2eEnv.adminPassword);
+    await admin.getByRole("button", { name: "Sign in", exact: true }).click();
+    await expect(admin).toHaveURL(/\/w\/default\/projects$/);
+    await admin.goto("/w/default/settings");
+    await expect(
+      admin.getByText("LLM key missing").filter({ visible: true }),
+    ).toBeVisible();
+    await expect(
+      admin
+        .getByText(/Set LLM_API_KEY on the server/)
+        .filter({ visible: true }),
+    ).toBeVisible();
+    await context.close();
   });
 
   test.describe("on a narrow window", () => {
