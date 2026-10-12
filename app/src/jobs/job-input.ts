@@ -10,9 +10,6 @@ import {
   type JobTriggerKind,
 } from "./job-types.ts";
 
-/** More than a job could sensibly carry. `/review` takes no text; this bounds a hostile body. */
-export const JOB_ARGS_MAX_LENGTH = 10_000;
-
 const HEAD_SHA = /^[0-9a-f]{40}$/i;
 
 /** An input that passed the checks, with defaults filled in. */
@@ -83,7 +80,9 @@ export function validateEnqueueInput(
 
   const args = fields.args ?? "";
   if (typeof args !== "string") refuse("args", "invalid");
-  else if (args.length > JOB_ARGS_MAX_LENGTH) refuse("args", "too_long");
+  // `/review` takes no text (#203), so any non-empty arguments would name a different job that then
+  // runs the same review; they are refused. (Kept as a field so a legacy caller gets a named error.)
+  else if (args !== "") refuse("args", "invalid");
 
   if (!JOB_TRIGGER_KINDS.some((kind) => kind === fields.triggerKind))
     refuse("triggerKind", "invalid");

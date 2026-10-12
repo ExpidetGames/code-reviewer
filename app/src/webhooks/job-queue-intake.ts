@@ -115,9 +115,7 @@ export function createJobQueueReviewTriggerIntake(
       } catch (error) {
         // Input the queue refuses will be refused every time: rejecting would make the route answer
         // 500 and release the delivery, and every redelivery would fail the same way. The trigger is
-        // dropped with a log line (field names and codes only, never values). The one case that can
-        // happen is arguments over `JOB_ARGS_MAX_LENGTH`; the provider cuts a comment's question
-        // far below that, so this is a safety net.
+        // dropped with a log line (field names and codes only, never values).
         if (
           error instanceof JobQueueError &&
           error.code === "JOB_INPUT_INVALID"

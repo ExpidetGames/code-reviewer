@@ -3,7 +3,7 @@
 // Pins down which input the queue accepts: the checks run before anything is written, and every
 // refusal names the field and a stable code.
 import { describe, expect, it } from "vitest";
-import { validateEnqueueInput, JOB_ARGS_MAX_LENGTH } from "./job-input.ts";
+import { validateEnqueueInput } from "./job-input.ts";
 import type { EnqueueJobInput } from "./job-types.ts";
 
 const SHA = "1f3a5c7e9b2d4f60a8c1e3b5d7f90a2c4e6b8d01";
@@ -125,18 +125,26 @@ describe("validating a job to enqueue", () => {
     });
   });
 
-  it("refuses arguments that are too long or not text", () => {
+  // #203: /review takes no text; non-empty arguments would name a duplicate job that runs the same
+  // review, so every non-empty argument is refused.
+  it("refuses non-empty review arguments and arguments that are not text", () => {
+    expect(validateEnqueueInput(input({ args: "first" }))).toEqual({
+      ok: false,
+      fieldErrors: [{ field: "args", code: "invalid" }],
+    });
     expect(
-      validateEnqueueInput(
-        input({ args: "x".repeat(JOB_ARGS_MAX_LENGTH + 1) }),
-      ),
+      validateEnqueueInput(input({ args: "--pr_reviewer.num_max_findings=9" })),
     ).toEqual({
       ok: false,
-      fieldErrors: [{ field: "args", code: "too_long" }],
+      fieldErrors: [{ field: "args", code: "invalid" }],
     });
     expect(validateEnqueueInput(input({ args: 5 }))).toEqual({
       ok: false,
       fieldErrors: [{ field: "args", code: "invalid" }],
+    });
+    expect(validateEnqueueInput(input({ args: "" }))).toMatchObject({
+      ok: true,
+      value: { args: "" },
     });
   });
 

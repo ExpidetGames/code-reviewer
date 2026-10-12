@@ -252,7 +252,6 @@ describe("replacing and deduplicating jobs", () => {
     });
     const manual = await fixture.enqueueNew({
       triggerKind: "manual",
-      args: "please",
     });
 
     await fixture.enqueueNew({ headSha: sha("b") });
@@ -408,23 +407,20 @@ describe("replacing and deduplicating jobs", () => {
     expect(next).toMatchObject({ status: "created", supersededJobIds: [] });
   });
 
-  it("treats person jobs with different arguments as different jobs", async () => {
+  // #203: /review takes no arguments; a person job with arguments is refused instead of creating a
+  // duplicate review that would run the same command.
+  it("refuses a person job with arguments instead of creating a duplicate review", async () => {
     const fixture = await createJobQueueFixture();
-    const first = await fixture.enqueueNew({
-      triggerKind: "comment",
-      args: "first",
-    });
+    const first = await fixture.enqueueNew({ triggerKind: "comment" });
 
-    const other = await fixture.enqueue({
-      triggerKind: "comment",
-      args: "second",
+    await expect(
+      fixture.enqueue({ triggerKind: "comment", args: "second" }),
+    ).rejects.toMatchObject({
+      name: "JobQueueError",
+      code: "JOB_INPUT_INVALID",
+      fieldErrors: [{ field: "args", code: "invalid" }],
     });
-    const same = await fixture.enqueue({
-      triggerKind: "comment",
-      args: "first",
-    });
-
-    expect(other.status).toBe("created");
+    const same = await fixture.enqueue({ triggerKind: "comment" });
     expect(same).toMatchObject({
       status: "existing",
       reason: "already_active",
@@ -864,9 +860,12 @@ describe("dropping waiting jobs", () => {
       prNumber: 7,
       headSha: sha("a"),
     });
-    const asked = await fixture.enqueueNew({
+    // A person job on the same pull request: seeded, because with only `/review` a second queue
+    // entry for the same pull request would be `already_active` instead of a new job.
+    const person = await fixture.seedHistoricalJob({
+      command: "review",
+      status: "queued",
       prNumber: 7,
-      args: "why?",
       triggerKind: "comment",
     });
     const otherPullRequest = await fixture.enqueueNew({
@@ -884,7 +883,7 @@ describe("dropping waiting jobs", () => {
       status: "cancelled",
       errorCode: "pull_request_draft",
     });
-    expect((await fixture.queue.get(asked.id))?.status).toBe("queued");
+    expect((await fixture.queue.get(person.id))?.status).toBe("queued");
     expect((await fixture.queue.get(otherPullRequest.id))?.status).toBe(
       "queued",
     );
@@ -901,9 +900,11 @@ describe("dropping waiting jobs", () => {
       prNumber: 7,
       headSha: sha("b"),
     });
-    const asked = await fixture.enqueueNew({
+    // A person job on the same pull request: seeded (see the draft test above).
+    const person = await fixture.seedHistoricalJob({
+      command: "review",
+      status: "queued",
       prNumber: 7,
-      args: "why?",
       triggerKind: "comment",
     });
     const other = await fixture.enqueueNew({ prNumber: 8 });
@@ -915,7 +916,7 @@ describe("dropping waiting jobs", () => {
 
     expect(discarded).toBe(2);
     expect((await fixture.queue.get(running.id))?.status).toBe("running");
-    for (const job of [waiting, asked])
+    for (const job of [waiting, person])
       expect(await fixture.queue.get(job.id)).toMatchObject({
         status: "cancelled",
         errorCode: "pull_request_closed",
@@ -1249,9 +1250,13 @@ describe("jobs a person asked for", () => {
       triggerKind: "comment",
       headSha: sha("a"),
     });
-    const manual = await fixture.enqueueNew({
+    // A second person job on the same pull request: seeded, since with only `/review` a manual start
+    // would be `already_active` against the waiting comment job.
+    const manual = await fixture.seedHistoricalJob({
+      command: "review",
+      status: "queued",
+      prNumber: 7,
       triggerKind: "manual",
-      args: "please",
     });
 
     const automatic = await fixture.enqueue({ headSha: sha("b") });

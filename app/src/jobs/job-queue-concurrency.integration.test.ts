@@ -84,15 +84,19 @@ describe("claiming from two processes", () => {
 
   it("never runs two jobs of one pull request, even when two runners claim at the same moment", async () => {
     const fixture = await createJobQueueFixture();
-    await fixture.enqueueNew({
-      headSha: sha("a"),
+    // Two waiting jobs on one pull request: with only `/review` the queue would dedupe or supersede
+    // a second enqueue, so the rows are seeded explicitly.
+    await fixture.seedHistoricalJob({
+      command: "review",
+      status: "queued",
+      prNumber: 7,
       triggerKind: "comment",
-      args: "first",
     });
-    await fixture.enqueueNew({
-      headSha: sha("b"),
-      triggerKind: "comment",
-      args: "second",
+    await fixture.seedHistoricalJob({
+      command: "review",
+      status: "queued",
+      prNumber: 7,
+      triggerKind: "manual",
     });
 
     const answers = await runTogether<{

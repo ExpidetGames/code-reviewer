@@ -237,7 +237,7 @@ describe("a comment delivery with the job queue behind the route", () => {
     ]);
   });
 
-  it("drops a trigger whose arguments are too long instead of failing the delivery again and again", async () => {
+  it("drops a trigger that carries review arguments instead of failing the delivery again and again", async () => {
     const { h, queue, intake, logLines } = await startHarness();
     const integration = await h.seedInstallation();
 
@@ -265,7 +265,7 @@ describe("a comment delivery with the job queue behind the route", () => {
     expect(await queue.list()).toEqual([]);
     const logged = logLines.join("\n");
     expect(logged).toContain("trigger dropped");
-    expect(logged).toContain("fields=args:too_long");
+    expect(logged).toContain("fields=args:invalid");
     expect(logged).not.toContain("SECRET-QUESTION");
   });
 
