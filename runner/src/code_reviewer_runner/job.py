@@ -16,12 +16,15 @@ Shape (basis of the runner contract v1, see the lead decisions for CR-10):
       "env": {"PR_REVIEWER__EXTRA_INSTRUCTIONS": "<string>"}   // optional, tool settings only
     }
 
-`/review` is the only command (the product removed `/ask`, `/improve` and `/describe`); a job that
-names another command, or carries the `args` a removed command used, is refused with
-`invalid_command`/`invalid_job` before PR-Agent is loaded. Everything that decides where a
-credential or a request goes (GitHub and LLM endpoints, tokens, the model, output switches) has
-its own validated field above or is pinned by the runner; `env` can only carry the settings of the
-review tool. Values of `env` are text: PR-Agent never evaluates them (see
+`/review` is the only command (the product removed `/ask`, `/improve` and `/describe`). A job that
+names a removed command is refused with `invalid_command` before PR-Agent is loaded; that failure is
+reported for the job (the loop completes it), so a mixed deployment never strands it. For a `review`
+job the runner stays compatible with the previous release's v1 payload: the legacy `args` field and
+the option families of the removed tools (`PR_DESCRIPTION__*`, `PR_CODE_SUGGESTIONS__*`,
+`PR_QUESTIONS__*`) are **accepted and ignored** — they are never handed to PR-Agent. The `env` the
+runner builds holds only `PR_REVIEWER__*` settings. Everything that decides where a credential or a
+request goes (GitHub and LLM endpoints, tokens, the model, output switches) has its own validated
+field above or is pinned by the runner. Values of `env` are text: PR-Agent never evaluates them (see
 `pr_agent_config.build_option_settings`).
 
 Validation never echoes a value from the job into its error detail: the job holds secrets, and the
@@ -41,7 +44,7 @@ from code_reviewer_runner.result import ErrorCode
 MAX_JOB_BYTES = 1024 * 1024
 MAX_SECRET_CHARS = 4096
 
-_TOP_LEVEL_FIELDS = {"prUrl", "command", "git", "llm", "env"}
+_TOP_LEVEL_FIELDS = {"prUrl", "command", "args", "git", "llm", "env"}
 _GIT_FIELDS = {"provider", "baseUrl", "token", "botLogin"}
 _LLM_FIELDS = {"provider", "model", "apiKey", "baseUrl", "maxTokens", "fallbackModels"}
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
@@ -57,11 +60,18 @@ _PR_PATH = re.compile(r"/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/pull/([1-9][0-9]{0,
 # the identity patch (identity_patch.py) both validate with it.
 BOT_LOGIN_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}(\[bot\])?")
 _MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,199}")
-# `env` may only set the options of the review tool. An allowlist instead of a list of forbidden
+# `env` may only set the options of the PR-Agent tools. An allowlist instead of a list of forbidden
 # keys: PR-Agent has many sections (litellm, openai, azure, push_outputs, ...) that route requests
 # or credentials, and a new PR-Agent version can add more. One option name per key: a second `__`
 # would address a nested value.
-_ENV_KEY = re.compile(r"PR_REVIEWER__[A-Z0-9]+(_[A-Z0-9]+)*")
+# The previous release's app could send the option families of the removed tools; they are accepted
+# (v1 compatibility) but ignored, never handed to PR-Agent. Only the review family reaches the job.
+_ENV_KEY = re.compile(
+    r"(PR_REVIEWER|PR_DESCRIPTION|PR_CODE_SUGGESTIONS|PR_QUESTIONS)__[A-Z0-9]+(_[A-Z0-9]+)*"
+)
+_REMOVED_TOOL_ENV_KEY = re.compile(
+    r"(PR_DESCRIPTION|PR_CODE_SUGGESTIONS|PR_QUESTIONS)__[A-Z0-9]+(_[A-Z0-9]+)*"
+)
 # The names of the options the runner sets itself (switches that decide what is published). A job
 # may not set them: the runner's value must win, and a repository file may not change them either
 # (see `repo_settings_guard.PROTECTED_SETTINGS`, which a test compares with this list).
@@ -301,16 +311,21 @@ def _command(data: dict[str, Any]) -> Command:
 
 
 def _env(data: dict[str, Any]) -> dict[str, str]:
+    """The review tool's options. A legacy option of a removed tool is accepted and dropped."""
     if data.get("env") is None:
         return {}
     env: dict[str, str] = {}
     for key, value in _object(data["env"], "env").items():
         if not _ENV_KEY.fullmatch(key):
-            raise _invalid("env may only set options of the review tool")
-        if key in RESERVED_OPTIONS:
-            raise _invalid(f"env option {key} is set by the runner and cannot be set by a job")
+            raise _invalid("env may only set options of the PR-Agent tools")
         if not isinstance(value, str):
             raise _invalid("env values must be strings")
+        # A previous release sent the removed tools' options too; they are ignored, so they never
+        # reach PR-Agent (which no longer runs those tools).
+        if _REMOVED_TOOL_ENV_KEY.fullmatch(key):
+            continue
+        if key in RESERVED_OPTIONS:
+            raise _invalid(f"env option {key} is set by the runner and cannot be set by a job")
         env[key] = value
     return env
 
@@ -325,6 +340,8 @@ def parse_job(raw: str) -> Job:
         raise _invalid("stdin is not valid JSON") from None
     job = _object(data, "the job")
     command = _command(job)
+    # `args` (the legacy question of the removed `/ask`) is an allowed field so a previous release's
+    # payload still parses for a review; it is never read, so it never reaches PR-Agent.
     _check_fields(job, _TOP_LEVEL_FIELDS, "")
     git = _git_access(job)
     llm = _llm_access(job)

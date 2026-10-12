@@ -56,6 +56,29 @@ def _example(definition: str) -> Document:
     return _load(EXAMPLES / f"{definition}.json")
 
 
+# A review job a previous release's app could have sent: the legacy `args` and the option families
+# of the removed tools. Frozen in fakes/fixtures, proven against a recorded shape.
+PREVIOUS_RELEASE_JOB = (
+    Path(__file__).resolve().parents[3] / "fakes" / "fixtures" / "previous-release-review-job.json"
+)
+
+
+def _previous_release_review_claim() -> Document:
+    job_input: Document = _load(PREVIOUS_RELEASE_JOB)
+    job_input["args"] = ["a legacy question"]
+    return {
+        "version": 1,
+        "job": {
+            "id": "00000000-0000-4000-8000-0000000000aa",
+            "leaseToken": "previous-release-lease-token",
+            "leaseExpiresAt": "2026-10-10T13:00:00.000Z",
+            "heartbeatIntervalSeconds": 30,
+            "tokenExpiresAt": None,
+            "input": job_input,
+        },
+    }
+
+
 def test_the_contract_file_is_a_valid_schema_of_version_one() -> None:
     schema: Document = _load(SCHEMA_PATH)
 
@@ -118,10 +141,6 @@ def _command_not_allowed(claim: Document) -> None:
     claim["job"]["input"]["command"] = "deploy"
 
 
-def _arguments_for_a_review(claim: Document) -> None:
-    claim["job"]["input"]["args"] = ["why?"]
-
-
 def _foreign_environment_variable(claim: Document) -> None:
     claim["job"]["input"]["env"]["GITHUB__USER_TOKEN"] = "x"
 
@@ -140,8 +159,7 @@ def _lease_expiry_not_a_timestamp(claim: Document) -> None:
         pytest.param(_another_version, id="another version"),
         pytest.param(_unsupported_platform, id="unsupported platform"),
         pytest.param(_command_not_allowed, id="command not allowed"),
-        pytest.param(_arguments_for_a_review, id="arguments for a review"),
-        pytest.param(_foreign_environment_variable, id="variable outside the review tool"),
+        pytest.param(_foreign_environment_variable, id="variable outside the PR-Agent tools"),
         pytest.param(_lease_expiry_not_a_timestamp, id="lease expiry not a timestamp"),
     ],
 )
@@ -152,15 +170,17 @@ def test_a_claim_response_that_breaks_a_rule_is_refused(mutate: Callable[[Docume
     assert not _accepts("ClaimResponse", claim)
 
 
-# #203-T13: only /review is accepted, and it takes no arguments.
-def test_only_the_review_command_and_no_arguments_are_accepted() -> None:
+# #203-T13: only /review is a command, and a previous release's review payload still validates (v1
+# compatibility): the legacy `args` and the removed tools' env families are accepted.
+def test_only_review_is_a_command_and_legacy_review_fields_are_accepted() -> None:
     claim = copy.deepcopy(_example("ClaimResponse"))
     claim["job"]["input"]["command"] = "ask"
     assert not _accepts("ClaimResponse", claim)
 
-    claim["job"]["input"]["command"] = "review"
-    claim["job"]["input"]["args"] = ["Why is this lock needed?"]
-    assert not _accepts("ClaimResponse", claim)
+    legacy = _previous_release_review_claim()
+    assert _accepts("ClaimResponse", legacy)
+    assert legacy["job"]["input"]["args"] == ["a legacy question"]
+    assert "PR_QUESTIONS__EXTRA_INSTRUCTIONS" in legacy["job"]["input"]["env"]
 
 
 # CR-28-T03

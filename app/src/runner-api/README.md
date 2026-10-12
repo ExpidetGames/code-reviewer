@@ -154,8 +154,9 @@ The body is `{ leaseToken, result }`. `result` is what `code-reviewer-run-job` p
   wired in `src/projects/shared.ts`: deactivating a project cancels its waiting jobs in the same
   transaction; running jobs finish.
 - **`JobOptionsSource`** (`job-options.ts`): `optionsFor(job)` returns the options of one job, so they
-  can differ per repository: `env` (the extra options of the review PR-Agent tool, `PR_REVIEWER__*`)
-  and optionally
+  can differ per repository: `env` (the extra options of the review PR-Agent tool, `PR_REVIEWER__*`;
+  a previous release also sent the removed tools' families, which the runner accepts and ignores) and
+  optionally
   `llm: { model, maxTokens, fallbackModels }`. The running server uses
   `createReviewSettingsJobOptionsSource` (`review-settings-job-options.ts`): the review settings of the
   job's repository (project over global defaults over built-in values, read at claim time) go through

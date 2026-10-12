@@ -60,10 +60,10 @@
       ]
     },
     "JobEnv": {
-      "description": "Extra options of the review tool, as strings. Nothing else is allowed here (credentials, endpoints and the model have their own fields).",
+      "description": "Extra options of the PR-Agent tools, as strings. The review tool's options (PR_REVIEWER__*) are used; a previous release's option families for the removed tools (PR_DESCRIPTION__*, PR_CODE_SUGGESTIONS__*, PR_QUESTIONS__*) are accepted for v1 compatibility and ignored. Nothing else is allowed here (credentials, endpoints and the model have their own fields).",
       "type": "object",
       "propertyNames": {
-        "pattern": "^PR_REVIEWER__[A-Z0-9]+(_[A-Z0-9]+)*$"
+        "pattern": "^(PR_REVIEWER|PR_DESCRIPTION|PR_CODE_SUGGESTIONS|PR_QUESTIONS)__[A-Z0-9]+(_[A-Z0-9]+)*$"
       },
       "additionalProperties": { "type": "string", "maxLength": 4096 },
       "maxProperties": 64
@@ -76,6 +76,12 @@
       "properties": {
         "prUrl": { "type": "string", "minLength": 1, "maxLength": 2048 },
         "command": { "$ref": "#/$defs/Command" },
+        "args": {
+          "description": "Legacy field of the removed /ask command. A previous release may send it; the runner accepts and ignores it and never hands it to PR-Agent. This app sends no args.",
+          "type": "array",
+          "items": { "type": "string", "maxLength": 4000 },
+          "maxItems": 1
+        },
         "git": {
           "type": "object",
           "additionalProperties": false,

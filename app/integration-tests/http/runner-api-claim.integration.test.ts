@@ -108,10 +108,13 @@ describe("claiming a job", () => {
     );
   });
 
-  // #203-T13
-  it("hands a review job the review command and no arguments, whatever text the comment had", async () => {
+  // #203-T13: the claim hands out `review` and never any arguments, even for a legacy row that
+  // still carries them (an old app's /ask leftover), so nothing text-like reaches the runner.
+  it("hands a review job the review command and no arguments, whatever legacy text the row had", async () => {
     const h = await startRunnerApiHarness();
-    await h.enqueueNew({
+    await h.seedHistoricalJob({
+      command: "review",
+      status: "queued",
       args: 'please be nice"; rm -rf / #$(id)\n/review --a=b',
     });
 

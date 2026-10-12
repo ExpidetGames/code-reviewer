@@ -456,16 +456,15 @@ describe("the contract file and the options the app sends", () => {
     },
   );
 
+  // #203 v1 compatibility: the removed tools' option families are still accepted (and ignored).
   it.each([
     "PR_QUESTIONS__EXTRA_INSTRUCTIONS",
-    "PR_DESCRIPTION__EXTRA_INSTRUCTIONS",
-  ])(
-    "refuses the removed tool's key %s in the contract and in the app",
-    (key) => {
-      expect(RUNNER_ENV_KEY_PATTERN.test(key)).toBe(false);
-      expect(contract.check("JobEnv", { [key]: "x" }).valid).toBe(false);
-    },
-  );
+    "PR_DESCRIPTION__ADD_ORIGINAL_USER_DESCRIPTION",
+    "PR_CODE_SUGGESTIONS__NUM_CODE_SUGGESTIONS",
+  ])("accepts the legacy key %s in the contract and in the app", (key) => {
+    expect(RUNNER_ENV_KEY_PATTERN.test(key)).toBe(true);
+    expect(contract.check("JobEnv", { [key]: "x" }).valid).toBe(true);
+  });
 
   // CR-46-T06
   it("describes the optional llm fields the runner accepts", () => {

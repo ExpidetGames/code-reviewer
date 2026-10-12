@@ -18,12 +18,14 @@ export const RUNNER_MAX_BODY_BYTES = 64 * 1024;
 export const HEARTBEAT_INTERVAL_SECONDS = 30;
 
 /**
- * The environment variables a job may carry: the options of the review tool, one option name per
- * key (a second `__` would address a nested value). The same pattern as `propertyNames` of `JobEnv`
- * in the contract and as the runner's `_ENV_KEY` (a test compares it with the contract). The only
- * definition in the app: the review settings (`toRunnerSettings`) import it from here.
+ * The environment variables a job may carry: the options of the PR-Agent tools, one option name per
+ * key (a second `__` would address a nested value). The app only ever sends the review tool's family
+ * (`toRunnerSettings`); the removed tools' families are accepted for v1 compatibility with a
+ * previous-release app and ignored by the runner. The same pattern as `propertyNames` of `JobEnv` in
+ * the contract and as the runner's `_ENV_KEY` (a test compares it with the contract).
  */
-export const RUNNER_ENV_KEY_PATTERN = /^PR_REVIEWER__[A-Z0-9]+(_[A-Z0-9]+)*$/;
+export const RUNNER_ENV_KEY_PATTERN =
+  /^(PR_REVIEWER|PR_DESCRIPTION|PR_CODE_SUGGESTIONS|PR_QUESTIONS)__[A-Z0-9]+(_[A-Z0-9]+)*$/;
 
 /** Error codes the runner reports in a result (`KnownRunnerErrorCode` in the contract). */
 export const RUNNER_ERROR_CODES = [

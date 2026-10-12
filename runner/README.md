@@ -80,9 +80,10 @@ The job is JSON on stdin (the shape is documented in `src/code_reviewer_runner/j
 | Field | Meaning |
 |---|---|
 | `prUrl`, `command` | `https://<host>/<owner>/<repo>/pull/<n>` on the host of `git.baseUrl`; `review` (the only command; `/ask`, `/improve` and `/describe` were removed) |
+| `args` | legacy field of the removed `/ask`: a previous release may send it; the runner accepts and ignores it and never hands it to PR-Agent |
 | `git` | `provider` (`github`), `baseUrl`, `token` (installation token), `botLogin` (`<app slug>[bot]`) |
 | `llm` | `provider` (`openrouter`), `model`, `apiKey`; optional `baseUrl` (loopback only, for test fakes), `maxTokens` and `fallbackModels` (see below) |
-| `env` | optional options of the review tool, `PR_REVIEWER__*`, as strings; one option per key (`PR_REVIEWER__NUM_MAX_FINDINGS`, never a second `__`). Nothing else is accepted. See "Settings policy" for how the values are read. |
+| `env` | optional options of the PR-Agent tools, as strings; one option per key (`PR_REVIEWER__NUM_MAX_FINDINGS`, never a second `__`). The app sends only `PR_REVIEWER__*`; the removed tools' families (`PR_DESCRIPTION__*`, `PR_CODE_SUGGESTIONS__*`, `PR_QUESTIONS__*`) are accepted for v1 compatibility and ignored. Nothing else is accepted. See "Settings policy" for how the values are read. |
 
 `llm.maxTokens` (integer, 1000 to 10,000,000) is the context window the runner gives PR-Agent. It
 sets `config.custom_model_max_tokens` (used for a model PR-Agent does not know) and
@@ -227,7 +228,7 @@ How a job becomes PR-Agent configuration (`pr_agent_config.py`, `pr_agent_runtim
   PR-Agent's review prompt. The Dynaconf version they were written against is pinned in
   `tests/unit/test_dependency_pin.py`.
 - **`job.env` values keep their type.** They are not read as TOML. The type of an option is the
-  type of PR-Agent's own default for it (all options of the four tools are switches, integers or
+  type of PR-Agent's own default for it (the review tool's options are switches, integers or
   text): a switch takes `true` or `false` (any case), an integer option takes an integer, and
   everything else, instructions above all, stays exactly the text that was sent (`123`, `[1]`,
   `2026-01-01` and `true` in an instructions field are text). A value that does not fit the type of
