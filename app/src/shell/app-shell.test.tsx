@@ -1,17 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // @vitest-environment jsdom
-// Pins down the frame around every signed in page: the navigation with its three places and the
-// current one marked, and on a narrow screen the menu button that opens and closes it. Whether it
-// looks right is checked by eye (see the ticket); here only what a screen reader or keyboard can
-// observe is checked.
-import {
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  within,
-} from "@testing-library/react";
+// Pins down the frame around every signed in page: the sidebar with its two groups of workspace
+// places, the current one marked, the brand link, the skip link and the user menu slot, and the
+// narrow-screen drawer (its trigger advertises the drawer it opens, Escape closes it and returns the
+// focus, a chosen link closes it, a page change closes it). Whether it looks right is checked by
+// eye; the same drawer is a journey in e2e/app/navigation.e2e.ts.
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -26,8 +21,12 @@ import { AppShell } from "./app-shell.tsx";
 const keepPageInPlace = (event: Event) => event.preventDefault();
 beforeEach(() => document.addEventListener("click", keepPageInPlace));
 
+// The shim of the setup file (matchMedia always "desktop"); a narrow-screen test replaces it and
+// this puts it back.
+const desktopMatchMedia = window.matchMedia;
 afterEach(() => {
   document.removeEventListener("click", keepPageInPlace);
+  window.matchMedia = desktopMatchMedia;
   cleanup();
   navigation.pathname = "/w/acme/runs";
 });
@@ -40,35 +39,50 @@ function renderShell() {
   );
 }
 
-describe("the navigation", () => {
-  // CR-36-T01
-  it("links Projects, Runs, Connections, Settings and Members of the workspace in the address and marks only the current page", () => {
+function narrowScreen() {
+  window.matchMedia = ((query: string) => ({
+    matches: query.includes("767px"),
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia;
+}
+
+function mainNavigation() {
+  return screen.getByRole("navigation", { name: "Main" });
+}
+
+describe("the sidebar", () => {
+  // #168-T01
+  it("shows the workspace places in two groups, separated, and marks only the current page", () => {
     renderShell();
 
-    const nav = screen.getByRole("navigation", { name: "Main" });
-    const links = within(nav).getAllByRole("link");
+    const nav = mainNavigation();
+    const groups = nav.querySelectorAll('[data-slot="sidebar-group"]');
 
-    expect(links.map((link) => link.textContent)).toEqual([
-      "Projects",
-      "Runs",
-      "Connections",
-      "Settings",
-      "Members",
+    expect(groups).toHaveLength(2);
+    expect(
+      Array.from(groups[0].querySelectorAll("a")).map((link) => [
+        link.textContent,
+        link.getAttribute("href"),
+        link.getAttribute("aria-current"),
+      ]),
+    ).toEqual([
+      ["Projects", "/w/acme/projects", null],
+      ["Runs", "/w/acme/runs", "page"],
     ]);
-    expect(links.map((link) => link.getAttribute("href"))).toEqual([
-      "/w/acme/projects",
-      "/w/acme/runs",
-      "/w/acme/connections",
-      "/w/acme/settings",
-      "/w/acme/members",
-    ]);
-    expect(links.map((link) => link.getAttribute("aria-current"))).toEqual([
-      null,
-      "page",
-      null,
-      null,
-      null,
-    ]);
+    expect(
+      Array.from(groups[1].querySelectorAll("a")).map(
+        (link) => link.textContent,
+      ),
+    ).toEqual(["Connections", "Members", "Settings"]);
+    expect(
+      nav.querySelectorAll('[data-slot="sidebar-separator"]'),
+    ).toHaveLength(1);
   });
 
   it("keeps a place marked while a page below it is open", () => {
@@ -85,10 +99,11 @@ describe("the navigation", () => {
     ).toBeNull();
   });
 
-  it("marks nothing on a page that is not one of the places", () => {
+  it("marks nothing on a page that is not one of the places, but still shows the places", () => {
     navigation.pathname = "/w/acme/runs-archive";
     renderShell();
 
+    expect(mainNavigation()).toBeTruthy();
     expect(document.querySelector("[aria-current]")).toBeNull();
   });
 
@@ -98,31 +113,31 @@ describe("the navigation", () => {
     renderShell();
 
     expect(
-      screen
+      within(mainNavigation())
         .getAllByRole("link")
-        .filter((link) => link.closest("nav"))
         .map((link) => link.getAttribute("href")),
     ).toEqual([
       "/w/other-team/projects",
       "/w/other-team/runs",
       "/w/other-team/connections",
-      "/w/other-team/settings",
       "/w/other-team/members",
+      "/w/other-team/settings",
     ]);
   });
 
   // #101-WM-01
   it.each(["/no-access", "/workspaces/new", "/invitations", "/"])(
-    "has no places on %s, which is outside any workspace",
+    "has no sidebar on %s, which is outside any workspace",
     (path) => {
       navigation.pathname = path;
       renderShell();
 
-      const nav = screen.getByRole("navigation", { name: "Main" });
-      expect(within(nav).queryAllByRole("link")).toEqual([]);
+      expect(screen.queryByRole("navigation", { name: "Main" })).toBeNull();
     },
   );
+});
 
+describe("the frame", () => {
   it("sends the brand link to the start page, which opens the first workspace of the person", () => {
     renderShell();
 
@@ -143,75 +158,85 @@ describe("the navigation", () => {
     expect(skip.getAttribute("href")).toBe(`#${main.id}`);
   });
 
-  it("shows the user menu it is given in the header", () => {
+  it("shows the workspace switcher and the user menu it is given in the header, and a way to open the sidebar", () => {
+    render(
+      <AppShell
+        userMenu={<span>user menu</span>}
+        workspaceSwitcher={<span>workspace switcher</span>}
+      >
+        <h1>Page content</h1>
+      </AppShell>,
+    );
+
+    const banner = screen.getByRole("banner");
+    expect(within(banner).getByText("user menu")).toBeTruthy();
+    expect(within(banner).getByText("workspace switcher")).toBeTruthy();
+    expect(
+      within(banner).getByRole("button", { name: "Toggle Sidebar" }),
+    ).toBeTruthy();
+  });
+
+  it("has no trigger on a page outside a workspace, where there is no sidebar to open", () => {
+    navigation.pathname = "/invitations";
     renderShell();
 
-    expect(
-      within(screen.getByRole("banner")).getByText("user menu"),
-    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Toggle Sidebar" })).toBeNull();
   });
 });
 
-describe("the menu on a narrow screen", () => {
-  // CR-36-T07
-  it("opens and closes the navigation with the menu button and keeps aria-expanded in step", async () => {
+describe("the drawer on a narrow screen", () => {
+  it("advertises the drawer it opens with aria-expanded and aria-controls", async () => {
     const user = userEvent.setup();
+    narrowScreen();
     renderShell();
-    const button = screen.getByRole("button", { name: "Menu" });
-    const nav = screen.getByRole("navigation", { name: "Main" });
+    const trigger = screen.getByRole("button", { name: "Toggle Sidebar" });
+    const controls = trigger.getAttribute("aria-controls");
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(controls).toBeTruthy();
 
-    expect(button.getAttribute("aria-expanded")).toBe("false");
-    expect(button.getAttribute("aria-controls")).toBe(nav.id);
-    expect(nav.getAttribute("data-open")).toBe("false");
+    await user.click(trigger);
 
-    await user.click(button);
-    expect(button.getAttribute("aria-expanded")).toBe("true");
-    expect(nav.getAttribute("data-open")).toBe("true");
-
-    await user.click(button);
-    expect(button.getAttribute("aria-expanded")).toBe("false");
-    expect(nav.getAttribute("data-open")).toBe("false");
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(document.getElementById(controls ?? "")).not.toBeNull();
   });
 
   // CR-36-T07
-  it("closes the navigation after a place is chosen", async () => {
+  it("closes with Escape and puts the focus back on the trigger", async () => {
     const user = userEvent.setup();
+    narrowScreen();
     renderShell();
-    const button = screen.getByRole("button", { name: "Menu" });
-    await user.click(button);
-
-    await user.click(screen.getByRole("link", { name: "Settings" }));
-
-    expect(button.getAttribute("aria-expanded")).toBe("false");
-    expect(
-      screen
-        .getByRole("navigation", { name: "Main" })
-        .getAttribute("data-open"),
-    ).toBe("false");
-  });
-
-  it("closes the open navigation with Escape and puts the focus back on the menu button", async () => {
-    const user = userEvent.setup();
-    renderShell();
-    const button = screen.getByRole("button", { name: "Menu" });
-    await user.click(button);
-    await user.click(screen.getByRole("link", { name: "Projects" }));
-    await user.click(button);
-    screen.getByRole("link", { name: "Runs" }).focus();
+    const trigger = screen.getByRole("button", { name: "Toggle Sidebar" });
+    await user.click(trigger);
+    expect(screen.getByRole("navigation", { name: "Main" })).toBeTruthy();
 
     await user.keyboard("{Escape}");
 
-    expect(button.getAttribute("aria-expanded")).toBe("false");
-    expect(document.activeElement).toBe(button);
+    expect(screen.queryByRole("navigation", { name: "Main" })).toBeNull();
+    expect(document.activeElement).toBe(trigger);
   });
 
   // CR-36-T07
-  it("closes the navigation when the page changes by any other way than a nav link, such as the brand link or back and forward", async () => {
+  it("closes after a place is chosen", async () => {
     const user = userEvent.setup();
+    narrowScreen();
+    renderShell();
+    await user.click(screen.getByRole("button", { name: "Toggle Sidebar" }));
+    const nav = screen.getByRole("navigation", { name: "Main" });
+
+    await user.click(within(nav).getByRole("link", { name: "Settings" }));
+
+    expect(screen.queryByRole("navigation", { name: "Main" })).toBeNull();
+  });
+
+  // CR-36-T07, #168-T01
+  it("closes when the page changes without a link, such as back and forward", async () => {
+    const user = userEvent.setup();
+    narrowScreen();
     const { rerender } = renderShell();
-    const button = screen.getByRole("button", { name: "Menu" });
-    await user.click(button);
-    expect(button.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.queryByRole("navigation", { name: "Main" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Toggle Sidebar" }));
+    expect(screen.getByRole("navigation", { name: "Main" })).toBeTruthy();
 
     navigation.pathname = "/w/acme/projects";
     rerender(
@@ -220,47 +245,6 @@ describe("the menu on a narrow screen", () => {
       </AppShell>,
     );
 
-    expect(button.getAttribute("aria-expanded")).toBe("false");
-  });
-
-  // CR-36-T07
-  it("closes the navigation when the brand link is chosen on the page it points to", async () => {
-    const user = userEvent.setup();
-    navigation.pathname = "/w/acme/projects";
-    renderShell();
-    const button = screen.getByRole("button", { name: "Menu" });
-    await user.click(button);
-
-    await user.click(screen.getByRole("link", { name: "Code Reviewer" }));
-
-    expect(button.getAttribute("aria-expanded")).toBe("false");
-  });
-
-  // CR-36-T07
-  it("closes the navigation on a click outside it, also on the user menu", async () => {
-    const user = userEvent.setup();
-    renderShell();
-    const button = screen.getByRole("button", { name: "Menu" });
-
-    await user.click(button);
-    fireEvent.pointerDown(
-      screen.getByRole("heading", { name: "Page content" }),
-    );
-    expect(button.getAttribute("aria-expanded")).toBe("false");
-
-    await user.click(button);
-    fireEvent.pointerDown(screen.getByText("user menu"));
-    expect(button.getAttribute("aria-expanded")).toBe("false");
-  });
-
-  it("stays open when the press lands on the navigation itself", async () => {
-    const user = userEvent.setup();
-    renderShell();
-    const button = screen.getByRole("button", { name: "Menu" });
-    await user.click(button);
-
-    fireEvent.pointerDown(screen.getByRole("navigation", { name: "Main" }));
-
-    expect(button.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.queryByRole("navigation", { name: "Main" })).toBeNull();
   });
 });

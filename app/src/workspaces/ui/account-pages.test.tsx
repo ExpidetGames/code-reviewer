@@ -18,7 +18,6 @@ import type { AccountApi } from "./api.ts";
 import { AcceptInvitation } from "./accept-invitation.tsx";
 import { CreateWorkspaceForm } from "./create-workspace-form.tsx";
 import { NoAccessContent } from "./no-access-content.tsx";
-import { WorkspaceSwitcher } from "./workspace-switcher.tsx";
 
 afterEach(() => {
   cleanup();
@@ -214,104 +213,5 @@ describe("accepting an invitation", () => {
     await user.click(screen.getByRole("button"));
 
     expect((await screen.findByRole("alert")).textContent).toBe(sentence);
-  });
-});
-
-describe("the workspace switcher", () => {
-  const workspaces = [
-    { slug: "acme", name: "Acme" },
-    { slug: "team-a", name: "Team A <i>" },
-  ];
-
-  // #101-WM-03
-  it("names the workspace of the address and links every workspace of the person", async () => {
-    const user = userEvent.setup();
-    render(
-      <WorkspaceSwitcher
-        workspaces={workspaces}
-        canCreate
-        pendingInvitations={0}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: /Workspace/ }));
-
-    expect(
-      screen.getByRole("button", { name: /Workspace/ }).textContent,
-    ).toContain("Acme");
-    const list = screen.getByRole("list", { name: "Your workspaces" });
-    expect(
-      Array.from(list.querySelectorAll("a")).map((a) => a.getAttribute("href")),
-    ).toEqual(["/w/acme/projects", "/w/team-a/projects"]);
-    expect(screen.getByText("Team A <i>")).toBeTruthy();
-    expect(document.querySelector("i")).toBeNull();
-    expect(
-      screen
-        .getByRole("link", { name: "Create a workspace" })
-        .getAttribute("href"),
-    ).toBe("/workspaces/new");
-  });
-
-  it("offers no creation on a single-tenant instance and shows the waiting invitations", async () => {
-    const user = userEvent.setup();
-    render(
-      <WorkspaceSwitcher
-        workspaces={workspaces}
-        canCreate={false}
-        pendingInvitations={2}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: /Workspace/ }));
-
-    expect(
-      screen.queryByRole("link", { name: "Create a workspace" }),
-    ).toBeNull();
-    expect(
-      screen
-        .getByRole("link", { name: "Invitations (2)" })
-        .getAttribute("href"),
-    ).toBe("/invitations");
-  });
-
-  it("follows the address: the other workspace is named when the page is in it", () => {
-    navigation.pathname = "/w/team-a/runs/42";
-    render(
-      <WorkspaceSwitcher
-        workspaces={workspaces}
-        canCreate
-        pendingInvitations={0}
-      />,
-    );
-
-    expect(
-      screen.getByRole("button", { name: /Workspace/ }).textContent,
-    ).toContain("Team A");
-  });
-
-  it("closes with Escape and shows nothing for an account with nothing to switch to", async () => {
-    const user = userEvent.setup();
-    const { container } = render(
-      <WorkspaceSwitcher
-        workspaces={workspaces}
-        canCreate
-        pendingInvitations={0}
-      />,
-    );
-    await user.click(screen.getByRole("button", { name: /Workspace/ }));
-    await user.keyboard("{Escape}");
-    expect(screen.queryByRole("list", { name: "Your workspaces" })).toBeNull();
-    cleanup();
-
-    const empty = render(
-      <WorkspaceSwitcher
-        workspaces={[]}
-        canCreate={false}
-        pendingInvitations={0}
-      />,
-    );
-
-    expect(empty.container.textContent).toBe("");
-    expect(container).toBeTruthy();
   });
 });

@@ -161,7 +161,7 @@ export async function signOutThroughTheMenu(
   account: GithubAccount,
 ): Promise<void> {
   await userMenuButton(page, account).click();
-  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.getByRole("menuitem", { name: "Sign out" }).click();
 }
 
 export type GithubInstallation = {

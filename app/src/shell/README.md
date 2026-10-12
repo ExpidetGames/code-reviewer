@@ -1,20 +1,18 @@
 # App frame
 
 The frame around every signed in page, and the places of a workspace inside it. Colors, buttons and the
-other small building blocks are in `src/ui/` and `src/app/globals.css`; the color mode is in
-`src/theme/`.
+other small building blocks are in `src/components/` (shadcn kit) and `src/app/theme.css`; the color
+mode is in `src/theme/`.
 
-| File              | Role                                                                                                                                                                                                                                                                                                       |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `nav-items.ts`    | The places of a workspace (Projects, Runs, Connections, Settings, Members), built for the workspace the address names (`navItemsFor`; none outside a workspace), and `isCurrentPage` (a place is current on its own path and below it). One list feeds links and active state.                             |
-| `nav-links.tsx`   | The navigation links. `NavLinks` takes the path as a value, `CurrentNavLinks` reads it from the router.                                                                                                                                                                                                    |
-| `app-shell.tsx`   | Skip link, header (brand, navigation, user menu slot) and the `main` landmark. On a narrow screen the navigation sits behind the "Menu" button (`aria-expanded`), closes after a choice, on any page change (brand link, back and forward), on a press outside it (also on the user menu) and with Escape. |
-| `user-menu.tsx`   | The button with avatar and name that opens a panel: name and login, the theme choice, "Sign out" (disabled while it runs). A disclosure, so it works with Tab and Enter; Escape, a click outside and moving the focus away close it.                                                                       |
-| `user-avatar.tsx` | The GitHub avatar (https only, no referrer) or the initials; never a broken image.                                                                                                                                                                                                                         |
-| `user-display.ts` | Display name (the login when the profile has no name), initials, `safeAvatarUrl`.                                                                                                                                                                                                                          |
-
-The user menu links to the admin portal (`/admin`, `src/admin/README.md`) for the instance admin only
-(`ShellUser.isInstanceAdmin`).
+| File                     | Role                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `nav-items.ts`           | The places of a workspace, in the two groups the sidebar shows (Projects, Runs — a separator — Connections, Members, Settings; #168 keeps Members a top-level item), built for the workspace the address names (`navGroupsFor`/`navItemsFor`; none outside a workspace), and `isCurrentPage` (a place is current on its own path and below it). One list feeds the links and the active state; `SIDEBAR_LINK_CLASS` is the shared link class of both sidebars (colour, underline, coarse-pointer height).                            |
+| `nav-links.tsx`          | `NavLinks` renders the groups on the shadcn `Sidebar` (`SidebarGroup`, `SidebarMenu`, `SidebarMenuButton`, `aria-current="page"`); `CurrentWorkspaceSidebar` reads the path from the router and renders the `Sidebar` itself, or nothing outside a workspace so there is no empty column. `WorkspaceSidebarTrigger` renders the trigger in the header only where that sidebar renders. The `Sidebar` is the Sheet drawer on a narrow screen; a link, Escape and a page change close it, and Escape returns the focus to the trigger. |
+| `app-shell.tsx`          | The skip link, the header (the workspace drawer trigger, the brand, the workspace switcher and the user menu) and the `SidebarInset` main landmark with the page. The header is sticky; the fixed sidebar starts below it (`SIDEBAR_TOP_CLASS`). The user menu and the switcher arrive as slots: they need the session, so the layout renders them on the server and the frame itself stays static.                                                                                                                                  |
+| `workspace-switcher.tsx` | The DropdownMenu with the workspaces of the person, the waiting invitations and "Create a workspace" (multi-tenant only); moved here from `workspaces/ui/` with #168. Only names and slugs of workspaces the person is a member of are ever passed in.                                                                                                                                                                                                                                                                               |
+| `user-menu.tsx`          | The DropdownMenu with name and login, `Account`, `Admin` (the instance admin only), the color theme (System, Light, Dark) and "Sign out". Radix handles the keyboard, Escape, the click outside and the focus return.                                                                                                                                                                                                                                                                                                                |
+| `user-avatar.tsx`        | The GitHub avatar (https only, no referrer) or the initials; never a broken image.                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `user-display.ts`        | Display name (the login when the profile has no name), initials, `safeAvatarUrl`.                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 
 The pages live in `src/app/(app)/` (route group, no effect on the URLs): `layout.tsx` wraps them in
 `AppShell`. The pages of a workspace are below `w/[workspace]/`: `projects` (the list and, below
@@ -22,9 +20,16 @@ it, `[repositoryId]` for the settings of one project), `runs` (the list and, bel
 run), `settings` and `members` are real pages, see `src/projects/README.md`, `src/runs/README.md`,
 `src/review-settings/README.md` and `src/workspaces/README.md`. `/projects`, `/runs` and `/settings` redirect
 to the same page of the first workspace of the person (old bookmarks), `workspaces/new` and `invitations` are
-the two places outside a workspace, and `/` redirects to the first workspace (or `/no-access`). The
-workspace switcher (`src/workspaces/ui/workspace-switcher.tsx`) sits next to the user menu; it names the
-workspace of the address and links the others. Without JavaScript the narrow Menu button does nothing (the navigation stays folded); the rest keeps working. The login page is outside the frame.
+the two places outside a workspace, and `/` redirects to the first workspace (or `/no-access`).
+
+The admin portal (`/admin`, `src/admin/README.md`) renders behind its own layout and its own shadcn
+`Sidebar` (`src/admin/ui/admin-nav.tsx`, grouped: Admin / Setup / Integrations) with its own
+`SidebarProvider` and trigger: on a wide screen the sidebar's container is `absolute` inside the
+admin frame (not the primitive's `fixed` one), so it lines up with the centered content, and on a
+narrow screen it is the same Sheet drawer as the workspace. The admin check runs before any section
+name is rendered. The Ctrl/Cmd+B shortcut is `SidebarShortcut` (`components/ui/sidebar.tsx`), which
+each side renders only inside the sidebar it actually shows: on an admin page only the admin sidebar
+toggles, and the shell's provider (no workspace sidebar there) registers nothing.
 
 ## Rules
 
@@ -34,22 +39,31 @@ workspace of the address and links the others. Without JavaScript the narrow Men
   (`guard-rule.test.ts` fails without it); its components get the slug as a prop and build every link and
   call with `workspacePath` / `workspaceApiPath`, and a client component keeps one API client per component
   (`useMemo`), not a new one per render. A new place in the navigation is one more entry in `nav-items.ts`.
-- With Cache Components the frame is static. The user menu needs the session, so the layout renders
-  it behind `<Suspense>`; the page children are behind `<Suspense>` too (they read the session). Do not
-  read `cookies()` or `headers()` in the shell components themselves.
+- With Cache Components the frame is static. The workspace sidebar and its trigger, the user menu and
+  the workspace switcher need the request, so each sits behind its own `<Suspense>` boundary (the
+  trigger and the sidebar render nothing meanwhile); the page children are behind `<Suspense>` too
+  (they read the session). Do not read `cookies()` or `headers()` in the shell components themselves.
 - The user menu gets only what it shows (`ShellUser`), never the whole session user. Name and avatar
   come from the GitHub profile and are untrusted: they are rendered as text, and the avatar only when
   it is an https address.
-- Breakpoint: below 48rem the navigation folds into the Menu button (`globals.css`). Keep the
-  navigation reachable by keyboard in both layouts: a closed narrow navigation is `display: none`.
+- Every color comes from a token in `src/app/theme.css` (`bg-card`, `text-muted-foreground`, ...), never
+  a literal (the colour guard in `src/ci/colors` fails otherwise). Hit areas follow the kit's rule
+  (`src/components/README.md`, "Hit areas"); the skip link and `aria-current="page"` stay.
+- Without JavaScript the workspace and admin sidebars stay folded (the Sheet needs the trigger's
+  click); the header, the page content, the links and sign out keep working through the server. The
+  desktop sidebar is plain CSS, so it needs no script.
 
 ## Tests
 
-- `app-shell.test.tsx`, `user-menu.test.tsx`: component tests (jsdom, Testing Library) for the
-  navigation, the narrow menu and the user menu, including a hostile name and a missing avatar.
+- `app-shell.test.tsx`, `user-menu.test.tsx`, `workspace-switcher.test.tsx`: component tests (jsdom,
+  Testing Library) for the sidebar groups, the current place, the narrow-screen drawer (its trigger's
+  `aria-expanded`/`aria-controls`, Escape and the focus return, a chosen link, a page change), the
+  menus (including a hostile name and a missing avatar) and the switcher.
+- `admin/ui/admin-nav.test.tsx`: the grouped admin sections, the current one and the same drawer.
 - `app-pages.integration.test.ts`: the proxy and the pages turn away a visitor without a session,
   and the sign out action ends the session on the server.
-- `e2e/app/navigation.e2e.ts`: the three places and sign out on a desktop window, the menu on a
-  375 px window.
+- `e2e/app/navigation.e2e.ts`: the places and sign out on a desktop window, the drawer on a 375 px
+  window (`@smoke`). `e2e/admin/admin-portal.e2e.ts` has the same narrow-window drawer journey
+  (`@smoke`).
 - Not automated: how it looks (contrast in both modes, nothing cut off, no flash of the wrong mode on
   load). That is a visual check by a team member before a release.

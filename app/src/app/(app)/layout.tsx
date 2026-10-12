@@ -11,7 +11,7 @@ import { currentLookup, requireSignedIn } from "@/auth/session";
 import { AppShell } from "@/shell/app-shell";
 import { UserMenu } from "@/shell/user-menu";
 import { loadAccountView } from "@/workspaces/account-view";
-import { WorkspaceSwitcher } from "@/workspaces/ui/workspace-switcher";
+import { WorkspaceSwitcher } from "@/shell/workspace-switcher";
 
 export default function AppLayout({ children }: LayoutProps<"/">) {
   return (

@@ -126,7 +126,7 @@ test.describe("invitations by mail", () => {
     await colleague.getByRole("button", { name: /Workspace/ }).click();
     await expect(
       colleague
-        .getByRole("list", { name: "Your workspaces" })
+        .getByRole("group", { name: "Your workspaces" })
         .getByText(WORKSPACE),
     ).toBeVisible();
 

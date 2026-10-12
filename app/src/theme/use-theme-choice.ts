@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 "use client";
-// The control for the color mode: System (the default), Light or Dark. The page itself is the
-// source of truth: whatever `data-theme` is on <html> is what is shown, so the buttons always match
-// the page, also when the choice came from the inline script or from another tab.
+// The color mode as a hook for the user menu's theme entries: System (the default), Light or Dark.
+// The page itself is the source of truth: whatever `data-theme` is on <html> is shown, so the choice
+// always matches the page, also when it came from the inline script or from another tab.
 import { useSyncExternalStore } from "react";
 import {
   THEME_ATTRIBUTE,
@@ -14,7 +14,7 @@ import {
   type ThemeChoice,
 } from "./theme.ts";
 
-const LABELS: Record<ThemeChoice, string> = {
+export const THEME_CHOICE_LABELS: Record<ThemeChoice, string> = {
   system: "System",
   light: "Light",
   dark: "Dark",
@@ -40,7 +40,12 @@ function serverChoice(): ThemeChoice {
   return "system";
 }
 
-export function ThemeToggle() {
+export function useThemeChoice(): {
+  choice: ThemeChoice;
+  /** The choices in menu order (System, Light, Dark). */
+  choices: readonly ThemeChoice[];
+  choose: (next: ThemeChoice) => void;
+} {
   const choice = useSyncExternalStore(subscribe, currentChoice, serverChoice);
 
   function choose(next: ThemeChoice) {
@@ -48,18 +53,5 @@ export function ThemeToggle() {
     applyThemeChoice(document.documentElement, next);
   }
 
-  return (
-    <div role="group" aria-label="Color theme" className="theme-toggle">
-      {THEME_CHOICES.map((option) => (
-        <button
-          key={option}
-          type="button"
-          aria-pressed={choice === option}
-          onClick={() => choose(option)}
-        >
-          {LABELS[option]}
-        </button>
-      ))}
-    </div>
-  );
+  return { choice, choices: THEME_CHOICES, choose };
 }
