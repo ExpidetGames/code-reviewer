@@ -136,7 +136,7 @@ export function ResetPasswordForm({
     <form
       onSubmit={(event) => void submit(event)}
       className="flex flex-col gap-4"
-      aria-label="Set a new password"
+      aria-label="Reset the password"
     >
       {problem === null ? null : (
         <Alert variant="destructive">

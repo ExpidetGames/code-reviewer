@@ -41,7 +41,7 @@ describe("the login page", () => {
       screen.getByRole("heading", { level: 1, name: "Sign in" }),
     ).toBeTruthy();
     const email = screen.getByRole("form", {
-      name: "Sign in with email and password",
+      name: "Sign in with email",
     });
     expect(within(email).getByLabelText("Email address")).toBeTruthy();
     expect(within(email).getByLabelText("Password")).toBeTruthy();
@@ -61,7 +61,7 @@ describe("the login page", () => {
     );
 
     const form = screen.getByRole("form", {
-      name: "Sign in with email and password",
+      name: "Sign in with email",
     });
     const alert = within(form).getByRole("alert");
     expect(alert.textContent).toBe(

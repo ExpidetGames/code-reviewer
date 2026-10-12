@@ -92,7 +92,7 @@ export function LoginPageContent({ data }: { data: LoginPageData }) {
       {data.emailPassword ? (
         <form
           action={signInWithPassword}
-          aria-label="Sign in with email and password"
+          aria-label="Sign in with email"
           className="flex flex-col gap-4"
         >
           {errorAlert}
