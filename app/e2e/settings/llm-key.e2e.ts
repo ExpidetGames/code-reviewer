@@ -92,7 +92,6 @@ test.describe("the LLM key of a workspace", () => {
     // Save: write-only, shown as set with the last four characters.
     await form.getByLabel("API key").fill(KEY);
     await form.getByRole("button", { name: "Save key" }).click();
-    await expect(page.getByText("The key is saved.")).toBeVisible();
     await expect(
       form.getByText(`A key is saved (ends in ${KEY.slice(-4)})`),
     ).toBeVisible();

@@ -27,6 +27,7 @@ import {
   type LlmAccessResult,
 } from "./access.ts";
 import {
+  legacyConfigIsAbsent,
   LLM_PROVIDERS,
   type LlmConfigState,
   type LlmDefaults,
@@ -99,11 +100,7 @@ export function resolveWorkspaceLlmAccess(
     if (legacy.ok) return legacy;
     // A legacy configuration that is simply absent (neither the provider nor the key is set) is "no key"; one
     // that is set but wrong, or half set, is reported as such (names and codes of the variables only).
-    const absent =
-      legacy.issues.length === 2 &&
-      legacy.issues.some((issue) => issue.code === "LLM_API_KEY_MISSING") &&
-      legacy.issues.some((issue) => issue.code === "LLM_PROVIDER_MISSING");
-    return absent ? failure("no_key") : legacy;
+    return legacyConfigIsAbsent(legacy.issues) ? failure("no_key") : legacy;
   }
   return failure("no_key");
 }

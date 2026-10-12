@@ -60,7 +60,10 @@ runner-api-llm-key.integration.test.ts`).
   checked. The address is the provider's own, redirects are not followed, the time is limited, and the provider's
   words only appear as a cleaned first line (the key removed in every spelling, long opaque tokens blanked). Limited
   per workspace (5 per 10 minutes) and for the instance (60), in `rate_limits`; counters that cannot be read refuse
-  the click. Failure classes: `llm_key_rejected`, `llm_unreachable`, `llm_provider_error`.
+  the click. **The instance budget is shared**: the workspaces of one person (a multi-tenant instance lets anybody
+  create several, 10 by default) can use it up, and the button is then refused for everybody for a while. Nothing
+  else is affected. The server also logs `LLM_TEST_ENDPOINTS_ENABLED` at start when the test stack's address switch is
+  on. Failure classes: `llm_key_rejected`, `llm_unreachable`, `llm_provider_error`.
 - **The model** is not set here. It is the `model` review setting (`src/review-settings`), whose built-in value is
   the instance's `LLM_MODEL` (default `anthropic/claude-haiku-5.5`; a wrong name is ignored with a warning and the
   default is used). **That built-in model name is visible to every member** in the model setting of the review

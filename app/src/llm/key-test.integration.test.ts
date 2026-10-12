@@ -95,6 +95,50 @@ describe("checking a key against the provider", () => {
   });
 
   // #104-LK-09
+  it("removes a short key the provider quotes, which the rule for opaque tokens would not hide", async () => {
+    const shortKey = "tiny-key-7";
+    const fake = await setup();
+    fake.acceptKeys([]);
+    fake.quoteKeyInErrors(true);
+
+    const result = await checkLlmKey({
+      baseUrl: fake.baseUrl,
+      apiKey: shortKey,
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: "llm_key_rejected",
+      detail: "Incorrect API key provided: [secret]",
+    });
+  });
+
+  // #104-LK-09
+  it("reads no more than a few kilobytes of the answer of a provider that never stops", async () => {
+    let pulled = 0;
+    const endless = () =>
+      new Response(
+        new ReadableStream({
+          pull(controller) {
+            pulled += 1;
+            controller.enqueue(new Uint8Array(4096).fill(97));
+          },
+        }),
+        { status: 400 },
+      );
+
+    const result = await checkLlmKey({
+      baseUrl: "https://provider.test/api/v1",
+      apiKey: KEY,
+      fetchImpl: async () => endless(),
+    });
+
+    expect(result).toMatchObject({ ok: false, error: "llm_provider_error" });
+    // The limit is 8 KB: two chunks, and the stream may be one ahead.
+    expect(pulled).toBeLessThanOrEqual(5);
+  });
+
+  // #104-LK-09
   it("reports an address where nothing answers as llm_unreachable, without naming it", async () => {
     // A fake that is closed again at once: its port answers nothing.
     const fake = await startLlmFake();

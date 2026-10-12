@@ -122,7 +122,11 @@ describe("the Settings page", () => {
 
   // #104-LK-13 (the hint about the workspace's LLM key is src/llm/ui/llm-access-notice.tsx)
   it("does not report an absent LLM variable as a problem of the instance, and shows no key value", async () => {
-    const app = await openSettings({ ...WORKING_ENV, LLM_API_KEY: undefined });
+    const app = await openSettings({
+      ...WORKING_ENV,
+      LLM_API_KEY: undefined,
+      LLM_PROVIDER: undefined,
+    });
 
     expect(screen.queryByText("LLM key missing")).toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();

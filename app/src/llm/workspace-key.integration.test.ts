@@ -260,6 +260,27 @@ describe("removing the key", () => {
   });
 });
 
+describe("a key that was entered for another provider", () => {
+  // #104-LK-09 (the test button must not send it to the provider either)
+  it("is not revealed for the test button, and is not used for a job", async () => {
+    const { db, service } = await start();
+    await service.save({ provider: "openrouter", apiKey: KEY }, "admin-1");
+    await db
+      .updateTable("workspace_secrets")
+      .set({ binding: "another-provider" })
+      .execute();
+
+    expect(await service.reveal()).toEqual({
+      ok: false,
+      reason: "key_binding_mismatch",
+    });
+    expect(await service.forJob()).toMatchObject({
+      state: "key",
+      binding: "another-provider",
+    });
+  });
+});
+
 describe("a key that cannot be read", () => {
   it("is reported as unreadable, never as a key, and never throws", async () => {
     const { db, service } = await start();

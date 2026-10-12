@@ -96,6 +96,22 @@ export function createLlmConfig(fields: LlmConfig): LlmConfig {
   return config as LlmConfig;
 }
 
+/**
+ * Whether the legacy configuration is simply ABSENT: neither the provider nor the key is set. That is the normal
+ * state of an instance whose workspaces bring their own key and nothing to report. One that is half set (a key
+ * without a provider, or the other way round) or set but wrong is not absent: the instance admin hears about it.
+ * The one rule for the resolver, the start-up warning and the notices.
+ */
+export function legacyConfigIsAbsent(
+  issues: readonly LlmConfigIssue[],
+): boolean {
+  return (
+    issues.length === 2 &&
+    issues.some((issue) => issue.code === "LLM_API_KEY_MISSING") &&
+    issues.some((issue) => issue.code === "LLM_PROVIDER_MISSING")
+  );
+}
+
 /** Reads and validates the four variables. Never throws; never puts a value into the result. */
 export function loadLlmConfig(env: Env): LlmConfigState {
   const issues: LlmConfigIssue[] = [];

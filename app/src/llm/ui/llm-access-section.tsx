@@ -67,7 +67,8 @@ export function LlmAccessSection({
       <SourceNote summary={summary} canManage={canManage} />
       {canManage ? (
         <LlmAccessForm
-          key={JSON.stringify(keyStatus)}
+          // Not keyed on the status: the page's data changes after a save (`router.refresh()`), and a form
+          // that is mounted again would lose the message that says it worked. It shows the status it gets.
           workspaceSlug={workspaceSlug}
           keyStatus={keyStatus}
           {...(api === undefined ? {} : { api })}

@@ -95,6 +95,32 @@ describe("the LLM access section for an Admin or an Owner", () => {
   });
 
   // #104-LK-03
+  it("keeps the message 'The key is saved.' when the page brings the new status", async () => {
+    const user = userEvent.setup();
+    const api = fakeApi();
+    const view = section({}, api);
+
+    await user.type(screen.getByLabelText("API key"), KEY);
+    await user.click(screen.getByRole("button", { name: "Save key" }));
+    expect(await screen.findByText("The key is saved.")).toBeTruthy();
+    // What router.refresh() does: the same section with the new status from the server.
+    view.rerender(
+      <LlmAccessSection
+        workspaceSlug="acme"
+        canManage
+        keyStatus={CONFIGURED}
+        summary={WORKS}
+        api={api}
+      />,
+    );
+
+    expect(screen.getByText("The key is saved.")).toBeTruthy();
+    expect(view.container.textContent).toMatch(
+      /A key is saved \(ends in cdef\)/,
+    );
+  });
+
+  // #104-LK-03
   it("keeps the key in a password field and never puts a saved key on the page", () => {
     const { container } = section({
       keyStatus: CONFIGURED,

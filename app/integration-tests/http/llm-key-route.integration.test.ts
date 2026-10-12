@@ -508,6 +508,26 @@ describe("the test button", () => {
     });
   });
 
+  // #104-LK-09
+  it("does not send a stored key that was entered for another provider", async () => {
+    const t = await start();
+    t.as("admin");
+    await t.handle.put({ provider: "openrouter", apiKey: KEY });
+    await t.db
+      .updateTable("workspace_secrets")
+      .set({ binding: "another-provider" })
+      .execute();
+
+    const response = await t.handle.test({});
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({
+      error: "invalid_input",
+      issues: [{ field: "apiKey", code: "api_key_required" }],
+    });
+    expect(t.fake.keyChecks()).toEqual([]);
+  });
+
   it("asks for a key when none is typed and none is stored", async () => {
     const t = await start();
     t.as("admin");

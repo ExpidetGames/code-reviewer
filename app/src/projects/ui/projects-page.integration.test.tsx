@@ -118,6 +118,7 @@ describe("the Projects page", () => {
     const { container } = await openPage({
       ...WORKING_ENV,
       LLM_API_KEY: undefined,
+      LLM_PROVIDER: undefined,
     });
 
     expect(screen.queryByText("LLM key missing")).toBeNull();

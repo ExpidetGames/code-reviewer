@@ -145,8 +145,10 @@ workspace LLM key is in place (`src/llm/`, `manage_llm_key`: an Admin or an Owne
 there is one). The installation-binding issue gives the
 synchronization with GitHub back to the workspaces (`manage_connections`, an Admin or an Owner): until then it is the
 instance admin's, because it reads every connection of the instance (`src/integrations/README.md`). In the same way the
-workspace pages tell a member only that GitHub or the reviews are not set up and to ask the instance admin; the names
-of the variables and the provider and model are the instance admin's to read (`src/config-status/`).
+workspace pages tell a member only that GitHub is not set up and to ask the instance admin; the names of the
+variables are the instance admin's to read (`src/config-status/`). Whether reviews have an LLM key is the
+workspace's own matter: the hint "LLM not configured" tells a Member to ask an Admin or an Owner of the workspace
+(`src/llm/ui/`).
 
 The Postgres issue (#105) has work here as well: creating a workspace and the last Owner rule lean on SQLite's
 serialized writers (`begin immediate`). On Postgres the creation needs a lock (or the handling of the unique

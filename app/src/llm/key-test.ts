@@ -15,6 +15,8 @@
 //   as printable text and cut short. The key is also absent from the log line.
 // - **Limited** per workspace and for the whole instance, counted in the shared `rate_limits` table; counters
 //   that cannot be read refuse the click (the caller answers 503), they never wave it through.
+//   The instance budget is shared by everybody: the workspaces of one person can use it up, and the button is then
+//   refused for all of them for a while (nothing else is affected).
 import type { RateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
 import { secondsLeft } from "../auth/sign-in-limit.ts";
 import { sanitizeServerMessage } from "../mail/smtp-failure.ts";

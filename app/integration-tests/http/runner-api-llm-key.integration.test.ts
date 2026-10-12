@@ -17,6 +17,7 @@ import {
   TEST_LLM_MODEL,
   TEST_RUNNER_TOKEN,
 } from "../../src/test-support/runner-api-harness.ts";
+import { redactText } from "../../src/runner-api/redact.ts";
 import { addWorkspace } from "../../src/test-support/workspaces.ts";
 
 type Harness = Awaited<ReturnType<typeof startRunnerApiHarness>>;
@@ -24,6 +25,9 @@ type Harness = Awaited<ReturnType<typeof startRunnerApiHarness>>;
 const KEY_A = "sk-or-v1-sentinel-key-of-workspace-alpha-0001";
 const KEY_B = "sk-or-v1-sentinel-key-of-workspace-bravo-0002";
 const KEY_ROTATED = "sk-or-v1-rotated-key-of-workspace-alpha-0003";
+// Keys that no shape of src/runner-api/redact.ts matches, so only what the app remembers can mask them.
+const PLAIN_KEY_A = "plain-workspace-key-alpha-0001";
+const PLAIN_KEY_ROTATED = "plain-workspace-key-alpha-rotated-0002";
 const NO_LEGACY_KEY = { LLM_PROVIDER: undefined, LLM_API_KEY: undefined };
 
 /** A harness whose environment has no legacy key, so a key can only come from a workspace. */
@@ -297,27 +301,94 @@ describe("removing or replacing the key of a workspace", () => {
   it("masks the key of the claim in the result when another app instance completes the job after the key was rotated", async () => {
     const h = await startWithoutLegacyKey();
     const job = await h.enqueueNew();
-    await saveKey(h, job.workspaceId, KEY_A);
+    await saveKey(h, job.workspaceId, PLAIN_KEY_A);
     const claimed = await h.claimed();
-    expect(claimed.job.input.llm.apiKey).toBe(KEY_A);
-    await saveKey(h, job.workspaceId, KEY_ROTATED);
+    expect(claimed.job.input.llm.apiKey).toBe(PLAIN_KEY_A);
+    await saveKey(h, job.workspaceId, PLAIN_KEY_ROTATED);
     const secondInstance = h.anotherInstance();
 
     const completed = await secondInstance.complete(
       job.id,
       claimed.job.leaseToken,
       {
-        logTail: `calling the provider with ${KEY_A} (old) and ${KEY_ROTATED} (new)`,
-        errorMessage: `Incorrect API key provided: ${encodeURIComponent(KEY_A)}`,
+        logTail: `calling the provider with ${PLAIN_KEY_A} (old) and ${PLAIN_KEY_ROTATED} (new)`,
+        errorMessage: `Incorrect API key provided: ${encodeURIComponent(PLAIN_KEY_A)}`,
       },
     );
 
     expect(completed.status).toBe(200);
     const stored = JSON.stringify((await h.queue.get(job.id))?.result ?? null);
     expect(stored).toContain("[redacted]");
-    expect(stored).not.toContain(KEY_A);
-    expect(stored).not.toContain(KEY_ROTATED);
-    expect(stored).not.toContain(encodeURIComponent(KEY_A));
+    // The old key is masked because the app remembers what it handed out (the database, another instance),
+    // the new one because it is the key of the workspace now: neither has the shape of a credential.
+    expect(stored).not.toContain(PLAIN_KEY_A);
+    expect(stored).not.toContain(PLAIN_KEY_ROTATED);
+    expect(stored).not.toContain(encodeURIComponent(PLAIN_KEY_A));
+  });
+
+  // #104-LK-07
+  it("masks the key by the keys the app remembers and not by the shape of a credential: the test keys have none", () => {
+    // If a test key ever matched a shape of `redact.ts`, the tests of this block would pass without the
+    // remembered keys, which is the point they exist for.
+    for (const key of [PLAIN_KEY_A, PLAIN_KEY_ROTATED])
+      expect(redactText(`x ${key} y`, [])).toBe(`x ${key} y`);
+  });
+
+  // #104-LK-07
+  it("masks the current key of the workspace in the result even when the remembered key of the job is gone", async () => {
+    const h = await startWithoutLegacyKey();
+    const job = await h.enqueueNew();
+    await saveKey(h, job.workspaceId, PLAIN_KEY_A);
+    const claimed = await h.claimed();
+    await h.db.deleteFrom("job_claimed_keys").execute();
+
+    await h.anotherInstance().complete(job.id, claimed.job.leaseToken, {
+      logTail: `the provider refused ${PLAIN_KEY_A}`,
+    });
+
+    const stored = JSON.stringify((await h.queue.get(job.id))?.result ?? null);
+    expect(stored).toContain("[redacted]");
+    expect(stored).not.toContain(PLAIN_KEY_A);
+  });
+
+  // #104-LK-07
+  it("masks the key of the claim in the result even when the workspace has no key any more", async () => {
+    const h = await startWithoutLegacyKey();
+    const job = await h.enqueueNew();
+    await saveKey(h, job.workspaceId, PLAIN_KEY_A);
+    const claimed = await h.claimed();
+    await h.llm.keyServiceFor(job.workspaceId).remove();
+
+    await h.anotherInstance().complete(job.id, claimed.job.leaseToken, {
+      logTail: `the provider refused ${PLAIN_KEY_A}`,
+    });
+
+    const stored = JSON.stringify((await h.queue.get(job.id))?.result ?? null);
+    expect(stored).toContain("[redacted]");
+    expect(stored).not.toContain(PLAIN_KEY_A);
+  });
+
+  // #104-LK-07
+  it("does not read the remembered key of one job for another job, even if the row is copied", async () => {
+    const h = await startWithoutLegacyKey();
+    const first = await h.enqueueNew();
+    h.clock.advance(1000);
+    const second = await h.enqueueNew({ prNumber: 8 });
+    await saveKey(h, first.workspaceId, PLAIN_KEY_A);
+    await h.claimed();
+    // Somebody with write access to the database copies the sealed row to the other job.
+    const [row] = await h.db
+      .selectFrom("job_claimed_keys")
+      .selectAll()
+      .execute();
+    if (row === undefined) throw new Error("the key was not remembered");
+    await h.db
+      .insertInto("job_claimed_keys")
+      .values({ ...row, job_id: second.id })
+      .execute();
+
+    expect(await h.claimedKeys.keysOf(first.id)).toEqual([PLAIN_KEY_A]);
+    expect(await h.claimedKeys.keysOf(second.id)).toEqual([]);
   });
 
   // #104-LK-07

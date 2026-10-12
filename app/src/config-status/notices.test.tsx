@@ -53,6 +53,24 @@ describe("the configuration hints", () => {
     expect(describeConfigNotices(status)).toEqual([]);
   });
 
+  // #104-LK-12
+  it("tell the instance admin about a key without a provider, which the fallback does not use", () => {
+    const notices = describeConfigNotices(
+      {
+        ...WORKING,
+        llm: {
+          configured: false,
+          issues: [{ code: "LLM_PROVIDER_MISSING", variable: "LLM_PROVIDER" }],
+          warnings: [],
+        },
+      },
+      "operator",
+    );
+
+    expect(notices).toMatchObject([{ id: "LLM_PROVIDER_MISSING" }]);
+    expect(notices[0]?.detail).toContain("LLM_PROVIDER");
+  });
+
   it("still tell the instance admin about a legacy LLM variable that is set but wrong", () => {
     render(
       <ConfigNotices

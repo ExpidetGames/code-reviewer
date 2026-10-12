@@ -7,7 +7,12 @@
 // the problem and a job fails with `llm_not_configured`. A wrong optional variable
 // (`LLM_MODEL`, `LLM_MAX_TOKENS`) is a warning of its own: the default is used and reviews run.
 // Called from `src/instrumentation.ts`.
-import { loadLlmConfig, type LlmConfigIssue } from "./config.ts";
+import { ALLOW_TEST_LLM_ENDPOINTS_FLAG, llmApiBaseUrl } from "./endpoint.ts";
+import {
+  legacyConfigIsAbsent,
+  loadLlmConfig,
+  type LlmConfigIssue,
+} from "./config.ts";
 
 type StartOptions = {
   env?: Readonly<Record<string, string | undefined>>;
@@ -23,18 +28,21 @@ export function checkLlmConfigOnStart({
   warn = console.warn,
 }: StartOptions = {}): void {
   const state = loadLlmConfig(env);
-  // Nothing set at all is the normal state of an instance whose workspaces bring their own key.
-  const wrong =
-    state.status === "misconfigured"
-      ? state.issues.filter(
-          (issue) =>
-            issue.code !== "LLM_API_KEY_MISSING" &&
-            issue.code !== "LLM_PROVIDER_MISSING",
-        )
-      : [];
-  if (state.status === "misconfigured" && wrong.length > 0)
+  // Nothing set at all is the normal state of an instance whose workspaces bring their own key; a variable that
+  // is set but wrong, or a key without a provider (or the other way round), is reported.
+  if (state.status === "misconfigured" && !legacyConfigIsAbsent(state.issues))
     warn(
-      `[llm] LLM_NOT_CONFIGURED: the shared LLM access from the environment is not usable: ${describe(wrong)}. Workspaces with a key of their own are not affected.`,
+      `[llm] LLM_NOT_CONFIGURED: the shared LLM access from the environment is not usable: ${describe(state.issues)}. Workspaces with a key of their own are not affected.`,
+    );
+  // A key is sent to the address of the test stack, so a deployment hears when it is switched on, and when an
+  // address is named without the switch (it is ignored and the provider's own address is used).
+  if (env[ALLOW_TEST_LLM_ENDPOINTS_FLAG]?.trim() === "true")
+    warn(
+      `[llm] LLM_TEST_ENDPOINTS_ENABLED: ${ALLOW_TEST_LLM_ENDPOINTS_FLAG} is on, so the keys of workspaces are checked at LLM_API_BASE_URL instead of the provider. Never set it in a real deployment.`,
+    );
+  else if (llmApiBaseUrl(env, "openrouter").overrideIgnored)
+    warn(
+      "[llm] LLM_API_BASE_URL_IGNORED: LLM_API_BASE_URL is set without ALLOW_TEST_LLM_ENDPOINTS=true and is ignored; keys are checked at the provider.",
     );
   if (state.warnings.length > 0)
     warn(

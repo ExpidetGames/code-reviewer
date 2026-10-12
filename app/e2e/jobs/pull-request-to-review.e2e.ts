@@ -372,7 +372,10 @@ test.describe("a pull request on its way to a review comment", () => {
     const form = page.getByRole("form", { name: "LLM key" });
     await form.getByLabel("API key").fill(WORKSPACE_KEY);
     await form.getByRole("button", { name: "Save key" }).click();
-    await expect(page.getByText("The key is saved.")).toBeVisible();
+    // The state the server holds now (not the message, which is shown for a moment).
+    await expect(
+      form.getByText(`A key is saved (ends in ${WORKSPACE_KEY.slice(-4)})`),
+    ).toBeVisible();
 
     try {
       await page.getByRole("link", { name: "Runs", exact: true }).click();
