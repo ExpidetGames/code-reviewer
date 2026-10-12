@@ -31,14 +31,21 @@ export APP_SECRET="$(openssl rand -base64 32)"     # keep a copy apart from the 
 export RUNNER_TOKEN="$(openssl rand -hex 32)"
 export POSTGRES_PASSWORD="..."                      # the database user's password
 export BETTER_AUTH_URL="https://reviews.example.com"
+# Start with ONE app replica and finish the first-run setup, then scale the app out:
 docker compose -f compose.large.yml up -d --wait
-docker compose -f compose.large.yml up -d --scale app=2 --scale runner=2 --wait
+docker compose -f compose.large.yml up -d --scale app=2 --wait
 ```
 
 `compose.large.yml` builds `DATABASE_URL` from `POSTGRES_USER`, `POSTGRES_PASSWORD` and `POSTGRES_DB`,
-so the app and the database agree on it. Open `BETTER_AUTH_URL`: a new instance asks for the **setup
-code**, printed once in the log of each app instance (`docker compose logs app`). The first-run setup
-is done once, on one instance; the others see it immediately because the state is in Postgres.
+so the app and the database agree on it. Open `BETTER_AUTH_URL`: the app asks for the **setup code**,
+printed once in the log of the single app instance (`docker compose logs app`).
+
+**The first-run setup is per process** (ADR 2.2): the setup code, its attempt counter and the setup
+session live in one app process, so the setup must be done on ONE app replica. Behind a round-robin
+proxy the code from one instance is rejected by another and `/api/setup/complete` fails. `replicas: 1`
+is therefore what `compose.large.yml` starts with; finish the setup, then `--scale app=2`. From then on
+the replicas are interchangeable: the settings, sessions and secrets live in Postgres, and a change on
+one is effective on the others on the next request (section 4).
 
 ## 3. Environment variables
 
@@ -63,6 +70,8 @@ do nothing here.
 
 ## 4. How several instances behave
 
+- **First-run setup** is the exception: the setup code, its counter and the setup session live in one
+  process, so do it on a single app replica before scaling out (section 2, ADR 2.2).
 - **Configuration** is read from the database without a per-process cache, so a change made on one
   instance is effective on the others on the next request.
 - **Sessions** live in the database: sign in on one instance and the next request may reach another.

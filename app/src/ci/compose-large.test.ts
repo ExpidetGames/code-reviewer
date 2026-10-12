@@ -45,14 +45,15 @@ const SECRET_NAME = /SECRET|TOKEN|PRIVATE_KEY|API_KEY|PASSWORD/;
 
 describe("compose.large.yml services", () => {
   // #105-PG-16
-  it("defines Postgres, two app replicas, two runners and a proxy", () => {
+  it("defines Postgres, one app replica for the setup, two runners and a proxy", () => {
     expect(Object.keys(compose.services).sort()).toEqual([
       "app",
       "postgres",
       "proxy",
       "runner",
     ]);
-    expect(service("app").deploy?.replicas).toBe(2);
+    // One app replica: the first-run setup is per process (ADR 2.2); the guide scales out afterwards.
+    expect(service("app").deploy?.replicas).toBe(1);
     expect(service("runner").deploy?.replicas).toBe(2);
   });
 

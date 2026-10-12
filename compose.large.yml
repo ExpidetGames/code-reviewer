@@ -7,7 +7,10 @@
 #   missing required value stops `up` with a message naming the variable, before any container runs.
 #
 #   docker compose -f compose.large.yml up -d --wait
-#   docker compose -f compose.large.yml up -d --scale app=2 --scale runner=2 --wait
+#
+#   The first-run setup is per process (ADR 2.2): start ONE app replica, finish the setup, then scale
+#   the app out (the runners may already run several). After the setup:
+#   docker compose -f compose.large.yml up -d --scale app=2 --wait
 #
 # No secret is written in this file: every value is a reference to the environment or to `.env`.
 name: code-reviewer-large
@@ -37,10 +40,13 @@ services:
   app:
     image: ${APP_IMAGE:-ghcr.io/expidetgames/code-reviewer-app:development}
     restart: unless-stopped
-    # Stateless: several replicas share the Postgres database and APP_SECRET, so a session or a
-    # setting made on one is seen by the others. No published port: the proxy is the only way in.
+    # Start with ONE replica: the first-run setup (the setup code and its session) lives in one
+    # process, so it must be done on a single instance (ADR 2.2). After the setup, scale out with
+    # `--scale app=2` (docs/deployment-large.md). Then the replicas are interchangeable: they share
+    # the Postgres database and APP_SECRET, so a session or a setting made on one is seen by the
+    # others. No published port: the proxy is the only way in.
     deploy:
-      replicas: 2
+      replicas: 1
     depends_on:
       postgres:
         condition: service_healthy
