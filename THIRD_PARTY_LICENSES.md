@@ -55,7 +55,8 @@ match the license shipped in the new release.
   must travel with them. Each copied file keeps a `// SPDX-License-Identifier: MIT` header with a
   provenance line; every other source file stays Apache-2.0 (`app/src/ci/spdx-headers/rules.ts`).
 - Components copied so far: none. The component-kit issue (#167) and the screen issues copy the
-  first ones; this section lists them as they arrive.
+  first ones; this section lists them as they arrive. `app/src/lib/utils.ts` (`cn`) follows
+  shadcn/ui's helper but is a two-line composition and stays Apache-2.0.
 
 ```text
 MIT License

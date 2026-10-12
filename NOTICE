@@ -15,4 +15,5 @@ require us to keep are in THIRD_PARTY_LICENSES.md, in particular:
   shadcn/ui (https://ui.shadcn.com)
   Copyright (c) 2023 shadcn
   Licensed under the MIT License.
-  Its components are copied into the app under app/src/components/ui/ and keep their MIT header.
+  No component is copied into this repository yet; the ones copied later live under
+  app/src/components/ui/ and keep their MIT header.
