@@ -162,22 +162,20 @@ describe("the mark of the portal rewrite", () => {
   it("is compared with timingSafeEqual, whatever the length of what was sent", async () => {
     const proxy = newProxy();
     const mark = await markOf(proxy);
-    vi.mocked(timingSafeEqual).mockClear();
+    for (const sent of ["short", `${mark}more`, mark]) {
+      vi.mocked(timingSafeEqual).mockClear();
 
-    await proxy(
-      request("/instance-portal", { [PORTAL_REWRITE_HEADER]: "short" }),
-    );
-    await proxy(
-      request("/instance-portal", { [PORTAL_REWRITE_HEADER]: `${mark}more` }),
-    );
-    await proxy(request("/instance-portal", { [PORTAL_REWRITE_HEADER]: mark }));
-
-    expect(timingSafeEqual).toHaveBeenCalledTimes(3);
-    // The two sides are of one length, which is what the function demands (it throws otherwise).
-    for (const [left, right] of vi.mocked(timingSafeEqual).mock.calls)
-      expect(Buffer.byteLength(left as Buffer)).toBe(
-        Buffer.byteLength(right as Buffer),
+      await proxy(
+        request("/instance-portal", { [PORTAL_REWRITE_HEADER]: sent }),
       );
+
+      expect(timingSafeEqual).toHaveBeenCalled();
+      // The two sides are of one length, which is what the function demands (it throws otherwise).
+      for (const [left, right] of vi.mocked(timingSafeEqual).mock.calls)
+        expect(Buffer.byteLength(left as Buffer)).toBe(
+          Buffer.byteLength(right as Buffer),
+        );
+    }
   });
 });
 

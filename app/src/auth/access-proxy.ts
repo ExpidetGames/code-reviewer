@@ -54,18 +54,11 @@ export function createAccessProxy({
   const rewriteMark = randomBytes(24).toString("base64url");
   const rewriteMarkDigest = digest(rewriteMark);
 
-  // One comparison per request, however many times the proxy asks.
-  const compared = new WeakMap<NextRequest, boolean>();
-
   /** Whether the request carries the mark (compared in constant time, whatever the length of what was sent). */
   function hasRewriteMark(request: NextRequest): boolean {
-    const known = compared.get(request);
-    if (known !== undefined) return known;
     const sent = request.headers.get(PORTAL_REWRITE_HEADER);
-    const result =
-      sent !== null && timingSafeEqual(digest(sent), rewriteMarkDigest);
-    compared.set(request, result);
-    return result;
+    if (sent === null) return false;
+    return timingSafeEqual(digest(sent), rewriteMarkDigest);
   }
 
   /**
@@ -74,7 +67,8 @@ export function createAccessProxy({
    * (not the static files it leaves out, which the rewrites leave out as well), so nobody can have an
    * answer rewritten to a missing path (and a cache between us and them cannot be made to keep that
    * answer), or be served the files of the portal. The portal's header stays on a request that carries the
-   * mark, which is the proxy's own rewrite coming round again.
+   * mark. Next.js does not run the proxy again on the path a rewrite of `next.config.ts` leads to, so no
+   * request of the proxy's own comes back; the mark is kept for the case that it ever does.
    */
   function cleanedHeaders(request: NextRequest): Headers | null {
     const carriesDenied = request.headers.has(PORTAL_DENIED_HEADER);
@@ -140,7 +134,8 @@ export function createAccessProxy({
 
     // The instance admin whose address is not verified yet keeps the admin portal, so that a problem with
     // the mail server can always be repaired; everything else of the app waits for the verification
-    // (src/auth/access-gates.ts). The portal's own files count, because a rewrite runs the proxy again.
+    // (src/auth/access-gates.ts). The portal's own files count too: Next.js does not run the proxy on the path a rewrite of next.config.ts
+    // leads to, but if it ever does, the request carries the mark.
     // A person without a workspace reaches the few places made for them (access.ts, NO_WORKSPACE_PATHS) and
     // nothing else.
     const signedIn =
@@ -225,8 +220,9 @@ export function createAccessProxy({
         // everybody else the request goes on as it is and gets the answer of a path that does not
         // exist, with nothing that says the portal is there (src/admin/paths.ts). The pages and routes
         // check again themselves (src/admin/session.ts).
-        // The files by their own address are for nobody: not even the admin comes this way. (The admin's
-        // own rewrite arrives here once more, with the mark.)
+        // The files by their own address are for nobody: not even the admin comes this way. (Only a request
+        // with the mark passes, which would be the proxy's own rewrite coming round again; Next.js does not
+        // do that for the rewrites of next.config.ts.)
         if (isInternalPortalPath(pathname) && !hasRewriteMark(request))
           return treatAsMissing(request);
         if (signedIn === null) return forward(request);
