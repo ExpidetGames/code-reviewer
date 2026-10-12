@@ -273,7 +273,7 @@ export function Wizard({
         ) : null}
       </div>
       <div className="field">
-        <div className="flex items-center gap-1">
+        <div className="field-head">
           <label htmlFor={`${ids}-password`} className="field-label">
             Password
           </label>

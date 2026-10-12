@@ -10,6 +10,7 @@
 // secret as a pair.
 import { useId, useState, type FormEvent } from "react";
 import { Button } from "../../ui/button.tsx";
+import { InfoHint } from "../../components/info-hint.tsx";
 import type { RequestIssue } from "../../ui/json-request.ts";
 import { STORED_ENCRYPTED_HINT } from "../../secrets/messages.ts";
 import type { GithubConfigView } from "../service.ts";
@@ -27,9 +28,8 @@ type Status =
   | null;
 
 const SECRET_HINT: Record<string, string> = {
-  configured:
-    "A value is saved. Leave the field empty to keep it, or enter a new one to replace it.",
-  unreadable: "The saved value cannot be read. Enter it again.",
+  configured: "A value is saved; leave the field empty to keep it.",
+  unreadable: "The saved value cannot be read; enter it again.",
   none: "Nothing is saved.",
 };
 
@@ -164,9 +164,16 @@ export function ManualForm({
           hint: "The last part of the App's public link, github.com/apps/<slug>.",
         })}
         <div className="field">
-          <label htmlFor={`${ids}-privateKey`} className="field-label">
-            Private key
-          </label>
+          <div className="field-head">
+            <label htmlFor={`${ids}-privateKey`} className="field-label">
+              Private key
+            </label>
+            <InfoHint label="About the private key">
+              The content of the .pem file, with real line breaks or on one line
+              with \n. Enter a new value to replace the saved one.{" "}
+              {STORED_ENCRYPTED_HINT}
+            </InfoHint>
+          </div>
           <textarea
             id={`${ids}-privateKey`}
             rows={4}
@@ -182,16 +189,20 @@ export function ManualForm({
             )}
           />
           <p id={`${ids}-privateKey-hint`} className="muted small">
-            {SECRET_HINT[view.secrets.privateKey]} The content of the .pem file,
-            with real line breaks or on one line with \n.{" "}
-            {STORED_ENCRYPTED_HINT}
+            {SECRET_HINT[view.secrets.privateKey]}
           </p>
           {error("privateKey")}
         </div>
         <div className="field">
-          <label htmlFor={`${ids}-webhookSecret`} className="field-label">
-            Webhook secret
-          </label>
+          <div className="field-head">
+            <label htmlFor={`${ids}-webhookSecret`} className="field-label">
+              Webhook secret
+            </label>
+            <InfoHint label="About the webhook secret">
+              The string you entered as the webhook secret on GitHub. It is used
+              byte for byte, so no trailing space.
+            </InfoHint>
+          </div>
           <input
             id={`${ids}-webhookSecret`}
             type="password"
@@ -205,9 +216,7 @@ export function ManualForm({
             )}
           />
           <p id={`${ids}-webhookSecret-hint`} className="muted small">
-            {SECRET_HINT[view.secrets.webhookSecret]} The string you entered as
-            the webhook secret on GitHub. It is used byte for byte, so no
-            trailing space.
+            {SECRET_HINT[view.secrets.webhookSecret]}
           </p>
           {error("webhookSecret")}
         </div>
@@ -269,7 +278,7 @@ export function ManualForm({
             )}
           />
           <p id={`${ids}-clientSecret-hint`} className="muted small">
-            {SECRET_HINT[view.secrets.clientSecret]} {STORED_ENCRYPTED_HINT}
+            {SECRET_HINT[view.secrets.clientSecret]}
           </p>
           {error("clientSecret")}
         </div>

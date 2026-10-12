@@ -8,6 +8,7 @@
 // (src/mail/smtp-settings.ts); the form shows the reasons it gets back.
 import { useId, useState, type FormEvent } from "react";
 import { Button } from "../../ui/button.tsx";
+import { InfoHint } from "../../components/info-hint.tsx";
 import {
   STORED_ENCRYPTED_HINT,
   UNREADABLE_SECRET_CAUSE,
@@ -279,9 +280,14 @@ export function MailForm({
           {error("user")}
         </div>
         <div className="field">
-          <label htmlFor={`${ids}-password`} className="field-label">
-            Password
-          </label>
+          <div className="field-head">
+            <label htmlFor={`${ids}-password`} className="field-label">
+              Password
+            </label>
+            <InfoHint label="About the saved password">
+              {STORED_ENCRYPTED_HINT} Enter a new one to replace the saved one.
+            </InfoHint>
+          </div>
           <input
             id={`${ids}-password`}
             type="password"
@@ -293,11 +299,10 @@ export function MailForm({
           />
           <p id={`${ids}-password-hint`} className="muted small">
             {passwordState === "configured"
-              ? "A password is saved. Leave the field empty to keep it, or enter a new one to replace it."
+              ? "A password is saved; leave the field empty to keep it."
               : passwordState === "unreadable"
-                ? "The saved password cannot be read. Enter it again."
-                : "No password is saved."}{" "}
-            {STORED_ENCRYPTED_HINT}
+                ? "The saved password cannot be read; enter it again."
+                : "No password is saved."}
           </p>
           {error("password")}
           {passwordState !== "none" ? (
