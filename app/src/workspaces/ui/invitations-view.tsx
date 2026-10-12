@@ -32,7 +32,7 @@ export function InvitationsView({
           </EmptyTitle>
           <EmptyDescription>
             Invitations for your email address show up here once it is
-            confirmed.
+            confirmed, and a link you were sent opens the invitation directly.
           </EmptyDescription>
         </EmptyHeader>
       </Empty>
