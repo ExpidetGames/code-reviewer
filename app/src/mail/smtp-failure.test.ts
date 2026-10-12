@@ -203,15 +203,74 @@ describe("the cleaning of a server's answer", () => {
     ).toBe("334 [redacted]");
   });
 
-  it("replaces the secrets it is given, in the clear and encoded", () => {
-    const secret = "s3cr3t-value";
-    const cleaned = sanitizeServerMessage(
-      `535 ${secret} and ${Buffer.from(secret).toString("base64")} and ${encodeURIComponent(secret)}`,
-      [secret],
-    );
+  // #100-SM-05, #100-review-5
+  it.each([
+    ["Kj9", "short password with letters in its hex"],
+    ["pw", "two characters"],
+    ["a", "one character"],
+    ["p@ss w/rd!", "characters that are escaped in a URL"],
+    ["caf\u00e9-\u00fc", "non-ASCII characters"],
+  ])(
+    "replaces the secret %j (%s) in every spelling a server could repeat it in",
+    (secret) => {
+      const buffer = Buffer.from(secret, "utf8");
+      const spellings = [
+        secret,
+        buffer.toString("base64"),
+        buffer.toString("base64").replace(/=+$/, ""),
+        buffer.toString("base64url"),
+        buffer.toString("hex"),
+        buffer.toString("hex").toUpperCase(),
+        encodeURIComponent(secret),
+        encodeURIComponent(secret).toLowerCase(),
+        [...buffer]
+          .map((byte) => `%${byte.toString(16).toUpperCase().padStart(2, "0")}`)
+          .join(""),
+        [...buffer]
+          .map((byte) => `%${byte.toString(16).padStart(2, "0")}`)
+          .join(""),
+      ];
 
-    expect(cleaned).not.toContain(secret);
-    expect(cleaned).not.toContain(Buffer.from(secret).toString("base64"));
+      for (const spelling of spellings) {
+        const cleaned = sanitizeServerMessage(
+          `535 bad login <${spelling}> end`,
+          [secret],
+        );
+        expect(cleaned, spelling).not.toContain(spelling);
+        expect(cleaned, spelling).toContain("[secret]");
+      }
+    },
+  );
+
+  it("replaces the forms in which a login travels, as the delivery lists them", () => {
+    const user = "mailer";
+    const password = "Kj9";
+    const forms = [
+      Buffer.from(`\0${user}\0${password}`).toString("base64"),
+      Buffer.from(`${user}\0${password}`).toString("base64"),
+      Buffer.from(`${user}:${password}`).toString("base64"),
+      Buffer.from(`\0${user}\0${password}`).toString("hex"),
+    ];
+    const secrets = [
+      password,
+      `\0${user}\0${password}`,
+      `${user}\0${password}`,
+      `${user}:${password}`,
+    ];
+
+    for (const form of forms) {
+      const cleaned = sanitizeServerMessage(`334 ${form}`, secrets);
+      expect(cleaned, form).not.toContain(form);
+    }
+  });
+
+  it("matches without regard to case", () => {
+    const cleaned = sanitizeServerMessage("535 token KJ9 and kj9 and 6B6A39", [
+      "kj9",
+    ]);
+
+    expect(cleaned).not.toMatch(/kj9/i);
+    expect(cleaned).not.toContain("6B6A39");
   });
 
   it("answers null when there is nothing to show", () => {

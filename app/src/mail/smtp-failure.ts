@@ -45,15 +45,43 @@ const MAX_DETAIL_LENGTH = 200;
 // would echo it like this.
 const OPAQUE_TOKEN = /[A-Za-z0-9+/=_-]{24,}/g;
 
+function percentEncodedBytes(buffer: Buffer): string {
+  return [...buffer]
+    .map((byte) => `%${byte.toString(16).padStart(2, "0")}`)
+    .join("");
+}
+
+// Every spelling in which a server could repeat a secret. Matching is case-insensitive (upper-case hex,
+// lower-case percent escapes), which over-redacts a little base64 and never under-redacts.
 function encodings(secret: string): string[] {
   const buffer = Buffer.from(secret, "utf8");
+  const base64 = buffer.toString("base64");
   return [
     secret,
-    buffer.toString("base64"),
+    base64,
+    base64.replace(/=+$/, ""),
     buffer.toString("base64url"),
     buffer.toString("hex"),
     encodeURIComponent(secret),
+    percentEncodedBytes(buffer),
   ];
+}
+
+function escapeForPattern(text: string): string {
+  return text.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * The secrets to keep out of a text, in every spelling. Give it the password and, for a login, the forms in
+ * which a login travels: `\0user\0password` (AUTH PLAIN, base64 encoded on the wire) and `user\0password`.
+ * AUTH LOGIN sends the user and the password one after the other, which the password's own spellings cover.
+ */
+export function secretPattern(secrets: readonly string[]): RegExp | null {
+  const spellings = [
+    ...new Set(secrets.filter((secret) => secret !== "").flatMap(encodings)),
+  ].sort((a, b) => b.length - a.length);
+  if (spellings.length === 0) return null;
+  return new RegExp(spellings.map(escapeForPattern).join("|"), "gi");
 }
 
 /** The first line of a server's reply, safe to show: see the header of this file. */
@@ -63,12 +91,8 @@ export function sanitizeServerMessage(
 ): string | null {
   if (typeof text !== "string") return null;
   let line = text.split(/\r?\n/)[0] ?? "";
-  // Longest first, so a secret that contains another is replaced as a whole.
-  const forbidden = secrets
-    .filter((secret) => secret.length >= 3)
-    .flatMap(encodings)
-    .sort((a, b) => b.length - a.length);
-  for (const value of forbidden) line = line.split(value).join("[secret]");
+  const pattern = secretPattern(secrets);
+  if (pattern !== null) line = line.replace(pattern, "[secret]");
   line = line
     .replaceAll(OPAQUE_TOKEN, "[redacted]")
     .replaceAll(/[^\x20-\x7e]+/g, "?")

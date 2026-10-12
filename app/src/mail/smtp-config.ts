@@ -9,6 +9,15 @@
 // - The password is write-only. What the portal reads (`view`) says whether one is set, can be read or
 //   cannot be read; the value only leaves through `resolve`, wrapped so that it prints as a placeholder, for
 //   the sender on the server.
+// - The saved password is not carried over to another server. "Keep" (an empty field) is only valid while
+//   host, port, user and security are unchanged; otherwise the password has to be entered again
+//   (`password_required_for_new_server`). Without that, a stolen admin session could point the host at a
+//   server of its own and have "Send test mail" deliver the stored password there.
+// - "Can send" and "saved" are different: `isConfigured` is true when a message could be sent (the settings
+//   are valid and, for a login, the password is there and can be read), `isSaved` when there is a row. An
+//   instance whose saved password cannot be read behaves as one without a mail server (nothing is offered
+//   that could never work) while the portal shows the settings and asks for the password again.
+// - Saving and removing change the settings and the password in one transaction.
 // - An empty password field keeps the stored password, a new one replaces it, the explicit clear removes
 //   it. A login without a password is only possible through the clear (the admin said so); on the first
 //   save and after a password that cannot be decrypted, a login needs a password entered now.
@@ -21,7 +30,7 @@ import {
 } from "../db/repositories/instance-settings-repository.ts";
 import type { Database } from "../db/schema.ts";
 import type { SecretValue } from "../secrets/secret-value.ts";
-import type { SecretStore } from "../secrets/store.ts";
+import { createSecretStore } from "../secrets/store.ts";
 import type { SetupIssue } from "../setup/errors.ts";
 import {
   parseSmtpInput,
@@ -57,8 +66,10 @@ export type SaveSmtpResult =
   { ok: true } | { ok: false; error: "invalid_input"; issues: SetupIssue[] };
 
 export type SmtpConfigStore = {
-  /** Whether the instance has a mail server. One cheap read. */
+  /** Whether a message could be sent now: valid settings and, for a login, a password that can be read. */
   isConfigured(): Promise<boolean>;
+  /** Whether there are saved settings, whatever the state of the password. */
+  isSaved(): Promise<boolean>;
   view(): Promise<SmtpConfigView>;
   /** For the sender on the server. */
   resolve(): Promise<ResolvedSmtp | null>;
@@ -70,21 +81,23 @@ export type SmtpConfigStore = {
 
 export type SmtpConfigStoreOptions = {
   db: Kysely<Database>;
-  secrets: Pick<SecretStore, "save" | "status" | "use" | "remove">;
+  /** The master key (`APP_SECRET`). */
+  appSecret: string;
   now?: () => Date;
 };
 
 export function createSmtpConfigStore({
   db,
-  secrets,
+  appSecret,
   now = () => new Date(),
 }: SmtpConfigStoreOptions): SmtpConfigStore {
-  const settings: InstanceSettingsRepository = createInstanceSettingsRepository(
-    db,
-    now,
-  );
+  // The same stores on another connection: a transaction.
+  const on = (connection: Kysely<Database>) => ({
+    settings: createInstanceSettingsRepository(connection, now),
+    secrets: createSecretStore({ db: connection, appSecret, now }),
+  });
 
-  async function stored() {
+  async function stored(settings: InstanceSettingsRepository) {
     const row = await settings.getWithMeta("smtp");
     if (row === undefined) return null;
     const valid = readStoredSmtpSettings(row.value);
@@ -92,12 +105,21 @@ export function createSmtpConfigStore({
   }
 
   return {
+    async isSaved() {
+      return (await stored(on(db).settings)) !== null;
+    },
+
     async isConfigured() {
-      return (await stored()) !== null;
+      const { settings, secrets } = on(db);
+      const row = await stored(settings);
+      if (row === null) return false;
+      if (row.value.user === null) return true;
+      return (await secrets.status(PASSWORD_SECRET)).state === "configured";
     },
 
     async view() {
-      const row = await stored();
+      const { settings, secrets } = on(db);
+      const row = await stored(settings);
       if (row === null)
         return {
           settings: null,
@@ -120,7 +142,8 @@ export function createSmtpConfigStore({
     },
 
     async resolve() {
-      const row = await stored();
+      const { settings, secrets } = on(db);
+      const row = await stored(settings);
       if (row === null) return null;
       // A server without a login has no password to use, whatever is left in the store.
       if (row.value.user === null)
@@ -144,40 +167,55 @@ export function createSmtpConfigStore({
       if (!parsed.ok)
         return { ok: false, error: "invalid_input", issues: parsed.issues };
       const { settings: next, password } = parsed.value;
-      const current = await secrets.status(PASSWORD_SECRET);
 
-      const refuse = (field: string, code: string): SaveSmtpResult => ({
-        ok: false,
-        error: "invalid_input",
-        issues: [{ field, code }],
-      });
-      if (next.user === null && password.kind === "set")
-        return refuse("password", "user_required");
-      // A login needs a password: entered now, or still stored and readable. (The explicit clear is the
-      // admin's way to say that this server logs in without one.)
-      if (
-        next.user !== null &&
-        password.kind === "keep" &&
-        current.state !== "configured"
-      )
-        return refuse("password", "password_required");
-
-      if (password.kind === "set") {
-        const saved = await secrets.save(PASSWORD_SECRET, password.value, {
-          updatedBy: actorId,
+      return db.transaction().execute(async (trx): Promise<SaveSmtpResult> => {
+        const { settings, secrets } = on(trx);
+        const refuse = (field: string, code: string): SaveSmtpResult => ({
+          ok: false,
+          error: "invalid_input",
+          issues: [{ field, code }],
         });
-        if (!saved.ok) return refuse("password", "password_invalid");
-      }
-      await settings.set("smtp", next, actorId);
-      // The login is gone, or the admin asked for no password: nothing stays in the store.
-      if (password.kind === "clear" || next.user === null)
-        await secrets.remove(PASSWORD_SECRET);
-      return { ok: true };
+        if (next.user === null && password.kind === "set")
+          return refuse("password", "user_required");
+
+        if (next.user !== null && password.kind === "keep") {
+          // A login needs a password: entered now, or still stored and readable. (The explicit clear is
+          // the admin's way to say that this server logs in without one.)
+          const current = await secrets.status(PASSWORD_SECRET);
+          if (current.state !== "configured")
+            return refuse("password", "password_required");
+          // And the stored one only for the server it was entered for.
+          const before = await stored(settings);
+          if (
+            before === null ||
+            before.value.host !== next.host ||
+            before.value.port !== next.port ||
+            before.value.user !== next.user ||
+            before.value.security !== next.security
+          )
+            return refuse("password", "password_required_for_new_server");
+        }
+
+        if (password.kind === "set") {
+          const saved = await secrets.save(PASSWORD_SECRET, password.value, {
+            updatedBy: actorId,
+          });
+          if (!saved.ok) return refuse("password", "password_invalid");
+        }
+        await settings.set("smtp", next, actorId);
+        // The login is gone, or the admin asked for no password: nothing stays in the store.
+        if (password.kind === "clear" || next.user === null)
+          await secrets.remove(PASSWORD_SECRET);
+        return { ok: true };
+      });
     },
 
     async remove() {
-      await settings.remove("smtp");
-      await secrets.remove(PASSWORD_SECRET);
+      await db.transaction().execute(async (trx) => {
+        const { settings, secrets } = on(trx);
+        await settings.remove("smtp");
+        await secrets.remove(PASSWORD_SECRET);
+      });
     },
   };
 }

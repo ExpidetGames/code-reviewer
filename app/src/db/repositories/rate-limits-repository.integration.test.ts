@@ -91,4 +91,18 @@ describe("the rate limits repository", () => {
     expect((await repository.hit("fresh", MINUTE)).count).toBe(2);
     expect((await repository.hit("reset-me", MINUTE)).count).toBe(1);
   });
+
+  it("takes one attempt back, never below zero", async () => {
+    const { db } = await createTestDatabase();
+    const repository = createRateLimitsRepository(db);
+    await repository.hit("refunded", MINUTE);
+    await repository.hit("refunded", MINUTE);
+
+    await repository.refund("refunded");
+    await repository.refund("refunded");
+    await repository.refund("refunded");
+    await repository.refund("never-counted");
+
+    expect((await repository.hit("refunded", MINUTE)).count).toBe(1);
+  });
 });

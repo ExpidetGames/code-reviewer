@@ -83,6 +83,34 @@ describe("the checklist", () => {
     expect(within(item("GitHub")).getByText("Done")).toBeTruthy();
   });
 
+  // #100-review-4
+  it("says that a saved mail server cannot send because its password cannot be read, and what that stops", () => {
+    const smtp = {
+      value: {
+        host: "smtp.example.com",
+        port: 587,
+        security: "starttls" as const,
+        user: "mailer",
+        senderAddress: "a@example.com",
+        senderName: null,
+        allowSelfSigned: false,
+        allowPlainTextLogin: false,
+      },
+      password: "unreadable" as const,
+      updatedBy: null,
+      updatedAt: "2026-10-12T08:00:00.000Z",
+    };
+    render(<Overview settings={view({ smtp, mailConfigured: false })} />);
+
+    const mail = item("Mail server");
+    expect(within(mail).getByText("To do")).toBeTruthy();
+    expect(mail.textContent).toContain("password cannot be read");
+    expect(mail.textContent).toContain("nothing that needs mail is offered");
+    expect(
+      within(mail).getByRole("link", { name: "Mail" }).getAttribute("href"),
+    ).toBe("/admin/mail");
+  });
+
   // #98-AD-03
   it("states the tenancy with the number of workspaces and the sign-up rule in words", () => {
     render(

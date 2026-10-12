@@ -20,6 +20,7 @@
 //   (smtp-delivery.integration.test.ts reads the bytes the server received).
 // - The password is only ever in the transport options of the moment. No log line, no thrown error and no
 //   result carries it (smtp-failure.ts cleans what a server quotes).
+import { Socket } from "node:net";
 import { createTransport } from "nodemailer";
 import type { MailMessage } from "./sender.ts";
 import { classifySmtpError, type SmtpFailure } from "./smtp-failure.ts";
@@ -51,10 +52,11 @@ export type SmtpConnection = {
 
 export type DeliveryResult = { ok: true } | { ok: false; failure: SmtpFailure };
 
-// One address, nothing else: no white space, no control character, none of the characters that would make a
-// header parser read a name, a comment, a group or a second address.
-const PLAIN_ADDRESS =
-  /^[^\s<>()[\]\\,;:"@\u0000-\u001f\u007f\u2028\u2029]+@[^\s<>()[\]\\,;:"@\u0000-\u001f\u007f\u2028\u2029]+$/;
+// One address, nothing else: printable ASCII only, from an allow list of the characters of an unquoted address
+// (letters, digits and the punctuation RFC 5322 allows in an atom, and dots and hyphens in the domain). No
+// white space, no control character of any range, nothing that would make a header parser read a name, a
+// comment, a group, a quoted string or a second address.
+const PLAIN_ADDRESS = /^[A-Za-z0-9!#$%&'*+/=?^_`{|}~.-]+@[A-Za-z0-9.-]+$/;
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f\u2028\u2029]+/g;
 const MAX_SUBJECT_LENGTH = 255;
 
@@ -96,9 +98,41 @@ export async function deliverOverSmtp(
     };
   if (settings.user !== null && password === null)
     return { ok: false, failure: { code: "password_missing", detail: null } };
+  // The stored settings cannot get here without it (smtp-settings.ts); this is the second line.
+  if (
+    settings.security === "none" &&
+    settings.user !== null &&
+    !settings.allowPlainTextLogin
+  )
+    return {
+      ok: false,
+      failure: {
+        code: "unknown",
+        detail:
+          "Sending a login without encryption has not been confirmed in the settings.",
+      },
+    };
 
-  const secrets = password === null ? [] : [password];
+  // What must never come back in an answer: the password, and the forms in which the login travels.
+  const secrets =
+    password === null
+      ? []
+      : [
+          password,
+          ...(settings.user === null
+            ? []
+            : [
+                `\0${settings.user}\0${password}`,
+                `${settings.user}\0${password}`,
+                `${settings.user}:${password}`,
+              ]),
+        ];
+  // Our own socket, so that the deadline can destroy it. `close()` of a transport that is not pooled does
+  // not close the connection of a send in progress, and a server that answers one byte at a time would
+  // keep it open (and might still accept the message) long after the caller was told "timeout".
+  const socket = new Socket();
   const transport = createTransport({
+    socket,
     host: settings.host,
     port: settings.port,
     secure: settings.security === "tls",
@@ -122,6 +156,7 @@ export async function deliverOverSmtp(
   let timer: NodeJS.Timeout | undefined;
   const deadline = new Promise<DeliveryResult>((resolve) => {
     timer = setTimeout(() => {
+      socket.destroy();
       transport.close();
       resolve({ ok: false, failure: { code: "timeout", detail: null } });
     }, timeouts.totalMs);

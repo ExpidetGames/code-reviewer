@@ -5,9 +5,9 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { signInWithGithub, signInWithPassword } from "@/auth/actions";
 import { loginErrorMessage } from "@/auth/login-errors";
-import { getPasswordResetAvailable } from "@/auth/password-reset-runtime";
-import { getSignInMethods } from "@/auth/sign-in-runtime";
-import { getSignUpAvailability } from "@/signup/shared";
+import { passwordResetAvailable } from "@/auth/password-reset-request";
+import { signUpAvailability } from "@/signup/availability";
+import { getSignUpFacts } from "@/signup/shared";
 import { Button } from "@/ui/button";
 
 export default function LoginPage({ searchParams }: PageProps<"/login">) {
@@ -33,13 +33,16 @@ export default function LoginPage({ searchParams }: PageProps<"/login">) {
 async function SignInForms() {
   // Reads the database and the environment at request time (not when the page is built).
   await connection();
-  const methods = await getSignInMethods();
-  // The link to the sign-up is offered while the sign-up is open (the state of the instance).
+  // The state of the instance, read once: the ways to sign in that are on, the sign-up rule, whether mail
+  // can be sent.
+  const facts = await getSignUpFacts();
+  const methods = facts.signInMethods;
+  // The link to the sign-up is offered while the sign-up is open.
   const signUp = methods.emailPassword
-    ? await getSignUpAvailability()
+    ? signUpAvailability(facts)
     : { open: false as const };
   // The link to "forgot your password" is offered while the instance can send the mail.
-  const canReset = methods.emailPassword && (await getPasswordResetAvailable());
+  const canReset = passwordResetAvailable(facts);
   return (
     <>
       {methods.emailPassword ? (

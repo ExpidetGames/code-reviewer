@@ -87,7 +87,7 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
     githubAllowed: true,
   };
   const secrets = createSecretStore({ db, appSecret: SETUP_TEST_SECRET });
-  const smtp = createSmtpConfigStore({ db, secrets });
+  const smtp = createSmtpConfigStore({ db, appSecret: SETUP_TEST_SECRET });
   const service = createAdminService({
     db,
     secrets,
@@ -100,7 +100,7 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
     }),
     githubConfigured: () => flags.github,
     // A test switches the flag; a mail server saved through the portal counts as well.
-    mailConfigured: async () => flags.mail || (await smtp.isConfigured()),
+    mailConfigured: () => Promise.resolve(flags.mail),
     accessPolicy: () =>
       Promise.resolve(
         flags.githubAllowed

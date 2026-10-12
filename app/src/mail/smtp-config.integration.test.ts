@@ -31,12 +31,9 @@ async function start(appSecret: string = APP_SECRET) {
     db,
   );
   const secrets = createSecretStore({ db, appSecret });
-  const store = createSmtpConfigStore({ db, secrets });
+  const store = createSmtpConfigStore({ db, appSecret });
   const reopened = (secret: string) =>
-    createSmtpConfigStore({
-      db,
-      secrets: createSecretStore({ db, appSecret: secret }),
-    });
+    createSmtpConfigStore({ db, appSecret: secret });
   return { db, secrets, store, reopened };
 }
 
@@ -71,6 +68,7 @@ describe("the stored mail server settings", () => {
       senderAddress: "reviewer@example.com",
       senderName: "Code Reviewer",
       allowSelfSigned: false,
+      allowPlainTextLogin: false,
     });
     expect(view.password).toBe("configured");
     expect(view.updatedBy).toBe("admin-1");
@@ -111,10 +109,10 @@ describe("the stored mail server settings", () => {
     const kept = await store.save("admin-1", {
       ...INPUT,
       password: "",
-      port: 2525,
+      senderName: "Kept",
     });
     const afterKeep = await secrets.use("smtp_password");
-    const portAfterKeep = (await store.view()).settings?.port;
+    const nameAfterKeep = (await store.view()).settings?.senderName;
     const cleared = await store.save("admin-1", {
       ...INPUT,
       password: undefined,
@@ -123,7 +121,7 @@ describe("the stored mail server settings", () => {
 
     expect(kept).toEqual({ ok: true });
     expect(afterKeep.ok && afterKeep.value.reveal()).toBe(PASSWORD);
-    expect(portAfterKeep).toBe(2525);
+    expect(nameAfterKeep).toBe("Kept");
     expect(cleared).toEqual({ ok: true });
     expect(await secrets.status("smtp_password")).toMatchObject({
       state: "not_configured",
@@ -195,12 +193,14 @@ describe("the stored mail server settings", () => {
   });
 
   // #100-SM-15
-  it("reports a password that cannot be decrypted as a state, keeps the server configured and asks for it again", async () => {
+  it("reports a password that cannot be decrypted as a state, cannot send, and asks for it again", async () => {
     const { store, reopened } = await start();
     await store.save("admin-1", INPUT);
     const other = reopened("another-app-secret-0123456789-0123456789-xyz");
 
-    expect(await other.isConfigured()).toBe(true);
+    // Saved, but nothing could be sent: nothing is offered that could never work.
+    expect(await other.isSaved()).toBe(true);
+    expect(await other.isConfigured()).toBe(false);
     expect((await other.view()).password).toBe("unreadable");
     expect((await other.resolve())?.password.state).toBe("unreadable");
     // Keeping what cannot be read is no way to carry on.
@@ -217,6 +217,183 @@ describe("the stored mail server settings", () => {
     });
     expect(entered).toEqual({ ok: true });
     expect((await other.view()).password).toBe("configured");
+  });
+
+  // #100-review-4
+  it("can send only with a password that can be read when there is a login", async () => {
+    const { store, secrets } = await start();
+    await store.save("admin-1", INPUT);
+    const withPassword = await store.isConfigured();
+
+    await store.save("admin-1", {
+      ...INPUT,
+      password: undefined,
+      clearPassword: true,
+    });
+    const loginWithoutPassword = [
+      await store.isConfigured(),
+      await store.isSaved(),
+    ];
+    await store.save("admin-1", { ...INPUT, user: "", password: undefined });
+    const noLogin = await store.isConfigured();
+
+    expect(withPassword).toBe(true);
+    expect(loginWithoutPassword).toEqual([false, true]);
+    expect(noLogin).toBe(true);
+    expect((await secrets.status("smtp_password")).state).toBe(
+      "not_configured",
+    );
+  });
+
+  // #100-review-2
+  describe("the saved password and another server", () => {
+    it.each([
+      ["host", { host: "smtp.attacker.example" }],
+      ["port", { port: 2525 }],
+      ["user", { user: "someone-else" }],
+      ["security", { security: "tls" }],
+    ])(
+      "is not kept when the %s changes: it has to be entered again",
+      async (_field, change) => {
+        const { store, secrets } = await start();
+        await store.save("admin-1", INPUT);
+
+        const result = await store.save("admin-1", {
+          ...INPUT,
+          password: "",
+          ...change,
+        });
+
+        expect(result).toEqual({
+          ok: false,
+          error: "invalid_input",
+          issues: [
+            { field: "password", code: "password_required_for_new_server" },
+          ],
+        });
+        // Nothing changed: the old server, the old password.
+        expect((await store.view()).settings).toMatchObject({
+          host: "smtp.example.com",
+          port: 587,
+        });
+        const used = await secrets.use("smtp_password");
+        expect(used.ok && used.value.reveal()).toBe(PASSWORD);
+      },
+    );
+
+    it("moves with a new password entered for the new server", async () => {
+      const { store, secrets } = await start();
+      await store.save("admin-1", INPUT);
+
+      const result = await store.save("admin-1", {
+        ...INPUT,
+        host: "smtp.other.example",
+        password: "entered-for-the-new-one",
+      });
+
+      expect(result).toEqual({ ok: true });
+      const used = await secrets.use("smtp_password");
+      expect(used.ok && used.value.reveal()).toBe("entered-for-the-new-one");
+    });
+
+    it("still keeps the password when only the sender, the name or the certificate setting change", async () => {
+      const { store, secrets } = await start();
+      await store.save("admin-1", INPUT);
+
+      const result = await store.save("admin-1", {
+        ...INPUT,
+        password: "",
+        senderAddress: "other@example.com",
+        senderName: "Other",
+        allowSelfSigned: true,
+      });
+
+      expect(result).toEqual({ ok: true });
+      const used = await secrets.use("smtp_password");
+      expect(used.ok && used.value.reveal()).toBe(PASSWORD);
+    });
+
+    it("lets the explicit clear and a new server without a login through", async () => {
+      const { store } = await start();
+      await store.save("admin-1", INPUT);
+
+      const cleared = await store.save("admin-1", {
+        ...INPUT,
+        host: "smtp.other.example",
+        password: undefined,
+        clearPassword: true,
+      });
+      const noLogin = await store.save("admin-1", {
+        ...INPUT,
+        host: "relay.internal",
+        user: "",
+        password: undefined,
+      });
+
+      expect(cleared).toEqual({ ok: true });
+      expect(noLogin).toEqual({ ok: true });
+    });
+  });
+
+  // #100-review-6
+  it("refuses a login without encryption that the admin did not confirm, and takes a confirmed one", async () => {
+    const { store } = await start();
+
+    const refused = await store.save("admin-1", {
+      ...INPUT,
+      security: "none",
+      port: 25,
+    });
+    const confirmed = await store.save("admin-1", {
+      ...INPUT,
+      security: "none",
+      port: 25,
+      allowPlainTextLogin: true,
+    });
+
+    expect(refused).toEqual({
+      ok: false,
+      error: "invalid_input",
+      issues: [
+        {
+          field: "allowPlainTextLogin",
+          code: "plain_text_login_not_confirmed",
+        },
+      ],
+    });
+    expect(confirmed).toEqual({ ok: true });
+    expect((await store.view()).settings).toMatchObject({
+      security: "none",
+      allowPlainTextLogin: true,
+    });
+  });
+
+  // #100-review-9
+  describe("changing the settings and the password together", () => {
+    it("saves neither when the settings cannot be written", async () => {
+      const { db, store } = await start();
+      await sql`drop table instance_settings`.execute(db);
+
+      await expect(store.save("admin-1", INPUT)).rejects.toThrow();
+
+      expect(await db.selectFrom("secrets").selectAll().execute()).toEqual([]);
+    });
+
+    it("keeps the settings when the password cannot be removed", async () => {
+      const { db, store } = await start();
+      await store.save("admin-1", INPUT);
+      await sql`drop table secrets`.execute(db);
+
+      await expect(store.remove()).rejects.toThrow();
+
+      expect(
+        await db
+          .selectFrom("instance_settings")
+          .selectAll()
+          .where("key", "=", "smtp")
+          .execute(),
+      ).toHaveLength(1);
+    });
   });
 
   // #100-SM-07

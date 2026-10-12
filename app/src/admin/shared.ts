@@ -8,7 +8,7 @@ import { loadAuthConfig } from "../auth/config.ts";
 import { githubSignInConfigured } from "../auth/sign-in-methods.ts";
 import { createRateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
 import { getDatabase } from "../db/startup.ts";
-import { getMailSender, getSmtpConfigStore } from "../mail/shared.ts";
+import { getSmtpConfigStore } from "../mail/shared.ts";
 import { createTestMailService } from "../mail/test-mail.ts";
 import { getSecretStore } from "../secrets/shared.ts";
 import { createAdminService, type AdminService } from "./service.ts";
@@ -28,9 +28,6 @@ export function getAdminService(): AdminService {
     // Sign-in with GitHub exists while the GitHub OAuth app is configured. The GitHub issue of the
     // admin portal moves the configuration into the database and changes only this line.
     githubConfigured: () => githubSignInConfigured(process.env),
-    // Whether the instance can send mail: the sender of the running server (src/mail/), which reads the
-    // mail server settings on every call.
-    mailConfigured: () => getMailSender().isConfigured(),
     accessPolicy: (user) => getAccessPolicy()(user),
   });
 }

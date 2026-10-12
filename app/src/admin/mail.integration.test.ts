@@ -145,6 +145,60 @@ describe("saving the mail server", () => {
     expect((await settings()).smtp.value).toBeNull();
   });
 
+  // #100-review-2
+  it("does not carry the saved password over to another host, port, user or security", async () => {
+    const { portal, putSmtp, valid, settings } = await start();
+    await putSmtp(valid());
+
+    for (const change of [
+      { host: "localhost" },
+      { port: 2525 },
+      { user: "somebody" },
+      { security: "tls" },
+    ]) {
+      const response = await putSmtp(valid({ password: "", ...change }));
+      expect(response.status, JSON.stringify(change)).toBe(422);
+      expect(await response.json()).toEqual({
+        error: "invalid_input",
+        issues: [
+          { field: "password", code: "password_required_for_new_server" },
+        ],
+      });
+    }
+    // The server and the password are as they were, and "Send test mail" still talks to the first server.
+    const read = await settings();
+    expect(read.smtp.value.host).toBe("127.0.0.1");
+    const used = await portal.secrets.use("smtp_password");
+    expect(used.ok && used.value.reveal()).toBe(TEST_SMTP_PASSWORD);
+    const kept = await putSmtp(
+      valid({ password: "", senderName: "Same server" }),
+    );
+    expect(kept.status).toBe(200);
+  });
+
+  // #100-review-6
+  it("refuses a login without encryption unless the admin confirmed it", async () => {
+    const { putSmtp, valid, settings } = await start();
+
+    const refused = await putSmtp(valid({ security: "none", port: 25 }));
+    const confirmed = await putSmtp(
+      valid({ security: "none", port: 25, allowPlainTextLogin: true }),
+    );
+
+    expect(refused.status).toBe(422);
+    expect(await refused.json()).toEqual({
+      error: "invalid_input",
+      issues: [
+        {
+          field: "allowPlainTextLogin",
+          code: "plain_text_login_not_confirmed",
+        },
+      ],
+    });
+    expect(confirmed.status).toBe(200);
+    expect((await settings()).smtp.value.allowPlainTextLogin).toBe(true);
+  });
+
   // #100-SM-07
   it("can be removed at any time, and a sign-up rule that names emails becomes fail-closed again", async () => {
     const { portal, putSmtp, valid, settings } = await start();
@@ -183,7 +237,8 @@ describe("saving the mail server", () => {
     const entered = await putSmtp(valid({ password: TEST_SMTP_PASSWORD }));
 
     expect(read.smtp.password).toBe("unreadable");
-    expect(read.mailConfigured).toBe(true);
+    // Saved, but no mail can be sent: nothing that needs a mail server is offered.
+    expect(read.mailConfigured).toBe(false);
     expect(kept.status).toBe(422);
     expect(await kept.json()).toMatchObject({
       issues: [{ field: "password", code: "password_required" }],

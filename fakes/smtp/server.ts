@@ -31,6 +31,11 @@ export type SmtpFakeBehavior = {
   rejectMessage: string | null;
   /** The text of the 535 answer to a wrong login. */
   authFailure: string;
+  /**
+   * Every reply (except the one before STARTTLS) is written this many milliseconds late: a server that
+   * drips its answers, to test that the client gives up on time and really closes the connection.
+   */
+  replyDelayMs: number;
 };
 
 export type SmtpFakeOptions = {
@@ -56,6 +61,8 @@ export type SmtpSession = {
   commands: string[];
   /** The user the client logged in as, or null. */
   authenticatedAs: string | null;
+  /** Whether the connection has been closed (by either side). */
+  closed: boolean;
 };
 
 export type CapturedMessage = ParsedMessage & {
@@ -92,6 +99,7 @@ const DEFAULT_BEHAVIOR: SmtpFakeBehavior = {
   rejectRecipient: null,
   rejectMessage: null,
   authFailure: "Authentication credentials invalid",
+  replyDelayMs: 0,
 };
 
 function listen(
@@ -134,8 +142,12 @@ export async function startSmtpFake(
       secure: implicitTls,
       commands: [],
       authenticatedAs: null,
+      closed: false,
     };
     sessions.push(session);
+    initial.on("close", () => {
+      session.closed = true;
+    });
     if (behavior.greeting === "close") {
       initial.destroy();
       return;
@@ -147,8 +159,12 @@ export async function startSmtpFake(
     let loginUser = "";
     let envelope: { from: string; to: string[] } | null = null;
 
-    const reply = (line: string) => {
-      if (!socket.destroyed) socket.write(`${line}\r\n`);
+    const reply = (line: string, immediately = false) => {
+      const write = () => {
+        if (!socket.destroyed) socket.write(`${line}\r\n`);
+      };
+      if (immediately || behavior.replyDelayMs <= 0) write();
+      else setTimeout(write, behavior.replyDelayMs);
     };
 
     function finishLogin(user: string, password: string): void {
@@ -217,7 +233,7 @@ export async function startSmtpFake(
             reply("502 5.5.1 STARTTLS not available");
             return;
           }
-          reply("220 2.0.0 Ready to start TLS");
+          reply("220 2.0.0 Ready to start TLS", true);
           initial.removeAllListeners("data");
           const upgraded = new tls.TLSSocket(initial, {
             isServer: true,

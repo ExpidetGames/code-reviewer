@@ -6,20 +6,13 @@
 // is the one `admin reset-password` prints a link to: the token is a link of 256 random bits that works
 // once within 30 minutes (src/auth/password-reset.ts).
 import { RESET_PAGE_PATH } from "../admin-cli/reset-link.ts";
+import { escapeHtml } from "./html.ts";
 import type { MailMessage } from "./sender.ts";
 
 export function passwordResetLink(baseUrl: string, token: string): string {
   const url = new URL(RESET_PAGE_PATH, baseUrl);
   url.searchParams.set("token", token);
   return url.toString();
-}
-
-function escapeHtml(text: string): string {
-  return text
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
 }
 
 export function passwordResetMessage({

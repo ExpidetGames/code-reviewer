@@ -20,6 +20,8 @@ export type SmtpChange = {
   senderAddress: string;
   senderName: string;
   allowSelfSigned: boolean;
+  /** Set only after the admin ticked the second warning: the login goes out without encryption. */
+  allowPlainTextLogin: boolean;
 };
 
 /** The result of the test mail: it worked, or a class of failure with a safe detail. */

@@ -69,7 +69,12 @@ export function describeAdminIssue(issue: RequestIssue): string {
       return "Enter the password of this login. There is none saved, or the saved one cannot be read.";
     case "user_required":
       return "A password needs a user. Enter the user name, or leave the password empty.";
+    case "password_required_for_new_server":
+      return "The saved password only works for the server it was entered for. Host, port, user or security changed, so enter the password again.";
+    case "plain_text_login_not_confirmed":
+      return "A login on a connection without encryption sends the password in the clear. Tick the box to confirm that, or choose STARTTLS or TLS.";
     case "clear_password_invalid":
+    case "allow_plain_text_login_invalid":
     case "allow_self_signed_invalid":
       return GENERIC_FAILURE;
     case "sender_required":

@@ -5,7 +5,7 @@
 // for an address with an account and one without (and does not wait for the mail), the limits cannot be
 // used up by junk, the link works once within 30 minutes and ends the old password and every session, and
 // without a mail server the whole thing does not exist.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { hashResetToken } from "../admin-cli/token.ts";
 import { createRateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
 import { createSmtpMailSender } from "../mail/smtp-sender.ts";
@@ -47,7 +47,7 @@ async function start(
   let time = Date.parse("2026-10-12T08:00:00.000Z");
   const now = () => new Date(time);
   const logs: string[] = [];
-  const pending: Promise<void>[] = [];
+  const pending: Array<() => Promise<void>> = [];
 
   if (options.smtp !== false)
     await portal.smtp.save(portal.adminId, {
@@ -122,8 +122,10 @@ async function start(
     reset: (token: string, password: string = NEW_PASSWORD) =>
       complete(post("/api/password-reset", { token, password })),
     flush: async () => {
-      await Promise.all(pending.splice(0));
+      await Promise.all(pending.splice(0).map((work) => work()));
     },
+    /** How many pieces of work wait for the answer to be sent. */
+    waiting: () => pending.length,
     advance(ms: number) {
       time += ms;
     },
@@ -220,15 +222,44 @@ describe("asking for a reset link by mail", () => {
   });
 
   // #100-SM-11
-  it("answers before the mail is sent, so the time of the answer does not tell whether there was one", async () => {
-    const { ask, flush, smtp } = await start();
+  // #100-review-3
+  it("starts no work on the account before the answer is on its way, for a known address and an unknown one alike", async () => {
+    const { ask, flush, smtp, portal, rateLimits, waiting } = await start();
+    const queries: string[] = [];
+    // Every statement the database runs from here on is noted.
+    const original = portal.db
+      .getExecutor()
+      .transformQuery.bind(portal.db.getExecutor());
+    vi.spyOn(portal.db.getExecutor(), "transformQuery").mockImplementation(
+      (node, queryId) => {
+        queries.push(
+          JSON.stringify(node).includes('"users"') ? "users" : "other",
+        );
+        return original(node, queryId);
+      },
+    );
 
     const known = await ask(PERSON.email);
     const unknown = await ask("nobody@example.com");
 
     expect(known.status).toBe(200);
     expect(unknown.status).toBe(200);
+    // The two requests did the same, and neither looked at an account, counted a mail or opened a connection.
+    expect(queries).not.toContain("users");
+    expect(waiting()).toBe(2);
     expect(smtp.sessions).toEqual([]);
+    expect(
+      await portal.db.selectFrom("password_reset_tokens").selectAll().execute(),
+    ).toEqual([]);
+    expect(
+      (
+        await rateLimits.hit(
+          PASSWORD_RESET_MAIL_GLOBAL_KEY,
+          PASSWORD_RESET_MAIL_GLOBAL_WINDOW_MS,
+        )
+      ).count,
+    ).toBe(1);
+    vi.restoreAllMocks();
     await flush();
     expect(smtp.messages).toHaveLength(1);
   });

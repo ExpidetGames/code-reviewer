@@ -6,7 +6,6 @@
 import { sql } from "kysely";
 import { describe, expect, it } from "vitest";
 import { createRateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
-import { createSecretStore } from "../secrets/store.ts";
 import {
   startTestSmtp,
   TEST_SMTP_PASSWORD,
@@ -17,7 +16,9 @@ import { createSmtpConfigStore } from "./smtp-config.ts";
 import {
   createTestMailService,
   TEST_MAIL_ADMIN_MAX,
+  TEST_MAIL_GLOBAL_KEY,
   TEST_MAIL_GLOBAL_MAX,
+  testMailAdminKey,
   TEST_MAIL_WINDOW_MS,
 } from "./test-mail.ts";
 
@@ -52,14 +53,14 @@ async function start(options: { auth?: boolean; configure?: boolean } = {}) {
       values (${id}, ${id}, ${`${id}@example.test`}, 0, '2026-10-12T00:00:00.000Z', '2026-10-12T00:00:00.000Z')`.execute(
       db,
     );
-  const secrets = createSecretStore({ db, appSecret: APP_SECRET });
-  const config = createSmtpConfigStore({ db, secrets });
+  const config = createSmtpConfigStore({ db, appSecret: APP_SECRET });
   const clock = { time: Date.parse("2026-10-12T08:00:00.000Z") };
   const now = () => new Date(clock.time);
+  const rateLimits = createRateLimitsRepository(db, now);
   const logs: string[] = [];
   const service = createTestMailService({
     config,
-    rateLimits: createRateLimitsRepository(db, now),
+    rateLimits,
     baseUrl: "https://code-reviewer.example.com",
     timeouts: QUICK,
     now,
@@ -76,7 +77,7 @@ async function start(options: { auth?: boolean; configure?: boolean } = {}) {
         ? {}
         : { user: TEST_SMTP_USER, password: TEST_SMTP_PASSWORD }),
     });
-  return { smtp, db, config, service, clock, logs };
+  return { smtp, db, config, service, clock, logs, rateLimits };
 }
 
 describe("the test mail", () => {
@@ -150,10 +151,7 @@ describe("the test mail", () => {
     const service = createTestMailService({
       config: createSmtpConfigStore({
         db,
-        secrets: createSecretStore({
-          db,
-          appSecret: "another-app-secret-0123456789-0123456789-xyz",
-        }),
+        appSecret: "another-app-secret-0123456789-0123456789-xyz",
       }),
       rateLimits: createRateLimitsRepository(db),
       baseUrl: "https://code-reviewer.example.com",
@@ -241,6 +239,36 @@ describe("the limit of the test mail", () => {
       ok: false,
       error: "rate_limited",
     });
+  });
+
+  it("takes an attempt that the admin's own limit refused back from the instance's budget", async () => {
+    const { service } = await start();
+    for (let index = 0; index < TEST_MAIL_ADMIN_MAX + 10; index += 1)
+      await service.send(ADMIN);
+
+    // 5 mails went out; the 10 refused attempts did not use up the budget of the other admins.
+    let others = 0;
+    for (const id of ["admin-2", "admin-3", "admin-4"])
+      for (let index = 0; index < TEST_MAIL_ADMIN_MAX; index += 1)
+        if ((await service.send({ id, email: `${id}@example.test` })).ok)
+          others += 1;
+
+    expect(others).toBe(TEST_MAIL_GLOBAL_MAX - TEST_MAIL_ADMIN_MAX);
+  });
+
+  it("does not count an attempt against an admin when the instance is out of budget", async () => {
+    const { service, rateLimits } = await start();
+    for (let index = 0; index < TEST_MAIL_GLOBAL_MAX; index += 1)
+      await rateLimits.hit(TEST_MAIL_GLOBAL_KEY, TEST_MAIL_WINDOW_MS);
+
+    const refused = await service.send(ADMIN);
+    const counter = await rateLimits.hit(
+      testMailAdminKey(ADMIN.id),
+      TEST_MAIL_WINDOW_MS,
+    );
+
+    expect(refused).toMatchObject({ ok: false, error: "rate_limited" });
+    expect(counter.count).toBe(1);
   });
 
   it("does not count an attempt that finds no mail server against anyone", async () => {

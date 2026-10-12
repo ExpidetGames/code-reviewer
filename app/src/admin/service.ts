@@ -113,8 +113,11 @@ export type AdminServiceOptions = {
   secrets: Pick<SecretStore, "statuses">;
   /** Whether sign-in with GitHub can work: the GitHub integration is configured. */
   githubConfigured: () => boolean;
-  /** Whether a mail server is configured (the mail settings come with the SMTP issue). */
-  mailConfigured: () => Promise<boolean>;
+  /**
+   * Counts as "mail can be sent" in addition to the saved mail server (tests only; the running server leaves
+   * it out, so the settings are read once).
+   */
+  mailConfigured?: () => Promise<boolean>;
   /** The stored mail server settings and password (src/mail/smtp-config.ts). */
   smtp: SmtpConfigStore;
   /** The test mail button (src/mail/test-mail.ts). */
@@ -123,6 +126,15 @@ export type AdminServiceOptions = {
   accessPolicy: AccessPolicy;
   now?: () => Date;
 };
+
+/** Whether a message could be sent with the saved mail server: settings, and a password that can be read for a login. */
+function canSend(view: {
+  settings: { user: string | null } | null;
+  password: string;
+}): boolean {
+  if (view.settings === null) return false;
+  return view.settings.user === null || view.password === "configured";
+}
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -183,7 +195,7 @@ export function createAdminService({
       });
 
       const github = githubConfigured();
-      const mail = await mailConfigured();
+      const mail = canSend(mailServer) || (await mailConfigured?.()) === true;
       const storedMethods = methods?.value as SignInMethods | undefined;
       const effective = effectiveSignInMethods(storedMethods, github);
       const signUp: SignUpRule =

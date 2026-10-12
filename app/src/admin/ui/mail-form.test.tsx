@@ -29,6 +29,7 @@ const SAVED_SETTINGS = {
   senderAddress: "reviewer@example.com",
   senderName: "Code Reviewer",
   allowSelfSigned: false,
+  allowPlainTextLogin: false,
 } as const;
 
 function view(
@@ -101,6 +102,7 @@ describe("the mail form", () => {
         senderAddress: "reviewer@example.com",
         senderName: "Code Reviewer",
         allowSelfSigned: false,
+        allowPlainTextLogin: false,
       },
     });
     await waitFor(() =>
@@ -267,6 +269,70 @@ describe("the mail form", () => {
     expect(changeMock.mock.calls[0]?.[0]).toMatchObject({
       smtp: { allowSelfSigned: true },
     });
+  });
+
+  // #100-review-6
+  it("asks for a second confirmation before a login goes out without encryption, and sends it only when ticked", async () => {
+    const { api: mock, changeMock } = api();
+    const user = userEvent.setup();
+    render(<MailForm settings={configured()} api={mock} />);
+
+    await user.click(screen.getByRole("radio", { name: /None/ }));
+    const confirmBox = screen.getByRole("checkbox", {
+      name: "I understand that the login is sent without encryption",
+    });
+    expect(
+      screen.getByText(/password would be sent in the clear/),
+    ).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Save mail server" }));
+    await waitFor(() => expect(changeMock).toHaveBeenCalledTimes(1));
+    expect(changeMock.mock.calls[0]?.[0]).toMatchObject({
+      smtp: { security: "none", allowPlainTextLogin: false },
+    });
+    await user.click(confirmBox);
+    await user.click(screen.getByRole("button", { name: "Save mail server" }));
+
+    await waitFor(() => expect(changeMock).toHaveBeenCalledTimes(2));
+    expect(changeMock.mock.calls[1]?.[0]).toMatchObject({
+      smtp: { security: "none", allowPlainTextLogin: true },
+    });
+  });
+
+  it("has no confirmation without a login or with encryption, and shows the server's refusal in words", async () => {
+    const { api: mock } = api({
+      ok: false,
+      status: 422,
+      code: "invalid_input",
+      issues: [
+        {
+          field: "allowPlainTextLogin",
+          code: "plain_text_login_not_confirmed",
+        },
+        { field: "password", code: "password_required_for_new_server" },
+      ],
+    });
+    const user = userEvent.setup();
+    render(<MailForm settings={configured()} api={mock} />);
+    expect(
+      screen.queryByRole("checkbox", {
+        name: /login is sent without encryption/,
+      }),
+    ).toBeNull();
+    await user.click(screen.getByRole("radio", { name: /None/ }));
+    await user.click(screen.getByRole("button", { name: "Save mail server" }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/Tick the box to confirm that/)).toBeTruthy(),
+    );
+    expect(
+      screen.getByText(/only works for the server it was entered for/),
+    ).toBeTruthy();
+    await user.clear(screen.getByLabelText("User"));
+    expect(
+      screen.queryByRole("checkbox", {
+        name: /login is sent without encryption/,
+      }),
+    ).toBeNull();
   });
 
   // #100-SM-07

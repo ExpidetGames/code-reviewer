@@ -5,7 +5,6 @@
 // server, reports a failure as the stable code and logs nothing that identifies a message.
 import { sql } from "kysely";
 import { describe, expect, it } from "vitest";
-import { createSecretStore } from "../secrets/store.ts";
 import {
   startTestSmtp,
   TEST_SMTP_PASSWORD,
@@ -34,10 +33,7 @@ async function start(auth = true) {
     values ('admin-1', 'Admin', 'admin@example.test', 0, '2026-10-12T00:00:00.000Z', '2026-10-12T00:00:00.000Z')`.execute(
     db,
   );
-  const config = createSmtpConfigStore({
-    db,
-    secrets: createSecretStore({ db, appSecret: APP_SECRET }),
-  });
+  const config = createSmtpConfigStore({ db, appSecret: APP_SECRET });
   const logs: string[] = [];
   const sender = createSmtpMailSender({
     config,
@@ -143,16 +139,14 @@ describe("the SMTP mail sender", () => {
     const other = createSmtpMailSender({
       config: createSmtpConfigStore({
         db,
-        secrets: createSecretStore({
-          db,
-          appSecret: "another-app-secret-0123456789-0123456789-xyz",
-        }),
+        appSecret: "another-app-secret-0123456789-0123456789-xyz",
       }),
       timeouts: QUICK,
       log: (line) => logs.push(line),
     });
 
-    expect(await other.isConfigured()).toBe(true);
+    // Saved, but it could never send: nothing that needs a mail server is offered.
+    expect(await other.isConfigured()).toBe(false);
     expect(await other.send(MESSAGE)).toEqual({
       ok: false,
       error: "mail_failed",

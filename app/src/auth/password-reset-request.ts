@@ -36,6 +36,17 @@ import type { SignUpLimits } from "../signup/limits.ts";
 import { canonicalEmail } from "../signup/rule.ts";
 import { CREDENTIAL_PROVIDER_ID } from "./session-user.ts";
 
+/**
+ * Whether the reset by mail is offered: the instance can send mail and email with password sign-in is on
+ * (a new password is of no use otherwise).
+ */
+export function passwordResetAvailable(facts: {
+  mailConfigured: boolean;
+  signInMethods: { emailPassword: boolean };
+}): boolean {
+  return facts.mailConfigured && facts.signInMethods.emailPassword;
+}
+
 export type ResetRequestOutcome =
   | { kind: "accepted" }
   /** No mail server, or email with password sign-in is off: there is nothing to offer. */
@@ -51,8 +62,11 @@ export type ResetRequestDependencies = {
   emailPasswordOn: () => Promise<boolean>;
   /** The configured public address of the app: the link never comes from a request header. */
   baseUrl: string;
-  /** Runs work after the answer. */
-  defer: (work: Promise<void>) => void;
+  /**
+   * Runs work after the answer has been sent. It takes a function, not a promise: nothing of the work (not
+   * even the look at the account) may start before the answer is on its way.
+   */
+  defer: (work: () => Promise<void>) => void;
   now?: () => Date;
   log?: (message: string) => void;
 };
@@ -147,6 +161,6 @@ export async function requestPasswordReset(
       retryAfterSeconds: permission.retryAfterSeconds,
     };
 
-  dependencies.defer(mailResetLink(dependencies, email));
+  dependencies.defer(() => mailResetLink(dependencies, email));
   return { kind: "accepted" };
 }

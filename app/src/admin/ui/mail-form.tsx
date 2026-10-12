@@ -69,6 +69,9 @@ export function MailForm({
   const [allowSelfSigned, setAllowSelfSigned] = useState(
     saved?.allowSelfSigned ?? false,
   );
+  const [allowPlainTextLogin, setAllowPlainTextLogin] = useState(
+    saved?.allowPlainTextLogin ?? false,
+  );
   const [confirmRemove, setConfirmRemove] = useState(false);
   const { pending, status, save } = useSave(api);
 
@@ -80,6 +83,7 @@ export function MailForm({
       setPortText(String(DEFAULT_PORT[next]));
     setSecurity(next);
     if (next === "none") setAllowSelfSigned(false);
+    else setAllowPlainTextLogin(false);
   }
 
   function submit(event: FormEvent) {
@@ -94,6 +98,9 @@ export function MailForm({
         senderAddress,
         senderName,
         allowSelfSigned,
+        // Only a login on a connection without encryption needs the confirmation.
+        allowPlainTextLogin:
+          security === "none" && user.trim() !== "" && allowPlainTextLogin,
         ...(password === "" ? {} : { password }),
         ...(clearPassword ? { clearPassword: true } : {}),
       },
@@ -117,6 +124,7 @@ export function MailForm({
       setClearPassword(false);
       setSenderAddress("");
       setSenderName("");
+      setAllowPlainTextLogin(false);
       setAllowSelfSigned(false);
     });
   }
@@ -299,6 +307,29 @@ export function MailForm({
             </label>
           ) : null}
         </div>
+        {security === "none" && user.trim() !== "" ? (
+          <div className="field">
+            <p role="note" className="alert alert-warning">
+              <strong>The password would be sent in the clear.</strong> With no
+              encryption, anyone on the way to the mail server can read the user
+              name and the password of this login.
+            </p>
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={allowPlainTextLogin}
+                onChange={(event) =>
+                  setAllowPlainTextLogin(event.target.checked)
+                }
+                aria-invalid={invalid("allowPlainTextLogin")}
+              />
+              <span>
+                I understand that the login is sent without encryption
+              </span>
+            </label>
+            {error("allowPlainTextLogin")}
+          </div>
+        ) : null}
       </fieldset>
 
       <fieldset>

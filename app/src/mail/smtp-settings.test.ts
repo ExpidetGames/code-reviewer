@@ -44,6 +44,7 @@ describe("the mail server settings", () => {
           senderAddress: "reviewer@example.com",
           senderName: "Code Reviewer",
           allowSelfSigned: true,
+          allowPlainTextLogin: false,
         },
         password: { kind: "set", value: VALID.password },
       },
@@ -69,6 +70,7 @@ describe("the mail server settings", () => {
           senderAddress: "reviewer@example.com",
           senderName: null,
           allowSelfSigned: false,
+          allowPlainTextLogin: false,
         },
         password: { kind: "keep" },
       },
@@ -225,11 +227,50 @@ describe("the mail server settings", () => {
     expect(clear.ok && clear.value.password).toEqual({ kind: "clear" });
   });
 
+  // #100-review-6
+  it("refuses a login over a connection without encryption until the admin confirms it", () => {
+    const refused = issuesOf({ ...VALID, security: "none" });
+    const wrongType = issuesOf({ ...VALID, allowPlainTextLogin: "yes" });
+    const confirmed = parseSmtpInput({
+      ...VALID,
+      security: "none",
+      allowPlainTextLogin: true,
+    });
+
+    expect(refused).toContainEqual({
+      field: "allowPlainTextLogin",
+      code: "plain_text_login_not_confirmed",
+    });
+    expect(wrongType).toContainEqual({
+      field: "allowPlainTextLogin",
+      code: "allow_plain_text_login_invalid",
+    });
+    expect(confirmed.ok && confirmed.value.settings.allowPlainTextLogin).toBe(
+      true,
+    );
+  });
+
+  it("needs no confirmation without a login, and drops a confirmation that means nothing", () => {
+    const noLogin = parseSmtpInput({
+      ...VALID,
+      security: "none",
+      user: "",
+      password: undefined,
+    });
+    const encrypted = parseSmtpInput({ ...VALID, allowPlainTextLogin: true });
+
+    expect(noLogin.ok).toBe(true);
+    expect(encrypted.ok && encrypted.value.settings.allowPlainTextLogin).toBe(
+      false,
+    );
+  });
+
   it("does not check the certificate less for a connection without encryption, where the flag means nothing", () => {
     const result = parseSmtpInput({
       ...VALID,
       security: "none",
       allowSelfSigned: true,
+      allowPlainTextLogin: true,
     });
 
     expect(result.ok && result.value.settings.allowSelfSigned).toBe(false);

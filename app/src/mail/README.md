@@ -5,7 +5,7 @@ How the app sends mail, and where the admin sets the mail server up. The decisio
 
 `MailSender` (`sender.ts`) is the interface everything goes through: the verification link, the password reset, the
 test mail and (in the workspaces issue) the invitations. `isConfigured()` says whether the instance can send mail at
-all (the sign-up rule, the verification gate, the reset page and the admin portal ask it); `send()` never throws, a
+all (the sign-up rule, the verification gate, the reset page and the admin portal ask it). It means "a message could be sent now": valid settings and, when there is a login, a password that is there and can be read. Saved settings whose password is missing or cannot be read count as no mail server until the password is entered again (the portal shows the settings and says what is wrong; the test mail still works on saved settings and names the problem); `send()` never throws, a
 failure is a code (`not_configured`, `mail_failed`) and nothing in it can carry the message.
 
 | File                                                   | Role                                                                                                                                                                                                           |
@@ -26,8 +26,14 @@ Nothing in the app reads an `SMTP_*` variable (`shared.test.ts` fails when a sou
 rows in the database; the password is encrypted with a key derived from `APP_SECRET` and is **write-only**: the page
 shows whether one is saved, an empty password field keeps it, the checkbox removes it, and no API returns it, no log
 line has it, and no error carries it. A password that cannot be decrypted (another `APP_SECRET`) is a state of its own:
-the page asks for it again, the mail server stays configured (so a sign-up rule that needs verification stays closed and
-does not open by accident), and every send fails with `mail_failed` until it is entered again.
+the page asks for it again, the overview says that no mail can be sent, nothing that needs mail is offered
+meanwhile (confirming addresses, "Forgot your password?"), and every send fails with `mail_failed` until it is entered
+again.
+
+**The saved password stays with the server it was entered for.** An empty password field keeps it only while host, port,
+user and security are unchanged; otherwise the save is refused (`password_required_for_new_server`) and the password has
+to be entered again. Without that, a stolen admin session could point the host at a server of its own and have "Send test
+mail" hand over the stored password. The settings row and the password are saved, cleared and removed in one transaction.
 
 ## What the app does with the host the admin enters
 
@@ -37,13 +43,18 @@ does not open by accident), and every send fails with `mail_failed` until it is 
   the mail client cannot be pointed at ssh, http, imap and the like.
 - **Security.** `starttls` demands the upgrade: a server that does not offer STARTTLS is a `tls_error`, and neither the
   login nor the message is ever sent in the clear. `tls` is TLS from the first byte. `none` is plain on purpose, does not
-  even try STARTTLS, and the page shows a warning. TLS 1.2 or newer.
+  even try STARTTLS, and the page shows a warning. A **login** over `none` sends the user name and the password in the
+  clear, so the settings are only accepted with an explicit confirmation (`allowPlainTextLogin`, which the form sets after
+  a second warning box is ticked; the server refuses without it, and the delivery refuses to log in without it). TLS 1.2 or newer.
 - **Certificates are verified** (chain and host name) unless the admin ticks "Accept a self-signed certificate", which
   turns the verification off completely and comes with a warning on the page. It is always off without encryption.
 - **Time limits**: 10 s to connect, 10 s for the greeting, 20 s for a silent socket, 30 s for the whole delivery. One
-  attempt: no queue, no retry (a failed mail is a `mail_failed` and the caller carries on).
-- **Headers.** The recipient is checked against a strict pattern before anything is opened (no white space, control
-  character, comma, quote, angle bracket or second `@`), the envelope is built from exactly the addresses we mean, the
+  attempt: no queue, no retry (a failed mail is a `mail_failed` and the caller carries on). At the 30 s limit the socket
+  is destroyed (the delivery uses a socket of its own for that: closing a transport does not close a send in progress), so
+  a server that answers one byte at a time cannot accept the message after the caller was told `timeout`.
+- **Headers.** The recipient is checked against an allow list before anything is opened (printable ASCII: letters, digits
+  and the punctuation of an unquoted address, no white space, control character of any range, comma, quote, angle bracket
+  or second `@`), the envelope is built from exactly the addresses we mean, the
   subject loses its control characters (a CR or LF becomes a space), the sender name loses them too, and the library
   encodes the rest. `smtp-delivery.integration.test.ts` reads the bytes the fake server received and looks for an
   injected header.

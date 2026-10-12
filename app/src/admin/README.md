@@ -100,7 +100,7 @@ GitHub issue of the portal moves it into the database and changes only `getAdmin
 - A secret that cannot be decrypted (a changed row, another `APP_SECRET`, an unknown key version) is the
   state `undecryptable` with the code `secret_undecryptable` or `secret_key_version_unknown`. Nothing throws
   and nothing logs; the overview tells the admin to enter it again.
-- The mail form saves the SMTP password through `PUT /api/admin/settings` (`{ "smtp": { ..., "password": "..." } }`); an empty or missing password keeps the stored one, `clearPassword` removes it, and the answer, the settings read back and every log line say only that one is set (`configured`), cannot be read (`unreadable`) or is missing (`none`). The GitHub form of the next issue uses the store the same way.
+- The mail form saves the SMTP password through `PUT /api/admin/settings` (`{ "smtp": { ..., "password": "..." } }`); an empty or missing password keeps the stored one only while host, port, user and security are unchanged (otherwise `password_required_for_new_server`), `clearPassword` removes it, and the answer, the settings read back and every log line say only that one is set (`configured`), cannot be read (`unreadable`) or is missing (`none`). The GitHub form of the next issue uses the store the same way.
 
 ## A lost admin password
 

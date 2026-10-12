@@ -32,6 +32,11 @@ export type SmtpSettings = {
    * match the host. An explicit opt-in of the admin; always false without encryption.
    */
   allowSelfSigned: boolean;
+  /**
+   * The admin confirmed that the login (user and password) may be sent without encryption. Only ever true
+   * for `none` with a login; without it such settings are refused.
+   */
+  allowPlainTextLogin: boolean;
 };
 
 export type SmtpPasswordChange =
@@ -69,6 +74,11 @@ export const SMTP_ISSUE_CODES = [
   "sender_invalid",
   "sender_name_invalid",
   "allow_self_signed_invalid",
+  "allow_plain_text_login_invalid",
+  /** `none` with a login, and the admin did not confirm that the password goes out in the clear. */
+  "plain_text_login_not_confirmed",
+  /** Host, port, user or security changed: the saved password is not carried over to a new server. */
+  "password_required_for_new_server",
 ] as const;
 export type SmtpIssueCode = (typeof SMTP_ISSUE_CODES)[number];
 
@@ -153,6 +163,17 @@ export function parseSmtpInput(raw: unknown): ParseSmtpResult {
   if (typeof allowSelfSigned !== "boolean")
     refuse("allowSelfSigned", "allow_self_signed_invalid");
 
+  const allowPlainTextLogin = raw.allowPlainTextLogin ?? false;
+  if (typeof allowPlainTextLogin !== "boolean")
+    refuse("allowPlainTextLogin", "allow_plain_text_login_invalid");
+  else if (
+    security === "none" &&
+    user !== undefined &&
+    user !== null &&
+    !allowPlainTextLogin
+  )
+    refuse("allowPlainTextLogin", "plain_text_login_not_confirmed");
+
   const clear = raw.clearPassword ?? false;
   if (typeof clear !== "boolean")
     refuse("clearPassword", "clear_password_invalid");
@@ -178,7 +199,8 @@ export function parseSmtpInput(raw: unknown): ParseSmtpResult {
     user === undefined ||
     senderName === undefined ||
     typeof port !== "number" ||
-    typeof allowSelfSigned !== "boolean"
+    typeof allowSelfSigned !== "boolean" ||
+    typeof allowPlainTextLogin !== "boolean"
   )
     return { ok: false, issues };
 
@@ -194,6 +216,8 @@ export function parseSmtpInput(raw: unknown): ParseSmtpResult {
         senderName,
         // Without encryption there is no certificate to accept.
         allowSelfSigned: security === "none" ? false : allowSelfSigned,
+        allowPlainTextLogin:
+          security === "none" && user !== null && allowPlainTextLogin,
       },
       password,
     },

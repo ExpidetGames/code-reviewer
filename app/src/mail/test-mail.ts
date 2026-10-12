@@ -13,6 +13,7 @@
 // nothing else; no secret is in it, and none is in an answer.
 import { secondsLeft } from "../auth/sign-in-limit.ts";
 import type { RateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
+import { escapeHtml } from "./html.ts";
 import type { MailMessage } from "./sender.ts";
 import type { SmtpConfigStore } from "./smtp-config.ts";
 import type { SmtpTimeouts } from "./smtp-delivery.ts";
@@ -51,14 +52,7 @@ export function testMessage(to: string, baseUrl: string): MailMessage {
   ].join("\n");
   const html = [
     "<p>This is a test message from Code Reviewer.</p>",
-    `<p>It was sent by the instance at ${baseUrl
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll(
-        '"',
-        "&quot;",
-      )} to check the mail server settings. If you can read it, the settings work. Nobody needs to answer.</p>`,
+    `<p>It was sent by the instance at ${escapeHtml(baseUrl)} to check the mail server settings. If you can read it, the settings work. Nobody needs to answer.</p>`,
   ].join("\n");
   return { to, subject: "Test mail from Code Reviewer", text, html };
 }
@@ -83,24 +77,36 @@ export function createTestMailService({
 }: TestMailServiceOptions): TestMailService {
   return {
     async send(admin) {
-      if (!(await config.isConfigured()))
+      // Saved settings, whatever the state of the password: the test mail is how the admin finds out that
+      // the password is missing or cannot be read.
+      if (!(await config.isSaved()))
         return { ok: false, error: "not_configured", detail: null };
 
-      for (const { key, max } of [
-        { key: testMailAdminKey(admin.id), max: TEST_MAIL_ADMIN_MAX },
-        { key: TEST_MAIL_GLOBAL_KEY, max: TEST_MAIL_GLOBAL_MAX },
-      ]) {
-        const hit = await rateLimits.hit(key, TEST_MAIL_WINDOW_MS);
-        if (hit.count > max)
-          return {
-            ok: false,
-            error: "rate_limited",
-            retryAfterSeconds: secondsLeft(
-              hit.windowStartedAt,
-              TEST_MAIL_WINDOW_MS,
-              now(),
-            ),
-          };
+      // The instance counter first: an admin who is over their own allowance must not use up the budget of
+      // the instance (their attempt is taken back from it), and an instance that is out of budget does not
+      // count against any admin.
+      const limited = (hit: { windowStartedAt: Date }) =>
+        ({
+          ok: false,
+          error: "rate_limited",
+          retryAfterSeconds: secondsLeft(
+            hit.windowStartedAt,
+            TEST_MAIL_WINDOW_MS,
+            now(),
+          ),
+        }) as const;
+      const instance = await rateLimits.hit(
+        TEST_MAIL_GLOBAL_KEY,
+        TEST_MAIL_WINDOW_MS,
+      );
+      if (instance.count > TEST_MAIL_GLOBAL_MAX) return limited(instance);
+      const own = await rateLimits.hit(
+        testMailAdminKey(admin.id),
+        TEST_MAIL_WINDOW_MS,
+      );
+      if (own.count > TEST_MAIL_ADMIN_MAX) {
+        await rateLimits.refund(TEST_MAIL_GLOBAL_KEY);
+        return limited(own);
       }
 
       const result = await deliverWithStoredSettings(

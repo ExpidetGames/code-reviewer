@@ -4,7 +4,7 @@
 // certificate check and its explicit opt-out, the refusal to drop encryption quietly, every class of failure,
 // the time limits, and the bytes that reach the server (no header can be injected, no password anywhere).
 import net from "node:net";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { SmtpFake } from "../../../fakes/smtp/server.ts";
 import {
   startTestSmtp,
@@ -45,6 +45,7 @@ function settingsFor(
     senderAddress: "reviewer@example.com",
     senderName: "Code Reviewer",
     allowSelfSigned: true,
+    allowPlainTextLogin: false,
     ...overrides,
   };
 }
@@ -354,6 +355,99 @@ describe("a delivery over SMTP", () => {
   });
 });
 
+describe("the time limit of a delivery", () => {
+  // #100-review-1
+  it("closes the connection at the deadline, and nothing that a server drips afterwards is accepted", async () => {
+    const smtp = await startTestSmtp({ tlsPort: null });
+    // Each reply takes 250 ms: the whole conversation takes seconds, the limit is 700 ms.
+    smtp.behavior.replyDelayMs = 250;
+    const started = Date.now();
+
+    const result = await deliverOverSmtp(
+      {
+        settings: settingsFor(smtp, {
+          security: "none",
+          allowSelfSigned: false,
+        }),
+        password: null,
+      },
+      MESSAGE,
+      { connectionMs: 5_000, greetingMs: 5_000, socketMs: 5_000, totalMs: 700 },
+    );
+    const answeredAfter = Date.now() - started;
+
+    expect(result).toMatchObject({ ok: false, failure: { code: "timeout" } });
+    expect(answeredAfter).toBeLessThan(1_800);
+    // The server sees the client hang up shortly after the deadline ...
+    await vi.waitFor(() => expect(smtp.sessions[0]?.closed).toBe(true), {
+      timeout: 1_500,
+    });
+    // ... and no message completes after it, however long the server keeps dripping.
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    expect(smtp.messages).toEqual([]);
+  });
+
+  it("closes the connection at the deadline after STARTTLS too", async () => {
+    const smtp = await startTestSmtp({ tlsPort: null });
+    smtp.behavior.replyDelayMs = 250;
+
+    const result = await deliverOverSmtp(
+      { settings: settingsFor(smtp), password: null },
+      MESSAGE,
+      { connectionMs: 5_000, greetingMs: 5_000, socketMs: 5_000, totalMs: 900 },
+    );
+
+    expect(result).toMatchObject({ ok: false, failure: { code: "timeout" } });
+    await vi.waitFor(() => expect(smtp.sessions[0]?.closed).toBe(true), {
+      timeout: 1_500,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    expect(smtp.messages).toEqual([]);
+  });
+});
+
+describe("a login without encryption", () => {
+  // #100-review-6
+  it("is not sent unless the settings say that the admin confirmed it", async () => {
+    const smtp = await startTestSmtp({
+      auth: { user: TEST_SMTP_USER, password: TEST_SMTP_PASSWORD },
+      tlsPort: null,
+    });
+
+    const refused = await deliverOverSmtp(
+      {
+        settings: settingsFor(smtp, {
+          security: "none",
+          user: TEST_SMTP_USER,
+          allowSelfSigned: false,
+        }),
+        password: TEST_SMTP_PASSWORD,
+      },
+      MESSAGE,
+      QUICK,
+    );
+    const confirmed = await deliverOverSmtp(
+      {
+        settings: settingsFor(smtp, {
+          security: "none",
+          user: TEST_SMTP_USER,
+          allowSelfSigned: false,
+          allowPlainTextLogin: true,
+        }),
+        password: TEST_SMTP_PASSWORD,
+      },
+      MESSAGE,
+      QUICK,
+    );
+
+    expect(refused).toMatchObject({ ok: false });
+    expect(smtp.sessions.length).toBe(1);
+    expect(confirmed).toEqual({ ok: true });
+    expect(smtp.messages[0]?.secure).toBe(false);
+    expect(smtp.messages[0]?.authenticatedAs).toBe(TEST_SMTP_USER);
+  });
+});
+
 describe("what reaches the server", () => {
   // #100-SM-03 / header injection
   it("takes the line breaks out of a subject, so it cannot start another header", async () => {
@@ -412,6 +506,12 @@ describe("what reaches the server", () => {
     "victim@example.com>",
     "a@b@example.com",
     "vic tim@example.com",
+    "victim\u0085@example.com",
+    "victim@exa\u00a0mple.com",
+    "v\u00efctim@example.com",
+    "victim@example.com\u2028",
+    "victim@exam_ple.com",
+    "victim@[127.0.0.1]",
     "no-at-sign",
     "",
   ])("refuses the recipient %j before connecting", async (to) => {
