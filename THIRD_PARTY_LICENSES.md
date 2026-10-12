@@ -54,9 +54,28 @@ match the license shipped in the new release.
   repository** under `app/src/components/ui/` (that is how shadcn/ui is used), so the MIT notice
   must travel with them. Each copied file keeps a `// SPDX-License-Identifier: MIT` header with a
   provenance line; every other source file stays Apache-2.0 (`app/src/ci/spdx-headers/rules.ts`).
-- Components copied so far: none. The component-kit issue (#167) and the screen issues copy the
-  first ones; this section lists them as they arrive. `app/src/lib/utils.ts` (`cn`) follows
-  shadcn/ui's helper but is a two-line composition and stays Apache-2.0.
+- Components copied so far (27, all under `app/src/components/ui/`): `alert`, `alert-dialog`,
+  `avatar`, `badge`, `breadcrumb`, `button`, `card`, `checkbox`, `collapsible`, `dialog`,
+  `dropdown-menu`, `empty`, `field`, `input`, `label`, `progress`, `radio-group`, `select`,
+  `separator`, `sheet`, `sidebar`, `skeleton`, `switch`, `table`, `tabs`, `textarea`, `tooltip`.
+  They use the Radix UI primitives through the unified `radix-ui` package (the primitive set the
+  current shadcn registry ships for Tailwind v4), which is a normal dependency and MIT-licensed.
+- A few of the copies carry a small local adaptation; a re-copy has to re-apply it. Every adapted
+  file marks it with a line `// Local adaptation for Code Reviewer: ...` below the provenance line
+  (the MIT header itself is unchanged). In detail: the application `button`, `badge` and `alert` add
+  this project's variants and the button a native-control reset (`appearance-none border-0
+bg-transparent`), because Tailwind's preflight reset is only enabled with the legacy-CSS cleanup
+  (#185); the `dialog`, `alert-dialog` and `sheet` overlays use the `--overlay` token instead of
+  `bg-black/50`; `dialog`, `sheet` and `breadcrumb` use `focus-visible:` instead of `focus:` (or add
+  it) so a focus ring only shows for keyboard users; `progress` passes `value` to the Radix root so
+  it exposes `aria-valuenow`; `sidebar`'s `SidebarMenuSkeleton` derives a stable width from `useId`
+  (the React compiler rejects `Math.random` during render). The kit's `DangerZone` renders the copied
+  `AlertDialogAction` with `variant="destructive"`; the copied `AlertDialogAction`/`AlertDialogCancel`
+  keep their upstream default variants (`default`/`outline`).
+- Every copy imports the local class-name helper as `@/lib/utils` (`cn`), not as an npm package.
+- `app/src/lib/utils.ts` (`cn`) and `app/src/hooks/use-mobile.ts` (`useIsMobile`) follow shadcn/ui's
+  helpers but are short compositions of our own that stay Apache-2.0; they are not copied
+  components.
 
 ```text
 MIT License
@@ -84,7 +103,7 @@ SOFTWARE.
 
 The Tailwind CSS v4 packages the app installs (`tailwindcss`, `@tailwindcss/postcss`) and the
 shadcn runtime dependencies (`clsx`, `tailwind-merge`, `class-variance-authority`, `lucide-react`,
-`tw-animate-css`) are MIT/Apache-2.0/ISC and need no exception.
+`tw-animate-css`, `radix-ui`) are MIT/Apache-2.0/ISC and need no exception.
 
 ## Dependency license review
 
@@ -113,13 +132,13 @@ folder; the spelling it does not know fails the scan until it is added there.
 
 #### Exceptions
 
-| Package | License | Note |
-|---|---|---|
-| `@img/sharp-*` | LGPL-3.0-or-later | All `@img/sharp-libvips-*` packages and the prebuilt `@img/sharp-*` binaries for every platform (including win32 and the wasm builds): prebuilt libvips, optional dependencies of `sharp`, which Next.js uses for image optimization. Used unmodified and dynamically loaded as a separate binary, not linked into our code |
-| `axe-core` | MPL-2.0 | Test tooling only. File level copyleft, used unmodified, nothing of it is part of our source |
-| `lightningcss` | MPL-2.0 | A build tool of Next.js. Used unmodified as a tool |
-| `lightningcss-*` | MPL-2.0 | The platform binaries of `lightningcss`. Used unmodified as tools |
-| `caniuse-lite` | CC-BY-4.0 | Browser support data used by the build tooling. Data, not code. Attribution: Alexis Deveria and contributors, https://github.com/browserslist/caniuse-lite |
+| Package          | License           | Note                                                                                                                                                                                                                                                                                                                        |
+| ---------------- | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@img/sharp-*`   | LGPL-3.0-or-later | All `@img/sharp-libvips-*` packages and the prebuilt `@img/sharp-*` binaries for every platform (including win32 and the wasm builds): prebuilt libvips, optional dependencies of `sharp`, which Next.js uses for image optimization. Used unmodified and dynamically loaded as a separate binary, not linked into our code |
+| `axe-core`       | MPL-2.0           | Test tooling only. File level copyleft, used unmodified, nothing of it is part of our source                                                                                                                                                                                                                                |
+| `lightningcss`   | MPL-2.0           | A build tool of Next.js. Used unmodified as a tool                                                                                                                                                                                                                                                                          |
+| `lightningcss-*` | MPL-2.0           | The platform binaries of `lightningcss`. Used unmodified as tools                                                                                                                                                                                                                                                           |
+| `caniuse-lite`   | CC-BY-4.0         | Browser support data used by the build tooling. Data, not code. Attribution: Alexis Deveria and contributors, https://github.com/browserslist/caniuse-lite                                                                                                                                                                  |
 
 #### Not installed on every platform
 
@@ -127,18 +146,18 @@ The lockfile lists the binaries for every operating system, but only the ones fo
 runs `pnpm install` are installed, so their metadata cannot be read everywhere. The licenses below
 were read from the npm registry when the entries were added and are judged like any other license.
 
-| Package | License | Note |
-|---|---|---|
-| `@emnapi/*` | MIT | WebAssembly fallback of native packages |
-| `@img/sharp-*` | Apache-2.0 AND LGPL-3.0-or-later AND MIT | sharp and libvips binaries for other platforms, the strictest declaration of any of them |
-| `@napi-rs/wasm-runtime` | MIT | WebAssembly fallback of native packages |
-| `@next/swc-*` | MIT | Next.js compiler binaries for other platforms |
-| `@rolldown/binding-*` | MIT | Rolldown binaries for other platforms |
-| `@tailwindcss/oxide-*` | MIT | Tailwind CSS Oxide engine binaries for other platforms; only the one for the current platform is installed |
-| `@tybys/wasm-util` | MIT | WebAssembly fallback of native packages |
-| `@unrs/resolver-binding-*` | MIT | Resolver binaries for other platforms |
-| `fsevents` | MIT | File watching on macOS only, an optional dependency of watchers |
-| `lightningcss-*` | MPL-2.0 | lightningcss binaries for other platforms |
+| Package                    | License                                  | Note                                                                                                       |
+| -------------------------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `@emnapi/*`                | MIT                                      | WebAssembly fallback of native packages                                                                    |
+| `@img/sharp-*`             | Apache-2.0 AND LGPL-3.0-or-later AND MIT | sharp and libvips binaries for other platforms, the strictest declaration of any of them                   |
+| `@napi-rs/wasm-runtime`    | MIT                                      | WebAssembly fallback of native packages                                                                    |
+| `@next/swc-*`              | MIT                                      | Next.js compiler binaries for other platforms                                                              |
+| `@rolldown/binding-*`      | MIT                                      | Rolldown binaries for other platforms                                                                      |
+| `@tailwindcss/oxide-*`     | MIT                                      | Tailwind CSS Oxide engine binaries for other platforms; only the one for the current platform is installed |
+| `@tybys/wasm-util`         | MIT                                      | WebAssembly fallback of native packages                                                                    |
+| `@unrs/resolver-binding-*` | MIT                                      | Resolver binaries for other platforms                                                                      |
+| `fsevents`                 | MIT                                      | File watching on macOS only, an optional dependency of watchers                                            |
+| `lightningcss-*`           | MPL-2.0                                  | lightningcss binaries for other platforms                                                                  |
 
 No package of the app uses a license that conflicts with distributing this project under Apache-2.0.
 
@@ -150,24 +169,24 @@ the exceptions:
 
 #### Exceptions
 
-| Package | License | Note |
-|---|---|---|
-| `html2text` | GPL-3.0-only | Version 2024.2.26. Required by PR-Agent and imported by it at runtime |
-| `python-gitlab` | LGPL-3.0-or-later | Version 8.3.0. Required by PR-Agent, used unmodified as a library |
-| `PyGithub` | LicenseRef-LGPL | Version 2.10.0, LGPL-3.0 upstream. Its metadata only carries the generic LGPL classifier, which the scan reads as `LicenseRef-LGPL`. Required by PR-Agent, used unmodified as a library |
-| `certifi` | MPL-2.0 | Used unmodified |
-| `tqdm` | MPL-2.0 | Declared as MPL-2.0 AND MIT. Used unmodified |
-| `giteapy` | NONE | Version 1.0.8. No license declared in the package metadata. Required by PR-Agent, never used by our runner |
+| Package         | License           | Note                                                                                                                                                                                    |
+| --------------- | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `html2text`     | GPL-3.0-only      | Version 2024.2.26. Required by PR-Agent and imported by it at runtime                                                                                                                   |
+| `python-gitlab` | LGPL-3.0-or-later | Version 8.3.0. Required by PR-Agent, used unmodified as a library                                                                                                                       |
+| `PyGithub`      | LicenseRef-LGPL   | Version 2.10.0, LGPL-3.0 upstream. Its metadata only carries the generic LGPL classifier, which the scan reads as `LicenseRef-LGPL`. Required by PR-Agent, used unmodified as a library |
+| `certifi`       | MPL-2.0           | Used unmodified                                                                                                                                                                         |
+| `tqdm`          | MPL-2.0           | Declared as MPL-2.0 AND MIT. Used unmodified                                                                                                                                            |
+| `giteapy`       | NONE              | Version 1.0.8. No license declared in the package metadata. Required by PR-Agent, never used by our runner                                                                              |
 
 #### Not installed on every platform
 
 `uv.lock` also lists packages that are only installed under a platform marker.
 
-| Package | License | Note |
-|---|---|---|
-| `colorama` | BSD-3-Clause | Windows only |
+| Package          | License      | Note                      |
+| ---------------- | ------------ | ------------------------- |
+| `colorama`       | BSD-3-Clause | Windows only              |
 | `httpx2-jsfetch` | BSD-3-Clause | Pyodide (emscripten) only |
-| `win32-setctime` | MIT | Windows only |
+| `win32-setctime` | MIT          | Windows only              |
 
 Our own source code stays under Apache-2.0: Apache-2.0 is compatible with the GPL-3.0 in one
 direction, and we do not copy or modify any of these packages.

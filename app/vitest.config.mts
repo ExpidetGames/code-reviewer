@@ -15,7 +15,10 @@ const alias = {
     new URL("./src/test-support/empty.ts", import.meta.url),
   ),
 };
-const setupFiles = ["./src/test-support/network-guard.setup.ts"];
+const setupFiles = [
+  "./src/test-support/network-guard.setup.ts",
+  "./src/test-support/dom-shims.setup.ts",
+];
 const maxWorkers = Number(process.env.TEST_MAX_WORKERS) || 4;
 
 export default defineConfig({

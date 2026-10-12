@@ -76,6 +76,10 @@
   --info-foreground: var(--primary-foreground);
   --info-soft: var(--accent);
 
+  /* Modal scrims (shadcn Dialog/AlertDialog/Sheet overlays): a translucent surface token, so the
+   * components never need a `black`/`white` utility (the color guard forbids both). */
+  --overlay: rgb(0 0 0 / 0.5);
+
   /* Charts (the sidebar and chart sets that shadcn blocks expect) */
   --chart-1: #4a44cf;
   --chart-2: #0f766e;
@@ -126,6 +130,7 @@
     --info: var(--primary);
     --info-foreground: var(--primary-foreground);
     --info-soft: var(--accent);
+    --overlay: rgb(0 0 0 / 0.7);
     --chart-1: #8d87f5;
     --chart-2: #2dd4bf;
     --chart-3: #fbbf24;
@@ -175,6 +180,7 @@
   --info: var(--primary);
   --info-foreground: var(--primary-foreground);
   --info-soft: var(--accent);
+  --overlay: rgb(0 0 0 / 0.7);
   --chart-1: #8d87f5;
   --chart-2: #2dd4bf;
   --chart-3: #fbbf24;
@@ -226,6 +232,7 @@
   --color-info: var(--info);
   --color-info-foreground: var(--info-foreground);
   --color-info-soft: var(--info-soft);
+  --color-overlay: var(--overlay);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
