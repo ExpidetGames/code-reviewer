@@ -78,6 +78,14 @@ export function describeSetupIssue(field: string, code: string): string {
 export const PASSWORD_REASON =
   "There are no other rules: a long passphrase of a few unrelated words is the strongest choice. The same rule applies to every account on this instance.";
 
+/**
+ * The one line under a rule that names emails or domains (#172). The shared warning
+ * (`FAIL_CLOSED_WARNING`, #169) states the same in full and sits in the field's InfoHint; this line
+ * only carries what the person has to know without opening it.
+ */
+export const FAIL_CLOSED_LINE =
+  "Until the instance can verify addresses, nobody except you can sign up.";
+
 /** The step of the wizard (1 to 3) a field belongs to, to show the problem where it can be fixed. */
 export function stepOfField(field: string): 1 | 2 | 3 {
   if (field === "tenancy") return 1;
