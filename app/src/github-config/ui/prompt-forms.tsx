@@ -9,7 +9,6 @@ import { useRouter } from "next/navigation";
 import { useId, useState, type FormEvent } from "react";
 import { Button } from "../../ui/button.tsx";
 import type { RequestIssue } from "../../ui/json-request.ts";
-import { STORED_ENCRYPTED_HINT } from "../../secrets/messages.ts";
 import type { GithubConfigView } from "../service.ts";
 import { browserGithubApi, type GithubApi } from "./api.ts";
 import {
@@ -107,11 +106,12 @@ export function UserAuthorizationForm({
           onChange={(event) => setClientSecret(event.target.value)}
           aria-invalid={issueFor("clientSecret") !== undefined}
         />
-        <p className="muted small">
-          {view.secrets.clientSecret === "configured"
-            ? "A secret is saved. Leave the field empty to keep it while the client id is unchanged."
-            : STORED_ENCRYPTED_HINT}
-        </p>
+        {view.secrets.clientSecret === "configured" ? (
+          <p className="muted small">
+            A secret is saved. Leave the field empty to keep it while the client
+            id is unchanged.
+          </p>
+        ) : null}
         {issueFor("clientSecret") ? (
           <p className="field-error">
             {describeGithubIssue(issueFor("clientSecret") as RequestIssue)}
