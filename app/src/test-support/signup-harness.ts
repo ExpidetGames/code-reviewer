@@ -56,7 +56,7 @@ export async function createSignUpHarness(options: SignUpHarnessOptions = {}) {
   const clock = { time: Date.parse("2026-10-11T09:00:00.000Z") };
   const now = () => new Date(clock.time);
   const logs: string[] = [];
-  const pending: Promise<void>[] = [];
+  const pending: Array<() => Promise<void>> = [];
   const session = { userId: null as string | null };
 
   const hash = (await auth.$context).password.hash;
@@ -107,10 +107,12 @@ export async function createSignUpHarness(options: SignUpHarnessOptions = {}) {
       clock.time += ms;
     },
     now,
-    /** Waits for the work that runs after an answer (the mails). */
+    /** Runs the work that waits for the answer to be sent (the account and the mail) and waits for it. */
     async flush() {
-      await Promise.all(pending.splice(0));
+      await Promise.all(pending.splice(0).map((work) => work()));
     },
+    /** How many pieces of work wait for the answer to be sent. Nothing of them has started. */
+    waiting: () => pending.length,
     signUp: (body: unknown, headers?: Record<string, string>) =>
       handlers.signUp(post("/api/sign-up", body, headers)),
     verify: (body: unknown, headers?: Record<string, string>) =>

@@ -4,6 +4,7 @@
 // hash and session lookup, and the mail sender of the instance. Handlers are built per request, so the
 // state they rest on (the rule, the ways to sign in, whether mail can be sent) is read when it matters.
 import "server-only";
+import { after } from "next/server";
 import { getAuth } from "../auth/auth.ts";
 import { loadAuthConfig } from "../auth/config.ts";
 import { isGithubSignInConfigured } from "../github-config/shared.ts";
@@ -35,10 +36,11 @@ export function getSignUpRouteHandlers(): SignUpRouteHandlers {
         return null;
       }
     },
-    // The mail goes out after the answer, so that its duration does not tell whether there was one.
-    // `sendVerificationMail` does not throw; the catch is only a net.
+    // Nothing of the account is looked at before the answer is sent (Next.js runs it after the response),
+    // so neither its content nor its time tells whether there was one. The work does not throw; the catch
+    // is only a net.
     defer: (work) => {
-      void work.catch(() => undefined);
+      after(() => work().catch(() => undefined));
     },
   });
 }

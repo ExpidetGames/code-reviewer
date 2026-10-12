@@ -181,6 +181,86 @@ describe("the mark of the portal rewrite", () => {
   });
 });
 
+describe("the instance admin's request for the portal", () => {
+  // The proxy builds no address for it, so nothing the client sent (the protocol, the host) can end up in
+  // the address of a rewrite that Next.js takes for a request to another server.
+  // #146
+  it.each([
+    ["/admin", "http://localhost:3000"],
+    ["/admin/setup", "https://localhost:3000"],
+    ["/api/admin/settings", "http://127.0.0.1:3000"],
+    ["/api/admin/settings?a=1", "https://reviewer.example.com"],
+  ])(
+    "goes on marked, without a rewrite, whatever origin Next.js made of the request (%s on %s)",
+    async (path, origin) => {
+      lookupSession.mockResolvedValue(aUser(true));
+
+      const response = await newProxy()(
+        new NextRequest(`${origin}${path}`, {
+          headers: {
+            "x-forwarded-proto": "javascript",
+            "x-forwarded-host": "evil.example",
+          },
+        }),
+      );
+
+      expect(response.headers.get("x-middleware-next")).toBe("1");
+      expect(response.headers.get("x-middleware-rewrite")).toBeNull();
+      expect(response.headers.get("location")).toBeNull();
+      expect(response.status).toBe(200);
+      expect(
+        response.headers.get(REQUEST_HEADER(PORTAL_REWRITE_HEADER)),
+      ).not.toBeNull();
+      expect(response.headers.get(REQUEST_HEADER(PORTAL_DENIED_HEADER))).toBe(
+        null,
+      );
+    },
+  );
+
+  // #146
+  it("gets the mark, not the value the client sent", async () => {
+    const proxy = newProxy();
+    const mark = await markOf(proxy);
+    lookupSession.mockResolvedValue(aUser(true));
+
+    const response = await proxy(
+      request("/admin/setup", { [PORTAL_REWRITE_HEADER]: "forged" }),
+    );
+
+    expect(response.headers.get(REQUEST_HEADER(PORTAL_REWRITE_HEADER))).toBe(
+      mark,
+    );
+  });
+});
+
+describe("the header that serves the portal's files", () => {
+  // #146
+  it.each([
+    ["a person who is not an admin", "/admin/setup", () => aUser(false)],
+    ["a person who is not an admin", "/api/admin/settings", () => aUser(false)],
+    ["a person who is not an admin", "/w/acme/projects", () => aUser(false)],
+    ["a visitor", "/login", () => ({ kind: "none" }) as SessionLookup],
+    ["the instance admin", "/w/acme/projects", () => aUser(true)],
+  ])(
+    "is taken off a request that arrives with it from outside (%s, %s)",
+    async (_who, path, lookup) => {
+      lookupSession.mockResolvedValue(lookup());
+
+      const response = await newProxy({
+        workspaceRole: () => Promise.resolve("member"),
+      })(request(path, { [PORTAL_REWRITE_HEADER]: "anything" }));
+
+      expect(response.headers.get(REQUEST_HEADER(PORTAL_REWRITE_HEADER))).toBe(
+        null,
+      );
+      // The proxy lists the request headers that go on; the one the client sent is not among them.
+      const kept = response.headers.get("x-middleware-override-headers");
+      expect(kept).not.toBeNull();
+      expect((kept ?? "").split(",")).not.toContain(PORTAL_REWRITE_HEADER);
+    },
+  );
+});
+
 describe("a request for the files of the portal by their own address", () => {
   // #138
   it.each([

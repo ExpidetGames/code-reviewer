@@ -62,7 +62,7 @@ async function start() {
     baseUrl: ADMIN_TEST_BASE_URL,
     currentUserId: () => Promise.resolve(null),
     defer: (work) => {
-      pending.push(() => work);
+      pending.push(work);
     },
     log: () => undefined,
   });

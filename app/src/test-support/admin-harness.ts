@@ -13,6 +13,7 @@ import {
   MISSING_PATH,
   PORTAL_DENIED_HEADER,
   isAdminPath,
+  portalRewriteTarget,
 } from "../admin/paths.ts";
 import { PORTAL_REWRITE_HEADER } from "../auth/access-proxy.ts";
 import { createAdminRouteHandlers } from "../admin/http.ts";
@@ -361,46 +362,24 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
       null
     )
       return missingAnswer();
-    if (
-      outcome.headers.get("x-middleware-next") !== "1" &&
-      outcome.headers.get("x-middleware-rewrite") === null
-    )
-      return outcome;
-    // The instance admin's request is rewritten to the files of the portal; anybody else's goes on as it
-    // is. The files are all there is: `/admin` itself is no route.
-    const rewrite = outcome.headers.get("x-middleware-rewrite");
-    if (rewrite !== null) {
-      const target = new URL(rewrite);
-      // Next.js runs the proxy again on the path a rewrite leads to, with the headers the rewrite set.
-      const again = new Headers(headers);
-      const mark = outcome.headers.get(
-        `x-middleware-request-${PORTAL_REWRITE_HEADER}`,
-      );
-      if (mark !== null) again.set(PORTAL_REWRITE_HEADER, mark);
-      const second = await setup.access(
-        new NextRequest(
-          `${ADMIN_TEST_BASE_URL}${target.pathname}${target.search}`,
-          {
-            method,
-            headers: again,
-            ...(bodyText === undefined ? {} : { body: bodyText }),
-          },
-        ),
-      );
-      const followed = second.headers.get("x-middleware-rewrite");
-      if (second.headers.get("x-middleware-next") !== "1")
-        return followed === null
-          ? second
-          : reach(new Request(followed), headers);
+    if (outcome.headers.get("x-middleware-next") !== "1") return outcome;
+    // The instance admin's request for the portal goes on marked, and next.config.ts serves it from the
+    // files of the portal (`/admin/setup` is `/instance-portal/setup`). The files are all there is:
+    // `/admin` itself is no route. The proxy builds no address for it, and Next.js does not run it a
+    // second time.
+    const marked =
+      outcome.headers.get(`x-middleware-request-${PORTAL_REWRITE_HEADER}`) !==
+      null;
+    if (marked) {
+      const requested = new URL(build().url);
+      const target = portalRewriteTarget(requested.pathname);
+      if (target === null) return missingAnswer();
       return reach(
-        new Request(
-          `${ADMIN_TEST_BASE_URL}${target.pathname}${target.search}`,
-          {
-            method,
-            headers,
-            ...(bodyText === undefined ? {} : { body: bodyText }),
-          },
-        ),
+        new Request(`${ADMIN_TEST_BASE_URL}${target}${requested.search}`, {
+          method,
+          headers,
+          ...(bodyText === undefined ? {} : { body: bodyText }),
+        }),
         headers,
       );
     }

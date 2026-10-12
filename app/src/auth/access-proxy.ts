@@ -8,6 +8,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import {
   PORTAL_DENIED_HEADER,
+  PORTAL_REWRITE_HEADER,
   isAdminPath,
   isInstanceAdminOnlyPath,
   isInternalPortalPath,
@@ -26,12 +27,7 @@ import {
   type SessionLookup,
 } from "./session-user.ts";
 
-/**
- * Next.js runs the proxy again on the path a rewrite leads to. The rewrite of the admin's request to the
- * files of the portal carries this header with a value only this process knows, so the second run can
- * tell it from a request that asks for the files by their own address.
- */
-export const PORTAL_REWRITE_HEADER = "x-portal-rewrite";
+export { PORTAL_REWRITE_HEADER };
 
 /** SHA-256 of a text: equal in length whatever the text, which is what `timingSafeEqual` needs. */
 function digest(text: string): Buffer {
@@ -58,23 +54,43 @@ export function createAccessProxy({
   const rewriteMark = randomBytes(24).toString("base64url");
   const rewriteMarkDigest = digest(rewriteMark);
 
+  // One comparison per request, however many times the proxy asks.
+  const compared = new WeakMap<NextRequest, boolean>();
+
   /** Whether the request carries the mark (compared in constant time, whatever the length of what was sent). */
   function hasRewriteMark(request: NextRequest): boolean {
+    const known = compared.get(request);
+    if (known !== undefined) return known;
     const sent = request.headers.get(PORTAL_REWRITE_HEADER);
-    if (sent === null) return false;
-    return timingSafeEqual(digest(sent), rewriteMarkDigest);
+    const result =
+      sent !== null && timingSafeEqual(digest(sent), rewriteMarkDigest);
+    compared.set(request, result);
+    return result;
   }
 
   /**
-   * Lets the request go on. The header that marks a request for the files of the portal is the proxy's
-   * alone: one that arrives from outside is taken off every request the proxy sees (not the static files it
-   * leaves out, which the rewrite on the header leaves out as well), so nobody can have an answer rewritten to a
-   * missing path (and a cache between us and them cannot be made to keep that answer).
+   * The headers of a request that goes on. The two headers that tell `next.config.ts` what to do with a
+   * request are the proxy's alone: one that arrives from outside is taken off every request the proxy sees
+   * (not the static files it leaves out, which the rewrites leave out as well), so nobody can have an
+   * answer rewritten to a missing path (and a cache between us and them cannot be made to keep that
+   * answer), or be served the files of the portal. The portal's header stays on a request that carries the
+   * mark, which is the proxy's own rewrite coming round again.
    */
-  function forward(request: NextRequest): NextResponse {
-    if (!request.headers.has(PORTAL_DENIED_HEADER)) return NextResponse.next();
+  function cleanedHeaders(request: NextRequest): Headers | null {
+    const carriesDenied = request.headers.has(PORTAL_DENIED_HEADER);
+    const carriesPortal =
+      request.headers.has(PORTAL_REWRITE_HEADER) && !hasRewriteMark(request);
+    if (!carriesDenied && !carriesPortal) return null;
     const headers = new Headers(request.headers);
     headers.delete(PORTAL_DENIED_HEADER);
+    if (carriesPortal) headers.delete(PORTAL_REWRITE_HEADER);
+    return headers;
+  }
+
+  /** Lets the request go on, without the headers that are the proxy's alone. */
+  function forward(request: NextRequest): NextResponse {
+    const headers = cleanedHeaders(request);
+    if (headers === null) return NextResponse.next();
     return NextResponse.next({ request: { headers } });
   }
 
@@ -84,7 +100,7 @@ export function createAccessProxy({
    * (a rewrite or a 404 made here would show in the answer, see PORTAL_DENIED_HEADER).
    */
   function treatAsMissing(request: NextRequest): NextResponse {
-    const headers = new Headers(request.headers);
+    const headers = cleanedHeaders(request) ?? new Headers(request.headers);
     headers.set(PORTAL_DENIED_HEADER, "1");
     return NextResponse.next({ request: { headers } });
   }
@@ -214,17 +230,18 @@ export function createAccessProxy({
         if (isInternalPortalPath(pathname) && !hasRewriteMark(request))
           return treatAsMissing(request);
         if (signedIn === null) return forward(request);
-        const target = signedIn.isInstanceAdmin
-          ? portalRewriteTarget(pathname)
-          : null;
-        if (target !== null) {
-          const marked = new Headers(request.headers);
-          marked.delete(PORTAL_DENIED_HEADER);
+        if (
+          signedIn.isInstanceAdmin &&
+          portalRewriteTarget(pathname) !== null
+        ) {
+          // The request goes on marked and `next.config.ts` serves it from the files of the portal. The
+          // proxy builds no address for it: the one Next.js made of the request has the protocol and the
+          // host of whatever the client sent as `X-Forwarded-Proto` and `Host`, and a rewrite to an origin
+          // other than Next.js's own is a request to another server, which answered 500 here.
+          const marked =
+            cleanedHeaders(request) ?? new Headers(request.headers);
           marked.set(PORTAL_REWRITE_HEADER, rewriteMark);
-          return NextResponse.rewrite(
-            new URL(`${target}${request.nextUrl.search}`, request.url),
-            { request: { headers: marked } },
-          );
+          return NextResponse.next({ request: { headers: marked } });
         }
         return forward(request);
       }

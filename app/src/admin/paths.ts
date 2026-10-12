@@ -28,6 +28,18 @@ export const MISSING_PATH = "/page-not-found-a41e0c";
  */
 export const PORTAL_DENIED_HEADER = "x-portal-denied";
 /**
+ * The request header with which the proxy (src/auth/access-proxy.ts) sends the instance admin's request to
+ * the files of the portal, and the mark that lets such a request through the proxy a second time. Its value
+ * is a secret of the running proxy (Next.js does not run the proxy again on the path such a rewrite leads to; if it
+ * did, the mark is how the proxy would tell its own request from one that asks for the files by their address).
+ * `next.config.ts` rewrites `/admin/...` and `/api/admin/...` to the files
+ * when the header is present, so the proxy builds no address for the rewrite: an address would carry the
+ * protocol and host Next.js made of the request (including a client's `X-Forwarded-Proto`), and Next.js treats
+ * a rewrite to any other origin than its own as a request to forward to that server, which fails (500).
+ * Only the proxy may set it: it takes it off every request it sees that arrives with it from outside.
+ */
+export const PORTAL_REWRITE_HEADER = "x-portal-rewrite";
+/**
  * What the proxy does not see (the alternatives of the negative lookahead in `config.matcher` of
  * src/proxy.ts, which has to be a literal there, so src/proxy.test.ts checks that the two agree).
  * A request for these never has its `PORTAL_DENIED_HEADER` taken off, so the rewrite that acts on the

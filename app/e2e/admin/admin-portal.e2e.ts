@@ -297,6 +297,79 @@ test.describe("the admin portal", () => {
     expect(portal?.status()).toBe(200);
   });
 
+  // A client can send any `X-Forwarded-Proto` (a reverse proxy sets `https`, and nothing in front of the
+  // app can be told from a client that sends the same). The proxy's rewrite to the files of the portal must
+  // not depend on it.
+  // #146
+  test("the instance admin reaches the portal whatever X-Forwarded-Proto says, as behind a reverse proxy", async ({
+    page,
+  }) => {
+    await signInAsAdmin(page);
+    const plain = await observe(page, "/api/admin/settings");
+    expect(plain.status).toBe(200);
+    const portal = await observe(page, "/admin/setup", {
+      headers: { accept: "text/html" },
+    });
+    expect(portal.status).toBe(200);
+
+    for (const forwarded of [
+      "https",
+      "http",
+      "HTTPS",
+      "https, http",
+      "javascript",
+      "",
+      "garbage ://",
+    ]) {
+      const label = JSON.stringify(forwarded);
+      const headers = { "x-forwarded-proto": forwarded };
+      const data = await observe(page, "/api/admin/settings", { headers });
+      expect(data.status, `data route ${label}`).toBe(200);
+      expect(data.body, `data route ${label}`).toBe(plain.body);
+      const rendered = await observe(page, "/admin/setup", {
+        headers: { ...headers, accept: "text/html" },
+      });
+      expect(rendered.status, `page ${label}`).toBe(200);
+    }
+    // What a reverse proxy (Coolify, Traefik) sends with a request.
+    const proxied = await observe(page, "/api/admin/settings", {
+      headers: {
+        "x-forwarded-proto": "https",
+        "x-forwarded-host": "reviewer.example.com",
+        "x-forwarded-port": "443",
+      },
+    });
+    expect(proxied.status).toBe(200);
+    expect(proxied.body).toBe(plain.body);
+  });
+
+  // #146
+  test("a person who is not an admin gets the answer of a missing path whatever X-Forwarded-Proto says", async ({
+    page,
+  }) => {
+    await signInThroughTheForm(page, member);
+
+    for (const forwarded of ["https", "javascript", "", "garbage ://"]) {
+      // The header the proxy sets for the admin's request is the proxy's alone; one sent from outside
+      // does not serve the portal to anyone.
+      const headers = {
+        "x-forwarded-proto": forwarded,
+        "x-portal-rewrite": "anything",
+      };
+      for (const path of ["/api/admin/settings", "/admin", "/admin/setup"]) {
+        const expected = await observe(page, MISSING, { headers });
+        const answer = await observe(page, path, { headers });
+        expect(answer.status, `${path} ${JSON.stringify(forwarded)}`).toBe(404);
+        expect(answer.lines, `${path} ${JSON.stringify(forwarded)}`).toEqual(
+          expected.lines,
+        );
+        expect(answer.body, `${path} ${JSON.stringify(forwarded)}`).toBe(
+          expected.body,
+        );
+      }
+    }
+  });
+
   // #98-AD-17
   test("the page of a reset link asks the browser not to send its address on as a referrer", async ({
     request,
