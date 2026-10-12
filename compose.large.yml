@@ -107,8 +107,9 @@ services:
       RUNNER_ID: ${RUNNER_ID:-}
 
   # A reverse proxy sketch. In production use your own (nginx, Caddy, Traefik, a cloud load
-  # balancer): terminate TLS here, forward to `app:3000`, and keep a health check on /api/health. This
-  # minimal example forwards everything to the app over the compose network on APP_PORT.
+  # balancer): terminate TLS here, forward to `app:3000`, and keep a health check on /api/health. The
+  # default `docker/proxy/default.conf` forwards everything to the app; replace it with your own
+  # (set PROXY_CONFIG_DIR) for TLS and a real server_name (docs/deployment-large.md, section 6).
   proxy:
     image: ${PROXY_IMAGE:-nginx:1.27-alpine}
     restart: unless-stopped
@@ -121,8 +122,8 @@ services:
       - nginx
       - -g
       - "daemon off;"
-    # The operator provides the server block (TLS, server_name, proxy_pass http://app:3000). It is a
-    # sketch on purpose: a real deployment mounts its own configuration here.
+    # The default config in docker/proxy/default.conf forwards to the app; mount your own directory
+    # (set PROXY_CONFIG_DIR) for TLS and a real server_name.
     volumes:
       - ${PROXY_CONFIG_DIR:-./docker/proxy}:/etc/nginx/conf.d:ro
 

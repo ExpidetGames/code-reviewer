@@ -5,13 +5,17 @@
 // in it, and that the required variables are the ones docs/deployment-large.md lists. Whether the
 // stack really starts is the operator's deployment, not an automated test (the small stack's smoke
 // test is docker/smoke/compose.sh).
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
 
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
 const source = readFileSync(`${repoRoot}compose.large.yml`, "utf8");
+
+function read(path: string): string {
+  return readFileSync(`${repoRoot}${path}`, "utf8");
+}
 
 type Service = {
   image?: string;
@@ -129,6 +133,12 @@ describe("compose.large.yml secrets and required variables", () => {
     expect(service("postgres").environment?.POSTGRES_PASSWORD).toContain(
       "${POSTGRES_PASSWORD:?",
     );
+  });
+
+  // #105-PG-16
+  it("ships the default proxy config it mounts, forwarding to the app", () => {
+    expect(existsSync(`${repoRoot}docker/proxy/default.conf`)).toBe(true);
+    expect(read("docker/proxy/default.conf")).toContain("app:3000");
   });
 
   // #105-PG-16
