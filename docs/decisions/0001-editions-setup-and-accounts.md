@@ -226,6 +226,10 @@ GitHub reports; the old OAuth sign-in did not provide one).
   access to `/admin` meanwhile so that SMTP can be repaired.
 - Without SMTP no email can be verified; email and password accounts are usable unverified under the
   rule "everyone".
+- **An email and password sign-up that is never verified is removed after a week** (the maintenance job,
+  `src/maintenance/`; only while SMTP is configured), together with its password account and its pending
+  links. Verified accounts, the instance admin, imported users, workspace members, anyone with a session
+  and GitHub identities are never touched. A new sign-up for the address is then an ordinary one.
 
 **A verification link is bound to the password of the sign-up that made it.** Someone can sign up with
 another person's address before that person does (an account pre-hijack): the owner then gets a mail, and a
