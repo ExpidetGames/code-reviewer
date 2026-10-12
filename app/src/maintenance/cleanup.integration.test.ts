@@ -18,6 +18,7 @@ import {
   VERIFY_TOKEN_WINDOW_MS,
 } from "../signup/limits.ts";
 import { createTestDatabase } from "../test-support/test-database.ts";
+import { WORKSPACE_WINDOWS_MS } from "../workspaces/rate-limits.ts";
 import {
   cleanUpExpiredRows,
   LONGEST_RATE_LIMIT_WINDOW_MS,
@@ -117,6 +118,7 @@ describe("the cleanup of old rows", () => {
       VERIFICATION_MAIL_ADDRESS_WINDOW_MS,
       VERIFICATION_MAIL_GLOBAL_WINDOW_MS,
       VERIFY_TOKEN_WINDOW_MS,
+      ...WORKSPACE_WINDOWS_MS,
     ])
       expect(window).toBeLessThanOrEqual(LONGEST_RATE_LIMIT_WINDOW_MS);
   });
