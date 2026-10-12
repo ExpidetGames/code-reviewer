@@ -53,7 +53,7 @@ export type GithubProviderOptions = {
   }) => Promise<GithubSignInDecision>;
 };
 
-type GithubProfile = {
+export type GithubProfile = {
   id: number;
   login: string;
   name?: string | null;
@@ -89,8 +89,22 @@ export function githubProviderConfig(
   };
 }
 
-async function exchangeCode(
-  options: GithubProviderOptions,
+/** The address and the credentials of the App's user authorization. */
+export type GithubAuthorizationEndpoint = {
+  clientId: string;
+  clientSecret: string;
+  /** Base URL of `/login/oauth/authorize` and `/login/oauth/access_token`. */
+  oauthBaseUrl: string;
+};
+
+/**
+ * Trades an authorization code (with the PKCE verifier of the request, when there was one) for the user
+ * token of the App. Used by the sign in (through Better Auth) and by the linking of a GitHub identity
+ * (src/github-signin/link.ts). Throws with a message that names the status or GitHub's error code, never
+ * the code, the client secret or a token.
+ */
+export async function exchangeCode(
+  options: GithubAuthorizationEndpoint,
   timeoutMs: number,
   grant: { code: string; redirectURI: string; codeVerifier?: string },
 ): Promise<OAuth2Tokens> {
@@ -246,7 +260,7 @@ async function readEmails(
   return emails;
 }
 
-async function getJson<T>(
+export async function getJson<T>(
   url: string,
   accessToken: string,
   timeoutMs: number,

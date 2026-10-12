@@ -65,6 +65,7 @@ describe("the routes of the portal", () => {
       "/admin/setup",
       "/api/admin/github",
       "/api/admin/github/check",
+      "/api/admin/github/link",
       "/api/admin/github/manifest",
       "/api/admin/github/manifest/callback",
       "/api/admin/mail/test",

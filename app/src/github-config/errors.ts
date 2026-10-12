@@ -27,6 +27,8 @@ export const GITHUB_ERROR_CODES = [
   "not_configured",
   "app_auth_failed",
   "github_unreachable",
+  /** The user authorization (client id and secret) is not configured, so there is nothing to authorize. */
+  "github_not_configured",
 ] as const;
 export type GithubErrorCode = (typeof GITHUB_ERROR_CODES)[number];
 
@@ -44,4 +46,5 @@ export const GITHUB_ERROR_STATUS: Record<GithubErrorCode, number> = {
   not_configured: 409,
   app_auth_failed: 422,
   github_unreachable: 502,
+  github_not_configured: 409,
 };

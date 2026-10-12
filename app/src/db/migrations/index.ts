@@ -29,6 +29,7 @@ import { migration as createPasswordResetTokens } from "./20261011200100_create_
 import { migration as createEmailVerificationTokens } from "./20261011210000_create_email_verification_tokens.ts";
 import { migration as createSignedStates } from "./20261012100000_create_signed_states.ts";
 import { migration as addUsersEmailConflict } from "./20261012100100_add_users_email_conflict.ts";
+import { migration as uniqueAccounts } from "./20261012100200_unique_accounts.ts";
 
 const migrations: Record<string, Migration> = {
   "0001_create_app_meta": createAppMeta,
@@ -58,6 +59,7 @@ const migrations: Record<string, Migration> = {
     createEmailVerificationTokens,
   "20261012100000_create_signed_states": createSignedStates,
   "20261012100100_add_users_email_conflict": addUsersEmailConflict,
+  "20261012100200_unique_accounts": uniqueAccounts,
 };
 
 export const migrationProvider: MigrationProvider = {

@@ -64,10 +64,12 @@ const PROTECTED_ROUTES = [
 ] as const;
 // Data routes: a visitor without a session gets 401 instead of a redirect.
 const PROTECTED_DATA_ROUTES = [
+  "/api/account/github/link",
   "/api/instance-portal/settings",
   "/api/instance-portal/mail/test",
   "/api/instance-portal/github",
   "/api/instance-portal/github/check",
+  "/api/instance-portal/github/link",
   "/api/instance-portal/github/manifest",
   "/api/instance-portal/github/manifest/callback",
   "/api/backup/status",

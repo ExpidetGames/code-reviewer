@@ -22,17 +22,7 @@ export async function lookupAdmin(): Promise<AdminAccess> {
   );
 }
 
-/** The id of the session of the current request, or null. A state that travels through GitHub is bound to it. */
-export async function lookupSessionId(): Promise<string | null> {
-  try {
-    const session = await getAuth().api.getSession({
-      headers: await headers(),
-    });
-    return session?.session.id ?? null;
-  } catch {
-    return null;
-  }
-}
+export { lookupSessionId } from "../auth/session.ts";
 
 /**
  * The instance admin of the current request, for a page or a layout. Without a session the person is

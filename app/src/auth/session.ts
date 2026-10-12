@@ -28,6 +28,18 @@ export const currentLookup = cache(async (): Promise<SessionLookup> => {
   return lookupSession(getAuth(), requestHeaders, getAccessGates());
 });
 
+/** The id of the session of the current request, or null. A state that travels through GitHub is bound to it. */
+export async function lookupSessionId(): Promise<string | null> {
+  try {
+    const session = await getAuth().api.getSession({
+      headers: await headers(),
+    });
+    return session?.session.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The user of the current request, who may use the app. Without a valid session the person is sent
  * to the login page; somebody who still has to verify the address, or who has no workspace, to the
