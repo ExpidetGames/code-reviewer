@@ -4,7 +4,8 @@
 // and 2.6). An account is created only when the sign-up is open (`signUpAvailability`), the address
 // passes the rule and no account has it yet. Nothing about that is visible from outside: a visitor
 // whose address is not allowed, or already has an account, gets exactly the answer of a new account, and
-// the work is the same size (the password is hashed in every case, the mail is sent after the answer).
+// the work is the same size (the password is hashed in every case, and the rule, the account and the mail
+// all wait until the answer is sent).
 // What a visitor can learn is only what does not depend on the address: that the sign-up is closed, that
 // it is switched off, that the form is wrong, that they are going too fast.
 //
@@ -52,8 +53,12 @@ export type SignUpDependencies = {
   limits: SignUpLimits;
   facts: () => Promise<SignUpFacts>;
   baseUrl: string;
-  /** Runs work after the answer is on its way (the mail), so its duration does not show. */
-  defer: (work: Promise<void>) => void;
+  /**
+   * Runs work after the answer is on its way. It takes a function, not a promise: nothing of the work (not
+   * even the look at the account) may start before the answer is sent, so neither its content nor its time
+   * shows whether there was an account.
+   */
+  defer: (work: () => Promise<void>) => void;
   now?: () => Date;
   newId?: () => string;
   log?: (message: string) => void;
@@ -149,7 +154,7 @@ export async function signUp(
   dependencies: SignUpDependencies,
   input: { email: unknown; password: unknown },
 ): Promise<SignUpOutcome> {
-  const { hashPassword, mail, limits, facts, defer } = dependencies;
+  const { hashPassword, limits, facts, defer } = dependencies;
 
   // What does not depend on the address comes first: is the sign-up open at all.
   const state = await facts();
@@ -186,29 +191,53 @@ export async function signUp(
   const passwordHash = await hashPassword(password);
   const next = availability.verifyByMail ? "verify_email" : "sign_in";
 
-  if (!evaluateSignUpRule(state.rule, email).ok)
-    return { kind: "accepted", next };
-  const created = await createAccount(dependencies, email, passwordHash);
-  // An address that has an account already: the account is left as it is (its password is not
-  // replaced). Only when it waits for verification a link for this sign-up's password goes out.
-  const account =
-    created ??
-    (availability.verifyByMail
-      ? await findWaitingAccount(dependencies.db, email)
-      : null);
-  if (account !== null && availability.verifyByMail)
-    defer(
-      sendVerificationMail(
-        {
-          db: dependencies.db,
-          mail,
-          baseUrl: dependencies.baseUrl,
-          now: dependencies.now,
-          log: dependencies.log,
-        },
-        { id: account.id, email },
-        passwordHash,
-      ),
-    );
+  // Nothing that depends on the address is done before the answer: whether the rule lets it in, whether it
+  // has an account, the account, the link and the mail all wait for the answer to be on its way, so neither
+  // the answer nor its time tells which of them there was.
+  defer(() =>
+    provisionAccount(dependencies, {
+      email,
+      passwordHash,
+      rule: state.rule,
+      verifyByMail: availability.verifyByMail,
+    }),
+  );
   return { kind: "accepted", next };
+}
+
+/**
+ * The part of a sign-up that depends on the address, run after the answer: the rule, the account and, with
+ * a mail server, the link. An address that has an account already: the account is left as it is (its
+ * password is not replaced), and only when it waits for verification a link for this sign-up's password goes
+ * out. Never throws and says nothing to anyone; a failure is logged by its code only, never with the address.
+ */
+async function provisionAccount(
+  dependencies: SignUpDependencies,
+  {
+    email,
+    passwordHash,
+    rule,
+    verifyByMail,
+  }: {
+    email: string;
+    passwordHash: string;
+    rule: SignUpFacts["rule"];
+    verifyByMail: boolean;
+  },
+): Promise<void> {
+  const { db, mail, baseUrl, now, log = console.error } = dependencies;
+  try {
+    if (!evaluateSignUpRule(rule, email).ok) return;
+    const created = await createAccount(dependencies, email, passwordHash);
+    const account =
+      created ?? (verifyByMail ? await findWaitingAccount(db, email) : null);
+    if (account === null || !verifyByMail) return;
+    await sendVerificationMail(
+      { db, mail, baseUrl, now, log },
+      { id: account.id, email },
+      passwordHash,
+    );
+  } catch {
+    log("[signup] SIGN_UP_FAILED: an account could not be made (error).");
+  }
 }
