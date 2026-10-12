@@ -77,15 +77,15 @@ afterEach(() => {
 
 describe("starting the server", () => {
   // CR-26-T03
-  it("warns about a missing LLM key and still starts", async () => {
+  it("warns about a legacy LLM key that is set but wrong and still starts", async () => {
     vi.stubEnv("LLM_PROVIDER", "openrouter");
-    vi.stubEnv("LLM_API_KEY", "");
+    vi.stubEnv("LLM_API_KEY", "a key with spaces");
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
     await register();
 
     expect(warn).toHaveBeenCalledTimes(1);
-    expect(String(warn.mock.calls[0]?.[0])).toContain("LLM_API_KEY_MISSING");
+    expect(String(warn.mock.calls[0]?.[0])).toContain("LLM_API_KEY_INVALID");
     expect(calls).toEqual([
       "auth-check",
       "backup-check",

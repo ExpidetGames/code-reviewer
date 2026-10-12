@@ -29,6 +29,11 @@ const githubPort = Number(process.env.E2E_GITHUB_PORT);
 // own so that the three never overlap the fake GitHub's port.
 process.env.E2E_SMTP_PORT ||= String(40500 + Math.floor(Math.random() * 20000));
 const smtpPort = Number(process.env.E2E_SMTP_PORT);
+// The fake LLM of the journey of the LLM key. The fifth app (multi-tenant) checks keys at this address (the
+// "test key" button), so the port has to be known when the app starts: random, in a range of its own, and kept
+// in the environment for the worker processes like the others.
+process.env.E2E_LLM_PORT ||= String(61000 + Math.floor(Math.random() * 4000));
+const llmFakePort = Number(process.env.E2E_LLM_PORT);
 
 export const e2eEnv = {
   appPort,
@@ -82,6 +87,9 @@ export const e2eEnv = {
   adminEmail: "admin@e2e.test",
   adminPassword: "e2e-admin-passphrase-orbit-lantern-77",
   githubUrl: `http://127.0.0.1:${githubPort}`,
+  /** The fake LLM of the LLM key journey; the fifth app is pointed at its `/api/v1` (LLM_API_BASE_URL). */
+  llmFakePort,
+  llmFakeApiUrl: `http://127.0.0.1:${llmFakePort}/api/v1`,
   githubClientId: "e2e-client-id",
   githubClientSecret: "e2e-client-secret-value",
   appSecret: "e2e-app-secret-0123456789-0123456789-abcdef",

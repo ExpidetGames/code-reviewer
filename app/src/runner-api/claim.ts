@@ -98,8 +98,12 @@ export type ClaimDeps = {
   registry: IntegrationRegistry;
   guard: ClaimGuard;
   jobOptions: JobOptionsSource;
-  loadLlm: () => LlmAccessResult;
-  /** Where the key handed out with a claim is noted, so a rotated key can still be masked. */
+  /**
+   * The LLM access of ONE workspace: the one the claimed job names (`job.workspaceId`), never another
+   * (src/llm/resolve.ts, docs/decisions/0001-editions-setup-and-accounts.md, section 2.8).
+   */
+  loadLlm: (workspaceId: string) => Promise<LlmAccessResult>;
+  /** Where the key handed out with a claim is noted (encrypted, in the database), so a rotated key can still be masked. */
   claimedKeys: Pick<ClaimedKeys, "remember">;
   now: () => Date;
   logger: RunnerApiLogger;
@@ -192,12 +196,19 @@ async function prepare(
       ? { kind: "cancelled", errorCode: decision.errorCode }
       : refuse(decision.errorCode);
 
-  const llm = deps.loadLlm();
-  // The log names which variable is wrong and why (names and codes, never a value).
+  // The access of the job's own workspace: its key, or the operator's, or the legacy variables of a
+  // single-tenant instance. Another workspace's key is never looked at.
+  const llm = await deps.loadLlm(job.workspaceId);
+  // The log names the variables that are wrong and why (names and codes, never a value), or else the
+  // reason the workspace has no access.
   if (!llm.ok)
     return refuse(
       llm.errorCode,
-      llm.issues.map((issue) => `${issue.variable}: ${issue.code}`).join(", "),
+      llm.issues.length > 0
+        ? llm.issues
+            .map((issue) => `${issue.variable}: ${issue.code}`)
+            .join(", ")
+        : llm.reason,
     );
 
   const args = argsOf(job);
@@ -438,7 +449,9 @@ export async function handleClaim(
         });
       }
 
-      deps.claimedKeys.remember(
+      // Before the key leaves with the response: if it cannot be remembered, the job is given back (below)
+      // and no runner has the key.
+      await deps.claimedKeys.remember(
         claimed.job.id,
         prepared.response.job.input.llm.apiKey,
       );

@@ -3,6 +3,9 @@
 import type { Metadata } from "next";
 import { getConfigStatusFor } from "@/config-status/shared";
 import { configAudienceOf } from "@/config-status/status";
+import { getWorkspaceLlm } from "@/llm/shared";
+import { LlmAccessNotice } from "@/llm/ui/llm-access-notice";
+import { LlmAccessSection } from "@/llm/ui/llm-access-section";
 import { reviewSettingsServiceFor } from "@/review-settings/shared";
 import {
   GlobalSettingsPageContent,
@@ -45,6 +48,7 @@ export default async function SettingsPage({
         workspaceId={workspace.id}
         workspaceSlug={workspace.slug}
         canEdit={can(role, "manage_review_defaults")}
+        canManageLlmKey={can(role, "manage_llm_key")}
         user={user}
       />
     </>
@@ -55,11 +59,13 @@ async function SettingsContent({
   workspaceId,
   workspaceSlug,
   canEdit,
+  canManageLlmKey,
   user,
 }: {
   workspaceId: string;
   workspaceSlug: string;
   canEdit: boolean;
+  canManageLlmKey: boolean;
   user: { isInstanceAdmin: boolean };
 }) {
   const data = await loadGlobalSettingsPage({
@@ -67,12 +73,28 @@ async function SettingsContent({
     // Only the instance admin gets the names of the variables that are wrong.
     config: () => getConfigStatusFor(user),
   });
+  const llm = getWorkspaceLlm();
+  const keyStatus = await llm.keyServiceFor(workspaceId).status();
+  const summary = await llm.summaryFor(workspaceId);
   return (
-    <GlobalSettingsPageContent
-      workspaceSlug={workspaceSlug}
-      audience={configAudienceOf(user)}
-      canEdit={canEdit}
-      data={data}
-    />
+    <>
+      <LlmAccessNotice
+        workspaceSlug={workspaceSlug}
+        summary={summary}
+        canManage={canManageLlmKey}
+      />
+      <LlmAccessSection
+        workspaceSlug={workspaceSlug}
+        canManage={canManageLlmKey}
+        keyStatus={keyStatus}
+        summary={summary}
+      />
+      <GlobalSettingsPageContent
+        workspaceSlug={workspaceSlug}
+        audience={configAudienceOf(user)}
+        canEdit={canEdit}
+        data={data}
+      />
+    </>
   );
 }

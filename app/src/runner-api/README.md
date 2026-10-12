@@ -20,7 +20,7 @@ The runner (Python, `runner/`) asks the app for work over HTTP: it **claims** a 
 | `redact.ts`                        | Removes anything that looks like a credential from a result before it is stored                                                                                                                                 |
 | `responses.ts`                     | Every answer: `Cache-Control: no-store`, the error form `{ error: { code, message } }`                                                                                                                          |
 | `claim-guard.ts`, `job-options.ts` | The two hooks (below); `project-claim-guard.ts` and `review-settings-job-options.ts` are what the running server plugs in                                                                                       |
-| `claimed-keys.ts`                  | In memory only: the LLM key handed out with the claim of each job, so a rotated key can still be masked in its result                                                                                           |
+| `claimed-keys.ts`                  | In the database, encrypted (`job_claimed_keys`): the LLM key handed out with the claim of each job, so a rotated key can still be masked in its result by whichever app instance completes it                   |
 | `contract.ts`                      | The TypeScript types and code lists of the contract                                                                                                                                                             |
 | `shared.ts`                        | The wiring of the running server (`getRunnerApi()`, `withRunnerApi`); the route files under `src/app/api/runners/v1/` only call `withRunnerApi`, which answers a failure while setting up in the usual 500 form |
 
@@ -78,13 +78,15 @@ Every answer, including `204`, carries `Cache-Control: no-store`.
 for that job, in this order:
 
 1. **The claim guard** may refuse it (below).
-2. **LLM access** must be configured: the shared LLM configuration of `src/llm` (`getLlmAccess()`, read
-   from the environment on every claim): `LLM_PROVIDER` (required, `openrouter`) and `LLM_API_KEY`
-   (required); `LLM_MODEL` (default `anthropic/claude-haiku-5.5`) and `LLM_MAX_TOKENS` are optional.
-   Otherwise the job ends as `failed` with `llm_not_configured`. **Operations:** this fails every job a
-   runner claims, up to 25 per request, for good; fixing the setting later does not revive them (they
-   have to be queued again, for example by a new commit or a comment). Set `LLM_PROVIDER` and
-   `LLM_API_KEY` before the first runner connects.
+2. **LLM access** of the job's own workspace (`llm.accessFor(job.workspaceId)`, `src/llm/resolve.ts`): the key the
+   workspace entered itself, or, if the operator offers included usage (off), the operator's, or, on a
+   single-tenant instance, the legacy `LLM_PROVIDER`/`LLM_API_KEY` variables. The key of another workspace is
+   never looked at, and a workspace without a key does not get one: the job ends as `failed` with
+   `llm_not_configured` (the log line names the reason, `no_key`, `key_unreadable`, `key_binding_mismatch`, or the
+   legacy variables that are wrong). **Operations:** this fails every job of that workspace a runner claims, up to 25
+   per request, for good; entering a key later does not revive them (they have to be queued again, for example
+   by a new commit or a comment). The key is remembered, encrypted, in the database before the response leaves
+   (`claimed-keys.ts`); if that fails the job is given back and the runner gets a 500 without a key.
    **Options** of the job come next (`JobOptionsSource`, below): the model and token budget of the
    review settings replace the instance's model and context window (`llm.model`, `llm.maxTokens`), and
    the other options go into `env`. `llm.baseUrl` and `llm.fallbackModels` are never sent (the LLM
@@ -123,7 +125,8 @@ The body is `{ leaseToken, result }`. `result` is what `code-reviewer-run-job` p
   result).
 - **No secrets are stored.** The runner redacts its own log. As a second line, `redact.ts` removes
   anything that looks like a credential (GitHub tokens, provider keys, bearer credentials) and the exact
-  LLM key and runner token from `logTail`, `errorMessage` and `commentUrl` before they are stored. The
+  LLM key of the claim (from the database, so any app instance knows it), the current key of the job's workspace
+  and the runner token from `logTail`, `errorMessage` and `commentUrl` before they are stored. The
   git token is not known to the app after the claim, so it can only be recognised by its shape.
 - **A runner that is shut down** reports `ok: false, errorCode: "runner_shutdown"`. That is not a result:
   the job is given back with `release` (it waits again, one attempt counted, the same cap as a lapsed
