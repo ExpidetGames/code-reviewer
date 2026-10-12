@@ -56,13 +56,14 @@ afterEach(() => {
 });
 
 describe("the routes of the portal", () => {
-  it("are found on the file system: the pages of the five sections and the settings route", () => {
+  it("are found on the file system: the pages of the five sections, the settings route and the test mail route", () => {
     expect(adminRoutes.map(({ route }) => route).sort()).toEqual([
       "/admin",
       "/admin/integrations",
       "/admin/limits",
       "/admin/mail",
       "/admin/setup",
+      "/api/admin/mail/test",
       "/api/admin/settings",
     ]);
   });

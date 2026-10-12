@@ -113,4 +113,17 @@ describe("the instance settings repository, with who and when", () => {
       await createInstanceSettingsRepository(db).getWithMeta("tenancy"),
     ).toBeUndefined();
   });
+
+  it("removes a setting, so it reads as never saved, and says whether there was one", async () => {
+    const { db } = await createTestDatabase();
+    const repository = createInstanceSettingsRepository(db);
+    await repository.set("tenancy", "multi", null);
+
+    const first = await repository.remove("tenancy");
+    const second = await repository.remove("tenancy");
+
+    expect(first).toBe(true);
+    expect(second).toBe(false);
+    expect(await repository.get("tenancy")).toBeUndefined();
+  });
 });

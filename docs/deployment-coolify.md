@@ -218,7 +218,6 @@ Variables that exist in `.env.example` but that you **do not set on Coolify**:
 | `GITHUB_APP_PRIVATE_KEY_PATH` | not used | The Compose file mounts no key file; use `GITHUB_APP_PRIVATE_KEY`. |
 | `BACKUP_DIR` | not used | The image fixes it to `/backups`, the mount point of the backup volume. |
 | `ALLOW_TEST_GITHUB_ENDPOINTS`, `GITHUB_OAUTH_BASE_URL`, `GITHUB_API_BASE_URL` | not used | For the test stack with a fake GitHub only. Never set them in a real deployment. |
-| `ALLOW_TEST_MAIL_OUTBOX`, `TEST_MAIL_OUTBOX_FILE` | not used | For the test stack only: mail goes to a file instead of being sent. Never set them in a real deployment; mail is configured in the admin portal, not here. |
 | `RUNNER_API_URL` | fixed | The Compose file sets it to `http://app:3000`, the app over the Docker network. It is not a setting. |
 | `RUNNER_SHUTDOWN_GRACE_SECONDS` | not used | How long running reviews may finish after a stop. The Compose file leaves the runner's 60 seconds and gives the runner `stop_grace_period: 90s` for it ([section 9](#stopping-the-runner)); the two belong together. |
 | `PR_AGENT_COMMAND` | not used | Replaces PR-Agent by another command, for test stacks with a fake. The runner would hand that command every job with its GitHub token and LLM key. The Compose files never pass it on; never set it. |
@@ -275,11 +274,24 @@ Every start of the app prints a fresh 6-digit **setup code** in its log while th
 
 What to know:
 
-- **A lost admin password** (no mail server yet): run `admin reset-password <email>` inside the `app`
+- **A lost admin password** (with a mail server, "Forgot your password?" on the sign-in page mails a link;
+  without one): run `admin reset-password <email>` inside the `app`
   container (Coolify: the **Terminal** of the service `app`; plain Docker: `docker compose exec app admin
   reset-password <email>`). It prints a link that sets a new password once, within 30 minutes, and signs the
   account out everywhere. Whoever can open a shell in the container can do this; that is the proof of
   operator rights.
+- **Mail** is set up in the admin portal (**Mail**), never through environment variables: SMTP host, port, how
+  the connection is secured (STARTTLS on port 587, TLS on 465, or none, which the page warns about), the login
+  and the sender address. The password is stored encrypted with a key derived from `APP_SECRET`, shown nowhere
+  and never returned; leave the field empty to keep it. **Send test mail** sends one message to your own
+  address and, when it fails, says why in words (host not found, nothing listening, certificate, login
+  refused, sender refused, timeout). Certificates are checked; "Accept a self-signed certificate" turns the
+  check off for a mail server on a network you control. The app connects to the host you enter **from its own
+  network**, so the mail server must be reachable from the `app` container and you should only enter one you
+  trust. Ports below 1024 other than 25, 465 and 587 are refused. With a mail server people confirm their
+  address by link, and can reset a forgotten password; removing it later is allowed and the sign-up rules that
+  need verification close again. If the stored password cannot be read (another `APP_SECRET`), the page says
+  so: enter it again.
 - The code is valid for **60 minutes**, works once, and the setup session that follows it lasts **30
   minutes**. If either runs out, **restart the app**: it prints a new code. A restart before the wizard is
   finished shows the wizard again from the start.

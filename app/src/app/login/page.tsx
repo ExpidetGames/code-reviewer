@@ -6,8 +6,9 @@ import { Suspense } from "react";
 import { signInWithGithub, signInWithPassword } from "@/auth/actions";
 import { invitationTokenOf, pathCarrying } from "@/auth/invitation-return";
 import { loginErrorMessage } from "@/auth/login-errors";
-import { getSignInMethods } from "@/auth/sign-in-runtime";
-import { getSignUpAvailability } from "@/signup/shared";
+import { passwordResetAvailable } from "@/auth/password-reset-request";
+import { signUpAvailability } from "@/signup/availability";
+import { getSignUpFacts } from "@/signup/shared";
 import { Button } from "@/ui/button";
 
 export default function LoginPage({ searchParams }: PageProps<"/login">) {
@@ -37,11 +38,16 @@ async function SignInForms({
   await connection();
   // The invitation link the person came from, if any: carried through the sign-in.
   const invitation = invitationTokenOf((await searchParams).invitation);
-  const methods = await getSignInMethods();
-  // The link to the sign-up is offered while the sign-up is open (the state of the instance).
+  // The state of the instance, read once: the ways to sign in that are on, the sign-up rule, whether mail
+  // can be sent.
+  const facts = await getSignUpFacts();
+  const methods = facts.signInMethods;
+  // The link to the sign-up is offered while the sign-up is open.
   const signUp = methods.emailPassword
-    ? await getSignUpAvailability()
+    ? signUpAvailability(facts)
     : { open: false as const };
+  // The link to "forgot your password" is offered while the instance can send the mail.
+  const canReset = passwordResetAvailable(facts);
   return (
     <>
       {methods.emailPassword ? (
@@ -76,6 +82,11 @@ async function SignInForms({
           <Button type="submit" className="btn-block">
             Sign in
           </Button>
+          {canReset ? (
+            <p className="muted small">
+              <Link href="/forgot-password">Forgot your password?</Link>
+            </p>
+          ) : null}
         </form>
       ) : null}
       {signUp.open ? (

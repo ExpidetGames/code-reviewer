@@ -155,6 +155,8 @@ and 2.7):
   (`src/signup/`). A row goes with its user.
 - `instance_settings` gained two keys: `sign_in_methods` and `max_workspaces_per_user` (typed in
   `instance-settings-repository.ts`, which also reads a value with who saved it and when).
+  A third key, `smtp`, holds the mail server's settings (the password is in `secrets`, never here); the repository
+  can also `remove` a setting.
 
 ## Workspace scoping
 

@@ -82,7 +82,8 @@ export default defineConfig({
         /e2e\/reviews\//,
         /e2e\/jobs\//,
         /e2e\/setup\//,
-        /e2e\/auth\/sign-up\.e2e\.ts$/,
+        /e2e\/auth\/(sign-up|password-reset)\.e2e\.ts$/,
+        /e2e\/admin\/mail\.e2e\.ts$/,
         /e2e\/workspaces\//,
       ],
     },
@@ -98,14 +99,22 @@ export default defineConfig({
       testMatch: /e2e\/reviews\/.*\.e2e\.ts$/,
       dependencies: ["runs"],
     },
-    // The journey of the sign-up and the email verification has an app of its own (the fourth), because
-    // its mail outbox makes the instance ask every email account for a verified address, which would
-    // change what the admin of the other journeys sees.
+    // The journeys with a mail server have an app of their own (the fourth), because a mail server makes the
+    // instance ask every email account for a verified address, which would change what the admin of the
+    // other journeys sees. The mail page's journey comes first: it takes the app from "no mail server" to
+    // "mail through the fake SMTP server", configured in the admin portal like an operator does it. The
+    // sign-up and the password reset use that mail server.
+    {
+      name: "mail",
+      use: { ...browser, baseURL: e2eEnv.signupAppUrl },
+      testMatch: /e2e\/admin\/mail\.e2e\.ts$/,
+      dependencies: ["prepare"],
+    },
     {
       name: "signup",
       use: { ...browser, baseURL: e2eEnv.signupAppUrl },
-      testMatch: /e2e\/auth\/sign-up\.e2e\.ts$/,
-      dependencies: ["prepare"],
+      testMatch: /e2e\/auth\/(sign-up|password-reset)\.e2e\.ts$/,
+      dependencies: ["prepare", "mail"],
     },
     // The journey of the invitations changes who belongs to the workspace of the first app and needs its
     // sign-up rule to be "everyone", which the admin portal journey changes for a while: it runs after
@@ -123,6 +132,15 @@ export default defineConfig({
       use: { ...browser, baseURL: e2eEnv.multiAppUrl },
       testMatch: /e2e\/workspaces\/multi-tenant\.e2e\.ts$/,
       dependencies: ["prepare"],
+    },
+    // The journey of the invitations by mail uses the multi-tenant app again, after the journeys that need it
+    // without a mail server: it configures the fake SMTP server there, which makes every account of that
+    // app confirm its address.
+    {
+      name: "multi-mail",
+      use: { ...browser, baseURL: e2eEnv.multiAppUrl },
+      testMatch: /e2e\/workspaces\/invite-by-mail\.e2e\.ts$/,
+      dependencies: ["multi"],
     },
     // The journey of the first-run setup has an app of its own that nobody has set up (the third
     // one), so it needs nothing to run first and disturbs nobody.
@@ -154,8 +172,9 @@ export default defineConfig({
   // runner needs: the LLM access (the other app has none, a journey checks its warning), and a
   // push that is reviewed after a second instead of after 90 seconds. The third is the same build
   // again, left unconfigured and not set up, for the journey that walks through the first-run
-  // wizard. The fourth is the same build with a database of its own and a mail outbox (the test stack's
-  // stand-in for a mail server, src/mail/outbox-sender.ts), for the sign-up journey.
+  // wizard. The fourth is the same build with a database of its own, for the journeys that need a mail server:
+  // the journey of the mail page configures it in the admin portal to send to the fake SMTP server (the
+  // sixth server), and the sign-up and the password reset read their mail from that server's inbox.
   webServer: [
     {
       command: "node ../fakes/github/main.ts",
@@ -171,6 +190,19 @@ export default defineConfig({
         GITHUB_FAKE_SELF_LINKS: "true",
       },
       url: `${e2eEnv.githubUrl}/__fake/health`,
+      reuseExistingServer: false,
+      timeout: 30_000,
+    },
+    {
+      command: "node ../fakes/smtp/main.ts",
+      env: {
+        SMTP_FAKE_PORT: String(e2eEnv.smtp.port),
+        SMTP_FAKE_TLS_PORT: String(e2eEnv.smtp.tlsPort),
+        SMTP_FAKE_CONTROL_PORT: String(e2eEnv.smtp.controlPort),
+        SMTP_FAKE_USER: e2eEnv.smtp.user,
+        SMTP_FAKE_PASSWORD: e2eEnv.smtp.password,
+      },
+      url: `${e2eEnv.smtp.controlUrl}/__fake/health`,
       reuseExistingServer: false,
       timeout: 30_000,
     },
@@ -224,15 +256,12 @@ export default defineConfig({
     {
       command:
         "rm -rf test-results/e2e-signup-data && mkdir -p test-results/e2e-signup-data && " +
-        `rm -f ${e2eEnv.mailOutboxFile} && ` +
         `pnpm start --hostname 127.0.0.1 --port ${e2eEnv.signupAppPort} > ${e2eEnv.logFiles.signup} 2>&1`,
       env: {
         ...appEnv,
         DATABASE_PATH: e2eEnv.signupDatabasePath,
         BETTER_AUTH_URL: e2eEnv.signupAppUrl,
         ALLOWED_GITHUB_LOGINS: e2eEnv.allowedLogins,
-        ALLOW_TEST_MAIL_OUTBOX: "true",
-        TEST_MAIL_OUTBOX_FILE: e2eEnv.mailOutboxFile,
       },
       url: e2eEnv.signupAppUrl,
       reuseExistingServer: false,

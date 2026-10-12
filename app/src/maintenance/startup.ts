@@ -34,9 +34,14 @@ export function startCleanup({
   const once = async (): Promise<void> => {
     try {
       const removed = await run();
-      if (removed.rateLimits + removed.verificationTokens > 0)
+      if (
+        removed.rateLimits +
+          removed.verificationTokens +
+          removed.passwordResetTokens >
+        0
+      )
         log.info(
-          `[maintenance] removed ${String(removed.rateLimits)} old rate limit counters and ${String(removed.verificationTokens)} old verification links.`,
+          `[maintenance] removed ${String(removed.rateLimits)} old rate limit counters, ${String(removed.verificationTokens)} old verification links and ${String(removed.passwordResetTokens)} old reset links.`,
         );
     } catch {
       log.error(
