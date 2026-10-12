@@ -308,6 +308,29 @@ export interface EmailVerificationTokensTable {
   used_at: string | null;
 }
 
+/**
+ * The single-use side of a signed `state` that travels through the browser and GitHub (the manifest flow, the
+ * authorization that links a GitHub identity); see src/signed-state/.
+ */
+export interface SignedStatesTable {
+  /** The random nonce that the signed value names. */
+  id: string;
+  /** What the state is for (`github-manifest`, `github-link`): a state of one purpose is worthless for another. */
+  purpose: string;
+  /** The person who started it. */
+  user_id: string | null;
+  /** SHA-256 (hex) of the session it was started in: the callback must come from the same session. */
+  session_hash: string | null;
+  /** The PKCE verifier of an authorization started here; never leaves the server. */
+  code_verifier: string | null;
+  /** ISO 8601 text in UTC. */
+  created_at: string;
+  /** ISO 8601 text in UTC. */
+  expires_at: string;
+  /** ISO 8601 text in UTC, or null while the state is unused. */
+  used_at: string | null;
+}
+
 export interface Database {
   app_meta: AppMetaTable;
   users: UsersTable;
@@ -329,4 +352,5 @@ export interface Database {
   secrets: SecretsTable;
   password_reset_tokens: PasswordResetTokensTable;
   email_verification_tokens: EmailVerificationTokensTable;
+  signed_states: SignedStatesTable;
 }

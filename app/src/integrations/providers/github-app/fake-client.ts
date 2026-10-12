@@ -64,6 +64,10 @@ export function fakeGithubAppClient(
 
   return {
     calls,
+    async getApp() {
+      record("getApp");
+      return { id: "424242", slug: "code-reviewer-test", permissions: {} };
+    },
     async listInstallations() {
       record("listInstallations");
       return data.installations ?? [];

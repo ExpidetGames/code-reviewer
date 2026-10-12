@@ -188,6 +188,35 @@ describe("the cleanup of old rows", () => {
     ).toEqual(["expired-just-now", "pending", "used-recently"]);
   });
 
+  // #102-GH-02
+  it("removes signed states that have expired and keeps the ones still valid", async () => {
+    const { db, now } = await setup();
+    const state = (id: string, expiresAt: number) =>
+      db
+        .insertInto("signed_states")
+        .values({
+          id,
+          purpose: "github-manifest",
+          user_id: "u1",
+          session_hash: "hash",
+          code_verifier: null,
+          created_at: iso(START - DAY),
+          expires_at: iso(expiresAt),
+          used_at: null,
+        })
+        .execute();
+    await state("expired", START - 1000);
+    await state("valid", START + 1000);
+
+    await cleanUpExpiredRows(db, now);
+
+    expect(
+      (await db.selectFrom("signed_states").select("id").execute()).map(
+        (row) => row.id,
+      ),
+    ).toEqual(["valid"]);
+  });
+
   it("does nothing on an empty database", async () => {
     const { db, now } = await setup();
 

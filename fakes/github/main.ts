@@ -4,8 +4,9 @@
 // stack. Configuration comes from the environment; the values are dummies shared with the app under
 // test. Test code adds accounts through POST /__fake/users and clears state with POST /__fake/reset.
 //
-//   GITHUB_FAKE_CLIENT_ID      required
-//   GITHUB_FAKE_CLIENT_SECRET  required
+//   GITHUB_FAKE_CLIENT_ID      required unless GITHUB_FAKE_MANIFEST_FLOW is "true"
+//   GITHUB_FAKE_CLIENT_SECRET  required unless GITHUB_FAKE_MANIFEST_FLOW is "true"
+//   GITHUB_FAKE_MANIFEST_FLOW  optional, "true": apps can be created through the manifest flow
 //   GITHUB_FAKE_APP_ID         optional, together with the next one: switches the GitHub App API on
 //   GITHUB_FAKE_APP_PUBLIC_KEY SPKI PEM the App JWTs are checked with; installations are added
 //                              with POST /__fake/installations
@@ -15,9 +16,16 @@
 //   GITHUB_FAKE_HOST           default 127.0.0.1
 import { startGithubFake } from "./server.ts";
 
-const clientId = process.env.GITHUB_FAKE_CLIENT_ID;
-const clientSecret = process.env.GITHUB_FAKE_CLIENT_SECRET;
-if (!clientId || !clientSecret) {
+const manifestFlow = process.env.GITHUB_FAKE_MANIFEST_FLOW === "true";
+const clientId = process.env.GITHUB_FAKE_CLIENT_ID || undefined;
+const clientSecret = process.env.GITHUB_FAKE_CLIENT_SECRET || undefined;
+if ((clientId === undefined) !== (clientSecret === undefined)) {
+  console.error(
+    "GITHUB_FAKE_CLIENT_ID and GITHUB_FAKE_CLIENT_SECRET must be set together.",
+  );
+  process.exit(1);
+}
+if (clientId === undefined && !manifestFlow) {
   console.error(
     "GITHUB_FAKE_CLIENT_ID and GITHUB_FAKE_CLIENT_SECRET must be set.",
   );
@@ -34,8 +42,10 @@ if ((appId === undefined) !== (publicKeyPem === undefined)) {
 }
 
 const fake = await startGithubFake({
-  clientId,
-  clientSecret,
+  ...(clientId === undefined || clientSecret === undefined
+    ? {}
+    : { clientId, clientSecret }),
+  manifestFlow,
   ...(appId === undefined || publicKeyPem === undefined
     ? {}
     : { appId, publicKeyPem }),
