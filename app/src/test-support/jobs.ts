@@ -58,7 +58,11 @@ export function createTestQueue(
 export type JobQueueFixture = {
   db: Kysely<Database>;
   workspaceId: string;
-  /** The path of the database file, for a second connection or a child process. */
+  /**
+   * The path of the SQLite database file, for a second connection or a child process. A fixture on
+   * a supplied (Postgres) database has no file: reading this throws instead of handing out an empty
+   * path.
+   */
   databasePath: string;
   queue: TestQueue;
   clock: TestClock;
@@ -83,12 +87,12 @@ export async function createJobQueueFixture(
   } = {},
 ): Promise<JobQueueFixture> {
   const created = options.database
-    ? { db: options.database, databasePath: "" }
+    ? { db: options.database, databasePath: null as string | null }
     : await (async () => {
         const test = await createTestDatabase();
-        return { db: test.db, databasePath: test.config.path };
+        return { db: test.db, databasePath: test.config.path as string | null };
       })();
-  const { db, databasePath } = created;
+  const { db } = created;
   const clock = createTestClock();
   const workspaceId = await defaultWorkspaceId(db);
   const integration = await createIntegrationsRepository(
@@ -139,7 +143,13 @@ export async function createJobQueueFixture(
   return {
     db,
     workspaceId,
-    databasePath,
+    get databasePath(): string {
+      if (created.databasePath === null)
+        throw new Error(
+          "A Postgres job queue fixture has no database file path; use its connection.",
+        );
+      return created.databasePath;
+    },
     queue,
     clock,
     repositoryId: first.id,
