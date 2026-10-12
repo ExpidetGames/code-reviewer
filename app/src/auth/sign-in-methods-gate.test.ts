@@ -57,7 +57,7 @@ describe("a way to sign in that is switched off", () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
-  // #98-SIGN-IN-METHODS
+  // #98-SIGN-IN-METHODS, #102-GH-15
   it("refuses the start of the GitHub sign in", async () => {
     const { call, handler } = setup(EMAIL_ONLY);
 
@@ -136,6 +136,58 @@ describe("a way to sign in that is on", () => {
     await call("GET", "/api/auth/callback/github?code=abc&state=s");
 
     expect(handler).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("the GitHub sign in while the GitHub App has no user authorization", () => {
+  async function callWithoutGithub(
+    method: string,
+    path: string,
+    body?: unknown,
+  ) {
+    const handler = vi.fn(() => Promise.resolve(Response.json({})));
+    const response = await handleAuthRequest(
+      { handler },
+      new Request(`http://localhost:3000${path}`, {
+        method,
+        headers: { "content-type": "application/json" },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      }),
+      {
+        check: () => Promise.resolve({ allowed: true as const }),
+        succeeded: () => Promise.resolve(),
+      },
+      BOTH,
+      () => Promise.resolve(null),
+    );
+    return { response, handler };
+  }
+
+  // #102-GH-15
+  it("refuses the start with a stable code and reaches no handler", async () => {
+    const { response, handler } = await callWithoutGithub(
+      "POST",
+      "/api/auth/sign-in/social",
+      { provider: "github" },
+    );
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: "github_not_configured" });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  // #102-GH-15
+  it("sends a person who comes back from GitHub to the login page with the reason", async () => {
+    const { response, handler } = await callWithoutGithub(
+      "GET",
+      "/api/auth/callback/github?code=abc&state=s",
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "/login?error=github_not_configured",
+    );
+    expect(handler).not.toHaveBeenCalled();
   });
 });
 

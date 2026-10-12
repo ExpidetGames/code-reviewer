@@ -23,14 +23,14 @@ async function startInstance(options: { linked?: boolean } = {}) {
 }
 
 describe("a linked GitHub identity", () => {
-  // #98-AD-16
+  // #98-AD-16, #102-GH-22
   it("is found for a user with a GitHub account row", async () => {
     const db = await startInstance();
 
     expect(await githubIdentityLinked(db, "admin-1")).toBe(true);
   });
 
-  // #98-AD-16
+  // #98-AD-16, #102-GH-22
   it("is not found for a user without a GitHub account row", async () => {
     const db = await startInstance({ linked: false });
 
