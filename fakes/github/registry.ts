@@ -15,6 +15,8 @@ export type FakeRegisteredApp = {
   slug: string;
   name: string;
   ownerLogin: string;
+  /** The account id of the owner (what `GET /app` reports as `owner.id`). */
+  ownerId: number;
   /** SPKI PEM of the app's key pair; absent for an app that only signs people in. */
   publicKeyPem: string | null;
   clientId: string | null;
@@ -33,6 +35,12 @@ export type FakeRegisteredApp = {
   callbackUrls: string[] | null;
   /** Whether the app can only be installed on its owner's account. */
   isPublic: boolean;
+  /**
+   * The "Setup URL" of the app: where GitHub sends the person after an installation. The manifest names it;
+   * for the app registered at start a test says it (`setAppSetupUrl`). Null: the installation page cannot
+   * send anybody anywhere and refuses.
+   */
+  setupUrl: string | null;
   /** Where the manifest sent the person after the creation, kept for tests. */
   createdFromManifest: boolean;
 };
@@ -42,6 +50,17 @@ export const DEFAULT_ACCOUNT_PERMISSIONS: FakeAppPermissionMap = {
   emails: "read",
   members: "read",
 };
+
+/**
+ * The account id the fake gives the owner of an app, by login: stable, and the same for the same login, so a test
+ * can add an installation "on the app's own account" without asking the fake.
+ */
+export function ownerIdFor(login: string): number {
+  let hash = 17;
+  for (const character of login.toLowerCase())
+    hash = (hash * 31 + character.charCodeAt(0)) % 900_000;
+  return 100_000 + hash;
+}
 
 export type AppRegistry = {
   add(app: FakeRegisteredApp): void;

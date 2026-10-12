@@ -81,6 +81,7 @@ describe("the migrations of both epics", () => {
       "20261012120200_unique_accounts",
       "20261012140000_create_workspace_secrets",
       "20261012140100_create_job_claimed_keys",
+      "20261012150000_create_installation_binding",
     ]);
   });
 
@@ -123,6 +124,7 @@ describe("starting the database", () => {
       "app_meta",
       "app_settings",
       "email_verification_tokens",
+      "installation_link_requests",
       "instance_settings",
       "integrations",
       "invitations",
@@ -138,6 +140,7 @@ describe("starting the database", () => {
       "secrets",
       "sessions",
       "signed_states",
+      "unclaimed_installations",
       "users",
       "verifications",
       "webhook_deliveries",

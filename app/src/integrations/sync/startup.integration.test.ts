@@ -22,6 +22,7 @@ describe("the sync at server start", () => {
     const summary = await runStartupSync({
       getDb: () => h.db,
       registry: h.registry,
+      placeNewConnection: async () => h.workspaceId,
       log: (line) => lines.push(line),
     });
 

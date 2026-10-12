@@ -43,19 +43,22 @@ test.describe("a multi-tenant instance", () => {
       "Team A",
     );
 
-    // The Owner of a workspace who does not run the instance cannot synchronize it with GitHub: the button is
-    // not there and the instance admin's route is a path that does not exist for them.
+    // The Owner of a workspace synchronizes the connections of their own workspace (the button is there and the
+    // route answers for it); the synchronization of the whole instance is the instance admin's, and for them a
+    // path that does not exist.
     await expect(
       page.getByRole("heading", { level: 1, name: "Projects" }),
     ).toBeVisible();
     await expect(
       page.getByRole("button", { name: "Sync from GitHub" }),
-    ).toHaveCount(0);
-    for (const path of [
-      "/api/admin/integrations/sync",
-      "/api/w/team-a/integrations/sync",
-    ])
-      expect((await page.request.post(path)).status(), path).toBe(404);
+    ).toBeVisible();
+    expect(
+      (await page.request.post("/api/admin/integrations/sync")).status(),
+      "the instance's synchronization",
+    ).toBe(404);
+    const own = await page.request.post("/api/w/team-a/integrations/sync");
+    expect(own.status()).toBe(200);
+    expect(await own.json()).toEqual({ added: 0, errors: [] });
 
     // A second workspace with the same name: its address is numbered.
     await page.getByRole("button", { name: /Workspace/ }).click();

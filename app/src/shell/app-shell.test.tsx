@@ -42,7 +42,7 @@ function renderShell() {
 
 describe("the navigation", () => {
   // CR-36-T01
-  it("links Projects, Runs, Settings and Members of the workspace in the address and marks only the current page", () => {
+  it("links Projects, Runs, Connections, Settings and Members of the workspace in the address and marks only the current page", () => {
     renderShell();
 
     const nav = screen.getByRole("navigation", { name: "Main" });
@@ -51,18 +51,21 @@ describe("the navigation", () => {
     expect(links.map((link) => link.textContent)).toEqual([
       "Projects",
       "Runs",
+      "Connections",
       "Settings",
       "Members",
     ]);
     expect(links.map((link) => link.getAttribute("href"))).toEqual([
       "/w/acme/projects",
       "/w/acme/runs",
+      "/w/acme/connections",
       "/w/acme/settings",
       "/w/acme/members",
     ]);
     expect(links.map((link) => link.getAttribute("aria-current"))).toEqual([
       null,
       "page",
+      null,
       null,
       null,
     ]);
@@ -102,6 +105,7 @@ describe("the navigation", () => {
     ).toEqual([
       "/w/other-team/projects",
       "/w/other-team/runs",
+      "/w/other-team/connections",
       "/w/other-team/settings",
       "/w/other-team/members",
     ]);

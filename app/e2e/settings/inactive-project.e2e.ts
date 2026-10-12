@@ -10,6 +10,7 @@ import { e2eEnv } from "../helpers/e2e-env";
 import {
   addGithubAccount,
   addGithubInstallation,
+  GITHUB_APP_OWNER_ACCOUNT,
   signInThroughTheForm,
   type GithubAccount,
 } from "../helpers/github-fake";
@@ -29,7 +30,7 @@ test.describe("the settings of an inactive project", () => {
       request,
       {
         id: 9100010,
-        account: { login: account.login, id: account.id, type: "User" },
+        account: GITHUB_APP_OWNER_ACCOUNT,
       },
       [{ id: 9200010, fullName: REPOSITORY }],
     );

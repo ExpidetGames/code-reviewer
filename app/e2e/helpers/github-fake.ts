@@ -6,6 +6,7 @@ import { execFile } from "node:child_process";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
 import { expect, type APIRequestContext, type Page } from "@playwright/test";
+import { ownerIdFor } from "../../../fakes/github/registry";
 import type { WorkspaceRole } from "../../src/workspaces/roles";
 import { e2eEnv } from "./e2e-env";
 
@@ -169,6 +170,20 @@ export type GithubInstallation = {
 };
 
 /**
+ * The account the GitHub App of the apps under test belongs to (the fake reports it as the owner of the App).
+ * In a single-tenant instance whose App is private, an installation on it is attached to the one workspace
+ * without a person connecting it; an installation on any other account is only noted as unclaimed
+ * (docs/decisions/0001-editions-setup-and-accounts.md, section 2.9). The journeys of the single-tenant apps
+ * install the App here, so the synchronization finds their repositories the way it does for an operator who
+ * installs their own App on their own account.
+ */
+export const GITHUB_APP_OWNER_ACCOUNT = {
+  login: "fake-owner",
+  id: ownerIdFor("fake-owner"),
+  type: "User",
+} as const;
+
+/**
  * Installs the GitHub App for an account at the fake, with these repositories (replacing the ones
  * of an installation that exists). Each spec file owns its installations, like its accounts. The app
  * learns about them at its next sync (the "Sync from GitHub" button).
@@ -181,6 +196,55 @@ export async function addGithubInstallation(
   const response = await request.post(
     `${e2eEnv.githubUrl}/__fake/installations`,
     { data: { installation, repositories } },
+  );
+  expect(response.status()).toBe(201);
+}
+
+/**
+ * Says where GitHub sends the person after they installed the App (the "Setup URL" of the App registered at the
+ * fake). The apps under test share that one App, so a journey that connects GitHub sets it to the app it uses.
+ */
+export async function setGithubAppSetupUrl(
+  request: APIRequestContext,
+  url: string,
+): Promise<void> {
+  const response = await request.post(
+    `${e2eEnv.githubUrl}/__fake/app-setup-url`,
+    { data: { url } },
+  );
+  expect(response.status()).toBe(201);
+}
+
+/**
+ * Makes an account a member of an organization at the fake. `role` is the one GitHub reports: `admin` for an
+ * owner of the organization, `member` for everybody else.
+ */
+export async function addGithubOrgMember(
+  request: APIRequestContext,
+  member: { org: string; login: string; role?: "admin" | "member" },
+): Promise<void> {
+  const response = await request.post(
+    `${e2eEnv.githubUrl}/__fake/org-members`,
+    {
+      data: member,
+    },
+  );
+  expect(response.status()).toBe(201);
+}
+
+/**
+ * Makes the roles in an organization unreadable for the user tokens of the App (GitHub refuses them), like an
+ * organization whose owners did not accept the permission "Members" for the App.
+ */
+export async function makeGithubMembershipUnreadable(
+  request: APIRequestContext,
+  org: string,
+): Promise<void> {
+  const response = await request.post(
+    `${e2eEnv.githubUrl}/__fake/org-unreadable`,
+    {
+      data: { org },
+    },
   );
   expect(response.status()).toBe(201);
 }

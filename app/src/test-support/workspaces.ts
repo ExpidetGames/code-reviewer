@@ -5,6 +5,7 @@
 // a second one.
 import type { Kysely } from "kysely";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
+import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
 import {
   createWorkspacesRepository,
   DEFAULT_WORKSPACE_SLUG,
@@ -55,4 +56,27 @@ export async function markInstanceSetUp(db: Kysely<Database>): Promise<string> {
     null,
   );
   return defaultWorkspaceId(db);
+}
+
+/**
+ * An installation of the GitHub App that a person of the workspace has linked: the connection as the binding
+ * leaves it (src/installation-binding/connections.ts), without the round trip through GitHub. The deliveries
+ * and the synchronization of an installation that is not linked do nothing; a test that is about what happens to
+ * a linked one starts here.
+ */
+export async function linkTestInstallation(
+  db: Kysely<Database>,
+  workspaceId: string,
+  installation: { id: string; accountLogin: string; accountId: number },
+) {
+  return createIntegrationsRepository(db, workspaceId).create({
+    type: "github_app",
+    displayName: installation.accountLogin,
+    externalId: installation.id,
+    config: {
+      accountLogin: installation.accountLogin,
+      accountId: installation.accountId,
+      accountType: "Organization",
+    },
+  });
 }

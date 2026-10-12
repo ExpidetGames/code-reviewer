@@ -13,7 +13,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 import type { ProjectsApi } from "./api.ts";
-import { SyncButton } from "./sync-button.tsx";
+import { InstanceSyncButton, SyncButton } from "./sync-button.tsx";
 
 afterEach(cleanup);
 
@@ -86,5 +86,24 @@ describe("the sync button", () => {
       /not allowed/i,
     );
     expect(navigation.refresh).not.toHaveBeenCalled();
+  });
+});
+
+describe("the sync button of the instance", () => {
+  // #103-IB-13
+  it("runs the synchronization it is given and says how many repositories are new", async () => {
+    const user = userEvent.setup();
+    const sync = vi.fn<ProjectsApi["sync"]>(async () => ({
+      ok: true,
+      data: { added: 3, errors: [] },
+    }));
+    render(<InstanceSyncButton api={{ sync }} />);
+
+    await user.click(screen.getByRole("button", { name: "Sync from GitHub" }));
+
+    expect((await screen.findByRole("status")).textContent).toBe(
+      "3 new repositories.",
+    );
+    expect(sync).toHaveBeenCalledTimes(1);
   });
 });

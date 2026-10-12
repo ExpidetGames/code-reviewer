@@ -14,7 +14,11 @@ import { generateKeyPair, randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { promisify } from "node:util";
 import { readForm, redirect, sendHtml, sendJson } from "./http.ts";
-import type { AppRegistry, FakeAppPermissionMap } from "./registry.ts";
+import {
+  ownerIdFor,
+  type AppRegistry,
+  type FakeAppPermissionMap,
+} from "./registry.ts";
 
 const generateKeyPairAsync = promisify(generateKeyPair);
 
@@ -185,6 +189,7 @@ export function createManifestPart(
       slug,
       name,
       ownerLogin,
+      ownerId: ownerIdFor(ownerLogin),
       publicKeyPem: keys.publicKey,
       clientId,
       clientSecret,
@@ -194,6 +199,8 @@ export function createManifestPart(
       events: manifest.default_events ?? [],
       callbackUrls: manifest.callback_urls ?? [],
       isPublic: manifest.public === true,
+      setupUrl:
+        typeof manifest.setup_url === "string" ? manifest.setup_url : null,
       createdFromManifest: true,
     });
     const now = new Date().toISOString();
@@ -201,7 +208,7 @@ export function createManifestPart(
       id: Number(id),
       slug,
       node_id: `A_fake${id}`,
-      owner: { login: ownerLogin, type: "User" },
+      owner: { login: ownerLogin, id: ownerIdFor(ownerLogin), type: "User" },
       name,
       description: "",
       external_url: manifest.url ?? "",

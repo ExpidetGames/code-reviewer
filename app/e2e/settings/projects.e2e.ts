@@ -10,6 +10,7 @@ import { syncFromGithubAsAdmin } from "../helpers/admin-api";
 import {
   addGithubAccount,
   addGithubInstallation,
+  GITHUB_APP_OWNER_ACCOUNT,
   signInThroughTheForm,
   type GithubAccount,
 } from "../helpers/github-fake";
@@ -33,7 +34,7 @@ test.describe("the project list and the settings pages", () => {
       request,
       {
         id: 9100001,
-        account: { login: account.login, id: account.id, type: "User" },
+        account: GITHUB_APP_OWNER_ACCOUNT,
       },
       [{ id: 9200001, fullName: REPOSITORY }],
     );
@@ -54,8 +55,9 @@ test.describe("the project list and the settings pages", () => {
   test("@smoke a person syncs the repository, switches it on, changes a setting, reloads and finds it, and switches it off again", async ({
     page,
   }) => {
-    // The synchronization reads every connection of the instance: it is the instance admin's. The person
-    // here owns the workspace and does not run the instance, so the page has no button for them.
+    // The installation is found by the synchronization of the whole instance, which is the instance admin's
+    // (it sits on the App's own account, so it is attached to the one workspace). The person here owns the
+    // workspace and does not run the instance: their page has the button that reads their own connections.
     await syncFromGithubAsAdmin(e2eEnv.appUrl);
     await signInThroughTheForm(page, account);
     await expect(
@@ -63,7 +65,7 @@ test.describe("the project list and the settings pages", () => {
     ).toBeVisible();
     await expect(
       page.getByRole("button", { name: "Sync from GitHub" }),
-    ).toHaveCount(0);
+    ).toBeVisible();
 
     const row = page.getByRole("listitem").filter({ hasText: REPOSITORY });
     await expect(row.getByText("Inactive")).toBeVisible();
@@ -105,8 +107,24 @@ test.describe("the project list and the settings pages", () => {
     ).toBeVisible();
   });
 
+  // #103-IB-13
+  test("@smoke a person who owns the workspace runs the Sync from GitHub button and reads their own connections", async ({
+    page,
+  }) => {
+    await signInThroughTheForm(page, account);
+
+    await page.getByRole("button", { name: "Sync from GitHub" }).click();
+
+    await expect(page.getByRole("status")).toContainText(
+      "No new repositories.",
+    );
+    await expect(
+      page.getByRole("listitem").filter({ hasText: REPOSITORY }),
+    ).toBeVisible();
+  });
+
   // #101-WM-08
-  test("@smoke the instance admin finds the Sync from GitHub button on the Projects page and runs it", async ({
+  test("the instance admin, who is an Owner of the workspace too, runs the same button there", async ({
     page,
   }) => {
     await page.goto("/login");

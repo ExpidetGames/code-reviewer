@@ -141,6 +141,14 @@ export type FakeTokenRequest = {
 /** What the GitHub App part of the fake offers a test (see `FakeGithub` in `server.ts` for the whole). */
 export type FakeGithubAppControls = {
   addInstallation(installation: FakeInstallation): void;
+  /** The installations the fake has now (what the installation page offers and the user listing filters). */
+  installations(): FakeInstallation[];
+  /**
+   * The "Setup URL" of the app registered at start: where the installation page sends the person after
+   * "Install" (with `installation_id`, `setup_action` and the `state` it was opened with). Apps created through
+   * the manifest flow use the one in their manifest. Null: the installation page refuses.
+   */
+  setAppSetupUrl(url: string | null): void;
   /** What uninstalling the app does: the installation and everything behind it disappears. */
   removeInstallation(id: number): void;
   suspendInstallation(id: number, suspended: boolean): void;
@@ -401,6 +409,16 @@ export function createAppPart(
       return send(201, { ok: true });
     }
 
+    // Control endpoint for a test that runs the fake as its own process (Playwright): the setup URL of the
+    // app registered at start, `{ url }` (null clears it).
+    if (path === "/__fake/app-setup-url" && method === "POST") {
+      const body = JSON.parse(await readBody(request)) as { url?: unknown };
+      if (body.url !== null && typeof body.url !== "string")
+        return send(400, { message: "Invalid body" });
+      controls.setAppSetupUrl(body.url);
+      return send(201, { ok: true });
+    }
+
     // Control endpoint for a test that runs the fake as its own process (Playwright): adds a pull
     // request (`addPullRequest`), replacing one with the same number. The body is
     // `{ repository: "owner/name", pullRequest: FakePullRequest }`.
@@ -436,7 +454,7 @@ export function createAppPart(
         id: Number(app.id),
         slug: app.slug,
         name: app.name,
-        owner: { login: app.ownerLogin, type: "User" },
+        owner: { login: app.ownerLogin, id: app.ownerId, type: "User" },
         description: "",
         external_url: webBase(),
         html_url: `${webBase()}/apps/${app.slug}`,
@@ -711,6 +729,11 @@ export function createAppPart(
       if (!repositories.has(installation.id))
         repositories.set(installation.id, []);
     },
+    installations: () => [...installations.values()],
+    setAppSetupUrl(url) {
+      const start = options.appId && registry.byId(options.appId);
+      if (start) start.setupUrl = url;
+    },
     removeInstallation(id) {
       installations.delete(id);
       repositories.delete(id);
@@ -806,7 +829,10 @@ export function createAppPart(
       tokenAnswerPatch = null;
       appPermissions = { ...DEFAULT_FAKE_APP_PERMISSIONS };
       const start = options.appId && registry.byId(options.appId);
-      if (start) start.accountPermissions = { ...DEFAULT_ACCOUNT_PERMISSIONS };
+      if (start) {
+        start.accountPermissions = { ...DEFAULT_ACCOUNT_PERMISSIONS };
+        start.setupUrl = null;
+      }
     },
   };
 }

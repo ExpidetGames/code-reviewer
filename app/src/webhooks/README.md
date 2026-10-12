@@ -78,6 +78,8 @@ API) sends the delivery again **with the same `X-GitHub-Delivery` id**, so the i
 reaches the app, and the rules below make sure it is handled again when that is what the operator
 wants:
 
+- `installation_unclaimed` answers an installation delivery for an installation that no workspace has linked (and that
+  `placement.ts` does not attach): the installation is noted, nothing is created, and the delivery can be redelivered.
 - Only a delivery that **succeeded** (`trigger_enqueued`, `installation_changed`) stays a duplicate
   (`202 duplicate`, nothing done) for 7 days. A `400` is never kept: an unusable payload releases the
   claim.

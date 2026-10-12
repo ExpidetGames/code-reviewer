@@ -161,7 +161,7 @@ export function createManualReviewService(
     if (repository === undefined) throw NOT_FOUND();
     const integration = await deps.integrations.get(repository.integrationId);
     if (integration === undefined) throw NOT_FOUND();
-    if (integration.status === "disabled") throw NOT_INSTALLED();
+    if (integration.status !== "active") throw NOT_INSTALLED();
     const project = await deps.projects.getActiveProjectForRepository(
       repository.id,
     );

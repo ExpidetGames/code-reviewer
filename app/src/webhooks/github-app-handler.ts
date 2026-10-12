@@ -299,9 +299,13 @@ export function createGithubAppWebhookHandler(
     );
     const isInstallationEvent = INSTALLATION_EVENTS.has(eventName);
 
-    // A suspended or removed installation reviews nothing; its own events still go through (they are
-    // how it comes back).
-    if (integration?.status === "disabled" && !isInstallationEvent)
+    // A suspended, removed or disconnected installation reviews nothing; its own events still go through
+    // (they are how a suspended one comes back).
+    if (
+      integration !== undefined &&
+      integration.status !== "active" &&
+      !isInstallationEvent
+    )
       return "integration_disabled";
     // Only an installation event can introduce an installation we do not know yet.
     if (integration === undefined && !isInstallationEvent)
@@ -328,7 +332,10 @@ export function createGithubAppWebhookHandler(
           `the installation could not be synchronized (${result.summary.errors.map((error) => error.code).join(", ")})`,
           503,
         );
-      return "installation_changed";
+      // An installation no workspace has linked is only noted; nothing else is done for it.
+      return result.outcome === "unclaimed"
+        ? "installation_unclaimed"
+        : "installation_changed";
     }
 
     // A payload that lacks what the app reads cannot be handled, now or on a redelivery: the sender

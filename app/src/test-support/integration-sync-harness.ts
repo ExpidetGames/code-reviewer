@@ -84,13 +84,16 @@ export async function startSyncHarness(
     },
   });
   const logged: string[] = [];
+  const workspaceId = await defaultWorkspaceId(db);
   const sync = createIntegrationSync({
     db,
     registry,
     log: (line) => logged.push(line),
+    // These tests are about the synchronization itself: a connection that is new to the instance goes to the
+    // default workspace. Where a new installation may go for real (src/installation-binding/placement.ts) is
+    // proven by the binding's own tests.
+    placeNewConnection: async () => workspaceId,
   });
-  // The sync puts a connection that is new to the instance in the default workspace.
-  const workspaceId = await defaultWorkspaceId(db);
   const integrations = createIntegrationsRepository(db, workspaceId);
   const repositories = createRepositoriesRepository(db, workspaceId);
   const directory = createIntegrationDirectory(db);

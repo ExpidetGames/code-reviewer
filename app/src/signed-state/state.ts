@@ -13,6 +13,12 @@ import type { Database } from "../db/schema.ts";
 export const SIGNED_STATE_PURPOSES = [
   "github-manifest",
   "github-link",
+  // Binding an installation to a workspace (src/installation-binding/): "Connect GitHub" (the round trip through
+  // GitHub's installation page), the user authorization that gives the token for the checks, and the list of
+  // installations the person may choose from.
+  "github-install",
+  "github-authorize",
+  "github-picker",
 ] as const;
 export type SignedStatePurpose = (typeof SIGNED_STATE_PURPOSES)[number];
 
@@ -27,6 +33,11 @@ export type IssueStateInput = {
   userId: string;
   /** The id of the session that starts it; the callback must present the same session. */
   sessionId: string;
+  /**
+   * The workspace the flow is for. It is part of the signed value, so a callback can only act for the workspace
+   * the state was issued for.
+   */
+  workspaceId?: string;
   /** Kept server side with the nonce and handed back when the state is consumed (PKCE). */
   codeVerifier?: string;
   /** JSON-compatible facts of the flow (never a secret), handed back when the state is consumed. */
@@ -42,12 +53,23 @@ export type ConsumeStateInput = {
 };
 
 export type ConsumeStateResult =
-  | { ok: true; codeVerifier: string | null; data: unknown }
+  | {
+      ok: true;
+      codeVerifier: string | null;
+      data: unknown;
+      /** The workspace the state was issued for, or null when it was issued for none. */
+      workspaceId: string | null;
+    }
   | { ok: false; error: SignedStateErrorCode };
 
 export type SignedStates = {
   issue(input: IssueStateInput): Promise<string>;
   consume(input: ConsumeStateInput): Promise<ConsumeStateResult>;
+  /**
+   * The same checks as `consume`, but the state stays usable: for a page that shows what a state holds (the list
+   * of the picker) before the person acts on it.
+   */
+  peek(input: ConsumeStateInput): Promise<ConsumeStateResult>;
 };
 
 export type SignedStatesOptions = {
@@ -58,7 +80,15 @@ export type SignedStatesOptions = {
   ttlMs?: number;
 };
 
-type Payload = { p: string; n: string; e: number; u: string; s: string };
+type Payload = {
+  p: string;
+  n: string;
+  e: number;
+  u: string;
+  s: string;
+  /** The workspace; absent when the state is for none. */
+  w?: string;
+};
 
 const REFUSED: ConsumeStateResult = { ok: false, error: "state_invalid" };
 
@@ -70,17 +100,33 @@ function parsePayload(text: string): Payload | null {
   try {
     const value: unknown = JSON.parse(text);
     if (typeof value !== "object" || value === null) return null;
-    const { p, n, e, u, s } = value as Record<string, unknown>;
+    const { p, n, e, u, s, w } = value as Record<string, unknown>;
     return typeof p === "string" &&
       typeof n === "string" &&
       typeof e === "number" &&
       typeof u === "string" &&
-      typeof s === "string"
-      ? { p, n, e, u, s }
+      typeof s === "string" &&
+      (w === undefined || typeof w === "string")
+      ? { p, n, e, u, s, ...(w === undefined ? {} : { w }) }
       : null;
   } catch {
     return null;
   }
+}
+
+/**
+ * What a `state` value says it is for, when its signature is right (and nothing else is checked, nothing is
+ * used up): lets a callback that several flows share hand the request to the one the state belongs to. A forged
+ * or malformed value gives null.
+ */
+export function purposeOfState(
+  appSecret: string,
+  value: string,
+): SignedStatePurpose | null {
+  const text = verifySignedValue(appSecret, "state-signing", value);
+  if (text === null) return null;
+  const payload = parsePayload(text);
+  return SIGNED_STATE_PURPOSES.find((p) => p === payload?.p) ?? null;
 }
 
 export function createSignedStates({
@@ -89,8 +135,75 @@ export function createSignedStates({
   now = () => new Date(),
   ttlMs = SIGNED_STATE_TTL_MS,
 }: SignedStatesOptions): SignedStates {
+  async function check(
+    { purpose, value, userId, sessionId }: ConsumeStateInput,
+    use: boolean,
+  ): Promise<ConsumeStateResult> {
+    const text = verifySignedValue(appSecret, "state-signing", value);
+    if (text === null) return REFUSED;
+    const payload = parsePayload(text);
+    if (payload === null) return REFUSED;
+    const at = now();
+    const sessionHash = hashSession(sessionId);
+    // Cheap checks first, and none of them uses up the nonce: only the person and the session that
+    // started the flow can use it up.
+    if (
+      payload.p !== purpose ||
+      payload.e <= at.getTime() ||
+      payload.u !== userId ||
+      payload.s !== sessionHash
+    )
+      return REFUSED;
+    const workspaceId = payload.w ?? null;
+    if (!use) {
+      const row = await db
+        .selectFrom("signed_states")
+        .select(["code_verifier", "data"])
+        .where("id", "=", payload.n)
+        .where("purpose", "=", purpose)
+        .where("user_id", "=", userId)
+        .where("session_hash", "=", sessionHash)
+        .where("used_at", "is", null)
+        .where("expires_at", ">", formatTimestamp(at))
+        .executeTakeFirst();
+      if (row === undefined) return REFUSED;
+      return {
+        ok: true,
+        codeVerifier: row.code_verifier,
+        data: row.data === null ? null : decodeJson(row.data),
+        workspaceId,
+      };
+    }
+    // One guarded statement: the first presentation wins, on every instance.
+    const row = await db
+      .updateTable("signed_states")
+      .set({ used_at: formatTimestamp(at) })
+      .where("id", "=", payload.n)
+      .where("purpose", "=", purpose)
+      .where("user_id", "=", userId)
+      .where("session_hash", "=", sessionHash)
+      .where("used_at", "is", null)
+      .where("expires_at", ">", formatTimestamp(at))
+      .returning(["code_verifier", "data"])
+      .executeTakeFirst();
+    if (row === undefined) return REFUSED;
+    return {
+      ok: true,
+      codeVerifier: row.code_verifier,
+      data: row.data === null ? null : decodeJson(row.data),
+      workspaceId,
+    };
+  }
+
   return {
-    async issue({ purpose, userId, sessionId, codeVerifier, data }) {
+    async issue({
+      purpose,
+      userId,
+      sessionId,
+      workspaceId,
+      codeVerifier,
+      data,
+    }) {
       const nonce = randomBytes(16).toString("hex");
       const issuedAt = now();
       const expiresAt = new Date(issuedAt.getTime() + ttlMs);
@@ -115,44 +228,12 @@ export function createSignedStates({
         e: expiresAt.getTime(),
         u: userId,
         s: sessionHash,
+        ...(workspaceId === undefined ? {} : { w: workspaceId }),
       };
       return signValue(appSecret, "state-signing", JSON.stringify(payload));
     },
 
-    async consume({ purpose, value, userId, sessionId }) {
-      const text = verifySignedValue(appSecret, "state-signing", value);
-      if (text === null) return REFUSED;
-      const payload = parsePayload(text);
-      if (payload === null) return REFUSED;
-      const at = now();
-      const sessionHash = hashSession(sessionId);
-      // Cheap checks first, and none of them uses up the nonce: only the person and the session that
-      // started the flow can use it up.
-      if (
-        payload.p !== purpose ||
-        payload.e <= at.getTime() ||
-        payload.u !== userId ||
-        payload.s !== sessionHash
-      )
-        return REFUSED;
-      // One guarded statement: the first presentation wins, on every instance.
-      const row = await db
-        .updateTable("signed_states")
-        .set({ used_at: formatTimestamp(at) })
-        .where("id", "=", payload.n)
-        .where("purpose", "=", purpose)
-        .where("user_id", "=", userId)
-        .where("session_hash", "=", sessionHash)
-        .where("used_at", "is", null)
-        .where("expires_at", ">", formatTimestamp(at))
-        .returning(["code_verifier", "data"])
-        .executeTakeFirst();
-      if (row === undefined) return REFUSED;
-      return {
-        ok: true,
-        codeVerifier: row.code_verifier,
-        data: row.data === null ? null : decodeJson(row.data),
-      };
-    },
+    consume: (input) => check(input, true),
+    peek: (input) => check(input, false),
   };
 }

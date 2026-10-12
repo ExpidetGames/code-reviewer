@@ -15,7 +15,6 @@ vi.mock("next/navigation", () => ({
 import { createProjectsRepository } from "../../db/repositories/projects-repository.ts";
 import {
   describeConfigStatus,
-  githubAppInstallUrl,
   statusForMembers,
   type ConfigAudience,
 } from "../../config-status/status.ts";
@@ -70,7 +69,6 @@ async function openPage(
       audience === "operator"
         ? describeConfigStatus(env)
         : statusForMembers(describeConfigStatus(env)),
-    installUrl: () => githubAppInstallUrl(env),
   });
   return render(
     <ProjectsPageContent

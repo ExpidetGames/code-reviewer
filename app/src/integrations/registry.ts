@@ -70,9 +70,21 @@ export function createIntegrationRegistry(
 // What the rest of the app may know about the GitHub App: the rest of the app reaches the provider folder
 // through this file only.
 export {
+  githubAppInstallPageUrl,
   githubAppInstallUrl,
   githubAppInstallUrlFor,
 } from "./providers/github-app/setup-status.ts";
+// The calls made with a person's own GitHub token (the binding of an installation to a workspace).
+export {
+  listUserInstallations,
+  readOrganizationRole,
+  readUser,
+  type GithubUser,
+  type OrganizationRole,
+  type UserInstallation,
+  type UserRequestFailure,
+  type UserRequestOptions,
+} from "./providers/github-app/user-requests.ts";
 // Whether any GitHub App variable is set at all (the fallback of an installation that has not been imported
 // yet; none is the normal state of an instance that is not connected to GitHub).
 export { anyGithubAppVariableSet } from "./providers/github-app/configured.ts";

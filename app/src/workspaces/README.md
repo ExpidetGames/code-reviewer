@@ -137,18 +137,14 @@ characters without control or formatting characters (they end up in mails and pa
 
 ## Not here
 
-Deleting workspaces, transferring data, SSO and teams below the workspace are out of scope. Binding a GitHub
-App installation to the workspace of the person who installed it is its own issue: until then the
-synchronization puts a connection that is new to the instance into the oldest workspace
-(`src/integrations/sync/default-workspace.ts`) and refuses (`WORKSPACE_NOT_AVAILABLE`) when there is none. The
-workspace LLM key is in place (`src/llm/`, `manage_llm_key`: an Admin or an Owner sets it, every member sees whether
-there is one). The installation-binding issue gives the
-synchronization with GitHub back to the workspaces (`manage_connections`, an Admin or an Owner): until then it is the
-instance admin's, because it reads every connection of the instance (`src/integrations/README.md`). In the same way the
-workspace pages tell a member only that GitHub is not set up and to ask the instance admin; the names of the
-variables are the instance admin's to read (`src/config-status/`). Whether reviews have an LLM key is the
-workspace's own matter: the hint "LLM not configured" tells a Member to ask an Admin or an Owner of the workspace
-(`src/llm/ui/`).
+Deleting workspaces, transferring data, SSO and teams below the workspace are out of scope. A GitHub App installation
+is bound to a workspace by an Owner or Admin (`manage_connections`) through "Connect GitHub" on the Connections page; the
+rules are in `src/installation-binding/README.md`, and the synchronization of a workspace reads its own connections only
+(`POST /api/w/:workspace/integrations/sync`; the whole instance's stays the instance admin's). The workspace LLM key is
+in place (`src/llm/`, `manage_llm_key`: an Admin or an Owner sets it, every member sees whether there is one). The workspace
+pages tell a member only that GitHub is not set up and to ask the instance admin; the names of the variables are the
+instance admin's to read (`src/config-status/`). Whether reviews have an LLM key is the workspace's own matter: the hint
+"LLM not configured" tells a Member to ask an Admin or an Owner of the workspace (`src/llm/ui/`).
 
 The Postgres issue (#105) has work here as well: creating a workspace and the last Owner rule lean on SQLite's
 serialized writers (`begin immediate`). On Postgres the creation needs a lock (or the handling of the unique

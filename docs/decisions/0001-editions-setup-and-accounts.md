@@ -602,7 +602,9 @@ start runs the import again from the beginning. Once `done`, a later start does 
 - **Existing users when the sign-up rule changes.** This record says accounts are not locked out by a
   rule change. Decide later whether the instance admin gets a "disable user" action.
 - **Unlinking an installation after a disconnect.** Decide who may link an installation again after
-  its workspace disconnected it, and whether a disconnect releases the one-workspace lock at once.
+  its workspace disconnected it, and whether a disconnect releases the one-workspace lock at once. (Until this is
+  decided, issue #103 keeps the lock: a disconnected connection stays the workspace's, only that workspace can connect
+  it again, and a deleted installation on GitHub frees nothing. A real release is a later decision.)
 - **Moving from SQLite to Postgres.** There is no migration tool in this milestone. Decide whether to
   provide an export and import path for an installation that outgrows the small topology.
 - **Rotation of `APP_SECRET`** and a re-encryption command.
