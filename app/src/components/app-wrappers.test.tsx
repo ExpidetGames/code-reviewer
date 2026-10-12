@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // @vitest-environment jsdom
-// Pins the small application wrappers of the kit (PageHeader, StatusRegion, DescriptionList,
-// DangerZone) and the three legacy wrappers (`src/ui/*`) that now render them with unchanged props.
+// Pins the small application wrappers of the kit: PageHeader, StatusRegion, DescriptionList and
+// DangerZone.
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -16,9 +16,6 @@ import {
   BreadcrumbList,
   BreadcrumbPage,
 } from "./ui/breadcrumb.tsx";
-import { Button as LegacyButton } from "@/ui/button";
-import { EmptyState } from "@/ui/empty-state";
-import { PageHeader as LegacyPageHeader } from "@/ui/page-header";
 
 afterEach(cleanup);
 
@@ -109,41 +106,5 @@ describe("the danger zone", () => {
     await user.click(screen.getByRole("button", { name: "Remove" }));
 
     expect(onConfirm).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe("the legacy wrappers", () => {
-  it("keeps the Button variant names and the type=button default", () => {
-    render(<LegacyButton variant="destructive">Delete</LegacyButton>);
-
-    const button = screen.getByRole("button", { name: "Delete" });
-    expect(button.getAttribute("data-variant")).toBe("destructive");
-    expect(button.getAttribute("type")).toBe("button");
-  });
-
-  it("renders the PageHeader through the kit", () => {
-    render(<LegacyPageHeader title="Members" description="People here." />);
-
-    expect(
-      screen.getByRole("heading", { level: 1, name: "Members" }),
-    ).toBeTruthy();
-    expect(screen.getByText("People here.")).toBeTruthy();
-  });
-
-  it("renders the EmptyState as a heading, a sentence and an action", () => {
-    render(
-      <EmptyState
-        title="No invitations"
-        action={<button type="button">Invite</button>}
-      >
-        Nobody has been invited yet.
-      </EmptyState>,
-    );
-
-    expect(
-      screen.getByRole("heading", { level: 2, name: "No invitations" }),
-    ).toBeTruthy();
-    expect(screen.getByText("Nobody has been invited yet.")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Invite" })).toBeTruthy();
   });
 });
