@@ -19,18 +19,32 @@ describe("checking the LLM configuration when the server starts", () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
+  // #104-LK-12
+  it("says nothing when no LLM variable is set, because the workspaces bring their own key", () => {
+    const warn = vi.fn();
+
+    checkLlmConfigOnStart({ env: {}, warn });
+    checkLlmConfigOnStart({ env: { LLM_PROVIDER: "openrouter" }, warn });
+
+    expect(warn).not.toHaveBeenCalled();
+  });
+
   // CR-26-T03
-  it("warns once with the code and the variable name and does not stop the start", () => {
+  it("warns once with the code and the variable name about a legacy variable that is set but wrong, and does not stop the start", () => {
     const warn = vi.fn();
 
     expect(() =>
-      checkLlmConfigOnStart({ env: { LLM_PROVIDER: "openrouter" }, warn }),
+      checkLlmConfigOnStart({
+        env: { LLM_PROVIDER: "openrouter", LLM_API_KEY: "has a space" },
+        warn,
+      }),
     ).not.toThrow();
 
     expect(warn).toHaveBeenCalledTimes(1);
     const line = String(warn.mock.calls[0]?.[0]);
-    expect(line).toContain("LLM_API_KEY_MISSING");
+    expect(line).toContain("LLM_API_KEY_INVALID");
     expect(line).toContain("LLM_API_KEY");
+    expect(line).not.toContain("has a space");
     expect(line).not.toContain("\n");
   });
 

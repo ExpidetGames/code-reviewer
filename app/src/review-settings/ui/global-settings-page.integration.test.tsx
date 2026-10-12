@@ -120,21 +120,20 @@ describe("the Settings page", () => {
     expect(await app.appSettingRows()).toEqual([]);
   });
 
-  // CR-34-T09
-  it("shows that the LLM key is missing and names the variable, never a value", async () => {
+  // #104-LK-13 (the hint about the workspace's LLM key is src/llm/ui/llm-access-notice.tsx)
+  it("does not report an absent LLM variable as a problem of the instance, and shows no key value", async () => {
     const app = await openSettings({ ...WORKING_ENV, LLM_API_KEY: undefined });
 
-    expect(screen.getByText("LLM key missing")).toBeTruthy();
-    expect(screen.getByText("LLM_API_KEY", { selector: ".mono" })).toBeTruthy();
+    expect(screen.queryByText("LLM key missing")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
     expect(app.view.container.textContent).not.toContain(LLM_KEY);
   });
 
   // CR-34-T11
-  it("shows provider and model and no hint while the configuration is complete", async () => {
+  it("shows no hint while the configuration is complete, and never the key", async () => {
     const app = await openSettings();
 
     expect(screen.queryByRole("alert")).toBeNull();
-    expect(screen.getByText("openrouter")).toBeTruthy();
     expect(app.view.container.textContent).not.toContain(LLM_KEY);
   });
 
@@ -146,7 +145,7 @@ describe("the Settings page", () => {
     );
 
     const text = app.view.container.textContent ?? "";
-    expect(screen.getByText("Reviews are not set up yet")).toBeTruthy();
+    expect(screen.queryByText("Reviews are not set up yet")).toBeNull();
     expect(screen.getByText("GitHub is not set up yet")).toBeTruthy();
     expect(text).toContain("Ask your instance admin");
     expect(text).not.toMatch(/GITHUB_APP|LLM_|openrouter|Missing:/);

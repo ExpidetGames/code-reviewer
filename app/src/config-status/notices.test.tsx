@@ -35,15 +35,32 @@ describe("the configuration hints", () => {
     expect(describeConfigNotices(WORKING)).toEqual([]);
   });
 
-  // CR-34-T09
-  it("say that the LLM key is missing and name the variable", () => {
+  // #104-LK-13 (the LLM access is a matter of the workspace now; its hint is src/llm/ui/llm-access-notice.tsx)
+  it("do not call an absent LLM variable a problem of the instance", () => {
+    const status: ConfigStatus = {
+      ...WORKING,
+      llm: {
+        configured: false,
+        issues: [
+          { code: "LLM_PROVIDER_MISSING", variable: "LLM_PROVIDER" },
+          { code: "LLM_API_KEY_MISSING", variable: "LLM_API_KEY" },
+        ],
+        warnings: [],
+      },
+    };
+
+    expect(describeConfigNotices(status, "operator")).toEqual([]);
+    expect(describeConfigNotices(status)).toEqual([]);
+  });
+
+  it("still tell the instance admin about a legacy LLM variable that is set but wrong", () => {
     render(
       <ConfigNotices
         status={{
           ...WORKING,
           llm: {
             configured: false,
-            issues: [{ code: "LLM_API_KEY_MISSING", variable: "LLM_API_KEY" }],
+            issues: [{ code: "LLM_API_KEY_INVALID", variable: "LLM_API_KEY" }],
             warnings: [],
           },
         }}
@@ -51,7 +68,7 @@ describe("the configuration hints", () => {
       />,
     );
 
-    expect(screen.getByText("LLM key missing")).toBeTruthy();
+    expect(screen.getByText("LLM key not valid")).toBeTruthy();
     expect(screen.getByText(/LLM_API_KEY/)).toBeTruthy();
   });
 
@@ -141,10 +158,9 @@ describe("the configuration hints", () => {
     const { container } = render(<ConfigNotices status={broken} />);
 
     expect(screen.getByText("GitHub is not set up yet")).toBeTruthy();
-    expect(screen.getByText("Reviews are not set up yet")).toBeTruthy();
     expect(container.textContent).toContain("Ask your instance admin");
     expect(container.textContent).not.toMatch(/GITHUB_APP|LLM_|private key/i);
-    expect(describeConfigNotices(broken)).toHaveLength(2);
+    expect(describeConfigNotices(broken)).toHaveLength(1);
   });
 
   // #101-WM-08

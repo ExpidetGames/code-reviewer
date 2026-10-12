@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// The "Instance" block on the Settings page: whether the GitHub App and the LLM access work, in
-// plain words. For the instance admin: variable names where something is wrong, provider and model where
-// it works, never a value (src/config-status/status.ts). For a member of a workspace only whether each part
-// is set up.
+// The "Instance" block on the Settings page: whether the GitHub App works, in plain words. For the instance
+// admin: variable names where something is wrong, never a value (src/config-status/status.ts). For a member of
+// a workspace only whether it is set up. (The LLM access is a matter of the workspace, with its own section on
+// the page: src/llm/ui/.)
 import type { ConfigAudience, ConfigStatus } from "./status.ts";
 
 export function InstanceStatus({
@@ -13,7 +13,7 @@ export function InstanceStatus({
   status: ConfigStatus;
   audience?: ConfigAudience;
 }) {
-  const { githubApp, llm } = status;
+  const { githubApp } = status;
   if (audience === "member")
     return (
       <dl className="status-list">
@@ -21,14 +21,6 @@ export function InstanceStatus({
           <dt>GitHub</dt>
           <dd>
             {githubApp.configured
-              ? "Set up"
-              : "Not set up yet. Ask your instance admin."}
-          </dd>
-        </div>
-        <div>
-          <dt>Reviews</dt>
-          <dd>
-            {llm.configured
               ? "Set up"
               : "Not set up yet. Ask your instance admin."}
           </dd>
@@ -48,26 +40,6 @@ export function InstanceStatus({
             <>
               {githubApp.kind === "missing" ? "Missing" : "Not valid"}:{" "}
               <span className="mono">{githubApp.variables.join(", ")}</span>
-            </>
-          )}
-        </dd>
-      </div>
-      <div>
-        <dt>LLM access</dt>
-        <dd>
-          {llm.configured ? (
-            <>
-              Configured: <span className="mono">{llm.provider}</span>, default
-              model <span className="mono">{llm.model}</span>
-            </>
-          ) : (
-            <>
-              Not configured:{" "}
-              <span className="mono">
-                {[...new Set(llm.issues.map((issue) => issue.variable))].join(
-                  ", ",
-                )}
-              </span>
             </>
           )}
         </dd>

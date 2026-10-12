@@ -113,14 +113,15 @@ describe("the Projects page", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  // CR-34-T09
-  it("shows 'LLM key missing' without any key value when no LLM key is set", async () => {
+  // #104-LK-13 (the hint about the workspace's LLM key is src/llm/ui/llm-access-notice.tsx)
+  it("does not report an absent LLM variable, and shows no key value", async () => {
     const { container } = await openPage({
       ...WORKING_ENV,
       LLM_API_KEY: undefined,
     });
 
-    expect(screen.getByText("LLM key missing")).toBeTruthy();
+    expect(screen.queryByText("LLM key missing")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
     expect(container.textContent).not.toContain(LLM_KEY);
   });
 
@@ -179,7 +180,7 @@ describe("the Projects page", () => {
     );
 
     expect(screen.getByText("GitHub is not set up yet")).toBeTruthy();
-    expect(screen.getByText("Reviews are not set up yet")).toBeTruthy();
+    expect(screen.queryByText("Reviews are not set up yet")).toBeNull();
     expect(container.textContent).toContain("Ask your instance admin");
     expect(container.textContent).not.toMatch(
       /GITHUB_APP|LLM_|GitHub App not configured/,

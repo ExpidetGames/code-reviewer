@@ -70,8 +70,20 @@ function llmNotice(issue: LlmConfigIssue): ConfigNotice {
 }
 
 /**
+ * The LLM access is a matter of the workspace now (its own key, `src/llm/`), and its hint is shown by the
+ * workspace pages (`LlmAccessNotice`). An absent `LLM_*` variable is therefore no problem of the instance. What
+ * the instance admin still hears about is a legacy variable that is set but wrong, and an optional one that is
+ * ignored.
+ */
+const ABSENT_LLM_ISSUES: readonly LlmConfigIssueCode[] = [
+  "LLM_API_KEY_MISSING",
+  "LLM_PROVIDER_MISSING",
+];
+
+/**
  * What a member of a workspace is told: that a part is not set up and who to ask, and nothing of how the
- * instance is configured (no variable name, no warning about a setting that is ignored).
+ * instance is configured (no variable name, no warning about a setting that is ignored). Whether reviews can run
+ * is said by the workspace's own hint (`LlmAccessNotice`).
  */
 function describeNoticesForMembers(status: ConfigStatus): ConfigNotice[] {
   const notices: ConfigNotice[] = [];
@@ -82,14 +94,6 @@ function describeNoticesForMembers(status: ConfigStatus): ConfigNotice[] {
       title: "GitHub is not set up yet",
       detail:
         "Ask your instance admin to set it up. Repositories cannot be read from GitHub and projects cannot be activated until then.",
-    });
-  if (!status.llm.configured)
-    notices.push({
-      id: "llm",
-      severity: "error",
-      title: "Reviews are not set up yet",
-      detail:
-        "Ask your instance admin to set them up. Reviews cannot run until then.",
     });
   return notices;
 }
@@ -116,7 +120,11 @@ export function describeConfigNotices(
       detail: `${kind === "missing" ? "Missing" : "Not valid"}: ${variables.join(", ")}. Repositories cannot be read from GitHub and projects cannot be activated until this is fixed.`,
     });
   }
-  const llmIssues = status.llm.configured ? [] : status.llm.issues;
+  const llmIssues = status.llm.configured
+    ? []
+    : status.llm.issues.filter(
+        (issue) => !ABSENT_LLM_ISSUES.includes(issue.code),
+      );
   for (const issue of [...llmIssues, ...status.llm.warnings])
     notices.push(llmNotice(issue));
   return notices;
