@@ -31,6 +31,8 @@ import { migration as createInvitations } from "./20261012100000_create_invitati
 import { migration as createSignedStates } from "./20261012120000_create_signed_states.ts";
 import { migration as addUsersEmailConflict } from "./20261012120100_add_users_email_conflict.ts";
 import { migration as uniqueAccounts } from "./20261012120200_unique_accounts.ts";
+import { migration as createWorkspaceSecrets } from "./20261012140000_create_workspace_secrets.ts";
+import { migration as createJobClaimedKeys } from "./20261012140100_create_job_claimed_keys.ts";
 
 const migrations: Record<string, Migration> = {
   "0001_create_app_meta": createAppMeta,
@@ -62,6 +64,8 @@ const migrations: Record<string, Migration> = {
   "20261012120000_create_signed_states": createSignedStates,
   "20261012120100_add_users_email_conflict": addUsersEmailConflict,
   "20261012120200_unique_accounts": uniqueAccounts,
+  "20261012140000_create_workspace_secrets": createWorkspaceSecrets,
+  "20261012140100_create_job_claimed_keys": createJobClaimedKeys,
 };
 
 export const migrationProvider: MigrationProvider = {

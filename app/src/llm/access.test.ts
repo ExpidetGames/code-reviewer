@@ -51,6 +51,7 @@ describe("resolving the LLM access for a job", () => {
     expect(result).toEqual({
       ok: false,
       errorCode: LLM_NOT_CONFIGURED_ERROR,
+      reason: "environment_misconfigured",
       issues: [{ code: "LLM_API_KEY_MISSING", variable: "LLM_API_KEY" }],
     });
     expect(LLM_NOT_CONFIGURED_ERROR).toBe("llm_not_configured");

@@ -8,8 +8,7 @@ import { createIntegrationsRepository } from "../db/repositories/integrations-re
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
 import { createDefaultIntegrationRegistry } from "../integrations/registry.ts";
 import type { JobQueueLimits } from "../jobs/job-limits.ts";
-import { resolveLlmAccess } from "../llm/access.ts";
-import { loadLlmConfig } from "../llm/config.ts";
+import { createWorkspaceLlm } from "../llm/assemble.ts";
 import { createRunnerApi } from "../runner-api/api.ts";
 import {
   allowAllClaimGuard,
@@ -38,6 +37,7 @@ import { createJobQueueFixture, sha, type TestQueue } from "./jobs.ts";
 export const TEST_RUNNER_TOKEN = "test-runner-token-4f9c2a7e1b-0d58a3c6e9f2";
 export const TEST_LLM_API_KEY = "test-llm-api-key-8d3b6e0a5c";
 export const TEST_LLM_MODEL = "vendor/test-model";
+export const TEST_APP_SECRET = "runner-api-test-app-secret-0123456789-0123";
 
 export type RequestOptions = {
   /** Sent as `Authorization: Bearer <token>`. Default: the right token. `null` sends no header. */
@@ -148,34 +148,63 @@ export async function startRunnerApiHarness(
     ),
     builtIn: () => builtInReviewSettings(env.LLM_MODEL ?? TEST_LLM_MODEL),
   });
-  const claimedKeys = createClaimedKeys();
-  const api = createRunnerApi({
-    queue: options.wrapQueue?.(fixture.queue) ?? fixture.queue,
-    repositories: (workspaceId) =>
-      createRepositoriesRepository(fixture.db, workspaceId, fixture.clock.now),
-    integrations: (workspaceId) =>
-      createIntegrationsRepository(fixture.db, workspaceId, fixture.clock.now),
-    registry,
-    guard:
-      options.guard ??
-      (options.projects === true
-        ? createProjectClaimGuard({ projects: () => projectService })
-        : allowAllClaimGuard),
-    jobOptions:
-      options.jobOptions ??
-      (options.projects === true
-        ? createReviewSettingsJobOptionsSource({
-            settings: () => reviewSettings,
-          })
-        : emptyJobOptionsSource),
-    loadLlm: () => resolveLlmAccess(loadLlmConfig(env)),
-    claimedKeys,
-    now: fixture.clock.now,
-    logger,
-    heartbeatIntervalSeconds: 30,
-    runnerToken: () => configuredRunnerToken(env),
-    knownSecrets: () => knownSecretsFromEnv(env),
-  });
+  // One app instance: its own collaborators, over the SAME database, queue and fakes. The LLM access is put
+  // together as the running server does it: the key of the job's own workspace, with the legacy variables of
+  // `env` as the fallback of a single-tenant instance. A second instance (`anotherInstance`) shares nothing but
+  // the database, which is what several app instances do.
+  function buildApi() {
+    const llm = createWorkspaceLlm({
+      db: fixture.db,
+      appSecret: () => TEST_APP_SECRET,
+      env: () => env,
+      now: fixture.clock.now,
+    });
+    const claimedKeys = createClaimedKeys({
+      db: fixture.db,
+      appSecret: () => TEST_APP_SECRET,
+      now: fixture.clock.now,
+    });
+    const api = createRunnerApi({
+      queue: options.wrapQueue?.(fixture.queue) ?? fixture.queue,
+      repositories: (workspaceId) =>
+        createRepositoriesRepository(
+          fixture.db,
+          workspaceId,
+          fixture.clock.now,
+        ),
+      integrations: (workspaceId) =>
+        createIntegrationsRepository(
+          fixture.db,
+          workspaceId,
+          fixture.clock.now,
+        ),
+      registry,
+      guard:
+        options.guard ??
+        (options.projects === true
+          ? createProjectClaimGuard({ projects: () => projectService })
+          : allowAllClaimGuard),
+      jobOptions:
+        options.jobOptions ??
+        (options.projects === true
+          ? createReviewSettingsJobOptionsSource({
+              settings: () => reviewSettings,
+            })
+          : emptyJobOptionsSource),
+      loadLlm: (workspaceId) => llm.accessFor(workspaceId),
+      claimedKeys,
+      now: fixture.clock.now,
+      logger,
+      heartbeatIntervalSeconds: 30,
+      runnerToken: () => configuredRunnerToken(env),
+      knownSecrets: async (workspaceId) => [
+        ...knownSecretsFromEnv(env),
+        ...(await llm.currentKeysFor(workspaceId)),
+      ],
+    });
+    return { api, llm, claimedKeys };
+  }
+  const { api, llm, claimedKeys } = buildApi();
 
   function headers(
     request: RequestOptions,
@@ -205,8 +234,8 @@ export async function startRunnerApiHarness(
     );
   }
 
-  /** `body` is sent as JSON, or as it is if it is a string. */
-  function post(
+  function postTo(
+    target: typeof api,
     action: "heartbeat" | "complete",
     jobId: string,
     body: unknown,
@@ -218,8 +247,47 @@ export async function startRunnerApiHarness(
       body: typeof body === "string" ? body : JSON.stringify(body),
     });
     return action === "heartbeat"
-      ? api.heartbeat(call, jobId)
-      : api.complete(call, jobId);
+      ? target.heartbeat(call, jobId)
+      : target.complete(call, jobId);
+  }
+
+  /** `body` is sent as JSON, or as it is if it is a string. */
+  const post = (
+    action: "heartbeat" | "complete",
+    jobId: string,
+    body: unknown,
+    request: RequestOptions = {},
+  ) => postTo(api, action, jobId, body, request);
+
+  /**
+   * Another app instance over the same database (nothing in memory is shared with the first): for the tests
+   * of what must work whichever instance serves a call.
+   */
+  function anotherInstance() {
+    const other = buildApi();
+    return {
+      claimedKeys: other.claimedKeys,
+      claim: (request: RequestOptions = {}) =>
+        other.api.claim(
+          new Request(`${url}/claim`, {
+            method: "POST",
+            headers: headers(request),
+          }),
+        ),
+      complete: (
+        jobId: string,
+        leaseToken: string,
+        result: Partial<RunnerResult> = {},
+        request?: RequestOptions,
+      ) =>
+        postTo(
+          other.api,
+          "complete",
+          jobId,
+          { leaseToken, result: goodResult(result) },
+          request,
+        ),
+    };
   }
 
   const heartbeat = (
@@ -264,11 +332,15 @@ export async function startRunnerApiHarness(
     },
     githubClock: github.clock,
     env,
+    /** The LLM access of each workspace, as the claim resolves it: `llm.keyServiceFor(id).save(...)` sets a workspace key. */
+    llm,
+    claimedKeys,
     registry,
     /** The project service (with the job queue's deactivation hook) and the review settings service. */
     projectService,
     reviewSettings,
     api,
+    anotherInstance,
     claim,
     claimed,
     heartbeat,
