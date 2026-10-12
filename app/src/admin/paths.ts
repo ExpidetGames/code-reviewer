@@ -35,6 +35,13 @@ export const PORTAL_DENIED_HEADER = "x-portal-denied";
  */
 export const PROXY_SKIPPED_PATHS = "_next/static/|_next/image$|favicon\\.ico$";
 
+/**
+ * Data routes outside the portal's address that are still the instance admin's alone: they are about the
+ * instance, not about a workspace. For everybody else they are paths that do not exist (the proxy answers
+ * them as such, see access-proxy.ts), whatever their role in a workspace is.
+ */
+export const INSTANCE_ADMIN_ONLY_PATHS = ["/api/backup/status"] as const;
+
 /** The path as the router sees it, or null when it cannot be decoded. */
 function normalize(pathname: string): string | null {
   let decoded: string;
@@ -89,4 +96,15 @@ export function isInternalPortalPath(pathname: string): boolean {
   return [PORTAL_PAGE_ROOT, PORTAL_API_ROOT].some(
     (root) => path === root || path.startsWith(`${root}/`),
   );
+}
+
+/**
+ * Whether the path is a route of the instance admin that does not live below the portal's address
+ * (`INSTANCE_ADMIN_ONLY_PATHS`). Read the way the router reads it, like the portal paths; a path that cannot be read
+ * is no route.
+ */
+export function isInstanceAdminOnlyPath(pathname: string): boolean {
+  const path = normalize(pathname);
+  if (path === null) return false;
+  return INSTANCE_ADMIN_ONLY_PATHS.some((only) => path === only);
 }

@@ -56,7 +56,15 @@ describe("an email and password account whose address is not verified while the 
       member: true,
     });
 
-    for (const path of ["/", "/projects", "/runs", "/settings", "/anything"]) {
+    for (const path of [
+      "/",
+      "/projects",
+      "/runs",
+      "/settings",
+      "/w/default/projects",
+      "/w/default/members",
+      "/anything",
+    ]) {
       const response = await portal.visit(path, { cookies });
       expect(response.status, path).toBe(307);
       expect(await location(response), path).toBe("/verify-email");
@@ -72,9 +80,10 @@ describe("an email and password account whose address is not verified while the 
     });
 
     for (const [path, method] of [
-      ["/api/runs", "GET"],
-      ["/api/review-settings", "PUT"],
-      ["/api/integrations/sync", "POST"],
+      ["/api/w/default/runs", "GET"],
+      ["/api/w/default/review-settings", "PUT"],
+      ["/api/w/default/invitations", "POST"],
+      ["/api/workspaces", "POST"],
     ] as const) {
       const response = await portal.visit(path, { cookies, method });
       expect(response.status, path).toBe(403);
@@ -186,7 +195,7 @@ describe("the instance admin whose address is not verified while the instance ca
     const page = await portal.visit("/projects", {
       cookies: portal.adminCookies,
     });
-    const data = await portal.visit("/api/runs", {
+    const data = await portal.visit("/api/w/default/runs", {
       cookies: portal.adminCookies,
     });
 
@@ -255,7 +264,13 @@ describe("an email and password account without a workspace", () => {
       member: false,
     });
 
-    for (const path of ["/", "/projects", "/runs/some-run", "/settings"]) {
+    for (const path of [
+      "/",
+      "/projects",
+      "/runs/some-run",
+      "/settings",
+      "/w/default/projects",
+    ]) {
       const response = await portal.visit(path, { cookies });
       expect(response.status, path).toBe(307);
       expect(await location(response), path).toBe("/no-access");
@@ -271,8 +286,9 @@ describe("an email and password account without a workspace", () => {
     });
 
     for (const [path, method] of [
-      ["/api/runs", "GET"],
-      ["/api/review-settings", "PUT"],
+      ["/api/w/default/runs", "GET"],
+      ["/api/w/default/review-settings", "PUT"],
+      ["/api/w/default/invitations", "POST"],
       ["/api/backup/status", "GET"],
     ] as const) {
       const response = await portal.visit(path, { cookies, method });

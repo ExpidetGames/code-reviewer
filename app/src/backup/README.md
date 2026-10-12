@@ -13,7 +13,7 @@ database file: a plain copy of a live WAL database is not a backup (see below).
 | `restore.ts`           | Puts a backup back as the database                                                                  |
 | `cli.ts`               | `node backup/cli.ts backup` and `restore <file>`; for Coolify, for operators, for the restore guide |
 | `scheduler.ts`         | The daily timer inside the app (production only), started from `src/instrumentation.ts`             |
-| `status.ts`, `http.ts` | `GET /api/backup/status` (needs a session): schedule, target, last run, newest backup               |
+| `status.ts`, `http.ts` | `GET /api/backup/status` (the instance admin only): schedule, target, last run, newest backup       |
 | `config.ts`            | `BACKUP_DIR`, `BACKUP_TIME` (and `DATABASE_PATH`, read with the database layer's default)           |
 
 This folder opens SQLite itself (better-sqlite3 directly, `VACUUM INTO`, `PRAGMA integrity_check`),
@@ -110,7 +110,9 @@ one line with an error code when the backup fails, which Coolify shows as a fail
 task. Run the same command by hand with `docker compose exec app node backup/cli.ts backup`.
 
 A failed scheduled run is logged as `[backup] <CODE>: <message>` (error level) and shown by
-`GET /api/backup/status` (`lastRun`, `target`, `stale`; only stable error codes, never paths or error
+`GET /api/backup/status` (the instance admin only: it is about the instance, not about a workspace, so for every
+other signed in person, owners of workspaces included, it is a path that does not exist, answered by the proxy
+like any missing path and checked again by the route; `lastRun`, `target`, `stale`; only stable error codes, never paths or error
 text, which stay in the log). `stale` looks at the newest backup in the directory, whoever made it:
 with `BACKUP_TIME=off` and a Coolify task that fails every night it turns true after a day and a half. A page that shows this status in the settings
 UI does not exist yet. There is no external alerting in the MVP.
