@@ -24,7 +24,6 @@ type Harness = Awaited<ReturnType<typeof startRunnerApiHarness>>;
 
 const KEY_A = "sk-or-v1-sentinel-key-of-workspace-alpha-0001";
 const KEY_B = "sk-or-v1-sentinel-key-of-workspace-bravo-0002";
-const KEY_ROTATED = "sk-or-v1-rotated-key-of-workspace-alpha-0003";
 // Keys that no shape of src/runner-api/redact.ts matches, so only what the app remembers can mask them.
 const PLAIN_KEY_A = "plain-workspace-key-alpha-0001";
 const PLAIN_KEY_ROTATED = "plain-workspace-key-alpha-rotated-0002";
