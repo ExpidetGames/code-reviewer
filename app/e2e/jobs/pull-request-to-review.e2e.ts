@@ -38,6 +38,8 @@ const WIDGETS = { id: 9600001, fullName: "pipeline-journey/widgets" };
 const DORMANT = { id: 9600002, fullName: "pipeline-journey/dormant" };
 const OWNER = { login: account.login, id: account.id };
 const REVIEW_MARKER = "<!-- pr-agent:review:full -->";
+// The key an Owner saves for the workspace in the last journey: a dummy that must never show up anywhere.
+const WORKSPACE_KEY = "sk-or-v1-e2e-workspace-key-of-the-pipeline-app-0001";
 // A review through the real PR-Agent takes a few seconds; the first one also loads PR-Agent.
 const RUN_TIMEOUT = { timeout: 120_000 };
 
@@ -351,6 +353,62 @@ test.describe("a pull request on its way to a review comment", () => {
     ).toEqual([]);
     await expectNoCredentials(page, request, runnerOutput());
   });
+
+  // #104-LK-13
+  test("a key saved for the workspace in the settings is the key a review is asked with, instead of the key of the server", async ({
+    page,
+    request,
+  }) => {
+    test.setTimeout(180_000);
+    const number = prNumber(9);
+    const head = headSha("5", number);
+    await addGithubPullRequest(request, WIDGETS.fullName, {
+      number,
+      title: "Add a salutation helper",
+      headSha: head,
+    });
+    await signInThroughTheForm(page, account);
+    await page.getByRole("link", { name: "Settings", exact: true }).click();
+    const form = page.getByRole("form", { name: "LLM key" });
+    await form.getByLabel("API key").fill(WORKSPACE_KEY);
+    await form.getByRole("button", { name: "Save key" }).click();
+    // The state the server holds now (not the message, which is shown for a moment).
+    await expect(
+      form.getByText(`A key is saved (ends in ${WORKSPACE_KEY.slice(-4)})`),
+    ).toBeVisible();
+
+    try {
+      await page.getByRole("link", { name: "Runs", exact: true }).click();
+      const answer = await deliverPullRequestEvent(request, {
+        action: "opened",
+        installationId: INSTALLATION_ID,
+        repository: { ...WIDGETS, owner: OWNER },
+        number,
+        title: "Add a salutation helper",
+        headSha: head,
+      });
+      expect(answer).toEqual({
+        status: "accepted",
+        outcome: "trigger_enqueued",
+      });
+      const run = runsOf(page, WIDGETS.fullName, number);
+      await expect(run.locator(".badge-run")).toContainText(
+        "Succeeded",
+        RUN_TIMEOUT,
+      );
+
+      // The model was asked with the key of the workspace and not with the one of the environment.
+      const asked = fakeLlm().requests();
+      expect(asked).toHaveLength(1);
+      expect(asked[0]?.authorization).toBe(`Bearer ${WORKSPACE_KEY}`);
+      expect(asked[0]?.authorization).not.toContain(llmEnv.apiKey);
+      await expectNoCredentials(page, request, runnerOutput(), [WORKSPACE_KEY]);
+    } finally {
+      // The other journeys of this group, and a retry of the group, use the key of the environment.
+      const removed = await page.request.delete("/api/w/default/llm-key");
+      expect(removed.status()).toBe(200);
+    }
+  });
 });
 
 /** The LLM key and every installation token are nowhere in the page, the runner's output or the run data. */
@@ -358,10 +416,16 @@ async function expectNoCredentials(
   page: Page,
   request: import("@playwright/test").APIRequestContext,
   runnerOutput: string,
+  moreSecrets: string[] = [],
 ): Promise<void> {
   const tokens = await getIssuedInstallationTokens(request);
   expect(tokens.length).toBeGreaterThan(0);
-  const secrets = [llmEnv.apiKey, e2eEnv.runnerToken, ...tokens];
+  const secrets = [
+    llmEnv.apiKey,
+    e2eEnv.runnerToken,
+    ...tokens,
+    ...moreSecrets,
+  ];
   const runs = await page.request.get("/api/w/default/runs");
   expect(runs.status()).toBe(200);
   const texts = {

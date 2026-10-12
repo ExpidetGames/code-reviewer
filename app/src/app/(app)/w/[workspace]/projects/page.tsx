@@ -6,6 +6,7 @@ import {
   getGithubAppInstallUrl,
 } from "@/config-status/shared";
 import { configAudienceOf } from "@/config-status/status";
+import { WorkspaceLlmNotice } from "@/llm/ui/workspace-llm-notice";
 import { projectServiceFor } from "@/projects/shared";
 import { lastRunSourceFor } from "@/runs/shared";
 import {
@@ -45,6 +46,7 @@ export default async function ProjectsPage({
         workspaceId={workspace.id}
         workspaceSlug={workspace.slug}
         canManage={canManage}
+        canManageLlmKey={can(role, "manage_llm_key")}
         user={user}
       />
     </>
@@ -55,11 +57,13 @@ async function ProjectsContent({
   workspaceId,
   workspaceSlug,
   canManage,
+  canManageLlmKey,
   user,
 }: {
   workspaceId: string;
   workspaceSlug: string;
   canManage: boolean;
+  canManageLlmKey: boolean;
   user: { isInstanceAdmin: boolean };
 }) {
   const data = await loadProjectsPage({
@@ -71,11 +75,18 @@ async function ProjectsContent({
     installUrl: getGithubAppInstallUrl,
   });
   return (
-    <ProjectsPageContent
-      workspaceSlug={workspaceSlug}
-      audience={configAudienceOf(user)}
-      canManage={canManage}
-      data={data}
-    />
+    <>
+      <WorkspaceLlmNotice
+        workspaceId={workspaceId}
+        workspaceSlug={workspaceSlug}
+        canManage={canManageLlmKey}
+      />
+      <ProjectsPageContent
+        workspaceSlug={workspaceSlug}
+        audience={configAudienceOf(user)}
+        canManage={canManage}
+        data={data}
+      />
+    </>
   );
 }

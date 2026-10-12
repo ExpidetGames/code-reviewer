@@ -57,6 +57,8 @@ async function startRoutes() {
       ALLOW_TEST_GITHUB_ENDPOINTS: "true",
     }),
     RUNNER_TOKEN,
+    // The master key: the key of a claim is remembered encrypted in the database.
+    APP_SECRET: "route-file-app-secret-0123456789-0123456789",
     LLM_PROVIDER: "openrouter",
     LLM_API_KEY: LLM_KEY,
     LLM_MODEL: "vendor/test-model",

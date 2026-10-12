@@ -395,7 +395,7 @@ describe("the settings page of a project", () => {
   });
 
   // #101-WM-08
-  it("tells a member that reviews are not set up and to ask the instance admin, naming no variable", async () => {
+  it("tells a member nothing about the LLM variables of the instance (the workspace notice says whether reviews have a key)", async () => {
     const app = await openProject();
     const data = await loadProjectSettingsPage(app.first.id, {
       projects: app.projects,
@@ -418,8 +418,7 @@ describe("the settings page of a project", () => {
       />,
     );
 
-    expect(screen.getByText("Reviews are not set up yet")).toBeTruthy();
-    expect(container.textContent).toContain("Ask your instance admin");
+    expect(screen.queryByText("Reviews are not set up yet")).toBeNull();
     expect(container.textContent).not.toMatch(/GITHUB_APP|LLM_/);
   });
 });
