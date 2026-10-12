@@ -22,7 +22,11 @@ describe("the health check", () => {
   it("reports an error when the file has no schema", async () => {
     const directory = await createTestDirectory();
     const db = track(
-      openDatabase({ path: join(directory, "app.db"), busyTimeoutMs: 1000 }),
+      openDatabase({
+        driver: "sqlite",
+        path: join(directory, "app.db"),
+        busyTimeoutMs: 1000,
+      }),
     );
 
     expect(await checkHealth(() => db)).toEqual({ status: "error" });

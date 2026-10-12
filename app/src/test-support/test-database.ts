@@ -8,13 +8,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Kysely } from "kysely";
 import { afterEach, inject } from "vitest";
-import { DEFAULT_BUSY_TIMEOUT_MS, type DatabaseConfig } from "../db/config.ts";
+import {
+  DEFAULT_BUSY_TIMEOUT_MS,
+  type SqliteDatabaseConfig,
+} from "../db/config.ts";
 import { openDatabase } from "../db/connection.ts";
 import type { Database } from "../db/schema.ts";
 
 export type TestDatabase = {
   db: Kysely<Database>;
-  config: DatabaseConfig;
+  config: SqliteDatabaseConfig;
   /** The directory that holds the file; removed after the test. */
   directory: string;
 };
@@ -56,6 +59,7 @@ export async function createTestDatabase(
   await copyFile(inject("dbTemplatePath"), path);
 
   const config = {
+    driver: "sqlite" as const,
     path,
     busyTimeoutMs: options.busyTimeoutMs ?? DEFAULT_BUSY_TIMEOUT_MS,
   };
