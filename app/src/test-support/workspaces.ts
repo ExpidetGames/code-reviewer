@@ -5,14 +5,26 @@
 // a second one.
 import type { Kysely } from "kysely";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
-import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
+import {
+  createWorkspacesRepository,
+  DEFAULT_WORKSPACE_SLUG,
+} from "../db/repositories/workspaces-repository.ts";
 import type { Database } from "../db/schema.ts";
 
-/** The id of the default workspace; made on the first call. */
+/** The id of the default workspace ("Default workspace", slug "default"); made on the first call. */
 export async function defaultWorkspaceId(
   db: Kysely<Database>,
 ): Promise<string> {
-  return (await createWorkspacesRepository(db).ensureDefault()).id;
+  const workspaces = createWorkspacesRepository(db);
+  const existing = await workspaces.findDefault();
+  if (existing !== undefined) return existing.id;
+  return (
+    await workspaces.create({
+      name: "Default workspace",
+      slug: DEFAULT_WORKSPACE_SLUG,
+      createdBy: null,
+    })
+  ).id;
 }
 
 /** Another workspace, for tests that need two. */

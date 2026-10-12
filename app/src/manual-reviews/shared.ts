@@ -10,13 +10,15 @@ import { integrationRegistry } from "../integrations/registry.ts";
 import { jobQueueFor } from "../jobs/shared.ts";
 import { projectServiceFor } from "../projects/shared.ts";
 import { reviewSettingsServiceFor } from "../review-settings/shared.ts";
-import { inCurrentWorkspace } from "../workspaces/in-current-workspace.ts";
 import {
   createManualReviewService,
   type ManualReviewService,
 } from "./service.ts";
 
-function manualReviewServiceFor(workspaceId: string): ManualReviewService {
+/** The manual review service of one workspace. */
+export function manualReviewServiceFor(
+  workspaceId: string,
+): ManualReviewService {
   const db = getDatabase();
   return createManualReviewService({
     repositories: createRepositoriesRepository(db, workspaceId),
@@ -26,9 +28,4 @@ function manualReviewServiceFor(workspaceId: string): ManualReviewService {
     registry: integrationRegistry,
     queue: jobQueueFor(workspaceId),
   });
-}
-
-/** The manual review service for the current request (the workspace the signed-in user works in). */
-export function getManualReviewService(): ManualReviewService {
-  return inCurrentWorkspace(manualReviewServiceFor);
 }

@@ -24,7 +24,7 @@ import {
   testAppKeys,
   testGithubAppEnv,
 } from "../../src/test-support/github-app.ts";
-import { getProjectService } from "../../src/projects/shared.ts";
+import { projectServiceFor } from "../../src/projects/shared.ts";
 import { createTestDirectory } from "../../src/test-support/test-database.ts";
 import {
   defaultWorkspaceId,
@@ -159,7 +159,9 @@ describe("the runner API route files", () => {
           getDatabase(),
           await defaultWorkspaceId(getDatabase()),
         ).list();
-        await getProjectService().activateProject(repository!.id);
+        await projectServiceFor(
+          await defaultWorkspaceId(getDatabase()),
+        ).activateProject(repository!.id);
       }
     }
 

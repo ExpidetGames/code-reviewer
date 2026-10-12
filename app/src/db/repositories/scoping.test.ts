@@ -21,10 +21,12 @@ import { describe, expect, it } from "vitest";
 const SCOPED = [
   "app-settings-repository.ts",
   "integrations-repository.ts",
+  "invitations-repository.ts",
   "jobs-repository.ts",
   "projects-repository.ts",
   "repositories-repository.ts",
   "runs-repository.ts",
+  "workspace-members-repository.ts",
 ] as const;
 
 /**
@@ -33,6 +35,9 @@ const SCOPED = [
  *   instance_settings, rate_limits, secrets);
  * - integration-directory: webhooks and the synchronization find a connection before the workspace is
  *   known; it only reads and the answer names the workspace;
+ * - invitation-directory: a person who opens an invitation link holds only the token, and the list of the
+ *   invitations that wait for an address spans workspaces; it only reads and every answer names the
+ *   workspace, and whatever is done next goes through the scoped invitations repository;
  * - runner-jobs: runners serve the whole instance, every statement is fenced by the lease token;
  * - jobs-claim: the one SQL statement of the runner side, not a repository.
  */
@@ -41,6 +46,7 @@ const INSTANCE_LEVEL = [
   "app-meta-repository.ts",
   "instance-settings-repository.ts",
   "integration-directory-repository.ts",
+  "invitation-directory-repository.ts",
   "jobs-claim.ts",
   "rate-limits-repository.ts",
   "runner-jobs-repository.ts",

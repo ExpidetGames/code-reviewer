@@ -40,6 +40,7 @@ function renderToggle(
 ) {
   return render(
     <ProjectToggle
+      workspaceSlug="acme"
       repositoryId="repo-1"
       fullName="acme/widgets"
       checked={props.checked ?? false}

@@ -19,7 +19,9 @@ afterEach(cleanup);
 
 function renderButton(result: Awaited<ReturnType<ProjectsApi["sync"]>>) {
   const sync = vi.fn<ProjectsApi["sync"]>(async () => result);
-  render(<SyncButton api={{ setActive: vi.fn(), sync }} />);
+  render(
+    <SyncButton workspaceSlug="acme" api={{ setActive: vi.fn(), sync }} />,
+  );
   return sync;
 }
 

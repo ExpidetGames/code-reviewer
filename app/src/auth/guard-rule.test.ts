@@ -22,9 +22,12 @@ const PUBLIC_SERVER_FUNCTION_FILES = ["auth/actions.ts"];
 // `requireUser()` is the guard of a route handler or a Server Function. The admin data routes hand
 // `lookupAdmin` to `createAdminRouteHandlers`, which checks it before anything else (a 401 for nobody,
 // a 404 for somebody who is not an instance admin; src/admin/guard.integration.test.ts), and the admin
-// pages call `requireAdmin()`.
+// pages call `requireAdmin()`. The routes of a workspace run their handler through `withWorkspace(...)`
+// (the membership and the role of the person, src/workspaces/access-runtime.ts) and the routes that are
+// not about one workspace through `withSignedIn(...)`. The backup status is for the instance admin
+// (`adminAccessOf`).
 function callsRequireUser(source: string): boolean {
-  return /\brequireUser\(\)|\brequireAdmin\(\)|\baccess:\s*lookupAdmin\b/.test(
+  return /\brequireUser\(\)|\brequireAdmin\(\)|\baccess:\s*lookupAdmin\b|\bwithWorkspace\(|\bwithSignedIn\(|\badminAccessOf\(/.test(
     source,
   );
 }

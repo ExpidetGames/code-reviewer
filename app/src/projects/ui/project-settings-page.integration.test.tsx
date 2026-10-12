@@ -14,7 +14,10 @@ vi.mock("next/navigation", () => ({
 }));
 
 import type { SessionUser } from "../../auth/access-policy.ts";
-import { describeConfigStatus } from "../../config-status/status.ts";
+import {
+  describeConfigStatus,
+  statusForMembers,
+} from "../../config-status/status.ts";
 import { createProjectsRepository } from "../../db/repositories/projects-repository.ts";
 import type { ManualReviewApi } from "../../manual-reviews/ui/api.ts";
 import { createReviewSettingsRouteHandlers } from "../../review-settings/http.ts";
@@ -68,19 +71,24 @@ async function openProject(options: { activate?: boolean } = {}) {
     service: s.service,
   });
   // The form's API client, wired to the real handlers instead of the network.
-  const api = createProjectSettingsApi(async (url, init) => {
-    const request = new Request(`https://app.test${url}`, {
-      ...init,
-      headers: {
-        ...(init?.headers as Record<string, string>),
-        "sec-fetch-site": "same-origin",
-      },
-    });
-    if (init?.method === "PUT") return handlers.putProject(request, s.first.id);
-    if (init?.method === "DELETE")
-      return handlers.deleteProject(request, s.first.id);
-    return handlers.getProject(request, s.first.id);
-  }, s.first.id);
+  const api = createProjectSettingsApi(
+    async (url, init) => {
+      const request = new Request(`https://app.test${url}`, {
+        ...init,
+        headers: {
+          ...(init?.headers as Record<string, string>),
+          "sec-fetch-site": "same-origin",
+        },
+      });
+      if (init?.method === "PUT")
+        return handlers.putProject(request, s.first.id);
+      if (init?.method === "DELETE")
+        return handlers.deleteProject(request, s.first.id);
+      return handlers.getProject(request, s.first.id);
+    },
+    "acme",
+    s.first.id,
+  );
   async function load(repositoryId = s.first.id) {
     return loadProjectSettingsPage(repositoryId, {
       projects,
@@ -100,6 +108,7 @@ describe("the settings page of a repository that was never activated", () => {
 
     render(
       <ProjectSettingsPageContent
+        workspaceSlug="acme"
         data={data}
         api={app.api}
         manualReviewApi={quietManualReviews}
@@ -126,6 +135,7 @@ describe("the settings page of a repository that was never activated", () => {
     if (data.kind !== "ready") throw new Error("expected the form");
     render(
       <ProjectSettingsPageContent
+        workspaceSlug="acme"
         data={data}
         api={app.api}
         manualReviewApi={quietManualReviews}
@@ -191,6 +201,7 @@ describe("the settings page of a project", () => {
     expect(data.model.effective.maxTokens).toBe(50_000);
     render(
       <ProjectSettingsPageContent
+        workspaceSlug="acme"
         data={data}
         api={app.api}
         manualReviewApi={quietManualReviews}
@@ -213,6 +224,7 @@ describe("the settings page of a project", () => {
     if (before.kind !== "ready") throw new Error("expected a project");
     const view = render(
       <ProjectSettingsPageContent
+        workspaceSlug="acme"
         data={before}
         api={app.api}
         manualReviewApi={quietManualReviews}
@@ -227,6 +239,7 @@ describe("the settings page of a project", () => {
     if (after.kind !== "ready") throw new Error("expected a project");
     view.rerender(
       <ProjectSettingsPageContent
+        workspaceSlug="acme"
         data={after}
         api={app.api}
         manualReviewApi={quietManualReviews}
@@ -251,6 +264,7 @@ describe("the settings page of a project", () => {
     if (data.kind !== "ready") throw new Error("expected a project");
     render(
       <ProjectSettingsPageContent
+        workspaceSlug="acme"
         data={data}
         api={app.api}
         manualReviewApi={quietManualReviews}
@@ -283,6 +297,7 @@ describe("the settings page of a project", () => {
     // A budget the model cannot hold: the client check passes, the service refuses.
     render(
       <ProjectSettingsPageContent
+        workspaceSlug="acme"
         data={data}
         api={app.api}
         manualReviewApi={quietManualReviews}
@@ -314,6 +329,7 @@ describe("the settings page of a project", () => {
 
     render(
       <ProjectSettingsPageContent
+        workspaceSlug="acme"
         data={data}
         api={app.api}
         manualReviewApi={{
@@ -339,6 +355,7 @@ describe("the settings page of a project", () => {
 
     render(
       <ProjectSettingsPageContent
+        workspaceSlug="acme"
         data={data}
         api={app.api}
         manualReviewApi={quietManualReviews}
@@ -364,6 +381,7 @@ describe("the settings page of a project", () => {
 
     const { container } = render(
       <ProjectSettingsPageContent
+        workspaceSlug="acme"
         data={data}
         api={app.api}
         manualReviewApi={quietManualReviews}
@@ -374,5 +392,34 @@ describe("the settings page of a project", () => {
       "acme/<img src=x onerror=alert(1)>",
     );
     expect(container.querySelector("img")).toBeNull();
+  });
+
+  // #101-WM-08
+  it("tells a member that reviews are not set up and to ask the instance admin, naming no variable", async () => {
+    const app = await openProject();
+    const data = await loadProjectSettingsPage(app.first.id, {
+      projects: app.projects,
+      settings: app.service,
+      // What the page file does for a person who does not run the instance.
+      config: () =>
+        statusForMembers(
+          describeConfigStatus({ ...WORKING_ENV, LLM_API_KEY: undefined }),
+        ),
+    });
+    if (data.kind !== "ready") throw new Error("expected the form");
+
+    const { container } = render(
+      <ProjectSettingsPageContent
+        workspaceSlug="acme"
+        audience="member"
+        data={data}
+        api={app.api}
+        manualReviewApi={quietManualReviews}
+      />,
+    );
+
+    expect(screen.getByText("Reviews are not set up yet")).toBeTruthy();
+    expect(container.textContent).toContain("Ask your instance admin");
+    expect(container.textContent).not.toMatch(/GITHUB_APP|LLM_/);
   });
 });

@@ -100,7 +100,7 @@ test.describe("the first-run setup", () => {
     await page.getByLabel("Email address").fill(e2eEnv.adminEmail);
     await page.getByLabel("Password").fill(e2eEnv.adminPassword);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
-    await expect(page).toHaveURL(/\/projects$/);
+    await expect(page).toHaveURL(/\/w\/default\/projects$/);
 
     await page.goto("/admin");
     await expect(page.getByRole("heading", { name: "Admin" })).toBeVisible();

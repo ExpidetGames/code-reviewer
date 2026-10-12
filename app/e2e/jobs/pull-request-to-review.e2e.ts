@@ -12,6 +12,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { startLlmFake, type FakeLlm } from "../../../fakes/llm/server.ts";
 import { review } from "../../../fakes/llm/canned.ts";
+import { syncFromGithubAsAdmin } from "../helpers/admin-api";
 import { e2eEnv, llmEnv } from "../helpers/e2e-env";
 import {
   addGithubAccount,
@@ -80,8 +81,8 @@ test.describe("a pull request on its way to a review comment", () => {
       },
       [WIDGETS, DORMANT],
     );
+    await syncFromGithubAsAdmin(baseURL);
     await signInThroughTheForm(page, account);
-    await page.getByRole("button", { name: "Sync from GitHub" }).click();
     const row = page
       .getByRole("listitem")
       .filter({ hasText: WIDGETS.fullName });
@@ -361,7 +362,7 @@ async function expectNoCredentials(
   const tokens = await getIssuedInstallationTokens(request);
   expect(tokens.length).toBeGreaterThan(0);
   const secrets = [llmEnv.apiKey, e2eEnv.runnerToken, ...tokens];
-  const runs = await page.request.get("/api/runs");
+  const runs = await page.request.get("/api/w/default/runs");
   expect(runs.status()).toBe(200);
   const texts = {
     "the page": await page.content(),

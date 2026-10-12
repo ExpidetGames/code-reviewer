@@ -6,6 +6,8 @@
 // settled so a run that starts later shows up too. Everything in a run that came from outside (the
 // project name, the login) is rendered as text.
 import Link from "next/link";
+import { useMemo } from "react";
+import { workspacePath } from "../../workspaces/paths.ts";
 import { EmptyState } from "../../ui/empty-state.tsx";
 import { formatUtc } from "../../ui/format-time.ts";
 import { useLiveSnapshot } from "../../ui/use-live-snapshot.ts";
@@ -36,11 +38,23 @@ function TimeLine({ run }: { run: RunRowView }) {
   );
 }
 
-function RunRow({ run }: { run: RunRowView }) {
+function RunRow({
+  run,
+  workspaceSlug,
+}: {
+  run: RunRowView;
+  workspaceSlug: string;
+}) {
   return (
     <li className="run-row" data-run-id={run.id}>
       <div className="run-main">
-        <Link href={`/runs/${encodeURIComponent(run.id)}`} className="run-link">
+        <Link
+          href={workspacePath(
+            workspaceSlug,
+            `/runs/${encodeURIComponent(run.id)}`,
+          )}
+          className="run-link"
+        >
           {run.project} #{run.prNumber}
         </Link>
         <span className="muted small">
@@ -66,13 +80,22 @@ function RunRow({ run }: { run: RunRowView }) {
   );
 }
 
-export function RunsEmptyState({ filtered }: { filtered: boolean }) {
+export function RunsEmptyState({
+  filtered,
+  workspaceSlug,
+}: {
+  filtered: boolean;
+  workspaceSlug: string;
+}) {
   if (filtered)
     return (
       <EmptyState
         title="No runs for this filter"
         action={
-          <Link href="/runs" className="btn btn-secondary">
+          <Link
+            href={workspacePath(workspaceSlug, "/runs")}
+            className="btn btn-secondary"
+          >
             Reset filter
           </Link>
         }
@@ -90,14 +113,23 @@ export function RunsEmptyState({ filtered }: { filtered: boolean }) {
 }
 
 export function RunsList({
+  workspaceSlug,
   initial,
   filter,
-  api = browserRunsApi,
+  api: apiProp,
 }: {
+  /** The workspace of the page: the polling and every link stay in it. */
+  workspaceSlug: string;
   initial: RunsSnapshot;
   filter: RunsFilter;
   api?: RunsApi;
 }) {
+  // One client for the life of the component: a new one every render would restart what depends on it.
+  const defaultApi = useMemo(
+    () => browserRunsApi(workspaceSlug),
+    [workspaceSlug],
+  );
+  const api = apiProp ?? defaultApi;
   const { data, failed, failureCode, stopped } = useLiveSnapshot({
     initial,
     fetchLatest: () => api.list(filter),
@@ -116,11 +148,11 @@ export function RunsList({
         </p>
       ) : null}
       {data.runs.length === 0 ? (
-        <RunsEmptyState filtered={filtered} />
+        <RunsEmptyState filtered={filtered} workspaceSlug={workspaceSlug} />
       ) : (
         <ul className="run-list" aria-label="Runs">
           {data.runs.map((run) => (
-            <RunRow key={run.id} run={run} />
+            <RunRow key={run.id} run={run} workspaceSlug={workspaceSlug} />
           ))}
         </ul>
       )}

@@ -16,7 +16,7 @@ function recorder(body: unknown = {}) {
     });
     return new Response(JSON.stringify(body), { status: 200 });
   };
-  return { calls, api: createProjectsApi(fetchImpl) };
+  return { calls, api: createProjectsApi(fetchImpl, "acme") };
 }
 
 describe("the project list's calls", () => {
@@ -29,7 +29,7 @@ describe("the project list's calls", () => {
     expect(result.ok).toBe(true);
     expect(calls).toEqual([
       {
-        url: "/api/repositories/repo-1/project",
+        url: "/api/w/acme/repositories/repo-1/project",
         method: "PUT",
         body: '{"active":true}',
       },
@@ -50,7 +50,7 @@ describe("the project list's calls", () => {
 
     await api.setActive("a/b?c", true);
 
-    expect(calls[0]?.url).toBe("/api/repositories/a%2Fb%3Fc/project");
+    expect(calls[0]?.url).toBe("/api/w/acme/repositories/a%2Fb%3Fc/project");
   });
 
   // CR-21-T03
@@ -61,7 +61,7 @@ describe("the project list's calls", () => {
 
     expect(result).toEqual({ ok: true, data: { added: 1, errors: [] } });
     expect(calls).toEqual([
-      { url: "/api/integrations/sync", method: "POST", body: null },
+      { url: "/api/admin/integrations/sync", method: "POST", body: null },
     ]);
   });
 });

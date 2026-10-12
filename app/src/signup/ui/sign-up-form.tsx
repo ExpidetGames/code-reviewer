@@ -18,8 +18,11 @@ import { describeSignUpFailure } from "./messages.ts";
 type Next = "verify_email" | "sign_in";
 
 export function SignUpForm({
+  signInPath = "/login",
   fetchImpl = (url, init) => fetch(url, init),
 }: {
+  /** Where "go to the sign-in" leads: the login page, with an invitation link carried along. */
+  signInPath?: string;
   /** Only tests pass this. */
   fetchImpl?: FetchLike;
 }) {
@@ -48,7 +51,7 @@ export function SignUpForm({
           Thank you. If this address may sign up, the account is ready: sign in
           with it.
         </p>
-        <Link href="/login">Go to the sign-in</Link>
+        <Link href={signInPath}>Go to the sign-in</Link>
       </>
     );
 

@@ -7,7 +7,9 @@
 // data; once it is settled it stops. Every text that came from outside is rendered as text, and the
 // one link made from stored data is the comment link, already checked to be a github.com address.
 import Link from "next/link";
+import { useMemo } from "react";
 import { formatUtc } from "../../ui/format-time.ts";
+import { workspacePath } from "../../workspaces/paths.ts";
 import { useLiveSnapshot } from "../../ui/use-live-snapshot.ts";
 import { formatDuration } from "../run-duration.ts";
 import { isSettled, RUN_STATUS_PRESENTATION } from "../run-status.ts";
@@ -82,12 +84,21 @@ function CommentFacts({ run }: { run: RunDetailView }) {
 }
 
 export function RunDetail({
+  workspaceSlug,
   initial,
-  api = browserRunsApi,
+  api: apiProp,
 }: {
+  /** The workspace of the page: the polling and every link stay in it. */
+  workspaceSlug: string;
   initial: RunDetailSnapshot;
   api?: RunsApi;
 }) {
+  // One client for the life of the component: a new one every render would restart what depends on it.
+  const defaultApi = useMemo(
+    () => browserRunsApi(workspaceSlug),
+    [workspaceSlug],
+  );
+  const api = apiProp ?? defaultApi;
   const { data, failed, failureCode, stopped } = useLiveSnapshot({
     initial,
     fetchLatest: () => api.detail(initial.run.id),
@@ -120,7 +131,12 @@ export function RunDetail({
           <CommentFacts run={run} />
           <dt>Project</dt>
           <dd>
-            <Link href={`/projects/${encodeURIComponent(run.repositoryId)}`}>
+            <Link
+              href={workspacePath(
+                workspaceSlug,
+                `/projects/${encodeURIComponent(run.repositoryId)}`,
+              )}
+            >
               {run.project}
             </Link>
           </dd>
@@ -182,7 +198,12 @@ export function RunDetail({
             <>
               <dt>Replaced by</dt>
               <dd>
-                <Link href={`/runs/${encodeURIComponent(run.supersededBy)}`}>
+                <Link
+                  href={workspacePath(
+                    workspaceSlug,
+                    `/runs/${encodeURIComponent(run.supersededBy)}`,
+                  )}
+                >
                   The newer run
                 </Link>
               </dd>

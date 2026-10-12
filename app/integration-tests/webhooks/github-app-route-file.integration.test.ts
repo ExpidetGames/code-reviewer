@@ -11,7 +11,7 @@ import {
   webhookFixture,
 } from "../../../fakes/github/webhooks.ts";
 import { createRepositoriesRepository } from "../../src/db/repositories/repositories-repository.ts";
-import { getProjectService } from "../../src/projects/shared.ts";
+import { projectServiceFor } from "../../src/projects/shared.ts";
 import { closeDatabase, getDatabase } from "../../src/db/startup.ts";
 import { initializeDatabaseOnStart } from "../../src/db/startup.ts";
 import { TEST_WEBHOOK_SECRET } from "../../src/test-support/github-app.ts";
@@ -135,7 +135,9 @@ describe("the webhook route file", () => {
       getDatabase(),
       await defaultWorkspaceId(getDatabase()),
     ).list();
-    await getProjectService().activateProject(repository!.id);
+    await projectServiceFor(
+      await defaultWorkspaceId(getDatabase()),
+    ).activateProject(repository!.id);
     vi.mocked(console.info).mockClear();
 
     const response = await route.POST(

@@ -126,7 +126,7 @@ async function signInAsAdmin(page: Page): Promise<void> {
   await page.getByLabel("Email address").fill(e2eEnv.adminEmail);
   await page.getByLabel("Password").fill(e2eEnv.adminPassword);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await expect(page).toHaveURL(/\/projects$/);
+  await expect(page).toHaveURL(/\/w\/default\/projects$/);
 }
 
 test.describe("the admin portal", () => {
@@ -177,9 +177,8 @@ test.describe("the admin portal", () => {
     await page.getByRole("radio", { name: /Allowed email domains/ }).check();
     await page.getByLabel("Domains", { exact: true }).fill("e2e.test");
     await page.getByRole("button", { name: "Save sign-up rule" }).click();
-    await expect(
-      page.getByRole("status").filter({ hasText: "Saved." }),
-    ).toBeVisible();
+    // ("Saved." only shows for an instant: the form starts again from the saved values, so the lasting
+    // proof is what the page says once it has the new data.)
     // Nothing can verify addresses yet, so the notice says the rule does not work.
     await expect(page.getByRole("note")).toContainText("does not work yet");
     await expect(
@@ -192,7 +191,7 @@ test.describe("the admin portal", () => {
     await page.getByLabel(/Maximum number of workspaces/).fill("4");
     await page.getByRole("button", { name: "Save limit" }).click();
     await expect(
-      page.getByRole("status").filter({ hasText: "Saved." }),
+      page.getByText(`Last changed by ${e2eEnv.adminEmail}`),
     ).toBeVisible();
     await page.reload();
     await expect(page.getByLabel(/Maximum number of workspaces/)).toHaveValue(
@@ -230,7 +229,7 @@ test.describe("the admin portal", () => {
     await expect(page.getByRole("navigation", { name: "Admin" })).toHaveCount(
       0,
     );
-    await page.goto("/projects");
+    await page.goto("/w/default/projects");
     await page.getByRole("button", { name: member.name }).click();
     await expect(page.getByRole("link", { name: "Admin" })).toHaveCount(0);
   });
@@ -277,7 +276,7 @@ test.describe("the admin portal", () => {
     // takes it off first.
     expect(
       (
-        await observe(page, "/projects", {
+        await observe(page, "/w/default/projects", {
           headers: { "x-portal-denied": "1" },
         })
       ).status,

@@ -16,6 +16,9 @@
 //                             answer ever contains it; null removes the mail server)
 //   POST /api/admin/mail/test sends a test mail to the admin's own address with the saved settings;
 //                             answers { "ok": true } or { "ok": false, "error": <class>, "detail" }
+//   POST /api/admin/integrations/sync  reads the installations and repositories from GitHub now (every
+//                             connection of the instance, which is why it is not a workspace route);
+//                             answers { "added": number, "errors": [...] } (src/integrations/sync/http.ts)
 //
 // Order: the admin first (nothing is read before the caller is known: not signed in is 401, signed in
 // but not an admin is a 404 like for any path that does not exist), then for a change where the
@@ -23,6 +26,8 @@
 // `{ "error": <code> }` with a stable code from errors.ts, every answer is `Cache-Control: no-store`.
 import type { SessionUser } from "../auth/access-policy.ts";
 import { isCrossSite, isJsonRequest } from "../http/request-checks.ts";
+import { createSyncRouteHandler } from "../integrations/sync/http.ts";
+import type { IntegrationSyncService } from "../integrations/sync/service.ts";
 import { readLimitedBody } from "../webhooks/limited-body.ts";
 import type { AdminAccess } from "./access.ts";
 import { ADMIN_ERROR_STATUS, type AdminErrorCode } from "./errors.ts";
@@ -37,12 +42,18 @@ export type AdminRouteDependencies = {
   /** The 404 for somebody who is not an admin: Next.js's own, so it is the one of a path that does not exist. Throws. */
   notFound: () => never;
   service: AdminService;
+  /**
+   * The process-wide synchronization with GitHub (the one the start-up sync and the webhooks use), asked for
+   * only when an admin's request for it is served.
+   */
+  sync: () => Pick<IntegrationSyncService, "syncAll">;
 };
 
 export type AdminRouteHandlers = {
   getSettings(request: Request): Promise<Response>;
   putSettings(request: Request): Promise<Response>;
   testMail(request: Request): Promise<Response>;
+  syncIntegrations(request: Request): Promise<Response>;
 };
 
 const NO_STORE = { "cache-control": "no-store" };
@@ -94,6 +105,7 @@ export function createAdminRouteHandlers({
   access,
   notFound,
   service,
+  sync,
 }: AdminRouteDependencies): AdminRouteHandlers {
   // The user first. The proxy has turned these away already; this is the second guard.
   async function admin(): Promise<SessionUser | Response> {
@@ -209,6 +221,15 @@ export function createAdminRouteHandlers({
         { ok: false, error: result.error, detail: result.detail },
         { headers: NO_STORE },
       );
+    },
+
+    async syncIntegrations(request) {
+      const who = await admin();
+      if (who instanceof Response) return who;
+      return createSyncRouteHandler({
+        requireUser: () => Promise.resolve(who),
+        sync: sync(),
+      })(request);
     },
   };
 }

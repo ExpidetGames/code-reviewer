@@ -315,7 +315,11 @@ must first make somebody else an Owner.
 
 - **The sign-up rule applies to invitations.** Only emails that the current sign-up rule allows can be
   invited; an invitation does not override the rule. (An email list rule therefore needs the address
-  on the list first.)
+  on the list first.) The rule is evaluated **again when the invitation is accepted** and when it is sent
+  again, not only when it is made: an invitation made under "everyone" does not bring in an address that
+  a tightened rule refuses (`email_not_allowed`, or `signup_closed` while the rule names addresses and
+  nothing can verify them). The instance admin is exempt, as from the sign-up itself, and a membership
+  that exists is never touched by a rule change. An invitation can still be revoked.
 - An invitation is a **single-use link bound to that email address**. It expires after **7 days** and
   can be revoked by an Owner, or by an Admin for Member invitations. The token is random with 256 bits;
   only its hash is stored.
@@ -337,6 +341,19 @@ must first make somebody else an Owner.
 - **Single-tenant:** the user sees "Ask an admin of this instance for an invitation" and has **no
   access** until invited. There is **no automatic join**, even when the sign-up rule lets the person
   create an account.
+
+**Which workspace a request is about** (decided with the implementation, issue #101). The workspace is part of
+the address: pages live below `/w/<slug>` and data routes below `/api/w/<slug>`. It is not a cookie or a header,
+because an address is what links, bookmarks and a second browser tab carry: deep links keep working, two tabs
+can work in two workspaces, and nothing remembered by the browser can point a request at a workspace by
+accident. The slug is never trusted: on every request it is looked up among the memberships of the signed in
+person, and a workspace they do not belong to is exactly as absent as one that does not exist (a missing path,
+with the same answer in every detail). The instance admin is not a member of a workspace by being the admin.
+The switcher in the navigation links the workspaces of the person; `/` opens the first one.
+
+**Roles of the first implementation.** Besides what the table says: switching a project on or off and changing
+the review defaults of a workspace need an Admin (they decide which repositories are reviewed and what a review
+costs), a Member changes the settings of a project. Only an Owner changes roles; an Admin cannot hand out a rank.
 
 ### 2.7 Instance level versus workspace level
 
@@ -580,9 +597,6 @@ start runs the import again from the beginning. Once `done`, a later start does 
 - **OIDC / SSO** as a further identity: later, behind the identity model of section 2.6.
 - **Existing users when the sign-up rule changes.** This record says accounts are not locked out by a
   rule change. Decide later whether the instance admin gets a "disable user" action.
-- **Inviting an account the rule no longer allows.** After the rule is tightened, an existing account
-  may no longer pass the rule. Decide whether it can still be invited to (or stay in) further
-  workspaces. Until decided, existing accounts are never affected and new accounts must pass the rule.
 - **Unlinking an installation after a disconnect.** Decide who may link an installation again after
   its workspace disconnected it, and whether a disconnect releases the one-workspace lock at once.
 - **Moving from SQLite to Postgres.** There is no migration tool in this milestone. Decide whether to
