@@ -39,10 +39,11 @@ describe("SPDX license headers", () => {
   });
 
   // #118-T04
-  it("start every source file with SPDX-License-Identifier: Apache-2.0", () => {
+  it("start every source file with the SPDX header its path requires", () => {
     const without = files.filter(
       (path) =>
-        headerProblem(readFileSync(`${repoRoot}${path}`, "utf8")) !== null,
+        headerProblem(readFileSync(`${repoRoot}${path}`, "utf8"), path) !==
+        null,
     );
 
     expect(

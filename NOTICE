@@ -11,3 +11,8 @@ require us to keep are in THIRD_PARTY_LICENSES.md, in particular:
   Licensed under the MIT License.
   The runner installs the pinned release of PR-Agent as a dependency and runs it to produce the
   reviews.
+
+  shadcn/ui (https://ui.shadcn.com)
+  Copyright (c) 2023 shadcn
+  Licensed under the MIT License.
+  Its components are copied into the app under app/src/components/ui/ and keep their MIT header.
