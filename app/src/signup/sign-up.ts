@@ -154,7 +154,7 @@ export async function signUp(
   dependencies: SignUpDependencies,
   input: { email: unknown; password: unknown },
 ): Promise<SignUpOutcome> {
-  const { hashPassword, mail, limits, facts, defer } = dependencies;
+  const { hashPassword, limits, facts, defer } = dependencies;
 
   // What does not depend on the address comes first: is the sign-up open at all.
   const state = await facts();
