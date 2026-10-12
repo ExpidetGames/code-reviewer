@@ -60,6 +60,9 @@ function newProxy(
   });
 }
 
+/** A browser navigation: it asks for HTML. */
+const DOCUMENT = { accept: "text/html,application/xhtml+xml,*/*;q=0.8" };
+
 function request(path: string, headers: Record<string, string> = {}) {
   return new NextRequest(`${BASE}${path}`, { headers });
 }
@@ -513,7 +516,7 @@ describe("an address from before the workspace was in the address", () => {
       const gate = firstWorkspaceSlug("acme");
 
       const response = await newProxy({ firstWorkspaceSlug: gate })(
-        request(`${path}?tab=2`),
+        request(`${path}?tab=2`, DOCUMENT),
       );
 
       expect(response.status).toBe(307);
@@ -539,7 +542,7 @@ describe("an address from before the workspace was in the address", () => {
     const response = await newProxy({
       firstWorkspaceSlug: gate,
       workspaceRole: () => Promise.resolve("member"),
-    })(request(path));
+    })(request(path, DOCUMENT));
 
     expect(response.status).not.toBe(307);
     expect(gate).not.toHaveBeenCalled();
@@ -547,9 +550,14 @@ describe("an address from before the workspace was in the address", () => {
 
   // #101-WM-05
   it.each([
-    ["a client-side navigation of the app (RSC)", "/", { rsc: "1" }, "GET"],
-    ["a prefetch", "/projects?_rsc=abc", {}, "GET"],
-    ["a request that is not a read", "/projects", {}, "POST"],
+    [
+      "a client-side navigation of the app (a fetch, not a document)",
+      "/",
+      { accept: "*/*", "sec-fetch-dest": "empty" },
+      "GET",
+    ],
+    ["a request that asks for no HTML", "/projects", {}, "GET"],
+    ["a request that is not a read", "/projects", DOCUMENT, "POST"],
   ])(
     "leaves %s to the redirect of the page",
     async (_what, path, headers, method) => {
@@ -571,7 +579,7 @@ describe("an address from before the workspace was in the address", () => {
 
     const response = await newProxy({
       firstWorkspaceSlug: firstWorkspaceSlug(null),
-    })(request("/projects"));
+    })(request("/projects", DOCUMENT));
 
     expect(wentOnUntouched(response)).toBe(true);
   });
@@ -582,7 +590,7 @@ describe("an address from before the workspace was in the address", () => {
     const gate = firstWorkspaceSlug("acme");
 
     const response = await newProxy({ firstWorkspaceSlug: gate })(
-      request("/projects"),
+      request("/projects", DOCUMENT),
     );
 
     expect(new URL(response.headers.get("location") ?? "").pathname).toBe(
@@ -596,7 +604,7 @@ describe("an address from before the workspace was in the address", () => {
 
     const response = await newProxy({
       firstWorkspaceSlug: () => Promise.reject(new Error("database is down")),
-    })(request("/projects"));
+    })(request("/projects", DOCUMENT));
 
     expect(response.status).toBe(503);
   });

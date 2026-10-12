@@ -39,6 +39,12 @@ function digest(text: string): Buffer {
   return createHash("sha256").update(text).digest();
 }
 
+/** Whether the request is a browser's navigation (or any client that asks for HTML), not a fetch of the app's own. */
+function asksForADocument(request: NextRequest): boolean {
+  if (request.headers.get("sec-fetch-dest") === "empty") return false;
+  return (request.headers.get("accept") ?? "").includes("text/html");
+}
+
 export type AccessProxyDependencies = {
   getAuth: () => Pick<Auth, "api" | "$context">;
   /** Called per request, so the policy is created on first use (not when the module is loaded). */
@@ -170,13 +176,13 @@ export function createAccessProxy({
     // verify the address, is sent where every other page sends them, below.)
     // Only for a page that is asked for as a document (the address bar, a bookmark, a link from elsewhere):
     // the browser follows a 307 there. The client-side navigation inside the app (a request for the page's
-    // data, `RSC: 1` and `_rsc`) keeps the redirect of the page itself, which the router follows in place; a
+    // data, which Next.js strips its own markers from before the proxy sees it, but which asks for no HTML and
+    // says `Sec-Fetch-Dest: empty`) keeps the redirect of the page itself, which the router follows in place; a
     // 307 there makes the router fetch the target twice and the address stays where it was.
     if (
       lookup.kind === "user" &&
       (request.method === "GET" || request.method === "HEAD") &&
-      !request.headers.has("rsc") &&
-      !request.nextUrl.searchParams.has("_rsc") &&
+      asksForADocument(request) &&
       legacyWorkspaceTarget(pathname, "x") !== null
     ) {
       let first: string | null;

@@ -278,7 +278,11 @@ test.describe("an Owner invites a colleague who accepts", () => {
       ["/runs/some-run", "/w/default/runs/some-run"],
       ["/settings", "/w/default/settings"],
     ] as const) {
-      const redirect = await page.request.get(path, { maxRedirects: 0 });
+      const redirect = await page.request.get(path, {
+        maxRedirects: 0,
+        // What a browser asks for when it opens an address.
+        headers: { accept: "text/html,application/xhtml+xml,*/*;q=0.8" },
+      });
       expect(redirect.status(), path).toBe(307);
       expect(new URL(redirect.headers().location ?? "").pathname, path).toBe(
         target,
