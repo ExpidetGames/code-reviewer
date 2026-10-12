@@ -664,6 +664,43 @@ test.describe(
         .click();
       await expect(page).toHaveURL(/\/no-access$/);
     });
+
+    // #106-IM-23
+    test("the admin links the GitHub identity of the imported Owner, and the two accounts become one", async ({
+      page,
+    }) => {
+      const alice = person("upgrade-alice");
+      await signInAsOperator(page);
+      await page.goto("/admin/integrations");
+      await expect(page.getByText("Not linked.")).toBeVisible();
+
+      await page.getByRole("button", { name: "Link GitHub account" }).click();
+      await page
+        .getByRole("button", { name: `Authorize ${alice.login}` })
+        .click();
+
+      await expect(page).toHaveURL(/\/admin\/integrations\?github=merged$/);
+      await expect(
+        page.getByRole("status").filter({ hasText: "merged into this one" }),
+      ).toBeVisible();
+      // One account holds the identity, the email and password of the operator, and the Owner role.
+      expect(
+        readUpgradeDatabase(
+          `select u.email as email, u.is_instance_admin as admin, m.role as role
+         from users u
+         join accounts a on a.user_id = u.id and a.provider_id = 'github'
+         join workspace_members m on m.user_id = u.id
+         where a.account_id = ?`,
+          String(alice.id),
+        ),
+      ).toEqual([{ email: NEW_ADMIN.email, admin: 1, role: "owner" }]);
+      expect(
+        readUpgradeDatabase<{ n: number }>(
+          "select count(*) as n from users where github_login = ? and is_instance_admin = 0",
+          alice.login,
+        )[0]?.n,
+      ).toBe(0);
+    });
   },
 );
 
