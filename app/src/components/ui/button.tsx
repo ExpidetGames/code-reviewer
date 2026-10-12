@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Adapted from shadcn/ui (MIT), https://ui.shadcn.com
+// Local adaptation for Code Reviewer: the native-control reset (appearance-none border-0
+// bg-transparent) until Tailwind's preflight lands (#185).
 
 import * as React from "react";
 import { cva, type VariantProps } from "class-variance-authority";

@@ -3,6 +3,10 @@
 // Tabs whose active tab lives in the query string, so a tab is deep-linkable, survives a reload and
 // can be shared. Ours (Apache-2.0) on top of the copied shadcn Tabs; the query string is the single
 // source of truth, an unknown or missing value falls back to the first tab.
+//
+// `useSearchParams` suspends on the server; a page that renders `QueryTabs` must wrap it in a
+// `<Suspense>` boundary (or the page opts into dynamic rendering), the way the legacy filter forms
+// do today.
 "use client";
 
 import type { ReactNode } from "react";

@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Adapted from shadcn/ui (MIT), https://ui.shadcn.com
 
-"use client";
-
 import * as React from "react";
 import { cn } from "@/lib/utils";
 

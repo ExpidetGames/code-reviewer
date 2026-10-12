@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Adapted from shadcn/ui (MIT), https://ui.shadcn.com
+// Local adaptation for Code Reviewer: SidebarMenuSkeleton derives its width from useId instead of
+// Math.random (the React compiler lint rejects an impure call during render).
 
 "use client";
 

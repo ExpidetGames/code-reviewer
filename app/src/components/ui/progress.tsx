@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Adapted from shadcn/ui (MIT), https://ui.shadcn.com
+// Local adaptation for Code Reviewer: `value` is passed to the Radix root so it exposes
+// aria-valuenow.
 
 "use client";
 

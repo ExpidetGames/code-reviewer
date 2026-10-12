@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Adapted from shadcn/ui (MIT), https://ui.shadcn.com
+// Local adaptation for Code Reviewer: the info/success/warning tone variants.
 
 import * as React from "react";
 import { cva, type VariantProps } from "class-variance-authority";

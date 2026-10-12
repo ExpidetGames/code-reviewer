@@ -11,6 +11,7 @@
 import type { ComponentProps } from "react";
 import { Loader2 } from "lucide-react";
 import { Button as ShadcnButton } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 export type ButtonVariant = "primary" | "secondary" | "ghost" | "destructive";
 export type ButtonSize = "sm" | "default" | "icon";
@@ -63,7 +64,11 @@ export function Button({
       aria-busy={loading || undefined}
       disabled={disabled || loading}
       // `size` alone is 36px; the extra class grows the icon-only hit area to 44px.
-      className={size === "icon" ? `size-11 ${className ?? ""}` : className}
+      className={cn(
+        "cursor-pointer disabled:cursor-not-allowed",
+        size === "icon" && "size-11",
+        className,
+      )}
       {...props}
     >
       {loading ? (
@@ -71,7 +76,9 @@ export function Button({
           <Loader2 aria-hidden="true" className="size-4 animate-spin" />
           {loadingLabel ? (
             <span className="sr-only">{loadingLabel}</span>
-          ) : null}
+          ) : (
+            children
+          )}
         </>
       ) : (
         children

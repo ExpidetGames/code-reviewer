@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Adapted from shadcn/ui (MIT), https://ui.shadcn.com
+// Local adaptation for Code Reviewer: the --overlay scrim token.
 
 "use client";
 

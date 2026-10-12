@@ -70,6 +70,13 @@ describe("the kit button", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
+  // #167-T01
+  it("keeps the children as the accessible name when loading has no label", () => {
+    render(<Button loading>Save</Button>);
+
+    expect(screen.getByRole("button", { name: "Save" })).toBeTruthy();
+  });
+
   // #167-T02
   it("refuses an icon-only button without an accessible name", () => {
     expect(() =>

@@ -25,6 +25,8 @@ describe("the info hint", () => {
       name: "About the review model",
     });
     expect(document.activeElement).toBe(trigger);
+    // The hit area is at least 44x44px even though the icon stays small (WCAG 2.5.5).
+    expect(trigger.className).toContain("size-11");
 
     await waitFor(() =>
       expect(trigger.getAttribute("aria-describedby")).toBeTruthy(),
