@@ -44,14 +44,24 @@ export function nonRootSkipReason(
   return NEEDS_NON_ROOT_REASON;
 }
 
+/** The line the default reporter would not show: one per skipped test, with its reason. */
+export function skipNotice(name: string, reason: string): string {
+  return `skipped "${name}": ${reason}\n`;
+}
+
 /** The test function to register for an environment: the body itself, or one that skips. */
 export function needsNonRootTest(
   environment: RootOnlyEnvironment,
+  name: string,
   body: () => void | Promise<void>,
 ): (context: SkipContext) => void | Promise<void> {
   const reason = nonRootSkipReason(environment);
   if (reason === null) return body;
-  return (context) => context.skip(reason);
+  return (context) => {
+    // The default reporter only counts the skip; print the reason so a local root run shows why.
+    process.stderr.write(skipNotice(name, reason));
+    context.skip(reason);
+  };
 }
 
 /** Registers a test that only holds for a non-root user; see the file comment. */
@@ -59,5 +69,5 @@ export function itNeedsNonRoot(
   name: string,
   body: () => void | Promise<void>,
 ): void {
-  it(name, needsNonRootTest(currentRootOnlyEnvironment(), body));
+  it(name, needsNonRootTest(currentRootOnlyEnvironment(), name, body));
 }

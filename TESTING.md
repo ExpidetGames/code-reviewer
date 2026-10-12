@@ -294,7 +294,8 @@ Inside `runner/`: `uv sync --locked`, `uv run ruff check . ../fakes`, `uv run ru
 - Tests of file system errors that depend on permissions (a read-only directory) hold only for a
   non-root user, because root may write anywhere. Such a test is registered with `itNeedsNonRoot`
   (`src/test-support/root-only.ts`), which skips it with that reason when the suite runs as root
-  outside CI and fails instead of skipping when CI is set. Run the suite as a normal user.
+  outside CI and fails instead of skipping when CI is set. Every skip prints one line with the
+  reason to stderr, and `--reporter=verbose` lists them too. Run the suite as a normal user.
 
 `make test-engine` runs the engine suite on your machine (after priming the tiktoken cache, see above; without the network namespace, which is Linux and CI only). Planned targets: `test-stack-up`,
 `test-stack-down`, `test:docker`, `test:e2e:docker` (they arrive with the Docker test stack).
