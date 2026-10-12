@@ -65,8 +65,39 @@ async function renameToOld(db: AnyDb, table: string): Promise<void> {
   );
 }
 
+// Postgres keeps the name of an explicitly named constraint when its table is renamed, and the
+// names of primary key constraints are schema-wide (each is backed by an index). The new
+// `job_comments` below reuses the explicit name `job_comments_pk`, so the old one steps aside first.
+// (The old `app_settings` primary key was auto-named `app_settings_pkey`, so it does not collide
+// with the new explicit `app_settings_pk`.) SQLite has neither a schema-wide constraint namespace
+// nor `alter table ... rename constraint`, so this runs on Postgres only.
+async function onPostgres(db: AnyDb): Promise<boolean> {
+  try {
+    // Postgres-only catalog. On SQLite this fails as a statement error, which does not abort the
+    // surrounding transaction.
+    await sql`select 1 from pg_catalog.pg_class limit 1`.execute(db);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function freeConstraintName(
+  db: AnyDb,
+  postgres: boolean,
+  table: string,
+  from: string,
+  to: string,
+): Promise<void> {
+  if (!postgres) return;
+  await sql`alter table ${sql.table(table)} rename constraint ${sql.id(from)} to ${sql.id(to)}`.execute(
+    db,
+  );
+}
+
 export const migration: Migration = {
   async up(db) {
+    const postgres = await onPostgres(db);
     const workspaceId = (await installationHoldsData(db)) ? randomUUID() : null;
     if (workspaceId !== null)
       await db
@@ -107,6 +138,17 @@ export const migration: Migration = {
              webhook_secret, status, created_at, updated_at
       from integrations_old`.execute(db);
 
+    // The target of the composite foreign keys must be unique, AND the unique index must exist
+    // before a table that refers to it is created: Postgres refuses a foreign key whose target has
+    // no matching unique constraint (SQLite would only check at insert). Reordering the DDL does not
+    // change the schema this migration ends with.
+    await db.schema
+      .createIndex("integrations_id_workspace_unique")
+      .on("integrations")
+      .columns(["id", "workspace_id"])
+      .unique()
+      .execute();
+
     // repositories
     await renameToOld(db, "repositories");
     await db.schema
@@ -128,14 +170,6 @@ export const migration: Migration = {
         "integrations",
         ["id", "workspace_id"],
       )
-      .execute();
-    // The target of the composite foreign keys must be unique; it has to exist before rows are
-    // inserted into a table that refers to it.
-    await db.schema
-      .createIndex("integrations_id_workspace_unique")
-      .on("integrations")
-      .columns(["id", "workspace_id"])
-      .unique()
       .execute();
     await sql`
       insert into repositories (id, workspace_id, integration_id, external_id, full_name, url, active,
@@ -221,6 +255,13 @@ export const migration: Migration = {
 
     // job_comments
     await renameToOld(db, "job_comments");
+    await freeConstraintName(
+      db,
+      postgres,
+      "job_comments_old",
+      "job_comments_pk",
+      "job_comments_old_pk",
+    );
     await db.schema
       .createTable("job_comments")
       .addColumn("repository_id", "text", (column) =>
