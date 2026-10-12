@@ -34,7 +34,7 @@ export function NavLinks({ pathname }: { pathname: string | null }) {
           {index > 0 ? <SidebarSeparator /> : null}
           <SidebarGroup>
             <SidebarGroupContent>
-              <SidebarMenu>
+              <SidebarMenu className="m-0 list-none p-0">
                 {group.items.map((item) => (
                   <NavLink key={item.href} item={item} pathname={pathname} />
                 ))}
@@ -62,6 +62,7 @@ function NavLink({
         <Link
           href={item.href}
           aria-current={current ? "page" : undefined}
+          className="text-sidebar-foreground no-underline aria-[current=page]:underline"
           onClick={() => setOpenMobile(false)}
         >
           {item.label}

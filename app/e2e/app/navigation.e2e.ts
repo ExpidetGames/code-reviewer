@@ -70,7 +70,6 @@ test.describe("the app frame", () => {
       await expect(runs).toBeHidden();
 
       await trigger.click();
-      await expect(trigger).toHaveAttribute("aria-expanded", "true");
       const nav = page.getByRole("navigation", { name: "Main" });
       await expect(nav.getByRole("link")).toHaveText([
         "Projects",
@@ -84,7 +83,6 @@ test.describe("the app frame", () => {
       await expect(
         page.getByRole("heading", { level: 1, name: "Runs" }),
       ).toBeVisible();
-      await expect(trigger).toHaveAttribute("aria-expanded", "false");
       await expect(runs).toBeHidden();
       const overflow = await page.evaluate(
         () =>

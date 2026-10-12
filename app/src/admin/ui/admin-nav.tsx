@@ -31,7 +31,7 @@ export function SectionLinks({ pathname }: { pathname: string | null }) {
           <SidebarGroup>
             <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu>
+              <SidebarMenu className="m-0 list-none p-0">
                 {group.items.map((item) => {
                   const current = isCurrentSection(pathname, item);
                   return (
@@ -40,6 +40,7 @@ export function SectionLinks({ pathname }: { pathname: string | null }) {
                         <Link
                           href={item.href}
                           aria-current={current ? "page" : undefined}
+                          className="text-sidebar-foreground no-underline aria-[current=page]:underline"
                         >
                           {item.label}
                         </Link>
