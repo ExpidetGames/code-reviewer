@@ -168,6 +168,38 @@ test.describe("the admin portal", () => {
     await expect(checklist.getByText("Sign-up rule")).toBeVisible();
   });
 
+  // #156
+  test("an admin's portal prefetch answer is private and no-store, never a year of shared caching", async ({
+    page,
+  }) => {
+    await signInAsAdmin(page);
+
+    // What the browser asks for ahead of a navigation into the portal, and what the server answers.
+    const prefetches = new Map<string, string>();
+    page.on("response", (response) => {
+      const url = new URL(response.url());
+      if (url.origin !== e2eEnv.appUrl) return;
+      if (!url.pathname.startsWith("/admin")) return;
+      if (response.request().headers()["next-router-prefetch"] !== "1") return;
+      prefetches.set(url.pathname, response.headers()["cache-control"] ?? "");
+    });
+
+    // The menu offers the portal to the admin; the portal's own navigation offers its sections.
+    await page.getByRole("button", { name: "admin", exact: true }).click();
+    await page.getByRole("link", { name: "Admin" }).click();
+    await expect(page).toHaveURL(/\/admin$/);
+    await expect.poll(() => prefetches.has("/admin")).toBe(true);
+    await expect.poll(() => prefetches.has("/admin/setup")).toBe(true);
+
+    // A prefetch answer is for one signed in admin (the frame and the session data): no shared cache
+    // may keep it, and never for the year of a prerendered answer.
+    for (const [path, cacheControl] of prefetches) {
+      expect(cacheControl, path).toContain("private");
+      expect(cacheControl, path).toContain("no-store");
+      expect(cacheControl, path).not.toContain("s-maxage");
+    }
+  });
+
   // #98-AD-14
   test("the admin changes the sign-up rule and the limit and sees who changed them", async ({
     page,
