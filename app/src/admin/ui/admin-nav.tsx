@@ -91,9 +91,11 @@ function CurrentSectionLinks() {
 export function AdminNav() {
   return (
     <Sidebar
-      className="w-full md:absolute md:h-full md:w-64 md:border-r md:border-sidebar-border"
+      className="w-full md:absolute md:h-full md:w-64 md:border-r md:border-sidebar-border md:group-data-[collapsible=offcanvas]:-left-full"
       // `md:absolute` overrides the primitive's `fixed` at md and up, so the container sits in the
-      // `relative` admin provider and its 16rem gap lines up with the centered content.
+      // `relative` admin provider and its 16rem gap lines up with the centered content. Collapsed,
+      // the primitive moves it one sidebar width left of the provider; that would leave a sliver
+      // visible, so it moves a full container width (the provider is not at the viewport edge).
     >
       <nav aria-label="Admin" className="flex min-h-0 flex-1 flex-col">
         <Suspense fallback={<SectionLinks pathname={null} />}>

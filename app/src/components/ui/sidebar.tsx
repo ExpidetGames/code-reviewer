@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: MIT
 // Adapted from shadcn/ui (MIT), https://ui.shadcn.com
 // Local adaptation for Code Reviewer: SidebarMenuSkeleton derives its width from useId instead of
-// Math.random (the React compiler lint rejects an impure call during render), and the mobile drawer
-// names its trigger to assistive technology and returns the focus there: SidebarTrigger exposes
+// Math.random (the React compiler lint rejects an impure call during render); the mobile drawer names
+// its trigger to assistive technology and returns the focus there: SidebarTrigger exposes
 // `aria-expanded`/`aria-controls` for the Sheet, whose content carries that id and, on close, puts
-// the focus back on the control that opened it (upstream leaves both to a Radix trigger element).
+// the focus back on the control that opened it (upstream leaves both to a Radix trigger element); and
+// the Ctrl/Cmd+B shortcut lives in `SidebarShortcut`, which a page renders only inside the sidebar it
+// shows, so two mounted providers (the shell and the admin portal) do not both listen to it.
 
 "use client";
 
@@ -106,22 +108,6 @@ function SidebarProvider({
   const toggleSidebar = React.useCallback(() => {
     return isMobile ? setOpenMobile((open) => !open) : setOpen((open) => !open);
   }, [isMobile, setOpen, setOpenMobile]);
-
-  // Adds a keyboard shortcut to toggle the sidebar.
-  React.useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (
-        event.key === SIDEBAR_KEYBOARD_SHORTCUT &&
-        (event.metaKey || event.ctrlKey)
-      ) {
-        event.preventDefault();
-        toggleSidebar();
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [toggleSidebar]);
 
   // We add a state so that we can do data-state="expanded" or "collapsed".
   // This makes it easier to style the sidebar with Tailwind classes.
@@ -330,6 +316,33 @@ function SidebarTrigger({
       <span className="sr-only">Toggle Sidebar</span>
     </Button>
   );
+}
+
+/**
+ * Registers the Ctrl/Cmd+B shortcut of the sidebar it sits in. It is a component of its own, not a
+ * listener of `SidebarProvider`, so that a page with more than one mounted provider (the shell's and
+ * the admin portal's) has exactly one active shortcut: the provider whose `Sidebar` is rendered
+ * includes this, the other does not (local adaptation, see the file header).
+ */
+function SidebarShortcut() {
+  const { toggleSidebar } = useSidebar();
+
+  React.useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.key === SIDEBAR_KEYBOARD_SHORTCUT &&
+        (event.metaKey || event.ctrlKey)
+      ) {
+        event.preventDefault();
+        toggleSidebar();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [toggleSidebar]);
+
+  return null;
 }
 
 function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
@@ -774,6 +787,7 @@ export {
   SidebarProvider,
   SidebarRail,
   SidebarSeparator,
+  SidebarShortcut,
   SidebarTrigger,
   useSidebar,
 };

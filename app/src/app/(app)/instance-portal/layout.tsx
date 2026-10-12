@@ -10,7 +10,11 @@ import type { Metadata } from "next";
 import { Suspense, type ReactNode } from "react";
 import { requireAdmin } from "@/admin/session";
 import { AdminNav } from "@/admin/ui/admin-nav";
-import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
+import {
+  SidebarProvider,
+  SidebarShortcut,
+  SidebarTrigger,
+} from "@/components/ui/sidebar";
 
 export const metadata: Metadata = { title: "Admin" };
 
@@ -32,6 +36,9 @@ async function AdminFrame({ children }: { children: ReactNode }) {
     // viewport minimum, so the admin frame must not add a second one (#168 review).
     <SidebarProvider className="relative min-h-0">
       <AdminNav />
+      {/* The shortcut belongs to the provider whose sidebar is rendered; the shell's provider (no
+          workspace sidebar on an admin page) has none. */}
+      <SidebarShortcut />
       <div className="min-w-0 flex-1">
         {/* The admin sidebar is always visible on a wide screen; on a narrow one this opens it. */}
         <div className="mb-4 md:hidden">

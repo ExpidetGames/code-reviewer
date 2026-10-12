@@ -17,6 +17,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarSeparator,
+  SidebarShortcut,
   SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar";
@@ -98,11 +99,14 @@ export function CurrentWorkspaceSidebar() {
 
   if (navGroupsFor(pathname).length === 0) return null;
   return (
-    <Sidebar className={SIDEBAR_TOP_CLASS}>
-      <nav aria-label="Main" className="flex min-h-0 flex-1 flex-col">
-        <NavLinks pathname={pathname} />
-      </nav>
-    </Sidebar>
+    <>
+      <SidebarShortcut />
+      <Sidebar className={SIDEBAR_TOP_CLASS}>
+        <nav aria-label="Main" className="flex min-h-0 flex-1 flex-col">
+          <NavLinks pathname={pathname} />
+        </nav>
+      </Sidebar>
+    </>
   );
 }
 

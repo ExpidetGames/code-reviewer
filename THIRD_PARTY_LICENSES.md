@@ -69,10 +69,11 @@ bg-transparent`), because Tailwind's preflight reset is only enabled with the le
   `bg-black/50`; `dialog`, `sheet` and `breadcrumb` use `focus-visible:` instead of `focus:` (or add
   it) so a focus ring only shows for keyboard users; `progress` passes `value` to the Radix root so
   it exposes `aria-valuenow`; `sidebar`'s `SidebarMenuSkeleton` derives a stable width from `useId`
-  (the React compiler rejects `Math.random` during render), and its `SidebarTrigger` exposes the
-  mobile drawer to assistive technology (`aria-expanded`/`aria-controls` against the content id,
-  plus returning the focus there on close), which upstream leaves to a Radix trigger element. The
-  kit's `DangerZone` renders the copied
+  (the React compiler rejects `Math.random` during render), its `SidebarTrigger` exposes the mobile
+  drawer to assistive technology (`aria-expanded`/`aria-controls` against the content id, plus
+  returning the focus there on close), which upstream leaves to a Radix trigger element, and its
+  Ctrl/Cmd+B shortcut lives in `SidebarShortcut` instead of the provider, so two mounted providers
+  (the shell and the admin portal) do not both listen to it. The kit's `DangerZone` renders the copied
   `AlertDialogAction` with `variant="destructive"`; the copied `AlertDialogAction`/`AlertDialogCancel`
   keep their upstream default variants (`default`/`outline`).
 - Every copy imports the local class-name helper as `@/lib/utils` (`cn`), not as an npm package.

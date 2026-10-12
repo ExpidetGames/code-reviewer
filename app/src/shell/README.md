@@ -27,7 +27,9 @@ The admin portal (`/admin`, `src/admin/README.md`) renders behind its own layout
 `SidebarProvider` and trigger: on a wide screen the sidebar's container is `absolute` inside the
 admin frame (not the primitive's `fixed` one), so it lines up with the centered content, and on a
 narrow screen it is the same Sheet drawer as the workspace. The admin check runs before any section
-name is rendered.
+name is rendered. The Ctrl/Cmd+B shortcut is `SidebarShortcut` (`components/ui/sidebar.tsx`), which
+each side renders only inside the sidebar it actually shows: on an admin page only the admin sidebar
+toggles, and the shell's provider (no workspace sidebar there) registers nothing.
 
 ## Rules
 
