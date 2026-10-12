@@ -25,11 +25,18 @@ function request(path: string, method = "GET") {
 
 describe("the setup gate as a proxy step", () => {
   // #97-SU-03
-  it("serves the setup page in place of the page that was asked for", async () => {
+  // #155
+  it("serves the setup page in place of the page that was asked for, without building an address", async () => {
     const response = await gateFor({ kind: "fresh" })(request("/projects"));
 
-    expect(response?.headers.get("x-middleware-rewrite")).toBe(
-      "http://localhost:3000/setup",
+    // No address is built: a rewrite to `request.url` carries the protocol and host Next.js made of
+    // the request (a forged `X-Forwarded-Proto` included), and Next.js forwards a rewrite to another
+    // origin to that server, which answered 500 (#155, the same as #146). The request goes on marked
+    // and next.config.ts serves it from the setup page.
+    expect(response?.headers.get("x-middleware-rewrite")).toBeNull();
+    expect(response?.headers.get("x-middleware-next")).toBe("1");
+    expect(response?.headers.get("x-middleware-request-x-setup-rewrite")).toBe(
+      "1",
     );
     expect(response?.headers.get("cache-control")).toBe("no-store");
   });
