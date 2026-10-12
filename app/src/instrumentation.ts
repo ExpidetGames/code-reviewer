@@ -48,9 +48,6 @@ export async function register(): Promise<void> {
     const { runStartupSync } = await import("./integrations/sync/startup.ts");
     void runStartupSync();
   }
-  // The test stack's mail outbox sends no mail: say so when it is switched on.
-  const { warnAboutTestMailOutbox } = await import("./mail/startup.ts");
-  warnAboutTestMailOutbox();
   // Old counters and spent verification links are removed now and every hour (production only).
   const { startCleanupOnStart } = await import("./maintenance/startup.ts");
   startCleanupOnStart();

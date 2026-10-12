@@ -7,6 +7,9 @@
 import { sql } from "kysely";
 import { describe, expect, it } from "vitest";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
+import { createRateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
+import { createSmtpConfigStore } from "../mail/smtp-config.ts";
+import { createTestMailService } from "../mail/test-mail.ts";
 import { createTestDatabase } from "../test-support/test-database.ts";
 import { createSecretStore } from "../secrets/store.ts";
 import { createAdminService } from "./service.ts";
@@ -37,10 +40,23 @@ async function startService(
     appSecret: APP_SECRET,
     now: () => now,
   });
+  const smtp = createSmtpConfigStore({
+    db,
+    appSecret: APP_SECRET,
+    now: () => now,
+  });
   const service = createAdminService({
     db,
     secrets,
+    smtp,
+    testMail: createTestMailService({
+      config: smtp,
+      rateLimits: createRateLimitsRepository(db, () => now),
+      baseUrl: "https://code-reviewer.example.com",
+      now: () => now,
+    }),
     githubConfigured: () => flags.github,
+    // A test switches the flag; a mail server saved through the service counts as well.
     mailConfigured: () => Promise.resolve(flags.mail),
     accessPolicy: () =>
       Promise.resolve(
@@ -54,6 +70,7 @@ async function startService(
     db,
     settings,
     secrets,
+    smtp,
     service,
     flags,
     setTime(value: string) {

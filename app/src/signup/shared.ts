@@ -43,6 +43,15 @@ export function getSignUpRouteHandlers(): SignUpRouteHandlers {
   });
 }
 
+/** The facts the login page and the pages next to it decide on, read once. */
+export function getSignUpFacts() {
+  return readSignUpFacts({
+    db: getDatabase(),
+    mail: getMailSender(),
+    githubConfigured: () => githubSignInConfigured(process.env),
+  });
+}
+
 /** Whether the sign-up is open right now, for the pages that offer it. Read when asked, never remembered. */
 export async function getSignUpAvailability(): Promise<SignUpAvailability> {
   return signUpAvailability(

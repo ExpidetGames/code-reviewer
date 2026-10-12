@@ -21,6 +21,8 @@ export type RateLimitsRepository = {
    * starts again at 1. One statement, so attempts that arrive together are all counted.
    */
   hit(key: string, windowMs: number): Promise<RateLimitHit>;
+  /** Takes one attempt back (never below zero): for a counter that was hit for a request another counter refused. */
+  refund(key: string): Promise<void>;
   /** Forgets the counter (for example after a successful sign in). */
   reset(key: string): Promise<void>;
   /** Deletes the counters whose window began `windowMs` or more ago. Returns how many. */
@@ -62,6 +64,15 @@ export function createRateLimitsRepository(
         count: row.count,
         windowStartedAt: new Date(row.window_started_at),
       };
+    },
+
+    async refund(key) {
+      await db
+        .updateTable("rate_limits")
+        .set((eb) => ({ count: eb("count", "-", 1) }))
+        .where("key", "=", key)
+        .where("count", ">", 0)
+        .execute();
     },
 
     async reset(key) {

@@ -10,6 +10,12 @@
 //                             { "signUp": { "kind": "everyone" | "emails" | "domains", "entries": [...] } }
 //                             { "signInMethods": { "emailPassword": boolean, "github": boolean } }
 //                             { "limits": { "maxWorkspacesPerUser": number } }
+//                             { "smtp": { host, port, security, user, password, clearPassword,
+//                                         senderAddress, senderName, allowSelfSigned } | null }
+//                             (the password is write-only: an empty one keeps the stored one, and no
+//                             answer ever contains it; null removes the mail server)
+//   POST /api/admin/mail/test sends a test mail to the admin's own address with the saved settings;
+//                             answers { "ok": true } or { "ok": false, "error": <class>, "detail" }
 //
 // Order: the admin first (nothing is read before the caller is known: not signed in is 401, signed in
 // but not an admin is a 404 like for any path that does not exist), then for a change where the
@@ -36,6 +42,7 @@ export type AdminRouteDependencies = {
 export type AdminRouteHandlers = {
   getSettings(request: Request): Promise<Response>;
   putSettings(request: Request): Promise<Response>;
+  testMail(request: Request): Promise<Response>;
 };
 
 const NO_STORE = { "cache-control": "no-store" };
@@ -43,10 +50,19 @@ const NO_STORE = { "cache-control": "no-store" };
 function refusal(
   code: AdminErrorCode,
   extra: Record<string, unknown> = {},
+  retryAfterSeconds?: number,
 ): Response {
   return Response.json(
     { error: code, ...extra },
-    { status: ADMIN_ERROR_STATUS[code], headers: NO_STORE },
+    {
+      status: ADMIN_ERROR_STATUS[code],
+      headers: {
+        ...NO_STORE,
+        ...(retryAfterSeconds === undefined
+          ? {}
+          : { "retry-after": String(retryAfterSeconds) }),
+      },
+    },
   );
 }
 
@@ -66,7 +82,13 @@ async function readBody(
   }
 }
 
-const SETTING_KEYS = ["tenancy", "signUp", "signInMethods", "limits"] as const;
+const SETTING_KEYS = [
+  "tenancy",
+  "signUp",
+  "signInMethods",
+  "limits",
+  "smtp",
+] as const;
 
 export function createAdminRouteHandlers({
   access,
@@ -127,6 +149,8 @@ export function createAdminRouteHandlers({
             return service.changeSignUpRule(who.id, fields.signUp);
           case "signInMethods":
             return service.changeSignInMethods(who.id, fields.signInMethods);
+          case "smtp":
+            return service.changeSmtp(who.id, fields.smtp);
           default: {
             const limits = fields.limits;
             if (
@@ -156,6 +180,33 @@ export function createAdminRouteHandlers({
       }
       return Response.json(
         { ok: true, settings: await service.readSettings() },
+        { headers: NO_STORE },
+      );
+    },
+
+    async testMail(request) {
+      const who = await admin();
+      if (who instanceof Response) return who;
+      if (isCrossSite(request)) return refusal("cross_site_request");
+      const body = await readBody(request);
+      if (!body.ok) return refusal(body.error);
+
+      let result: Awaited<ReturnType<AdminService["sendTestMail"]>>;
+      try {
+        result = await service.sendTestMail({ id: who.id, email: who.email });
+      } catch {
+        // The counters (or the database) could not be read: no mail is sent without a limit.
+        console.error(
+          "[admin] TEST_MAIL_UNAVAILABLE: the request was not served.",
+        );
+        return refusal("unavailable");
+      }
+      if (result.ok) return Response.json({ ok: true }, { headers: NO_STORE });
+      if (result.error === "rate_limited")
+        return refusal("rate_limited", {}, result.retryAfterSeconds);
+      // The mail server's answer is the result of the check, not an error of this route.
+      return Response.json(
+        { ok: false, error: result.error, detail: result.detail },
         { headers: NO_STORE },
       );
     },

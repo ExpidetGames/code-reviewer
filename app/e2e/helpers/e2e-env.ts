@@ -21,6 +21,11 @@ process.env.E2E_GITHUB_PORT ||= String(
   20000 + Math.floor(Math.random() * 20000),
 );
 const githubPort = Number(process.env.E2E_GITHUB_PORT);
+// The fake SMTP server takes three ports in a row (the plain one that offers STARTTLS, the one with TLS and
+// the control API the journeys read the inbox from), also random and kept in the environment. A base of its
+// own so that the three never overlap the fake GitHub's port.
+process.env.E2E_SMTP_PORT ||= String(40500 + Math.floor(Math.random() * 20000));
+const smtpPort = Number(process.env.E2E_SMTP_PORT);
 
 export const e2eEnv = {
   appPort,
@@ -41,10 +46,19 @@ export const e2eEnv = {
   signupDatabasePath: "test-results/e2e-signup-data/app.db",
   signupAppUrl: `http://127.0.0.1:${signupAppPort}`,
   /**
-   * The file the fourth app writes its mail to instead of sending it (one JSON message per line, fresh
-   * for every run): the journey reads the verification link from it like from an inbox.
+   * The fake SMTP server (fakes/smtp): the journey of the mail page configures the fourth app to send to it
+   * (host, STARTTLS port, TLS port, a login), and every journey that reads a mail reads the "inbox" from its
+   * control API.
    */
-  mailOutboxFile: "test-results/e2e-signup-mail.jsonl",
+  smtp: {
+    host: "127.0.0.1",
+    port: smtpPort,
+    tlsPort: smtpPort + 1,
+    controlPort: smtpPort + 2,
+    controlUrl: `http://127.0.0.1:${smtpPort + 2}`,
+    user: "e2e-mailer",
+    password: "e2e-smtp-password-0123456789",
+  },
   /**
    * Where each app's output goes (relative to the app folder). The first-run setup prints its code
    * in the log only, so the journeys read it from there, the way an operator reads `docker compose

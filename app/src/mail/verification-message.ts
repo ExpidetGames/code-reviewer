@@ -4,6 +4,7 @@
 // link is the only secret in it; the message never contains a password. The address of the link is built
 // from the configured public address of the app, never from a request header (a forged `Host` header
 // must not make the app mail a link to another site).
+import { escapeHtml } from "./html.ts";
 import type { MailMessage } from "./sender.ts";
 
 /** The path the link opens; the page behind it asks for one more click before it verifies. */
@@ -13,14 +14,6 @@ export function verificationLink(baseUrl: string, token: string): string {
   const url = new URL(VERIFY_EMAIL_PATH, baseUrl);
   url.searchParams.set("token", token);
   return url.toString();
-}
-
-function escapeHtml(text: string): string {
-  return text
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
 }
 
 export function verificationMessage({

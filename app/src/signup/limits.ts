@@ -11,6 +11,9 @@
 //   sends a verification link counts here, a sign-up and a resend alike, so the two cannot be added up
 //   against one inbox. Counted before the account is looked up: an unknown address is refused exactly
 //   when a known one is.
+// - The reset mail (`password-reset-request.ts`): per address (5 per hour, counted before the account is
+//   looked up, so an unknown address is refused exactly when a known one is) and for the whole instance
+//   (200 per 10 minutes, counted only for a mail that is really about to be sent).
 // - A link: per link that exists (10 attempts in the 24 hours it lives), like the password reset
 //   (`src/auth/password-reset-http.ts`). A token that does not exist touches no counter, and there is
 //   no counter for all links together, so junk requests can never use up the attempts of a person's
@@ -36,6 +39,15 @@ export const VERIFICATION_MAIL_ADDRESS_WINDOW_MS = 60 * 60 * 1000;
 export const VERIFICATION_MAIL_GLOBAL_MAX = 200;
 export const VERIFICATION_MAIL_GLOBAL_WINDOW_MS = 10 * 60 * 1000;
 
+// The mail that carries a password reset link. A request is counted per address before anything is looked
+// up (the same for an address with an account and one without); the instance counter is only touched by a
+// mail that is really about to go out, so requests for addresses that have no account can never use it up
+// and keep a real reset from being mailed.
+export const PASSWORD_RESET_REQUEST_ADDRESS_MAX = 5;
+export const PASSWORD_RESET_REQUEST_ADDRESS_WINDOW_MS = 60 * 60 * 1000;
+export const PASSWORD_RESET_MAIL_GLOBAL_MAX = 200;
+export const PASSWORD_RESET_MAIL_GLOBAL_WINDOW_MS = 10 * 60 * 1000;
+
 export const VERIFY_TOKEN_MAX_ATTEMPTS = 10;
 export const VERIFY_TOKEN_WINDOW_MS = VERIFICATION_TOKEN_TTL_MS;
 
@@ -46,6 +58,10 @@ export type SignUpLimits = {
   signUp(email: string): Promise<Permission>;
   /** Counts one verification mail to this canonical address. */
   mail(email: string): Promise<Permission>;
+  /** Counts one request for a password reset mail to this canonical address, whether it has an account or not. */
+  resetRequest(email: string): Promise<Permission>;
+  /** Counts one reset mail that is about to be sent (an account exists), for the whole instance. */
+  resetMail(): Promise<Permission>;
   /** Counts one attempt against a link that exists; `tokenHash` is the hash of its token. */
   verifyToken(tokenHash: string): Promise<Permission>;
 };
@@ -63,6 +79,10 @@ export function verificationMailAddressKey(email: string): string {
 export function verifyTokenKey(tokenHash: string): string {
   return `verify-email:${tokenHash}`;
 }
+export function passwordResetRequestKey(email: string): string {
+  return `password-reset-request:email:${addressHash(email)}`;
+}
+export const PASSWORD_RESET_MAIL_GLOBAL_KEY = "password-reset-mail:all";
 export const SIGN_UP_GLOBAL_KEY = "sign-up:all";
 export const VERIFICATION_MAIL_GLOBAL_KEY = "verification-mail:all";
 
@@ -85,7 +105,33 @@ export function createSignUpLimits(
     return { allowed: true };
   }
 
+  async function single(
+    key: string,
+    max: number,
+    windowMs: number,
+  ): Promise<Permission> {
+    const hit = await rateLimits.hit(key, windowMs);
+    return hit.count > max
+      ? {
+          allowed: false,
+          retryAfterSeconds: secondsLeft(hit.windowStartedAt, windowMs, now()),
+        }
+      : { allowed: true };
+  }
+
   return {
+    resetRequest: (email) =>
+      single(
+        passwordResetRequestKey(email),
+        PASSWORD_RESET_REQUEST_ADDRESS_MAX,
+        PASSWORD_RESET_REQUEST_ADDRESS_WINDOW_MS,
+      ),
+    resetMail: () =>
+      single(
+        PASSWORD_RESET_MAIL_GLOBAL_KEY,
+        PASSWORD_RESET_MAIL_GLOBAL_MAX,
+        PASSWORD_RESET_MAIL_GLOBAL_WINDOW_MS,
+      ),
     signUp: (email) =>
       counted(
         {

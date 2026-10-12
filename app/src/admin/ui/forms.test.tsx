@@ -34,6 +34,7 @@ function view(overrides: Partial<AdminSettingsView> = {}): AdminSettingsView {
       ...never,
     },
     maxWorkspacesPerUser: { value: 10, ...never },
+    smtp: { value: null, password: "none", ...never },
     workspaceCount: 1,
     githubConfigured: false,
     mailConfigured: false,
@@ -50,7 +51,10 @@ function apiAnswering(
   const change = vi.fn<(change: SettingChange) => Promise<typeof result>>(() =>
     Promise.resolve(result),
   );
-  return { api: { change } satisfies AdminApi, change };
+  const testMail = vi.fn<AdminApi["testMail"]>(() =>
+    Promise.resolve({ ok: true, data: { ok: true } } as const),
+  );
+  return { api: { change, testMail } satisfies AdminApi, change };
 }
 
 const SAVED = { ok: true, data: { ok: true, settings: view() } } as const;
