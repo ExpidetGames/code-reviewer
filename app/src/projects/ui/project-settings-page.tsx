@@ -36,12 +36,12 @@ export async function loadProjectSettingsPage(
   deps: {
     projects: Pick<ProjectService, "findProject">;
     settings: Pick<ReviewSettingsService, "getProjectSettings">;
-    config: () => ConfigStatus;
+    config: () => ConfigStatus | Promise<ConfigStatus>;
   },
 ): Promise<ProjectSettingsPageData> {
   const row = await loadProjectRow(repositoryId, { projects: deps.projects });
   if (row === undefined) return { kind: "not_found" };
-  const config = deps.config();
+  const config = await deps.config();
   try {
     const view = await deps.settings.getProjectSettings(repositoryId);
     return { kind: "ready", row, model: modelFromProjectView(view), config };

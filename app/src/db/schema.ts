@@ -323,6 +323,8 @@ export interface SignedStatesTable {
   session_hash: string | null;
   /** The PKCE verifier of an authorization started here; never leaves the server. */
   code_verifier: string | null;
+  /** JSON text that belongs to the flow and comes back when the state is used (never a secret), or null. */
+  data: string | null;
   /** ISO 8601 text in UTC. */
   created_at: string;
   /** ISO 8601 text in UTC. */

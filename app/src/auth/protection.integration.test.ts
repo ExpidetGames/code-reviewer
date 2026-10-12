@@ -66,6 +66,10 @@ const PROTECTED_ROUTES = [
 const PROTECTED_DATA_ROUTES = [
   "/api/instance-portal/settings",
   "/api/instance-portal/mail/test",
+  "/api/instance-portal/github",
+  "/api/instance-portal/github/check",
+  "/api/instance-portal/github/manifest",
+  "/api/instance-portal/github/manifest/callback",
   "/api/backup/status",
   "/api/repositories/[repositoryId]/project",
   "/api/repositories/[repositoryId]/project/settings",

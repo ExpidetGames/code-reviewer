@@ -18,8 +18,14 @@ export function InstanceStatus({ status }: { status: ConfigStatus }) {
             </>
           ) : (
             <>
-              {githubApp.kind === "missing" ? "Missing" : "Not valid"}:{" "}
-              <span className="mono">{githubApp.variables.join(", ")}</span>
+              {githubApp.variables.length === 0 ? (
+                "Not connected"
+              ) : (
+                <>
+                  {githubApp.kind === "missing" ? "Missing" : "Not valid"}:{" "}
+                  <span className="mono">{githubApp.variables.join(", ")}</span>
+                </>
+              )}
             </>
           )}
         </dd>

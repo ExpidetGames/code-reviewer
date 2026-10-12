@@ -7,7 +7,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { Kysely } from "kysely";
 import { signValue, verifySignedValue } from "../crypto/sign.ts";
-import { formatTimestamp } from "../db/codecs.ts";
+import { decodeJson, encodeJson, formatTimestamp } from "../db/codecs.ts";
 import type { Database } from "../db/schema.ts";
 
 export const SIGNED_STATE_PURPOSES = [
@@ -29,6 +29,8 @@ export type IssueStateInput = {
   sessionId: string;
   /** Kept server side with the nonce and handed back when the state is consumed (PKCE). */
   codeVerifier?: string;
+  /** JSON-compatible facts of the flow (never a secret), handed back when the state is consumed. */
+  data?: unknown;
 };
 
 export type ConsumeStateInput = {
@@ -40,7 +42,7 @@ export type ConsumeStateInput = {
 };
 
 export type ConsumeStateResult =
-  | { ok: true; codeVerifier: string | null }
+  | { ok: true; codeVerifier: string | null; data: unknown }
   | { ok: false; error: SignedStateErrorCode };
 
 export type SignedStates = {
@@ -88,7 +90,7 @@ export function createSignedStates({
   ttlMs = SIGNED_STATE_TTL_MS,
 }: SignedStatesOptions): SignedStates {
   return {
-    async issue({ purpose, userId, sessionId, codeVerifier }) {
+    async issue({ purpose, userId, sessionId, codeVerifier, data }) {
       const nonce = randomBytes(16).toString("hex");
       const issuedAt = now();
       const expiresAt = new Date(issuedAt.getTime() + ttlMs);
@@ -101,6 +103,7 @@ export function createSignedStates({
           user_id: userId,
           session_hash: sessionHash,
           code_verifier: codeVerifier ?? null,
+          data: data === undefined ? null : encodeJson(data),
           created_at: formatTimestamp(issuedAt),
           expires_at: formatTimestamp(expiresAt),
           used_at: null,
@@ -142,10 +145,14 @@ export function createSignedStates({
         .where("session_hash", "=", sessionHash)
         .where("used_at", "is", null)
         .where("expires_at", ">", formatTimestamp(at))
-        .returning("code_verifier")
+        .returning(["code_verifier", "data"])
         .executeTakeFirst();
       if (row === undefined) return REFUSED;
-      return { ok: true, codeVerifier: row.code_verifier };
+      return {
+        ok: true,
+        codeVerifier: row.code_verifier,
+        data: row.data === null ? null : decodeJson(row.data),
+      };
     },
   };
 }

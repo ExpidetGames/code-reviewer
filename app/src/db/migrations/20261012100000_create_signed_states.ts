@@ -7,7 +7,8 @@
 // the row's id, and a state is accepted only if its row exists, has not expired and is used by one guarded
 // statement, so it works once however many instances serve the callback. `user_id` and `session_hash` bind
 // the state to the person and the browser session that started it. `code_verifier` is the PKCE secret of an
-// authorization that was started here, kept server side. A row goes with its user.
+// authorization that was started here, kept server side; `data` is JSON that belongs to the flow and is
+// handed back when the state is used (never a secret). A row goes with its user.
 import type { Migration } from "kysely/migration";
 
 export const migration: Migration = {
@@ -21,6 +22,7 @@ export const migration: Migration = {
       )
       .addColumn("session_hash", "text")
       .addColumn("code_verifier", "text")
+      .addColumn("data", "text")
       .addColumn("created_at", "text", (column) => column.notNull())
       .addColumn("expires_at", "text", (column) => column.notNull())
       .addColumn("used_at", "text")

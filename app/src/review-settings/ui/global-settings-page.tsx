@@ -18,11 +18,11 @@ export type GlobalSettingsPageData = {
 
 export async function loadGlobalSettingsPage(deps: {
   settings: Pick<ReviewSettingsService, "getGlobalSettings">;
-  config: () => ConfigStatus;
+  config: () => ConfigStatus | Promise<ConfigStatus>;
 }): Promise<GlobalSettingsPageData> {
   return {
     model: modelFromGlobalView(await deps.settings.getGlobalSettings()),
-    config: deps.config(),
+    config: await deps.config(),
   };
 }
 

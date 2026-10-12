@@ -24,16 +24,16 @@ export type ProjectsPageData = {
 export async function loadProjectsPage(deps: {
   projects: Pick<ProjectService, "listProjects">;
   lastRuns?: LastRunSource;
-  config: () => ConfigStatus;
-  installUrl: () => string | null;
+  config: () => ConfigStatus | Promise<ConfigStatus>;
+  installUrl: () => string | null | Promise<string | null>;
 }): Promise<ProjectsPageData> {
   return {
     list: await loadProjectList({
       projects: deps.projects,
       ...(deps.lastRuns === undefined ? {} : { lastRuns: deps.lastRuns }),
     }),
-    config: deps.config(),
-    installUrl: deps.installUrl(),
+    config: await deps.config(),
+    installUrl: await deps.installUrl(),
   };
 }
 

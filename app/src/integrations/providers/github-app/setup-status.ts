@@ -26,3 +26,10 @@ export function githubAppInstallUrl(env: Env): string | null {
     ? null
     : `https://github.com/apps/${slug}/installations/new`;
 }
+
+/** The same address for a slug that is already known to be well formed (it comes from the database). */
+export function githubAppInstallUrlFor(slug: string): string | null {
+  return SLUG_PATTERN.test(slug)
+    ? `https://github.com/apps/${slug}/installations/new`
+    : null;
+}

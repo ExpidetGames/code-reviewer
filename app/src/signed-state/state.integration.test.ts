@@ -47,7 +47,7 @@ describe("a signed state", () => {
       sessionId: "session-a",
     });
 
-    expect(first).toEqual({ ok: true, codeVerifier: null });
+    expect(first).toEqual({ ok: true, codeVerifier: null, data: null });
     expect(second).toEqual({ ok: false, error: "state_invalid" });
   });
 
@@ -66,7 +66,33 @@ describe("a signed state", () => {
       sessionId: "session-a",
     });
 
-    expect(result).toEqual({ ok: true, codeVerifier: "verifier-value" });
+    expect(result).toEqual({
+      ok: true,
+      codeVerifier: "verifier-value",
+      data: null,
+    });
+  });
+
+  it("hands back the facts of the flow that were stored with it", async () => {
+    const value = await ctx.states.issue({
+      purpose: "github-manifest",
+      userId: "admin-1",
+      sessionId: "session-a",
+      data: { privateApp: true },
+    });
+
+    const result = await ctx.states.consume({
+      purpose: "github-manifest",
+      value,
+      userId: "admin-1",
+      sessionId: "session-a",
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      codeVerifier: null,
+      data: { privateApp: true },
+    });
   });
 
   it("is refused after ten minutes", async () => {

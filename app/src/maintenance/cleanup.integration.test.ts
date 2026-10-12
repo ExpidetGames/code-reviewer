@@ -200,6 +200,7 @@ describe("the cleanup of old rows", () => {
           user_id: "u1",
           session_hash: "hash",
           code_verifier: null,
+          data: null,
           created_at: iso(START - DAY),
           expires_at: iso(expiresAt),
           used_at: null,
