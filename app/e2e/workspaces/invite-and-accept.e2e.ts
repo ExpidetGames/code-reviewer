@@ -8,6 +8,7 @@
 // integration tests (src/workspaces/); this is the path a person takes.
 import {
   expect,
+  request,
   test,
   type Browser,
   type BrowserContext,
@@ -41,10 +42,33 @@ async function newPerson(browser: Browser): Promise<BrowserContext> {
   return browser.newContext({ baseURL: e2eEnv.appUrl });
 }
 
+/**
+ * Puts the sign-up rule of the app to "everyone", the way an operator would through the portal's data route:
+ * the admin portal journey leaves it at a list of domains, which no invitation can be made under without a mail
+ * server.
+ */
+async function openTheSignUp(): Promise<void> {
+  const client = await request.newContext({ baseURL: e2eEnv.appUrl });
+  try {
+    const signedIn = await client.post("/api/auth/sign-in/email", {
+      data: { email: e2eEnv.adminEmail, password: e2eEnv.adminPassword },
+    });
+    expect(signedIn.status()).toBe(200);
+    const changed = await client.put("/api/admin/settings", {
+      data: { signUp: { kind: "everyone" } },
+    });
+    expect(changed.status(), await changed.text()).toBe(200);
+  } finally {
+    await client.dispose();
+  }
+}
+
 test.describe.configure({ mode: "serial" });
 
 test.describe("an Owner invites a colleague who accepts", () => {
   let invitation = "";
+
+  test.beforeAll(openTheSignUp);
 
   // #101-WM-26, #101-WM-13
   test("@smoke the Owner invites an address and copies the link, which is shown once", async ({
