@@ -20,6 +20,7 @@ import {
   createTestDatabase,
   createTestDirectory,
 } from "../test-support/test-database.ts";
+import { itNeedsNonRoot } from "../test-support/root-only.ts";
 import {
   holdDatabaseExclusively,
   integrityOf,
@@ -237,33 +238,36 @@ describe("a backup that cannot be made", () => {
   });
 
   // CR-40-T07
-  it("fails clearly when the target is not writable and leaves the existing backups untouched", async () => {
-    const { config, target } = await setup();
-    const earlier = createBackup({
-      databasePath: config.path,
-      backupDir: target,
-      now: () => AT,
-    });
-    const earlierBytes = readFileSync(earlier.path);
-    chmodSync(target, 0o500);
+  itNeedsNonRoot(
+    "fails clearly when the target is not writable and leaves the existing backups untouched",
+    async () => {
+      const { config, target } = await setup();
+      const earlier = createBackup({
+        databasePath: config.path,
+        backupDir: target,
+        now: () => AT,
+      });
+      const earlierBytes = readFileSync(earlier.path);
+      chmodSync(target, 0o500);
 
-    try {
-      await expectFailure(
-        () =>
-          createBackup({
-            databasePath: config.path,
-            backupDir: target,
-            now: () => new Date(AT.getTime() + 60_000),
-          }),
-        "BACKUP_TARGET_UNAVAILABLE",
-      );
-    } finally {
-      chmodSync(target, 0o700);
-    }
+      try {
+        await expectFailure(
+          () =>
+            createBackup({
+              databasePath: config.path,
+              backupDir: target,
+              now: () => new Date(AT.getTime() + 60_000),
+            }),
+          "BACKUP_TARGET_UNAVAILABLE",
+        );
+      } finally {
+        chmodSync(target, 0o700);
+      }
 
-    expect(namesIn(target)).toEqual([earlier.fileName]);
-    expect(readFileSync(earlier.path).equals(earlierBytes)).toBe(true);
-  });
+      expect(namesIn(target)).toEqual([earlier.fileName]);
+      expect(readFileSync(earlier.path).equals(earlierBytes)).toBe(true);
+    },
+  );
 
   // CR-40-T07
   it("leaves no half file behind when writing fails midway, for example on a full disk", async () => {
