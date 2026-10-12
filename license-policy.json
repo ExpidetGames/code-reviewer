@@ -115,6 +115,12 @@
     },
     {
       "ecosystem": "npm",
+      "package": "@tailwindcss/oxide-*",
+      "license": "MIT",
+      "reason": "Platform binaries of the Tailwind CSS Oxide engine that Tailwind v4 uses; only the one for the current platform is installed."
+    },
+    {
+      "ecosystem": "npm",
       "package": "@tybys/wasm-util",
       "license": "MIT",
       "reason": "WebAssembly fallback of native packages."

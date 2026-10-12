@@ -8,7 +8,20 @@
 // extension and no TypeScript-only runtime syntax.
 
 export const SPDX_IDENTIFIER = "Apache-2.0";
+export const MIT_IDENTIFIER = "MIT";
 export const SPDX_HEADER_TEXT = `SPDX-License-Identifier: ${SPDX_IDENTIFIER}`;
+
+// Copied shadcn/ui components (epic #165) keep their real license: MIT plus a provenance line
+// instead of Apache-2.0. Every file below this folder may carry MIT; every other file must stay
+// Apache-2.0. The check, the writer and their tests share this one rule.
+export const SHADCN_COMPONENT_PREFIX = "app/src/components/ui/";
+
+/** The license identifier the file at `path` must carry. */
+export function requiredIdentifier(path: string): string {
+  return path.startsWith(SHADCN_COMPONENT_PREFIX)
+    ? MIT_IDENTIFIER
+    : SPDX_IDENTIFIER;
+}
 
 /** How many lines from the top of a file may hold the header (a shebang or directive, then the header). */
 const HEADER_WINDOW = 3;
@@ -75,10 +88,11 @@ export function isSourceFile(path: string): boolean {
   return !segments.some((segment) => EXCLUDED_SEGMENTS.includes(segment));
 }
 
-function headerLine(style: CommentStyle): string {
-  if (style === "slashes") return `// ${SPDX_HEADER_TEXT}`;
-  if (style === "hash") return `# ${SPDX_HEADER_TEXT}`;
-  return `/* ${SPDX_HEADER_TEXT} */`;
+function headerLine(style: CommentStyle, identifier: string): string {
+  const text = `SPDX-License-Identifier: ${identifier}`;
+  if (style === "slashes") return `// ${text}`;
+  if (style === "hash") return `# ${text}`;
+  return `/* ${text} */`;
 }
 
 /** The identifier of the header in the first lines of the file, or null when there is none. */
@@ -108,20 +122,30 @@ export type HeaderProblem = (typeof HEADER_PROBLEMS)[number];
 
 /**
  * The one rule for "has the right header", used by the check, the command and the test: null when
- * the first lines carry `SPDX-License-Identifier: Apache-2.0`, otherwise why not.
+ * the first lines carry the identifier this file requires (`Apache-2.0`, or `MIT` below the copied
+ * shadcn components), otherwise why not. Without a path the required identifier is `Apache-2.0`.
  */
-export function headerProblem(content: string): HeaderProblem | null {
+export function headerProblem(
+  content: string,
+  path?: string,
+): HeaderProblem | null {
   const identifier = findHeader(content);
   if (identifier === null) return "HEADER_MISSING";
-  return identifier === SPDX_IDENTIFIER ? null : "HEADER_OTHER_LICENSE";
+  const expected =
+    path === undefined ? SPDX_IDENTIFIER : requiredIdentifier(path);
+  return identifier === expected ? null : "HEADER_OTHER_LICENSE";
 }
 
 /** Adds the header to a file that has none; returns a file that has one unchanged. */
-export function addHeader(content: string, style: CommentStyle): string {
+export function addHeader(
+  content: string,
+  style: CommentStyle,
+  identifier: string = SPDX_IDENTIFIER,
+): string {
   if (findHeader(content) !== null) return content;
   const eol = content.includes("\r\n") ? "\r\n" : "\n";
   const lines = content === "" ? [] : content.split(eol);
-  const header = headerLine(style);
+  const header = headerLine(style, identifier);
   if (lines.length === 0) return `${header}${eol}`;
 
   const keep = leadingLinesToKeep(lines);

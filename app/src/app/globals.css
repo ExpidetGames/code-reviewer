@@ -1,12 +1,12 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 
 /*
- * Design tokens and the small UI kit of Code Reviewer.
+ * The legacy UI kit of Code Reviewer (being replaced by Tailwind + shadcn/ui, epic #165).
  *
- * The color values are the Octestra brand tokens (blue primary, navy ink), adapted: Octestra keeps
- * raw HSL channels for Tailwind, here every token is a complete color made with light-dark(), so
- * one declaration holds both modes and components only ever write var(--token). Colors are never
- * written outside this block.
+ * The colors and the type/radius tokens live in `theme.css` now, in the shadcn naming; this
+ * stylesheet only reads them (`var(--token)`), so changing the accent is editing `theme.css` alone.
+ * This file is the one documented exception of the color guard (`app/src/ci/colors`) until the
+ * cleanup issue removes it.
  *
  * Light and dark: the page follows the system setting (color-scheme: light dark). The toggle sets
  * data-theme="light" or "dark" on <html> (src/theme/theme.ts), which pins color-scheme; without the
@@ -15,41 +15,9 @@
 :root {
   color-scheme: light dark;
 
-  --background: light-dark(hsl(0 0% 100%), hsl(218 72% 6%));
-  --foreground: light-dark(hsl(218 72% 8%), hsl(210 40% 96%));
-  --card: light-dark(hsl(0 0% 100%), hsl(218 65% 9%));
-  --card-foreground: var(--foreground);
-  --muted: light-dark(hsl(210 35% 95%), hsl(218 50% 14%));
-  --muted-foreground: light-dark(hsl(215 20% 38%), hsl(215 25% 66%));
-  --border: light-dark(hsl(210 30% 86%), hsl(218 45% 20%));
-  --primary: light-dark(hsl(210 78% 40%), hsl(210 80% 62%));
-  --primary-foreground: light-dark(hsl(0 0% 100%), hsl(218 72% 6%));
-  --accent: light-dark(hsl(205 75% 92%), hsl(210 60% 18%));
-  --accent-foreground: light-dark(hsl(210 78% 28%), hsl(210 80% 78%));
-  --secondary: light-dark(hsl(210 40% 94%), hsl(218 50% 16%));
-  --secondary-foreground: light-dark(hsl(218 72% 15%), hsl(210 40% 96%));
-  --destructive: light-dark(hsl(0 72% 42%), hsl(0 84% 62%));
-  --destructive-foreground: light-dark(hsl(0 0% 100%), hsl(218 72% 6%));
-  --ring: var(--primary);
-
-  /* Status colors for run states (later tickets): text on the matching soft background. */
-  --success: light-dark(hsl(142 70% 26%), hsl(142 60% 62%));
-  --success-soft: light-dark(hsl(142 55% 92%), hsl(142 40% 14%));
-  --warning: light-dark(hsl(32 90% 28%), hsl(40 90% 66%));
-  --warning-soft: light-dark(hsl(40 90% 90%), hsl(36 50% 14%));
-  --danger: light-dark(hsl(0 72% 38%), hsl(0 84% 70%));
-  --danger-soft: light-dark(hsl(0 80% 95%), hsl(0 50% 15%));
-  --info: var(--accent-foreground);
-  --info-soft: var(--accent);
-
-  --radius: 0.5rem;
   --header-height: 3.5rem;
   --content-width: 72rem;
   --gutter: 1rem;
-  --font-sans:
-    system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
-    sans-serif;
-  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
 :root[data-theme="light"] {

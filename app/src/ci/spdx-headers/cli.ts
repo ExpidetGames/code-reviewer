@@ -18,7 +18,7 @@ import {
   addHeader,
   commentStyle,
   headerProblem,
-  SPDX_IDENTIFIER,
+  requiredIdentifier,
 } from "./rules.ts";
 import { listSourceFiles } from "./source-files.ts";
 
@@ -40,7 +40,10 @@ export function runCli(
     return 2;
   }
   const problems = listSourceFiles(repoRoot).flatMap((path) => {
-    const problem = headerProblem(readFileSync(`${repoRoot}/${path}`, "utf8"));
+    const problem = headerProblem(
+      readFileSync(`${repoRoot}/${path}`, "utf8"),
+      path,
+    );
     return problem === null ? [] : [{ path, problem }];
   });
   const missing = problems.filter(
@@ -53,7 +56,7 @@ export function runCli(
   // is a decision for a person, so both modes report it and fail.
   for (const { path } of other) {
     err(
-      `SPDX identifier other than ${SPDX_IDENTIFIER} (decide by hand): ${path}`,
+      `Wrong SPDX identifier, not the one this file requires (decide by hand): ${path}`,
     );
   }
   if (mode === "--check") {
@@ -71,7 +74,10 @@ export function runCli(
     const style = commentStyle(path);
     if (style === null) continue;
     const file = `${repoRoot}/${path}`;
-    writeFileSync(file, addHeader(readFileSync(file, "utf8"), style));
+    writeFileSync(
+      file,
+      addHeader(readFileSync(file, "utf8"), style, requiredIdentifier(path)),
+    );
     out(path);
   }
   out(`Added the header to ${missing.length} file(s).`);
