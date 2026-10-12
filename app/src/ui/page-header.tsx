@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// The heading block at the top of a page: the one h1 of the page, an optional line below it and
-// optional actions (buttons) on the right.
+// The heading block of the pre-redesign screens. It now renders the application PageHeader
+// (`@/components/page-header`) and keeps its public props, so a screen that has not moved yet still
+// compiles. Each screen issue deletes this wrapper once its last usage is gone (epic #165).
 import type { ReactNode } from "react";
+import { PageHeader as KitPageHeader } from "@/components/page-header";
 
 export function PageHeader({
   title,
@@ -14,12 +16,6 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <div className="page-header">
-      <div className="page-header-text">
-        <h1>{title}</h1>
-        {description ? <p>{description}</p> : null}
-      </div>
-      {actions ? <div className="page-header-actions">{actions}</div> : null}
-    </div>
+    <KitPageHeader title={title} description={description} actions={actions} />
   );
 }
