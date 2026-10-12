@@ -14,6 +14,9 @@ to it, under `ui/`, and keep their MIT header (see `THIRD_PARTY_LICENSES.md` and
 destructive`, sizes `sm | default | icon`, the `loading`/`loadingLabel` convention and the
     icon-only accessible-name guard. Prefer it over `@/components/ui/button`.
   - `@/components/page-header` — one `h1`, a breadcrumb slot and the page actions.
+  - `@/components/breadcrumbs` — the trail of a non-root page: ancestors as links, the last crumb as
+    the current page (`aria-current="page"`, no link). Goes into the `breadcrumb` slot of
+    `PageHeader`.
   - `@/components/auth-card` — the centered 34rem frame and action-named `h1` of the public auth pages.
   - `@/components/info-hint` — the focusable "?" next to a label (Tooltip, `aria-describedby`,
     Escape closes, 44px hit area).
