@@ -53,7 +53,7 @@ export function NeedsAttention({
       {rest.length > 0 ? (
         <HelpDisclosure
           label={`${String(rest.length)} more ${
-            rest.length === 1 ? "problem" : "problems"
+            rest.length === 1 ? "notice" : "notices"
           }`}
         >
           <ul className="flex flex-col gap-1">

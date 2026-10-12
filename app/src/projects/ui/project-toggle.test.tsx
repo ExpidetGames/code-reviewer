@@ -148,8 +148,8 @@ describe("switching a project", () => {
     );
   });
 
-  // CR-34-T10
-  it("does not call the route while activating is blocked, and shows the reason", async () => {
+  // CR-34-T10, #173-T03
+  it("does not call the route while activating is blocked, and describes the switch with the reason", async () => {
     const user = userEvent.setup();
     const { api, setActive } = fakeApi(ok(true));
     renderToggle(api, { blockedReason: "Configure the GitHub App first." });
@@ -157,6 +157,30 @@ describe("switching a project", () => {
     await user.click(screen.getByRole("switch"));
 
     expect(setActive).not.toHaveBeenCalled();
-    expect(screen.getByText("Configure the GitHub App first.")).toBeTruthy();
+    const toggle = screen.getByRole("switch") as HTMLButtonElement;
+    expect(toggle.disabled).toBe(true);
+    const describedBy = toggle.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    expect(document.getElementById(describedBy!)?.textContent).toBe(
+      "Configure the GitHub App first.",
+    );
+    expect(
+      screen.getByRole("button", {
+        name: "Why acme/widgets cannot be switched on",
+      }),
+    ).toBeTruthy();
+  });
+
+  // The lead decision on hit areas (epic #165): a control reaches at least 44x44px even when it
+  // stays visually small. Not a numbered case of #173.
+  it("gives the switch a 44x44 hit area while its track keeps the mockup's 44x24", () => {
+    renderToggle({ setActive: vi.fn(), sync: vi.fn() });
+
+    const toggle = screen.getByRole("switch");
+    const hit = toggle.closest("label");
+    expect(hit?.className).toContain("min-h-11");
+    expect(hit?.className).toContain("min-w-11");
+    expect(toggle.className).toContain("data-[size=default]:h-6");
+    expect(toggle.className).toContain("data-[size=default]:w-11");
   });
 });

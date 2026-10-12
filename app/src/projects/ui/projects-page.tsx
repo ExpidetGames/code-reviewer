@@ -4,10 +4,14 @@
 // the workspace's LLM hint, then the list of repositories. `loadProjectsPage` gathers the data from
 // the services (passed in, so a test uses real ones against a test database), `ProjectsPageContent`
 // renders it. The page file only wires the real services.
-import { NeedsAttention } from "../../components/needs-attention.tsx";
-import type { AttentionNotice } from "../../components/needs-attention.tsx";
-import { describeConfigNotices } from "../../config-status/notices.ts";
-import { GITHUB_NOT_CONFIGURED_COPY } from "../../config-status/notices.ts";
+import {
+  NeedsAttention,
+  type AttentionNotice,
+} from "../../components/needs-attention.tsx";
+import {
+  describeConfigNotices,
+  GITHUB_NOT_CONFIGURED_COPY,
+} from "../../config-status/notices.ts";
 import type {
   ConfigAudience,
   ConfigStatus,

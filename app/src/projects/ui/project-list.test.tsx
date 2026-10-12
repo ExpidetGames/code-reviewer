@@ -246,7 +246,7 @@ describe("the project list with repositories", () => {
     );
   });
 
-  it("does not offer to switch on a repository the app can no longer read, and says what happens if it comes back", () => {
+  it("does not offer to switch on a repository the app can no longer read, and describes the switch with the reason", () => {
     renderList([
       row({ status: "unavailable", switchedOn: true }),
       row({ repositoryId: "x", fullName: "acme/x", status: "unavailable" }),
@@ -260,8 +260,16 @@ describe("the project list with repositories", () => {
     expect(
       screen.getByText(/resumes if the repository comes back/),
     ).toBeTruthy();
+    // The blocked switch is described by the reason, which is also the hint next to it.
+    const describedBy = withoutProject?.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    expect(document.getElementById(describedBy!)?.textContent).toBe(
+      "The GitHub App can no longer read this repository.",
+    );
     expect(
-      screen.getByText("The GitHub App can no longer read this repository."),
+      screen.getByRole("button", {
+        name: "Why acme/x cannot be switched on",
+      }),
     ).toBeTruthy();
   });
 
@@ -274,7 +282,9 @@ describe("the project list with repositories", () => {
 
     const name = screen.getByRole("link", { name: hostile });
     expect(name.className).toContain("truncate");
-    expect(screen.getByText(/<b>acme<\/b>/)).toBeTruthy();
+    // The untrusted installation name wraps instead of overflowing its fixed column.
+    const installation = screen.getByText(/<b>acme<\/b>/);
+    expect(installation.closest("td")?.className).toContain("break-words");
     expect(container.querySelector("img")).toBeNull();
     expect(container.querySelector("script")).toBeNull();
     expect(container.querySelector("b")).toBeNull();

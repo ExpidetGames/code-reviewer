@@ -54,7 +54,7 @@ describe("the needs attention strip", () => {
 
     // Two open rows: the third is not one of the alert rows but is still reachable.
     expect(screen.getAllByRole("alert")).toHaveLength(2);
-    const trigger = screen.getByRole("button", { name: "1 more problem" });
+    const trigger = screen.getByRole("button", { name: "1 more notice" });
     const content = document.getElementById(
       trigger.getAttribute("aria-controls")!,
     );

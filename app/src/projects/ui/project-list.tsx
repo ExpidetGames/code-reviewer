@@ -132,7 +132,7 @@ export function ProjectList({
                 </a>
               ) : null}
             </TableCell>
-            <TableCell className="align-top text-muted-foreground">
+            <TableCell className="align-top whitespace-normal break-words text-muted-foreground">
               {row.installation}
             </TableCell>
             <TableCell className="align-top">

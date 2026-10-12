@@ -46,6 +46,7 @@ export function ProjectToggle({
   const api = apiProp ?? defaultApi;
   const router = useRouter();
   const messageId = useId();
+  const switchId = useId();
   // What the last successful call set; the page data catches up after the refresh.
   const [confirmed, setConfirmed] = useState<boolean | null>(null);
   const [pending, setPending] = useState(false);
@@ -74,13 +75,21 @@ export function ProjectToggle({
   return (
     <div className="flex flex-col items-start gap-1">
       <div className="flex items-center gap-1">
-        <Switch
-          checked={on}
-          onCheckedChange={() => void toggle()}
-          disabled={pending || blocked}
-          aria-label={`Review ${fullName}`}
-          aria-describedby={description === null ? undefined : messageId}
-        />
+        {/* The track keeps the mockup's 44x24; the label around it is the 44x44 hit area (epic #165). */}
+        <label
+          htmlFor={switchId}
+          className="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center"
+        >
+          <Switch
+            id={switchId}
+            checked={on}
+            onCheckedChange={() => void toggle()}
+            disabled={pending || blocked}
+            aria-label={`Review ${fullName}`}
+            aria-describedby={description === null ? undefined : messageId}
+            className="data-[size=default]:h-6 data-[size=default]:w-11"
+          />
+        </label>
         {problem === null && blocked && blockedText !== null ? (
           <InfoHint label={`Why ${fullName} cannot be switched on`}>
             {blockedText}
