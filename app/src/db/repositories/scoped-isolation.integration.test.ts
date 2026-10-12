@@ -577,11 +577,6 @@ const CASES: Case[] = [
         expect.objectContaining({ id: a.linkRequest.id }),
       ]),
   },
-  {
-    name: "linkRequests.withdrawPending",
-    run: (a, b) => a.linkRequests.withdrawPending(b.linkRequest.installationId),
-    expectAnswer: (answer) => expect(answer).toBeUndefined(),
-  },
   // workspace secrets: the names are the same in every workspace, so the scope is what decides whose it is
   {
     name: "workspaceSecrets.get",

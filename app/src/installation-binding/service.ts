@@ -28,6 +28,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { Kysely } from "kysely";
 import { exchangeCode } from "../auth/github-provider.ts";
+import { createUnclaimedInstallationsRepository } from "../db/repositories/unclaimed-installations-repository.ts";
 import { createInstallationLinkRequestsRepository } from "../db/repositories/installation-link-requests-repository.ts";
 import type { RateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
 import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
@@ -691,12 +692,27 @@ export function createInstallationBindingService({
   /**
    * A single-tenant instance whose App has no user authorization cannot check anybody's rights with a token.
    * The installation is then described by GitHub to the App itself, and the instance admin decides.
+   *
+   * Nothing proves that the person may use the installation, so the id they bring must not be a probe: only an
+   * installation the instance has noted as unclaimed (it arrived by delivery or by the synchronization) can be
+   * asked for. Every other id, one GitHub does not know, one that does not exist and one that belongs to
+   * another workspace, gets the same answer, and the App is not asked about it at all.
    */
   async function requestWithoutToken(
     userId: string,
     workspaceId: string,
     installationId: string,
   ): Promise<CallbackResult> {
+    const where = await linkedElsewhereOrHere(workspaceId, installationId);
+    if (where === "here") return done(workspaceId, "linked");
+    if (
+      where === "elsewhere" ||
+      (where === "none" &&
+        (await createUnclaimedInstallationsRepository(db, now).get(
+          installationId,
+        )) === undefined)
+    )
+      return done(workspaceId, "installation_not_accessible");
     let connection;
     try {
       connection = await registry

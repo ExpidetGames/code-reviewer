@@ -32,8 +32,6 @@ export type InstallationLinkRequestsRepository = {
   ): Promise<InstallationLinkRequest | undefined>;
   /** The newest requests of the workspace, newest first. */
   list(limit?: number): Promise<InstallationLinkRequest[]>;
-  /** Ends the pending requests for the installation because it was linked in the meantime. */
-  withdrawPending(installationId: string): Promise<void>;
 };
 
 export function toLinkRequest(
@@ -147,16 +145,6 @@ export function createInstallationLinkRequestsRepository(
         .limit(limit)
         .execute();
       return rows.map(toLinkRequest);
-    },
-
-    async withdrawPending(installationId) {
-      await db
-        .updateTable("installation_link_requests")
-        .set({ status: "withdrawn", decided_at: formatTimestamp(now()) })
-        .where("workspace_id", "=", workspaceId)
-        .where("installation_id", "=", installationId)
-        .where("status", "=", "pending")
-        .execute();
     },
   };
 }

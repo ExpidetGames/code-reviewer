@@ -257,6 +257,39 @@ describe("a single-tenant instance", () => {
   });
 
   // #103-IB-12
+  it("asks GitHub for the owner of the App once for all the new installations of one synchronization", async () => {
+    const h = await createBindingHarness({
+      tenancy: "single",
+      privateApp: true,
+    });
+    await h.workspace("only");
+    for (const id of [4242, 4243, 4244])
+      h.install(
+        {
+          id,
+          account: {
+            login: `org-${String(id)}`,
+            id: id + 1000,
+            type: "Organization",
+          },
+        },
+        [],
+      );
+    const appReads = () =>
+      h.github.requests().filter((request) => request.path === "/app").length;
+
+    await h.sync.syncAll();
+
+    expect(await h.unclaimed.list()).toHaveLength(3);
+    expect(appReads()).toBe(1);
+    // Remembered only briefly: a later synchronization asks again.
+    h.advance(60_000);
+    h.install({ id: 4245, account: ACME }, []);
+    await h.sync.syncAll();
+    expect(appReads()).toBe(2);
+  });
+
+  // #103-IB-12
   it("needs the explicit Connect flow with the same checks for everything else", async () => {
     const h = await createBindingHarness({
       tenancy: "single",

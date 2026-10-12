@@ -99,6 +99,10 @@ export function createApprovalService({
       if (linked.ok) return { ok: true };
       if (linked.error === "not_claimed")
         return { ok: false, error: "request_not_pending" };
+      // Linked to another workspace in the meantime: the request can never be approved, so it must not wait
+      // (and be tried again) forever. The admin is told, and finds it among the ended ones.
+      if (linked.error === "installation_already_linked")
+        await directory.withdrawPendingFor(request.installationId);
       return { ok: false, error: linked.error };
     },
 

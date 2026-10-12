@@ -78,7 +78,9 @@ describe("a request that waits", () => {
     );
     expect(evidenceOf("For workspace")).toBe("Team A");
     expect(evidenceOf("Installation on")).toBe("acme (organization)");
-    expect(evidenceOf("Can their token use the installation?")).toBe("Yes");
+    expect(evidenceOf("Can their token use the installation?")).toMatch(
+      /^Yes \(outside collaborators can use an installation too/,
+    );
     expect(evidenceOf("Their role in the account")).toMatch(
       /^Could not be read \(GitHub refused: the app probably lacks the organization permission Members\)$/,
     );

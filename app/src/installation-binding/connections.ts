@@ -10,7 +10,8 @@
 //   that is there: an installation belongs to ONE workspace (the unique index of `integrations`), so another
 //   workspace's installation is refused with one answer that does not say whose it is. Linking it again from
 //   the same workspace is idempotent, and brings back a connection that was disconnected. Afterwards the
-//   installation is no longer unclaimed, requests for it are withdrawn and its repositories are read.
+//   installation is no longer unclaimed, the requests for it (of every workspace) are withdrawn and its
+//   repositories are read.
 // - `disconnect` turns the connection into `disconnected` and its repositories inactive in one transaction.
 //   The row stays (so the installation stays the workspace's, projects and runs keep their reference), the
 //   synchronization never resumes it, and nothing happens on GitHub.
@@ -19,7 +20,7 @@
 // interleaves with them: a sync that began before a disconnect cannot write its repositories back.
 import type { Kysely } from "kysely";
 import { createIntegrationDirectory } from "../db/repositories/integration-directory-repository.ts";
-import { createInstallationLinkRequestsRepository } from "../db/repositories/installation-link-requests-repository.ts";
+import { createInstallationLinkRequestDirectory } from "../db/repositories/installation-link-request-directory-repository.ts";
 import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
 import { createUnclaimedInstallationsRepository } from "../db/repositories/unclaimed-installations-repository.ts";
@@ -170,11 +171,11 @@ export function createConnections({
     await createUnclaimedInstallationsRepository(db, now).forget(
       installationId,
     );
-    await createInstallationLinkRequestsRepository(
-      db,
-      workspaceId,
-      now,
-    ).withdrawPending(installationId);
+    // Requests of any workspace for it end here: the one that was approved is decided already, the others (of
+    // this workspace and of workspaces that asked for the same installation) can never be approved now.
+    await createInstallationLinkRequestDirectory(db, now).withdrawPendingFor(
+      installationId,
+    );
     return { ok: true, ...linked, status };
   }
 

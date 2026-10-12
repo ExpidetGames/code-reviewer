@@ -31,6 +31,11 @@ export type InstallationLinkRequestDirectory = {
     id: string,
     decision: { status: "approved" | "denied"; decidedBy: string },
   ): Promise<InstallationLinkRequest | undefined>;
+  /**
+   * Ends the requests of EVERY workspace that still wait for the installation, because it belongs to a
+   * workspace now: a request that can never be approved must not wait forever. Returns how many were ended.
+   */
+  withdrawPendingFor(installationId: string): Promise<number>;
 };
 
 export function createInstallationLinkRequestDirectory(
@@ -115,6 +120,17 @@ export function createInstallationLinkRequestDirectory(
         .returningAll()
         .executeTakeFirst();
       return row === undefined ? undefined : toLinkRequest(row);
+    },
+
+    async withdrawPendingFor(installationId) {
+      const rows = await db
+        .updateTable("installation_link_requests")
+        .set({ status: "withdrawn", decided_at: formatTimestamp(now()) })
+        .where("installation_id", "=", installationId)
+        .where("status", "=", "pending")
+        .returning("id")
+        .execute();
+      return rows.length;
     },
   };
 }

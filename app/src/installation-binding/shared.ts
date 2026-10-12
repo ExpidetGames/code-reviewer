@@ -6,7 +6,7 @@
 import "server-only";
 import { loadAuthConfig } from "../auth/config.ts";
 import { resolveAppSecret } from "../crypto/app-secret.ts";
-import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
+import { createRateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
 import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
 import { getDatabase } from "../db/startup.ts";
 import { getGithubCredentialStore } from "../github-config/shared.ts";
@@ -17,8 +17,10 @@ import { getIntegrationSync } from "../integrations/sync/shared.ts";
 import { purposeOfState } from "../signed-state/state.ts";
 import {
   assembleInstallationBinding,
+  bindingTenancy,
   type AssembledBinding,
 } from "./assemble.ts";
+import { hitBindingLimit } from "./rate-limits.ts";
 import {
   createBindingRouteHandlers,
   type BindingRouteHandlers,
@@ -56,8 +58,7 @@ export function getInstallationBinding(): AssembledBinding {
             : null,
       };
     },
-    tenancy: async () =>
-      (await createInstanceSettingsRepository(db).get("tenancy")) ?? "single",
+    tenancy: () => bindingTenancy(db),
   });
 }
 
@@ -73,6 +74,13 @@ export function getBindingRouteHandlers(): BindingRouteHandlers {
     session: sessionOfRequest,
     workspaceSlug: async (workspaceId) =>
       (await createWorkspacesRepository(db).get(workspaceId))?.slug ?? null,
+    syncLimit: (userId) =>
+      hitBindingLimit(
+        createRateLimitsRepository(db),
+        "sync",
+        userId,
+        new Date(),
+      ),
     isAuthorizationState: (state) =>
       purposeOfState(secret, state) === "github-authorize",
   });

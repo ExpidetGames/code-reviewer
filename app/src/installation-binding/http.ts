@@ -28,13 +28,13 @@ import {
   type JsonBodyErrorCode,
 } from "../http/json-body.ts";
 import { isCrossSite } from "../http/request-checks.ts";
-import type { SyncAnswer } from "../integrations/sync/http.ts";
 import type { IntegrationSyncService } from "../integrations/sync/service.ts";
 import { can } from "../workspaces/permissions.ts";
 import { workspacePath } from "../workspaces/paths.ts";
 import type { WorkspaceAccess } from "../workspaces/access.ts";
 import type { Connections } from "./connections.ts";
 import { BINDING_ERROR_STATUS, type BindingErrorCode } from "./errors.ts";
+import type { LimitResult } from "./rate-limits.ts";
 import type { CallbackResult, InstallationBindingService } from "./service.ts";
 
 export const BINDING_REQUEST_MAX_BYTES = 4 * 1024;
@@ -83,6 +83,8 @@ export type BindingRouteDependencies = {
   ) => Promise<{ userId: string; sessionId: string } | null>;
   /** The address name of a workspace, or null when there is none. */
   workspaceSlug: (workspaceId: string) => Promise<string | null>;
+  /** Counts a press of the workspace's sync button against the shared limits (rate-limits.ts, `sync`). */
+  syncLimit: (userId: string) => Promise<LimitResult>;
   /** Whether a `state` is one of the authorization of this flow (its signature is ours and so is its purpose). */
   isAuthorizationState: (state: string) => boolean;
 };
@@ -102,8 +104,15 @@ export type BindingRouteHandlers = {
   authorizationCallback(request: Request): Promise<Response | null>;
 };
 
-/** What a workspace's synchronization answers: how many repositories are new and what went wrong, for its own connections. */
-export type WorkspaceSyncAnswer = SyncAnswer;
+/**
+ * What a workspace's synchronization answers: how many repositories are new and what went wrong, for its own
+ * connections. Only the stable code of each problem: a person of a workspace gets no text written for the
+ * operator of the instance (the page translates the code).
+ */
+export type WorkspaceSyncAnswer = {
+  added: number;
+  errors: { code: string }[];
+};
 
 export function createBindingRouteHandlers(
   deps: BindingRouteDependencies,
@@ -253,12 +262,22 @@ export function createBindingRouteHandlers(
     async syncWorkspace(request, access) {
       if (isCrossSite(request)) return refusal("cross_site_request");
       if (!mayManage(access)) return refusal("forbidden");
-      const summary = await sync.syncWorkspace(access.workspace.id);
-      const answer: WorkspaceSyncAnswer = {
-        added: summary.repositories.added,
-        errors: summary.errors,
-      };
-      return Response.json(answer, { headers: NO_STORE });
+      try {
+        const limit = await deps.syncLimit(access.user.id);
+        if (!limit.allowed)
+          return refusal("rate_limited", limit.retryAfterSeconds);
+        const summary = await sync.syncWorkspace(access.workspace.id);
+        const answer: WorkspaceSyncAnswer = {
+          added: summary.repositories.added,
+          errors: summary.errors.map((error) => ({ code: error.code })),
+        };
+        return Response.json(answer, { headers: NO_STORE });
+      } catch {
+        console.error(
+          "[installation-binding] BINDING_UNAVAILABLE: the request was not served.",
+        );
+        return refusal("unavailable");
+      }
     },
 
     setupCallback(request) {

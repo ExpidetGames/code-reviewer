@@ -123,7 +123,7 @@ export const APPROVAL_ERROR_STATUS: Record<ApprovalErrorCode, number> = {
   request_not_pending: 409,
   requester_not_admin: 409,
   installation_already_linked: 409,
-  installation_not_accessible: 409,
+  installation_not_accessible: 403,
   github_unreachable: 502,
   unavailable: 503,
 };

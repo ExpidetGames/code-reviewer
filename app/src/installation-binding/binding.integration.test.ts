@@ -6,6 +6,7 @@
 // token, obtained during the flow; these tests walk the whole round trip (the installation page, the setup
 // address, the authorization, the callback) the way a browser does.
 import { describe, expect, it } from "vitest";
+import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
 import {
   createBindingHarness,
   type BindingHarness,
@@ -842,11 +843,16 @@ describe("Connect GitHub without the user authorization of the App", () => {
   });
 
   // #103-IB-22
-  it("leaves the decision to the instance admin in a single-tenant instance", async () => {
+  it("leaves the decision to the instance admin in a single-tenant instance, for an installation the instance has noted", async () => {
     const { h, a, owner } = await scene({
       tenancy: "single",
       userAuthorization: false,
     });
+    // Installed on GitHub, the instance heard of it (the synchronization, here) and nobody has linked it.
+    await h.sync.syncAll();
+    expect(
+      (await h.unclaimed.list()).map((entry) => entry.installationId),
+    ).toEqual(["4242"]);
 
     const run = await h.walk(owner, a.id, {
       installationId: 4242,
@@ -873,6 +879,116 @@ describe("Connect GitHub without the user authorization of the App", () => {
   });
 
   // #103-IB-22
+  it("gives an id it has not noted the same answer whether GitHub knows it, does not know it, or another workspace has it, and does not ask GitHub about it", async () => {
+    const { h, a, owner } = await scene({
+      tenancy: "single",
+      userAuthorization: false,
+    });
+    // 4800: a real installation nobody told the instance about. 4900: GitHub has none. 4700: linked elsewhere.
+    h.install({
+      id: 4800,
+      account: { login: "stranger", id: 5800, type: "Organization" },
+    });
+    h.install({
+      id: 4700,
+      account: { login: "taken", id: 5700, type: "Organization" },
+    });
+    const b = await h.workspace("b");
+    await createIntegrationsRepository(h.db, b.id).create({
+      type: "github_app",
+      displayName: "taken",
+      externalId: "4700",
+      config: {
+        accountLogin: "taken",
+        accountId: 5700,
+        accountType: "Organization",
+      },
+      status: "active",
+    });
+    const before = h.github.requests().length;
+
+    const answers = [];
+    for (const installationId of [4800, 4900, 4700])
+      answers.push(
+        (await h.walk(owner, a.id, { installationId, githubLogin: "octo" }))
+          .setup,
+      );
+
+    for (const answer of answers)
+      expect(answer).toEqual({
+        kind: "done",
+        workspaceId: a.id,
+        code: "installation_not_accessible",
+      });
+    expect(await h.requests.listPending()).toEqual([]);
+    // GitHub was not asked what these ids are: nothing to learn from the answer, and no probe.
+    expect(
+      h.github
+        .requests()
+        .slice(before)
+        .filter((request) =>
+          /\/app\/installations\/(4800|4900|4700)/.test(request.path),
+        ),
+    ).toEqual([]);
+  });
+
+  // #103-IB-22
+  it("tells the workspace that already has the installation that it is linked, without a request", async () => {
+    const { h, a, owner } = await scene({
+      tenancy: "single",
+      userAuthorization: false,
+    });
+    await createIntegrationsRepository(h.db, a.id).create({
+      type: "github_app",
+      displayName: "acme",
+      externalId: "4242",
+      config: {
+        accountLogin: "acme",
+        accountId: 5001,
+        accountType: "Organization",
+      },
+      status: "active",
+    });
+
+    const run = await h.walk(owner, a.id, {
+      installationId: 4242,
+      githubLogin: "octo",
+    });
+
+    expect(run.setup).toEqual({
+      kind: "done",
+      workspaceId: a.id,
+      code: "linked",
+    });
+    expect(await h.requests.listPending()).toEqual([]);
+  });
+
+  // #103-IB-22
+  it("treats an instance whose tenancy is not stored as multi-tenant: no Connect, and no request for the instance admin", async () => {
+    const { h, a, owner } = await scene({
+      tenancy: "single",
+      userAuthorization: false,
+    });
+    await h.db
+      .deleteFrom("instance_settings")
+      .where("key", "=", "tenancy")
+      .execute();
+
+    const availability = await h.binding.service.availability();
+    const connect = await h.binding.service.startConnect(owner, a.id);
+
+    expect(availability).toEqual({
+      connect: "user_authorization_not_configured",
+      picker: false,
+    });
+    expect(connect).toEqual({
+      ok: false,
+      error: "user_authorization_not_configured",
+    });
+    await expectNothingLinked(h);
+  });
+
+  // #103-IB-22
   it("does not start without a GitHub App at all", async () => {
     const { h, a, owner } = await scene();
     await h.db
@@ -888,8 +1004,47 @@ describe("Connect GitHub without the user authorization of the App", () => {
 });
 
 describe("what the binding does with the token of the person", () => {
+  /**
+   * Everything the binding keeps or says: every table that could hold it, the log, and the answers of the steps
+   * that were walked. None of the tokens the fake GitHub issued may be in any of it.
+   */
+  async function expectNoTokenAnywhere(
+    h: BindingHarness,
+    ...answers: unknown[]
+  ) {
+    const tokens = h.github.issuedAccessTokens();
+    expect(tokens.length).toBeGreaterThan(0);
+    const tables = [
+      "accounts",
+      "signed_states",
+      "installation_link_requests",
+      "unclaimed_installations",
+      "integrations",
+      "sessions",
+      "verifications",
+      "instance_settings",
+      "secrets",
+    ] as const;
+    const dump = JSON.stringify([
+      answers,
+      h.logs,
+      ...(await Promise.all(
+        tables.map((table) => h.db.selectFrom(table).selectAll().execute()),
+      )),
+    ]);
+    // A signed state carries its facts in base64url: read every such piece as text too, so a token put into one
+    // is found as well.
+    const decoded = (dump.match(/[A-Za-z0-9_-]{16,}/g) ?? [])
+      .map((piece) => Buffer.from(piece, "base64url").toString("utf8"))
+      .join("\n");
+    for (const token of tokens) {
+      expect(dump).not.toContain(token);
+      expect(decoded).not.toContain(token);
+    }
+  }
+
   // #103-IB-09
-  it("keeps no GitHub token anywhere: not in a table, not in the log, not in an answer", async () => {
+  it("keeps no GitHub token anywhere after a link: not in a table, not in the log, not in an answer", async () => {
     const { h, a, owner } = await scene();
     h.github.addOrgMember("acme", "octo", "active", "admin");
 
@@ -898,26 +1053,61 @@ describe("what the binding does with the token of the person", () => {
       githubLogin: "octo",
     });
 
-    const tokens = h.github.issuedAccessTokens();
-    expect(tokens.length).toBeGreaterThan(0);
-    const tables = [
-      "accounts",
-      "signed_states",
-      "installation_link_requests",
-      "integrations",
-      "sessions",
-      "verifications",
-      "instance_settings",
-      "secrets",
-    ] as const;
-    const dump = JSON.stringify([
-      run,
-      h.logs,
-      ...(await Promise.all(
-        tables.map((table) => h.db.selectFrom(table).selectAll().execute()),
-      )),
-    ]);
-    for (const token of tokens) expect(dump).not.toContain(token);
+    expect(run.final).toMatchObject({ code: "linked" });
+    await expectNoTokenAnywhere(h, run);
+  });
+
+  // #103-IB-09
+  it("keeps no GitHub token anywhere after the list of installations and a choice from it", async () => {
+    const { h, a, owner } = await scene();
+    h.github.addOrgMember("acme", "octo", "active", "admin");
+
+    const start = await h.binding.service.startPicker(owner, a.id);
+    if (!start.ok) throw new Error("the list did not start");
+    const listed = await h.authorize(owner, start.url, "octo");
+    if (listed.kind !== "done" || listed.picker === undefined)
+      throw new Error("expected the list");
+    const read = await h.binding.service.readPicker(owner, a.id, listed.picker);
+    const choose = await h.binding.service.chooseFromPicker(owner, a.id, {
+      picker: listed.picker,
+      installationId: "4242",
+    });
+    if (!choose.ok) throw new Error("the choice did not start");
+    const linked = await h.authorize(owner, choose.url, "octo");
+
+    expect(linked).toMatchObject({ code: "linked" });
+    // The list was made while the token existed: nothing of it is in the list, which the page reads back.
+    expect(listed.picker).not.toContain(h.github.issuedAccessTokens()[0]);
+    await expectNoTokenAnywhere(h, start, listed, read, choose, linked);
+  });
+
+  // #103-IB-09
+  it("keeps no GitHub token anywhere after a role that could not be read: the request holds the evidence and no token", async () => {
+    const { h, a, owner } = await scene();
+    h.github.addOrgMember("acme", "octo", "active", "admin");
+    h.github.setAppAccountPermissions({ emails: "read" });
+
+    const run = await h.walk(owner, a.id, {
+      installationId: 4242,
+      githubLogin: "octo",
+    });
+
+    expect(run.final).toMatchObject({ code: "waiting_for_instance_admin" });
+    await expectNoTokenAnywhere(h, run, await h.requests.listPending());
+  });
+
+  // #103-IB-09
+  it("keeps no GitHub token anywhere after a refusal, and the log of a refusal names the code only", async () => {
+    const { h, a, owner } = await scene();
+    h.github.addOrgMember("acme", "octo", "active", "member");
+
+    const run = await h.walk(owner, a.id, {
+      installationId: 4242,
+      githubLogin: "octo",
+    });
+
+    expect(run.final).toMatchObject({ code: "not_installation_admin" });
+    await expectNoTokenAnywhere(h, run);
   });
 
   // #103-IB-09

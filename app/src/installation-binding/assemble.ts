@@ -4,6 +4,7 @@
 // and the integration tests (`src/test-support/binding-harness.ts`) both build it here, so a test runs the code
 // that serves requests.
 import type { Kysely } from "kysely";
+import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import { createRateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
 import {
   createUnclaimedInstallationsRepository,
@@ -24,6 +25,17 @@ import {
   type GithubFacts,
   type InstallationBindingService,
 } from "./service.ts";
+
+/**
+ * The tenancy of the instance as the binding reads it. FAIL CLOSED: an instance whose tenancy is not stored
+ * (not set up, or the row is gone) is multi-tenant, which never binds an installation without a person's proof
+ * and never attaches one on its own.
+ */
+export async function bindingTenancy(
+  db: Kysely<Database>,
+): Promise<"single" | "multi"> {
+  return (await createInstanceSettingsRepository(db).get("tenancy")) ?? "multi";
+}
 
 export type AssembleBindingOptions = {
   db: Kysely<Database>;

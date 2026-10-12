@@ -15,6 +15,7 @@ import {
   describeRoleDetail,
   REQUEST_STATUS_COPY,
   ROLE_RESULT_COPY,
+  TOKEN_CAN_ACCESS_COPY,
 } from "./messages.ts";
 import type { InstallationLinkRequestView } from "../requests.ts";
 
@@ -57,7 +58,7 @@ function Evidence({ request }: { request: InstallationLinkRequestView }) {
           {evidence.tokenCanAccess === null
             ? "Not checked"
             : evidence.tokenCanAccess
-              ? "Yes"
+              ? TOKEN_CAN_ACCESS_COPY
               : "No"}
         </dd>
       </div>

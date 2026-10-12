@@ -12,7 +12,7 @@ belongs to, and never hands the repositories of one customer to another. The dec
 | `approvals.ts`, `approvals-http.ts` | The instance admin's decision on a request (`POST /api/admin/approvals/:id`)                                                                                                                                  |
 | `placement.ts`                      | Where an installation that is new to the instance may go **without** a person: a workspace in one case, otherwise nowhere                                                                                     |
 | `http.ts`                           | The handlers of the routes below, and the two redirects of GitHub                                                                                                                                             |
-| `rate-limits.ts`                    | The shared counters (`start` and `callback`, per person and for the instance)                                                                                                                                 |
+| `rate-limits.ts`                    | The shared counters (`start`, `callback` and `sync`, per person and for the instance)                                                                                                                         |
 | `errors.ts`, `requests.ts`          | The stable codes (refusals, waits, results of the page) and the vocabulary of a request                                                                                                                       |
 | `assemble.ts`, `shared.ts`          | The wiring over a database (tests) and over the running server                                                                                                                                                |
 | `ui/`                               | The Connections page of a workspace and the Approvals page of the portal, with the copy of every code                                                                                                         |
@@ -43,8 +43,12 @@ belongs to, and never hands the repositories of one customer to another. The dec
    approves or denies it under **Approvals** in the admin portal. The evidence is whether the person's token lists the
    installation and the result of the role read, never the token. Approving links the installation in the same
    transaction that claims the decision, with the checks that still apply (the person is still an Owner or Admin, the
-   installation is not another workspace's). A single-tenant instance without the user authorization sends every
-   request there.
+   installation is not another workspace's). Linking an installation through the binding ends the waiting requests for it in every
+   workspace (`withdrawn`), and an approval that finds it linked elsewhere withdraws its request. A single-tenant instance
+   without the user authorization sends every request there, but only for an installation the instance has noted as
+   unclaimed (or one the workspace already has): any other id, unknown to GitHub or linked elsewhere, is answered
+   `installation_not_accessible` without asking GitHub, so the id is no probe. An instance whose tenancy is not stored is
+   treated as multi-tenant.
 
 "Link an existing installation" lists the installations the person's token can use that no other workspace has linked (an
 authorization, then a signed list `github-picker`), and a choice goes through steps 3 to 5 again.
@@ -84,7 +88,8 @@ instance admin's (`/api/admin/integrations/sync`, a button on the Approvals page
 
 The JSON routes read the request the one way every route does (`src/http/json-body.ts`: same site, `application/json` only, a
 small limit, parsed once). Every start and every callback is rate limited through `rate_limits` (10 per person per 10
-minutes, per kind).
+minutes, per kind; the button of the workspace synchronization counts as `sync`, and its answer carries the code of each
+problem only).
 
 ## Tests
 

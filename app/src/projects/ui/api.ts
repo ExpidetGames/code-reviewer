@@ -6,7 +6,6 @@
 // the synchronization of the whole instance stays the instance admin's route,
 // src/installation-binding/http.ts). The workspace of both calls is the one of the page that makes them.
 // Browser side; no secrets here.
-import type { SyncAnswer } from "../../integrations/sync/http.ts";
 import { workspaceApiPath } from "../../workspaces/paths.ts";
 import {
   requestJson,
@@ -21,12 +20,15 @@ export type SetActiveAnswer = {
   changed: boolean;
 };
 
+/** What the sync button needs of an answer: how many repositories are new and the code of each problem. */
+export type SyncResult = { added: number; errors: { code: string }[] };
+
 export type ProjectsApi = {
   setActive(
     repositoryId: string,
     active: boolean,
   ): Promise<RequestResult<SetActiveAnswer>>;
-  sync(): Promise<RequestResult<SyncAnswer>>;
+  sync(): Promise<RequestResult<SyncResult>>;
 };
 
 export function createProjectsApi(
@@ -45,7 +47,7 @@ export function createProjectsApi(
         { active },
       ),
     sync: () =>
-      requestJson<SyncAnswer>(
+      requestJson<SyncResult>(
         fetchImpl,
         "POST",
         workspaceApiPath(workspaceSlug, "/integrations/sync"),
@@ -65,7 +67,7 @@ export type InstanceSyncApi = Pick<ProjectsApi, "sync">;
 
 export function createInstanceSyncApi(fetchImpl: FetchLike): InstanceSyncApi {
   return {
-    sync: () => requestJson<SyncAnswer>(fetchImpl, "POST", INSTANCE_SYNC_PATH),
+    sync: () => requestJson<SyncResult>(fetchImpl, "POST", INSTANCE_SYNC_PATH),
   };
 }
 

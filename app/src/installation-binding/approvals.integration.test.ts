@@ -4,6 +4,7 @@
 // accounts.md, section 2.9): approving links it (with the checks that still apply), denying links nothing, a
 // request is decided once, and the requester finds the decision in their workspace.
 import { describe, expect, it } from "vitest";
+import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
 import {
   createBindingHarness,
   type BindingHarness,
@@ -85,8 +86,44 @@ describe("approving a request", () => {
   });
 
   // #103-IB-20
-  it("still refuses an installation that belongs to another workspace by now, and leaves the request waiting", async () => {
-    const { h, request } = await requested();
+  it("withdraws the requests of every workspace for an installation when one workspace links it, and they can no longer be approved", async () => {
+    const { h, a, request } = await requested();
+    h.githubUser(1003, "octo2");
+    h.github.addOrgMember("acme", "octo2", "active", "admin");
+    const b = await h.workspace("b");
+    const ownerB = await h.person("owner-b", {
+      workspaceId: b.id,
+      role: "owner",
+    });
+    // Workspace B asks for the same installation, with a role that cannot be read as well; then links it.
+    h.github.setAppAccountPermissions({ emails: "read" });
+    await h.walk(ownerB, b.id, { installationId: 4242, githubLogin: "octo2" });
+    expect(await h.requests.listPending()).toHaveLength(2);
+    h.github.setAppAccountPermissions({ emails: "read", members: "read" });
+    const second = (await h.requests.listPending()).find(
+      (candidate) => candidate.workspaceId === b.id,
+    );
+    if (second === undefined) throw new Error("no request of workspace B");
+    expect(
+      await h.binding.approvals.approve("instance-admin", second.id),
+    ).toEqual({ ok: true });
+    const linked = await h.integrationRows();
+
+    // A's request waited for an installation that is B's now: it is closed, not left waiting forever.
+    expect(await h.requests.get(request.id)).toMatchObject({
+      workspaceId: a.id,
+      status: "withdrawn",
+    });
+    expect(await h.requests.listPending()).toEqual([]);
+    expect(
+      await h.binding.approvals.approve("instance-admin", request.id),
+    ).toEqual({ ok: false, error: "request_not_pending" });
+    expect(await h.integrationRows()).toEqual(linked);
+  });
+
+  // #103-IB-20
+  it("withdraws the waiting request of another workspace when a person links the installation directly", async () => {
+    const { h, a, request } = await requested();
     h.githubUser(1003, "octo2");
     h.github.addOrgMember("acme", "octo2", "active", "admin");
     h.github.setAppAccountPermissions({ emails: "read", members: "read" });
@@ -95,7 +132,36 @@ describe("approving a request", () => {
       workspaceId: b.id,
       role: "owner",
     });
-    await h.walk(ownerB, b.id, { installationId: 4242, githubLogin: "octo2" });
+
+    const run = await h.walk(ownerB, b.id, {
+      installationId: 4242,
+      githubLogin: "octo2",
+    });
+
+    expect(run.final).toMatchObject({ code: "linked" });
+    expect(await h.requests.get(request.id)).toMatchObject({
+      workspaceId: a.id,
+      status: "withdrawn",
+    });
+    expect(await h.requests.listPending()).toEqual([]);
+  });
+
+  // #103-IB-20
+  it("refuses an installation that was linked another way by now (the request is withdrawn, so it does not wait forever)", async () => {
+    const { h, request } = await requested();
+    // Linked without a person's flow, for instance by the single-tenant attach of the synchronization.
+    const b = await h.workspace("b");
+    await createIntegrationsRepository(h.db, b.id).create({
+      type: "github_app",
+      displayName: "acme",
+      externalId: "4242",
+      config: {
+        accountLogin: "acme",
+        accountId: 5001,
+        accountType: "Organization",
+      },
+      status: "active",
+    });
     const linked = await h.integrationRows();
 
     const result = await h.binding.approvals.approve(
@@ -106,12 +172,9 @@ describe("approving a request", () => {
     expect(result).toEqual({ ok: false, error: "installation_already_linked" });
     expect(await h.integrationRows()).toEqual(linked);
     expect(await h.requests.get(request.id)).toMatchObject({
-      status: "pending",
+      status: "withdrawn",
     });
-    // The admin can deny it.
-    expect(
-      await h.binding.approvals.deny("instance-admin", request.id),
-    ).toEqual({ ok: true });
+    expect(await h.requests.listPending()).toEqual([]);
   });
 
   // #103-IB-20

@@ -143,6 +143,51 @@ describe("disconnecting", () => {
   });
 
   // #103-IB-14
+  it.each([
+    ["a pull request that was opened", "pull_request.opened"],
+    ["a comment that gives a command", "issue_comment.created.review"],
+  ] as const)(
+    "starts no review for %s after the disconnect, and answers integration_disabled",
+    async (_, fixture) => {
+      const { h, a, integration, widgets } = await connected();
+      const route = h.webhook(h.reviewingCollaborators);
+      // The open pull request of the recorded payloads, and a commenter who may write to the repository.
+      h.github.addPullRequest("acme/widgets", {
+        number: 7,
+        title: "Add widget caching",
+        state: "open",
+        headSha: "1f3a5c7e9b2d4f60a8c1e3b5d7f90a2c4e6b8d01",
+        headRef: "feature/caching",
+        baseRef: "main",
+        author: { login: "alice", id: 1001 },
+      });
+      h.github.setCollaboratorPermission("acme/widgets", "bob", "write");
+      // The recorded payloads name repository 7001; this scene's repository has the id the fake gave it.
+      const deliver = () =>
+        route.deliver(fixture, (payload) => {
+          (payload.repository as { id: unknown }).id = Number(
+            widgets.externalId,
+          );
+        });
+      const jobs = async () =>
+        (await h.db.selectFrom("jobs").selectAll().execute()).length;
+      // The same delivery of the connected workspace is a trigger: the test is not vacuous.
+      const reviewed = await deliver();
+      expect(reviewed.outcome).toBe("trigger_enqueued");
+
+      await h.binding.connections.disconnect({
+        workspaceId: a.id,
+        integrationId: integration.id,
+      });
+      const after = await jobs();
+      const answer = await deliver();
+
+      expect(answer).toEqual({ status: 202, outcome: "integration_disabled" });
+      expect(await jobs()).toBe(after);
+    },
+  );
+
+  // #103-IB-14
   it("keeps the installation the workspace's: another workspace cannot link it, and the workspace can connect it again", async () => {
     const { h, a, owner, integration } = await connected();
     h.githubUser(1003, "octo2");

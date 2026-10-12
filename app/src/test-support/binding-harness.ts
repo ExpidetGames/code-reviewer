@@ -15,6 +15,16 @@ import {
   webhookFixture,
 } from "../../../fakes/github/webhooks.ts";
 import { createIntegrationDirectory } from "../db/repositories/integration-directory-repository.ts";
+import { createAppSettingsRepository } from "../db/repositories/app-settings-repository.ts";
+import { createProjectsRepository } from "../db/repositories/projects-repository.ts";
+import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
+import { createJobQueue } from "../jobs/job-queue.ts";
+import { createProjectService } from "../projects/service.ts";
+import { createReviewSettingsService } from "../review-settings/service.ts";
+import { builtInReviewSettings } from "../review-settings/settings.ts";
+import { createAutomaticReviewSettingsSource } from "../webhooks/automatic-review-settings.ts";
+import { createJobQueueReviewTriggerIntake } from "../webhooks/job-queue-intake.ts";
+import { createRateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
 import { createWebhookDeliveriesRepository } from "../db/repositories/webhook-deliveries-repository.ts";
 import {
   createGithubAppWebhookHandler,
@@ -26,12 +36,17 @@ import { createInstanceSettingsRepository } from "../db/repositories/instance-se
 import { createUnclaimedInstallationsRepository } from "../db/repositories/unclaimed-installations-repository.ts";
 import { createWorkspacesRepository } from "../db/repositories/workspaces-repository.ts";
 import { createGithubCredentialStore } from "../github-config/credentials.ts";
-import { assembleInstallationBinding } from "../installation-binding/assemble.ts";
+import {
+  assembleInstallationBinding,
+  bindingTenancy,
+} from "../installation-binding/assemble.ts";
 import {
   createBindingRouteHandlers,
+  type BindingRouteDependencies,
   type BindingRouteHandlers,
 } from "../installation-binding/http.ts";
 import { createConnectionPlacement } from "../installation-binding/placement.ts";
+import { hitBindingLimit } from "../installation-binding/rate-limits.ts";
 import type {
   BindingActor,
   CallbackResult,
@@ -126,6 +141,7 @@ export async function createBindingHarness(
     log,
     placeNewConnection: createConnectionPlacement({
       db,
+      now,
       ownerAccount: async () =>
         (await registry.resolve("github_app").ownerAccount?.()) ?? null,
       privateApp: async () =>
@@ -156,7 +172,7 @@ export async function createBindingHarness(
             : null,
       };
     },
-    tenancy: async () => (await settings.get("tenancy")) ?? "single",
+    tenancy: () => bindingTenancy(db),
     now,
     log,
     timeoutMs: 5000,
@@ -203,7 +219,11 @@ export async function createBindingHarness(
     };
   }
 
-  function handlers(actor: BindingActor | null = null): BindingRouteHandlers {
+  function handlers(
+    actor: BindingActor | null = null,
+    /** Replaces collaborators, for example a synchronization that fails. */
+    overrides: Partial<BindingRouteDependencies> = {},
+  ): BindingRouteHandlers {
     return createBindingRouteHandlers({
       service: binding.service,
       connections: binding.connections,
@@ -214,9 +234,44 @@ export async function createBindingHarness(
           ? null
           : { userId: actor.id, sessionId: actor.sessionId },
       workspaceSlug: async (id) => (await workspaces.get(id))?.slug ?? null,
+      syncLimit: (userId) =>
+        hitBindingLimit(
+          createRateLimitsRepository(db, now),
+          "sync",
+          userId,
+          now(),
+        ),
       isAuthorizationState: (state) =>
         purposeOfState(GITHUB_CONFIG_TEST_SECRET, state) === "github-authorize",
+      ...overrides,
     });
+  }
+
+  /**
+   * The collaborators of the running server for one workspace: the real project service, the real review
+   * settings and the real job queue, so a delivery that deserves a review makes a job and one that does not
+   * makes none. Pass it as `webhook(h.reviewingCollaborators)`.
+   */
+  function reviewingCollaborators(workspaceId: string): WorkspaceCollaborators {
+    const repositories = createRepositoriesRepository(db, workspaceId);
+    return {
+      projects: createProjectService({
+        projects: createProjectsRepository(db, workspaceId, now),
+      }),
+      settingsFor: createAutomaticReviewSettingsSource({
+        repositories,
+        settings: createReviewSettingsService({
+          appSettings: createAppSettingsRepository(db, workspaceId, now),
+          projects: createProjectsRepository(db, workspaceId, now),
+          builtIn: () => builtInReviewSettings("test-model"),
+        }),
+      }),
+      intake: createJobQueueReviewTriggerIntake({
+        queue: createJobQueue(db, workspaceId),
+        repositories,
+        logger: { info: () => undefined, error: () => undefined },
+      }),
+    };
   }
 
   /**
@@ -373,6 +428,7 @@ export async function createBindingHarness(
     accessOf,
     handlers,
     webhook,
+    reviewingCollaborators,
     githubUser,
     install,
     walk,

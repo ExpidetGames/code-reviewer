@@ -67,7 +67,7 @@ export const RESULT_COPY: Record<
   },
   installation_not_accessible: {
     tone: "error",
-    text: "That installation is not one your GitHub account can use, so it cannot be connected.",
+    text: "That installation is not one this instance can connect for you: your GitHub account cannot use it, or the instance has not heard of it yet. If it was installed just now, wait a moment and try again.",
   },
   not_installation_admin: {
     tone: "error",
@@ -170,7 +170,7 @@ export const APPROVAL_FAILURE_COPY: Record<string, string> = {
   requester_not_admin:
     "The person who asked is not an Owner or Admin of the workspace any more. Deny the request.",
   installation_already_linked:
-    "That installation is connected to a workspace already. Deny the request.",
+    "That installation is connected to a workspace already. The request was closed.",
   installation_not_accessible:
     "GitHub does not know that installation any more. Deny the request.",
   github_unreachable: "GitHub could not be reached. Try again in a moment.",
@@ -184,3 +184,7 @@ export function describeApprovalFailure(code: string): string {
     GENERIC_FAILURE
   );
 }
+
+/** Using an installation is not administering its account: outside collaborators can use it too. */
+export const TOKEN_CAN_ACCESS_COPY =
+  "Yes (outside collaborators can use an installation too, so this alone does not show that they administer the account)";

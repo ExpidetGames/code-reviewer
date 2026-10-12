@@ -534,4 +534,57 @@ describe("disconnecting and synchronizing through the routes", () => {
     expect(await body(response)).toEqual({ added: 1, errors: [] });
     expect(ownIntegration).toBeDefined();
   });
+
+  // #103-IB-17
+  it("limits how often a person can press the synchronization of a workspace", async () => {
+    const { h, a, owner } = await scene();
+    await h.walk(owner, a.id, { installationId: 4242, githubLogin: "octo" });
+    const handlers = h.handlers(owner);
+    const access = h.accessOf(owner, a, "owner");
+
+    const statuses = [];
+    for (let attempt = 0; attempt < 12; attempt += 1)
+      statuses.push((await handlers.syncWorkspace(json({}), access)).status);
+    const refused = await handlers.syncWorkspace(json({}), access);
+
+    expect(statuses.slice(0, 10).every((status) => status === 200)).toBe(true);
+    expect(statuses.slice(10)).toEqual([429, 429]);
+    expect(refused.status).toBe(429);
+    expect(await body(refused)).toEqual({ error: "rate_limited" });
+    expect(Number(refused.headers.get("retry-after"))).toBeGreaterThan(0);
+    // The window ends: the button works again.
+    h.advance(11 * 60 * 1000);
+    expect((await handlers.syncWorkspace(json({}), access)).status).toBe(200);
+  });
+
+  // #103-IB-13
+  it("answers a synchronization that fails with a stable code and no text of the operator, and a problem with its code only", async () => {
+    const { h, a, owner } = await scene();
+    await h.walk(owner, a.id, { installationId: 4242, githubLogin: "octo" });
+    const access = h.accessOf(owner, a, "owner");
+    const failing = h.handlers(owner, {
+      sync: {
+        syncWorkspace: () =>
+          Promise.reject(
+            new Error("database is locked: /srv/code-reviewer/data.db"),
+          ),
+      },
+    });
+
+    const response = await failing.syncWorkspace(json({}), access);
+
+    expect(response.status).toBe(503);
+    expect(await body(response)).toEqual({ error: "unavailable" });
+
+    // A problem GitHub caused reaches the page as a code, without the text written for the operator.
+    h.github.fail({ pathIncludes: "/app/installations/4242", status: 503 });
+    const problem = await h.handlers(owner).syncWorkspace(json({}), access);
+    const answer = (await body(problem)) as {
+      errors: Record<string, unknown>[];
+    };
+    expect(problem.status).toBe(200);
+    expect(answer.errors.length).toBeGreaterThan(0);
+    for (const error of answer.errors)
+      expect(Object.keys(error)).toEqual(["code"]);
+  });
 });
