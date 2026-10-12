@@ -180,8 +180,10 @@ Not scoped, each for a reason (the list is in `scoping.test.ts`):
 | `integration-directory-repository.ts`                                | Reads integrations of any workspace. A webhook names an installation before anybody knows the workspace, and the synchronization walks every connection. It only reads, and the answer carries `workspaceId`; everything done next goes through scoped repositories               |
 | `runner-jobs-repository.ts`                                          | The lease side of the job queue (claim, heartbeat, complete, release, expiry). Runners serve the whole instance with one token, so a claim hands out the oldest due job of any workspace; every change is fenced by the lease token, and the job it returns carries `workspaceId` |
 
-Until workspace switching exists, a signed-in user works in the default workspace
-(`src/workspaces/current-workspace.ts`, temporary).
+A signed-in user works in the workspace named by the address (`/w/<slug>`) and only in one they are a member
+of (`src/workspaces/README.md`); the repositories of members and invitations below follow the same rule,
+and the question "which invitations wait for this address?" is answered by the instance level
+`invitation-directory-repository.ts`, which only reads.
 
 ## Portable schema conventions
 
@@ -251,9 +253,20 @@ comment); everything else is query builder code.
 one workspace, one row per setting with a JSON value; the first is `review_defaults`, the default values of
 the review settings of the workspace (`src/review-settings/README.md`).
 
-`workspaces` and `workspace_members` (migration `20261011160000_create_workspaces`, repository
-`workspaces-repository.ts`; members have no repository yet) are described under "Workspaces and the
-migration that introduced them" above and in `src/workspaces/README.md`.
+`workspaces` and `workspace_members` (migration `20261011160000_create_workspaces`, repositories
+`workspaces-repository.ts` for the questions that start from a user and `workspace-members-repository.ts` for
+the members of one workspace) are described under "Workspaces and the migration that introduced them" above
+and in `src/workspaces/README.md`.
+
+`invitations` (migration `20261012100000_create_invitations`, scoped repository `invitations-repository.ts`,
+instance level `invitation-directory-repository.ts`): the links that bring a person into a workspace. Columns:
+`workspace_id`, the canonical `email` it is bound to, the `role` (the same check as `workspace_members`),
+`token_hash` (SHA-256 of the 256 bit token, unique; the token itself is never stored, a resend replaces the
+hash), `invited_by`, `created_at`, `expires_at` (7 days), and the ways it ends: `accepted_at` with
+`accepted_by`, or `revoked_at`. A partial unique index allows one open (neither accepted nor revoked)
+invitation per workspace and address; an expired one is ended by the code before a new one is made. Every
+statement that ends or renews an invitation only touches an open one, and accepting only an open one that has
+not expired (`invitations-repository.integration.test.ts`).
 
 `app_meta` (a key/value table for facts about the installation) exists to prove the setup. Product
 tables come with the tickets that need them: add the migration, the row type in `schema.ts` and the

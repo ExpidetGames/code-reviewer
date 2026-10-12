@@ -338,6 +338,19 @@ must first make somebody else an Owner.
   access** until invited. There is **no automatic join**, even when the sign-up rule lets the person
   create an account.
 
+**Which workspace a request is about** (decided with the implementation, issue #101). The workspace is part of
+the address: pages live below `/w/<slug>` and data routes below `/api/w/<slug>`. It is not a cookie or a header,
+because an address is what links, bookmarks and a second browser tab carry: deep links keep working, two tabs
+can work in two workspaces, and nothing remembered by the browser can point a request at a workspace by
+accident. The slug is never trusted: on every request it is looked up among the memberships of the signed in
+person, and a workspace they do not belong to is exactly as absent as one that does not exist (a missing path,
+with the same answer in every detail). The instance admin is not a member of a workspace by being the admin.
+The switcher in the navigation links the workspaces of the person; `/` opens the first one.
+
+**Roles of the first implementation.** Besides what the table says: switching a project on or off and changing
+the review defaults of a workspace need an Admin (they decide which repositories are reviewed and what a review
+costs), a Member changes the settings of a project. Only an Owner changes roles; an Admin cannot hand out a rank.
+
 ### 2.7 Instance level versus workspace level
 
 | Level | What lives there | Who changes it |

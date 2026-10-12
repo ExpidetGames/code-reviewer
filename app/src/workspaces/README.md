@@ -1,48 +1,147 @@
-# Workspaces
+# Workspaces, roles and invitations
 
 A workspace owns the customer data of an installation: connections (`integrations`), repositories,
-projects, jobs and the review defaults. A user reaches a workspace as a member with a role (`owner`,
-`admin`, `member`, `roles.ts`). The decision is in `docs/decisions/0001-editions-setup-and-accounts.md`
-(sections 2.6 and 2.7); the tables and the migration are described in `src/db/README.md`.
+projects, jobs and the review defaults. People work in workspaces with a role, are brought in by invitation
+and can belong to several. The decision is in `docs/decisions/0001-editions-setup-and-accounts.md`
+(sections 2.6 and 2.7); the tables are described in `src/db/README.md`.
 
-This folder holds the first step only: the data model and the scoping. Roles beyond storing them,
-members, invitations, the switcher and any UI come with the workspaces feature.
+| File                                                 | Role                                                                                                                                                                                                                            |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `roles.ts`                                           | `WORKSPACE_ROLES`, the three roles (the database restricts the column to the same list)                                                                                                                                         |
+| `permissions.ts`                                     | The one permission matrix: what each role may do (`can(role, action)`), who may invite, revoke, change roles and remove whom. Pure; `permissions.test.ts` pins every action against every role                                  |
+| `paths.ts`                                           | The addresses: `/w/<slug>/...` for pages, `/api/w/<slug>/...` for data routes, and how a path names a workspace                                                                                                                 |
+| `access.ts`                                          | `resolveWorkspaceAccess`: may this request act in this workspace? A pure decision over the session and the memberships                                                                                                          |
+| `access-runtime.ts`, `access-response.ts`            | The running server's side: `requireWorkspace(slug)` for pages, `withWorkspace(slug, action, handler)` for data routes, `withSignedIn(handler)` for routes that are not about one workspace; the JSON answers of a refusal       |
+| `create-workspace.ts`, `names.ts`, `limits.ts`       | Creating a workspace for a person (multi-tenant only, the limit of workspaces per user, the slug), and the rules for names (length, characters, the slug, line-safe text for mails)                                             |
+| `members.ts`                                         | Changing roles, removing a member or leaving, renaming; the last Owner rule, under a lock                                                                                                                                       |
+| `invitations.ts`                                     | Creating, resending, revoking and accepting invitations; the list of what waits for a verified address                                                                                                                          |
+| `rate-limits.ts`                                     | The limits on creating invitations, accepting them and creating workspaces, in the shared `rate_limits` table                                                                                                                   |
+| `http.ts`, `assemble.ts`, `shared.ts`, `acceptor.ts` | The handlers of the routes, how the services are put together over a database (the same code serves requests and tests), the wiring of the running server, and the account that accepts, as the database has it                 |
+| `account-view.ts`, `legacy-redirect.ts`              | What the frame and the page of a person without a workspace need (memberships, pending invitations, whether people can create workspaces); the old addresses of the pages (`/projects`, `/runs/<id>`, `/settings`) as bookmarks |
+| `ui/`                                                | The Members page, the forms (invite, rename, create), the list of pending invitations, the page of a person without a workspace, the accept button and the workspace switcher                                                   |
 
-| File                      | Role                                                                                                                          |
-| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `roles.ts`                | `WORKSPACE_ROLES`, the three roles (the database restricts the column to the same list)                                       |
-| `current-workspace.ts`    | **Temporary.** `resolveCurrentWorkspaceId` / `getCurrentWorkspaceId`: the workspace a signed-in user works in                 |
-| `in-current-workspace.ts` | `inCurrentWorkspace(build)`: a service for the current workspace that looks it up on its first call, not when it is asked for |
+## The current workspace is in the address
 
-## How the code is scoped
+Every workspace page lives below `/w/<slug>` and every data route below `/api/w/<slug>`. Not a cookie, not a
+header: an address is what a link, a bookmark and a second browser tab carry with them, so a deep link opens
+the workspace it names for any member, two tabs can work in two workspaces, and nothing the browser remembers
+can point a request at a workspace by accident. There is deliberately no "current workspace" that code could
+ask for without naming one; the temporary resolver and the lazy default workspace of the data model issue are
+gone.
 
-- **Repositories** are created for one workspace (`createXRepository(db, workspaceId, ...)`) and every
-  query filters by it; a workspace never sees a row of another (`src/db/README.md`, "Workspace
-  scoping"). A test enforces the signature, another one the behaviour.
-- **Services and wiring** (`shared.ts` of each module) offer `xxxFor(workspaceId)` for code that knows
-  the workspace (the webhook handler, the runner API) and `getXxx()` for a signed-in request, which
-  works in the current workspace.
-- **Webhooks** find the integration by the installation id (in any workspace,
-  `integration-directory-repository.ts`) and then work in the workspace that integration names.
-- **The runner API** serves the whole instance: the queue's lease side is not scoped, and everything a
-  claim looks up for a job (repository, connection, project, settings) is looked up in `job.workspaceId`.
-- **The synchronization** walks every connection of the instance through the same directory and changes
-  each one in its own workspace. A connection that is new to the instance goes to the default workspace
-  (temporary, see below).
+The address is never believed. The slug is looked up among the memberships of the person who is signed in:
 
-## The current workspace (temporary)
+1. The proxy (`src/auth/access-proxy.ts`) asks for the role of the person in that slug on every request to
+   a workspace address. No role, or a slug that is not shaped like one, and the request goes on marked as one
+   for a path that does not exist: the very answer of a workspace that is not there, in every detail (status,
+   headers, body). The instance admin is not a member of a workspace by being the admin.
+2. The page or route asks again (`requireWorkspace`, `withWorkspace`), close to the data, because the proxy
+   alone must not be the only guard. The service for the workspace (`runsServiceFor(workspaceId)`, ...) is
+   only made from the answer (`access.workspace.id`), never from the slug or an id of the request;
+   `guard-rule.test.ts` fails for a page or route without the guard and for a file that makes a service from
+   a value of the address.
+3. The services decide on their own who may do what, from the role the person has in the database inside the
+   transaction that makes the change, so a caller that forgets a check still cannot hand out a rank.
 
-Until workspace switching exists, every signed-in user works in **the default workspace**: the oldest
-workspace, which the migration made for an installation that had data, or which the first-run setup made
-(single-tenant: "Default workspace", with the admin as Owner, `src/setup/complete.ts`). Who may sign in is
-still decided by the existing access policy, so nobody gains access. The workspaces feature replaces
-`resolveCurrentWorkspaceId` with the lookup of the user's membership; nothing else has to change, because
-everything below already asks for a workspace id.
+A person who belongs to no workspace reaches only the pages and routes made for them
+(`NO_WORKSPACE_PATHS`, `src/auth/access.ts`): `/no-access`, `/invitations`, `/workspaces/new`,
+`POST /api/workspaces` and `POST /api/invitations/accept`. Everything else answers a redirect to `/no-access`
+or 403 `no_workspace_access`. That holds for every identity, the GitHub ones too: being on the allow list
+admits a person to the app, it gives them no workspace. A member who is removed is turned away at once, also
+with the session they hold.
 
-**The resolver does not create a workspace while the instance is not set up** (`resolveDefaultWorkspaceId`
-in `current-workspace.ts`): the setup decides whether an instance has one, so it throws
-`WorkspaceUnavailableError` (`WORKSPACE_NOT_AVAILABLE`) instead. An existing installation is not affected:
-its workspace exists from the migration, and webhooks and the runner API keep working in it while the
-setup is open. Once the instance is set up and still has no workspace (multi-tenant, where nobody can create
-one yet), the default workspace is made on first use (`WorkspacesRepository.ensureDefault`, safe against two
-requests at once); that last path goes away together with this file.
+`/` opens the first workspace of the person (the one they joined first), or `/no-access`. The old addresses
+(`/projects`, `/runs/<id>`, `/settings`) redirect to the same page in that workspace.
+
+## Roles and the permission matrix
+
+| Role   | Can                                                                                                                                                                                               |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Member | See projects, runs, settings and the members; start reviews; change the settings of a project; leave                                                                                              |
+| Admin  | Also switch projects on and off (which repositories are reviewed), change the review defaults, manage connections and (later) the LLM key; invite, revoke and remove Members; see the invitations |
+| Owner  | Also invite with any role, revoke any invitation, change roles, remove Admins and Owners, rename the workspace                                                                                    |
+
+`permissions.ts` is the matrix, `permissions.test.ts` pins it. Two judgments are written down here because
+the decision record leaves them to this issue: switching a project on or off needs an Admin (it is "which
+repositories are managed", and in a hosted instance it decides what is paid for), and the review defaults of a
+workspace need an Admin (they decide what every project costs). A Member changes the settings of a project, as
+the record says. Admins cannot touch Owners or other Admins, and cannot raise anybody's role.
+
+**The last Owner cannot leave, be removed or be demoted** (`last_owner`). The count and the change are one
+transaction that first takes the lock of the workspace (`WorkspaceMembersRepository.lock`; SQLite takes its
+write lock for every transaction, the lock statement is what keeps the code right on a database that locks by
+row), so two Owners who leave at the same moment cannot both succeed (`last-owner-race.integration.test.ts`
+runs it with two real processes).
+
+## Creating workspaces
+
+Only a multi-tenant instance lets people create workspaces (`multi_tenant_required`); a single-tenant instance
+has the one workspace its setup made. `createWorkspaceUnderTenancy` is the one place that creates a workspace
+for a person: in one transaction it reads the tenancy and the limit "workspaces per user" (the workspaces the
+person is an Owner of; default 10, changed on the Limits page of the admin portal; `workspace_limit_reached`),
+makes the slug from the name (a taken one gets `-2`, `-3`) and the person its Owner. A name is 1 to 80
+characters without control or formatting characters (they end up in mails and pages). Counted per person
+(10 per hour).
+
+## Invitations
+
+- Owners invite with any role, Admins Members only. The address must be allowed by the current sign-up rule,
+  evaluated with the sign-up's own functions (`signUpAvailability`, `evaluateSignUpRule`): `email_not_allowed`
+  for an address the rule refuses, `signup_closed` while a rule that names addresses has no way to verify
+  them. An instance that has switched email sign-up off (GitHub only) still invites, because the invited
+  person signs in with GitHub; the invitation never overrides the rule.
+- The link is `<public address>/invitation?token=...`, built from the configured address, never a request
+  header. The token is 256 random bits, only its SHA-256 hash is stored, it works once, for 7 days, for the
+  address it was made for. With a mail server it is mailed (the names in the mail are made one line each, so
+  a name with a line break cannot start a header; the HTML is escaped); without one, or if the mail server
+  refuses, the link is in the answer **once** for the person who invited to copy. A new link then needs a
+  revoke and a new invitation; with a mail server the same invitation can be sent again (a resend replaces the
+  token, which stops the old link).
+- An address that is a member already is `already_member`, one with an open invitation `already_invited`
+  (an expired one is ended and replaced). An address that has an account but is no member gets exactly the
+  answer of one that has none, so the form tells an Admin nothing they cannot see on the lists.
+- Limits (`rate-limits.ts`, in `rate_limits`): per person (30 an hour), per workspace (100 a day), per
+  invited address across workspaces (10 a day) and for the instance. A Member who is refused burns no counter.
+- **Accepting.** Opening the link accepts nothing: the page (`src/app/invitation`, public) shows what the
+  invitation is about and, for a person who is signed in with the invited address, a button; the accept is a
+  POST (`/api/invitations/accept`) that needs a session and the same-site check, and the page sends
+  `Referrer-Policy: no-referrer` (a header from `next.config.ts` and in the metadata). A person without a
+  session is sent to `/login?invitation=...` or `/sign-up?invitation=...`, which carry only a value shaped like
+  a token and lead back to the invitation page only (`src/auth/invitation-return.ts`).
+- The person must be signed in with the invited address (`email_mismatch`), and that address must be verified
+  while the instance can send mail or the rule names addresses (`email_not_verified`); the instance admin needs
+  no verification. Only under the rule "everyone" without a mail server there is nothing to verify, and the
+  link is the proof of the address (ADR section 2.5/2.6).
+- **Without a mail server an invitation is only ever found by its link.** With one, after sign-up or sign-in
+  the invitations for the **verified** address are listed (`/no-access`, `/invitations`, the switcher) and
+  accepted by id; an unverified address sees nothing listed and the id of an invitation is useless to it.
+- One guarded statement uses an invitation up, so of two requests with one link only one succeeds
+  (`invitation_used`); revoked and expired ones say `invitation_revoked` and `invitation_expired`; an unknown
+  or damaged token is one generic `invitation_not_found`. Accepting while already a member changes nothing
+  about the role. Attempts are limited per person (any token) and per invitation (10 a day; a token that does
+  not exist touches no invitation counter). The hash is looked up in the database, never compared in
+  application code with something an attacker controls.
+
+## Empty states
+
+- **Multi-tenant**, no workspace, no invitation: "Create a workspace" (the person becomes its Owner).
+- **Single-tenant**, no workspace: "Ask an admin of this instance for an invitation". No access, no automatic
+  join, however the account was made; `POST /api/workspaces` answers `multi_tenant_required`.
+
+## Not here
+
+Deleting workspaces, transferring data, SSO and teams below the workspace are out of scope. Binding a GitHub
+App installation to the workspace of the person who installed it is its own issue: until then the
+synchronization puts a connection that is new to the instance into the oldest workspace
+(`src/integrations/sync/default-workspace.ts`) and refuses (`WORKSPACE_NOT_AVAILABLE`) when there is none. The
+workspace LLM key is its own issue as well; the matrix already names `manage_llm_key`.
+
+## Tests
+
+`permissions.test.ts`, `names.test.ts`, `paths.test.ts`, `access.test.ts`, `guard-rule.test.ts`: the pure
+rules and the structure rules. `members.integration.test.ts`, `invitations.integration.test.ts`,
+`create-workspace.integration.test.ts`, `last-owner-race.integration.test.ts`, `http.integration.test.ts`,
+`fresh-user.integration.test.ts`, `invitation-sign-up.integration.test.ts`: the services and handlers over a
+real SQLite file. `integration-tests/http/workspace-isolation.integration.test.ts`: every data route against
+a second workspace and against every role. `ui/*.test.tsx`: the components. Journeys:
+`e2e/workspaces/invite-and-accept.e2e.ts` (single-tenant, no mail server), `e2e/workspaces/multi-tenant.e2e.ts`.

@@ -40,8 +40,18 @@ stand in front of such an account (`access-gates.ts`, `lookupSession`): its addr
 while the instance can send mail (the instance admin keeps `/admin`), and it has to belong to a workspace
 (the admin is exempt; an account made by the sign-up has none, so it sees no data until it is invited).
 A refused account is `unverified` or `no_workspace` in the session lookup: a page goes to `/verify-email`
-or `/no-access`, a data route answers 403 `email_not_verified` or `no_workspace_access`. Accounts that
-sign in with GitHub only are asked neither. Nobody signs up through Better Auth
+or `/no-access`, a data route answers 403 `email_not_verified` or `no_workspace_access`. An account without
+a workspace still reaches the few places made for it (`NO_WORKSPACE_PATHS` in `access.ts`: `/no-access`,
+`/invitations`, `/workspaces/new`, `POST /api/workspaces`, `POST /api/invitations/accept`), which is how it
+accepts an invitation or creates a workspace (`src/workspaces/README.md`). Accounts that sign in with GitHub
+are asked the workspace question too (being on the allow list admits them, it gives them no workspace) and
+not the verification.
+
+A request for a workspace address (`/w/<slug>...`, `/api/w/<slug>...`, `src/workspaces/paths.ts`) is asked
+one more thing by the proxy: the role of the person in that slug (`AccessGates.workspaceRole`). No role is
+the answer of a path that does not exist (the same marked request as for the files of the admin portal), for
+a workspace that does not exist and for one the person does not belong to alike, the instance admin
+included. The pages and routes check again (`requireWorkspace`, `withWorkspace`). Nobody signs up through Better Auth
 (`emailAndPassword.disableSignUp`, and the endpoint is not reachable): `POST /api/sign-up` creates the
 account.
 
@@ -171,7 +181,7 @@ settings needs a restart of the server (they are read once per process).
 
 Everything needs a session except `/login`, `/api/health`, `/api/auth/**`, `/api/runners/**` (own
 token), `/api/webhooks/**` (own signature), `/reset-password` and `/api/password-reset` (the token in a
-reset link is the credential), `/sign-up`, `/api/sign-up`, `/verify-email`, `/api/verify-email/**` and `/no-access` (the sign-up and the verification have limits of their own, `src/signup/limits.ts`) and, while the instance is not set up, `/setup` and
+reset link is the credential), `/sign-up`, `/api/sign-up`, `/verify-email`, `/api/verify-email/**` (the sign-up and the verification have limits of their own, `src/signup/limits.ts`) and `/invitation` (the page behind an invitation link; the token is its credential and accepting is a POST that needs a session, `src/workspaces/README.md`) and, while the instance is not set up, `/setup` and
 `/api/setup/**` (the setup code and the setup session; the setup gate in `src/proxy.ts`, which runs before
 this check, answers 404 for them once the instance is set up and 503 `setup_required` for everything
 else before that, `src/setup/gate.ts`). The list is `PUBLIC_PATHS` in `access.ts`; a route

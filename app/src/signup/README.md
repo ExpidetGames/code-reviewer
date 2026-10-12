@@ -100,10 +100,13 @@ sign-up endpoint stays switched off.
 
 A new account belongs to no workspace and nothing joins it to one: in a single-tenant instance the person sees
 `/no-access` ("ask an admin of this instance for an invitation"), every data route answers 403
-`no_workspace_access`. The instance admin is exempt, accounts that sign in with GitHub only are not asked. The
-workspaces issue builds the invitation, the empty state of a multi-tenant instance and the workspace pages, and
-replaces this interim check (`src/auth/access-gates.ts`) with them. This code creates no workspace; a
-workspace is only ever created through `createWorkspaceUnderTenancy`.
+`no_workspace_access`; in a multi-tenant instance `/no-access` offers to create a workspace. The instance admin
+is exempt from the gate (the portal stays reachable); the GitHub accounts are asked too. A person joins a
+workspace only by accepting an invitation (`src/workspaces/README.md`), which is judged against the same rule
+and the same state of the mail server as the sign-up (`signUpAvailability`, `evaluateSignUpRule`). This code
+creates no workspace; a workspace is only ever created through `createWorkspaceUnderTenancy`. A person who
+comes from an invitation link signs up at `/sign-up?invitation=<token>` and signs in at
+`/login?invitation=<token>`, which lead back to the invitation page (`src/auth/invitation-return.ts`).
 
 ## Tests
 

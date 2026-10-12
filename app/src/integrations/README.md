@@ -290,8 +290,11 @@ the button use `getIntegrationSync()` (`sync/shared.ts`), the process-wide servi
 decides from the list alone: before it disables a row the list does not mention, and before it
 suspends or resumes one, it asks GitHub about that one installation inside the lock.
 
-The button is `POST /api/integrations/sync` (`sync/http.ts`, the route file in `src/app/api/integrations/sync`):
-`requireUser()` first, a same-site check, then `getIntegrationSync().syncAll()`. The answer is
+The button is `POST /api/w/:workspace/integrations/sync` (`sync/http.ts`, the route file in `src/app/api/w/[workspace]/integrations/sync`):
+`withWorkspace(...)` first (an Admin or an Owner of the workspace in the address: `manage_connections`), a same-site check, then
+`getIntegrationSync().syncAll()` (the service is the process-wide one and reads every connection of the
+instance; binding an installation to the workspace of the person who installed it is the job of its own
+issue, `src/workspaces/README.md`). The answer is
 `{ added, errors }` (`summary.repositories.added` and `summary.errors`, stage and stable code, never a
 credential). Overlapping full syncs share one run: `getIntegrationSync()` wraps the service with
 `coalesceSyncAll` (`sync/coalesce.ts`), so several tabs or the start-up sync meeting the button read GitHub once. The Projects page shows it as "Sync from GitHub".
