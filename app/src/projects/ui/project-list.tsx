@@ -58,8 +58,8 @@ function blockedReasonOf(
 export function ProjectList({
   workspaceSlug,
   canManage = true,
+  canConnect = true,
   view,
-  installUrl,
   activationBlocked,
   api,
 }: {
@@ -67,13 +67,20 @@ export function ProjectList({
   workspaceSlug: string;
   /** Whether the person may switch projects on and off (an Admin or an Owner). */
   canManage?: boolean;
+  /** Whether the person may connect GitHub (an Admin or an Owner). */
+  canConnect?: boolean;
   view: ProjectListView;
-  installUrl: string | null;
   /** Why no project can be switched on right now (the GitHub App is not configured), or null. */
   activationBlocked: string | null;
   api?: ProjectsApi;
 }) {
-  if (view.rows.length === 0) return <NoRepositories installUrl={installUrl} />;
+  if (view.rows.length === 0)
+    return (
+      <NoRepositories
+        connectionsPath={workspacePath(workspaceSlug, "/connections")}
+        canConnect={canConnect}
+      />
+    );
   return (
     <ul className="project-list" aria-label="Repositories">
       {view.rows.map((row) => (

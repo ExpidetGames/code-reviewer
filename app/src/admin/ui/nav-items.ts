@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// The five sections of the admin portal. One list feeds the links and the active state.
+// The sections of the admin portal. One list feeds the links and the active state.
 
 export const ADMIN_NAV_ITEMS = [
   { href: "/admin", label: "Overview", exact: true },
   { href: "/admin/setup", label: "Setup", exact: false },
   { href: "/admin/integrations", label: "Integrations", exact: false },
+  { href: "/admin/approvals", label: "Approvals", exact: false },
   { href: "/admin/mail", label: "Mail", exact: false },
   { href: "/admin/limits", label: "Limits", exact: false },
 ] as const;

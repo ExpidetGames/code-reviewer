@@ -54,14 +54,18 @@ describe("the project list's calls", () => {
   });
 
   // CR-21-T03
-  it("runs the sync with POST and no body", async () => {
+  it("runs the sync of the workspace with POST and no body", async () => {
     const { api, calls } = recorder({ added: 1, errors: [] });
 
     const result = await api.sync();
 
     expect(result).toEqual({ ok: true, data: { added: 1, errors: [] } });
     expect(calls).toEqual([
-      { url: "/api/admin/integrations/sync", method: "POST", body: null },
+      {
+        url: "/api/w/acme/integrations/sync",
+        method: "POST",
+        body: null,
+      },
     ]);
   });
 });

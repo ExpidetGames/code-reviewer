@@ -87,7 +87,29 @@ export type CallbackResult =
       picker?: string;
     };
 
+/**
+ * Whether "Connect GitHub" can be offered, and if not why (the page says it in words):
+ * - `available`: the App is configured with its user authorization;
+ * - `needs_approval`: single-tenant and no user authorization, so nobody's rights can be checked and the
+ *   instance admin decides every request;
+ * - `app_not_configured`: there is no GitHub App yet;
+ * - `user_authorization_not_configured`: a multi-tenant instance without the user authorization has no Connect.
+ */
+export const CONNECT_AVAILABILITY = [
+  "available",
+  "needs_approval",
+  "app_not_configured",
+  "user_authorization_not_configured",
+] as const;
+export type ConnectAvailability = (typeof CONNECT_AVAILABILITY)[number];
+
 export type InstallationBindingService = {
+  /** What the page may offer right now. */
+  availability(): Promise<{
+    connect: ConnectAvailability;
+    /** Whether the list of installations can be offered (it needs the user authorization). */
+    picker: boolean;
+  }>;
   startConnect(actor: BindingActor, workspaceId: string): Promise<StartResult>;
   startPicker(actor: BindingActor, workspaceId: string): Promise<StartResult>;
   chooseFromPicker(
@@ -453,6 +475,21 @@ export function createInstallationBindingService({
   }
 
   return {
+    async availability() {
+      const facts = await github();
+      if (facts.slug === null)
+        return { connect: "app_not_configured", picker: false };
+      if (facts.userAuthorization !== null)
+        return { connect: "available", picker: true };
+      return {
+        connect:
+          (await tenancy()) === "multi"
+            ? "user_authorization_not_configured"
+            : "needs_approval",
+        picker: false,
+      };
+    },
+
     async startConnect(actor, workspaceId) {
       const allowed = await startChecks(actor, workspaceId);
       if (!allowed.ok) return allowed;

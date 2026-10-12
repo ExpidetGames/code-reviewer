@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // @vitest-environment jsdom
-// Pins down the navigation of the portal: the five sections in order, and the current one marked, with
+// Pins down the navigation of the portal: the sections in order, and the current one marked, with
 // Overview current only on its own page (every other page of the portal is below /admin).
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
@@ -12,11 +12,11 @@ afterEach(cleanup);
 
 describe("the sections of the portal", () => {
   // #98-AD-03
-  it("are Overview, Setup, Integrations, Mail and Limits, in that order", () => {
+  it("are Overview, Setup, Integrations, Approvals, Mail and Limits, in that order", () => {
     render(<SectionLinks pathname={null} />);
 
     expect(screen.getAllByRole("link").map((link) => link.textContent)).toEqual(
-      ["Overview", "Setup", "Integrations", "Mail", "Limits"],
+      ["Overview", "Setup", "Integrations", "Approvals", "Mail", "Limits"],
     );
     expect(
       screen.getAllByRole("link").map((link) => link.getAttribute("href")),

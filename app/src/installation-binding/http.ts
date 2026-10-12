@@ -28,6 +28,7 @@ import {
   type JsonBodyErrorCode,
 } from "../http/json-body.ts";
 import { isCrossSite } from "../http/request-checks.ts";
+import type { SyncAnswer } from "../integrations/sync/http.ts";
 import type { IntegrationSyncService } from "../integrations/sync/service.ts";
 import { can } from "../workspaces/permissions.ts";
 import { workspacePath } from "../workspaces/paths.ts";
@@ -101,11 +102,8 @@ export type BindingRouteHandlers = {
   authorizationCallback(request: Request): Promise<Response | null>;
 };
 
-/** What a workspace's synchronization answers: how many repositories are new and what went wrong. */
-export type WorkspaceSyncAnswer = {
-  added: number;
-  errors: Array<{ stage: string; integrationId: string | null; code: string }>;
-};
+/** What a workspace's synchronization answers: how many repositories are new and what went wrong, for its own connections. */
+export type WorkspaceSyncAnswer = SyncAnswer;
 
 export function createBindingRouteHandlers(
   deps: BindingRouteDependencies,
@@ -258,11 +256,7 @@ export function createBindingRouteHandlers(
       const summary = await sync.syncWorkspace(access.workspace.id);
       const answer: WorkspaceSyncAnswer = {
         added: summary.repositories.added,
-        errors: summary.errors.map(({ stage, integrationId, code }) => ({
-          stage,
-          integrationId,
-          code,
-        })),
+        errors: summary.errors,
       };
       return Response.json(answer, { headers: NO_STORE });
     },

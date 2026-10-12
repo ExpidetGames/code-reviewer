@@ -20,15 +20,12 @@ import { ProjectList } from "./project-list.tsx";
 export type ProjectsPageData = {
   list: ProjectListView;
   config: ConfigStatus;
-  /** Where the GitHub App is installed, or null while its name is not configured. */
-  installUrl: string | null;
 };
 
 export async function loadProjectsPage(deps: {
   projects: Pick<ProjectService, "listProjects">;
   lastRuns?: LastRunSource;
   config: () => ConfigStatus | Promise<ConfigStatus>;
-  installUrl: () => string | null | Promise<string | null>;
 }): Promise<ProjectsPageData> {
   return {
     list: await loadProjectList({
@@ -36,7 +33,6 @@ export async function loadProjectsPage(deps: {
       ...(deps.lastRuns === undefined ? {} : { lastRuns: deps.lastRuns }),
     }),
     config: await deps.config(),
-    installUrl: await deps.installUrl(),
   };
 }
 
@@ -50,6 +46,7 @@ export function ProjectsPageContent({
   workspaceSlug,
   audience = "member",
   canManage = true,
+  canConnect = canManage,
   data,
   api,
 }: {
@@ -59,6 +56,8 @@ export function ProjectsPageContent({
   audience?: ConfigAudience;
   /** Whether the person may switch projects on and off (an Admin or an Owner). */
   canManage?: boolean;
+  /** Whether the person may connect GitHub (an Admin or an Owner). */
+  canConnect?: boolean;
   data: ProjectsPageData;
   api?: ProjectsApi;
 }) {
@@ -68,8 +67,8 @@ export function ProjectsPageContent({
       <ProjectList
         workspaceSlug={workspaceSlug}
         canManage={canManage}
+        canConnect={canConnect}
         view={data.list}
-        installUrl={data.installUrl}
         activationBlocked={
           data.config.githubApp.configured
             ? null
