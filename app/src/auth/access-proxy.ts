@@ -237,7 +237,12 @@ export function createAccessProxy({
           const marked =
             cleanedHeaders(request) ?? new Headers(request.headers);
           marked.set(PORTAL_REWRITE_HEADER, rewriteMark);
-          return NextResponse.next({ request: { headers: marked } });
+          const response = NextResponse.next({ request: { headers: marked } });
+          // A portal answer belongs to one signed in admin (the frame and, on a prefetch, the session
+          // data). A prefetch is answered from Next.js's prerender cache with a year of shared caching
+          // (`s-maxage=31536000`), so no shared cache may keep it: private and no-store.
+          response.headers.set("cache-control", "private, no-store");
+          return response;
         }
         return forward(request);
       }
