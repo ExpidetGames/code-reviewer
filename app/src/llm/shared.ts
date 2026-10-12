@@ -1,22 +1,36 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// The wiring of the running server: the LLM configuration as the process environment has it right
-// now. Read on every call, never cached, so a changed value is used by the next claim or page.
+// The wiring of the running server: the LLM access of a workspace on the server's database, with the master key
+// and the legacy variables from the process environment as they are right now (read on every call, never
+// cached, so a changed value is used by the next claim or page).
 import "server-only";
-import { resolveLlmAccess, type LlmAccessResult } from "./access.ts";
-import { loadLlmConfig, type LlmConfigState } from "./config.ts";
-import { describeLlmStatus, type LlmStatus } from "./status.ts";
+import { resolveAppSecret } from "../crypto/app-secret.ts";
+import { getDatabase } from "../db/startup.ts";
+import { createRateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
+import { createWorkspaceLlm, type WorkspaceLlmAssembly } from "./assemble.ts";
+import { llmApiBaseUrl } from "./endpoint.ts";
+import { createLlmKeyTestService, type LlmKeyTestService } from "./key-test.ts";
 
-export function getLlmConfigState(): LlmConfigState {
-  return loadLlmConfig(process.env);
+export function getWorkspaceLlm(): WorkspaceLlmAssembly {
+  return createWorkspaceLlm({
+    db: getDatabase(),
+    appSecret: () => {
+      const resolved = resolveAppSecret(process.env);
+      // The server does not start without it (src/auth/startup.ts); this is the second line.
+      if (!resolved.ok) throw new Error(resolved.problem);
+      return resolved.secret;
+    },
+    env: () => process.env,
+  });
 }
 
-/** For the claim of the runner API: the access for one job, or `llm_not_configured`. */
-export function getLlmAccess(): LlmAccessResult {
-  return resolveLlmAccess(getLlmConfigState());
-}
-
-/** For the settings page (CR-34): "LLM not configured" with the variable names, or provider and model. */
-export function getLlmStatus(): LlmStatus {
-  return describeLlmStatus(getLlmConfigState());
+/**
+ * The "test key" service of the running server: counted in the shared `rate_limits` table, and connecting to
+ * the provider's own address only (src/llm/endpoint.ts: the test stack may point it at the fake LLM).
+ */
+export function getLlmKeyTester(): LlmKeyTestService {
+  return createLlmKeyTestService({
+    rateLimits: createRateLimitsRepository(getDatabase()),
+    baseUrlOf: (provider) => llmApiBaseUrl(process.env, provider).url,
+  });
 }
