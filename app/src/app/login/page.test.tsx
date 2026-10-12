@@ -1,0 +1,78 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// @vitest-environment jsdom
+// #170: the login page names the action in its h1, gives each way to sign in its own named form,
+// and puts a sign-in error directly above the fields it concerns, associated with them.
+import { cleanup, render, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("next/server", () => ({ connection: async () => {} }));
+vi.mock("@/auth/actions", () => ({
+  signInWithPassword: async () => {},
+  signInWithGithub: async () => {},
+}));
+vi.mock("@/signup/shared", () => ({ getSignUpFacts: async () => ({}) }));
+vi.mock("@/auth/password-reset-request", () => ({
+  passwordResetAvailable: () => true,
+}));
+
+import { LoginPageContent, type LoginPageData } from "./page.tsx";
+
+afterEach(cleanup);
+
+function data(overrides: Partial<LoginPageData> = {}): LoginPageData {
+  return {
+    invitation: null,
+    emailPassword: true,
+    github: true,
+    signUpOpen: true,
+    canReset: true,
+    error: null,
+    ...overrides,
+  };
+}
+
+describe("the login page", () => {
+  // #170-T01
+  it("names the action and gives each way to sign in its own named form", () => {
+    render(<LoginPageContent data={data()} />);
+
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Sign in" }),
+    ).toBeTruthy();
+    const email = screen.getByRole("form", {
+      name: "Sign in with email and password",
+    });
+    expect(within(email).getByLabelText("Email address")).toBeTruthy();
+    expect(within(email).getByLabelText("Password")).toBeTruthy();
+    expect(
+      screen.getByRole("form", { name: "Sign in with GitHub" }),
+    ).toBeTruthy();
+  });
+
+  // #170-T02
+  it("puts a sign-in error directly above the fields it concerns and associates it with them", () => {
+    render(
+      <LoginPageContent
+        data={data({
+          error: "The email address or the password is not correct.",
+        })}
+      />,
+    );
+
+    const form = screen.getByRole("form", {
+      name: "Sign in with email and password",
+    });
+    const alert = within(form).getByRole("alert");
+    expect(alert.textContent).toBe(
+      "The email address or the password is not correct.",
+    );
+    expect(alert.id).not.toBe("");
+    // Directly above the fields, not above the whole page.
+    expect(form.firstElementChild).toBe(alert);
+    for (const label of ["Email address", "Password"]) {
+      const field = within(form).getByLabelText(label);
+      expect(field.getAttribute("aria-describedby")).toBe(alert.id);
+    }
+  });
+});

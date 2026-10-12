@@ -1,125 +1,170 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { connection } from "next/server";
+// The sign-in page: the action is the h1, the ways to sign in each get their own named form, and a
+// sign-in error sits directly above the fields of the form it concerns (#170). What is on (the ways to
+// sign in, the sign-up rule, whether mail can be sent) is the state of the instance, read at request
+// time behind a boundary. The invitation link the person came from is carried through the forms.
 import Link from "next/link";
+import { connection } from "next/server";
 import { Suspense } from "react";
 import { signInWithGithub, signInWithPassword } from "@/auth/actions";
 import { invitationTokenOf, pathCarrying } from "@/auth/invitation-return";
 import { loginErrorMessage } from "@/auth/login-errors";
 import { passwordResetAvailable } from "@/auth/password-reset-request";
+import { AuthCard } from "@/components/auth-card";
+import { Button } from "@/components/button";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Field, FieldLabel, FieldSeparator } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
 import { signUpAvailability } from "@/signup/availability";
 import { getSignUpFacts } from "@/signup/shared";
-import { Button } from "@/ui/button";
+
+/** What the login page draws, gathered from the state of the instance and the `?error=` code. */
+export type LoginPageData = {
+  /** The invitation link the person came from, or null. */
+  invitation: string | null;
+  /** Whether email and password sign-in is on. */
+  emailPassword: boolean;
+  /** Whether the sign-in with GitHub is on. */
+  github: boolean;
+  /** Whether the sign-up is open (offer the link to it). */
+  signUpOpen: boolean;
+  /** Whether a password reset by mail is offered (offer the link to it). */
+  canReset: boolean;
+  /** The sentence of a failed sign in, or null. */
+  error: string | null;
+};
 
 export default function LoginPage({ searchParams }: PageProps<"/login">) {
   return (
-    <main className="auth-page">
-      <div className="card auth-card">
-        <h1>Code Reviewer</h1>
-        <p className="muted">Sign in to continue.</p>
-        {/* The error code is part of the URL, so it is read at request time, behind a boundary. */}
-        <Suspense fallback={null}>
-          <LoginError searchParams={searchParams} />
-        </Suspense>
-        {/* The ways to sign in are the admin's setting (Setup, Ways to sign in) and GitHub exists while
-            it is configured: both are read at request time, behind a boundary. */}
-        <Suspense fallback={null}>
-          <SignInForms searchParams={searchParams} />
-        </Suspense>
-      </div>
-    </main>
+    <Suspense fallback={<AuthCard title="Sign in" />}>
+      <LoginBoundary searchParams={searchParams} />
+    </Suspense>
   );
 }
 
-async function SignInForms({
+async function LoginBoundary({
   searchParams,
 }: Pick<PageProps<"/login">, "searchParams">) {
   // Reads the database and the environment at request time (not when the page is built).
   await connection();
-  // The invitation link the person came from, if any: carried through the sign-in.
-  const invitation = invitationTokenOf((await searchParams).invitation);
+  return <LoginPageContent data={await loadLoginPage(searchParams)} />;
+}
+
+/** The state of the page, read at request time. */
+export async function loadLoginPage(
+  searchParams: PageProps<"/login">["searchParams"],
+): Promise<LoginPageData> {
+  const { invitation: rawInvitation, error: rawError } = await searchParams;
+  const invitation = invitationTokenOf(rawInvitation);
   // The state of the instance, read once: the ways to sign in that are on, the sign-up rule, whether mail
   // can be sent.
   const facts = await getSignUpFacts();
   const methods = facts.signInMethods;
-  // The link to the sign-up is offered while the sign-up is open.
+  // The link to the sign-up is offered while the sign-up is open; the link to the reset while mail can be
+  // sent and email with password sign-in is on.
   const signUp = methods.emailPassword
     ? signUpAvailability(facts)
     : { open: false as const };
-  // The link to "forgot your password" is offered while the instance can send the mail.
-  const canReset = passwordResetAvailable(facts);
+  return {
+    invitation,
+    emailPassword: methods.emailPassword,
+    github: methods.github,
+    signUpOpen: signUp.open,
+    canReset: passwordResetAvailable(facts),
+    error: loginErrorMessage(
+      typeof rawError === "string" ? rawError : undefined,
+    ),
+  };
+}
+
+export function LoginPageContent({ data }: { data: LoginPageData }) {
+  // The id ties the error to the fields it concerns through `aria-describedby`.
+  const errorId = "login-error";
+  const errorAlert =
+    data.error === null ? null : (
+      <Alert id={errorId} variant="destructive">
+        <AlertDescription>{data.error}</AlertDescription>
+      </Alert>
+    );
   return (
-    <>
-      {methods.emailPassword ? (
-        <form action={signInWithPassword} className="login-form">
-          <div className="field">
-            <label htmlFor="login-email" className="field-label">
-              Email address
-            </label>
-            <input
+    <AuthCard title="Sign in">
+      {data.emailPassword ? (
+        <form
+          action={signInWithPassword}
+          aria-label="Sign in with email and password"
+          className="flex flex-col gap-4"
+        >
+          {errorAlert}
+          <Field>
+            <FieldLabel htmlFor="login-email">Email address</FieldLabel>
+            <Input
               id="login-email"
               name="email"
               type="email"
               autoComplete="username"
               required
+              aria-describedby={data.error === null ? undefined : errorId}
             />
-          </div>
-          <div className="field">
-            <label htmlFor="login-password" className="field-label">
-              Password
-            </label>
-            <input
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="login-password">Password</FieldLabel>
+            <Input
               id="login-password"
               name="password"
               type="password"
               autoComplete="current-password"
               required
+              aria-describedby={data.error === null ? undefined : errorId}
             />
-          </div>
-          {invitation !== null ? (
-            <input type="hidden" name="invitation" value={invitation} />
-          ) : null}
-          <Button type="submit" className="btn-block">
-            Sign in
-          </Button>
-          {canReset ? (
-            <p className="muted small">
-              <Link href="/forgot-password">Forgot your password?</Link>
+          </Field>
+          {data.invitation === null ? null : (
+            <input type="hidden" name="invitation" value={data.invitation} />
+          )}
+          <Button type="submit">Sign in</Button>
+          {data.canReset ? (
+            <p className="text-sm text-muted-foreground">
+              <Link
+                className="underline underline-offset-4"
+                href="/forgot-password"
+              >
+                Forgot your password?
+              </Link>
             </p>
           ) : null}
         </form>
       ) : null}
-      {signUp.open ? (
-        <p className="muted small">
+      {/* Without the email form (GitHub only, an unusual instance) the error has no fields to sit above. */}
+      {data.emailPassword ? null : errorAlert}
+      {data.signUpOpen ? (
+        <p className="text-sm text-muted-foreground">
           No account yet?{" "}
-          <Link href={pathCarrying("/sign-up", invitation)}>Create one</Link>.
+          <Link
+            className="underline underline-offset-4"
+            href={pathCarrying("/sign-up", data.invitation)}
+          >
+            Create one
+          </Link>
+          .
         </p>
       ) : null}
-      {methods.github ? (
-        <form action={signInWithGithub}>
-          {invitation !== null ? (
-            <input type="hidden" name="invitation" value={invitation} />
-          ) : null}
-          <Button type="submit" variant="secondary" className="btn-block">
+      {data.emailPassword && data.github ? (
+        <FieldSeparator>or</FieldSeparator>
+      ) : null}
+      {data.github ? (
+        <form
+          action={signInWithGithub}
+          aria-label="Sign in with GitHub"
+          className="flex flex-col gap-4"
+        >
+          {data.invitation === null ? null : (
+            <input type="hidden" name="invitation" value={data.invitation} />
+          )}
+          <Button type="submit" variant="secondary">
             Sign in with GitHub
           </Button>
         </form>
       ) : null}
-    </>
-  );
-}
-
-async function LoginError({
-  searchParams,
-}: Pick<PageProps<"/login">, "searchParams">) {
-  const { error } = await searchParams;
-  const message = loginErrorMessage(
-    typeof error === "string" ? error : undefined,
-  );
-  if (!message) return null;
-  return (
-    <p role="alert" className="alert alert-error">
-      {message}
-    </p>
+    </AuthCard>
   );
 }
