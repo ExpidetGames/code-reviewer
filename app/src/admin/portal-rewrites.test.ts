@@ -12,6 +12,7 @@ import {
   PORTAL_DENIED_HEADER,
   PORTAL_PAGE_ROOT,
   PORTAL_REWRITE_HEADER,
+  PROXY_SKIPPED_PATHS,
   portalRewriteTarget,
 } from "./paths.ts";
 
@@ -67,6 +68,33 @@ describe("the rewrites of next.config.ts", () => {
         rules.map((rule) => applied(rule, path)).find((hit) => hit !== null),
         path,
       ).toBeUndefined();
+  });
+
+  // #146
+  it("have sources that no path the proxy leaves out can match, so a header sent from outside never reaches them", async () => {
+    const { beforeFiles } = await rewrites();
+    const portal = (beforeFiles ?? []).filter((rule) =>
+      rule.has?.some((item) => item.key === PORTAL_REWRITE_HEADER),
+    );
+
+    expect(portal).toHaveLength(2);
+    // The paths of PROXY_SKIPPED_PATHS (the alternatives of the matcher), made concrete.
+    const skipped = [
+      "/_next/static/chunks/a.js",
+      "/_next/image",
+      "/favicon.ico",
+    ];
+    for (const rule of portal)
+      for (const path of skipped)
+        expect(applied(rule, path), `${rule.source} ${path}`).toBeNull();
+    // And the sources stay below the portal's two roots, which are not among the skipped paths.
+    for (const rule of portal)
+      expect(
+        rule.source.startsWith("/admin/") ||
+          rule.source.startsWith("/api/admin/"),
+      ).toBe(true);
+    for (const path of skipped)
+      expect(new RegExp(`^/(${PROXY_SKIPPED_PATHS})`).test(path)).toBe(true);
   });
 
   // #146
