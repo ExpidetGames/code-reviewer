@@ -102,6 +102,54 @@ describe("the name and the slug of a new workspace", () => {
   );
 });
 
+describe("creations at the same moment", () => {
+  // #101-WM-03
+  it("give two requests with the same name two different addresses, never an error", async () => {
+    const db = await startInstance("multi");
+    await sql`insert into users (id, name, email, email_verified, created_at, updated_at)
+      values ('user-2', 'u2', 'u2@example.test', 1, '2026-10-11T00:00:00.000Z', '2026-10-11T00:00:00.000Z')`.execute(
+      db,
+    );
+
+    const results = await Promise.all(
+      ["user-1", "user-2", "user-1", "user-2"].map((creatorId) =>
+        createWorkspaceUnderTenancy(db, { name: "Team A", creatorId }),
+      ),
+    );
+
+    expect(results.every((result) => result.ok)).toBe(true);
+    expect(
+      results.map((result) => result.ok && result.workspace.slug).sort(),
+    ).toEqual(["team-a", "team-a-2", "team-a-3", "team-a-4"]);
+  });
+
+  // #101-WM-04
+  it("let one person past the limit only as often as the limit says", async () => {
+    const db = await startInstance("multi");
+    await createInstanceSettingsRepository(db).set(
+      "max_workspaces_per_user",
+      2,
+      null,
+    );
+
+    const results = await Promise.all(
+      Array.from({ length: 5 }, (_, n) =>
+        createWorkspaceUnderTenancy(db, {
+          name: `Team ${String(n)}`,
+          creatorId: "user-1",
+        }),
+      ),
+    );
+
+    expect(results.filter((result) => result.ok)).toHaveLength(2);
+    expect(
+      results.filter(
+        (result) => !result.ok && result.error === "workspace_limit_reached",
+      ),
+    ).toHaveLength(3);
+  });
+});
+
 describe("the limit of workspaces per user", () => {
   async function create(db: Awaited<ReturnType<typeof startInstance>>) {
     return createWorkspaceUnderTenancy(db, {

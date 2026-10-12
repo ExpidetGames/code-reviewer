@@ -147,6 +147,11 @@ instance admin's, because it reads every connection of the instance (`src/integr
 workspace pages tell a member only that GitHub or the reviews are not set up and to ask the instance admin; the names
 of the variables and the provider and model are the instance admin's to read (`src/config-status/`).
 
+The Postgres issue (#105) has work here as well: creating a workspace and the last Owner rule lean on SQLite's
+serialized writers (`begin immediate`). On Postgres the creation needs a lock (or the handling of the unique
+violation of the slug, so a collision never becomes a 500), see the comment in `create-workspace.ts`, and the lock of
+`WorkspaceMembersRepository.lock()` has to become a real row lock.
+
 ## Tests
 
 `permissions.test.ts`, `names.test.ts`, `paths.test.ts`, `access.test.ts`, `guard-rule.test.ts`: the pure
