@@ -30,7 +30,7 @@ test.describe("signing in and out", () => {
   }) => {
     await signInThroughTheForm(page, account);
 
-    await expect(page).toHaveURL(/\/projects$/);
+    await expect(page).toHaveURL(/\/w\/default\/projects$/);
     await expect(userMenuButton(page, account)).toBeVisible();
 
     await page.reload();

@@ -10,9 +10,17 @@
 // hidden page cleans up and runs again when it is shown, so a person who comes back sees fresh
 // pull requests, not the ones from when they left.
 import Link from "next/link";
-import { useCallback, useEffect, useId, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useState,
+  type FormEvent,
+} from "react";
 import type { ReviewCommand } from "../../integrations/types.ts";
 import { Button } from "../../ui/button.tsx";
+import { workspacePath } from "../../workspaces/paths.ts";
 import type { OpenPullRequests, StartedReview } from "../service.ts";
 import { browserManualReviewApi, type ManualReviewApi } from "./api.ts";
 import { CommandFields } from "./command-fields.tsx";
@@ -27,13 +35,22 @@ import { PullRequestList } from "./pull-request-list.tsx";
 type Outcome = { run: StartedReview } | { problem: string } | null;
 
 export function StartReviewPanel({
+  workspaceSlug,
   repositoryId,
-  api = browserManualReviewApi,
+  api: apiProp,
 }: {
+  /** The workspace of the page: the calls are made in it, and the run it starts is linked in it. */
+  workspaceSlug: string;
   repositoryId: string;
   /** Only tests pass this. */
   api?: ManualReviewApi;
 }) {
+  // One client for the life of the component: a new one every render would restart what depends on it.
+  const defaultApi = useMemo(
+    () => browserManualReviewApi(workspaceSlug),
+    [workspaceSlug],
+  );
+  const api = apiProp ?? defaultApi;
   const groupName = useId();
   // The last list that arrived, kept when a later load fails: a typed question and the sentence about
   // a pull request that was closed stay on screen, the failure is shown beside them.
@@ -194,7 +211,12 @@ export function StartReviewPanel({
               {outcome.run.created
                 ? `Started: ${outcome.run.command} for pull request #${String(outcome.run.prNumber)}. `
                 : `The same ${outcome.run.command} for pull request #${String(outcome.run.prNumber)} is already waiting or running (it may be the run of an earlier commit), so nothing new was started. `}
-              <Link href={`/runs/${encodeURIComponent(outcome.run.runId)}`}>
+              <Link
+                href={workspacePath(
+                  workspaceSlug,
+                  `/runs/${encodeURIComponent(outcome.run.runId)}`,
+                )}
+              >
                 View the run
               </Link>
             </p>

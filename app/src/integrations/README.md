@@ -290,8 +290,15 @@ the button use `getIntegrationSync()` (`sync/shared.ts`), the process-wide servi
 decides from the list alone: before it disables a row the list does not mention, and before it
 suspends or resumes one, it asks GitHub about that one installation inside the lock.
 
-The button is `POST /api/integrations/sync` (`sync/http.ts`, the route file in `src/app/api/integrations/sync`):
-`requireUser()` first, a same-site check, then `getIntegrationSync().syncAll()`. The answer is
+The button is `POST /api/admin/integrations/sync` (`sync/http.ts`, the route file in
+`src/app/api/instance-portal/integrations/sync`), **the instance admin's**: it is a data route of the admin portal
+(`src/admin/http.ts`, `syncIntegrations`), so a person who is not the instance admin gets the answer of a path that does
+not exist, however high their role in a workspace is, and the Projects page shows the button to the instance admin only.
+The reason is what it does: `getIntegrationSync().syncAll()` is the process-wide service and reads every connection of the
+instance, so its answer (counts over the whole instance, the problems of every installation) is not for the member of one
+workspace. Binding an installation to the workspace of the person who installed it, and a synchronization of that
+workspace only, are the job of the GitHub installation issue (`src/workspaces/README.md`); the route moves into the
+workspace then. A same-site check comes before the sync. The answer is
 `{ added, errors }` (`summary.repositories.added` and `summary.errors`, stage and stable code, never a
 credential). Overlapping full syncs share one run: `getIntegrationSync()` wraps the service with
 `coalesceSyncAll` (`sync/coalesce.ts`), so several tabs or the start-up sync meeting the button read GitHub once. The Projects page shows it as "Sync from GitHub".

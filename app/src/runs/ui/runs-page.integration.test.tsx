@@ -44,7 +44,7 @@ async function openRuns() {
       projects,
       lastRuns,
     });
-    return render(<RunsPageContent data={data} />);
+    return render(<RunsPageContent workspaceSlug="acme" data={data} />);
   }
   return {
     f,
@@ -121,7 +121,7 @@ describe("the Runs page", () => {
     ]);
     expect(
       screen.getByRole("link", { name: "Reset filter" }).getAttribute("href"),
-    ).toBe("/runs");
+    ).toBe("/w/acme/runs");
   });
 
   it("moves the selects with the address when the filter is reset or the person goes back", async () => {
@@ -137,6 +137,7 @@ describe("the Runs page", () => {
       });
     const { rerender } = render(
       <RunsPageContent
+        workspaceSlug="acme"
         data={await data({
           repository: app.f.repositoryId,
           status: "failed",
@@ -150,11 +151,16 @@ describe("the Runs page", () => {
     expect(values()).toEqual([app.f.repositoryId, "failed"]);
 
     // "Reset filter" is a link to /runs: the page renders again with no filter.
-    rerender(<RunsPageContent data={await data({})} />);
+    rerender(<RunsPageContent workspaceSlug="acme" data={await data({})} />);
     expect(values()).toEqual(["", ""]);
 
     // Back brings the filter back.
-    rerender(<RunsPageContent data={await data({ status: "succeeded" })} />);
+    rerender(
+      <RunsPageContent
+        workspaceSlug="acme"
+        data={await data({ status: "succeeded" })}
+      />,
+    );
     expect(values()).toEqual(["", "succeeded"]);
   });
 
@@ -179,7 +185,7 @@ describe("the Runs page", () => {
       },
     );
 
-    render(<RunsPageContent data={data} />);
+    render(<RunsPageContent workspaceSlug="acme" data={data} />);
 
     const project = screen.getByLabelText("Project") as HTMLSelectElement;
     expect([...project.options].map((option) => option.text)).toEqual([
@@ -224,7 +230,7 @@ describe("the Runs page", () => {
     });
     const data = await loadRunsPage({}, { runs: f.runs, projects });
 
-    render(<RunsPageContent data={data} />);
+    render(<RunsPageContent workspaceSlug="acme" data={data} />);
 
     expect(screen.getByRole("heading", { name: "No runs yet" })).toBeTruthy();
   });
@@ -256,7 +262,7 @@ describe("the page of one run", () => {
     const data = await loadRunDetailPage(job.id, { runs: app.f.runs });
     if (data.kind !== "ready") throw new Error("the run was not found");
 
-    render(<RunDetailPageContent data={data} />);
+    render(<RunDetailPageContent workspaceSlug="acme" data={data} />);
 
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
       `acme/gadgets #${job.prNumber}`,

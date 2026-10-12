@@ -29,6 +29,15 @@ test.describe("the apps under test", () => {
     expect(page.status()).toBe(307);
   });
 
+  test("the multi-tenant app of the workspace journeys is set up before they run", async ({
+    request,
+  }) => {
+    await setUpApp(e2eEnv.multiAppUrl, e2eEnv.logFiles.multi, "multi");
+
+    const page = await request.get(e2eEnv.multiAppUrl, { maxRedirects: 0 });
+    expect(page.status()).toBe(307);
+  });
+
   test("the app of the real review journey is set up before it runs", async ({
     request,
   }) => {

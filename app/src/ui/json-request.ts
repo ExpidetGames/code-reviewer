@@ -55,7 +55,7 @@ function readIssues(value: unknown): RequestIssue[] {
 
 export async function requestJson<T>(
   fetchImpl: FetchLike,
-  method: "GET" | "POST" | "PUT" | "DELETE",
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
   url: string,
   body?: unknown,
 ): Promise<RequestResult<T>> {

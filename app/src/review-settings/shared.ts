@@ -7,7 +7,6 @@ import { createAppSettingsRepository } from "../db/repositories/app-settings-rep
 import { createProjectsRepository } from "../db/repositories/projects-repository.ts";
 import { getDatabase } from "../db/startup.ts";
 import { configuredLlmModel } from "../llm/config.ts";
-import { inCurrentWorkspace } from "../workspaces/in-current-workspace.ts";
 import {
   createReviewSettingsService,
   type ReviewSettingsService,
@@ -25,9 +24,4 @@ export function reviewSettingsServiceFor(
     // Read on every call, so a changed LLM_MODEL reaches the next review.
     builtIn: () => builtInReviewSettings(configuredLlmModel(process.env)),
   });
-}
-
-/** The review settings service for the current request (the workspace the signed-in user works in). */
-export function getReviewSettingsService(): ReviewSettingsService {
-  return inCurrentWorkspace(reviewSettingsServiceFor);
 }

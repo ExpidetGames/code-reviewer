@@ -5,6 +5,8 @@
 // says that no reviews run until it is activated, a saved value survives a reload and an
 // activation, and saving does not switch the repository on.
 import { expect, test } from "@playwright/test";
+import { syncFromGithubAsAdmin } from "../helpers/admin-api";
+import { e2eEnv } from "../helpers/e2e-env";
 import {
   addGithubAccount,
   addGithubInstallation,
@@ -37,9 +39,8 @@ test.describe("the settings of an inactive project", () => {
   test("a person opens the settings of a repository that was never activated, saves a value, finds it after a reload and after switching the repository on", async ({
     page,
   }) => {
+    await syncFromGithubAsAdmin(e2eEnv.appUrl);
     await signInThroughTheForm(page, account);
-    await page.getByRole("button", { name: "Sync from GitHub" }).click();
-    await expect(page.getByRole("status")).toContainText(/new repositor/);
     const row = page.getByRole("listitem").filter({ hasText: REPOSITORY });
     await expect(row.getByText("Inactive", { exact: true })).toBeVisible();
 

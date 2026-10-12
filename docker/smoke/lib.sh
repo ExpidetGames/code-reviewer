@@ -157,8 +157,14 @@ check_sign_up() {
   local base=$1 status first again admin body jar password output
   status=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 "$base/sign-up")
   [ "$status" = 200 ] || fail "/sign-up without a session did not answer 200 (got: $status)"
-  status=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 "$base/no-access")
-  [ "$status" = 200 ] || fail "/no-access without a session did not answer 200 (got: $status)"
+  # The page behind an invitation link is public (the token is its credential) and sends no referrer; the
+  # page for an account without a workspace needs a session.
+  status=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 "$base/invitation")
+  [ "$status" = 200 ] || fail "/invitation without a session did not answer 200 (got: $status)"
+  curl --silent --head --max-time 10 "$base/invitation" | tr -d '\r' | grep -qi '^referrer-policy: no-referrer$' ||
+    fail "/invitation did not send Referrer-Policy: no-referrer"
+  status=$(curl --silent --output /dev/null --write-out '%{http_code} %{redirect_url}' --max-time 10 "$base/no-access")
+  [[ "$status" == "307 "*"/login" ]] || fail "/no-access without a session did not go to the login (got: $status)"
 
   password=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24 || true)
   [ "${#password}" = 24 ] || fail "could not generate a password for the sign-up"
@@ -180,8 +186,14 @@ check_sign_up() {
   [ "$status" = 200 ] || { rm -f "$jar"; fail "the new account did not sign in (status $status)"; }
   status=$(curl --silent --output /dev/null --write-out '%{http_code} %{redirect_url}' --max-time 10 --cookie "$jar" "$base/")
   [[ "$status" == "307 "*"/no-access" ]] || { rm -f "$jar"; fail "the start page did not send the new account to /no-access (got: $status)"; }
-  output=$(curl --silent --max-time 10 --write-out ' %{http_code}' --cookie "$jar" "$base/api/runs") ||
-    { rm -f "$jar"; fail "GET /api/runs failed as the new account"; }
+  # The workspace of the instance (the setup made "default") is out of reach: the page goes to /no-access, the
+  # data route answers 403, and the page for an account without a workspace is open.
+  status=$(curl --silent --output /dev/null --write-out '%{http_code} %{redirect_url}' --max-time 10 --cookie "$jar" "$base/w/default/projects")
+  [[ "$status" == "307 "*"/no-access" ]] || { rm -f "$jar"; fail "the workspace page did not send the new account to /no-access (got: $status)"; }
+  status=$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 --cookie "$jar" "$base/no-access")
+  [ "$status" = 200 ] || { rm -f "$jar"; fail "/no-access did not answer 200 for the new account (got: $status)"; }
+  output=$(curl --silent --max-time 10 --write-out ' %{http_code}' --cookie "$jar" "$base/api/w/default/runs") ||
+    { rm -f "$jar"; fail "GET /api/w/default/runs failed as the new account"; }
   rm -f "$jar"
   [ "$output" = '{"error":"no_workspace_access"} 403' ] || fail "the data route did not refuse the new account (got: $output)"
 }

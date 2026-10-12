@@ -308,6 +308,32 @@ export interface EmailVerificationTokensTable {
   used_at: string | null;
 }
 
+/**
+ * A single-use link that brings a person into a workspace; only the hash of the token is kept
+ * (src/workspaces/invitations.ts).
+ */
+export interface InvitationsTable {
+  id: string;
+  workspace_id: string;
+  /** The address the invitation is bound to, canonical (src/signup/rule.ts `canonicalEmail`). */
+  email: string;
+  /** The role the person gets (a WorkspaceRole, src/workspaces/roles.ts). */
+  role: string;
+  /** SHA-256 of the token, hex. A resend replaces it, which invalidates the old link. */
+  token_hash: string;
+  /** The user who created it, or null (the user is gone). */
+  invited_by: string | null;
+  /** ISO 8601 text in UTC. */
+  created_at: string;
+  /** ISO 8601 text in UTC. */
+  expires_at: string;
+  /** ISO 8601 text in UTC, or null while the invitation is pending or was revoked. */
+  accepted_at: string | null;
+  accepted_by: string | null;
+  /** ISO 8601 text in UTC, or null while the invitation is pending or was accepted. */
+  revoked_at: string | null;
+}
+
 export interface Database {
   app_meta: AppMetaTable;
   users: UsersTable;
@@ -329,4 +355,5 @@ export interface Database {
   secrets: SecretsTable;
   password_reset_tokens: PasswordResetTokensTable;
   email_verification_tokens: EmailVerificationTokensTable;
+  invitations: InvitationsTable;
 }

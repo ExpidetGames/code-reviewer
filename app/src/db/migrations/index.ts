@@ -27,6 +27,7 @@ import { migration as addInstanceAdminFlagToUsers } from "./20261011170200_add_i
 import { migration as createSecrets } from "./20261011200000_create_secrets.ts";
 import { migration as createPasswordResetTokens } from "./20261011200100_create_password_reset_tokens.ts";
 import { migration as createEmailVerificationTokens } from "./20261011210000_create_email_verification_tokens.ts";
+import { migration as createInvitations } from "./20261012100000_create_invitations.ts";
 
 const migrations: Record<string, Migration> = {
   "0001_create_app_meta": createAppMeta,
@@ -54,6 +55,7 @@ const migrations: Record<string, Migration> = {
   "20261011200100_create_password_reset_tokens": createPasswordResetTokens,
   "20261011210000_create_email_verification_tokens":
     createEmailVerificationTokens,
+  "20261012100000_create_invitations": createInvitations,
 };
 
 export const migrationProvider: MigrationProvider = {

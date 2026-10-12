@@ -1,18 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Pins down the real route file `POST /api/integrations/sync` with the wiring the running server
-// uses: the database opened at start, the process-wide sync service and the registry configured from
-// the environment. Only the session lookup and `connection()` are replaced (they need Next.js's
-// request scope). The behavior of the handler is in src/integrations/sync/http.integration.test.ts
-// and the proxy in front is in sync-route.integration.test.ts; this file proves the pieces are
-// connected, and that the route uses the shared sync service rather than a new one.
+// Pins down the real route file `POST /api/admin/integrations/sync` (the instance admin's synchronization with
+// GitHub) with the wiring the running server uses: the database opened at start, the process-wide sync
+// service and the registry configured from the environment. Only the admin lookup and `notFound()` are
+// replaced (they need Next.js's request scope). The synchronization reads every connection of the instance,
+// so it is the instance admin's: a person who owns a workspace and does not run the instance gets the answer
+// of a path that does not exist, and GitHub is not called. The behavior of the handler is in
+// src/integrations/sync/http.integration.test.ts; this file proves the pieces are connected, that the
+// guard is there, and that the route uses the shared sync service rather than a new one.
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   startGithubFake,
   type FakeGithub,
 } from "../../../fakes/github/server.ts";
-import type { SessionUser } from "../../src/auth/access-policy.ts";
+import { adminAccessOf, type AdminAccess } from "../../src/admin/access.ts";
 import { createRepositoriesRepository } from "../../src/db/repositories/repositories-repository.ts";
 import {
   closeDatabase,
@@ -24,6 +26,7 @@ import {
   testAppKeys,
   testGithubAppEnv,
 } from "../../src/test-support/github-app.ts";
+import { signedInMember } from "../../src/test-support/session-lookup.ts";
 import { createTestDirectory } from "../../src/test-support/test-database.ts";
 import {
   defaultWorkspaceId,
@@ -31,16 +34,23 @@ import {
 } from "../../src/test-support/workspaces.ts";
 
 const session = vi.hoisted(() => ({
-  requireUser: vi.fn<() => Promise<SessionUser>>(),
+  lookupAdmin: vi.fn<() => Promise<AdminAccess>>(),
 }));
-vi.mock("@/auth/session", () => ({ requireUser: session.requireUser }));
+vi.mock("@/admin/session", () => ({ lookupAdmin: session.lookupAdmin }));
+// The 404 of Next.js is a thrown signal; here it is a marker error the test can recognize.
+class NotFoundSignal extends Error {}
+vi.mock("next/navigation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/navigation")>()),
+  notFound: () => {
+    throw new NotFoundSignal("not found");
+  },
+}));
 // `connection()` only works inside a Next.js request; here it just returns.
 vi.mock("next/server", async (importOriginal) => ({
   ...(await importOriginal<typeof import("next/server")>()),
   connection: async () => undefined,
 }));
 
-const USER = { id: "u1", githubLogin: "octocat" } as unknown as SessionUser;
 const fakes: FakeGithub[] = [];
 
 async function startRoute() {
@@ -55,26 +65,36 @@ async function startRoute() {
   });
   for (const [name, value] of Object.entries(env))
     if (value !== undefined) vi.stubEnv(name, value);
+  // The portal's routes build the settings service: the master key and the address the app is reached at.
+  vi.stubEnv("BETTER_AUTH_URL", "https://app.test");
+  vi.stubEnv("APP_SECRET", "sync-route-test-secret-0123456789-0123456789");
   await initializeDatabaseOnStart({
     env: { DATABASE_PATH: join(await createTestDirectory(), "app.db") },
   });
   // A deployment that is in use has been set up (the first-run setup decides about workspaces).
   await markInstanceSetUp(getDatabase());
+  session.lookupAdmin.mockResolvedValue(
+    adminAccessOf(
+      await signedInMember(getDatabase(), {
+        id: "root",
+        isInstanceAdmin: true,
+      }),
+    ),
+  );
   // The registry reads the environment on first use, so every test loads the route anew.
   vi.resetModules();
-  const route = await import("../../src/app/api/integrations/sync/route.ts");
+  const route =
+    await import("../../src/app/api/instance-portal/integrations/sync/route.ts");
   return { route, fake };
 }
 
 function post(route: { POST: (request: Request) => Promise<Response> }) {
   return route.POST(
-    new Request("https://app.test/api/integrations/sync", { method: "POST" }),
+    new Request("https://app.test/api/instance-portal/integrations/sync", {
+      method: "POST",
+    }),
   );
 }
-
-beforeEach(() => {
-  session.requireUser.mockResolvedValue(USER);
-});
 
 afterEach(async () => {
   vi.unstubAllEnvs();
@@ -106,15 +126,53 @@ describe("the sync route file", () => {
     ).toEqual(["acme/widgets"]);
   });
 
-  // CR-21-T11, CR-21-T12
-  it("asks for the user before it calls GitHub, and a refusal reaches the caller", async () => {
+  // #101-WM-08
+  it("is a path that does not exist for an Owner of a workspace who does not run the instance, and GitHub is not called", async () => {
     const { route, fake } = await startRoute();
-    const refusal = new Error("NEXT_REDIRECT");
-    session.requireUser.mockRejectedValue(refusal);
+    session.lookupAdmin.mockResolvedValue(
+      adminAccessOf(
+        await signedInMember(getDatabase(), {
+          id: "owner-only",
+          workspaceId: await defaultWorkspaceId(getDatabase()),
+          role: "owner",
+        }),
+      ),
+    );
 
-    await expect(post(route)).rejects.toBe(refusal);
+    await expect(post(route)).rejects.toBeInstanceOf(NotFoundSignal);
 
-    expect(session.requireUser).toHaveBeenCalled();
+    expect(fake.requests()).toEqual([]);
+  });
+
+  // #101-WM-08
+  it("is a path that does not exist for a Member and for a person without a workspace either", async () => {
+    const { route, fake } = await startRoute();
+    for (const options of [
+      {
+        id: "plain-member",
+        workspaceId: await defaultWorkspaceId(getDatabase()),
+        role: "member" as const,
+      },
+      { id: "outsider" },
+    ]) {
+      session.lookupAdmin.mockResolvedValue(
+        adminAccessOf(await signedInMember(getDatabase(), options)),
+      );
+
+      await expect(post(route)).rejects.toBeInstanceOf(NotFoundSignal);
+    }
+
+    expect(fake.requests()).toEqual([]);
+  });
+
+  // CR-21-T11, CR-21-T12
+  it("asks for the session before it calls GitHub, and answers a visitor with 401", async () => {
+    const { route, fake } = await startRoute();
+    session.lookupAdmin.mockResolvedValue(adminAccessOf({ kind: "none" }));
+
+    const response = await post(route);
+
+    expect(response.status).toBe(401);
     expect(fake.requests()).toEqual([]);
   });
 

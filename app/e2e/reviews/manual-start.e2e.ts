@@ -8,6 +8,7 @@
 // pull request that was closed after the list was shown, and the same review started twice. The
 // details of each piece (copy, rules, refusals) are proven as component and integration tests.
 import { expect, test } from "@playwright/test";
+import { syncFromGithubAsAdmin } from "../helpers/admin-api";
 import {
   addGithubAccount,
   addGithubInstallation,
@@ -15,6 +16,7 @@ import {
   signInThroughTheForm,
   type GithubAccount,
 } from "../helpers/github-fake";
+import { e2eEnv } from "../helpers/e2e-env";
 import { claimRun, completeRun } from "../helpers/job-queue";
 
 const account: GithubAccount = {
@@ -59,8 +61,8 @@ test.describe("starting a review by hand", () => {
 
   /** Signs in, syncs, switches the repository on and opens its project page. */
   async function openProject(page: import("@playwright/test").Page) {
+    await syncFromGithubAsAdmin(e2eEnv.appUrl);
     await signInThroughTheForm(page, account);
-    await page.getByRole("button", { name: "Sync from GitHub" }).click();
     const row = page
       .getByRole("listitem")
       .filter({ hasText: WIDGETS.fullName });

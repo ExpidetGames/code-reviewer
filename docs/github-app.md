@@ -161,9 +161,9 @@ Once the application runs on `<domain>`:
    equivalent). The `installation_repositories` delivery keeps the application current.
 
 Newly synced repositories are **inactive**: a repository is reviewed only after it was activated as a
-project in the application. Open the app's **Projects** page, press **Sync from GitHub** if the
+project in the application. Open the app's **Projects** page, press **Sync from GitHub** (only the instance admin sees the button) if the
 repository is missing, and switch the repository on. The API call
-`PUT /api/repositories/:repositoryId/project` of a signed-in user stays available for scripts (see
+`PUT /api/w/:workspace/repositories/:repositoryId/project` of a signed-in user stays available for scripts (see
 `app/src/projects/README.md`).
 
 ## Private key and secrets

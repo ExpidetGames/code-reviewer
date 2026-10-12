@@ -16,11 +16,13 @@ describe("the manual start API", () => {
   it("asks for the open pull requests of the repository", async () => {
     const fetchImpl = vi.fn(async () => json({ pullRequests: [] }));
 
-    const result =
-      await createManualReviewApi(fetchImpl).listPullRequests("a/b c");
+    const result = await createManualReviewApi(
+      fetchImpl,
+      "acme",
+    ).listPullRequests("a/b c");
 
     expect(fetchImpl).toHaveBeenCalledWith(
-      "/api/repositories/a%2Fb%20c/pull-requests",
+      "/api/w/acme/repositories/a%2Fb%20c/pull-requests",
       expect.objectContaining({ method: "GET", credentials: "same-origin" }),
     );
     expect(result).toEqual({ ok: true, data: { pullRequests: [] } });
@@ -31,14 +33,14 @@ describe("the manual start API", () => {
       json({ runId: "r1", created: true }, 201),
     );
 
-    await createManualReviewApi(fetchImpl).startReview("repo-1", {
+    await createManualReviewApi(fetchImpl, "acme").startReview("repo-1", {
       prNumber: 7,
       command: "ask",
       question: "Why?",
     });
 
     expect(fetchImpl).toHaveBeenCalledWith(
-      "/api/repositories/repo-1/reviews",
+      "/api/w/acme/repositories/repo-1/reviews",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ prNumber: 7, command: "ask", question: "Why?" }),
@@ -57,7 +59,7 @@ describe("the manual start API", () => {
       ),
     );
 
-    const result = await createManualReviewApi(fetchImpl).startReview(
+    const result = await createManualReviewApi(fetchImpl, "acme").startReview(
       "repo-1",
       {
         prNumber: 0,

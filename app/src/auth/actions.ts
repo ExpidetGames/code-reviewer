@@ -7,6 +7,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { getAccessGates } from "./access-gates-runtime.ts";
 import { getAuth } from "./auth.ts";
+import { landingWithInvitation, pathCarrying } from "./invitation-return.ts";
 import { pathAfterPasswordSignIn } from "./post-sign-in.ts";
 import { signInWithPasswordChecked } from "./password-sign-in.ts";
 import { getSignInLimiter, getSignInMethods } from "./sign-in-runtime.ts";
@@ -47,6 +48,8 @@ export async function signInWithPassword(formData: FormData): Promise<void> {
     redirect("/login?error=sign_in_method_disabled");
   const email = formData.get("email");
   const password = formData.get("password");
+  // An invitation link the person came from: carried to the page of the invitation after the sign-in.
+  const invitation = formData.get("invitation");
   let error: string | null = "invalid_credentials";
   if (typeof email === "string" && typeof password === "string") {
     const requestHeaders = await headers();
@@ -67,8 +70,11 @@ export async function signInWithPassword(formData: FormData): Promise<void> {
   // redirect() works by throwing, so it stays outside the try block.
   redirect(
     error === null
-      ? await landingAfterSignIn(email as string)
-      : `/login?error=${error}`,
+      ? landingWithInvitation(
+          await landingAfterSignIn(email as string),
+          invitation,
+        )
+      : pathCarrying("/login", invitation, { error }),
   );
 }
 

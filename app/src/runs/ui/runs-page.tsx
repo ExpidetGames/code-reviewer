@@ -10,6 +10,7 @@ import type { JobStatus } from "../../jobs/job-status.ts";
 import type { ProjectService } from "../../projects/service.ts";
 import { noRunsYet, type LastRunSource } from "../../projects/ui/list-view.ts";
 import { EmptyState } from "../../ui/empty-state.tsx";
+import { workspacePath } from "../../workspaces/paths.ts";
 import { RUN_STATUS_ORDER, RUN_STATUS_PRESENTATION } from "../run-status.ts";
 import { parseRunsFilter, type RunsService } from "../runs-service.ts";
 import type { RunsSnapshot } from "../run-view.ts";
@@ -80,16 +81,22 @@ function filterKey(filter: RunsFilter): string {
 }
 
 function RunsFilterForm({
+  workspaceSlug,
   filter,
   projects,
 }: {
+  workspaceSlug: string;
   filter: RunsFilter;
   projects: { id: string; name: string }[];
 }) {
   const active =
     filter.repositoryId !== undefined || filter.status !== undefined;
   return (
-    <form method="get" action="/runs" className="runs-filter">
+    <form
+      method="get"
+      action={workspacePath(workspaceSlug, "/runs")}
+      className="runs-filter"
+    >
       <label>
         Project
         <select name="repository" defaultValue={filter.repositoryId ?? ""}>
@@ -116,7 +123,10 @@ function RunsFilterForm({
         Apply filter
       </button>
       {active ? (
-        <Link href="/runs" className="btn btn-ghost">
+        <Link
+          href={workspacePath(workspaceSlug, "/runs")}
+          className="btn btn-ghost"
+        >
           Reset filter
         </Link>
       ) : null}
@@ -125,9 +135,12 @@ function RunsFilterForm({
 }
 
 export function RunsPageContent({
+  workspaceSlug,
   data,
   api,
 }: {
+  /** The workspace of the page: every link and call stays in it. */
+  workspaceSlug: string;
   data: RunsPageData;
   /** Only tests pass this: a server component cannot hand functions to the client list. */
   api?: RunsApi;
@@ -137,7 +150,10 @@ export function RunsPageContent({
       <EmptyState
         title="This filter is not valid"
         action={
-          <Link href="/runs" className="btn btn-secondary">
+          <Link
+            href={workspacePath(workspaceSlug, "/runs")}
+            className="btn btn-secondary"
+          >
             Reset filter
           </Link>
         }
@@ -151,6 +167,7 @@ export function RunsPageContent({
           "Reset filter" or Back and Forward they must start over with the filter of the address. */}
       <RunsFilterForm
         key={`filter:${filterKey(data.filter)}`}
+        workspaceSlug={workspaceSlug}
         filter={data.filter}
         projects={data.projects}
       />
@@ -158,6 +175,7 @@ export function RunsPageContent({
           address, and so its data, changes. */}
       <RunsList
         key={`list:${filterKey(data.filter)}`}
+        workspaceSlug={workspaceSlug}
         initial={data.snapshot}
         filter={data.filter}
         {...(api === undefined ? {} : { api })}

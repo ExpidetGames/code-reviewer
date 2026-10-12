@@ -19,17 +19,18 @@ on the Runs page as "Started by <login>".
 
 ## Routes
 
-Both are behind the access proxy and call `requireUser()` first (`src/auth/README.md`). Every answer
+Both belong to the workspace in the address and are for every member (`start_review`): they are behind the
+access proxy and run through `withWorkspace(...)` first (`src/workspaces/README.md`, `src/auth/README.md`). Every answer
 is `Cache-Control: no-store`.
 
-- `GET /api/repositories/:repositoryId/pull-requests`: `{ repositoryId, fullName, allowedCommands,
+- `GET /api/w/:workspace/repositories/:repositoryId/pull-requests`: `{ repositoryId, fullName, allowedCommands,
 pullRequests: [{ number, title, url, author, draft, headRef, baseRef }] }`, the open pull requests
   (drafts included), newest first, read from the platform through `IntegrationProvider.listOpenPullRequests`
   (every page). The head commit is not part of the answer.
   The pages are read one after the other (up to 100 per page, 100 pages at most) every time the panel
   is shown or the list is refreshed; fine for the MVP, and the calls share the rate limit of the
   installation with the jobs.
-- `POST /api/repositories/:repositoryId/reviews` with `{ "prNumber": 7, "command": "review" }` (and
+- `POST /api/w/:workspace/repositories/:repositoryId/reviews` with `{ "prNumber": 7, "command": "review" }` (and
   `"question"` for `ask`): `201 { runId, created: true, prNumber, command }` for a new run, `200` with
   `created: false` for the run that was already waiting or running.
 

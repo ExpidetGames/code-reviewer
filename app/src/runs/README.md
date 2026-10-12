@@ -13,7 +13,7 @@ last run. Jobs are made and changed only by the job queue (`src/jobs`); this mod
 | `error-copy.ts`   | The plain-English sentence for every error code the queue, the claim of the runner API and the runner can store; a test requires one for each code. An unknown code gets a general sentence and is shown beside it |
 | `run-view.ts`     | The boundary to the browser: `toRunRowView`, `toRunDetailView`. Only listed fields leave the server; of the stored result only the comment link and the log tail are read. `safeCommentUrl`, `cleanLog`            |
 | `runs-service.ts` | `createRunsService` (`list`, `get`), `parseRunsFilter`, `createLastRunSource` (the real `LastRunSource` of the project list)                                                                                       |
-| `http.ts`         | The handlers behind `GET /api/runs` and `GET /api/runs/:id`, the two polling routes (`src/app/api/runs/`)                                                                                                          |
+| `http.ts`         | The handlers behind `GET /api/w/:workspace/runs` and `GET /api/w/:workspace/runs/:id`, the two polling routes (`src/app/api/w/[workspace]/runs/`)                                                                  |
 | `shared.ts`       | The wiring of the running server: `getRunsService()` (with the secrets of the app removed from a log) and `getLastRunSource()`, both for the workspace the signed-in user works in                                 |
 | `ui/`             | `RunsList`, `RunDetail`, `RunStatusBadge`, the page contents (`runs-page.tsx`, `run-detail-page.tsx`) and the browser side of the polling (`api.ts`)                                                               |
 
@@ -68,9 +68,13 @@ and for the two failed runs whose review was posted but shortened to GitHub's co
 
 ## Access
 
-The pages and both routes need a session: the proxy answers `401` (data routes) or redirects (pages),
-and every page and route calls `requireUser()` itself first. `GET /api/runs` takes `repository` and
-`status` (`RUNS_FILTER_INVALID`, `400`, for a value it does not know); `GET /api/runs/:id` answers
+The pages and both routes belong to a workspace and need a member of it: the workspace is the one in the
+address (`/w/<slug>/runs`, `/api/w/<slug>/runs`), the proxy answers `401` (data routes) or redirects (pages)
+for a visitor and the answer of a path that does not exist for somebody who is not a member, and every page
+and route asks `requireWorkspace(...)` / `withWorkspace(...)` itself first (`src/workspaces/README.md`). Every
+member may read the runs; a run is looked up in the workspace of the address only, so the id of a run of
+another workspace is a run nobody has. `GET /api/w/:workspace/runs` takes `repository` and
+`status` (`RUNS_FILTER_INVALID`, `400`, for a value it does not know); `GET /api/w/:workspace/runs/:id` answers
 `404 RUN_NOT_FOUND` for an unknown or malformed id. With Cache Components the page of a run streams, so
 an unknown id shows the not-found page with status 200; the data route answers a real 404.
 

@@ -4,6 +4,7 @@
 // repository is inactive), installation, state, the status of the last run and the switch. Everything that
 // comes from GitHub (names, addresses) is untrusted and rendered as text.
 import Link from "next/link";
+import { workspacePath } from "../../workspaces/paths.ts";
 import { formatUtc } from "../../ui/format-time.ts";
 import { NoRepositories } from "./no-repositories.tsx";
 import { ProjectToggle } from "./project-toggle.tsx";
@@ -20,9 +21,11 @@ const STATE_COPY: Record<ProjectRowView["status"], string> = {
 function LastRunStatus({
   run,
   repositoryId,
+  workspaceSlug,
 }: {
   run: LastRun | null;
   repositoryId: string;
+  workspaceSlug: string;
 }) {
   if (run === null) return <span className="muted">No run yet</span>;
   return (
@@ -31,7 +34,12 @@ function LastRunStatus({
       <time dateTime={run.at} className="muted">
         {formatUtc(run.at)}
       </time>{" "}
-      <Link href={`/runs?repository=${encodeURIComponent(repositoryId)}`}>
+      <Link
+        href={workspacePath(
+          workspaceSlug,
+          `/runs?repository=${encodeURIComponent(repositoryId)}`,
+        )}
+      >
         All runs
       </Link>
     </span>
@@ -48,11 +56,17 @@ function blockedReasonOf(
 }
 
 export function ProjectList({
+  workspaceSlug,
+  canManage = true,
   view,
   installUrl,
   activationBlocked,
   api,
 }: {
+  /** The workspace of the page: every link and call stays in it. */
+  workspaceSlug: string;
+  /** Whether the person may switch projects on and off (an Admin or an Owner). */
+  canManage?: boolean;
   view: ProjectListView;
   installUrl: string | null;
   /** Why no project can be switched on right now (the GitHub App is not configured), or null. */
@@ -66,7 +80,10 @@ export function ProjectList({
         <li key={row.repositoryId} className="project-row">
           <div className="project-main">
             <Link
-              href={`/projects/${encodeURIComponent(row.repositoryId)}`}
+              href={workspacePath(
+                workspaceSlug,
+                `/projects/${encodeURIComponent(row.repositoryId)}`,
+              )}
               className="project-name"
             >
               {row.fullName}
@@ -98,6 +115,7 @@ export function ProjectList({
               <LastRunStatus
                 run={row.lastRun}
                 repositoryId={row.repositoryId}
+                workspaceSlug={workspaceSlug}
               />
             </span>
             {row.status === "unavailable" && row.switchedOn ? (
@@ -108,6 +126,8 @@ export function ProjectList({
           </div>
           <ProjectToggle
             key={`${row.repositoryId}:${String(row.switchedOn)}`}
+            workspaceSlug={workspaceSlug}
+            canManage={canManage}
             repositoryId={row.repositoryId}
             fullName={row.fullName}
             checked={row.switchedOn}
