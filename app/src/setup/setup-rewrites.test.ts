@@ -69,8 +69,18 @@ describe("the setup rewrite of next.config.ts", () => {
   // #155
   it("is applied before a path that is no route gets the missing path", async () => {
     const { beforeFiles, afterFiles, fallback } = await rewrites();
+    const rules = beforeFiles ?? [];
 
-    expect(setupRules(beforeFiles ?? [])).toHaveLength(1);
+    // The setup rewrite is the first `beforeFiles` rule: it is checked before the portal rules and
+    // before the one that sends a marked request to the missing path, so a page the gate marked is
+    // never served as a file or answered as a missing path. A reordering makes this red.
+    const [setup] = rules;
+    expect(setup?.has).toEqual([{ type: "header", key: SETUP_REWRITE_HEADER }]);
+    expect(setup?.destination).toBe(SETUP_PAGE);
+    const missing = rules.findIndex(
+      (candidate) => candidate.destination === MISSING_PATH,
+    );
+    expect(missing).toBeGreaterThan(0);
     expect(afterFiles).toEqual([]);
     expect(fallback?.at(-1)?.destination).toBe(MISSING_PATH);
   });
