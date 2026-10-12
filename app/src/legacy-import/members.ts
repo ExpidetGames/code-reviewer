@@ -6,8 +6,11 @@
 //
 //   - a listed login admits the account the login is bound to: the pin in `allowed_login_pins`, or an id given in
 //     the list as `login:id` (which wins over a stored pin, as it did at every start). A login that was never
-//     bound is bound to the first account that has it (the oldest user), exactly what the first request of that
-//     account would have done. Another account with the same login is not admitted through the list;
+//     bound is bound to the one account that has it, as the first request of that account would have done.
+//     When TWO accounts hold the same unbound login the old rule would have picked whoever came first, which may
+//     be a stale row of a renamed account: neither is admitted through the list and both are listed
+//     (`login_ambiguous`), and the admin invites the right one. Another account with a bound login is not
+//     admitted through the list;
 //   - with `ALLOWED_GITHUB_ORG`, a LIVE membership check with the user's own stored GitHub token admits the
 //     account as well. Either rule is enough.
 //
@@ -23,6 +26,8 @@ export const BLOCK_REASONS = [
   "not_allowed",
   /** The login is on the list, but bound to another GitHub account. */
   "login_bound_to_another_account",
+  /** The login is on the list, not bound to an id, and two accounts of the installation hold it. */
+  "login_ambiguous",
   /** The organization check could not be completed: no usable token, or GitHub did not answer. */
   "check_failed",
 ] as const;
@@ -48,30 +53,29 @@ export type DecideMembersInput = {
 
 const DEFAULT_CONCURRENCY = 4;
 
-type ByLogin =
-  { kind: "admitted" } | { kind: "bound_elsewhere" } | { kind: "not_listed" };
+type ByLogin = { kind: "admitted" } | { kind: "refused"; reason: BlockReason };
 
-/** The list part of the rule. `claimed` carries the logins that were bound to an account during this run. */
+/** The list part of the rule. `holders` counts the accounts that hold each unbound listed login. */
 function checkList(
   user: LegacyUser,
   config: AccessConfig,
   pins: ReadonlyMap<string, string>,
-  claimed: Map<string, string>,
+  holders: ReadonlyMap<string, number>,
 ): ByLogin {
   if (user.githubLogin === null || user.githubId === null)
-    return { kind: "not_listed" };
+    return { kind: "refused", reason: "not_allowed" };
   const login = user.githubLogin.toLowerCase();
-  if (!isLoginListed(config, login)) return { kind: "not_listed" };
+  if (!isLoginListed(config, login))
+    return { kind: "refused", reason: "not_allowed" };
   // An id given in the list (`login:id`) replaced a stored pin at every start, so it counts first.
-  const bound =
-    config.presetIds.get(login) ?? pins.get(login) ?? claimed.get(login);
-  if (bound === undefined) {
-    claimed.set(login, user.githubId);
-    return { kind: "admitted" };
-  }
+  const bound = config.presetIds.get(login) ?? pins.get(login);
+  if (bound === undefined)
+    return (holders.get(login) ?? 0) > 1
+      ? { kind: "refused", reason: "login_ambiguous" }
+      : { kind: "admitted" };
   return bound === user.githubId
     ? { kind: "admitted" }
-    : { kind: "bound_elsewhere" };
+    : { kind: "refused", reason: "login_bound_to_another_account" };
 }
 
 async function inPool<T>(
@@ -104,63 +108,57 @@ export async function decideMembers({
   concurrency = DEFAULT_CONCURRENCY,
 }: DecideMembersInput): Promise<MemberDecision[]> {
   const decisions = new Map<string, MemberDecision>();
-  const claimed = new Map<string, string>();
-  const needOrganization: Array<{ user: LegacyUser; boundElsewhere: boolean }> =
+  const holders = new Map<string, number>();
+  for (const user of users) {
+    const login = user.githubLogin?.toLowerCase();
+    if (login !== undefined) holders.set(login, (holders.get(login) ?? 0) + 1);
+  }
+  const needOrganization: Array<{ user: LegacyUser; refusal: BlockReason }> =
     [];
 
-  // The oldest user claims an unbound login first, so `users` must be in creation order (the repository's).
   for (const user of users) {
-    const byList = checkList(user, config, pins, claimed);
+    const byList = checkList(user, config, pins, holders);
     if (byList.kind === "admitted") {
       decisions.set(user.id, { userId: user.id, allowed: true, via: "login" });
       continue;
     }
-    const boundElsewhere = byList.kind === "bound_elsewhere";
     if (config.org === null || user.githubId === null) {
       decisions.set(user.id, {
         userId: user.id,
         allowed: false,
-        reason: boundElsewhere
-          ? "login_bound_to_another_account"
-          : "not_allowed",
+        reason: byList.reason,
       });
       continue;
     }
-    needOrganization.push({ user, boundElsewhere });
+    needOrganization.push({ user, refusal: byList.reason });
   }
 
-  await inPool(
-    needOrganization,
-    concurrency,
-    async ({ user, boundElsewhere }) => {
-      let outcome: OrgCheckOutcome;
-      try {
-        outcome = await checkOrganization(user);
-      } catch {
-        outcome = "unavailable";
-      }
-      if (outcome === "member")
-        decisions.set(user.id, {
-          userId: user.id,
-          allowed: true,
-          via: "organization",
-        });
-      else if (outcome === "not_member")
-        decisions.set(user.id, {
-          userId: user.id,
-          allowed: false,
-          reason: boundElsewhere
-            ? "login_bound_to_another_account"
-            : "not_allowed",
-        });
-      else
-        decisions.set(user.id, {
-          userId: user.id,
-          allowed: false,
-          reason: "check_failed",
-        });
-    },
-  );
+  await inPool(needOrganization, concurrency, async ({ user, refusal }) => {
+    let outcome: OrgCheckOutcome;
+    try {
+      outcome = await checkOrganization(user);
+    } catch {
+      outcome = "unavailable";
+    }
+    if (outcome === "member")
+      decisions.set(user.id, {
+        userId: user.id,
+        allowed: true,
+        via: "organization",
+      });
+    else if (outcome === "not_member")
+      decisions.set(user.id, {
+        userId: user.id,
+        allowed: false,
+        reason: refusal,
+      });
+    else
+      decisions.set(user.id, {
+        userId: user.id,
+        allowed: false,
+        reason: "check_failed",
+      });
+  });
 
   return users.map((user) => {
     const decision = decisions.get(user.id);

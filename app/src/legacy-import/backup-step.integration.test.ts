@@ -5,10 +5,11 @@
 // backup restores to exactly what the previous release left, a failing backup ends the start without a single
 // change to the database, and installations that need no import need no backup.
 import BetterSqlite3 from "better-sqlite3";
-import { mkdirSync, readdirSync } from "node:fs";
+import { mkdirSync, readdirSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { restoreBackup } from "../backup/restore.ts";
+import { rotateBackups } from "../backup/rotate.ts";
 import { openDatabase } from "../db/connection.ts";
 import { migrateToLatest } from "../db/migrate.ts";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
@@ -16,7 +17,8 @@ import { createLegacyInstallation } from "../test-support/legacy-installation.ts
 import { createTestDirectory, track } from "../test-support/test-database.ts";
 import {
   backupBeforeUpdateOnStart,
-  holdsInstallationToImport,
+  holdsDatabaseOfThePreviousRelease,
+  isBeforeUpdateBackupName,
 } from "./backup-step.ts";
 
 const SECRET = "legacy-secret-0123456789-0123456789-abcdef";
@@ -158,18 +160,76 @@ describe("the backup before the update", () => {
   });
 
   // #106-IM-22
-  it("takes another backup when the import has to run again, which is harmless", async () => {
+  it("takes no second backup when a start finds the migrated database of a failed import, so the way back stays the file of the previous release", async () => {
+    const files = await legacyFile();
+    const { options, lines } = startOptions(files);
+    expect(backupBeforeUpdateOnStart(options)).toBe(true);
+    const [wayBack] = readdirSync(files.backupDir);
+    // The migrations ran, the import failed (the marker is still `none`), and the app restarts again and again.
+    const db = track(
+      openDatabase({ path: files.databasePath, busyTimeoutMs: 5000 }),
+    );
+    await migrateToLatest(db);
+    await db.destroy();
+
+    for (let restart = 0; restart < 3; restart += 1)
+      expect(backupBeforeUpdateOnStart(options)).toBe(false);
+
+    expect(readdirSync(files.backupDir)).toEqual([wayBack]);
+    expect(tablesOf(join(files.backupDir, wayBack ?? ""))).not.toContain(
+      "workspaces",
+    );
+    expect(lines.join("\n")).not.toContain("BACKUP_BEFORE_UPDATE_KEPT");
+  });
+
+  // #106-IM-22
+  it("takes no second backup when the migrations failed and rolled back, while the backup of this update is newer than the database", async () => {
+    const files = await legacyFile();
+    const { options, lines } = startOptions(files);
+    expect(backupBeforeUpdateOnStart(options)).toBe(true);
+    const [wayBack] = readdirSync(files.backupDir);
+
+    expect(backupBeforeUpdateOnStart(options)).toBe(false);
+
+    expect(readdirSync(files.backupDir)).toEqual([wayBack]);
+    expect(lines.join("\n")).toContain("BACKUP_BEFORE_UPDATE_KEPT");
+  });
+
+  // #106-IM-22
+  it("takes a new backup when the previous release ran on the database after the earlier backup (a rollback and a later update)", async () => {
     const files = await legacyFile();
     const { options } = startOptions(files);
+    expect(backupBeforeUpdateOnStart(options)).toBe(true);
+    const later = new Date(Date.now() + 60_000);
+    utimesSync(files.databasePath, later, later);
 
-    backupBeforeUpdateOnStart(options);
-    backupBeforeUpdateOnStart(options);
+    expect(backupBeforeUpdateOnStart({ ...options, now: () => later })).toBe(
+      true,
+    );
 
     expect(readdirSync(files.backupDir)).toHaveLength(2);
   });
 
+  // #106-IM-17
+  it("keeps the backup of the update out of the retention rule of the daily backup, however old it gets", async () => {
+    const files = await legacyFile();
+    const { options } = startOptions(files);
+    backupBeforeUpdateOnStart(options);
+    const [wayBack] = readdirSync(files.backupDir);
+    expect(isBeforeUpdateBackupName(wayBack ?? "")).toBe(true);
+
+    // Daily backups for a week and a rotation after a month: the way back is not a candidate.
+    const result = rotateBackups({
+      backupDir: files.backupDir,
+      now: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
+    });
+
+    expect(result.removed).toEqual([]);
+    expect(readdirSync(files.backupDir)).toEqual([wayBack]);
+  });
+
   // #106-IM-16
-  it("takes no backup for a database without users, a missing file, an imported installation or a set up one", async () => {
+  it("takes no backup for a database without users, a missing file, a migrated one or a set up one", async () => {
     const files = await legacyFile();
     const { options } = startOptions(files);
     const empty = await createTestDirectory();
@@ -179,33 +239,23 @@ describe("the backup before the update", () => {
       users: [],
       reviewDefaults: null,
     });
-    expect(holdsInstallationToImport(emptyPath)).toBe(false);
-    expect(holdsInstallationToImport(join(empty, "missing.db"))).toBe(false);
+    expect(holdsDatabaseOfThePreviousRelease(emptyPath)).toBe(false);
+    expect(holdsDatabaseOfThePreviousRelease(join(empty, "missing.db"))).toBe(
+      false,
+    );
 
-    // Imported already: the marker is `done`.
+    // Migrated: the schema is not the previous release's any more, whatever the import marker says.
+    expect(holdsDatabaseOfThePreviousRelease(files.databasePath)).toBe(true);
     const db = track(
       openDatabase({ path: files.databasePath, busyTimeoutMs: 5000 }),
     );
     await migrateToLatest(db);
-    expect(holdsInstallationToImport(files.databasePath)).toBe(true);
-    await createInstanceSettingsRepository(db).set(
-      "import_state",
-      "done",
-      null,
-    );
-    expect(holdsInstallationToImport(files.databasePath)).toBe(false);
-    // Set up: the wizard has finished.
-    await createInstanceSettingsRepository(db).set(
-      "import_state",
-      "none",
-      null,
-    );
+    expect(holdsDatabaseOfThePreviousRelease(files.databasePath)).toBe(false);
     await createInstanceSettingsRepository(db).set(
       "setup_completed_at",
       "2026-10-12T10:00:00.000Z",
       null,
     );
-    expect(holdsInstallationToImport(files.databasePath)).toBe(false);
     expect(backupBeforeUpdateOnStart(options)).toBe(false);
     expect(readdirSync(files.backupDir)).toEqual([]);
   });

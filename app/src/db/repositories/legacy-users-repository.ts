@@ -27,6 +27,13 @@ export type LegacyUsersRepository = {
   list(): Promise<LegacyUser[]>;
   /** Marks every user that is not marked yet. Returns how many were marked. */
   markAllImported(at: string): Promise<number>;
+  /** Ends every session of these users. Returns how many sessions were deleted. */
+  deleteSessionsOf(userIds: readonly string[]): Promise<number>;
+  /**
+   * Empties the tokens of the earlier sign in (the GitHub OAuth app's user tokens) of every GitHub identity:
+   * after the organization check they have no use. Returns how many identities held one.
+   */
+  clearGithubTokens(): Promise<number>;
 };
 
 export function createLegacyUsersRepository(
@@ -79,6 +86,37 @@ export function createLegacyUsersRepository(
         });
       }
       return users;
+    },
+
+    async deleteSessionsOf(userIds) {
+      if (userIds.length === 0) return 0;
+      const result = await db
+        .deleteFrom("sessions")
+        .where("user_id", "in", [...userIds])
+        .executeTakeFirst();
+      return Number(result.numDeletedRows);
+    },
+
+    async clearGithubTokens() {
+      const result = await db
+        .updateTable("accounts")
+        .set({
+          access_token: null,
+          refresh_token: null,
+          id_token: null,
+          access_token_expires_at: null,
+          refresh_token_expires_at: null,
+        })
+        .where("provider_id", "=", "github")
+        .where((eb) =>
+          eb.or([
+            eb("access_token", "is not", null),
+            eb("refresh_token", "is not", null),
+            eb("id_token", "is not", null),
+          ]),
+        )
+        .executeTakeFirst();
+      return Number(result.numUpdatedRows);
     },
 
     async markAllImported(at) {

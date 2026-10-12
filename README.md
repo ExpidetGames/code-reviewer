@@ -140,18 +140,20 @@ section 2.11; the step by step guide for Coolify is "Updating an installation fr
 1. **Back up, and keep the master key.** Add `APP_SECRET` with exactly the value of `BETTER_AUTH_SECRET` (the old
    name keeps working while `APP_SECRET` is empty; two different values sign everybody out and make the stored
    GitHub tokens unreadable) and keep a copy of it **apart from the database backups**. The update takes a backup of
-   the SQLite file itself before it touches it and does not start if that fails (the `backups` volume must be
-   mounted and writable).
+   the SQLite file itself before it touches it (a file `code-reviewer-before-update-<time>.db` in the backup
+   directory, which the daily rotation never deletes) and does not start if that fails (the `backups` volume must be
+   mounted and writable). Only one is taken: a restart after a failed import takes none.
 2. **Start the new version with the environment you have.** On the first start the app backs up the database,
    migrates it and imports, in one transaction: one default workspace holds all the data; the GitHub App and the
    LLM key move into the encrypted store (the LLM key becomes the default workspace's key); the people who pass the
    allow list **at that moment** become members (a listed login whose GitHub id is bound to the account, or, with
    `ALLOWED_GITHUB_ORG`, a live check of the organization with the person's own stored token), the first of them
    to have signed in becomes the Owner. If the import fails it changes nothing and the start ends with one line;
-   fix the cause and start again. The log names every variable that is ignored from then on, never a value.
+   fix the cause and start again (no second backup is taken). The log names every variable that is ignored from then on, never a value.
    Reviews are never interrupted: webhooks and the runner API serve the imported settings meanwhile.
 3. **Do the short setup.** Read `[setup] Setup code: ...` in the log of the app, open the app, enter the code and
-   answer three questions (single or multi-tenant, who may sign up, your admin account). **The allow list is not
+   answer three questions (single or multi-tenant, who may sign up, your admin account; for an update the
+   wizard starts on "a list of email addresses", not "everyone"). **The allow list is not
    turned into a sign-up rule and the organization is not migrated**: the admin portal lists who was not made a
    member, the allowed logins that never signed in (invite them by email) and the organization (recreate that
    access as an email list or as allowed domains).

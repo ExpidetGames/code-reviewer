@@ -18,6 +18,8 @@ const REASON_COPY: Record<BlockReason, string> = {
   not_allowed: "was not on the list and not in the organization",
   login_bound_to_another_account:
     "has a login that is on the list, but it belongs to another GitHub account",
+  login_ambiguous:
+    "has a login that is on the list, but two accounts of this installation hold it, so neither was made a member",
   check_failed:
     "could not be checked against the organization (GitHub did not answer, or the stored sign-in cannot be read)",
 };

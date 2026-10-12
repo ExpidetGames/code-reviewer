@@ -73,7 +73,7 @@ describe("deciding who becomes a member", () => {
   });
 
   // #106-IM-04
-  it("binds an unbound login to the oldest account that has it", async () => {
+  it("admits neither of two accounts that hold the same unbound login, and says so for both", async () => {
     const decisions = await decideMembers({
       users: [
         user("alice", 1, 1),
@@ -84,7 +84,47 @@ describe("deciding who becomes a member", () => {
       checkOrganization: NO_ORGANIZATION,
     });
 
-    expect(decisions.map((d) => d.allowed)).toEqual([true, false]);
+    expect(decisions).toEqual([
+      { userId: "user-alice", allowed: false, reason: "login_ambiguous" },
+      { userId: "user-alice-2", allowed: false, reason: "login_ambiguous" },
+    ]);
+  });
+
+  // #106-IM-04
+  it("admits the account a pinned login belongs to when a second account holds the name", async () => {
+    const decisions = await decideMembers({
+      users: [
+        user("alice", 1, 1),
+        { ...user("alice", 2, 2), id: "user-alice-2" },
+      ],
+      config: parseAccessConfig({ ALLOWED_GITHUB_LOGINS: "alice" }, []),
+      pins: new Map([["alice", "2"]]),
+      checkOrganization: NO_ORGANIZATION,
+    });
+
+    expect(decisions.map((d) => d.allowed)).toEqual([false, true]);
+  });
+
+  // #106-IM-04
+  it("lets the organization admit an account whose login is ambiguous", async () => {
+    const decisions = await decideMembers({
+      users: [
+        user("alice", 1, 1),
+        { ...user("alice", 2, 2), id: "user-alice-2" },
+      ],
+      config: parseAccessConfig(
+        { ALLOWED_GITHUB_LOGINS: "alice", ALLOWED_GITHUB_ORG: "acme" },
+        [],
+      ),
+      pins: new Map(),
+      checkOrganization: async (u) =>
+        u.githubId === "2" ? "member" : "not_member",
+    });
+
+    expect(decisions).toEqual([
+      { userId: "user-alice", allowed: false, reason: "login_ambiguous" },
+      { userId: "user-alice-2", allowed: true, via: "organization" },
+    ]);
   });
 
   // #106-IM-05

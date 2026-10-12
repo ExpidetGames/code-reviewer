@@ -39,6 +39,7 @@ async function SetupContent() {
   const session = checkCurrentSetupSession(
     (await cookies()).get(SETUP_SESSION_COOKIE)?.value,
   );
-  if (session.ok) return <Wizard />;
+  if (session.ok)
+    return <Wizard existingInstallation={state.kind === "existing"} />;
   return <CodeForm existingInstallation={state.kind === "existing"} />;
 }

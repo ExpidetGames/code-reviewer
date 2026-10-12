@@ -188,7 +188,7 @@ value), set Literal.
 |---|---|---|---|
 | `BETTER_AUTH_URL` | yes | The public address: `https://<domain>` | No path, no port, no trailing slash. If you use GitHub sign in, register `<this>/api/auth/callback/github` as the OAuth app's callback URL. |
 | `APP_SECRET` | by the app | `openssl rand -base64 32` | **Required**, at least 32 characters. The master key of the instance: it signs the session cookie and encrypts the credentials stored in the database. Coolify does not block the deployment when it is empty, the app refuses to start and the log names the variable. **Back it up separately from the database** (a password manager): a database restored without its `APP_SECRET` loses every stored credential, and it cannot be recovered. Changing it signs everybody out. |
-| `BETTER_AUTH_SECRET` | deprecated | The value an existing deployment already has | The old name of `APP_SECRET`. The app uses it as `APP_SECRET` while `APP_SECRET` is empty (and logs once that it is deprecated), so an existing deployment keeps its sessions and stored tokens. When you update, add `APP_SECRET` with **exactly this value**, then remove this one; two different values sign everybody out and make the stored GitHub tokens of the earlier sign in unreadable. |
+| `BETTER_AUTH_SECRET` | deprecated | The value an existing deployment already has | The old name of `APP_SECRET`. The app uses it as `APP_SECRET` while `APP_SECRET` is empty (and logs once that it is deprecated), so an existing deployment keeps its sessions and stored tokens. When you update, add `APP_SECRET` with **exactly this value** first; remove this one only after that (removing it before leaves the instance without a master key, and the app does not start); two different values sign everybody out and make the stored GitHub tokens of the earlier sign in unreadable. |
 | `GITHUB_OAUTH_CLIENT_ID` | optional | Nowhere: no longer used | The separate OAuth app of earlier versions is replaced by the user authorization of the GitHub App (client id and secret are entered in the admin portal) and is never imported. Remove it. |
 | `GITHUB_OAUTH_CLIENT_SECRET` | optional | Nowhere: no longer used | Secret of the old OAuth app. Remove it. |
 | `ALLOWED_GITHUB_LOGINS` | optional | Comma separated GitHub logins of the earlier allow list | No longer decides who may sign in: the sign-up rule and the workspaces do (admin portal). The update to accounts reads it once to decide who becomes a member, then ignores it. A login can be bound to its numeric id (`octocat:583231`): [`app/src/auth/README.md`](../app/src/auth/README.md). |
@@ -541,15 +541,19 @@ stays, and its settings move into the new model once. You do a **short setup** o
 
 **What happens on the first start.** Open the **Logs** of the service `app` in Coolify. The lines, in this order:
 
-1. `[update] BACKUP_BEFORE_UPDATE` and `[backup] created /backups/...`: the database exactly as the previous
-   version left it. To go back, restore it ([section 8](#8-storage-and-backups)) and deploy the previous commit.
+1. `[update] BACKUP_BEFORE_UPDATE` and `[backup] created /backups/code-reviewer-before-update-<time>.db`: the
+   database exactly as the previous version left it. To go back, restore it ([section 8](#8-storage-and-backups))
+   and deploy the previous commit. The daily rotation never deletes this file (its name is not one of the daily
+   backups'); delete it yourself once the update is settled. It is taken once: a restart after a failed import, or
+   in a restart loop, takes no second one.
    If the backup cannot be written the start ends with `UPDATE_BACKUP_FAILED` and the database is untouched.
 2. `[database] applied migrations: ...`.
 3. `[import] IMPORT_DONE ...`: how many people became members, whether the GitHub App and the LLM key were
    imported. A variable that could not be imported (a broken private key, a key with a space) gets a
    `VARIABLE_NOT_IMPORTED` line that names the **variable**, never its value; everything else is imported anyway.
    If the import fails (`IMPORT_FAILED`) it changed nothing; fix the cause and start again, the whole import then
-   runs from the beginning (with another backup, which is harmless).
+   runs from the beginning. No second backup is taken: the one of step 1 is the only way back to the previous
+   version, and a copy of the migrated database could not be started by it.
 4. `[import] LEGACY_VARIABLES_IGNORED: ...`: the old variables are ignored from now on (names only).
 5. **`[setup] Setup code: 482913 ...`**: the code for the short setup (the number is yours). It is valid for 60
    minutes; restart the app for a new one. A restart before you finished the wizard prints a new code and imports
@@ -562,19 +566,22 @@ GitHub App and LLM key; only the web UI waits for the setup.
 
 1. Enter the code and answer the three questions: **single-tenant** (what the instance was; choose multi-tenant only if
    you want people to create workspaces), **who may sign up**, and the email and password of the **instance admin**.
-   Mind the second question: `ALLOWED_GITHUB_LOGINS` and `ALLOWED_GITHUB_ORG` are **not** turned into a sign-up rule.
-   Under "everyone" anybody can create an account (in a single-tenant instance it sees nothing until it is invited);
+   Mind the second question: `ALLOWED_GITHUB_LOGINS` and `ALLOWED_GITHUB_ORG` are **not** turned into a sign-up rule,
+   so for an update the wizard starts on "a list of email addresses" (it works once a mail server exists or GitHub is
+   the only way to sign in). Under "everyone" anybody can create an account (in a single-tenant instance it sees nothing until it is invited);
    choose an email list or allowed domains to limit that. You become an Owner of the default workspace next to the
    Owner the import chose (in multi-tenant mode only if the import left the workspace without one).
 2. Open **Admin**. The overview shows a notice you can hide when you have read it: the people who were **not** made
-   members and why, the allowed logins that never signed in (**invite them by email**), the allowed GitHub
+   members and why (their old sessions were ended), the allowed logins that never signed in (**invite them by email**), the allowed GitHub
    organization (**it is not migrated into a rule**: recreate that access as an email list or as allowed domains),
    and anything that could not be imported.
 3. **Integrations**: the imported GitHub App is there. Confirm whether it can only be installed on its own account
    (until you do, nothing is attached by itself; installations that were linked before the update keep their link),
    press **Check permissions** and add the two permissions it lacks if it does (Email addresses: read-only, Members:
    read-only), and enter the **client id and client secret of the GitHub App** (its user authorization; the callback
-   address to register is shown). The OAuth app of the earlier sign in is not imported and not needed.
+   address to register is shown). The OAuth app of the earlier sign in is not imported and not needed: the import emptied the user tokens it had
+   issued (they are no longer stored), and you can **delete that OAuth app on GitHub** (Settings, Developer settings,
+   OAuth Apps), which also revokes the tokens it issued.
 4. **Setup, ways to sign in**: switch on sign in with GitHub. People who used GitHub before sign in with it, are
    recognised by their numeric GitHub id and are members of the default workspace if they were admitted. Their
    temporary address is replaced by their verified GitHub address at their next sign in. Until you switch it on,

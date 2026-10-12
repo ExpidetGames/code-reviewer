@@ -44,6 +44,10 @@ import { deliverPullRequestEvent } from "../helpers/webhooks";
 
 const REVIEW_MARKER = "<!-- pr-agent:review:full -->";
 const RUN_TIMEOUT = 120_000;
+// A retry starts the whole serial group again on the same fake GitHub, which keeps the comments of the failed
+// attempt: every attempt works on pull requests of its own (the number moves by 100 per retry), so a stale comment
+// can never satisfy the wait for a new one.
+const prNumber = (base: number) => base + 100 * test.info().retry;
 const person = (login: string) => {
   const found = UPGRADE_PEOPLE.find((candidate) => candidate.login === login);
   if (found === undefined) throw new Error(`No such person ${login}`);
@@ -202,6 +206,10 @@ test.describe(
       // The backup is the database as the previous release left it.
       const backups = readdirSync(upgradePaths.backups);
       expect(backups).toHaveLength(1);
+      // Not one of the daily backups: the rotation of those never deletes the way back.
+      expect(backups[0]).toMatch(
+        /^code-reviewer-before-update-\d{8}T\d{6}Z\.db$/,
+      );
       const backupTables = tablesOf(
         join(upgradePaths.backups, backups[0] ?? ""),
       );
@@ -231,6 +239,19 @@ test.describe(
         readUpgradeDatabase<{ n: number }>("select count(*) as n from jobs")[0]
           ?.n,
       ).toBe(2);
+      // Whoever is not a member has no session any more, and the tokens of the earlier sign in are gone.
+      expect(
+        readUpgradeDatabase("select user_id from sessions order by user_id"),
+      ).toEqual(
+        ["upgrade-alice", "upgrade-bob", "upgrade-carol"].map((login) => ({
+          user_id: `legacy-user-${String(person(login).id)}`,
+        })),
+      );
+      expect(
+        readUpgradeDatabase<{ n: number }>(
+          "select count(*) as n from accounts where access_token is not null",
+        )[0]?.n,
+      ).toBe(0);
       expect(
         readUpgradeDatabase<{ key: string; value: string }>(
           "select key, value from instance_settings where key in ('import_state', 'setup_completed_at')",
@@ -263,7 +284,7 @@ test.describe(
       request: api,
     }) => {
       test.setTimeout(180_000);
-      const number = 21;
+      const number = prNumber(21);
       const head = `a${String(number).padStart(39, "0")}`;
       await addGithubPullRequest(api, UPGRADE_WIDGETS.fullName, {
         number,
@@ -466,7 +487,7 @@ test.describe(
       expect(log).not.toContain("IMPORT_DONE");
       expect(log).not.toContain("LEGACY_VARIABLES_IGNORED");
       expect(log).not.toContain("APP_SECRET_FROM_LEGACY_VARIABLE");
-      const number = 22;
+      const number = prNumber(22);
       const head = `b${String(number).padStart(39, "0")}`;
       await addGithubPullRequest(api, UPGRADE_WIDGETS.fullName, {
         number,
@@ -535,7 +556,7 @@ test.describe(
       // The installation that was linked before the update is the workspace's connection.
       await expect(page.getByText(UPGRADE_ORG.login).first()).toBeVisible();
 
-      const number = 23;
+      const number = prNumber(23);
       const head = `c${String(number).padStart(39, "0")}`;
       await addGithubPullRequest(api, UPGRADE_WIDGETS.fullName, {
         number,

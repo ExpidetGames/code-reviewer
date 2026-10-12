@@ -5,8 +5,8 @@
 // replaces every read of the `GITHUB_APP_*` variables.
 //
 // - The database comes first: the settings in `instance_settings` (key `github_app`) and the private key,
-//   the webhook secret and the client secret in the encrypted secret store. The environment is only a
-//   fallback is gone: the `GITHUB_APP_*` variables of an installation from before accounts were imported once
+//   the webhook secret and the client secret in the encrypted secret store. There is no environment fallback:
+//   the `GITHUB_APP_*` variables of an installation from before accounts were imported once
 //   (src/legacy-import/) and are not read; the OAuth app's `GITHUB_OAUTH_*` variables never were.
 // - Nothing is remembered between calls: every `load` reads the database, so a webhook secret or a key the
 //   admin replaced counts from the next request on every app instance.

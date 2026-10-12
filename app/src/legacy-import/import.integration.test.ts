@@ -272,7 +272,7 @@ describe("importing an existing installation", () => {
   });
 
   // #106-IM-04
-  it("binds an unbound listed login to the account that has it first and admits no other", async () => {
+  it("admits neither of two accounts that hold the same unbound listed login, and lists both", async () => {
     const h = await installation({
       users: [
         {
@@ -292,12 +292,100 @@ describe("importing an existing installation", () => {
 
     await h.run(h.env({ ALLOWED_GITHUB_LOGINS: "alice" }));
 
+    expect(await memberships(h)).toEqual([]);
+    expect((await settingOf(h, "import_notice"))?.notMembers).toEqual([
+      { login: "alice", reason: "login_ambiguous" },
+      { login: "alice", reason: "login_ambiguous" },
+    ]);
+  });
+
+  // #106-IM-04
+  it("admits the one account that holds a pinned login, even when a second account holds the name", async () => {
+    const h = await installation({
+      users: [
+        {
+          login: "alice",
+          githubId: 1001,
+          createdAt: "2026-09-01T10:00:00.000Z",
+        },
+        {
+          login: "alice",
+          githubId: 2002,
+          createdAt: "2026-09-05T10:00:00.000Z",
+        },
+      ],
+      pins: [{ login: "alice", githubId: 2002 }],
+    });
+
+    await h.run(h.env({ ALLOWED_GITHUB_LOGINS: "alice" }));
+
     const rows = await h.db
       .selectFrom("workspace_members")
       .innerJoin("accounts", "accounts.user_id", "workspace_members.user_id")
       .select("accounts.account_id as id")
       .execute();
-    expect(rows.map((row) => row.id)).toEqual(["1001"]);
+    expect(rows.map((row) => row.id)).toEqual(["2002"]);
+  });
+
+  // #106-IM-04
+  it("ends the sessions of the users who did not become members, blocked accounts included, and keeps the members'", async () => {
+    const h = await installation({
+      users: [
+        { login: "alice", githubId: 1001 },
+        { login: "dave", githubId: 1004 },
+        { login: "erin", githubId: 1005 },
+      ],
+      pins: [{ login: "erin", githubId: 9999 }],
+    });
+
+    await h.run(h.env({ ALLOWED_GITHUB_LOGINS: "alice,erin" }));
+
+    expect(
+      (await h.db.selectFrom("sessions").select("user_id").execute()).map(
+        (row) => row.user_id,
+      ),
+    ).toEqual(["legacy-user-1001"]);
+  });
+
+  // #106-IM-01
+  it("empties the tokens of the earlier sign in once the organization was checked, and keeps the identities", async () => {
+    const github = await startTestGithub();
+    github.addUser({ id: 1001, login: "alice", name: null, email: null });
+    github.addOrgMember("acme", "alice");
+    const h = await installation(
+      {
+        users: [
+          {
+            login: "alice",
+            githubId: 1001,
+            token: github.issueAccessToken("alice", {
+              scope: "read:org",
+              clientId: TEST_CLIENT_ID,
+            }),
+          },
+        ],
+      },
+      { github },
+    );
+
+    await h.run(
+      h.env({ ALLOWED_GITHUB_LOGINS: undefined, ALLOWED_GITHUB_ORG: "acme" }),
+    );
+
+    expect(await memberships(h)).toEqual([["alice", "owner"]]);
+    expect(
+      await h.db
+        .selectFrom("accounts")
+        .select(["account_id", "access_token", "refresh_token", "id_token"])
+        .execute(),
+    ).toEqual([
+      {
+        account_id: "1001",
+        access_token: null,
+        refresh_token: null,
+        id_token: null,
+      },
+    ]);
   });
 
   // #106-IM-04
@@ -617,17 +705,22 @@ describe("importing an existing installation", () => {
     "users",
     "members",
     "github_app",
+    "llm",
     "sign_in_methods",
     "notice",
   ] as const)
     it(`rolls everything back when the import fails after the step ${step}`, async () => {
       const h = await installation();
 
-      await h.run(h.env(), (reached) => {
+      await h.run(h.env({ ALLOWED_GITHUB_LOGINS: "alice" }), (reached) => {
         if (reached === step) throw new Error("injected");
       });
 
       expect(h.exits).toEqual([1]);
+      // The sessions of the people who are not members are still there: they ended in the rolled back transaction.
+      expect(
+        await h.db.selectFrom("sessions").select("id").execute(),
+      ).toHaveLength(3);
       expect(await settingOf(h, "import_state")).toBeUndefined();
       expect(await settingOf(h, "github_app")).toBeUndefined();
       expect(await settingOf(h, "sign_in_methods")).toBeUndefined();

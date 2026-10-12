@@ -8,10 +8,11 @@
 //
 // What it does, in the transaction:
 //   1. the default workspace (the migration made it when the installation held data; made here if it is missing);
-//   2. every user is marked as imported (`users.imported_at`);
+//   2. every user is marked as imported (`users.imported_at`), and the tokens of the earlier sign in (the OAuth
+//      app's user tokens, which the organization checks used) are emptied: nothing uses them afterwards;
 //   3. the users who pass the allow list of the moment become members, the earliest created is the Owner
-//      (members.ts). The checks that ask GitHub are done BEFORE the transaction opens, so a write lock is
-//      never held while the network is waited for;
+//      (members.ts), and the sessions of everybody else end. The checks that ask GitHub are done BEFORE the
+//      transaction opens, so a write lock is never held while the network is waited for;
 //   4. the GitHub App of `GITHUB_APP_*` moves into the encrypted store (id, slug, private key, webhook secret);
 //      a variable that is not usable is not imported and only named;
 //   5. the LLM key of `LLM_PROVIDER` / `LLM_API_KEY` becomes the default workspace's key, and `LLM_MODEL` its
@@ -227,8 +228,10 @@ export async function importExistingInstallation(
     await step("workspace");
 
     // 2. The users.
-    const usersMarked =
-      await createLegacyUsersRepository(trx).markAllImported(timestamp);
+    const legacyUsers = createLegacyUsersRepository(trx);
+    const usersMarked = await legacyUsers.markAllImported(timestamp);
+    // The organization checks are done; the tokens of the earlier sign in have no use any more.
+    await legacyUsers.clearGithubTokens();
     await step("users");
 
     // 3. The members.
@@ -244,6 +247,11 @@ export async function importExistingInstallation(
       );
       members += 1;
     }
+    // Whoever did not become a member has no business with a session of the earlier sign in (the earlier release
+    // revoked the sessions of blocked users lazily, so some may still hold one).
+    await legacyUsers.deleteSessionsOf(
+      decisions.filter((d) => !d.allowed).map((d) => d.userId),
+    );
     await step("members");
 
     // 4. The GitHub App.
