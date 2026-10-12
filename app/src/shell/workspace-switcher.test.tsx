@@ -98,6 +98,26 @@ describe("the workspace switcher", () => {
     ).toContain("Team A");
   });
 
+  // CR-36-T02
+  it("closes with Escape and puts the focus back on the trigger", async () => {
+    const user = userEvent.setup();
+    render(
+      <WorkspaceSwitcher
+        workspaces={workspaces}
+        canCreate
+        pendingInvitations={0}
+      />,
+    );
+    const trigger = screen.getByRole("button", { name: /Workspace/ });
+    await user.click(trigger);
+    expect(screen.getByRole("group", { name: "Your workspaces" })).toBeTruthy();
+
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("group", { name: "Your workspaces" })).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
   it("shows nothing for an account with nothing to switch to", () => {
     const { container } = render(
       <WorkspaceSwitcher

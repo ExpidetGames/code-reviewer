@@ -8,12 +8,11 @@
 // the layout renders them on the server and the frame itself stays static.
 import Link from "next/link";
 import { Suspense, useId, type ReactNode } from "react";
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import {
-  SidebarInset,
-  SidebarProvider,
-  SidebarTrigger,
-} from "@/components/ui/sidebar";
-import { CurrentWorkspaceSidebar } from "./nav-links.tsx";
+  CurrentWorkspaceSidebar,
+  WorkspaceSidebarTrigger,
+} from "./nav-links.tsx";
 
 export function AppShell({
   userMenu,
@@ -28,7 +27,9 @@ export function AppShell({
   const mainId = useId();
 
   return (
-    <SidebarProvider className="min-h-dvh flex-col">
+    // The primitive already gives the wrapper `min-h-svh`; `flex-col` is the only thing the frame
+    // adds, so there is a single min-height with no winner to guess (#168 review).
+    <SidebarProvider className="flex-col">
       <a
         href={`#${mainId}`}
         className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-primary-foreground"
@@ -37,7 +38,11 @@ export function AppShell({
       </a>
       <header className="sticky top-0 z-20 border-b border-border bg-card">
         <div className="mx-auto flex min-h-14 w-full max-w-6xl items-center gap-3 px-4 py-2">
-          <SidebarTrigger className="size-11" />
+          {/* Only where a sidebar exists: a page outside a workspace has none, and the admin portal
+              brings its own trigger next to the admin sidebar. */}
+          <Suspense fallback={null}>
+            <WorkspaceSidebarTrigger />
+          </Suspense>
           <Link href="/" className="font-bold text-foreground">
             Code Reviewer
           </Link>

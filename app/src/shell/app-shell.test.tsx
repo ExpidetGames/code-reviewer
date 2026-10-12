@@ -2,8 +2,10 @@
 
 // @vitest-environment jsdom
 // Pins down the frame around every signed in page: the sidebar with its two groups of workspace
-// places, the current one marked, the brand link, the skip link and the user menu slot. The narrow
-// screen drawer is a journey (e2e/app/navigation.e2e.ts); whether it looks right is checked by eye.
+// places, the current one marked, the brand link, the skip link and the user menu slot, and the
+// narrow-screen drawer (its trigger advertises the drawer it opens, Escape closes it and returns the
+// focus, a chosen link closes it, a page change closes it). Whether it looks right is checked by
+// eye; the same drawer is a journey in e2e/app/navigation.e2e.ts.
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -173,11 +175,61 @@ describe("the frame", () => {
       within(banner).getByRole("button", { name: "Toggle Sidebar" }),
     ).toBeTruthy();
   });
+
+  it("has no trigger on a page outside a workspace, where there is no sidebar to open", () => {
+    navigation.pathname = "/invitations";
+    renderShell();
+
+    expect(screen.queryByRole("button", { name: "Toggle Sidebar" })).toBeNull();
+  });
 });
 
 describe("the drawer on a narrow screen", () => {
+  it("advertises the drawer it opens with aria-expanded and aria-controls", async () => {
+    const user = userEvent.setup();
+    narrowScreen();
+    renderShell();
+    const trigger = screen.getByRole("button", { name: "Toggle Sidebar" });
+    const controls = trigger.getAttribute("aria-controls");
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(controls).toBeTruthy();
+
+    await user.click(trigger);
+
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(document.getElementById(controls ?? "")).not.toBeNull();
+  });
+
+  // CR-36-T07
+  it("closes with Escape and puts the focus back on the trigger", async () => {
+    const user = userEvent.setup();
+    narrowScreen();
+    renderShell();
+    const trigger = screen.getByRole("button", { name: "Toggle Sidebar" });
+    await user.click(trigger);
+    expect(screen.getByRole("navigation", { name: "Main" })).toBeTruthy();
+
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByRole("navigation", { name: "Main" })).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  // CR-36-T07
+  it("closes after a place is chosen", async () => {
+    const user = userEvent.setup();
+    narrowScreen();
+    renderShell();
+    await user.click(screen.getByRole("button", { name: "Toggle Sidebar" }));
+    const nav = screen.getByRole("navigation", { name: "Main" });
+
+    await user.click(within(nav).getByRole("link", { name: "Settings" }));
+
+    expect(screen.queryByRole("navigation", { name: "Main" })).toBeNull();
+  });
+
   // CR-36-T07, #168-T01
-  it("opens with the trigger and closes when the page changes without a link, such as back and forward", async () => {
+  it("closes when the page changes without a link, such as back and forward", async () => {
     const user = userEvent.setup();
     narrowScreen();
     const { rerender } = renderShell();

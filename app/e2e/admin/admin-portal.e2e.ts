@@ -168,6 +168,43 @@ test.describe("the admin portal", () => {
     await expect(checklist.getByText("Sign-up rule")).toBeVisible();
   });
 
+  test.describe("on a narrow window", () => {
+    test.use({ viewport: { width: 375, height: 812 } });
+
+    // #168-T05
+    test("@smoke the admin opens the sections from the drawer and it closes after a choice", async ({
+      page,
+    }) => {
+      await signInAsAdmin(page);
+      await page.goto("/admin");
+      await expect(
+        page.getByRole("heading", { level: 1, name: "Admin" }),
+      ).toBeVisible();
+      await expect(page.getByRole("navigation", { name: "Admin" })).toHaveCount(
+        0,
+      );
+
+      await page.getByRole("button", { name: "Toggle Sidebar" }).click();
+      const nav = page.getByRole("navigation", { name: "Admin" });
+      await expect(nav.getByRole("link")).toHaveText([
+        "Overview",
+        "Approvals",
+        "Setup",
+        "Limits",
+        "Integrations",
+        "Mail",
+      ]);
+      await nav.getByRole("link", { name: "Mail" }).click();
+
+      await expect(
+        page.getByRole("heading", { level: 1, name: "Mail" }),
+      ).toBeVisible();
+      await expect(page.getByRole("navigation", { name: "Admin" })).toHaveCount(
+        0,
+      );
+    });
+  });
+
   // #156
   test("an admin's portal prefetch answer is private and no-store, never a year of shared caching", async ({
     page,

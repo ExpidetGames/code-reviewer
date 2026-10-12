@@ -41,7 +41,7 @@ export function UserMenu({
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="flex cursor-pointer items-center gap-2 rounded-full border-0 bg-transparent p-1 pr-2 hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          className="flex min-h-11 min-w-11 cursor-pointer items-center gap-2 rounded-full border-0 bg-transparent p-1 pr-2 hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
         >
           <UserAvatar user={user} />
           <span className="max-w-40 truncate text-sm font-medium text-foreground">
@@ -92,11 +92,17 @@ export function UserMenu({
   );
 }
 
-// Disabled while the action runs: a second press would end an already ended session.
+// Disabled while the action runs: a second press would end an already ended session. The item keeps
+// the menu open while the action is pending (`onSelect` prevents the default close), so the guard is
+// visible; the redirect replaces the page when the action finishes.
 function SignOutMenuItem() {
   const { pending } = useFormStatus();
   return (
-    <DropdownMenuItem asChild disabled={pending}>
+    <DropdownMenuItem
+      asChild
+      disabled={pending}
+      onSelect={(event) => event.preventDefault()}
+    >
       <button
         type="submit"
         disabled={pending}

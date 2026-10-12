@@ -22,6 +22,21 @@ destructive`, sizes `sm | default | icon`, the `loading`/`loadingLabel` conventi
   - `@/components/query-tabs` — the `Tabs` whose active tab lives in the query string. It calls
     `useSearchParams`, so a page that renders it needs a `<Suspense>` boundary.
 
+## Hit areas
+
+The epic's rulebook asks for ≥44×44px touch targets (R66). The shell reads it per control:
+
+- Icon-only controls keep at least 44×44px: `@/components/button` with `size="icon"` and the shadcn
+  `SidebarTrigger` (the shell gives it `size-11`).
+- The two header triggers that carry the avatar and a name (the user menu and the workspace switcher)
+  are at least 44px tall (`min-h-11 min-w-11`).
+- Sidebar links (the shadcn `SidebarMenuButton`, whose `default` size is 32px / `h-8`) get a 44px row
+  on a coarse pointer — a touch screen — through Tailwind's `pointer-coarse:h-11`, and stay 32px on a
+  fine pointer — a mouse. The two numbers of the rule are read as "at least 44px for a touch target,
+  at least 32px for a pointer target": a mouse does not need the taller row, and keeping 32px there
+  preserves the density the mockups show. `SIDEBAR_LINK_CLASS` (`src/shell/nav-items.ts`) carries that
+  height together with the colour and underline rules, so both sidebars use it.
+
 ## Cascade layers
 
 Tailwind is imported by `app/src/app/theme.css`, which declares the layer order

@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // @vitest-environment jsdom
-// Pins down the navigation of the portal on the shadcn Sidebar: the grouped sections in order, and
-// the current one marked, with Overview current only on its own page (every other page of the portal
-// is below /admin).
-import { cleanup, render, screen } from "@testing-library/react";
+// Pins down the navigation of the portal on the shadcn Sidebar: the grouped sections in order, the
+// current one marked (Overview only on its own page, every other page of the portal is below
+// /admin), and the narrow-screen drawer that opens the same sections.
+import { cleanup, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { SidebarProvider } from "@/components/ui/sidebar";
+import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 
 const navigation = vi.hoisted(() => ({ pathname: "/admin/setup" }));
 vi.mock("next/navigation", () => ({
@@ -16,10 +17,27 @@ vi.mock("next/navigation", () => ({
 import { AdminNav } from "./admin-nav.tsx";
 import { ADMIN_NAV_ITEMS, isCurrentSection } from "./nav-items.ts";
 
+// The shim of the setup file (matchMedia always "desktop"); a narrow-screen test replaces it and
+// this puts it back.
+const desktopMatchMedia = window.matchMedia;
 afterEach(() => {
+  window.matchMedia = desktopMatchMedia;
   cleanup();
   navigation.pathname = "/admin/setup";
 });
+
+function narrowScreen() {
+  window.matchMedia = ((query: string) => ({
+    matches: query.includes("767px"),
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia;
+}
 
 function renderAdminNav() {
   return render(
@@ -70,5 +88,36 @@ describe("the sections of the portal", () => {
     expect(isCurrentSection("/admin", overview)).toBe(true);
     expect(isCurrentSection("/admin/mail", overview)).toBe(false);
     expect(isCurrentSection(null, overview)).toBe(false);
+  });
+});
+
+describe("the sections on a narrow screen", () => {
+  // #168-T02, #168-T05
+  it("open in the Sheet drawer from the trigger", async () => {
+    const user = userEvent.setup();
+    narrowScreen();
+    render(
+      <SidebarProvider>
+        <AdminNav />
+        <SidebarTrigger className="size-11" />
+      </SidebarProvider>,
+    );
+    expect(screen.queryByRole("navigation", { name: "Admin" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Toggle Sidebar" }));
+
+    const nav = screen.getByRole("navigation", { name: "Admin" });
+    expect(
+      within(nav)
+        .getAllByRole("link")
+        .map((link) => link.textContent),
+    ).toEqual([
+      "Overview",
+      "Approvals",
+      "Setup",
+      "Limits",
+      "Integrations",
+      "Mail",
+    ]);
   });
 });

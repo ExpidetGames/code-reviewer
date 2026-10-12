@@ -17,9 +17,14 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarSeparator,
+  SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar";
-import { isCurrentPage, navGroupsFor } from "./nav-items.ts";
+import {
+  isCurrentPage,
+  navGroupsFor,
+  SIDEBAR_LINK_CLASS,
+} from "./nav-items.ts";
 
 /** How much of the top the fixed sidebar leaves to the header (`min-h-14` + its bottom border). */
 export const SIDEBAR_TOP_CLASS = "top-14 h-[calc(100svh-3.5rem)]";
@@ -62,7 +67,7 @@ function NavLink({
         <Link
           href={item.href}
           aria-current={current ? "page" : undefined}
-          className="text-sidebar-foreground no-underline aria-[current=page]:underline"
+          className={SIDEBAR_LINK_CLASS}
           onClick={() => setOpenMobile(false)}
         >
           {item.label}
@@ -99,4 +104,15 @@ export function CurrentWorkspaceSidebar() {
       </nav>
     </Sidebar>
   );
+}
+
+/**
+ * The trigger of the workspace sidebar, in the header. It renders only where the sidebar renders, so
+ * a page outside a workspace has no control that toggles nothing (the admin portal brings its own
+ * trigger next to the admin sidebar).
+ */
+export function WorkspaceSidebarTrigger() {
+  const pathname = usePathname();
+  if (navGroupsFor(pathname).length === 0) return null;
+  return <SidebarTrigger className="size-11" />;
 }

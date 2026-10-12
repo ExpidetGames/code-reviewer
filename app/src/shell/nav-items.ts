@@ -28,6 +28,14 @@ export type NavItem = { href: string; label: string };
 /** A group of places; the sidebar draws a separator between two groups, not inside one. */
 export type NavGroup = { items: NavItem[] };
 
+/**
+ * The class of a sidebar link, shared by the workspace and the admin sidebar: the token colour, an
+ * underline only for the current page (`aria-current`), and a 44px row on a touch screen while the
+ * kit's 32px (`h-8`) stays on a fine pointer (`components/README.md`, "Hit areas").
+ */
+export const SIDEBAR_LINK_CLASS =
+  "text-sidebar-foreground no-underline aria-[current=page]:underline pointer-coarse:h-11";
+
 /** The groups of the workspace the page is in, or none for a page outside any workspace. */
 export function navGroupsFor(pathname: string | null): NavGroup[] {
   const slug = pathname === null ? undefined : workspaceSlugOfPath(pathname);

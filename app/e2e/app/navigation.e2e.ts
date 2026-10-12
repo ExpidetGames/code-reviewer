@@ -58,7 +58,7 @@ test.describe("the app frame", () => {
     test.use({ viewport: { width: 375, height: 812 } });
 
     // #168-T05, CR-36-T10
-    test("a person on a phone opens the drawer, switches from Projects to Runs and the page does not scroll sideways", async ({
+    test("@smoke a person on a phone opens the drawer, switches from Projects to Runs and the page does not scroll sideways", async ({
       page,
     }) => {
       await signInThroughTheForm(page, account);

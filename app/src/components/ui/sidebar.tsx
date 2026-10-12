@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: MIT
 // Adapted from shadcn/ui (MIT), https://ui.shadcn.com
 // Local adaptation for Code Reviewer: SidebarMenuSkeleton derives its width from useId instead of
-// Math.random (the React compiler lint rejects an impure call during render).
+// Math.random (the React compiler lint rejects an impure call during render), and the mobile drawer
+// names its trigger to assistive technology and returns the focus there: SidebarTrigger exposes
+// `aria-expanded`/`aria-controls` for the Sheet, whose content carries that id and, on close, puts
+// the focus back on the control that opened it (upstream leaves both to a Radix trigger element).
 
 "use client";
 
@@ -43,6 +46,10 @@ type SidebarContextProps = {
   setOpen: (open: boolean) => void;
   openMobile: boolean;
   setOpenMobile: (open: boolean) => void;
+  /** The id of the mobile Sheet content, so the trigger can point `aria-controls` at it. */
+  openMobileId: string;
+  /** The control that opened the mobile drawer, so closing it can return the focus there. */
+  mobileTriggerRef: React.RefObject<HTMLElement | null>;
   isMobile: boolean;
   toggleSidebar: () => void;
 };
@@ -73,6 +80,8 @@ function SidebarProvider({
 }) {
   const isMobile = useIsMobile();
   const [openMobile, setOpenMobile] = React.useState(false);
+  const openMobileId = React.useId();
+  const mobileTriggerRef = React.useRef<HTMLElement | null>(null);
 
   // This is the internal state of the sidebar.
   // We use openProp and setOpenProp for control from outside the component.
@@ -126,9 +135,21 @@ function SidebarProvider({
       isMobile,
       openMobile,
       setOpenMobile,
+      openMobileId,
+      mobileTriggerRef,
       toggleSidebar,
     }),
-    [state, open, setOpen, isMobile, openMobile, setOpenMobile, toggleSidebar],
+    [
+      state,
+      open,
+      setOpen,
+      isMobile,
+      openMobile,
+      setOpenMobile,
+      openMobileId,
+      mobileTriggerRef,
+      toggleSidebar,
+    ],
   );
 
   return (
@@ -168,7 +189,14 @@ function Sidebar({
   variant?: "sidebar" | "floating" | "inset";
   collapsible?: "offcanvas" | "icon" | "none";
 }) {
-  const { isMobile, state, openMobile, setOpenMobile } = useSidebar();
+  const {
+    isMobile,
+    state,
+    openMobile,
+    setOpenMobile,
+    openMobileId,
+    mobileTriggerRef,
+  } = useSidebar();
 
   if (collapsible === "none") {
     return (
@@ -189,9 +217,17 @@ function Sidebar({
     return (
       <Sheet open={openMobile} onOpenChange={setOpenMobile} {...props}>
         <SheetContent
+          id={openMobileId}
           data-sidebar="sidebar"
           data-slot="sidebar"
           data-mobile="true"
+          onCloseAutoFocus={(event) => {
+            // Radix has no trigger element registered for the drawer (the trigger is our own
+            // SidebarTrigger), so it cannot return the focus by itself; put it back on the control
+            // that opened the drawer (local adaptation, see the file header).
+            event.preventDefault();
+            mobileTriggerRef.current?.focus();
+          }}
           className="w-(--sidebar-width) bg-sidebar p-0 text-sidebar-foreground [&>button]:hidden"
           style={
             {
@@ -263,7 +299,13 @@ function SidebarTrigger({
   onClick,
   ...props
 }: React.ComponentProps<typeof Button>) {
-  const { toggleSidebar } = useSidebar();
+  const {
+    isMobile,
+    openMobile,
+    openMobileId,
+    mobileTriggerRef,
+    toggleSidebar,
+  } = useSidebar();
 
   return (
     <Button
@@ -272,7 +314,13 @@ function SidebarTrigger({
       variant="ghost"
       size="icon"
       className={cn("size-7", className)}
+      // On a narrow screen the trigger opens the Sheet drawer; the control's state and the content
+      // it opens are told to assistive technology, and closing the drawer returns the focus here
+      // (local adaptation, see the file header).
+      aria-expanded={isMobile ? openMobile : undefined}
+      aria-controls={isMobile ? openMobileId : undefined}
       onClick={(event) => {
+        if (isMobile) mobileTriggerRef.current = event.currentTarget;
         onClick?.(event);
         toggleSidebar();
       }}

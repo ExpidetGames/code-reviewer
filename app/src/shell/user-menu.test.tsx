@@ -6,6 +6,7 @@
 // and avatar come from the GitHub profile, so they are shown as plain text and a missing or unusable
 // avatar never leaves a broken image.
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -141,6 +142,27 @@ describe("opening the user menu", () => {
     await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
 
     expect(signOut).toHaveBeenCalledTimes(1);
+  });
+
+  // CR-36-T02
+  it("disables the sign out entry while the action runs, so a second press cannot end the session twice", async () => {
+    const user = userEvent.setup();
+    let finish: () => void = () => {};
+    const signOut = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    renderMenu(ada, signOut);
+    await user.click(screen.getByRole("button", { name: /Ada Lovelace/ }));
+    const entry = screen.getByRole("menuitem", { name: "Sign out" });
+
+    await user.dblClick(entry);
+
+    expect(signOut).toHaveBeenCalledTimes(1);
+    expect(entry.hasAttribute("disabled")).toBe(true);
+    await act(async () => finish());
   });
 
   it("offers the color theme choice with the current one checked", async () => {
