@@ -31,11 +31,22 @@ import {
   ProjectSettingsPageContent,
   type ProjectSettingsPageData,
 } from "./project-settings-page.tsx";
-import { defaultWorkspaceId } from "../../test-support/workspaces.ts";
+import {
+  addWorkspace,
+  defaultWorkspaceId,
+} from "../../test-support/workspaces.ts";
+import { TEST_DEFAULT_SKILL } from "../../test-support/review-settings-harness.ts";
+import { createIntegrationsRepository } from "../../db/repositories/integrations-repository.ts";
+import { createRepositoriesRepository } from "../../db/repositories/repositories-repository.ts";
+import { createReviewSettingsService } from "../../review-settings/service.ts";
+import { createAppSettingsRepository } from "../../db/repositories/app-settings-repository.ts";
+import { builtInReviewSettings } from "../../review-settings/settings.ts";
 
 afterEach(cleanup);
 
-async function openProject(options: { activate?: boolean } = {}) {
+async function openProject(
+  options: { activate?: boolean; dynamicReviewEnabled?: boolean } = {},
+) {
   const s = await setupReviewSettings();
   const projects = createProjectService({
     projects: createProjectsRepository(s.db, await defaultWorkspaceId(s.db)),
@@ -70,6 +81,7 @@ async function openProject(options: { activate?: boolean } = {}) {
       projects,
       settings: s.service,
       config: () => describeConfigStatus({}, testGithubAppStatus()),
+      dynamicReviewEnabled: async () => options.dynamicReviewEnabled ?? false,
     });
   }
   return { ...s, projects, api, load };
@@ -373,5 +385,249 @@ describe("the settings page of a project", () => {
 
     expect(screen.queryByText("Reviews are not set up yet")).toBeNull();
     expect(container.textContent).not.toMatch(/GITHUB_APP|LLM_/);
+  });
+});
+
+// #200-T05, #200-T07
+describe("the Review kind card of the settings page of a project", () => {
+  const SAVE = { name: "Save review settings" };
+
+  async function readyPage(options: Parameters<typeof openProject>[0] = {}) {
+    const app = await openProject(options);
+    const data = await app.load();
+    if (data.kind !== "ready") throw new Error("expected a project");
+    const view = renderReady(app, data);
+    return { app, data, view };
+  }
+
+  it("shows the real default model and skill of a project that never chose a kind, and says Dynamic Review is not enabled yet", async () => {
+    const { data } = await readyPage();
+
+    expect(data.dynamicReviewEnabled).toBe(false);
+    expect(
+      screen
+        .getByRole("radio", { name: "Diff Review" })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+    expect(screen.getByText("Not enabled on this instance yet.")).toBeTruthy();
+  });
+
+  it("does not say anything about the gate when the instance has Dynamic Review enabled", async () => {
+    const { data } = await readyPage({ dynamicReviewEnabled: true });
+
+    expect(data.dynamicReviewEnabled).toBe(true);
+    expect(screen.queryByText(/Not enabled on this instance/)).toBeNull();
+  });
+
+  it("stores a switch to Dynamic Review with its model and skill, shows them after a reload, and resets the skill to the shipped default", async () => {
+    const user = userEvent.setup();
+    const { app, view } = await readyPage({ dynamicReviewEnabled: true });
+
+    await user.click(screen.getByRole("radio", { name: "Dynamic Review" }));
+    const model = screen.getByLabelText("Dynamic Review model");
+    await user.clear(model);
+    await user.type(model, "vendor/agent-1");
+    await user.click(screen.getByRole("button", { name: "Edit skill" }));
+    const skill = screen.getByLabelText("Review skill");
+    await user.clear(skill);
+    await user.type(skill, "Look for security problems only.");
+    await user.click(screen.getByRole("button", SAVE));
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Switch to Dynamic Review",
+      }),
+    );
+    expect((await screen.findByRole("status")).textContent).toMatch(/Saved\./);
+
+    const stored = JSON.parse((await app.projectRows())[0]?.settings ?? "{}");
+    expect(stored).toMatchObject({
+      reviewKind: "dynamic",
+      dynamicModel: "vendor/agent-1",
+      reviewSkill: "Look for security problems only.",
+    });
+    const reloaded = await app.load();
+    if (reloaded.kind !== "ready") throw new Error("expected a project");
+    expect(reloaded.model.dynamic?.effective).toEqual({
+      reviewKind: "dynamic",
+      dynamicModel: "vendor/agent-1",
+      reviewSkill: "Look for security problems only.",
+    });
+
+    // Resetting the skill is staged, and stored only by the save; it removes only the skill override.
+    await user.click(
+      screen.getByRole("button", { name: "Reset review skill to default" }),
+    );
+    expect(
+      JSON.parse((await app.projectRows())[0]?.settings ?? "{}"),
+    ).toHaveProperty("reviewSkill");
+    await user.click(screen.getByRole("button", SAVE));
+    await screen.findByText(/Saved\./);
+    const afterReset = JSON.parse(
+      (await app.projectRows())[0]?.settings ?? "{}",
+    );
+    expect(afterReset).not.toHaveProperty("reviewSkill");
+    expect(afterReset).toMatchObject({
+      reviewKind: "dynamic",
+      dynamicModel: "vendor/agent-1",
+    });
+    const final = await app.load();
+    if (final.kind !== "ready") throw new Error("expected a project");
+    expect(final.model.dynamic?.reviewSkillIsDefault).toBe(true);
+    expect(final.model.dynamic?.effective.reviewSkill).toBe(
+      TEST_DEFAULT_SKILL.text,
+    );
+    view.unmount();
+  });
+
+  // Lead note (1): an untouched form must never clear the Diff overrides.
+  it("stores nothing when the form is saved untouched, and keeps the Diff overrides another client set meanwhile", async () => {
+    const user = userEvent.setup();
+    const { app } = await readyPage();
+    // Another client saves a Diff override after this form was loaded.
+    await app.service.updateProjectSettings(app.first.id, { maxFindings: 17 });
+    const before = await app.projectRows();
+
+    await user.click(screen.getByRole("button", SAVE));
+
+    expect((await screen.findByRole("status")).textContent).toMatch(
+      /No changes to save/,
+    );
+    expect(await app.projectRows()).toEqual(before);
+  });
+
+  // Lead note (2): the explicit Diff-group reset together with a kind switch.
+  it("resets the Diff overrides and switches the kind in one save, keeping what was not touched", async () => {
+    const user = userEvent.setup();
+    const app = await openProject({ dynamicReviewEnabled: true });
+    await app.service.updateProjectSettings(app.first.id, {
+      maxFindings: 9,
+      reviewSkill: "My skill",
+    });
+    const data = await app.load();
+    if (data.kind !== "ready") throw new Error("expected a project");
+    renderReady(app, data);
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "Reset to default for Most findings per review",
+      }),
+    );
+    await user.click(screen.getByRole("radio", { name: "Dynamic Review" }));
+    await user.click(screen.getByRole("button", SAVE));
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Switch to Dynamic Review",
+      }),
+    );
+
+    expect((await screen.findByRole("status")).textContent).toMatch(/Saved\./);
+    expect(JSON.parse((await app.projectRows())[0]?.settings ?? "{}")).toEqual({
+      reviewKind: "dynamic",
+      reviewSkill: "My skill",
+    });
+  });
+
+  it("refuses an oversize multibyte skill at the field, stores nothing and keeps the text", async () => {
+    const user = userEvent.setup();
+    const app = await openProject({ dynamicReviewEnabled: true });
+    await app.service.updateProjectSettings(app.first.id, {
+      reviewKind: "dynamic",
+    });
+    const data = await app.load();
+    if (data.kind !== "ready") throw new Error("expected a project");
+    renderReady(app, data);
+    const before = await app.projectRows();
+
+    await user.click(screen.getByRole("button", { name: "Edit skill" }));
+    const skill = screen.getByLabelText("Review skill");
+    await user.clear(skill);
+    await user.click(skill);
+    await user.paste("日".repeat(6000));
+    await user.click(screen.getByRole("button", SAVE));
+
+    expect(
+      await within(skill.closest("[data-field]") as HTMLElement).findByText(
+        /Use at most 16,384 bytes/,
+      ),
+    ).toBeTruthy();
+    expect((skill as HTMLTextAreaElement).value).toBe("日".repeat(6000));
+    expect(await app.projectRows()).toEqual(before);
+  });
+
+  // #200-T05
+  it("shows each project its own values in two workspaces and never another workspace's skill", async () => {
+    const app = await openProject({ dynamicReviewEnabled: true });
+    const otherWorkspace = await addWorkspace(app.db, "other");
+    const otherIntegration = await createIntegrationsRepository(
+      app.db,
+      otherWorkspace,
+    ).create({
+      type: "github_app",
+      displayName: "other",
+      externalId: "9999",
+      config: {},
+    });
+    const otherRepositories = createRepositoriesRepository(
+      app.db,
+      otherWorkspace,
+    );
+    await otherRepositories.reconcile(otherIntegration.id, [
+      {
+        integrationId: otherIntegration.id,
+        externalId: "77",
+        fullName: "other/widgets",
+        url: "https://github.test/other/widgets",
+      },
+    ]);
+    const [otherRepository] = await otherRepositories.list();
+    if (otherRepository === undefined) throw new Error("seeding failed");
+    const other = { first: otherRepository };
+    const otherService = createReviewSettingsService({
+      appSettings: createAppSettingsRepository(app.db, otherWorkspace),
+      projects: createProjectsRepository(app.db, otherWorkspace),
+      builtIn: () => builtInReviewSettings("deepseek/deepseek-v3.2"),
+      defaultSkill: () => TEST_DEFAULT_SKILL,
+    });
+    await otherService.updateProjectSettings(other.first.id, {
+      reviewKind: "dynamic",
+      reviewSkill: "Secret skill of the other workspace",
+    });
+
+    const mine = await app.load();
+    if (mine.kind !== "ready") throw new Error("expected a project");
+
+    expect(mine.model.dynamic?.effective.reviewKind).toBe("diff");
+    expect(mine.model.dynamic?.reviewSkillIsDefault).toBe(true);
+    expect(JSON.stringify(mine.model)).not.toContain("Secret skill");
+    // The other workspace's repository is not found through this workspace's services.
+    expect(await app.load(other.first.id)).toEqual({ kind: "not_found" });
+  });
+
+  // #200-T05
+  it("shows the card of an inactive project too, and saves into it without activating it", async () => {
+    const user = userEvent.setup();
+    const app = await openProject({
+      activate: false,
+      dynamicReviewEnabled: true,
+    });
+    const data = await app.load();
+    if (data.kind !== "ready") throw new Error("expected a project");
+    renderReady(app, data);
+
+    await user.click(screen.getByRole("radio", { name: "Dynamic Review" }));
+    await user.click(screen.getByRole("button", SAVE));
+    await user.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: "Switch to Dynamic Review",
+      }),
+    );
+
+    await screen.findByText(/Saved\./);
+    expect(await app.projectRows()).toMatchObject([
+      {
+        active: 0,
+        settings: expect.stringContaining('"reviewKind":"dynamic"'),
+      },
+    ]);
   });
 });
