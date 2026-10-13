@@ -45,6 +45,7 @@ def launch(tmp_path: Path, uid: int | None = None, gid: int | None = None) -> En
     config_dir = tmp_path / "job"
     config_dir.mkdir()
     return EngineLaunch(
+        config_owner=os.getuid(),  # root in production; a test cannot give a file to root
         uid=os.getuid() if uid is None else uid,
         gid=os.getgid() if gid is None else gid,
         home=str(tmp_path / "home"),
@@ -86,8 +87,10 @@ def test_the_config_is_written_for_its_user_only(tmp_path: Path) -> None:
     path = mine.write_config({"capability": "dummy-capability"})
 
     assert path == tmp_path / "job" / "opencode.json"
-    assert stat.S_IMODE(path.stat().st_mode) == 0o400
-    assert path.stat().st_uid == mine.uid
+    # Read-only for the engine's group, owned by someone else: the engine can neither rewrite the
+    # file nor change its mode (the owner of the file is the supervisor, root in production).
+    assert stat.S_IMODE(path.stat().st_mode) == 0o440
+    assert (path.stat().st_uid, path.stat().st_gid) == (mine.config_owner, mine.gid)
     assert json.loads(path.read_text()) == {"capability": "dummy-capability"}
 
 

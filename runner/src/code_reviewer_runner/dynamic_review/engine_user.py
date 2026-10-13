@@ -134,6 +134,9 @@ class EngineLaunch:
     tmpdir: str
     # A root-owned directory the engine user can enter but not list; the config file goes in it.
     config_dir: Path
+    # Who owns the engine's config file: root, the supervisor. Never the engine user, which could
+    # then change its mode and rewrite it.
+    config_owner: int = 0
     confinement: NetworkConfinement = field(init=False)
     _verified: bool = field(default=False, init=False)
 
@@ -150,15 +153,16 @@ class EngineLaunch:
         """Write the engine config so that only the engine user (and root) can read it.
 
         It carries the job's proxy capability. The directory is root's and not listable by the
-        engine; the file is owned by the engine user with mode 0400, so no other user of the
-        container can read it either (#202: config readability).
+        engine; the file belongs to the supervisor with the engine's group and mode 0440: the
+        engine reads it but cannot rewrite or chmod it, and no other user of the container can
+        read it either (#202: config readability).
         """
         path = self.config_dir / "opencode.json"
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
             stream.write(json.dumps(config))
-            os.fchown(stream.fileno(), self.uid, self.gid)
-            os.fchmod(stream.fileno(), 0o400)
+            os.fchown(stream.fileno(), self.config_owner, self.gid)
+            os.fchmod(stream.fileno(), 0o440)
         return path
 
     def confine(self, proxy_port: int, engine_port: int) -> None:

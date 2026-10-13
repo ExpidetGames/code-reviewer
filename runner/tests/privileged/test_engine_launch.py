@@ -169,8 +169,8 @@ def test_no_other_user_can_read_the_config_or_the_export_of_the_engine_user(
 ) -> None:
     with started_engine(repo, environment, tools) as started:
         config = Path(started.launch.config_dir) / "opencode.json"
-        assert stat.S_IMODE(config.stat().st_mode) == 0o400
-        assert (config.stat().st_uid, config.stat().st_gid) == (ENGINE_UID, ENGINE_GID)
+        assert stat.S_IMODE(config.stat().st_mode) == 0o440
+        assert (config.stat().st_uid, config.stat().st_gid) == (0, ENGINE_GID)
         export_file = next(p for p in started.prepared.content.export.rglob("*") if p.is_file())
         read = "import sys; open(sys.argv[1], 'rb').read(1)"
 
@@ -180,6 +180,11 @@ def test_no_other_user_can_read_the_config_or_the_export_of_the_engine_user(
         assert run_as(ENGINE_UID, ENGINE_GID, read, str(export_file)).returncode == 0
         assert run_as(STRANGER_UID, STRANGER_GID, read, str(config)).returncode != 0
         assert run_as(STRANGER_UID, STRANGER_GID, read, str(export_file)).returncode != 0
+        # The engine user cannot rewrite its own config or make it writable.
+        rewrite = "import sys; open(sys.argv[1], 'w').write('{}')"
+        assert run_as(ENGINE_UID, ENGINE_GID, rewrite, str(config)).returncode != 0
+        loosen = "import os, sys; os.chmod(sys.argv[1], 0o600)"
+        assert run_as(ENGINE_UID, ENGINE_GID, loosen, str(config)).returncode != 0
         listing = "import os, sys; os.listdir(sys.argv[1])"
         assert run_as(STRANGER_UID, STRANGER_GID, listing, str(config.parent)).returncode != 0
         # A stranger cannot write into the export either, nor can the engine user.

@@ -1012,6 +1012,7 @@ class ScriptedLaunch(EngineLaunch):
             home=str(tmp_path / "home"),
             tmpdir=str(tmp_path / "scratch"),
             config_dir=config_dir,
+            config_owner=os.getuid(),  # root in production; this process cannot give files to root
         )
         self.calls: list[str] = []
         self.refuse_network = False
@@ -1052,8 +1053,8 @@ def test_a_launched_engine_runs_behind_its_network_rules_and_in_its_users_direct
 
     assert answer.ok, answer.error
     startup = next(entry for entry in fixture.traces() if "config_mode" in entry)
-    # The config is the launch's file (mode 0400), not a runner scratch file; HOME is its home.
-    assert startup["config_mode"] == 0o400
+    # The config is the launch's file (mode 0440), not a runner scratch file; HOME is its home.
+    assert startup["config_mode"] == 0o440
     assert startup["env"]["HOME"] == launch.home
     assert startup["env"]["TMPDIR"] == launch.tmpdir
     # The network rules come first (the proxy port, then the engine's own), the engine is started
