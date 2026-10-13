@@ -82,7 +82,9 @@ export function InstanceForm({
     >
       <Card>
         <CardHeader>
-          <CardTitle>Tenancy</CardTitle>
+          <CardTitle>
+            <h2 className="text-lg font-semibold tracking-tight">Tenancy</h2>
+          </CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <RadioGroup
@@ -134,7 +136,9 @@ export function InstanceForm({
 
       <Card>
         <CardHeader>
-          <CardTitle>Limits</CardTitle>
+          <CardTitle>
+            <h2 className="text-lg font-semibold tracking-tight">Limits</h2>
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <Field>

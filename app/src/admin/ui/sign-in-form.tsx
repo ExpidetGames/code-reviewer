@@ -52,7 +52,11 @@ export function SignInMethodsForm({
     >
       <Card>
         <CardHeader>
-          <CardTitle>Ways to sign in</CardTitle>
+          <CardTitle>
+            <h2 className="text-lg font-semibold tracking-tight">
+              Ways to sign in
+            </h2>
+          </CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <Field orientation="horizontal" className="items-start">

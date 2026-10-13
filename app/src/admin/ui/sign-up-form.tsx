@@ -86,7 +86,11 @@ export function SignUpRuleForm({
     >
       <Card>
         <CardHeader>
-          <CardTitle>Who may sign up</CardTitle>
+          <CardTitle>
+            <h2 className="text-lg font-semibold tracking-tight">
+              Who may sign up
+            </h2>
+          </CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <RadioGroup
