@@ -27,6 +27,9 @@ async function signInAsAdmin(page: Page): Promise<void> {
 const form = (page: Page) =>
   page.getByRole("form", { name: "Mail server (SMTP)" });
 
+const testMailCard = (page: Page) =>
+  page.getByRole("region", { name: "Test mail" });
+
 async function fillServer(
   page: Page,
   values: { port?: number; password?: string } = {},
@@ -108,6 +111,13 @@ test.describe("the mail page", () => {
     await expect(
       page.getByRole("heading", { level: 1, name: "Mail" }),
     ).toBeVisible();
+    // The page below the Admin overview shows its trail (#184, breadcrumb rule of #179).
+    const crumb = page.getByRole("navigation", { name: "breadcrumb" });
+    await expect(crumb.getByRole("link", { name: "Admin" })).toBeVisible();
+    await expect(crumb.getByRole("link", { name: "Mail" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
     await expect(
       page.getByRole("button", { name: "Send test mail" }),
     ).toBeDisabled();
@@ -152,10 +162,12 @@ test.describe("the mail page", () => {
     await save(page);
     await sendTestMail(page);
     await expect(
-      page.getByRole("alert").filter({ hasText: "refused the login" }),
+      testMailCard(page)
+        .getByRole("status")
+        .filter({ hasText: "refused the login" }),
     ).toBeVisible();
     await expect(
-      page.getByRole("alert").filter({ hasText: "535" }),
+      testMailCard(page).getByRole("status").filter({ hasText: "535" }),
     ).toBeVisible();
     expect(await page.content()).not.toContain(wrong);
 
@@ -166,8 +178,8 @@ test.describe("the mail page", () => {
     await save(page);
     await sendTestMail(page);
     await expect(
-      page
-        .getByRole("alert")
+      testMailCard(page)
+        .getByRole("status")
         .filter({ hasText: "Nothing answered on that host and port" }),
     ).toBeVisible();
 
