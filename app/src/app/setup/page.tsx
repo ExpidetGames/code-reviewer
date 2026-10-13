@@ -2,12 +2,15 @@
 
 // The first-run setup: the code form, and once the code was accepted, the wizard. While the instance
 // is not set up the proxy shows this page in place of every other page (src/setup/gate.ts); once it
-// is, the proxy answers 404 for it and this page does the same as a second line.
+// is, the proxy answers 404 for it and this page does the same as a second line. The frame is the
+// shared `AuthCard` (#185): the setup brings its own `h1` per step, so the card renders none.
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense } from "react";
+import { AuthCard } from "@/components/auth-card";
+import { PageLoading } from "@/components/page-loading";
 import { SETUP_SESSION_COOKIE } from "@/setup/setup-session";
 import { checkCurrentSetupSession, getSetupStateReader } from "@/setup/shared";
 import { CodeForm } from "@/setup/ui/code-form";
@@ -20,14 +23,12 @@ export const metadata: Metadata = {
 
 export default function SetupPage() {
   return (
-    <main className="auth-page">
-      <div className="card auth-card setup-card">
-        {/* Everything here depends on the request (the cookie) and the database. */}
-        <Suspense fallback={<div className="page-loading" aria-busy="true" />}>
-          <SetupContent />
-        </Suspense>
-      </div>
-    </main>
+    <AuthCard>
+      {/* Everything here depends on the request (the cookie) and the database. */}
+      <Suspense fallback={<PageLoading label="Loading the setup" />}>
+        <SetupContent />
+      </Suspense>
+    </AuthCard>
   );
 }
 

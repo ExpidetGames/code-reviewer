@@ -18,8 +18,8 @@ describe("SPDX license headers", () => {
     expect(files.length).toBeGreaterThan(300);
     for (const path of [
       "app/src/ci/spdx-headers/rules.ts",
-      "app/src/ui/button.tsx",
-      "app/src/app/globals.css",
+      "app/src/components/button.tsx",
+      "app/src/app/theme.css",
       "app/next.config.ts",
       "runner/src/code_reviewer_runner/cli.py",
       "runner/scripts/list_licenses.py",

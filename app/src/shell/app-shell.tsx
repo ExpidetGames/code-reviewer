@@ -43,7 +43,7 @@ export function AppShell({
           <Suspense fallback={null}>
             <WorkspaceSidebarTrigger />
           </Suspense>
-          <Link href="/" className="font-bold text-foreground">
+          <Link href="/" className="font-bold text-foreground no-underline">
             Code Reviewer
           </Link>
           <div className="ml-auto flex min-w-0 items-center gap-2">

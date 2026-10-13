@@ -7,13 +7,17 @@ import type { SettingView } from "../service.ts";
 
 export function LastChanged({ setting }: { setting: SettingView<unknown> }) {
   if (setting.updatedAt === null)
-    return <p className="muted small">Never changed: the default is in use.</p>;
+    return (
+      <p className="text-sm text-muted-foreground">
+        Never changed: the default is in use.
+      </p>
+    );
   const who =
     setting.updatedBy === null
       ? "the system"
       : (setting.updatedBy.email ?? "a user who was deleted since");
   return (
-    <p className="muted small">
+    <p className="text-sm text-muted-foreground">
       Last changed by {who} on {formatUtc(setting.updatedAt)}.
     </p>
   );

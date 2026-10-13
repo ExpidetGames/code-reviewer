@@ -7,6 +7,7 @@
 // the forms are client components.
 import Link from "next/link";
 import { Breadcrumbs } from "../../components/breadcrumbs.tsx";
+import { CopyButton } from "../../components/copy-button.tsx";
 import { DescriptionList } from "../../components/description-list.tsx";
 import { HelpDisclosure } from "../../components/help-disclosure.tsx";
 import { PageHeader } from "../../components/page-header.tsx";
@@ -61,34 +62,31 @@ function originText(app: GithubConfigView["app"]): string {
 }
 
 function AddressList({ urls }: { urls: GithubConfigView["urls"] }) {
+  const rows = [
+    {
+      term: "Homepage URL",
+      value: urls.homepage,
+      label: "Copy the Homepage URL",
+    },
+    { term: "Webhook URL", value: urls.webhook, label: "Copy the Webhook URL" },
+    {
+      term: "Callback URL",
+      value: urls.callback,
+      label: "Copy the Callback URL",
+    },
+    { term: "Setup URL", value: urls.setup, label: "Copy the Setup URL" },
+  ] as const;
   return (
     <DescriptionList
-      items={[
-        {
-          term: "Homepage URL",
-          description: (
-            <span className="font-mono break-all">{urls.homepage}</span>
-          ),
-        },
-        {
-          term: "Webhook URL",
-          description: (
-            <span className="font-mono break-all">{urls.webhook}</span>
-          ),
-        },
-        {
-          term: "Callback URL",
-          description: (
-            <span className="font-mono break-all">{urls.callback}</span>
-          ),
-        },
-        {
-          term: "Setup URL",
-          description: (
-            <span className="font-mono break-all">{urls.setup}</span>
-          ),
-        },
-      ]}
+      items={rows.map((row) => ({
+        term: row.term,
+        description: (
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="font-mono break-all">{row.value}</span>
+            <CopyButton value={row.value} label={row.label} />
+          </div>
+        ),
+      }))}
     />
   );
 }

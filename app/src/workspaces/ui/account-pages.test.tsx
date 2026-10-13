@@ -154,9 +154,7 @@ describe("the form that creates a workspace", () => {
     render(<CreateWorkspaceForm api={api} open={open} />);
 
     await user.type(screen.getByLabelText("Name of the workspace"), "Team A");
-    await user.click(
-      screen.getByRole("button", { name: "Create the workspace" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Create workspace" }));
 
     expect(api.createWorkspace).toHaveBeenCalledWith("Team A");
     await waitFor(() =>
@@ -179,9 +177,7 @@ describe("the form that creates a workspace", () => {
     render(<CreateWorkspaceForm api={api} open={open} />);
 
     await user.type(screen.getByLabelText("Name of the workspace"), "Team A");
-    await user.click(
-      screen.getByRole("button", { name: "Create the workspace" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Create workspace" }));
 
     expect((await screen.findByRole("alert")).textContent).toBe(
       "You own as many workspaces as this instance allows.",
