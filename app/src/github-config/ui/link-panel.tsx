@@ -4,9 +4,9 @@
 // "Link my GitHub account": starts GitHub's authorization of the signed-in person (the user authorization
 // of the instance's GitHub App). Coming back, the identity is linked to this account, or, for the instance
 // admin and an imported operator who has that identity and no other credential, the two accounts are merged
-// (docs/decisions/0001-editions-setup-and-accounts.md, section 2.5). Used on the account page and in the
-// admin portal; they differ only in the route they call. It renders the content of a normal card (the caller
-// owns the card and its title), not a settings form, and the long merge explanation sits behind a disclosure.
+// (docs/decisions/0001-editions-setup-and-accounts.md, section 2.5). It renders the content of a normal
+// card (the caller owns the card and its title), not a settings form, and the long merge explanation sits
+// behind a disclosure.
 import { useState } from "react";
 import { Button } from "../../components/button.tsx";
 import { HelpDisclosure } from "../../components/help-disclosure.tsx";
@@ -17,32 +17,21 @@ import { describeGithubFailure } from "./messages.ts";
 
 export type StartLink = () => Promise<RequestResult<{ ok: true; url: string }>>;
 
-/** The route that starts the linking, by the page it is started from. */
-const START_ROUTE = {
-  account: "/api/account/github/link",
-  admin: "/api/admin/github/link",
-} as const;
+/** The route that starts the linking from the account page. */
+const LINK_START_ROUTE = "/api/account/github/link";
 
-export function startLinkFrom(surface: "account" | "admin"): StartLink {
+export function startLinkFrom(): StartLink {
   return () =>
-    requestJson(
-      (url, init) => fetch(url, init),
-      "POST",
-      START_ROUTE[surface],
-      {},
-    );
+    requestJson((url, init) => fetch(url, init), "POST", LINK_START_ROUTE, {});
 }
 
 export function LinkPanel({
-  surface,
-  startLink = startLinkFrom(surface),
+  startLink = startLinkFrom(),
   available,
   unavailableReason,
   merge = false,
   go = goTo,
 }: {
-  /** The page it is on: it decides the route that is called and where the person lands afterwards. */
-  surface: "account" | "admin";
   /** Only tests pass this. */
   startLink?: StartLink;
   /** False while the GitHub App's user authorization is not configured. */

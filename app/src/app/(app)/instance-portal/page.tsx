@@ -12,10 +12,10 @@ import { PageHeader } from "@/components/page-header";
 export const metadata: Metadata = { title: "Admin" };
 
 export default async function AdminPage() {
-  const user = await requireAdmin();
+  await requireAdmin();
   const [settings, github] = await Promise.all([
     getAdminService().readSettings(),
-    getIntegrationsPageData(user.id),
+    getIntegrationsPageData(),
   ]);
   return (
     <>
