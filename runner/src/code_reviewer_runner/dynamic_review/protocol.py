@@ -9,6 +9,9 @@ from .limits import Budget, CheckoutError, ObjectUnavailable
 from .transport import Transport, packet
 
 _SHA = re.compile(rb"[0-9a-f]{40}")
+# A shared commit within this many steps of both tips is enough; the merge base is never deeper
+# than the deepest common commit found (a descendant of it is on the tip paths).
+_MAX_HISTORY_DEPTH = 4096
 
 
 class Packets:
@@ -86,9 +89,18 @@ def fetch_pack(
     budget: Budget,
     *,
     blobs: bool = False,
+    history: int | None = None,
 ) -> bytes:
+    """Want commits (optionally blobless) and verify the returned PACK framing.
+
+    ``blobs`` wants the objects verbatim (hydration). ``history`` deepens the transfer and,
+    when the server supports filters, requests commits only (``tree:0``) so a bounded ancestry
+    walk cannot pull in trees or blobs.
+    """
     shas = (sha,) if isinstance(sha, str) else sha
     if not 1 <= len(shas) <= 32 or any(not _SHA.fullmatch(oid.encode()) for oid in shas):
+        raise CheckoutError()
+    if history is not None and not 1 <= history <= _MAX_HISTORY_DEPTH:
         raise CheckoutError()
     caps = "side-band-64k"
     if "no-progress" in capabilities:
@@ -98,10 +110,14 @@ def fetch_pack(
         caps += " filter"
     request = packet(f"want {shas[0]} {caps}\n".encode())
     request += b"".join(packet(f"want {oid}\n".encode()) for oid in shas[1:])
-    if not blobs:
+    if history is not None:
+        request += packet(f"deepen {history}\n".encode())
+        if filtered:
+            request += packet(b"filter tree:0\n")
+    elif not blobs:
         request += packet(b"deepen 1\n")
-    if filtered:
-        request += packet(b"filter blob:none\n")
+        if filtered:
+            request += packet(b"filter blob:none\n")
     request += b"0000" + packet(b"done\n")
     pack = bytearray()
     with closing(Packets(transport.stream(request, budget), budget).packets()) as lines:

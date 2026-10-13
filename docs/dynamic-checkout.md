@@ -76,9 +76,10 @@ preparation envelope (a busy repository can advertise many megabytes of `refs/pu
 is not limited by the 1 MiB per-field cap), and explicitly wants the queued
 commit, obtained from `refs/pull/<number>/head` in the **base** repository, and the base-ref snapshot.
 Both advertisement and fetched object identity are verified; the PR ref is checked again before
-returning preparation. Depth one and `blob:none` are requested when supported. Ignored filters
-are allowed only within the same hard envelope. Missing eligible blobs are explicitly wanted
-in batches of at most 32 only after all endpoint paths/modes pass policy.
+returning preparation. Depth one and `blob:none` are requested when supported. The merge base is
+found with a bounded, commits-only ancestry walk (`deepen` with `filter tree:0`), so it cannot pull
+in trees or blobs. Ignored filters are allowed only within the same hard envelope. Missing eligible
+blobs are explicitly wanted in batches of at most 32 only after all endpoint paths/modes pass policy.
 
 No Git client object store, checkout or `index-pack` is used in production. The runner verifies
 PACK versions 2/3, checksums, object headers, bounded zlib output, REF/OFS deltas and copy ranges,
@@ -92,7 +93,7 @@ This works independently of bookworm Git's lack of `--no-lazy-fetch`.
 | Bound | Enforcement |
 |---|---|
 | 20,000 entries | Each exact endpoint tree, including directories; before blob reads. Pack object count also has a bounded envelope. |
-| 512 KiB/file | Blob size before content read/materialization; redacted output checked again. Oversized unchanged input has an omission; required changed input fails. |
+| 512 KiB/file | Blob size before content read/materialization; redacted output checked again. Oversized unchanged input has an omission; a changed oversized file is skipped with reason `too_large` rather than failing. |
 | 64 MiB exposed content | All exported regular content plus serialized evidence, including manifest, metadata and prior state. |
 | 256 MiB preparation | One cumulative budget across HTTP status/headers/chunk framing/body or offline Git transfer, every hydration, inflation/delta reconstruction and exported/evidence writes; 4 KiB allocation rounding and directories charged before writes. A conservative 64 KiB runtime/lifetime reservation is charged before creation. No retry resets. |
 | 2 MiB diff | Each endpoint diff, incrementally before adding lines; combined serialized evidence has an additional 3 MiB ceiling. |
@@ -117,23 +118,33 @@ Known job credentials, token shapes, private-key blocks and credential assignmen
 in file text, diffs, metadata and prior state. Harmless example placeholders remain readable.
 
 Omissions use `OmissionReason` stable values and a bounded explicit manifest. A changed or deleted
-file needed by either comparison that is excluded by policy fails with `checkout_incomplete`.
-Unchanged exclusions remain visible in the manifest; consumers must retain that limitation rather
-than claim that excluded content was reviewed. No excluded config/plugin payload is relocated into
-another exposed file. Sanitized prior state is retained, including in full mode; checkout never
-infers a finding resolution. #199 owns parsing and lossless reconciliation of that state.
+**denied or unsafe** file needed by either comparison (engine discovery, credential path, symlink
+or other non-regular mode) fails with `checkout_incomplete`. A changed **binary** file or a changed
+file over 512 KiB is instead excluded from the checkout and listed in the evidence `skipped` array
+with the stable reason code `binary` or `too_large`, so the review can say the file was not
+reviewed; it never fails the job. Unchanged exclusions remain visible in the manifest; consumers
+must retain that limitation rather than claim that excluded content was reviewed. No excluded
+config/plugin payload is relocated into another exposed file. Sanitized prior state is retained,
+including in full mode; checkout never infers a finding resolution. #199 owns parsing and lossless
+reconciliation of that state.
 
 ## Comparison
 
-Evidence records exact head/base/prior identities. The current diff compares the base-ref snapshot
-tree and exact queued head tree. The incremental diff independently compares the exact previous
-reviewed tree and current head tree, without a merge-base/ancestry assumption. Full-file unified
-hunks preserve file modes, CRLF and final-newline changes; renames appear as exact deletion/addition
-pairs without a similarity heuristic. These are endpoint/two-dot comparisons, including orphan
-force pushes. If a previous commit/tree/blob is explicitly unavailable, mode is `full`, previous
-evidence is empty and prior findings remain. Malformed transfers, provider failures or global
-quota breaches are failures, never relabeled as full success. No GitHub three-dot compare response,
-300-file truncation or absent finding can establish completeness or resolution.
+Evidence records exact head/base/merge-base/prior identities. The base-to-head diff is the exact
+two-dot comparison between the **merge base of the queued head and the base ref** and the head tree
+(GitHub's "Files changed" semantics): base-only commits added after the fork never appear as
+reversed changes and a base-only oversized or binary file never fails the job. The merge base is
+found with a bounded, commits-only ancestry walk (`deepen`, `filter tree:0`, up to 4,096 commits)
+under the same budget; the walk does not run without the `filter` capability. If no merge base is
+found, checkout declares a full review of the head (the head tree added in full) instead of guessing
+a base. The incremental diff independently compares the exact previous reviewed tree and current
+head tree. Line-level unified hunks preserve file modes, CRLF and final-newline changes; renames
+appear as exact deletion/addition pairs without a similarity heuristic. These are endpoint/two-dot
+comparisons, including orphan force pushes. If a previous commit/tree/blob is explicitly
+unavailable, mode is `full`, previous evidence is empty and prior findings remain. Malformed
+transfers, provider failures or global quota breaches are failures, never relabeled as full
+success. No GitHub three-dot compare response, 300-file truncation or absent finding can establish
+completeness or resolution.
 
 ## Versioned discovery exclusions
 

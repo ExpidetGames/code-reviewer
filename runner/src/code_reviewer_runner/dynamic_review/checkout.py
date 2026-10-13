@@ -6,6 +6,7 @@ import re
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 
 from code_reviewer_runner.job import ClaimBase, Job
@@ -18,7 +19,7 @@ from .content_policy import (
     omission_reason,
     redact_text,
 )
-from .evidence import Entry, changed_paths, endpoint_diff, tracked_tree
+from .evidence import Entry, changed_paths, endpoint_diff, merge_base, tracked_tree
 from .limits import DEFAULT_LIMITS, Budget, CheckoutError, Limits, ObjectUnavailable
 from .objects import ObjectStore
 from .paths import validate_path
@@ -28,10 +29,23 @@ from .transport import HttpTransport, Transport, repository_url
 _SHA = re.compile(r"[0-9a-f]{40}")
 
 
+class SkipReason(StrEnum):
+    """Stable reason codes for changed content excluded from the review rather than failed."""
+
+    BINARY = "binary"
+    TOO_LARGE = "too_large"
+
+
 @dataclass(frozen=True)
 class Omission:
     path: str
     reason: OmissionReason
+
+
+@dataclass(frozen=True)
+class Skipped:
+    path: str
+    reason: SkipReason
 
 
 @dataclass(frozen=True)
@@ -40,12 +54,14 @@ class PreparedContent:
     export: Path
     head_sha: str
     base_sha: str
+    merge_base_sha: str | None
     previous_sha: str | None
     comparison: str
     files: dict[str, str]
     diff: str
     previous_diff: str
     omissions: tuple[Omission, ...]
+    skipped: tuple[Skipped, ...]
     metadata: str
     prior_state: str
     deadline: float
@@ -129,10 +145,16 @@ def prepare_content(
             raise CheckoutError()
         store = ObjectStore(directory / "objects", budget)
         store.unpack(fetch_pack(transport, base.head_sha, caps, budget))
-        if base_sha != base.head_sha:
-            store.unpack(fetch_pack(transport, base_sha, caps, budget))
         head = tracked_tree(store, base.head_sha)
-        current_base = tracked_tree(store, base_sha)
+        # The base-to-head ("Files changed") diff is against the merge base, never the moving
+        # base-ref snapshot. If the ancestry walk cannot find one within its bound, review the
+        # whole head instead of guessing a base.
+        merge_base_sha = _resolve_merge_base(
+            store, transport, caps, base.head_sha, base_sha, budget
+        )
+        base_tree: dict[str, Entry] = {}
+        if merge_base_sha is not None:
+            base_tree = tracked_tree(store, merge_base_sha)
         previous: dict[str, Entry] | None = None
         if base.comparison == "incremental" and base.previous_reviewed_sha:
             try:
@@ -142,15 +164,16 @@ def prepare_content(
             except ObjectUnavailable:
                 budget.check()
                 previous = None
-        required = changed_paths(head, current_base)
+        required = changed_paths(head, base_tree)
         if previous is not None:
             required |= changed_paths(head, previous)
         omissions: dict[str, Omission] = {}
+        skipped: dict[str, Skipped] = {}
         texts: dict[str, str] = {}
         cache: dict[str, str | None] = {}
         eligible: set[str] = set()
         prior_eligible: set[str] = set()
-        for index, tree in enumerate((head, current_base, previous or {})):
+        for index, tree in enumerate((head, base_tree, previous or {})):
             for path, entry in tree.items():
                 budget.check()
                 reason = omission_reason(path, entry.mode)
@@ -179,14 +202,17 @@ def prepare_content(
         except ObjectUnavailable:
             budget.check()
             previous = None
-            required = changed_paths(head, current_base)
+            required = changed_paths(head, base_tree)
             omissions = {
                 path: omission
                 for path, omission in omissions.items()
-                if path in head or path in current_base
+                if path in head or path in base_tree
+            }
+            skipped = {
+                path: skip for path, skip in skipped.items() if path in head or path in base_tree
             }
         # Apply policy to every endpoint before any blob reads, including deleted evidence.
-        for tree in (head, current_base, previous or {}):
+        for tree in (head, base_tree, previous or {}):
             for path, entry in tree.items():
                 budget.check()
                 reason = omission_reason(path, entry.mode)
@@ -209,10 +235,21 @@ def prepare_content(
                 if reason is not None:
                     omissions[path] = Omission(redact_text(path, redactor), reason)
                     if path in required:
-                        raise CheckoutError()
-        diff = endpoint_diff(current_base, head, cache, budget, redactor)
+                        # A changed binary or oversized file is excluded from the checkout and
+                        # reported as skipped; denied or unsafe content still fails closed.
+                        skip_reason = _skip_reason(reason)
+                        if skip_reason is None:
+                            raise CheckoutError()
+                        skipped[path] = Skipped(redact_text(path, redactor), skip_reason)
+        diff = endpoint_diff(
+            _diffable(base_tree, skipped), _diffable(head, skipped), cache, budget, redactor
+        )
         previous_diff = (
-            endpoint_diff(previous, head, cache, budget, redactor) if previous is not None else ""
+            endpoint_diff(
+                _diffable(previous, skipped), _diffable(head, skipped), cache, budget, redactor
+            )
+            if previous is not None
+            else ""
         )
         metadata = _bounded_text(metadata, budget, redactor)
         prior_state = _bounded_text(prior_state, budget, redactor)
@@ -233,6 +270,7 @@ def prepare_content(
             {
                 "headSha": base.head_sha,
                 "baseSha": base_sha,
+                "mergeBaseSha": merge_base_sha,
                 "previousReviewedSha": base.previous_reviewed_sha,
                 "comparison": "incremental" if previous is not None else "full",
                 "denyList": DENY_LIST_VERSION,
@@ -241,6 +279,7 @@ def prepare_content(
                 "metadata": metadata,
                 "priorState": prior_state,
                 "omissions": [x.__dict__ for x in omissions.values()],
+                "skipped": [x.__dict__ for x in skipped.values()],
             },
             ensure_ascii=True,
         ).encode()
@@ -260,12 +299,14 @@ def prepare_content(
             export,
             base.head_sha,
             base_sha,
+            merge_base_sha,
             base.previous_reviewed_sha,
             "incremental" if previous is not None else "full",
             texts,
             diff,
             previous_diff,
             tuple(omissions.values()),
+            tuple(skipped.values()),
             metadata,
             prior_state,
             budget.deadline,
@@ -276,6 +317,38 @@ def prepare_content(
     except BaseException:
         shutil.rmtree(directory)
         raise
+
+
+def _resolve_merge_base(
+    store: ObjectStore,
+    transport: Transport,
+    capabilities: set[str],
+    head: str,
+    base_sha: str,
+    budget: Budget,
+) -> str | None:
+    try:
+        found = merge_base(store, transport, capabilities, head, base_sha, budget)
+        if found is None or found == head:
+            return found
+        # The ancestry walk is commits-only; fetch the merge base commit with its tree.
+        store.unpack(fetch_pack(transport, found, capabilities, budget))
+    except ObjectUnavailable:
+        budget.check()
+        return None
+    return found if found in store.objects else None
+
+
+def _skip_reason(reason: OmissionReason) -> SkipReason | None:
+    if reason is OmissionReason.BINARY:
+        return SkipReason.BINARY
+    if reason is OmissionReason.LARGE_FILE:
+        return SkipReason.TOO_LARGE
+    return None
+
+
+def _diffable(tree: dict[str, Entry], skipped: dict[str, Skipped]) -> dict[str, Entry]:
+    return {path: entry for path, entry in tree.items() if path not in skipped}
 
 
 def _bounded_text(text: str, budget: Budget, redactor: Redactor) -> str:

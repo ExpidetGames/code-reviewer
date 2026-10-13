@@ -4,6 +4,7 @@
 import difflib
 import json
 import re
+from collections import deque
 from dataclasses import dataclass
 
 from code_reviewer_runner.redaction import Redactor
@@ -12,11 +13,16 @@ from .content_policy import redact_text
 from .limits import Budget, CheckoutError
 from .objects import ObjectStore
 from .paths import validate_path
+from .protocol import fetch_pack
+from .transport import Transport
 
 _SHA = re.compile(r"[0-9a-f]{40}")
 # Bound the (worst-case quadratic) line matcher; beyond this a full-body hunk is emitted, which
 # the diff budget bounds as before.
 _MAX_MATCH_LINES = 50_000
+# Progressive history depths for the merge base. Each fetch is commits-only (tree:0); the walk
+# gives up and declares a full review rather than guessing once these are exhausted.
+_MERGE_BASE_DEPTHS = (16, 64, 256, 1024, 4096)
 
 
 @dataclass(frozen=True)
@@ -69,6 +75,72 @@ def changed_paths(left: dict[str, Entry], right: dict[str, Entry]) -> set[str]:
     return {path for path in left.keys() | right.keys() if left.get(path) != right.get(path)}
 
 
+def commit_parents(store: ObjectStore, commit: str) -> list[str]:
+    obj = store.objects.get(commit)
+    if obj is None or obj.kind != "commit":
+        return []
+    parents: list[str] = []
+    for line in store.read(commit, "commit").split(b"\n"):
+        if line.startswith(b"parent "):
+            parents.append(line[len(b"parent ") :].decode("ascii"))
+        elif parents:
+            break
+    return parents
+
+
+def merge_base(
+    store: ObjectStore,
+    transport: Transport,
+    capabilities: set[str],
+    head: str,
+    base: str,
+    budget: Budget,
+) -> str | None:
+    """Best common ancestor of head and base within a bounded, commits-only deepening.
+
+    Returns ``None`` when the server cannot filter (no cheap ancestry walk) or no shared
+    ancestor is found within the depth bound; the caller then declares a full review.
+    """
+    if "filter" not in capabilities:
+        return None
+    parents: dict[str, list[str]] = {}
+    wants = (base,) if base == head else (base, head)
+    for depth in _MERGE_BASE_DEPTHS:
+        store.unpack(fetch_pack(transport, wants, capabilities, budget, history=depth))
+        for oid, obj in store.objects.items():
+            if obj.kind == "commit" and oid not in parents:
+                parents[oid] = commit_parents(store, oid)
+        result = _best_common_ancestor(head, base, parents)
+        if result is not None:
+            return result
+    return None
+
+
+def _best_common_ancestor(head: str, base: str, parents: dict[str, list[str]]) -> str | None:
+    def distances(start: str) -> dict[str, int]:
+        seen: dict[str, int] = {}
+        queue: deque[tuple[str, int]] = deque([(start, 0)])
+        while queue:
+            commit, distance = queue.popleft()
+            if commit in seen:
+                continue
+            seen[commit] = distance
+            queue.extend(
+                (parent, distance + 1)
+                for parent in parents.get(commit, ())
+                if parent in parents and parent not in seen
+            )
+        return seen
+
+    from_head, from_base = distances(head), distances(base)
+    common = from_head.keys() & from_base.keys()
+    if not common:
+        return None
+    # A merge base is never deeper than any other common ancestor, so the shallowest common
+    # commit from either tip is a merge base (there can be several on a criss-cross history).
+    return min(common, key=lambda commit: (from_head[commit], from_base[commit], commit))
+
+
 def endpoint_diff(
     left: dict[str, Entry],
     right: dict[str, Entry],
@@ -90,8 +162,8 @@ def endpoint_diff(
         result.append(line)
 
     for path in sorted(changed_paths(left, right)):
-        before = cache[left[path].oid] if path in left else ""
-        after = cache[right[path].oid] if path in right else ""
+        before = cache.get(left[path].oid) if path in left else ""
+        after = cache.get(right[path].oid) if path in right else ""
         if before is None or after is None:
             raise CheckoutError()
         a, b = before.splitlines(keepends=True), after.splitlines(keepends=True)

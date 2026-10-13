@@ -130,25 +130,42 @@ def test_discovery_credentials_and_symlinks_are_not_read_or_relocated(
     [
         ("opencode.json", b"{}"),
         (".env.local", b"secret"),
-        ("image.bin", b"\0"),
-        ("large.txt", b"a" * 17),
         ("link", ("120000", b"/etc/passwd")),
     ],
 )
-def test_required_omitted_changes_fail_the_review(
+def test_required_denied_or_unsafe_changes_fail_the_review(
     repo: GitFixture, tmp_path: Path, name: str, value: bytes | tuple[str, bytes]
 ) -> None:
     repo.set_head({"README.md": b"base\n", name: value})
     with pytest.raises(CheckoutError, match="checkout_incomplete"):
-        prepare_content(
-            claim(repo),
-            196,
-            LocalTransport(repo.path),
-            tmp_path / "job",
-            Redactor(()),
-            limits=Limits(file_bytes=16),
-        )
+        prepare_content(claim(repo), 196, LocalTransport(repo.path), tmp_path / "job", Redactor(()))
     assert not (tmp_path / "job").exists()
+
+
+# #196-T04 #196-T05
+@pytest.mark.parametrize(
+    "name,value,reason",
+    [("image.bin", b"\0", "binary"), ("large.txt", b"a" * 17, "too_large")],
+)
+def test_changed_binary_or_oversized_files_are_skipped_not_failed(
+    repo: GitFixture, tmp_path: Path, name: str, value: bytes, reason: str
+) -> None:
+    import json
+
+    repo.set_head({"README.md": b"base\n", name: value})
+    result = prepare_content(
+        claim(repo),
+        196,
+        LocalTransport(repo.path),
+        tmp_path / "job",
+        Redactor(()),
+        limits=Limits(file_bytes=16),
+    )
+    assert name not in result.files
+    assert [(skip.path, skip.reason) for skip in result.skipped] == [(name, reason)]
+    assert name not in result.diff
+    evidence = json.loads((result.root / "evidence.json").read_bytes())
+    assert {"path": name, "reason": reason} in evidence["skipped"]
 
 
 # #196-T07
@@ -667,6 +684,63 @@ def test_a_one_line_change_in_a_large_file_emits_a_bounded_hunk(
     assert "-line 2500\n" in result.diff and "+line 2500 changed\n" in result.diff
     assert "line 0\n" not in result.diff and "line 4999\n" not in result.diff
     assert len(result.diff.encode()) < len(original) // 10
+
+
+# #196-T11
+def test_base_to_head_diff_uses_the_merge_base_of_head_and_base(
+    repo: GitFixture, tmp_path: Path
+) -> None:
+    head = repo.commit({"README.md": b"base\n", "source.py": b"print('review')\n"}, repo.base)
+    git(repo.path, "update-ref", "refs/pull/196/head", head)
+    moved = repo.commit({"README.md": b"base\n", "other.py": b"print('other')\n"}, repo.base)
+    git(repo.path, "update-ref", "refs/heads/main", moved)
+    repo.head = head
+    result = prepare_content(
+        claim(repo), 196, LocalTransport(repo.path), tmp_path / "job", Redactor(())
+    )
+    assert result.base_sha == moved and result.merge_base_sha == repo.base
+    assert "source.py" in result.diff
+    assert "other.py" not in result.diff
+    assert "source.py" in result.files and "other.py" not in result.files
+
+
+# #196-T04 #196-T11
+def test_base_only_binary_and_oversized_files_never_fail_a_review(
+    repo: GitFixture, tmp_path: Path
+) -> None:
+    head = repo.commit({"README.md": b"base\n", "source.py": b"print('review')\n"}, repo.base)
+    git(repo.path, "update-ref", "refs/pull/196/head", head)
+    moved = repo.commit(
+        {"README.md": b"base\n", "image.bin": b"\0" * 64, "big.txt": b"a" * 2048}, repo.base
+    )
+    git(repo.path, "update-ref", "refs/heads/main", moved)
+    repo.head = head
+    result = prepare_content(
+        claim(repo),
+        196,
+        LocalTransport(repo.path),
+        tmp_path / "job",
+        Redactor(()),
+        limits=Limits(file_bytes=1024),
+    )
+    assert result.merge_base_sha == repo.base
+    assert result.skipped == ()
+    assert "source.py" in result.diff
+    assert "image.bin" not in result.diff and "big.txt" not in result.diff
+
+
+# #196-T11
+def test_a_missing_merge_base_declares_a_full_review_of_the_head(
+    repo: GitFixture, tmp_path: Path
+) -> None:
+    repo.set_head({"README.md": b"fork\n", "source.py": b"print('review')\n"}, orphan=True)
+    result = prepare_content(
+        claim(repo), 196, LocalTransport(repo.path), tmp_path / "job", Redactor(())
+    )
+    assert result.merge_base_sha is None
+    assert result.comparison == "full"
+    assert "source.py" in result.diff and "README.md" in result.diff
+    assert set(result.files) == {"README.md", "source.py"}
 
 
 # #196-T08 #196-T12

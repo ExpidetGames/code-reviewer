@@ -94,9 +94,13 @@ The job is JSON on stdin (the shape is documented in `src/code_reviewer_runner/j
 Checkout preparation (#196) is available through the root-supervised
 `dynamic_review.export_isolation.prepared_checkout` lifetime: bounded exact-head acquisition,
 sanitized endpoint evidence, exclusive job identities and an actual-uid verified read-only export.
-It is an integration seam for #197; it does not launch an engine or enable the capability/gate.
-The current non-root runner image cannot act as that root supervisor yet (#202). Details, hard
-bounds, the v1.19.0 discovery deny-list and cleanup obligations: [Dynamic checkout](../docs/dynamic-checkout.md).
+The base-to-head diff is against the merge base of the head and the base ref (a missing merge base
+declares a full review of the head); a changed binary or oversized file is excluded and reported as
+`skipped` with reason `binary`/`too_large` instead of failing, while denied and unsafe paths still
+fail closed. It is an integration seam for #197; it does not launch an engine or enable the
+capability/gate. The current non-root runner image cannot act as that root supervisor yet (#202).
+Details, hard bounds, the v1.19.0 discovery deny-list and cleanup obligations:
+[Dynamic checkout](../docs/dynamic-checkout.md).
 
 A Dynamic job is never run by PR-Agent: this stage has no engine yet, so `main` refuses it with the
 stable code `dynamic_engine_unavailable` before any process starts (#197 adds the engine). A Diff job
