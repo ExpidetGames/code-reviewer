@@ -61,7 +61,7 @@ test.describe("starting a review by hand", () => {
     });
   });
 
-  /** Signs in, syncs, switches the repository on and opens its project page. */
+  /** Signs in, syncs, switches the repository on and opens its review page (#174). */
   async function openProject(page: import("@playwright/test").Page) {
     await syncFromGithubAsAdmin(e2eEnv.appUrl);
     await signInThroughTheForm(page, account);
@@ -76,6 +76,12 @@ test.describe("starting a review by hand", () => {
     await expect(
       page.getByRole("heading", { level: 1, name: WIDGETS.fullName }),
     ).toBeVisible();
+    // The settings page is the project's entry; the manual review panel is its own page since #174.
+    await page
+      .getByRole("navigation", { name: "Project" })
+      .getByRole("link", { name: "Review now" })
+      .click();
+    await expect(page).toHaveURL(/\/projects\/[^/]+\/review$/);
   }
 
   // CR-33-T16, #203-T16
@@ -144,9 +150,16 @@ test.describe("starting a review by hand", () => {
     request,
   }) => {
     await signInThroughTheForm(page, account);
-    await page.getByRole("link", { name: "Projects", exact: true }).click();
+    await page
+      .getByRole("navigation", { name: "Main" })
+      .getByRole("link", { name: "Projects", exact: true })
+      .click();
     await page
       .getByRole("link", { name: WIDGETS.fullName, exact: true })
+      .click();
+    await page
+      .getByRole("navigation", { name: "Project" })
+      .getByRole("link", { name: "Review now" })
       .click();
     await page.getByRole("radio", { name: /#13 Work in progress/ }).check();
     await page.getByRole("button", { name: "Review now" }).click();

@@ -32,7 +32,7 @@ import {
   SIGN_UP_RULE_OPTIONS,
 } from "../signup/ui/rule-copy.ts";
 import { TENANCY_OPTIONS } from "../signup/ui/tenancy-copy.ts";
-import { PROJECT_STATE_TEXT } from "../projects/ui/messages.ts";
+import { PROJECT_STATE_NOTICE } from "../projects/ui/messages.ts";
 import {
   CROSS_SITE_REQUEST,
   CROSS_SITE_REQUEST_RELOAD_PAGE,
@@ -92,8 +92,11 @@ const CONSOLIDATED: ReadonlyArray<readonly [string, string]> = [
     option.text,
     "signup/ui/tenancy-copy.ts",
   ]),
-  ...Object.values(PROJECT_STATE_TEXT).map(
-    (text): readonly [string, string] => [text, "projects/ui/messages.ts"],
+  ...Object.values(PROJECT_STATE_NOTICE).flatMap(
+    (notice): ReadonlyArray<readonly [string, string]> => [
+      [notice.title, "projects/ui/messages.ts"],
+      [notice.detail, "projects/ui/messages.ts"],
+    ],
   ),
   [CROSS_SITE_REQUEST, "copy/messages.ts"],
   [CROSS_SITE_REQUEST_RELOAD_PAGE, "copy/messages.ts"],
