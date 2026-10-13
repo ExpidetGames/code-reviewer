@@ -101,6 +101,35 @@ describe("the global defaults", () => {
     expect(view.updatedBy).toBe("hubot");
   });
 
+  // #178 review M2: the "Reset every default" danger zone sends an empty patch; it must clear the global
+  // layer and leave the overrides of a project alone.
+  it("clear every global override with an empty patch, and keep a project's own overrides", async () => {
+    const app = await setupReviewSettings();
+    await app.projects.activate(app.first.id);
+    await app.service.updateGlobalSettings(
+      { maxFindings: 8, maxTokens: 50_000 },
+      "octocat",
+    );
+    await app.service.updateProjectSettings(app.first.id, {
+      maxFindings: 3,
+      maxTokens: 70_000,
+    });
+
+    const view = await app.service.updateGlobalSettings({}, "hubot");
+
+    expect(view.overrides).toEqual({});
+    expect(view.effective.maxFindings).toBe(5);
+    expect(view.effective.maxTokens).toBe(DEFAULT_MAX_TOKENS);
+    expect(view.updatedBy).toBe("hubot");
+    expect(await app.appSettingRows()).toMatchObject([
+      { key: "review_defaults", value: "{}", updated_by: "hubot" },
+    ]);
+    const project = await app.service.getProjectSettings(app.first.id);
+    expect(project.overrides).toEqual({ maxFindings: 3, maxTokens: 70_000 });
+    expect(project.effective.maxFindings).toBe(3);
+    expect(project.effective.maxTokens).toBe(70_000);
+  });
+
   // CR-25-T07
   it("refuse invalid settings with the fields that are wrong, and store nothing", async () => {
     const app = await setupReviewSettings();

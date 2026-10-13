@@ -1,9 +1,9 @@
 # Manual start
 
 A person can start a review (`/review`, the only command since #203) for an open pull request of an
-active project from the project page ("Review now"). The job goes through the same queue as every
-other trigger, as a `manual` job with the login of the person (`src/jobs/README.md`); the run shows up
-on the Runs page as "Started by <login>".
+active project from the project's review page ("Review now", `/w/:workspace/projects/:repositoryId/review`,
+#174). The job goes through the same queue as every other trigger, as a `manual` job with the login of
+the person (`src/jobs/README.md`); the run shows up on the Runs page as "Started by <login>".
 
 | File                          | Role                                                                                                                               |
 | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |

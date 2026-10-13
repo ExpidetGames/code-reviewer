@@ -15,7 +15,7 @@ import {
 } from "../../ui/transport-messages.ts";
 import type { ProjectErrorCode } from "../errors.ts";
 
-/** The one owner of the two project state wordings (#169): the list badge and the settings page. */
+/** The one owner of the three project state wordings (#169): the list badge and the settings page. */
 export const PROJECT_STATE_LABEL: Record<
   "active" | "inactive" | "unavailable",
   string
@@ -25,15 +25,37 @@ export const PROJECT_STATE_LABEL: Record<
   unavailable: "Unavailable",
 };
 
-export const PROJECT_STATE_TEXT: Record<
+/** The badge tone of a state; a state is never told by colour alone, the label always stands next to it. */
+export const PROJECT_STATE_BADGE: Record<
   "active" | "inactive" | "unavailable",
-  string
+  "success" | "neutral" | "warning"
 > = {
-  active: "Active: new pull requests are reviewed.",
-  inactive:
-    "Inactive: no reviews run until the project is activated. You can save settings now; they apply once it is switched on.",
-  unavailable:
-    "Unavailable: the GitHub App can no longer read this repository. Its settings are kept.",
+  active: "success",
+  inactive: "neutral",
+  unavailable: "warning",
+};
+
+/**
+ * What the settings page says about a project that is not running reviews (#174). The state itself is
+ * the badge next to the title; what it means for this page is a row of the one "Needs attention" strip.
+ * An active project has no row.
+ */
+export const PROJECT_STATE_NOTICE: Record<
+  "inactive" | "unavailable",
+  { severity: "warning" | "error"; title: string; detail: string }
+> = {
+  inactive: {
+    severity: "warning",
+    title: "Project is inactive",
+    detail:
+      "No reviews run until the project is activated. You can save settings now; they apply once it is switched on.",
+  },
+  unavailable: {
+    severity: "error",
+    title: "Repository is unavailable",
+    detail:
+      "The GitHub App cannot read this repository any more. Its settings are kept.",
+  },
 };
 
 const FAILURE_COPY: Record<ProjectErrorCode | SyncErrorCode, string> = {

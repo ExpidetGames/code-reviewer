@@ -84,7 +84,7 @@ test.describe("the LLM key of a workspace", () => {
       .getByRole("link", { name: "Add a key in the settings" })
       .filter({ visible: true })
       .click();
-    await expect(page).toHaveURL(new RegExp(`/w/${slug}/settings#llm-access$`));
+    await expect(page).toHaveURL(new RegExp(`/w/${slug}/settings/llm$`));
     const form = page.getByRole("form", { name: "LLM key" });
     await expect(form).toBeVisible();
     await expect(page.getByRole("button", { name: "Test key" })).toBeDisabled();
@@ -142,9 +142,9 @@ test.describe("the LLM key of a workspace", () => {
     await expect(member).toHaveURL(/\/no-access$/);
     await joinWorkspace(member, { email }, "member", slug);
 
-    await member.goto(`/w/${slug}/settings`);
+    await member.goto(`/w/${slug}/settings/llm`);
     await expect(
-      member.getByRole("heading", { level: 2, name: "LLM access" }),
+      member.getByRole("heading", { level: 1, name: "LLM access" }),
     ).toBeVisible();
     await expect(
       member.getByText("Reviews of this workspace have an LLM key."),

@@ -88,7 +88,7 @@ function renderPanel(
 
 describe("the page", () => {
   // #176-T01
-  it("renders one h1 and three cards with the expected headings", () => {
+  it("renders one h1 without a breadcrumb (its own area root) and three cards with the expected headings", () => {
     render(
       <ConnectionsPageContent
         workspaceSlug="acme"
@@ -101,6 +101,8 @@ describe("the page", () => {
     expect(
       screen.getByRole("heading", { level: 1, name: "Connections" }),
     ).toBeTruthy();
+    // Connections is its own area root, not below Settings (lead decision 2026-10-13).
+    expect(screen.queryByRole("navigation", { name: "breadcrumb" })).toBeNull();
     expect(
       screen.getByRole("heading", { level: 2, name: "Installations" }),
     ).toBeTruthy();

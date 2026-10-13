@@ -1,7 +1,8 @@
 # LLM access
 
 Every workspace brings its own LLM key (bring your own key, BYOK; `docs/decisions/0001-editions-setup-and-accounts.md`,
-sections 2.7 and 2.8). An Admin or an Owner enters it under **Settings, LLM access** of the workspace; the app
+sections 2.7 and 2.8). An Admin or an Owner enters it under **Settings → LLM access** of the workspace
+(`/w/:workspace/settings/llm`); removing the key is a danger zone under **Settings → Advanced**. The app
 hands the key of the job's own workspace to the runner with every job. The legacy `LLM_PROVIDER` and `LLM_API_KEY`
 were imported once into the default workspace by the update of an existing installation (`src/legacy-import/`) and
 are not read any more; `LLM_MODEL` and `LLM_MAX_TOKENS` are instance settings.
