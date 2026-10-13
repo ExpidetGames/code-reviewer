@@ -27,7 +27,7 @@ publishes as one persistent summary comment. The decisions are in epic
 | Opt-in deployment file for a separate Dynamic runner (`compose.dynamic.yml`) | Shipped (#202), cannot claim yet |
 | Pinned OpenCode fetch (checksum-verified), real-engine fixes, proxy-side audit, hostile-repository proof | Shipped (#197 part 2a) |
 | Launch as the dedicated engine user from the root supervisor, per-user network rules, lease loss and cleanup, proofs as root in CI | Shipped (#197 part 2b) |
-| Pinned OpenCode binary, `nft` and the engine user in the runner image, offline startup self-check that advertises `opencode` | **Not shipped** (rest of #202) |
+| Pinned OpenCode binary (**linux-x64 glibc only**: `runner/opencode-pin.json` has no other platform, and the fetch script refuses one; an arm64 image needs its own pinned digest), `nft`, a trusted `rg` (CI installs it from apt, unpinned until the provenance audit of #202) and the engine user in the runner image, offline startup self-check that advertises `opencode` | **Not shipped** (rest of #202) |
 | Binary and Bun lock provenance audit in `make check-licenses` | **Not shipped** |
 | Worst-case memory and OOM measurements, the decision to run more than one Dynamic job at a time | **Not shipped** |
 | Hosted activation | Needs the hosted egress gate (#82) |

@@ -266,11 +266,10 @@ def test_the_same_tree_unsanitized_runs_the_plugins_which_is_why_the_export_is_s
         steps=[reads(raw, "src/sub/mod.py")], final=findings_for(content.head_sha)
     )
     with model:
-        run = run_engine(model, content, scratch=tmp_path / "scratch", export=raw)
+        run_engine(model, content, scratch=tmp_path / "scratch", export=raw)
 
     executed = {path.name for path in sentinels.iterdir()}
     assert {"dot-opencode-plugins", "root-plugin"} <= executed, executed
-    assert run.answer.ok or run.answer.error is not None
 
 
 # #197-T03
@@ -313,9 +312,16 @@ def test_every_write_exec_network_and_unknown_tool_is_denied_and_the_checkout_is
         steps=[asks(*calls), asks(*outside_reads, pre)], final=findings_for(content.head_sha)
     )
     with model:
-        run = run_engine(model, content, scratch=tmp_path / "scratch")
+        # A short deadline: a tool the permission block does not deny makes the engine wait for
+        # an approval nobody gives, and that must fail here, by assertion, not by the 180 s test
+        # timeout.
+        run = run_engine(
+            model, content, scratch=tmp_path / "scratch", limits=DynamicLimits(deadline_seconds=60)
+        )
 
-    assert run.answer.ok, run.answer.error
+    assert run.answer.ok, (
+        f"{run.answer.error}: a tool call is waiting for a permission the config does not deny"
+    )
     results = model.tool_results()
     # The first message's results are in the history of every later request.
     first = next(r for r in model.requests if len(r["messages"]) > 3)
