@@ -63,9 +63,9 @@ test.describe("the review kind of a project", () => {
     await page.getByRole("button", { name: "Save review settings" }).click();
     await expect(page.getByRole("status")).toContainText("No changes to save.");
 
-    // The keyboard chooses a kind too: the arrow key moves the choice.
+    // The keyboard chooses a kind too: the arrow key moves the choice while it is held.
     await diff.focus();
-    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("ArrowDown", { delay: 200 });
     await expect(dynamic).toBeChecked();
     await expect(
       page.getByText(/Reviews of this project fail until an instance admin/),

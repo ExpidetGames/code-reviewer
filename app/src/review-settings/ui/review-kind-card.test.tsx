@@ -154,6 +154,30 @@ describe("the Review kind card", () => {
     expect(screen.queryByLabelText("Review skill")).toBeNull();
   });
 
+  // #200-T01
+  it("moves and selects with the arrow keys, one kind at a time", async () => {
+    const user = userEvent.setup();
+    renderForm(projectModel(), fakeApi().api);
+    const diff = screen.getByRole("radio", { name: "Diff Review" });
+    const dynamic = screen.getByRole("radio", { name: "Dynamic Review" });
+
+    // The key is held for the moment the browser needs to move the focus: a selection follows the
+    // focus only while the arrow key is down.
+    diff.focus();
+    await user.keyboard("{ArrowDown>}");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await user.keyboard("{/ArrowDown}");
+
+    expect(dynamic.getAttribute("aria-checked")).toBe("true");
+    expect(diff.getAttribute("aria-checked")).toBe("false");
+
+    await user.keyboard("{ArrowUp>}");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await user.keyboard("{/ArrowUp}");
+
+    expect(diff.getAttribute("aria-checked")).toBe("true");
+  });
+
   it("shows the Dynamic model and the shipped skill read-only once Dynamic Review is chosen, and hides what only the Diff review uses", async () => {
     const user = userEvent.setup();
     renderForm(projectModel(), fakeApi().api);
