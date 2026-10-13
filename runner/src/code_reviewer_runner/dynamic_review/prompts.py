@@ -130,6 +130,10 @@ class ReviewInputs:
     comparison: str = "full"
     previous_review_state: str = ""
     repository_content: str = ""
+    # The diff between the previously reviewed head and this one (incremental mode only), and what
+    # the preparation could not give the reviewer (binary or oversized changed files, omissions).
+    incremental_diff: str = ""
+    limitations: str = ""
 
 
 def compose_system_prompt(skill: str, head_sha: str) -> str:
@@ -163,6 +167,10 @@ def compose_user_prompt(inputs: ReviewInputs) -> str:
         untrusted_block("pull-request-body", inputs.pr_body),
         untrusted_block("pull-request-diff", inputs.diff),
     ]
+    if inputs.incremental_diff:
+        blocks.append(untrusted_block("changes-since-last-review", inputs.incremental_diff))
+    if inputs.limitations:
+        blocks.append(untrusted_block("review-limitations", inputs.limitations))
     if inputs.previous_review_state:
         blocks.append(untrusted_block("previous-review-state", inputs.previous_review_state))
     if inputs.repository_content:
