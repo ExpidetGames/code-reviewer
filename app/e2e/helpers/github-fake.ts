@@ -151,14 +151,14 @@ export async function joinWorkspace(
 }
 
 /** The button of the user menu in the header, named after the person. */
-export function userMenuButton(page: Page, account: GithubAccount) {
+export function userMenuButton(page: Page, account: { name: string }) {
   return page.getByRole("button", { name: account.name });
 }
 
 /** Opens the user menu and presses "Sign out". */
 export async function signOutThroughTheMenu(
   page: Page,
-  account: GithubAccount,
+  account: { name: string },
 ): Promise<void> {
   await userMenuButton(page, account).click();
   await page.getByRole("menuitem", { name: "Sign out" }).click();
