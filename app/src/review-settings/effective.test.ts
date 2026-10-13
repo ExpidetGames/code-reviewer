@@ -6,16 +6,20 @@ import { describe, expect, it } from "vitest";
 import {
   isAutomaticReviewEnabled,
   isCommandAllowed,
+  resolveProjectDynamicSettings,
   resolveReviewSettings,
 } from "./effective.ts";
 import {
+  DEFAULT_DYNAMIC_MODEL,
   DEFAULT_MAX_TOKENS,
+  builtInProjectDynamicSettings,
   builtInReviewSettings,
   type ReviewSettings,
   type ReviewSettingsOverrides,
 } from "./settings.ts";
 
 const builtIn = builtInReviewSettings("deepseek/deepseek-v3.2");
+const SHIPPED_SKILL = "# shipped default skill";
 
 describe("the built-in review settings", () => {
   // CR-25-T01
@@ -127,6 +131,82 @@ describe("resolving the settings of a project", () => {
 
     expect(global.allowedCommands).toEqual([]);
     expect(builtIn.allowedCommands).toEqual(["review"]);
+  });
+});
+
+describe("the project-only review kind, model and skill", () => {
+  // #194-T01
+  it("default a project without the fields to Diff Review, the shipped Dynamic model and the shipped skill", () => {
+    const dynamic = resolveProjectDynamicSettings({
+      builtIn: builtInProjectDynamicSettings(),
+      defaultSkill: SHIPPED_SKILL,
+    });
+
+    expect(dynamic.reviewKind).toBe("diff");
+    expect(dynamic.dynamicModel).toBe(DEFAULT_DYNAMIC_MODEL);
+    expect(dynamic.reviewSkill).toBe(SHIPPED_SKILL);
+    expect(dynamic.reviewSkillIsDefault).toBe(true);
+    expect(dynamic.sources).toEqual({
+      reviewKind: "built_in",
+      dynamicModel: "built_in",
+      reviewSkill: "built_in",
+    });
+  });
+
+  // #194-T01
+  it("switch to Dynamic and back while each kind keeps its own model and skill", () => {
+    const builtInDynamic = builtInProjectDynamicSettings();
+    const stored = {
+      reviewKind: "dynamic" as const,
+      dynamicModel: "vendor/dynamic-model",
+      reviewSkill: "review for the Dynamic kind",
+      model: "diff/model",
+    };
+
+    const asDynamic = resolveProjectDynamicSettings({
+      builtIn: builtInDynamic,
+      project: stored,
+      defaultSkill: SHIPPED_SKILL,
+    });
+    const asDiff = resolveProjectDynamicSettings({
+      builtIn: builtInDynamic,
+      project: { ...stored, reviewKind: "diff" },
+      defaultSkill: SHIPPED_SKILL,
+    });
+
+    expect(asDynamic.reviewKind).toBe("dynamic");
+    expect(asDynamic.sources.reviewKind).toBe("project");
+    // The Diff model and the Dynamic model are independent; switching kinds changes neither.
+    expect(
+      resolveReviewSettings({ builtIn, project: stored }).settings.model,
+    ).toBe("diff/model");
+    expect(asDiff.dynamicModel).toBe("vendor/dynamic-model");
+    expect(asDiff.reviewSkill).toBe("review for the Dynamic kind");
+  });
+
+  // #194-T01
+  it("resolve a cleared skill override to the shipped default, not to another project's skill", () => {
+    const dynamic = resolveProjectDynamicSettings({
+      builtIn: builtInProjectDynamicSettings(),
+      project: { reviewSkill: null },
+      defaultSkill: SHIPPED_SKILL,
+    });
+
+    expect(dynamic.reviewSkill).toBe(SHIPPED_SKILL);
+    expect(dynamic.reviewSkillIsDefault).toBe(true);
+    expect(dynamic.sources.reviewSkill).toBe("built_in");
+  });
+
+  // #194-T08
+  it("keep an alternative configured model identifier literally, without a provider rewrite", () => {
+    const dynamic = resolveProjectDynamicSettings({
+      builtIn: builtInProjectDynamicSettings(),
+      project: { reviewKind: "dynamic", dynamicModel: "vendor/alt-model-2" },
+      defaultSkill: SHIPPED_SKILL,
+    });
+
+    expect(dynamic.dynamicModel).toBe("vendor/alt-model-2");
+    expect(dynamic.sources.dynamicModel).toBe("project");
   });
 });
 
