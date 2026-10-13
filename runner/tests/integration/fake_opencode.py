@@ -5,26 +5,31 @@
 It is not a test file: the Dynamic Review integration tests start it as a subprocess exactly like
 the runner starts the engine, so the production adapter, client and config generation run unchanged.
 It speaks the verified API surface the adapter uses (`/global/health`, `/session`,
-`/session/{id}/message`, `/session/{id}/abort`), calls the runner-owned model proxy like the engine
-would, and can be scripted to answer badly, to break the message list and to leave a helper behind.
+`/session/{id}/message`, `/session/{id}/abort`) in the shapes the real v1.19.0 binary answers with
+(`{info: {structured}, parts}`), calls the runner-owned model proxy like the engine would (streamed,
+with the whole history of tool calls and results in every request), and can be scripted to answer
+badly, to break the message list and to leave a helper behind.
 
 The script (`.fake-opencode-script.json`) and the trace (`.fake-opencode-trace.jsonl`) live in the
 engine's own working directory, the export the runner gives it. Every key of the script is optional:
 
     {
       "version": "1.19.0",         # the health answer's version (a mismatch tests the refusal)
-      "proxy_calls": 2,            # how often the message handler calls the model proxy
+      "proxy_calls": 2,            # at most this many model calls per message
+      "results": {"call-1": "text"},  # what the fake "executes" a tool call to (default "ok")
+      "stream": true,              # ask the proxy for a stream, like the real engine (default)
       "answer": "structured",      # "structured" | "text" | "none"
       "message_status": 200,
       "messages_status": 200,      # 400 reproduces the pinned structured-message codec defect
-      "messages": [ ... ],         # the session's messages, with tool parts
-      "messages_body": ...,        # any JSON as the 200 list answer (a malformed list)
       "spawn_helper": false,       # leave a sleeping child in the engine's process group
       "exit_early": false          # leave that child behind and exit before serving (#202)
     }
 
-The trace records the pid, the process environment, the helper pid, the proxy answers and the
-config the runner wrote, so a test can assert on the whole run.
+The model loop is the engine's: each proxy answer with tool calls is "executed" (the scripted
+result) and appended to the history of the next request; an answer without tool calls, or one that
+calls `StructuredOutput`, ends it. The trace records the pid, the process environment, the helper
+pid, the proxy answers, whether the message list was requested and the config the runner wrote, so
+a test can assert on the whole run.
 """
 
 import argparse
@@ -84,6 +89,39 @@ def _trace(entry: dict[str, Any]) -> None:
         stream.write(json.dumps(entry) + "\n")
 
 
+def _assistant(body: bytes, stream: bool) -> dict[str, Any] | None:
+    """The assistant message out of a plain completion or of an event stream, like the engine's."""
+    if not stream:
+        document = as_object(_read_json(body))
+        choices: Any = document.get("choices") if document else None
+        entries: list[Any] = choices if isinstance(choices, list) else []  # pyright: ignore[reportUnknownVariableType]
+        first = as_object(entries[0]) if entries else None
+        return as_object(first.get("message")) if first else None
+    text = ""
+    calls: dict[int, dict[str, Any]] = {}
+    for line in body.decode("utf-8").splitlines():
+        if not line.startswith("data: ") or line == "data: [DONE]":
+            continue
+        chunk = as_object(_read_json(line[len("data: ") :].encode("utf-8")))
+        choice = as_object(chunk["choices"][0]) if chunk else None
+        delta = as_object(choice.get("delta")) if choice else None
+        if delta is None:
+            continue
+        text += delta.get("content") or ""
+        streamed: list[dict[str, Any]] = delta.get("tool_calls") or []
+        for call in streamed:
+            slot = calls.setdefault(int(call["index"]), {"type": "function", "function": {}})
+            function: dict[str, Any] = call["function"]
+            known: dict[str, Any] = slot["function"]
+            slot["id"] = call.get("id", slot.get("id"))
+            known["name"] = function.get("name", known.get("name"))
+            known["arguments"] = known.get("arguments", "") + (function.get("arguments") or "")
+    message: dict[str, Any] = {"role": "assistant", "content": text or None}
+    if calls:
+        message["tool_calls"] = [calls[index] for index in sorted(calls)]
+    return message
+
+
 def _read_json(body: bytes) -> Any:
     try:
         return json.loads(body)
@@ -113,12 +151,12 @@ class Handler(BaseHTTPRequestHandler):
             self._answer(200, {"healthy": True, "version": script.get("version", "1.19.0")})
             return
         if self.path.endswith("/message"):
+            _trace({"messages_requested": True})
             status = int(script.get("messages_status", 200))
             if status != 200:
-                _trace({"messages_status": status})
                 self._answer(status, {"error": "Expected OutputFormatJsonSchema"})
                 return
-            self._answer(200, script.get("messages_body", script.get("messages", [])))
+            self._answer(200, [])
             return
         self._answer(404, {"error": "not found"})
 
@@ -147,10 +185,7 @@ class Handler(BaseHTTPRequestHandler):
             helper = subprocess.Popen(["sleep", "60"])
             _trace({"helper_pid": helper.pid})
 
-        answers: list[Any] = []
-        for _ in range(int(script.get("proxy_calls", 0))):
-            answers.append(self._call_proxy())
-        _trace({"proxy_answers": answers})
+        _trace({"proxy_answers": self._model_loop(script)})
 
         if "message_status" in script:
             self._answer(int(script["message_status"]), {"error": "scripted"})
@@ -158,39 +193,67 @@ class Handler(BaseHTTPRequestHandler):
         answer = script.get("answer", "structured")
         document = script.get("findings")
         if answer == "none":
-            self._answer(200, {"id": "msg-1", "parts": []})
+            self._answer(200, {"info": {"id": "msg-1", "error": None}, "parts": []})
         elif answer == "text":
             self._answer(
-                200, {"id": "msg-1", "parts": [{"type": "text", "text": json.dumps(document)}]}
+                200,
+                {
+                    "info": {"id": "msg-1"},
+                    "parts": [{"type": "text", "text": json.dumps(document)}],
+                },
             )
         else:
-            self._answer(200, {"id": "msg-1", "structured": document})
+            self._answer(200, {"info": {"id": "msg-1", "structured": document}, "parts": []})
 
-    def _call_proxy(self) -> int:
+    def _model_loop(self, script: dict[str, Any]) -> list[int]:
+        """The engine's loop: ask the model, run what it asks for, send the whole history again."""
+        messages: list[dict[str, Any]] = [{"role": "user", "content": "review the change"}]
+        results: dict[str, Any] = as_object(script.get("results")) or {}
+        statuses: list[int] = []
+        for _ in range(int(script.get("proxy_calls", 0))):
+            status, answer = self._call_proxy(messages, bool(script.get("stream", True)))
+            statuses.append(status)
+            if status != 200 or answer is None:
+                break
+            messages.append(answer)
+            calls: list[dict[str, Any]] = answer.get("tool_calls") or []
+            if not calls or any(call["function"]["name"] == "StructuredOutput" for call in calls):
+                break
+            for call in calls:
+                content = results.get(call["id"], "ok")
+                messages.append({"role": "tool", "tool_call_id": call["id"], "content": content})
+        return statuses
+
+    def _call_proxy(
+        self, messages: list[dict[str, Any]], stream: bool
+    ) -> tuple[int, dict[str, Any] | None]:
         """One model call, exactly like the engine's provider would make it: the key it presents is
-        the one the runner wrote into the trusted config."""
+        the one the runner wrote into the trusted config. Returns the assistant message."""
         url = f"{_env('REVIEW_PROXY_URL')}/v1/chat/completions"
-        body = json.dumps(
-            {
-                "model": "review-proxy/deepseek-v4.1-flash",
-                "messages": [{"role": "user", "content": "review the change"}],
-                "tools": [{"type": "function", "function": {"name": "StructuredOutput"}}],
-                "tool_choice": "required",
-            }
-        ).encode("utf-8")
+        document: dict[str, Any] = {
+            "model": "review-proxy/deepseek-v4.1-flash",
+            "messages": messages,
+            "tools": [{"type": "function", "function": {"name": "StructuredOutput"}}],
+            "tool_choice": "required",
+            "max_tokens": 32000,
+        }
+        if stream:
+            document["stream"] = True
+            document["stream_options"] = {"include_usage": True}
         request = Request(
             url,
-            data=body,
+            data=json.dumps(document).encode("utf-8"),
             method="POST",
             headers={"Content-Type": "application/json", "Authorization": f"Bearer {_api_key()}"},
         )
         try:
             with urlopen(request, timeout=MESSAGE_TIMEOUT) as response:
-                return response.status
+                body = response.read()
+                return response.status, _assistant(body, stream)
         except HTTPError as error:
-            return error.code
+            return error.code, None
         except (URLError, OSError):
-            return 0
+            return 0, None
 
     def log_message(self, format: str, *args: Any) -> None:
         return
@@ -206,7 +269,7 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
 
     config_path = Path(_env("OPENCODE_CONFIG"))
-    scratch_dir = Path(_env("OPENCODE_CONFIG_DIR"))
+    scratch_dir = config_path.parent
     config_mode = stat.S_IMODE(config_path.stat().st_mode) if config_path.is_file() else None
     scratch_mode = stat.S_IMODE(scratch_dir.stat().st_mode) if scratch_dir.is_dir() else None
     _trace(

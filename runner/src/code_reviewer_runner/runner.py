@@ -24,8 +24,8 @@ import shlex
 import sys
 import threading
 import time
-from collections.abc import Mapping, Sequence
-from contextlib import ExitStack
+from collections.abc import Callable, Mapping, Sequence
+from contextlib import AbstractContextManager, ExitStack
 from dataclasses import replace
 from typing import Any, TextIO
 
@@ -47,7 +47,10 @@ from code_reviewer_runner.dynamic_review.budget import (
     DynamicLimits,
     LimitError,
 )
+from code_reviewer_runner.dynamic_review.checkout import PreparedContent
 from code_reviewer_runner.dynamic_review.config import new_proxy_capability
+from code_reviewer_runner.dynamic_review.inputs import review_inputs
+from code_reviewer_runner.dynamic_review.limits import CheckoutError
 from code_reviewer_runner.dynamic_review.prompts import compose_system_prompt
 from code_reviewer_runner.dynamic_review.proxy import ModelProxy, capabilities_from_config
 from code_reviewer_runner.error_mapping import classify_failure
@@ -200,9 +203,14 @@ def run_job(
 
 
 OPENCODE_COMMAND_VARIABLE = "RUNNER_OPENCODE_COMMAND"
-DYNAMIC_CHECKOUT_VARIABLE = "RUNNER_DYNAMIC_CHECKOUT"
 DYNAMIC_CAPABILITIES_VARIABLE = "RUNNER_DYNAMIC_CAPABILITIES"
 DYNAMIC_NODE_BIN_VARIABLE = "RUNNER_DYNAMIC_NODE_BIN"
+
+
+# Prepares the sanitized, read-only export of one claimed Dynamic job (#196) and keeps it for the
+# lifetime of the `with` block. The supervisor that owns the privileges (the dedicated engine user,
+# the root-owned job directory) supplies it; `run_dynamic_job` never builds an export itself.
+ContentPreparer = Callable[[Job], AbstractContextManager[PreparedContent]]
 
 
 def run_dynamic_job(
@@ -213,6 +221,7 @@ def run_dynamic_job(
     timeout_seconds: float | None = None,
     *,
     engines: Sequence[str] = (),
+    prepare: ContentPreparer | None = None,
 ) -> JobResult:
     """Run a Dynamic job with the read-only stock engine (#197).
 
@@ -247,8 +256,7 @@ def run_dynamic_job(
             started,
             capture,
         )
-    checkout = environment.get(DYNAMIC_CHECKOUT_VARIABLE, "").strip()
-    if not checkout:
+    if prepare is None:
         return _failure(
             ErrorCode.CHECKOUT_INCOMPLETE, "no prepared checkout is configured", started, capture
         )
@@ -282,22 +290,31 @@ def run_dynamic_job(
     except LimitError as error:
         # The destination cannot serve the run: fail before the engine starts, with no fallback.
         return _failure(error.code, error.detail, started, capture)
-    server = proxy.serve("127.0.0.1").start()
     try:
-        engine = DynamicEngine(
-            job,
-            ledger=ledger,
-            command=command,
-            directory=checkout,
-            proxy_url=server.url,
-            proxy_capability=capability,
-            agent_prompt=compose_system_prompt(dynamic.skill, base.head_sha),
-            model_schema=findings_schema(),
-            node_bin=environment.get(DYNAMIC_NODE_BIN_VARIABLE) or None,
-        )
-        answer = engine.run()
-    finally:
-        server.stop()
+        with prepare(job) as content:
+            # The export is the one directory the engine may read; the audit names files relative
+            # to it, and a finding may only point at a file it really holds.
+            proxy.audit.set_export_root(str(content.export))
+            server = proxy.serve("127.0.0.1").start()
+            try:
+                engine = DynamicEngine(
+                    job,
+                    ledger=ledger,
+                    command=command,
+                    directory=str(content.export),
+                    proxy_url=server.url,
+                    proxy_capability=capability,
+                    agent_prompt=compose_system_prompt(dynamic.skill, base.head_sha),
+                    model_schema=findings_schema(),
+                    inputs=review_inputs(job.pr_url, content),
+                    exported_paths=frozenset(content.files),
+                    node_bin=environment.get(DYNAMIC_NODE_BIN_VARIABLE) or None,
+                )
+                answer = engine.run()
+            finally:
+                server.stop()
+    except CheckoutError as error:
+        return _failure(error.code, "the pull request could not be prepared", started, capture)
 
     if answer.error is not None:
         return _failure(answer.error.code, answer.error.detail, started, capture)

@@ -16,18 +16,20 @@ The order is deliberate and mirrors the epic's:
 3. the adapter waits for a healthy pinned server, then opens one session;
 4. the untrusted input is sent as one structured turn; the reviewed head comes from the validated
    claim (`base.head_sha`), never from repository content;
-5. the tool parts the engine reports are counted against the ledger (tools, files, result bytes) —
-   a run whose tool parts cannot be observed fails closed with `dynamic_accounting_failed` — and
-   the structured answer is validated with the typed findings parser;
-6. any limit, any engine exit and any unusable answer ends the run with a stable code; the whole
-   owned process group is stopped and its private scratch directory removed. No fallback, no partial
-   success.
+5. the tool, file and result-byte bounds are audited **at the proxy** from the model requests
+   themselves (`audit.py`), not read back from the engine's session afterwards: the pinned server
+   cannot even list a session that has a stored JSON-schema format (#85, a 400), and a count taken
+   after the fact would not be preventive anyway. The adapter only reads the stable cause the proxy
+   recorded in the ledger, and validates the structured answer with the typed findings parser
+   against the files the export really contains;
+6. any limit, any engine exit and any unusable answer ends the run with a stable code, at the moment
+   it happens (the run does not wait for the engine to give up); the whole owned process group is
+   stopped and its private scratch directory removed. No fallback, no partial success.
 
 `steps`, SSE events and the engine's own counters are observation only; nothing here trusts them.
 """
 
 import contextlib
-import copy
 import json
 import os
 import shutil
@@ -37,7 +39,7 @@ import subprocess
 import tempfile
 import threading
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -57,6 +59,7 @@ from code_reviewer_runner.dynamic_review.config import (
 )
 from code_reviewer_runner.dynamic_review.net import no_redirect_opener
 from code_reviewer_runner.dynamic_review.prompts import ReviewInputs, compose_user_prompt
+from code_reviewer_runner.dynamic_review.schema import engine_schema
 from code_reviewer_runner.job import Job
 from code_reviewer_runner.job_loop.jsonvalues import as_object
 from code_reviewer_runner.process_group import end_group, has_exited
@@ -68,8 +71,15 @@ PINNED_ENGINE_VERSION = "1.19.0"
 STARTUP_SECONDS = 20.0
 # How often a start is attempted on a fresh port when the engine could not bind the one picked.
 START_ATTEMPTS = 3
-# How long one message may take before the adapter ends the run.
+# How long one message may take before the adapter ends the run (the whole-job deadline binds
+# first when it is shorter).
 MESSAGE_TIMEOUT_SECONDS = 300.0
+# One health check or session request. Before the listening marker the pinned server can accept a
+# connection and never answer, so a poll must give up quickly and try again.
+SHORT_TIMEOUT_SECONDS = 2.0
+SESSION_TIMEOUT_SECONDS = 30.0
+# How often the run checks the ledger, the deadline and the engine process while a message runs.
+WATCH_INTERVAL_SECONDS = 0.05
 # The agent the runner defines and selects; the request may never name another.
 REVIEW_AGENT = "review"
 # The largest startup/answer body the adapter will read before the ledger refuses it.
@@ -123,19 +133,19 @@ class EngineAnswer:
         return self.findings is not None and self.error is None
 
 
-# The transport of the client: method, URL, body (bytes), headers -> (status, body bytes). A test
-# replaces it to script answers; the real one talks to the engine on loopback.
-Transport = Callable[[str, str, bytes | None, Mapping[str, str]], tuple[int, bytes]]
+# The transport of the client: method, URL, body (bytes), headers, timeout -> (status, body bytes).
+# A test replaces it to script answers; the real one talks to the engine on loopback.
+Transport = Callable[[str, str, bytes | None, Mapping[str, str], float], tuple[int, bytes]]
 
 
 def _http_request(
-    method: str, url: str, body: bytes | None, headers: Mapping[str, str]
+    method: str, url: str, body: bytes | None, headers: Mapping[str, str], timeout: float
 ) -> tuple[int, bytes]:
     request = Request(url, data=body, method=method, headers=dict(headers))
     try:
         # Loopback only: never through a proxy of the environment, never through a redirect.
         opener = no_redirect_opener(direct=True)
-        with opener.open(request, timeout=MESSAGE_TIMEOUT_SECONDS) as response:
+        with opener.open(request, timeout=timeout) as response:
             return response.status, response.read(CLIENT_MAX_BYTES)
     except HTTPError as error:
         return error.code, error.read(CLIENT_MAX_BYTES)
@@ -157,7 +167,13 @@ class EngineClient:
         self._transport = transport
 
     def _call(
-        self, method: str, path: str, body: Any = None, *, scoped: bool = True
+        self,
+        method: str,
+        path: str,
+        body: Any = None,
+        *,
+        scoped: bool = True,
+        timeout: float = MESSAGE_TIMEOUT_SECONDS,
     ) -> tuple[int, bytes]:
         payload = json.dumps(body).encode("utf-8") if body is not None else None
         headers = {"Content-Type": "application/json"} if payload is not None else {}
@@ -166,12 +182,14 @@ class EngineClient:
         # global and carries none.
         if scoped:
             headers["x-opencode-directory"] = self.directory
-        return self._transport(method, f"{self.base_url}{path}", payload, headers)
+        return self._transport(method, f"{self.base_url}{path}", payload, headers, timeout)
 
     def health(self) -> bool:
         """True when the server answers a healthy pinned-version health check."""
         try:
-            status, body = self._call("GET", "/global/health", scoped=False)
+            status, body = self._call(
+                "GET", "/global/health", scoped=False, timeout=SHORT_TIMEOUT_SECONDS
+            )
         except EngineError:
             return False
         if status != 200:
@@ -204,7 +222,9 @@ class EngineClient:
         raise EngineError(ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE, "the engine did not become healthy")
 
     def create_session(self) -> str:
-        status, body = self._call("POST", "/session", {"title": SESSION_TITLE})
+        status, body = self._call(
+            "POST", "/session", {"title": SESSION_TITLE}, timeout=SESSION_TIMEOUT_SECONDS
+        )
         if status != 200:
             raise EngineError(ErrorCode.RUNNER_ERROR, "the engine refused a new session")
         session_id: Any = None
@@ -220,7 +240,13 @@ class EngineClient:
         return session_id
 
     def send_message(
-        self, session_id: str, *, model: str, parts: list[dict[str, str]], schema: Any
+        self,
+        session_id: str,
+        *,
+        model: str,
+        parts: list[dict[str, str]],
+        schema: Any,
+        timeout: float = MESSAGE_TIMEOUT_SECONDS,
     ) -> None:
         """Send one structured turn to the runner-defined review agent."""
         body = {
@@ -229,43 +255,14 @@ class EngineClient:
             "format": {"type": "json_schema", "schema": schema},
             "parts": parts,
         }
-        status, answer = self._call("POST", f"/session/{session_id}/message", body)
+        status, answer = self._call("POST", f"/session/{session_id}/message", body, timeout=timeout)
         if status != 200:
             raise EngineError(ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE, "the engine did not answer")
         self.last_message = answer
 
-    def messages(self, session_id: str) -> list[dict[str, Any]]:
-        """The session's messages, for the tool parts the ledger counts.
-
-        The tool, file and result-byte bounds are accounted from these parts, so a list that cannot
-        be read is not an empty one: the pinned server has a known structured-message codec defect
-        (#85) that answers this list with 400, and a run that cannot observe its tool parts fails
-        closed instead of reporting success with nothing counted.
-        """
-        status, body = self._call("GET", f"/session/{session_id}/message")
-        unobservable = EngineError(
-            ErrorCode.DYNAMIC_ACCOUNTING_FAILED, "the tool calls of the session cannot be observed"
-        )
-        if status != 200:
-            raise unobservable
-        try:
-            value: Any = json.loads(body)
-        except ValueError:
-            raise unobservable from None
-        if not isinstance(value, list):
-            raise unobservable
-        messages: list[dict[str, Any]] = []
-        entries: list[Any] = value  # pyright: ignore[reportUnknownVariableType]
-        for item in entries:
-            message = as_object(item)
-            if message is None:
-                raise unobservable
-            messages.append(message)
-        return messages
-
     def abort(self, session_id: str) -> None:
         try:
-            self._call("POST", f"/session/{session_id}/abort")
+            self._call("POST", f"/session/{session_id}/abort", timeout=SHORT_TIMEOUT_SECONDS)
         except EngineError:
             return  # the process group is ended anyway
 
@@ -273,9 +270,11 @@ class EngineClient:
 def structured_answer(message: bytes) -> Any:
     """The structured result out of a message POST answer, or None.
 
-    The pinned server stores a valid JSON-schema answer in the assistant message's `structured`
-    field; the spike also saw the JSON in a `text` part. The runner-side codec accepts either and
-    never trusts it without the typed validation that follows.
+    The pinned server answers `{info, parts}`: a valid JSON-schema answer is stored in
+    `info.structured` (the real shape, checked against the binary), and a model that answered in
+    prose leaves its JSON in a `text` part. The runner-side codec accepts either and never trusts
+    it without the typed validation that follows; `info.error` (for example a missing structured
+    answer) is not an answer.
     """
     try:
         value: Any = json.loads(message)
@@ -284,9 +283,12 @@ def structured_answer(message: bytes) -> Any:
     document = as_object(value)
     if document is None:
         return None
-    structured: Any = document.get("structured")
+    info = as_object(document.get("info"))
+    structured: Any = info.get("structured") if info else None
     if structured is not None:
         return structured
+    if info is not None and info.get("error") is not None:
+        return None
     parts: Any = document.get("parts")
     if not isinstance(parts, list):
         return None
@@ -315,8 +317,11 @@ class DynamicEngine:
         proxy_capability: str,
         agent_prompt: str,
         model_schema: dict[str, Any],
+        inputs: ReviewInputs,
+        exported_paths: Collection[str] | None,
         scratch_dir: str | None = None,
         node_bin: str | None = None,
+        require_ripgrep: bool = True,
         startup_seconds: float = STARTUP_SECONDS,
         transport: Transport = _http_request,
         port_source: Callable[[], int] = lambda: _free_port(),
@@ -333,7 +338,12 @@ class DynamicEngine:
         self._proxy_capability = proxy_capability
         self.agent_prompt = agent_prompt
         self.model_schema = model_schema
+        # What the model is given (the real title, body and diff of #196) and the files a finding
+        # may point at (exactly the verified export). Both come from the trusted preparation.
+        self.inputs = inputs
+        self.exported_paths = exported_paths
         self.node_bin = node_bin
+        self.require_ripgrep = require_ripgrep
         self.startup_seconds = startup_seconds
         self._transport = transport
         self._port_source = port_source
@@ -343,7 +353,7 @@ class DynamicEngine:
             Path(scratch_dir) if scratch_dir else Path(tempfile.mkdtemp(prefix="cr-engine-"))
         )
         self._process: subprocess.Popen[bytes] | None = None
-        self._counted_tool_calls: set[str] = set()
+        self._worker: threading.Thread | None = None
 
     # -- process --------------------------------------------------------------
 
@@ -371,10 +381,19 @@ class DynamicEngine:
             scratch_dir=str(self._scratch),
             node_bin=self.node_bin,
         )
-        # The one file the engine may read its configuration from. #202 confirms the exact variable
-        # against the pinned release; the config directory is the private job scratch either way.
+        # The one file the engine reads its configuration from (confirmed against the pinned
+        # release). `OPENCODE_CONFIG_DIR` is deliberately not set: a config directory makes the
+        # engine install `@opencode-ai/plugin` into it from the package registry, a download and
+        # an install the runner must never allow.
         environment["OPENCODE_CONFIG"] = str(config_path)
-        environment["OPENCODE_CONFIG_DIR"] = str(self._scratch)
+        # The engine's grep and glob run ripgrep. Without one on its PATH the pinned release
+        # downloads a binary from GitHub on first use (seen against the real binary): a runtime
+        # download the runner never allows, and one that fails anyway without network. The trusted
+        # image supplies `rg`; a missing one is a refusal to start, not an attempt to fetch it.
+        if self.require_ripgrep and shutil.which("rg", path=environment["PATH"]) is None:
+            raise EngineError(
+                ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE, "no ripgrep on the engine search path"
+            )
         # The port is only probed free, not held: the engine binds it itself a moment later. If a
         # stranger took it in between, our engine exits instead of serving and is started again on
         # another port; an answer is only trusted while our own process is alive.
@@ -455,7 +474,7 @@ class DynamicEngine:
             session_id = client.create_session()
             try:
                 self._send(client, session_id)
-                self._count_tool_parts(client, session_id)
+                self._raise_recorded_failure()
                 return self._validate(client)
             finally:
                 client.abort(session_id)
@@ -472,63 +491,53 @@ class DynamicEngine:
             )
         finally:
             self.stop()
+            if self._worker is not None:
+                self._worker.join(timeout=5.0)
+
+    def _raise_recorded_failure(self) -> None:
+        """A limit or provider refusal the proxy recorded is the run's result."""
+        failure = self.ledger.failure
+        if failure is not None:
+            raise failure
 
     def _send(self, client: EngineClient, session_id: str) -> None:
         dynamic = self.job.dynamic
-        base = self.job.base
-        assert dynamic is not None and base is not None
-        inputs = ReviewInputs(
-            pr_url=self.job.pr_url,
-            pr_title="",
-            pr_body="",
-            diff="",
-            comparison=base.comparison,
-        )
+        assert dynamic is not None
         # The fixed core, the verified head and the skill are the agent's prompt in the trusted
         # config; only the delimited untrusted input travels as a message part.
-        prompt = compose_user_prompt(inputs)
+        prompt = compose_user_prompt(self.inputs)
         self.ledger.check_input_bytes(len(prompt.encode("utf-8")))
-        client.send_message(
-            session_id,
-            model=dynamic.model,
-            parts=[{"type": "text", "text": prompt}],
-            schema=_bounded_schema(self.model_schema, dynamic.limits.max_findings),
-        )
+        schema = engine_schema(self.model_schema, dynamic.limits.max_findings)
+        outcome: list[Exception] = []
+        finished = threading.Event()
 
-    def _count_tool_parts(self, client: EngineClient, session_id: str) -> None:
-        for message in client.messages(session_id):
-            parts: Any = message.get("parts")
-            if not isinstance(parts, list):
-                continue
-            for part in parts:  # pyright: ignore[reportUnknownVariableType]
-                self._count_part(part)
+        def post() -> None:
+            try:
+                client.send_message(
+                    session_id,
+                    model=dynamic.model,
+                    parts=[{"type": "text", "text": prompt}],
+                    schema=schema,
+                    timeout=max(min(MESSAGE_TIMEOUT_SECONDS, self.ledger.remaining_seconds()), 1.0),
+                )
+            except Exception as error:  # re-raised below, in the caller's thread
+                outcome.append(error)
+            finally:
+                finished.set()
 
-    def _count_part(self, part: Any) -> None:
-        block = as_object(part)
-        if block is None or block.get("type") != "tool":
-            return
-        call_id: Any = block.get("callID") or block.get("id")
-        if isinstance(call_id, str):
-            if call_id in self._counted_tool_calls:
-                return
-            self._counted_tool_calls.add(call_id)
-        name: Any = block.get("tool")
-        self.ledger.count_tool_call(name if isinstance(name, str) else "")
-        state = as_object(block.get("state"))
-        if state is None:
-            # The result the model received cannot be sized: not observed, so not accounted.
-            raise LimitError(
-                ErrorCode.DYNAMIC_ACCOUNTING_FAILED, "a tool part carries no observable result"
-            )
-        path = _tool_path(state.get("input"))
-        if path is not None:
-            self.ledger.count_file(path)
-        output: Any = state.get("output")
-        if isinstance(output, str):
-            self.ledger.add_result_bytes(len(output.encode("utf-8")))
-        metadata: Any = state.get("metadata")
-        if metadata is not None:
-            self.ledger.add_result_bytes(len(json.dumps(metadata).encode("utf-8")))
+        # The message call blocks until the engine is done. It runs beside a watch that ends the
+        # run the moment the proxy records a limit or a provider refusal, the deadline passes or
+        # the engine dies, instead of waiting for an engine that is retrying a refused call.
+        self._worker = threading.Thread(target=post, daemon=True)
+        self._worker.start()
+        while not finished.wait(WATCH_INTERVAL_SECONDS):
+            self._raise_recorded_failure()
+            self.ledger.check_deadline()
+            if not self._is_running():
+                raise EngineError(ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE, "the engine exited")
+        self._raise_recorded_failure()
+        if outcome:
+            raise outcome[0]
 
     def _validate(self, client: EngineClient) -> EngineAnswer:
         base = self.job.base
@@ -542,9 +551,8 @@ class DynamicEngine:
                     ErrorCode.LLM_OUTPUT_INVALID, "the engine returned no structured answer"
                 ),
             )
-        # `exported_paths` is not passed yet: the set of prepared files comes with the sanitized
-        # export (#196/#199); until then a finding path is only checked to be lexically safe.
-        findings = parse_dynamic_findings(raw)
+        # A finding may only point at a file the verified export really contains.
+        findings = parse_dynamic_findings(raw, exported_paths=self.exported_paths)
         if len(findings.findings) > dynamic.limits.max_findings:
             raise LimitError(
                 ErrorCode.DYNAMIC_BUDGET_EXCEEDED,
@@ -556,31 +564,6 @@ class DynamicEngine:
                 "the answer was made against another reviewed head",
             )
         return EngineAnswer(findings=findings, error=None)
-
-
-def _bounded_schema(schema: dict[str, Any], max_findings: int) -> dict[str, Any]:
-    """A copy of the findings schema narrowed to the job's own finding bound (never widened)."""
-    bounded: dict[str, Any] = copy.deepcopy(schema)
-    definitions = as_object(bounded.get("$defs"))
-    envelope = as_object(definitions.get("DynamicFindings")) if definitions else None
-    properties = as_object(envelope.get("properties")) if envelope else None
-    findings = as_object(properties.get("findings")) if properties else None
-    if findings is None:
-        raise EngineError(ErrorCode.DYNAMIC_CONFIG_INVALID, "the findings schema has no findings")
-    current: Any = findings.get("maxItems")
-    if not isinstance(current, int) or max_findings < current:
-        findings["maxItems"] = max_findings
-    return bounded
-
-
-def _tool_path(raw: Any) -> str | None:
-    value = as_object(raw)
-    if value is None:
-        return None
-    # Only a real path names a file. A grep/glob `pattern` is a search expression, not a file, and
-    # must not inflate the distinct-file budget.
-    found: Any = value.get("filePath") or value.get("path")
-    return found if isinstance(found, str) and found else None
 
 
 def _free_port() -> int:
