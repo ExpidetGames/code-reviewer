@@ -16,6 +16,10 @@ The token reservation uses a **proven conservative bound**: a BPE token is never
 UTF-8 byte, so the byte length of the serialized request is an upper bound on its token count. It is
 deliberately conservative; a verified DeepSeek tokenizer may tighten it later without weakening the
 envelope. A request that fits the byte bound but not the token budget is refused before it is sent.
+
+The token budget is cumulative and preventive (#231): a call is refused when the usage already
+settled, the calls still in flight and this call's own reservation would together pass the cap, so a
+run never overshoots by the one call that would have crossed it.
 """
 
 import threading
@@ -91,6 +95,7 @@ class _Counters:
     reserved_tokens: int = 0
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    last_prompt_tokens: int = 0
     tool_calls: int = 0
     returned_bytes: int = 0
     files: set[str] = field(default_factory=lambda: set[str]())
@@ -169,23 +174,31 @@ class BudgetLedger:
 
         Every attempt reserves, including a retry, a compaction or a hidden call: they are all model
         calls and they all consume the same budget. The reservation is the serialized request plus
-        the output allowance; both must fit the window and the remaining budget.
+        the output allowance; both must fit the window and the budget left after the usage already
+        settled and the calls still in flight.
         """
         self.check_deadline()
-        input_tokens = reserved_tokens(request_text)
+        estimate = reserved_tokens(request_text)
         allowance = self.output_tokens if output_tokens is None else output_tokens
-        if input_tokens + allowance > self.window_tokens:
-            raise LimitError(
-                ErrorCode.DYNAMIC_BUDGET_EXCEEDED,
-                "the request plus its output allowance exceeds the model window",
-            )
         counters = self._counters
         with self._lock:
+            # The byte count is the proven bound. The last settled prompt is a lower bound on this
+            # one (a prompt in a tool loop only grows) and covers what the provider adds that the
+            # bytes do not show, such as its chat template; it only ever raises the reservation.
+            input_tokens = max(estimate, counters.last_prompt_tokens)
+            if input_tokens + allowance > self.window_tokens:
+                raise LimitError(
+                    ErrorCode.DYNAMIC_BUDGET_EXCEEDED,
+                    "the request plus its output allowance exceeds the model window",
+                )
             if counters.model_calls + 1 > self.limits.max_model_calls:
                 raise LimitError(
                     ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the model call budget is used up"
                 )
-            if counters.reserved_tokens + input_tokens + allowance > self.limits.max_total_tokens:
+            settled = counters.prompt_tokens + counters.completion_tokens
+            if settled + counters.reserved_tokens + input_tokens + allowance > (
+                self.limits.max_total_tokens
+            ):
                 raise LimitError(ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the token budget is used up")
             counters.model_calls += 1
             counters.reserved_tokens += input_tokens + allowance
@@ -221,6 +234,7 @@ class BudgetLedger:
             counters.reserved_tokens -= reservation.input_tokens + reservation.output_tokens
             counters.prompt_tokens += prompt_tokens
             counters.completion_tokens += completion_tokens
+            counters.last_prompt_tokens = prompt_tokens
             if counters.prompt_tokens + counters.completion_tokens > self.limits.max_total_tokens:
                 raise LimitError(ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the token budget is used up")
 
