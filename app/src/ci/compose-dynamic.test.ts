@@ -134,7 +134,9 @@ describe("compose.dynamic.yml", () => {
     // else is dropped, and no-new-privileges means nothing can regain a capability.
     expect(service.user).toBe("0:0");
     expect(service.cap_drop).toEqual(["ALL"]);
-    expect([...(service.cap_add ?? [])].sort()).toEqual(SUPERVISOR_CAPABILITIES);
+    expect([...(service.cap_add ?? [])].sort()).toEqual(
+      SUPERVISOR_CAPABILITIES,
+    );
     for (const forbidden of [
       "SYS_ADMIN",
       "SYS_PTRACE",
@@ -156,7 +158,9 @@ describe("compose.dynamic.yml", () => {
   it("keeps the capability list of the privileged suite equal to the file", () => {
     // The suite runs as root with exactly these capabilities (tests/privileged/conftest.py checks
     // the effective set), so what it proves is what the container holds.
-    const bounding = /--bounding-set=-all((?:,\+[a-z_]+)+)/.exec(privilegedScript);
+    const bounding = /--bounding-set=-all((?:,\+[a-z_]+)+)/.exec(
+      privilegedScript,
+    );
     expect(bounding, "no --bounding-set in the script").not.toBeNull();
     const names = (bounding?.[1] ?? "")
       .split(",")
