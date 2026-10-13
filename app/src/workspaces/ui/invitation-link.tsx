@@ -1,14 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 "use client";
-// What the person who invited is told about the link: it was mailed, or (no mail server, or the mail server
-// refused the message) here it is, once, to copy and send. The link is a secret: it is in this component's
-// state and in nothing else, it is not stored anywhere, and a new link needs a revoke and a new invitation
-// (or, with a mail server, a resend).
+// What the person who invited is told about the link (#177: two short lines and Copy): it was mailed, or
+// (no mail server, or the mail server refused the message) here it is, once, to copy and send. The lifetime
+// sentence comes from its one owner (`messages.ts`), so it is written in exactly one place. The link is a
+// secret: it is in this component's state and in nothing else, it is not stored anywhere, and a new link
+// needs a revoke and a new invitation (or, with a mail server, a resend).
 import { useId, useState } from "react";
-import { Button } from "../../ui/button.tsx";
-import { INVITATION_LINK_LIFETIME } from "./messages.ts";
+import { Button } from "../../components/button.tsx";
+import { StatusRegion } from "../../components/status-region.tsx";
+import { Alert, AlertDescription } from "../../components/ui/alert.tsx";
+import { Input } from "../../components/ui/input.tsx";
+import { Label } from "../../components/ui/label.tsx";
 import type { InvitationDelivery } from "../invitations.ts";
+import { INVITATION_LINK_LIFETIME } from "./messages.ts";
 
 export type ShownInvitation = { email: string; delivery: InvitationDelivery };
 
@@ -19,9 +24,11 @@ export function InvitationLink({ shown }: { shown: ShownInvitation }) {
 
   if (delivery.kind === "mailed")
     return (
-      <p role="status" className="alert alert-success">
-        The invitation was sent to {shown.email}. {INVITATION_LINK_LIFETIME}
-      </p>
+      <Alert variant="success" role="status">
+        <AlertDescription>
+          The invitation was sent to {shown.email}. {INVITATION_LINK_LIFETIME}
+        </AlertDescription>
+      </Alert>
     );
 
   async function copy() {
@@ -36,34 +43,39 @@ export function InvitationLink({ shown }: { shown: ShownInvitation }) {
   }
 
   return (
-    <div role="status" className="alert alert-warning">
-      <p>
-        {delivery.reason === "no_mail_server"
-          ? `This instance cannot send mail. Send this link to ${shown.email} yourself.`
-          : `The mail server did not accept the message. Send this link to ${shown.email} yourself, or revoke the invitation and try again.`}{" "}
-        It is shown only now. {INVITATION_LINK_LIFETIME}
-      </p>
-      <div className="field">
-        <label htmlFor={id} className="field-label">
-          Invitation link
-        </label>
-        <input
-          id={id}
-          type="text"
-          readOnly
-          value={delivery.link}
-          onFocus={(event) => event.currentTarget.select()}
-        />
-      </div>
-      <div className="form-actions">
-        <Button variant="secondary" onClick={() => void copy()}>
-          Copy the link
-        </Button>
-        {copied === "yes" ? <span>Copied.</span> : null}
-        {copied === "failed" ? (
-          <span>Copying did not work: select the link and copy it.</span>
-        ) : null}
-      </div>
-    </div>
+    <Alert variant="warning" role="note">
+      <AlertDescription className="flex flex-col gap-3">
+        <span>
+          {delivery.reason === "no_mail_server"
+            ? `This instance cannot send mail. Send this link to ${shown.email} yourself.`
+            : `The mail server did not accept the message. Send this link to ${shown.email} yourself.`}{" "}
+          {INVITATION_LINK_LIFETIME}
+        </span>
+        <span className="flex flex-col gap-2">
+          <Label htmlFor={id}>Invitation link</Label>
+          <Input
+            id={id}
+            type="text"
+            readOnly
+            value={delivery.link}
+            onFocus={(event) => event.currentTarget.select()}
+          />
+        </span>
+        <span className="flex flex-wrap items-center gap-2">
+          <Button variant="secondary" onClick={() => void copy()}>
+            Copy the link
+          </Button>
+          {/* The one polite region of the block: it stays in the DOM so the copy result is announced
+              when it changes (#177 review of #215). */}
+          <StatusRegion>
+            {copied === "yes"
+              ? "Copied."
+              : copied === "failed"
+                ? "Copying did not work: select the link and copy it."
+                : ""}
+          </StatusRegion>
+        </span>
+      </AlertDescription>
+    </Alert>
   );
 }
