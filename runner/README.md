@@ -89,7 +89,7 @@ The job is JSON on stdin (the shape is documented in `src/code_reviewer_runner/j
 | `git` | `provider` (`github`), `baseUrl`, `token` (installation token), `botLogin` (`<app slug>[bot]`) |
 | `llm` | `provider` (`openrouter`), `model`, `apiKey`; optional `baseUrl` (loopback only, for test fakes), `maxTokens` and `fallbackModels` (see below) |
 | `env` | optional options of the PR-Agent tools, as strings; one option per key (`PR_REVIEWER__NUM_MAX_FINDINGS`, never a second `__`). The app sends only `PR_REVIEWER__*`; the removed tools' families (`PR_DESCRIPTION__*`, `PR_CODE_SUGGESTIONS__*`, `PR_QUESTIONS__*`) are accepted for v1 compatibility and ignored. Nothing else is accepted. See "Settings policy" for how the values are read. |
-| `reviewKind`, `dynamic`, `base` | #195: a tagged **Dynamic** job. Absent means a Diff job (the legacy shape). `dynamic` is a closed object `{ model, skill, limits: { maxFindings } }` — model/skill/limits only, the skill is literal data and no field can add a command, a core override, a permission or an endpoint. `base` is `{ repository, baseRef, headSha, previousReviewedSha, comparison }`, the checkout facts; `comparison` is a declared mode, not proof of completeness. The skill is untrusted project data, bounded to 16 KiB of UTF-8 bytes; the runner composes it after its own fixed core (see "Dynamic Review prompts"). |
+| `reviewKind`, `dynamic`, `base` | #195: a tagged **Dynamic** job. Absent means a Diff job (the legacy shape). `dynamic` is a closed object `{ model, skill, limits: { maxFindings } }` — model/skill/limits only, the skill is literal data and no field can add a command, a core override, a permission or an endpoint. `base` is `{ repository, baseRef, headSha, previousReviewedSha, comparison }`, the checkout facts; `comparison` is a declared mode, not proof of completeness. `previousReviewedSha` is the head of the last successful review of the same kind (#199), or null. The skill is untrusted project data, bounded to 16 KiB of UTF-8 bytes; the runner composes it after its own fixed core (see "Dynamic Review prompts"). |
 
 A Dynamic job is never run by PR-Agent: this stage has no engine yet, so `main` refuses it with the
 stable code `dynamic_engine_unavailable` before any process starts (#197 adds the engine). A Diff job
@@ -150,6 +150,36 @@ through repository instructions or skill discovery:
 
 The engine that runs the model with this prompt is #197's; #198 ships the assets, the composition and
 their validation.
+
+## Dynamic Review publication and re-review (#199)
+
+A Dynamic Review writes **one** persistent summary comment (never inline comments, labels or a
+second status comment) and reconciles each run with the earlier ones:
+
+- `dynamic_review/state.py` is the persistent state (active findings, resolved history, reviewed
+  head), stored as a base64 marker in the comment and validated like model output: an unknown
+  version, an unknown field, a traversal path or an oversized state fails closed with
+  `dynamic_policy_violation` / `review_state_truncated`, never an empty state that forgets history.
+  `render_previous_state` is the bounded text handed to the model so it can keep ids stable and name
+  resolved ids.
+- `dynamic_review/reconcile.py` applies the fixed core's rules to untrusted model output: a finding
+  is resolved only when the run names its id (`resolvedIds`), an omitted or unreadable previous
+  finding stays active (no resolution by absence), a moved or rephrased finding keeps its id, a
+  duplicate is folded, a regression is re-opened, and the resolved history is retained without a cap.
+- `dynamic_review/render.py` renders the reader's view (P0–P3 and confidence, a commit-pinned link,
+  bounded evidence) with HTML escaping and neutralised mentions, under two independent bounds
+  (65,000 characters and 64 KiB of UTF-8). A state that cannot fit fails with
+  `review_state_truncated`; a view that cannot `review_text_truncated`, and the previous comment is
+  kept.
+- `dynamic_review/github.py` is the narrow client: page the pull request's comments, create one,
+  edit one — nothing else. `dynamic_review/publish.py` selects the bot-owned summary by its exact
+  hidden identity marker **and** author, refuses a stale result, redacts the job's secrets from the
+  findings before storing them, and re-reads after an ambiguous create instead of duplicating a
+  comment.
+
+The app supplies `base.previousReviewedSha` from the last successful review of the same kind
+(`jobs.previousReviewedSha`), so the checkout and the publisher compare against the head the earlier
+review actually saw. The engine that produces the findings is #197's; #199 owns the publication.
 
 ## Where the result comes from
 

@@ -1,0 +1,271 @@
+# SPDX-License-Identifier: Apache-2.0
+
+"""The Dynamic publisher against a real GitHub comment API on loopback (#199).
+
+Covers the persistent-comment behaviour end to end: one comment is created and then edited across
+pushes, a human or foreign-bot marker is ignored, a corrupt state fails closed, pagination is
+followed, an ambiguous create is not duplicated, a stale result is refused, and a resolved history
+of more than 20 entries survives with every id and detail.
+"""
+
+from collections.abc import Iterator
+
+import pytest
+from fake_github_comments import FakeGithubComments
+
+from code_reviewer_runner.dynamic_findings import DynamicFindings, Finding
+from code_reviewer_runner.dynamic_review.github import (
+    GitHubError,
+    HttpCommentsClient,
+)
+from code_reviewer_runner.dynamic_review.publish import (
+    IDENTITY_MARKER,
+    Publisher,
+    PublishError,
+)
+from code_reviewer_runner.dynamic_review.state import (
+    MARKER_PREFIX,
+    MARKER_SUFFIX,
+    decode_state,
+)
+from code_reviewer_runner.result import ErrorCode
+
+TOKEN = "ghs_fake-installation-token-0123456789"
+BOT = "code-reviewer[bot]"
+REPO = "acme/repo"
+PR = 1
+SHA = "1" * 40
+NEXT = "2" * 40
+THIRD = "3" * 40
+
+
+def finding(finding_id: str = "f-1", *, sha: str = SHA, **overrides: object) -> Finding:
+    base: dict[str, object] = {
+        "id": finding_id,
+        "priority": "P1",
+        "confidence": 0.5,
+        "title": "A finding",
+        "body": "why it is a defect",
+        "path": "src/a.ts",
+        "line_start": 1,
+        "line_end": 2,
+        "evidence": ("src/a.ts:1",),
+        "reviewed_sha": sha,
+    }
+    base.update(overrides)
+    return Finding(**base)  # type: ignore[arg-type]
+
+
+def run(*findings: Finding, resolved: tuple[str, ...] = (), sha: str = SHA) -> DynamicFindings:
+    return DynamicFindings(reviewed_sha=sha, findings=findings, resolved_ids=resolved)
+
+
+@pytest.fixture
+def server() -> Iterator[FakeGithubComments]:
+    fake = FakeGithubComments(token=TOKEN, bot_login=BOT)
+    yield fake
+    fake.stop()
+
+
+@pytest.fixture
+def publisher(server: FakeGithubComments) -> Publisher:
+    client = HttpCommentsClient(server.url, REPO, TOKEN)
+    return Publisher(
+        client=client,
+        bot_login=BOT,
+        repository=REPO,
+        pr_number=PR,
+        web_base="https://github.com",
+    )
+
+
+# #199-T01
+def test_one_comment_is_created_then_edited_across_pushes(
+    server: FakeGithubComments, publisher: Publisher
+) -> None:
+    first = publisher.publish(run(finding()), head_sha=SHA, previous_reviewed_sha=None)
+    assert first.created is True
+    assert len(server.comments) == 1
+    assert server.comments[0]["body"].count(IDENTITY_MARKER) == 1
+
+    second = publisher.publish(
+        run(finding("f-1", sha=NEXT, line_start=9, line_end=12), sha=NEXT),
+        head_sha=NEXT,
+        previous_reviewed_sha=SHA,
+    )
+    assert second.created is False
+    assert second.comment_url == first.comment_url
+    assert len(server.comments) == 1
+
+    third = publisher.publish(
+        run(resolved=("f-1",), sha=THIRD), head_sha=THIRD, previous_reviewed_sha=NEXT
+    )
+    assert third.created is False
+    assert len(server.comments) == 1
+    state = decode_state(server.comments[0]["body"])
+    assert state is not None
+    assert state.reviewed_sha == THIRD
+    assert state.findings == ()
+    assert [entry.finding.id for entry in state.resolved] == ["f-1"]
+
+    # Only issue comments were touched: no reviews, labels or pull-request edits.
+    assert all("/issues/" in path for _, path in server.requests)
+
+
+# #199-T04
+def test_a_human_or_foreign_marker_never_authorizes_an_edit(
+    server: FakeGithubComments, publisher: Publisher
+) -> None:
+    human = server.seed(IDENTITY_MARKER + "\nI am not the bot", author="alice")
+    foreign = server.seed(IDENTITY_MARKER + "\nother bot", author="other-bot[bot]")
+
+    publisher.publish(run(finding()), head_sha=SHA, previous_reviewed_sha=None)
+
+    human_body = next(item["body"] for item in server.comments if item["id"] == human["id"])
+    foreign_body = next(item["body"] for item in server.comments if item["id"] == foreign["id"])
+    assert human_body == IDENTITY_MARKER + "\nI am not the bot"
+    assert foreign_body == IDENTITY_MARKER + "\nother bot"
+    assert len(server.comments) == 3
+
+
+# #199-T04
+def test_a_corrupt_bot_state_fails_closed_without_rewriting_history(
+    server: FakeGithubComments, publisher: Publisher
+) -> None:
+    corrupt = server.seed(f"{IDENTITY_MARKER}\n\n{MARKER_PREFIX}AAAA{MARKER_SUFFIX}", author=BOT)
+
+    with pytest.raises(PublishError) as refused:
+        publisher.publish(run(finding()), head_sha=SHA, previous_reviewed_sha=None)
+
+    assert refused.value.code is ErrorCode.DYNAMIC_POLICY_VIOLATION
+    unchanged = next(item["body"] for item in server.comments if item["id"] == corrupt["id"])
+    assert unchanged == corrupt["body"]
+
+
+# #199-T04
+def test_the_summary_is_found_on_a_later_page(
+    server: FakeGithubComments, publisher: Publisher
+) -> None:
+    for index in range(150):
+        server.seed(f"filler comment {index}", author="alice")
+    publisher.publish(run(finding()), head_sha=SHA, previous_reviewed_sha=None)
+    assert len(server.comments) == 151
+
+    publisher.publish(
+        run(finding("f-1", sha=NEXT), sha=NEXT), head_sha=NEXT, previous_reviewed_sha=SHA
+    )
+
+    bot_comments = [item for item in server.comments if item["user"]["login"] == BOT]
+    assert len(bot_comments) == 1
+
+
+# #199-T03
+def test_more_than_twenty_resolved_findings_survive_losslessly(
+    server: FakeGithubComments, publisher: Publisher
+) -> None:
+    ids = [f"f-{index}" for index in range(25)]
+    prior = run(
+        *[
+            finding(finding_id, title=f"Finding {finding_id}", path=f"src/{finding_id}.ts")
+            for finding_id in ids
+        ]
+    )
+    publisher.publish(prior, head_sha=SHA, previous_reviewed_sha=None)
+
+    new = finding(
+        "fresh",
+        sha=NEXT,
+        priority="P0",
+        confidence=0.9,
+        evidence=("src/b.ts:7",),
+    )
+    publisher.publish(
+        run(new, resolved=tuple(ids), sha=NEXT), head_sha=NEXT, previous_reviewed_sha=SHA
+    )
+
+    state = decode_state(server.comments[0]["body"])
+    assert state is not None
+    assert [entry.finding.id for entry in state.resolved] == ids
+    assert all(entry.resolved_sha == NEXT for entry in state.resolved)
+    assert all(entry.finding.priority == "P1" for entry in state.resolved)
+    assert [item.id for item in state.findings] == ["fresh"]
+    assert state.findings[0].priority == "P0"
+    assert state.findings[0].confidence == 0.9
+    assert state.findings[0].evidence == ("src/b.ts:7",)
+
+
+# #199-T07
+@pytest.mark.parametrize(
+    ("status", "headers", "expected"),
+    [
+        (401, {}, ErrorCode.GIT_AUTH),
+        (403, {"X-RateLimit-Remaining": "0"}, ErrorCode.GIT_RATE_LIMIT),
+        (403, {}, ErrorCode.GIT_FORBIDDEN),
+        (429, {}, ErrorCode.GIT_RATE_LIMIT),
+        (500, {}, ErrorCode.GIT_UNAVAILABLE),
+    ],
+)
+def test_github_failures_become_stable_codes(
+    server: FakeGithubComments,
+    publisher: Publisher,
+    status: int,
+    headers: dict[str, str],
+    expected: ErrorCode,
+) -> None:
+    server.faults["GET"] = (status, headers)
+
+    with pytest.raises(PublishError) as refused:
+        publisher.publish(run(finding()), head_sha=SHA, previous_reviewed_sha=None)
+
+    assert refused.value.code is expected
+
+
+# #199-T07
+def test_an_ambiguous_create_is_not_duplicated(
+    server: FakeGithubComments, publisher: Publisher
+) -> None:
+    server.ambiguous_create = True
+
+    published = publisher.publish(run(finding()), head_sha=SHA, previous_reviewed_sha=None)
+
+    assert published.created is True
+    assert len(server.comments) == 1
+    assert decode_state(server.comments[0]["body"]) is not None
+
+
+# #199-T07
+def test_a_lost_create_without_a_comment_is_a_failure(
+    server: FakeGithubComments, publisher: Publisher
+) -> None:
+    server.faults["POST"] = (503, {})
+
+    with pytest.raises(PublishError) as refused:
+        publisher.publish(run(finding()), head_sha=SHA, previous_reviewed_sha=None)
+
+    assert refused.value.code is ErrorCode.GIT_UNAVAILABLE
+    assert server.comments == []
+
+
+# #199-T08
+def test_a_newer_published_review_is_not_overwritten(
+    server: FakeGithubComments, publisher: Publisher
+) -> None:
+    publisher.publish(
+        run(finding(sha=THIRD), sha=THIRD), head_sha=THIRD, previous_reviewed_sha=None
+    )
+    before = server.comments[0]["body"]
+
+    with pytest.raises(PublishError) as refused:
+        publisher.publish(
+            run(finding(sha=NEXT), sha=NEXT), head_sha=NEXT, previous_reviewed_sha=SHA
+        )
+
+    assert refused.value.code is ErrorCode.REVIEW_NOT_PUBLISHED
+    assert server.comments[0]["body"] == before
+
+
+def test_the_client_rejects_a_body_over_the_size_limit(server: FakeGithubComments) -> None:
+    client = HttpCommentsClient(server.url, REPO, TOKEN)
+    with pytest.raises(GitHubError) as refused:
+        client.create_comment(PR, "x" * (65 * 1024))
+    assert refused.value.code is ErrorCode.REVIEW_TEXT_TRUNCATED
