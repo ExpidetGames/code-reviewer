@@ -230,8 +230,8 @@ function dynamicOptionsOf(options: JobOptions): DynamicReviewOptions | null {
 /**
  * The checkout facts a Dynamic job carries. The head SHA is the one that was queued; the base is the
  * identity the provider reported. `comparison` is a declared mode, not proof: the checkout verifies
- * completeness before it trusts it, and `previousReviewedSha` is null until #199 supplies it. Nothing
- * here is a permission or an endpoint.
+ * completeness before it trusts it, and `previousReviewedSha` is the head of the last successful
+ * review of the same kind (#199), or null. Nothing here is a permission or an endpoint.
  */
 function claimBaseOf(
   repositoryFullName: string,
