@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Progressing HTTP headers must not extend the absolute preparation deadline."""
+"""Progressing HTTP input must not extend the absolute preparation deadline."""
 
 import io
 from collections.abc import Buffer
@@ -14,7 +14,10 @@ from code_reviewer_runner.dynamic_review.transport import _BudgetReader  # pyrig
 
 
 # #196-T08 #196-T12
-def test_a_dribbling_header_stops_at_the_absolute_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("method", ["readline", "read"])
+def test_progressing_http_input_stops_at_the_absolute_deadline(
+    monkeypatch: pytest.MonkeyPatch, method: str
+) -> None:
     now = 0.0
     reads = 0
     monkeypatch.setattr("code_reviewer_runner.dynamic_review.limits.time.monotonic", lambda: now)
@@ -33,5 +36,8 @@ def test_a_dribbling_header_stops_at_the_absolute_deadline(monkeypatch: pytest.M
     with io.BufferedReader(DribblingInput()) as stream:
         reader = _BudgetReader(cast(BinaryIO, stream), Budget(Limits(seconds=2)))
         with pytest.raises(CheckoutError, match="timeout"):
-            reader.readline(65_537)
+            if method == "readline":
+                reader.readline(65_537)
+            else:
+                reader.read(65_537)
     assert reads <= 2

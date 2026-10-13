@@ -83,7 +83,19 @@ class _BudgetReader(io.BufferedIOBase):
         return bytes(line)
 
     def read(self, size: int | None = -1, /) -> bytes:
-        return self._charge(self.stream.read(self._size(-1 if size is None else size)))
+        if size == 0:
+            return b""
+        wanted = -1 if size is None else size
+        result = bytearray()
+        # HTTP chunk terminators also use fixed-length reads; progressing partial input
+        # must not reset the deadline while BufferedReader waits to fill the request.
+        while wanted < 0 or len(result) < wanted:
+            request = 16 * 1024 if wanted < 0 else min(16 * 1024, wanted - len(result))
+            chunk = self._charge(cast(io.BufferedReader, self.stream).read1(self._size(request)))
+            if not chunk:
+                break
+            result.extend(chunk)
+        return bytes(result)
 
     def read1(self, size: int = -1, /) -> bytes:
         # HTTPResponse's underlying file is a socket BufferedReader.
