@@ -37,13 +37,14 @@ demands of the model boundary happens here, before a byte reaches the provider o
 """
 
 import hmac
+import http.client
 import json
 import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request
 
 from code_reviewer_runner.dynamic_review.audit import ToolAudit
@@ -286,15 +287,22 @@ class ModelProxy:
         reservation = self.ledger.reserve_call(
             body.decode("utf-8", errors="replace"), output_tokens=self._output_allowance(request)
         )
-        status, response_body = self._post(
-            self.upstream_url,
-            forwarded,
-            {
-                "Authorization": f"Bearer {self.upstream_api_key}",
-                "Content-Type": "application/json",
-            },
-            self.ledger.limits.max_response_bytes + 1,
-        )
+        try:
+            status, response_body = self._post(
+                self.upstream_url,
+                forwarded,
+                {
+                    "Authorization": f"Bearer {self.upstream_api_key}",
+                    "Content-Type": "application/json",
+                },
+                self.ledger.limits.max_response_bytes + 1,
+            )
+        except (OSError, http.client.HTTPException) as error:
+            # No answer exists (timeout, refused or reset connection, truncated read). Like a
+            # provider error it ends the run with a stable code of its own; the reservation stays
+            # spent and the engine gets a 5xx that is no budget refusal. The exception text is
+            # never passed on: it can carry the destination.
+            return self._transport_failure(error)
         self.ledger.check_response_bytes(len(response_body))
         if status != 200:
             # The run ends with the provider's stable code; no partial success is claimed and no
@@ -319,6 +327,19 @@ class ModelProxy:
         if stream is None:
             raise LimitError(ErrorCode.LLM_OUTPUT_INVALID, "the provider answer has no message")
         return ProxyResponse(status=status, body=stream, content_type="text/event-stream")
+
+    def _transport_failure(self, error: Exception) -> ProxyResponse:
+        timed_out = isinstance(error, TimeoutError) or (
+            isinstance(error, URLError) and isinstance(error.reason, TimeoutError)
+        )
+        code = ErrorCode.LLM_TIMEOUT if timed_out else ErrorCode.LLM_UNAVAILABLE
+        detail = (
+            "the model provider did not answer in time"
+            if timed_out
+            else "the model provider could not be reached"
+        )
+        self.ledger.record_failure(LimitError(code, detail))
+        return ProxyResponse(status=504 if timed_out else 502, body=error_body(code, detail))
 
     def _decode(self, body: bytes) -> dict[str, Any]:
         try:

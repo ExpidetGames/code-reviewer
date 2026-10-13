@@ -714,6 +714,9 @@ def test_the_engine_process_receives_only_the_closed_environment(
         "HOME": "/runner/home",
     }.items():
         monkeypatch.setenv(name, value)
+    # The runner's own upstream call honours HTTP_PROXY; the loopback fake upstream is exempt, so a
+    # transport failure (a stable error since #236) does not hide what this test is about.
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1")
     fixture = Fixture(tmp_path, {"answer": "structured", "findings": findings(), "proxy_calls": 1})
 
     with FakeUpstream() as upstream:

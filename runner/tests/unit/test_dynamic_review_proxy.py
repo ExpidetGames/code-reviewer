@@ -8,8 +8,10 @@ from the provider, and a destination that must advertise the required features. 
 stable code; nothing falls back to another model, provider or engine.
 """
 
+import http.client
 import json
 from typing import Any
+from urllib.error import URLError
 
 import pytest
 
@@ -18,6 +20,7 @@ from code_reviewer_runner.dynamic_review.config import new_proxy_capability
 from code_reviewer_runner.dynamic_review.proxy import (
     ModelProxy,
     ProxyResponse,
+    UpstreamPost,
     capabilities_from_config,
 )
 from code_reviewer_runner.result import ErrorCode
@@ -66,7 +69,7 @@ def request_body(*, model: str = "deepseek-v4.1-flash", **extra: Any) -> dict[st
     return body
 
 
-def proxy(upstream: Upstream, **overrides: Any) -> ModelProxy:
+def proxy(upstream: UpstreamPost, **overrides: Any) -> ModelProxy:
     configured: dict[str, Any] = {
         "ledger": BudgetLedger(DynamicLimits()),
         "base_path": "/v1",
@@ -284,6 +287,78 @@ def test_a_provider_error_keeps_its_reservation_spent() -> None:
         ledger.reserve_call("x" * 1000, output_tokens=4096)
     assert refused.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
     assert len(upstream.requests) == 1
+
+
+class Broken:
+    """An upstream whose transport fails before any answer exists."""
+
+    def __init__(self, error: BaseException) -> None:
+        self.error = error
+        self.calls = 0
+
+    def __call__(
+        self, url: str, body: bytes, headers: dict[str, str], limit: int
+    ) -> tuple[int, bytes]:
+        self.calls += 1
+        raise self.error
+
+
+TRANSPORT_FAILURES = (
+    (TimeoutError("timed out"), ErrorCode.LLM_TIMEOUT, 504),
+    (URLError(TimeoutError("timed out")), ErrorCode.LLM_TIMEOUT, 504),
+    (URLError(ConnectionRefusedError("refused")), ErrorCode.LLM_UNAVAILABLE, 502),
+    (ConnectionResetError("reset by peer"), ErrorCode.LLM_UNAVAILABLE, 502),
+    (OSError("network is unreachable"), ErrorCode.LLM_UNAVAILABLE, 502),
+    (http.client.RemoteDisconnected("closed without a response"), ErrorCode.LLM_UNAVAILABLE, 502),
+    (http.client.IncompleteRead(b"partial"), ErrorCode.LLM_UNAVAILABLE, 502),
+)
+
+
+# #236-T01
+def test_a_transport_failure_is_a_distinct_stable_code_and_never_a_budget_refusal() -> None:
+    for failure, code, status in TRANSPORT_FAILURES:
+        subject = proxy(Broken(failure))
+
+        response = post(subject, request_body())
+
+        assert response.status == status
+        assert error_code(response) == code.value
+        # Neither the exception text nor the URL it carries reaches the engine.
+        assert b"reset by peer" not in response.body
+        assert b"openrouter" not in response.body
+        recorded = subject.ledger.failure
+        assert recorded is not None
+        assert recorded.code is code
+
+
+# #236-T02
+def test_a_transport_failure_keeps_its_reservation_spent() -> None:
+    ledger = BudgetLedger(DynamicLimits(max_total_tokens=5000))
+    subject = proxy(Broken(ConnectionResetError("reset")), ledger=ledger)
+
+    assert post(subject, request_body()).status == 502
+
+    with pytest.raises(LimitError) as refused:
+        ledger.reserve_call("x" * 1000, output_tokens=4096)
+    assert refused.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
+
+
+# #236-T03
+def test_a_later_budget_refusal_does_not_replace_the_recorded_transport_cause() -> None:
+    ledger = BudgetLedger(DynamicLimits(max_total_tokens=5000))
+    subject = proxy(Broken(TimeoutError("timed out")), ledger=ledger)
+
+    first = post(subject, request_body())
+    retry = post(subject, request_body())
+
+    assert error_code(first) == ErrorCode.LLM_TIMEOUT.value
+    # The second request is refused by the budget (the reservation stayed spent) but the run's
+    # recorded cause is still the transport failure, not a misleading budget refusal. This does not
+    # model a successful engine retry: the run ends at the first recorded cause.
+    assert error_code(retry) == ErrorCode.DYNAMIC_BUDGET_EXCEEDED.value
+    failure = ledger.failure
+    assert failure is not None
+    assert failure.code is ErrorCode.LLM_TIMEOUT
 
 
 # #197-T04
