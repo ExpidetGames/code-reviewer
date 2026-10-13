@@ -124,7 +124,11 @@ export function InstallationsCard({
                       <AlertDialogContent>
                         <AlertDialogHeader>
                           <AlertDialogTitle>
-                            Disconnect {connection.accountLogin}?
+                            Disconnect{" "}
+                            <span className="break-all">
+                              {connection.accountLogin}
+                            </span>
+                            ?
                           </AlertDialogTitle>
                           <AlertDialogDescription>
                             Projects and runs stay. Nothing changes on GitHub.
@@ -134,6 +138,7 @@ export function InstallationsCard({
                           <AlertDialogCancel>Cancel</AlertDialogCancel>
                           <AlertDialogAction
                             variant="destructive"
+                            disabled={busy}
                             aria-label={`Confirm disconnecting ${connection.accountLogin}`}
                             onClick={() => onDisconnect(connection.id)}
                           >

@@ -176,6 +176,26 @@ describe("the buttons", () => {
     },
   );
 
+  // #176-T03
+  it("points the disabled Connect GitHub button at the one blocked reason", () => {
+    renderPanel(
+      data({ connect: "user_authorization_not_configured", picker: false }),
+    );
+
+    const button = screen.getByRole("button", { name: "Connect GitHub" });
+    const reason = screen.getByRole("note");
+    expect(reason.id).not.toBe("");
+    expect(button.getAttribute("aria-describedby")).toBe(reason.id);
+  });
+
+  // #176-T03
+  it("does not describe the Connect GitHub button with a reason while it is offered", () => {
+    renderPanel(data({ connect: "needs_approval", picker: false }));
+
+    const button = screen.getByRole("button", { name: "Connect GitHub" });
+    expect(button.getAttribute("aria-describedby")).toBeNull();
+  });
+
   // #103-IB-22
   it("offers Connect GitHub but says that the admin of the instance decides, while nobody's rights can be checked", () => {
     renderPanel(data({ connect: "needs_approval", picker: false }));

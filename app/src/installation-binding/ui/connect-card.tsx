@@ -47,6 +47,7 @@ export function ConnectCard({
   onChoose: (picker: string, installationId: string) => void;
 }) {
   const titleId = useId();
+  const reasonId = `${useId()}-reason`;
   const blocked = connect !== "available" && connect !== "needs_approval";
   return (
     <Card role="region" aria-labelledby={titleId}>
@@ -59,12 +60,16 @@ export function ConnectCard({
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         {connect === "available" ? null : (
-          <Alert variant={reasonVariant(connect)} role="note">
+          <Alert id={reasonId} variant={reasonVariant(connect)} role="note">
             <AlertDescription>{AVAILABILITY_COPY[connect]}</AlertDescription>
           </Alert>
         )}
         <div className="flex flex-wrap gap-2">
-          <Button disabled={busy || blocked} onClick={onConnect}>
+          <Button
+            disabled={busy || blocked}
+            {...(blocked ? { "aria-describedby": reasonId } : {})}
+            onClick={onConnect}
+          >
             Connect GitHub
           </Button>
           {picker ? (
