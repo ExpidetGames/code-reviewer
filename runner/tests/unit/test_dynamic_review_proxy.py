@@ -744,7 +744,8 @@ def test_non_ascii_text_is_reserved_at_its_utf_8_size_not_its_escaped_size() -> 
     ledger = BudgetLedger(DynamicLimits(), window_tokens=9000, output_tokens=100)
     subject = proxy(upstream, ledger=ledger)
 
-    # 2,000 characters are about 4 KB as UTF-8 and about 12 KB as `\uXXXX` escapes; the output allowance is 4,096.
+    # 2,000 characters are about 4 KB as UTF-8 and about 12 KB as `\uXXXX` escapes; the output
+    # allowance is 4,096.
     response = post(subject, request_body(messages=[{"role": "user", "content": "é" * 2000}]))
 
     assert response.status == 200, response.body
