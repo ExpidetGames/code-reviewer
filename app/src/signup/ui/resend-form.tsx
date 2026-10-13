@@ -3,7 +3,11 @@
 "use client";
 // Asks for a new verification link. The answer is the same for every address, and so is the copy.
 import { useId, useState, type FormEvent } from "react";
-import { Button } from "../../ui/button.tsx";
+import { Button } from "@/components/button";
+import { StatusRegion } from "@/components/status-region";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Field, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
 import { requestJson, type FetchLike } from "../../ui/json-request.ts";
 import { describeSignUpFailure } from "./messages.ts";
 
@@ -42,23 +46,25 @@ export function ResendForm({
   }
 
   return (
-    <form onSubmit={(event) => void submit(event)} className="login-form">
+    <form
+      onSubmit={(event) => void submit(event)}
+      className="flex flex-col gap-4"
+      aria-label="Request a new link"
+    >
       {problem ? (
-        <p role="alert" className="alert alert-error">
-          {problem}
-        </p>
+        <Alert variant="destructive">
+          <AlertDescription>{problem}</AlertDescription>
+        </Alert>
       ) : null}
       {sent ? (
-        <p role="status" className="alert alert-success">
+        <StatusRegion className="text-success">
           If this address is waiting to be confirmed, a new link is on its way.
           It is used with the password of the sign-up it belongs to.
-        </p>
+        </StatusRegion>
       ) : null}
-      <div className="field">
-        <label htmlFor={id} className="field-label">
-          Email address
-        </label>
-        <input
+      <Field>
+        <FieldLabel htmlFor={id}>Email address</FieldLabel>
+        <Input
           id={id}
           type="email"
           autoComplete="email"
@@ -66,14 +72,15 @@ export function ResendForm({
           value={email}
           onChange={(event) => setEmail(event.target.value)}
         />
-      </div>
+      </Field>
       <Button
         type="submit"
         variant="secondary"
-        className="btn-block"
-        disabled={pending}
+        loading={pending}
+        loadingLabel="Sending"
+        className="w-full"
       >
-        {pending ? "Sending..." : "Send a new link"}
+        Send a new link
       </Button>
     </form>
   );

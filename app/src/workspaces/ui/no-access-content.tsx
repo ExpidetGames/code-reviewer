@@ -7,7 +7,11 @@
 // - in a multi-tenant instance, the form that creates a workspace (they become its Owner),
 // - in a single-tenant instance, the sentence "ask an admin of this instance for an invitation". Nothing
 //   joins them automatically, however they got their account.
+//
+// Both instance modes render the action in the same card, so the slot is the same whether it holds the
+// form or the sentence (#171).
 import Link from "next/link";
+import { Card, CardContent } from "@/components/ui/card";
 import type { PendingInvitation } from "../invitations.ts";
 import type { AccountApi } from "./api.ts";
 import { CreateWorkspaceForm } from "./create-workspace-form.tsx";
@@ -32,29 +36,28 @@ export function NoAccessContent({
     ...(open === undefined ? {} : { open }),
   };
   return (
-    <>
+    <div className="flex flex-col gap-6">
       <PendingInvitations invitations={pending} {...withApi} />
-      {multiTenant ? (
-        <section aria-labelledby="create-heading">
-          <h2 id="create-heading">Create a workspace</h2>
-          <p>
-            A workspace holds your connections, repositories and reviews, and
-            the people you invite. You become its Owner.
-          </p>
-          <CreateWorkspaceForm {...withApi} />
-        </section>
-      ) : (
-        <p>
-          Your account exists, but it is not part of a workspace. Ask an admin
-          of this instance for an invitation.
-        </p>
-      )}
+      <Card>
+        <CardContent className="pt-6">
+          {multiTenant ? (
+            <CreateWorkspaceForm {...withApi} />
+          ) : (
+            <p className="text-sm text-muted-foreground text-pretty">
+              Ask an admin of this instance for an invitation.
+            </p>
+          )}
+        </CardContent>
+      </Card>
       {isInstanceAdmin ? (
-        <p className="muted small">
+        <p className="text-sm text-muted-foreground">
           You run this instance:{" "}
-          <Link href="/admin">open the admin portal</Link>.
+          <Link href="/admin" className="underline underline-offset-4">
+            open the admin portal
+          </Link>
+          .
         </p>
       ) : null}
-    </>
+    </div>
   );
 }
