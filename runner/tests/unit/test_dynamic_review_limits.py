@@ -8,6 +8,8 @@ from what the engine reports, and a missing or oversized answer fails closed ins
 counted as zero or ignored.
 """
 
+import threading
+import time
 from typing import Any
 
 import pytest
@@ -212,3 +214,48 @@ def test_the_default_envelope_is_the_epics() -> None:
     assert limits.max_input_bytes == 2 * 1024 * 1024
     assert DEFAULT_OUTPUT_TOKENS > 0
     assert DEFAULT_WINDOW_TOKENS > 0
+
+
+class SlowLimits(DynamicLimits):
+    """Limits whose bounds are slow to read: every check-then-update gets a wide window in which
+    other threads run, so a ledger that does not guard its counters is overshot reliably."""
+
+    def __getattribute__(self, name: str) -> Any:
+        if name in ("max_model_calls", "max_tool_calls", "max_files"):
+            time.sleep(0.002)
+        return super().__getattribute__(name)
+
+
+# #197-T05
+def test_concurrent_calls_cannot_overshoot_the_call_and_tool_budgets() -> None:
+    # The proxy serves from a threaded server, so the ledger is shared between threads.
+    calls, tools, files = 5, 7, 9
+    shared = BudgetLedger(SlowLimits(max_model_calls=calls, max_tool_calls=tools, max_files=files))
+    outcomes: list[str] = []
+    gate = threading.Barrier(16)
+
+    def worker(index: int) -> None:
+        gate.wait()
+        for round_ in range(3):
+            for action in (
+                lambda: shared.reserve_call("hello"),
+                lambda: shared.count_tool_call("read"),
+                lambda: shared.count_file(f"file-{index}-{round_}"),
+            ):
+                try:
+                    action()
+                except LimitError:
+                    outcomes.append("refused")
+                else:
+                    outcomes.append("allowed")
+
+    threads = [threading.Thread(target=worker, args=(index,)) for index in range(16)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert shared.model_calls == calls
+    assert shared.tool_calls == tools
+    assert shared.files == files
+    assert outcomes.count("allowed") == calls + tools + files

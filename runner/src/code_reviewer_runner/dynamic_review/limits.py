@@ -18,6 +18,7 @@ deliberately conservative; a verified DeepSeek tokenizer may tighten it later wi
 envelope. A request that fits the byte bound but not the token budget is refused before it is sent.
 """
 
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -105,6 +106,9 @@ class BudgetLedger:
 
     One instance per run, shared by the proxy (model calls and tokens) and the adapter (tool calls,
     files and returned bytes). The clock is injected so a test never waits.
+
+    The proxy serves from a threaded server, so every check-then-update section holds one lock: two
+    concurrent calls can never both pass the same bound.
     """
 
     def __init__(
@@ -123,6 +127,7 @@ class BudgetLedger:
         self._clock = clock
         self._started = clock()
         self._counters = _Counters()
+        self._lock = threading.Lock()
 
     @property
     def started(self) -> float:
@@ -157,12 +162,15 @@ class BudgetLedger:
                 "the request plus its output allowance exceeds the model window",
             )
         counters = self._counters
-        if counters.model_calls + 1 > self.limits.max_model_calls:
-            raise LimitError(ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the model call budget is used up")
-        if counters.reserved_tokens + input_tokens + allowance > self.limits.max_total_tokens:
-            raise LimitError(ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the token budget is used up")
-        counters.model_calls += 1
-        counters.reserved_tokens += input_tokens + allowance
+        with self._lock:
+            if counters.model_calls + 1 > self.limits.max_model_calls:
+                raise LimitError(
+                    ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the model call budget is used up"
+                )
+            if counters.reserved_tokens + input_tokens + allowance > self.limits.max_total_tokens:
+                raise LimitError(ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the token budget is used up")
+            counters.model_calls += 1
+            counters.reserved_tokens += input_tokens + allowance
         return Reservation(input_tokens=input_tokens, output_tokens=allowance)
 
     def settle_call(
@@ -191,30 +199,35 @@ class BudgetLedger:
                 "the provider reported more than the request reserved",
             )
         counters = self._counters
-        counters.reserved_tokens -= reservation.input_tokens + reservation.output_tokens
-        counters.prompt_tokens += prompt_tokens
-        counters.completion_tokens += completion_tokens
-        if counters.prompt_tokens + counters.completion_tokens > self.limits.max_total_tokens:
-            raise LimitError(ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the token budget is used up")
+        with self._lock:
+            counters.reserved_tokens -= reservation.input_tokens + reservation.output_tokens
+            counters.prompt_tokens += prompt_tokens
+            counters.completion_tokens += completion_tokens
+            if counters.prompt_tokens + counters.completion_tokens > self.limits.max_total_tokens:
+                raise LimitError(ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the token budget is used up")
 
     def count_tool_call(self, name: str) -> None:
         """Count one tool call the engine reported. Unknown attempts count too."""
         if not name:
             raise LimitError(ErrorCode.DYNAMIC_POLICY_VIOLATION, "a tool call without a name")
-        if self._counters.tool_calls + 1 > self.limits.max_tool_calls:
-            raise LimitError(ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the tool call budget is used up")
-        self._counters.tool_calls += 1
+        with self._lock:
+            if self._counters.tool_calls + 1 > self.limits.max_tool_calls:
+                raise LimitError(
+                    ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the tool call budget is used up"
+                )
+            self._counters.tool_calls += 1
 
     def count_file(self, path: str) -> None:
         """Count a content-bearing file the run read. Distinct files, not calls."""
         files = self._counters.files
-        if path in files:
-            return
-        if len(files) + 1 > self.limits.max_files:
-            raise LimitError(
-                ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the distinct file budget is used up"
-            )
-        files.add(path)
+        with self._lock:
+            if path in files:
+                return
+            if len(files) + 1 > self.limits.max_files:
+                raise LimitError(
+                    ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the distinct file budget is used up"
+                )
+            files.add(path)
 
     def add_result_bytes(self, size: int) -> None:
         """Count the UTF-8 bytes of one tool result delivered to the model."""
@@ -226,11 +239,12 @@ class BudgetLedger:
             raise LimitError(
                 ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "a tool result exceeds the per-result byte bound"
             )
-        if self._counters.returned_bytes + size > self.limits.max_returned_bytes:
-            raise LimitError(
-                ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the cumulative content bound is used up"
-            )
-        self._counters.returned_bytes += size
+        with self._lock:
+            if self._counters.returned_bytes + size > self.limits.max_returned_bytes:
+                raise LimitError(
+                    ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the cumulative content bound is used up"
+                )
+            self._counters.returned_bytes += size
 
     def check_request_bytes(self, size: int) -> None:
         """Refuse a model-protocol request before any byte of it is forwarded."""
@@ -248,29 +262,34 @@ class BudgetLedger:
 
     @property
     def model_calls(self) -> int:
-        return self._counters.model_calls
+        with self._lock:
+            return self._counters.model_calls
 
     @property
     def tool_calls(self) -> int:
-        return self._counters.tool_calls
+        with self._lock:
+            return self._counters.tool_calls
 
     @property
     def files(self) -> int:
-        return len(self._counters.files)
+        with self._lock:
+            return len(self._counters.files)
 
     @property
     def returned_bytes(self) -> int:
-        return self._counters.returned_bytes
+        with self._lock:
+            return self._counters.returned_bytes
 
     def usage(self, model: str | None) -> Usage:
         """The run's usage in the existing result shape. Cost is never guessed."""
-        counters = self._counters
-        return Usage(
-            model=model,
-            prompt_tokens=counters.prompt_tokens,
-            completion_tokens=counters.completion_tokens,
-            total_tokens=counters.prompt_tokens + counters.completion_tokens,
-            ai_calls=counters.model_calls,
-            fallback_used=False,
-            cost_usd=None,
-        )
+        with self._lock:
+            counters = self._counters
+            return Usage(
+                model=model,
+                prompt_tokens=counters.prompt_tokens,
+                completion_tokens=counters.completion_tokens,
+                total_tokens=counters.prompt_tokens + counters.completion_tokens,
+                ai_calls=counters.model_calls,
+                fallback_used=False,
+                cost_usd=None,
+            )
