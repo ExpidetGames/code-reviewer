@@ -71,7 +71,9 @@ or logs; auth, forbidden, rate limit, missing repository and availability failur
 existing stable codes. Stale/missing/malformed head or incomplete required evidence is
 `checkout_incomplete`; deadline expiry is `timeout`.
 
-A small Git smart HTTP v0 client reads bounded advertisements and explicitly wants the queued
+A small Git smart HTTP v0 client reads the ref advertisement within the same cumulative
+preparation envelope (a busy repository can advertise many megabytes of `refs/pull/*/head`, so it
+is not limited by the 1 MiB per-field cap), and explicitly wants the queued
 commit, obtained from `refs/pull/<number>/head` in the **base** repository, and the base-ref snapshot.
 Both advertisement and fetched object identity are verified; the PR ref is checked again before
 returning preparation. Depth one and `blob:none` are requested when supported. Ignored filters
@@ -94,7 +96,7 @@ This works independently of bookworm Git's lack of `--no-lazy-fetch`.
 | 64 MiB exposed content | All exported regular content plus serialized evidence, including manifest, metadata and prior state. |
 | 256 MiB preparation | One cumulative budget across HTTP status/headers/chunk framing/body or offline Git transfer, every hydration, inflation/delta reconstruction and exported/evidence writes; 4 KiB allocation rounding and directories charged before writes. A conservative 64 KiB runtime/lifetime reservation is charged before creation. No retry resets. |
 | 2 MiB diff | Each endpoint diff, incrementally before adding lines; combined serialized evidence has an additional 3 MiB ceiling. |
-| 1 MiB response/data field | Advertisements, HTTP headers and each metadata/prior-state input, plus the whole exposed-content limit. No compare API payload is used. |
+| 1 MiB response/data field | HTTP headers, each metadata/prior-state input and the serialized-evidence ceiling above the diff. The ref advertisement instead shares the cumulative preparation envelope. No compare API payload is used. |
 | Paths | 1,024 UTF-8 bytes, 32 components, 255 bytes/component; no absolute, drive/UNC, traversal, backslash, control, `.git`, ambiguous Windows reserved/trailing-dot names. |
 | 300 seconds | One monotonic preparation deadline, including all transfers, expansion, export and effective-access probe; raw HTTP header/chunk-line reads recheck it between bytes and reset socket timeout to the remaining lifetime; cancellation checked between bounded operations. The job supervisor terminates blocked processes on timeout/lease loss/shutdown. |
 

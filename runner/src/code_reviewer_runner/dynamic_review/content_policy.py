@@ -30,24 +30,78 @@ _CREDENTIAL_NAMES = {
     "id_ecdsa",
     "id_ed25519",
 }
-_PRIVATE_KEY = re.compile(
-    r"-----BEGIN (?:[A-Z0-9 ]*PRIVATE KEY|PGP PRIVATE KEY BLOCK)-----.*?"
-    r"-----END (?:[A-Z0-9 ]*PRIVATE KEY|PGP PRIVATE KEY BLOCK)-----",
-    re.DOTALL,
-)
+_PRIVATE_KEY_BEGIN = "-----BEGIN "
+_PRIVATE_KEY_END = "-----END "
+# A recognized PEM/PGP key block is small; bounding the search span keeps redaction linear
+# even for an allowed text file that repeats a BEGIN marker without ever closing it.
+_MAX_KEY_BLOCK = 8 * 1024
 _ASSIGNMENT = re.compile(
     r"(?im)\b(?:password|passwd|api[_-]?key|access[_-]?token|secret[_-]?key|"
-    r"client[_-]?secret|private[_-]?key|token)[\"']?\s*[:=]\s*[\"']?"
-    r"(?P<value>[^\s\"',;]+)"
+    r"client[_-]?secret|private[_-]?key|token)\b[\"']?(?P<prefix>\s*[:=]\s*)"
+    r"(?P<quote>[\"']?)(?P<value>[^\s\"',;]+)(?P=quote)"
 )
 _PLACEHOLDERS = {"placeholder", "changeme", "example", "your-api-key", "your-token", "your-key"}
 
 
+def _private_key_end(text: str, search: int) -> int | None:
+    limit = search + _MAX_KEY_BLOCK
+    while True:
+        marker = text.find(_PRIVATE_KEY_END, search, limit)
+        if marker < 0:
+            return None
+        after = marker + len(_PRIVATE_KEY_END)
+        end = text.find("-----", after, after + 64)
+        if end >= 0 and _is_private_key_header(text[after:end]):
+            return end + 5
+        search = after
+
+
+def _is_private_key_header(header: str) -> bool:
+    return header.endswith("PRIVATE KEY") or header == "PGP PRIVATE KEY BLOCK"
+
+
+def _redact_private_keys(text: str) -> str:
+    """Linearly replace whole PEM/PGP private-key blocks, without a catastrophic regex."""
+    if _PRIVATE_KEY_BEGIN not in text:
+        return text
+    result: list[str] = []
+    position = 0
+    while True:
+        start = text.find(_PRIVATE_KEY_BEGIN, position)
+        if start < 0:
+            result.append(text[position:])
+            return "".join(result)
+        after = start + len(_PRIVATE_KEY_BEGIN)
+        header_end = text.find("-----", after, after + 64)
+        if header_end < 0 or not _is_private_key_header(text[after:header_end]):
+            result.append(text[position:after])
+            position = after
+            continue
+        end = _private_key_end(text, header_end + 5)
+        result.append(text[position:start])
+        result.append("[REDACTED]")
+        position = end if end is not None else header_end + 5
+
+
+def _looks_like_secret(value: str) -> bool:
+    if value.lower() in _PLACEHOLDERS or (value.startswith("<") and value.endswith(">")):
+        return False
+    if len(value) >= 16:
+        return True
+    return any(char.isalpha() for char in value) and any(char.isdigit() for char in value)
+
+
 def _redact_assignment(match: re.Match[str]) -> str:
     value = match.group("value")
+    # Keep the key and the statement shape; only a secret-looking value is replaced, so an
+    # ordinary `token: string` / `token = getToken()` is not mangled into broken code.
     if value.lower() in _PLACEHOLDERS or (value.startswith("<") and value.endswith(">")):
         return match.group()
-    return "[REDACTED]"
+    if not match.group("quote") and not _looks_like_secret(value):
+        return match.group()
+    start, end = match.start("value"), match.end("value")
+    offset = match.start()
+    return match.group()[: start - offset] + "[REDACTED]" + match.group()[end - offset :]
 
 
 class OmissionReason(StrEnum):
@@ -78,9 +132,7 @@ def omission_reason(path: str, mode: str) -> OmissionReason | None:
 
 
 def redact_text(text: str, redactor: Redactor) -> str:
-    return _ASSIGNMENT.sub(
-        _redact_assignment, _PRIVATE_KEY.sub("[REDACTED]", redactor.redact(text))
-    )
+    return _ASSIGNMENT.sub(_redact_assignment, _redact_private_keys(redactor.redact(text)))
 
 
 def content_text(raw: bytes, redactor: Redactor) -> str | None:

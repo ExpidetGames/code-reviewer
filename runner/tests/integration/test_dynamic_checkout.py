@@ -54,6 +54,46 @@ def test_exact_head_and_sanitized_evidence_are_prepared(
     assert result.comparison == "full"
 
 
+# #196-T01 #196-T12
+@pytest.mark.parametrize("chunked", [False, True])
+def test_a_large_eligible_blob_survives_download_and_inflation(
+    repo: GitFixture, tmp_path: Path, chunked: bool
+) -> None:
+    from fakes.dynamic_git.server import git_server
+
+    from code_reviewer_runner.dynamic_review.transport import HttpTransport
+
+    payload = b"a" * 200_000
+    repo.set_head({"README.md": b"base\n", "big.txt": payload, "x.txt": b"x\n"})
+    git(repo.path, "update-ref", "refs/heads/main", repo.head)
+    with git_server(repo.path) as server:
+        server.chunked = chunked
+        result = prepare_content(
+            claim(repo),
+            196,
+            HttpTransport(server.url, server.token),
+            tmp_path / "job",
+            Redactor((server.token,)),
+        )
+    assert result.files["big.txt"] == payload.decode()
+    assert result.files["x.txt"] == "x\n"
+
+
+# #196-T01 #196-T12
+def test_a_large_eligible_blob_is_hydrated_through_real_git_transfer(
+    repo: GitFixture, tmp_path: Path
+) -> None:
+    # The local real-Git path is what the review used to expose the mis-tracked stream end.
+    payload = b"a" * 200_000
+    repo.set_head({"README.md": b"base\n", "big.txt": payload, "x.txt": b"x\n", "y.txt": b"y\n"})
+    git(repo.path, "update-ref", "refs/heads/main", repo.head)
+    result = prepare_content(
+        claim(repo), 196, LocalTransport(repo.path), tmp_path / "job", Redactor(())
+    )
+    assert result.files["big.txt"] == payload.decode()
+    assert {"big.txt", "x.txt", "y.txt"} <= set(result.files)
+
+
 # #196-T03 #196-T10
 def test_discovery_credentials_and_symlinks_are_not_read_or_relocated(
     repo: GitFixture, tmp_path: Path
@@ -187,6 +227,7 @@ def test_global_quotas_fail_and_remove_only_the_owned_directory(
             LocalTransport(repo.path),
             tmp_path / "job",
             Redactor(()),
+            metadata="xx",
             limits=replace(Limits(), **changes),
         )
     assert not (tmp_path / "job").exists() and (other / "sentinel").read_text() == "keep"
@@ -607,6 +648,25 @@ def test_endpoint_diff_preserves_mode_and_final_newline_changes(
     )
     assert "No newline at end of file" in result.diff
     assert "new mode 100755" in result.diff
+
+
+# #196-T11
+def test_a_one_line_change_in_a_large_file_emits_a_bounded_hunk(
+    repo: GitFixture, tmp_path: Path
+) -> None:
+    original = "".join(f"line {index}\n" for index in range(5000))
+    updated = original.replace("line 2500\n", "line 2500 changed\n")
+    base = repo.commit({"README.md": b"base\n", "big.txt": original.encode()})
+    head = repo.commit({"README.md": b"base\n", "big.txt": updated.encode()}, base)
+    git(repo.path, "update-ref", "refs/heads/main", base)
+    git(repo.path, "update-ref", "refs/pull/196/head", head)
+    repo.head = head
+    result = prepare_content(
+        claim(repo), 196, LocalTransport(repo.path), tmp_path / "job", Redactor(())
+    )
+    assert "-line 2500\n" in result.diff and "+line 2500 changed\n" in result.diff
+    assert "line 0\n" not in result.diff and "line 4999\n" not in result.diff
+    assert len(result.diff.encode()) < len(original) // 10
 
 
 # #196-T08 #196-T12

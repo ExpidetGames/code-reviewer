@@ -127,7 +127,16 @@ class ObjectStore:
                 if not chunk:
                     raise CheckoutError()
                 inflated = decoder.decompress(chunk, min(64 * 1024, size - len(raw) + 1))
-                position += len(chunk) - len(decoder.unconsumed_tail) - len(decoder.unused_data)
+                # At end of stream the trailing bytes of `chunk` appear in both `unused_data`
+                # and (when max_length stopped output exactly at the stream end) in
+                # `unconsumed_tail`; subtracting both double-counts them and lands `position`
+                # before the next object header. `unused_data` alone is authoritative then.
+                consumed = (
+                    len(chunk) - len(decoder.unused_data)
+                    if decoder.eof
+                    else len(chunk) - len(decoder.unconsumed_tail)
+                )
+                position += consumed
                 self.budget.charge(len(inflated))
                 raw.extend(inflated)
                 if len(raw) > size:

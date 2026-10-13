@@ -18,6 +18,7 @@ class GitServer:
         self.status = 200
         self.requests: list[tuple[str, bytes]] = []
         self.stall = False
+        self.chunked = False
         self.entered = threading.Event()
         self.release = threading.Event()
         self.closed = threading.Event()
@@ -86,6 +87,21 @@ class GitServer:
                     if request is None
                     else "application/x-git-upload-pack-result",
                 )
+                if fixture.chunked:
+                    # GitHub streams responses without Content-Length; exercise the chunked
+                    # framing path through the bounded reader.
+                    self.send_header("Transfer-Encoding", "chunked")
+                    self.end_headers()
+                    try:
+                        for start in range(0, len(payload), 4096):
+                            part = payload[start : start + 4096]
+                            self.wfile.write(f"{len(part):x}\r\n".encode() + part + b"\r\n")
+                            self.wfile.flush()
+                        self.wfile.write(b"0\r\n\r\n")
+                        self.wfile.flush()
+                    except (BrokenPipeError, ConnectionResetError):
+                        fixture.closed.set()
+                    return
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
                 try:

@@ -13,8 +13,25 @@ from code_reviewer_runner.dynamic_review.objects import ObjectStore
 from code_reviewer_runner.dynamic_review.protocol import Packets
 
 
+def pack_objects(entries: list[tuple[int, bytes]]) -> bytes:
+    body = bytearray()
+    for kind, raw in entries:
+        size = len(raw)
+        header = bytearray([(kind << 4) | (size & 15)])
+        size >>= 4
+        while size:
+            header[-1] |= 128
+            header.append(size & 127)
+            size >>= 7
+        body += bytes(header) + zlib.compress(raw)
+    payload = b"PACK" + struct.pack(">II", 2, len(entries)) + bytes(body)
+    return payload + hashlib.sha1(payload).digest()
+
+
 def packed(raw: bytes, kind: int = 3, declared: int | None = None) -> bytes:
-    size = len(raw) if declared is None else declared
+    if declared is None:
+        return pack_objects([(kind, raw)])
+    size = declared
     header = bytearray([(kind << 4) | (size & 15)])
     size >>= 4
     while size:
@@ -99,3 +116,18 @@ def test_valid_delta_objects_are_verified_and_resolved(tmp_path: Path, kind: str
     store.unpack(payload + hashlib.sha1(payload).digest())
     oid = hashlib.sha1(b"blob 2\0ab").hexdigest()
     assert store.read(oid, "blob") == b"ab"
+
+
+# #196-T01 #196-T12
+@pytest.mark.parametrize("size", [65_537, 66_000, 100_000, 262_144])
+def test_an_object_over_one_inflate_window_keeps_the_next_object_header_aligned(
+    tmp_path: Path, size: int
+) -> None:
+    # A real GitHub pack has many objects, so a blob larger than the 64 KiB inflate window
+    # leaves trailing bytes in the same chunk as the next object header.
+    entries = [(3, b"before\n"), (3, b"a" * size), (3, b"after\n")]
+    store = ObjectStore(tmp_path / "objects", Budget(Limits()))
+    store.unpack(pack_objects(entries))
+    for _kind, raw in entries:
+        oid = hashlib.sha1(f"blob {len(raw)}\0".encode() + raw).hexdigest()
+        assert store.read(oid, "blob") == raw

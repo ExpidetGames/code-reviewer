@@ -3,7 +3,11 @@
 
 import pytest
 
-from code_reviewer_runner.dynamic_review.content_policy import content_text, omission_reason
+from code_reviewer_runner.dynamic_review.content_policy import (
+    content_text,
+    omission_reason,
+    redact_text,
+)
 from code_reviewer_runner.dynamic_review.limits import CheckoutError, Limits
 from code_reviewer_runner.dynamic_review.paths import validate_path
 from code_reviewer_runner.redaction import Redactor
@@ -36,10 +40,27 @@ def test_unsafe_paths_are_refused(path: str) -> None:
 
 
 # #196-T02
-@pytest.mark.parametrize("path", ["abcde", "a/b/c"])
-def test_path_length_and_depth_are_bounded(path: str) -> None:
+def test_path_length_and_depth_are_bounded_apart() -> None:
     with pytest.raises(CheckoutError):
-        validate_path(path, Limits(path_bytes=4, path_depth=2))
+        validate_path("a/b/c", Limits(path_depth=2))
+    with pytest.raises(CheckoutError):
+        validate_path("abcdef", Limits(path_bytes=5))
+
+
+# #196-T02
+def test_path_component_and_depth_boundaries_are_exact() -> None:
+    exact_depth = "/".join(["a"] * 32)
+    assert validate_path(exact_depth, Limits()) == tuple(["a"] * 32)
+    with pytest.raises(CheckoutError):
+        validate_path("/".join(["a"] * 33), Limits())
+    assert validate_path("a" * 255, Limits())
+    with pytest.raises(CheckoutError):
+        validate_path("a" * 256, Limits())
+    exact_bytes = "/".join(["a" * 204] * 5)
+    assert len(exact_bytes.encode()) == 1024
+    validate_path(exact_bytes, Limits(path_bytes=1024))
+    with pytest.raises(CheckoutError):
+        validate_path(exact_bytes + "a", Limits(path_bytes=1024))
 
 
 # #196-T10
@@ -78,6 +99,15 @@ def test_path_length_and_depth_are_bounded(path: str) -> None:
 )
 def test_engine_discovery_inputs_are_omitted_at_every_depth(prefix: str, name: str) -> None:
     assert omission_reason(prefix + name, "100644") == "engine_discovery"
+
+
+# #196-T10
+@pytest.mark.parametrize(
+    "path",
+    ["OpenCode.JSON", "a/OpenCode.Jsonc", ".OpenCode/plugins/x.js", ".CLAUDE/Skills/x"],
+)
+def test_discovery_input_matching_is_case_insensitive(path: str) -> None:
+    assert omission_reason(path, "100644") == "engine_discovery"
 
 
 # #196-T05
@@ -146,3 +176,48 @@ def test_example_placeholders_stay_readable_and_json_credentials_are_redacted() 
     assert text is not None
     assert "your-api-key" in text and "<password>" in text
     assert "dummy-private-value" not in text
+
+
+# #196-T05
+@pytest.mark.parametrize(
+    "source",
+    [
+        "interface A { token: string; password: string }",
+        "const token = getToken();",
+        "def f(token: str) -> str:",
+        "let password: string;",
+    ],
+)
+def test_credential_assignment_redaction_keeps_ordinary_code_intact(source: str) -> None:
+    assert redact_text(source, Redactor(())) == source
+
+
+# #196-T05
+def test_credential_assignment_redaction_replaces_only_the_secret_value() -> None:
+    text = redact_text('client_secret = "dummy-private-value"', Redactor(()))
+    assert text == 'client_secret = "[REDACTED]"'
+    assert redact_text("API_KEY=9f8e7d6c5b4a3210", Redactor(())) == "API_KEY=[REDACTED]"
+
+
+# #196-T05
+def test_private_key_blocks_are_redacted_for_pem_and_pgp() -> None:
+    for header in (
+        "RSA PRIVATE KEY",
+        "PRIVATE KEY",
+        "ENCRYPTED PRIVATE KEY",
+        "PGP PRIVATE KEY BLOCK",
+    ):
+        text = f"-----BEGIN {header}-----\nsecret-body\n-----END {header}-----"
+        assert redact_text(text, Redactor(())) == "[REDACTED]"
+
+
+# #196-T05
+def test_unterminated_private_key_markers_are_redacted_without_a_catastrophic_regex() -> None:
+    import time
+
+    line = "-----BEGIN RSA PRIVATE KEY-----\n"
+    text = line * (512 * 1024 // len(line))
+    started = time.monotonic()
+    result = redact_text(text, Redactor(()))
+    assert time.monotonic() - started < 10
+    assert "PRIVATE KEY" not in result

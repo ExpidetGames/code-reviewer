@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Validated tracked trees and bounded exact endpoint evidence, independent of commit ancestry."""
 
+import difflib
 import json
 import re
 from dataclasses import dataclass
@@ -13,6 +14,9 @@ from .objects import ObjectStore
 from .paths import validate_path
 
 _SHA = re.compile(r"[0-9a-f]{40}")
+# Bound the (worst-case quadratic) line matcher; beyond this a full-body hunk is emitted, which
+# the diff budget bounds as before.
+_MAX_MATCH_LINES = 50_000
 
 
 @dataclass(frozen=True)
@@ -72,7 +76,8 @@ def endpoint_diff(
     budget: Budget,
     redactor: Redactor,
 ) -> str:
-    # Exact two-endpoint diff, full-file hunks rather than an unbounded similarity search.
+    # Exact two-endpoint diff. Line-level hunks with context keep a small change in a large file
+    # from costing the whole file twice; a similarity search is not needed.
     result: list[str] = []
     size = 0
 
@@ -98,14 +103,46 @@ def endpoint_diff(
             add(f"deleted mode {left[path].mode}\n")
         elif left[path].mode != right[path].mode:
             add(f"old mode {left[path].mode}\nnew mode {right[path].mode}\n")
-        add(
-            f"--- {name if path in left else '/dev/null'}\n"
-            f"+++ {name if path in right else '/dev/null'}\n"
-            f"@@ -1,{len(a)} +1,{len(b)} @@\n"
-        )
-        for sign, lines in (("-", a), ("+", b)):
-            for line in lines:
-                add(sign + line)
-                if not line.endswith("\n"):
-                    add("\n\\ No newline at end of file\n")
+        if a == b:
+            continue
+        add(f"--- {name if path in left else '/dev/null'}\n")
+        add(f"+++ {name if path in right else '/dev/null'}\n")
+        for hunk in _hunks(a, b):
+            add(hunk)
     return "".join(result)
+
+
+def _hunks(a: list[str], b: list[str]) -> list[str]:
+    if len(a) + len(b) > _MAX_MATCH_LINES:
+        return _full_hunk(a, b)
+    matcher = difflib.SequenceMatcher(None, a, b, autojunk=False)
+    hunks: list[str] = []
+    for group in matcher.get_grouped_opcodes(3):
+        start_a, stop_a = group[0][1], group[-1][2]
+        start_b, stop_b = group[0][3], group[-1][4]
+        hunks.append(f"@@ -{start_a + 1},{stop_a - start_a} +{start_b + 1},{stop_b - start_b} @@\n")
+        for tag, i1, i2, j1, j2 in group:
+            if tag == "equal":
+                _emit(hunks, " ", a[i1:i2])
+            elif tag == "delete":
+                _emit(hunks, "-", a[i1:i2])
+            elif tag == "insert":
+                _emit(hunks, "+", b[j1:j2])
+            else:
+                _emit(hunks, "-", a[i1:i2])
+                _emit(hunks, "+", b[j1:j2])
+    return hunks
+
+
+def _full_hunk(a: list[str], b: list[str]) -> list[str]:
+    hunks = [f"@@ -1,{len(a)} +1,{len(b)} @@\n"]
+    _emit(hunks, "-", a)
+    _emit(hunks, "+", b)
+    return hunks
+
+
+def _emit(hunks: list[str], sign: str, lines: list[str]) -> None:
+    for line in lines:
+        hunks.append(sign + line)
+        if not line.endswith("\n"):
+            hunks.append("\n\\ No newline at end of file\n")
