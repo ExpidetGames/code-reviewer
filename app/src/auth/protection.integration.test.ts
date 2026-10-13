@@ -92,7 +92,6 @@ const PROTECTED_DATA_ROUTES = [
   "/api/instance-portal/mail/test",
   "/api/instance-portal/github",
   "/api/instance-portal/github/check",
-  "/api/instance-portal/github/link",
   "/api/instance-portal/github/manifest",
   "/api/instance-portal/github/manifest/callback",
   "/api/instance-portal/integrations/sync",

@@ -5,6 +5,7 @@
 // segmented control, the sign in with GitHub, and the permissions of an App that may lack them behind
 // a disclosure. The admin's own GitHub account lives on /account (#179), not here. Server rendered;
 // the forms are client components.
+import Link from "next/link";
 import { Breadcrumbs } from "../../components/breadcrumbs.tsx";
 import { DescriptionList } from "../../components/description-list.tsx";
 import { HelpDisclosure } from "../../components/help-disclosure.tsx";
@@ -98,9 +99,16 @@ export function GithubStatusCard({ view }: { view: GithubConfigView }) {
   const signInReady = view.userAuthorization.configured;
   const app = view.app;
   return (
-    <Card>
+    <Card role="region" aria-labelledby="github-status-heading">
       <CardHeader>
-        <CardTitle>Status</CardTitle>
+        <CardTitle>
+          <h2
+            id="github-status-heading"
+            className="text-lg font-semibold tracking-tight"
+          >
+            Status
+          </h2>
+        </CardTitle>
         <CardAction>
           <Badge variant={badge.variant}>{badge.text}</Badge>
         </CardAction>
@@ -183,9 +191,16 @@ export function GithubStatusCard({ view }: { view: GithubConfigView }) {
 function SignInCard({ view }: { view: GithubConfigView }) {
   const signInReady = view.userAuthorization.configured;
   return (
-    <Card>
+    <Card role="region" aria-labelledby="github-signin-heading">
       <CardHeader>
-        <CardTitle>Sign in with GitHub</CardTitle>
+        <CardTitle>
+          <h2
+            id="github-signin-heading"
+            className="text-lg font-semibold tracking-tight"
+          >
+            Sign in with GitHub
+          </h2>
+        </CardTitle>
         {signInReady ? (
           <CardAction>
             <Badge variant="success">Enabled</Badge>
@@ -196,7 +211,14 @@ function SignInCard({ view }: { view: GithubConfigView }) {
         {signInReady ? (
           <p className="text-sm text-muted-foreground">
             People can sign in with GitHub. Your own GitHub account is linked on
-            the Account page.
+            the{" "}
+            <Link
+              href="/account"
+              className="font-medium text-primary underline-offset-4 hover:underline"
+            >
+              Account page
+            </Link>
+            .
           </p>
         ) : (
           <UserAuthorizationForm view={view} />
@@ -259,9 +281,16 @@ export function GithubSection({
           </Alert>
         ) : null}
 
-        <Card>
+        <Card role="region" aria-labelledby="github-connect-heading">
           <CardHeader>
-            <CardTitle>Connect the App</CardTitle>
+            <CardTitle>
+              <h2
+                id="github-connect-heading"
+                className="text-lg font-semibold tracking-tight"
+              >
+                Connect the App
+              </h2>
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <ConnectApp
@@ -275,9 +304,16 @@ export function GithubSection({
         {saved && view.app !== null ? <SignInCard view={view} /> : null}
 
         {saved && view.privateAppUnknown ? (
-          <Card>
+          <Card role="region" aria-labelledby="github-private-heading">
             <CardHeader>
-              <CardTitle>Where can this App be installed?</CardTitle>
+              <CardTitle>
+                <h2
+                  id="github-private-heading"
+                  className="text-lg font-semibold tracking-tight"
+                >
+                  Where can this App be installed?
+                </h2>
+              </CardTitle>
             </CardHeader>
             <CardContent>
               <PrivateAppForm />
@@ -292,9 +328,16 @@ export function GithubSection({
         ) : null}
 
         {conflicts.length > 0 ? (
-          <Card>
+          <Card role="region" aria-labelledby="github-conflicts-heading">
             <CardHeader>
-              <CardTitle>Addresses that could not be updated</CardTitle>
+              <CardTitle>
+                <h2
+                  id="github-conflicts-heading"
+                  className="text-lg font-semibold tracking-tight"
+                >
+                  Addresses that could not be updated
+                </h2>
+              </CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
               <Alert variant="warning" role="note">

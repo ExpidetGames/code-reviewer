@@ -58,16 +58,16 @@ export function PermissionsCheck({
           Check the permissions
         </Button>
       </div>
-      <div aria-live="polite">
+      <div role="status" aria-live="polite">
         {outcome?.kind === "missing" && outcome.missing.length === 0 ? (
-          <Alert variant="success">
+          <Alert variant="success" role="status">
             <AlertDescription>
               The App has every permission Code Reviewer asks for.
             </AlertDescription>
           </Alert>
         ) : null}
         {outcome?.kind === "missing" && outcome.missing.length > 0 ? (
-          <Alert variant="warning">
+          <Alert variant="warning" role="status">
             <AlertDescription>
               <p>The App lacks:</p>
               <ul className="list-disc pl-5">
@@ -79,7 +79,7 @@ export function PermissionsCheck({
           </Alert>
         ) : null}
         {outcome?.kind === "failed" ? (
-          <Alert variant="destructive">
+          <Alert variant="destructive" role="status">
             <AlertDescription>{outcome.text}</AlertDescription>
           </Alert>
         ) : null}

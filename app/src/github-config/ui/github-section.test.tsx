@@ -64,6 +64,10 @@ describe("the GitHub App status card", () => {
     expect(screen.getByText(URLS.webhook)).toBeTruthy();
     expect(screen.getByText(URLS.callback)).toBeTruthy();
     expect(container.querySelector("details")).toBeNull();
+    // The card title is an h2, so the page goes h1 -> h2 -> h3 (#182 review).
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Status" }),
+    ).toBeTruthy();
   });
 });
 
@@ -84,5 +88,26 @@ describe("the GitHub App page", () => {
     expect(
       screen.queryByRole("button", { name: "Link GitHub account" }),
     ).toBeNull();
+  });
+
+  // #182-T01 (the page is h1 -> h2 -> h3, one h1)
+  it("renders one h1 and the card titles as h2", () => {
+    render(
+      <GithubSection
+        view={view()}
+        tenancy="single"
+        suggestedName="code-reviewer"
+        conflicts={[]}
+        outcome={{ ok: null, error: null }}
+      />,
+    );
+
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Status" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Connect the App" }),
+    ).toBeTruthy();
   });
 });

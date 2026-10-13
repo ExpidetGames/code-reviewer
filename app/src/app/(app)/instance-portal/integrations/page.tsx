@@ -17,9 +17,9 @@ export const metadata: Metadata = { title: "Integrations · Admin" };
 
 export default async function AdminIntegrationsPage() {
   // The admin first: a person who is not one gets the 404 before anything is read.
-  const user = await requireAdmin();
+  await requireAdmin();
   const [github, settings] = await Promise.all([
-    getIntegrationsPageData(user.id),
+    getIntegrationsPageData(),
     getAdminService().readSettings(),
   ]);
   return (

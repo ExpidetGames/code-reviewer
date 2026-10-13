@@ -29,7 +29,6 @@ import { createInstanceSettingsRepository } from "../db/repositories/instance-se
 import { createGithubCredentialStore } from "../github-config/credentials.ts";
 import { createGithubRouteHandlers } from "../github-config/http.ts";
 import { createGithubConfigService } from "../github-config/service.ts";
-import { createGithubLinkService } from "../github-signin/link.ts";
 import { createSignedStates } from "../signed-state/state.ts";
 import { TEST_APP_SLUG } from "./github-app.ts";
 import { startTestGithub } from "./github-fake.ts";
@@ -157,24 +156,6 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
         apiBaseUrl: fake.baseUrl,
         log: () => undefined,
       });
-      const link = createGithubLinkService({
-        db,
-        signedStates,
-        rateLimits,
-        authorization: async () => {
-          const { userAuthorization } = await credentials.load();
-          return userAuthorization.state === "configured"
-            ? {
-                clientId: userAuthorization.clientId,
-                clientSecret: userAuthorization.clientSecret.reveal(),
-              }
-            : null;
-        },
-        publicUrl: ADMIN_TEST_BASE_URL,
-        oauthBaseUrl: fake.baseUrl,
-        apiBaseUrl: fake.baseUrl,
-        log: () => undefined,
-      });
       const routes = createGithubRouteHandlers({
         access: async () =>
           adminAccessOf(
@@ -187,7 +168,6 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
           throw new NotFoundSignal();
         },
         service,
-        link,
       });
       return { fake, routes };
     })();
@@ -444,11 +424,6 @@ export async function createAdminHarness(options: AdminHarnessOptions = {}) {
           request.method === "POST"
         )
           return await routes.check(request);
-        if (
-          pathname === "/api/instance-portal/github/link" &&
-          request.method === "POST"
-        )
-          return await routes.startLink(request);
       }
       if (
         pathname === "/api/instance-portal/integrations/sync" &&

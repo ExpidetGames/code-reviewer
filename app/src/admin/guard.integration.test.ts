@@ -68,7 +68,6 @@ describe("the routes of the portal", () => {
       "/api/admin/approvals/[id]",
       "/api/admin/github",
       "/api/admin/github/check",
-      "/api/admin/github/link",
       "/api/admin/github/manifest",
       "/api/admin/github/manifest/callback",
       "/api/admin/integrations/sync",

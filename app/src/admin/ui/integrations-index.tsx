@@ -125,9 +125,20 @@ export function IntegrationsIndex({
       />
       <div className="flex max-w-[64rem] flex-col gap-6 pt-6">
         {cards.map((card) => (
-          <Card key={card.id}>
+          <Card
+            key={card.id}
+            role="region"
+            aria-labelledby={`integration-${card.id}-heading`}
+          >
             <CardHeader>
-              <CardTitle>{card.name}</CardTitle>
+              <CardTitle>
+                <h2
+                  id={`integration-${card.id}-heading`}
+                  className="text-lg font-semibold tracking-tight"
+                >
+                  {card.name}
+                </h2>
+              </CardTitle>
               <CardAction>
                 <Badge variant={card.badge.variant}>{card.badge.text}</Badge>
               </CardAction>

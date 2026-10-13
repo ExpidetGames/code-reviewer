@@ -68,6 +68,14 @@ describe("the Integrations index", () => {
           card.querySelector('[data-slot="card-title"]')?.textContent ?? null,
       ),
     ).toEqual(["GitHub App", "Mail"]);
+    // The card titles are h2, the page's one h1 comes from the header (#182 review).
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    expect(
+      screen.getByRole("heading", { level: 2, name: "GitHub App" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Mail" }),
+    ).toBeTruthy();
     expect(
       screen
         .getByRole("link", { name: "Open GitHub App" })

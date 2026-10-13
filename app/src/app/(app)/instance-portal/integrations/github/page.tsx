@@ -7,19 +7,16 @@ import type { Metadata } from "next";
 import { requireAdmin } from "@/admin/session";
 import { getIntegrationsPageData } from "@/github-config/shared";
 import { GithubSection } from "@/github-config/ui/github-section";
+import { singleSearchParam } from "@/http/search-params";
 
 export const metadata: Metadata = { title: "GitHub App · Admin" };
-
-function single(value: string | string[] | undefined): string | null {
-  return typeof value === "string" && value !== "" ? value : null;
-}
 
 export default async function AdminGithubAppPage(
   props: PageProps<"/instance-portal/integrations/github">,
 ) {
   // The admin first: a person who is not one gets the 404 before anything is read.
-  const user = await requireAdmin();
-  const data = await getIntegrationsPageData(user.id);
+  await requireAdmin();
+  const data = await getIntegrationsPageData();
   const query = await props.searchParams;
   return (
     <GithubSection
@@ -28,8 +25,8 @@ export default async function AdminGithubAppPage(
       suggestedName={data.suggestedName}
       conflicts={data.conflicts}
       outcome={{
-        ok: single(query.github),
-        error: single(query.github_error),
+        ok: singleSearchParam(query.github),
+        error: singleSearchParam(query.github_error),
       }}
     />
   );

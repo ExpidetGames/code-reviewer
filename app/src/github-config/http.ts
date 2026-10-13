@@ -16,9 +16,6 @@
 //   GET  /api/admin/github/manifest/callback  where GitHub sends the browser back (code and state); answers a
 //                                             redirect to the GitHub App page, with the result in the query
 //   POST /api/admin/github/check              asks GitHub what the App is granted and says what is missing
-//   POST /api/admin/github/link               starts the linking of the admin's own GitHub account (and so the
-//                                             merge with an imported operator): answers { url }, the address
-//                                             of GitHub's authorization page (src/github-signin/link.ts)
 //
 // Order: the admin first (nothing is read before the caller is known: not signed in is 401, signed in but
 // not an admin is a 404 like for any path that does not exist), then for a change where the request comes
@@ -28,7 +25,6 @@ import type { SessionUser } from "../auth/access-policy.ts";
 import type { AdminAccess } from "../admin/access.ts";
 import { readJsonObject } from "../http/json-body.ts";
 import { isCrossSite, isJsonRequest } from "../http/request-checks.ts";
-import type { GithubLinkService } from "../github-signin/link.ts";
 import { readLimitedBody } from "../webhooks/limited-body.ts";
 import {
   COMPLETE_MANIFEST_ERROR_CODES,
@@ -50,8 +46,6 @@ export type GithubRouteDependencies = {
   /** The 404 for somebody who is not an admin: Next.js's own. Throws. */
   notFound: () => never;
   service: GithubConfigService;
-  /** The linking of a GitHub identity; only the route that starts it needs it. */
-  link?: GithubLinkService;
 };
 
 export type GithubRouteHandlers = {
@@ -60,7 +54,6 @@ export type GithubRouteHandlers = {
   startManifest(request: Request): Promise<Response>;
   manifestCallback(request: Request): Promise<Response>;
   check(request: Request): Promise<Response>;
-  startLink(request: Request): Promise<Response>;
 };
 
 const NO_STORE = { "cache-control": "no-store" };
@@ -111,7 +104,6 @@ export function createGithubRouteHandlers({
   sessionId,
   notFound,
   service,
-  link,
 }: GithubRouteDependencies): GithubRouteHandlers {
   // The user first. The proxy has turned these away already; this is the second guard.
   async function admin(): Promise<SessionUser | Response> {
@@ -244,26 +236,6 @@ export function createGithubRouteHandlers({
           ...NO_STORE,
         },
       });
-    },
-
-    async startLink(request) {
-      const who = await admin();
-      if (who instanceof Response) return who;
-      // A JSON object from this site, like every other POST of the portal (the shared reader).
-      const body = await readJsonObject(request, GITHUB_REQUEST_MAX_BYTES);
-      if (!body.ok) return refusal(body.error);
-      const session = await sessionId();
-      if (session === null) return refusal("session_required");
-      if (link === undefined) return refusal("unavailable");
-      const result = await guarded(() =>
-        link.start({ id: who.id, sessionId: session }, { surface: "admin" }),
-      );
-      if (result instanceof Response) return result;
-      if (!result.ok) return fromServiceFailure(result);
-      return Response.json(
-        { ok: true, url: result.url },
-        { headers: NO_STORE },
-      );
     },
 
     async check(request) {
