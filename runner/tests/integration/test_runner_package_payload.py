@@ -19,6 +19,7 @@ RUNNER = REPO_ROOT / "runner"
 DISTRIBUTION_FILES = {
     "code_reviewer_runner/dynamic_review/prompt_core.py",
     "code_reviewer_runner/dynamic_review/review-skill.md",
+    "code_reviewer_runner/dynamic_review/findings-schema.v1.json",
     "code_reviewer_runner/licenses/LICENSE",
     "code_reviewer_runner/licenses/NOTICE",
     "code_reviewer_runner/licenses/THIRD_PARTY_LICENSES.md",
