@@ -7,10 +7,14 @@ configuration: without an engine command, without a prepared checkout or without
 capability descriptor the run ends with a stable code before any process or credential is touched.
 """
 
+import io
 import json
 from typing import Any
 
+import pytest
+
 from code_reviewer_runner import runner
+from code_reviewer_runner.capabilities import ALL_ENGINES, ENGINE_DIFF
 from code_reviewer_runner.job import Job, parse_job
 from code_reviewer_runner.result import ErrorCode
 
@@ -22,8 +26,8 @@ CAPABILITIES = json.dumps(
 )
 
 
-def dynamic_job(**llm: Any) -> Job:
-    document: dict[str, Any] = {
+def dynamic_document(**llm: Any) -> dict[str, Any]:
+    return {
         "prUrl": "https://github.com/octo/repo/pull/7",
         "command": "review",
         "reviewKind": "dynamic",
@@ -52,12 +56,15 @@ def dynamic_job(**llm: Any) -> Job:
             **llm,
         },
     }
-    return parse_job(json.dumps(document))
+
+
+def dynamic_job(**llm: Any) -> Job:
+    return parse_job(json.dumps(dynamic_document(**llm)))
 
 
 # #197-T11
 def test_a_dynamic_job_without_an_engine_is_refused_and_pr_agent_is_never_used() -> None:
-    result = runner.run_dynamic_job(dynamic_job(), None, 0.0, {})
+    result = runner.run_dynamic_job(dynamic_job(), None, 0.0, {}, engines=ALL_ENGINES)
 
     assert result.ok is False
     assert result.error_code is ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE
@@ -66,7 +73,11 @@ def test_a_dynamic_job_without_an_engine_is_refused_and_pr_agent_is_never_used()
 # #197-T11
 def test_a_dynamic_job_without_a_prepared_checkout_is_refused() -> None:
     result = runner.run_dynamic_job(
-        dynamic_job(), None, 0.0, {runner.OPENCODE_COMMAND_VARIABLE: "opencode"}
+        dynamic_job(),
+        None,
+        0.0,
+        {runner.OPENCODE_COMMAND_VARIABLE: "opencode"},
+        engines=ALL_ENGINES,
     )
 
     assert result.ok is False
@@ -83,6 +94,7 @@ def test_a_dynamic_job_without_a_capability_descriptor_is_refused() -> None:
             runner.OPENCODE_COMMAND_VARIABLE: "opencode",
             runner.DYNAMIC_CHECKOUT_VARIABLE: "/export",
         },
+        engines=ALL_ENGINES,
     )
 
     assert result.ok is False
@@ -102,7 +114,49 @@ def test_an_unusable_capability_descriptor_is_refused_before_the_engine_starts()
                 {"tool_choice_required": False, "structured_output": True, "max_output_tokens": 1}
             ),
         },
+        engines=ALL_ENGINES,
     )
 
     assert result.ok is False
     assert result.error_code is ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED
+
+
+# #197-T11
+def test_a_dynamic_job_is_refused_when_the_runner_did_not_advertise_the_engine() -> None:
+    # Fully configured, but the runner only advertises PR-Agent: the engine is never started. A
+    # nonexistent command proves nothing was launched (it would fail differently).
+    environment = {
+        runner.OPENCODE_COMMAND_VARIABLE: "/nonexistent/opencode",
+        runner.DYNAMIC_CHECKOUT_VARIABLE: "/export",
+        runner.DYNAMIC_CAPABILITIES_VARIABLE: CAPABILITIES,
+    }
+
+    for engines in ((), (ENGINE_DIFF,)):
+        result = runner.run_dynamic_job(dynamic_job(), None, 0.0, environment, engines=engines)
+
+        assert result.ok is False
+        assert result.error_code is ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE
+        assert result.log_tail is not None and "not advertised" in result.log_tail
+
+
+# #197-T11
+def test_the_runner_process_never_runs_a_dynamic_job_while_the_isolation_check_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Production advertises only what the self-check proved; until #202 supplies the probes that is
+    # never `opencode`, so even a fully configured environment cannot start the stock engine.
+    monkeypatch.setenv(runner.OPENCODE_COMMAND_VARIABLE, "/nonexistent/opencode")
+    monkeypatch.setenv(runner.DYNAMIC_CHECKOUT_VARIABLE, "/export")
+    monkeypatch.setenv(runner.DYNAMIC_CAPABILITIES_VARIABLE, CAPABILITIES)
+
+    def must_not_start(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("the engine must not be created")
+
+    monkeypatch.setattr(runner, "DynamicEngine", must_not_start)
+    out = io.StringIO()
+
+    code = runner.main([], stdin=io.StringIO(json.dumps(dynamic_document())), stdout=out)
+
+    result = json.loads(out.getvalue())
+    assert code == 1
+    assert result["errorCode"] == ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE.value

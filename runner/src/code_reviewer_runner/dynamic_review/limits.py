@@ -246,6 +246,13 @@ class BudgetLedger:
                 )
             self._counters.returned_bytes += size
 
+    def check_input_bytes(self, size: int) -> None:
+        """Refuse untrusted input larger than the bound before the engine is given any of it."""
+        if size > self.limits.max_input_bytes:
+            raise LimitError(
+                ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the review input exceeds the input byte bound"
+            )
+
     def check_request_bytes(self, size: int) -> None:
         """Refuse a model-protocol request before any byte of it is forwarded."""
         if size > self.limits.max_request_bytes:

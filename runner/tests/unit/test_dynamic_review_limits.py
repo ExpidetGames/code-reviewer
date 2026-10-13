@@ -259,3 +259,14 @@ def test_concurrent_calls_cannot_overshoot_the_call_and_tool_budgets() -> None:
     assert shared.tool_calls == tools
     assert shared.files == files
     assert outcomes.count("allowed") == calls + tools + files
+
+
+# #197-T12
+def test_the_untrusted_input_over_the_input_bound_is_refused() -> None:
+    subject = ledger(max_input_bytes=100)
+
+    subject.check_input_bytes(100)
+    with pytest.raises(LimitError) as refused:
+        subject.check_input_bytes(101)
+
+    assert refused.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED

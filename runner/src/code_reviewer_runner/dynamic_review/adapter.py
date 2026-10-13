@@ -27,6 +27,7 @@ The order is deliberate and mirrors the epic's:
 """
 
 import contextlib
+import copy
 import json
 import os
 import shutil
@@ -47,7 +48,11 @@ from code_reviewer_runner.dynamic_findings import (
     FindingsError,
     parse_dynamic_findings,
 )
-from code_reviewer_runner.dynamic_review.config import build_engine_config, engine_environment
+from code_reviewer_runner.dynamic_review.config import (
+    PROXY_PROVIDER_ID,
+    build_engine_config,
+    engine_environment,
+)
 from code_reviewer_runner.dynamic_review.limits import BudgetLedger, LimitError
 from code_reviewer_runner.dynamic_review.net import no_redirect_opener
 from code_reviewer_runner.dynamic_review.prompts import ReviewInputs, compose_user_prompt
@@ -59,6 +64,8 @@ from code_reviewer_runner.result import ErrorCode
 PINNED_ENGINE_VERSION = "1.19.0"
 # How long the engine may take to print its listening marker and answer a health check.
 STARTUP_SECONDS = 20.0
+# How often a start is attempted on a fresh port when the engine could not bind the one picked.
+START_ATTEMPTS = 3
 # How long one message may take before the adapter ends the run.
 MESSAGE_TIMEOUT_SECONDS = 300.0
 # The agent the runner defines and selects; the request may never name another.
@@ -88,6 +95,13 @@ class EngineError(Exception):
         super().__init__(f"{code.value}: {detail}")
         self.code = code
         self.detail = detail
+
+
+class EngineExited(EngineError):
+    """The engine process ended while it was being waited for."""
+
+    def __init__(self) -> None:
+        super().__init__(ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE, "the engine exited during startup")
 
 
 @dataclass(frozen=True)
@@ -135,18 +149,22 @@ class EngineClient:
         self.last_message: bytes = b""
         self._transport = transport
 
-    def _call(self, method: str, path: str, body: Any = None) -> tuple[int, bytes]:
+    def _call(
+        self, method: str, path: str, body: Any = None, *, scoped: bool = True
+    ) -> tuple[int, bytes]:
         payload = json.dumps(body).encode("utf-8") if body is not None else None
         headers = {"Content-Type": "application/json"} if payload is not None else {}
-        # Scope every request to the prepared export. The engine may read nowhere else; a directory
-        # the request names is ignored, this header is the runner's.
-        headers["x-opencode-directory"] = self.directory
+        # Scope every session request to the prepared export. The engine may read nowhere else; a
+        # directory the request names is ignored, this header is the runner's. The health check is
+        # global and carries none.
+        if scoped:
+            headers["x-opencode-directory"] = self.directory
         return self._transport(method, f"{self.base_url}{path}", payload, headers)
 
     def health(self) -> bool:
         """True when the server answers a healthy pinned-version health check."""
         try:
-            status, body = self._call("GET", "/global/health")
+            status, body = self._call("GET", "/global/health", scoped=False)
         except EngineError:
             return False
         if status != 200:
@@ -160,11 +178,20 @@ class EngineClient:
             return False
         return document.get("healthy") is True and document.get("version") == PINNED_ENGINE_VERSION
 
-    def wait_healthy(self, deadline_seconds: float) -> None:
-        """Poll until healthy; a healthy server is the listening marker #85 verified."""
+    def wait_healthy(
+        self, deadline_seconds: float, alive: Callable[[], bool] = lambda: True
+    ) -> None:
+        """Poll until healthy; a healthy server is the listening marker #85 verified.
+
+        `alive` tells whether the engine process we started is still running. An answer only counts
+        while it is: if our process died (for example it could not bind a port a stranger took in
+        the meantime), whatever answers on that port is not our engine.
+        """
         until = time.monotonic() + deadline_seconds
         while time.monotonic() < until:
-            if self.health():
+            if not alive():
+                raise EngineExited()
+            if self.health() and alive():
                 return
             time.sleep(0.2)
         raise EngineError(ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE, "the engine did not become healthy")
@@ -191,7 +218,7 @@ class EngineClient:
         """Send one structured turn to the runner-defined review agent."""
         body = {
             "agent": REVIEW_AGENT,
-            "model": {"providerID": "review-proxy", "modelID": model},
+            "model": {"providerID": PROXY_PROVIDER_ID, "modelID": model},
             "format": {"type": "json_schema", "schema": schema},
             "parts": parts,
         }
@@ -285,6 +312,7 @@ class DynamicEngine:
         node_bin: str | None = None,
         startup_seconds: float = STARTUP_SECONDS,
         transport: Transport = _http_request,
+        port_source: Callable[[], int] = lambda: _free_port(),
     ) -> None:
         if job.dynamic is None or job.base is None:
             raise EngineError(
@@ -301,6 +329,7 @@ class DynamicEngine:
         self.node_bin = node_bin
         self.startup_seconds = startup_seconds
         self._transport = transport
+        self._port_source = port_source
         # The export is read-only and belongs to the engine user; the runner's own config, home and
         # cache live in a private directory outside it, removed when the run ends.
         self._scratch = (
@@ -338,7 +367,29 @@ class DynamicEngine:
         # against the pinned release; the config directory is the private job scratch either way.
         environment["OPENCODE_CONFIG"] = str(config_path)
         environment["OPENCODE_CONFIG_DIR"] = str(self._scratch)
-        port = _free_port()
+        # The port is only probed free, not held: the engine binds it itself a moment later. If a
+        # stranger took it in between, our engine exits instead of serving and is started again on
+        # another port; an answer is only trusted while our own process is alive.
+        for attempt in range(START_ATTEMPTS):
+            port = self._port_source()
+            self._spawn(environment, port)
+            client = EngineClient(
+                f"http://127.0.0.1:{port}", self.directory, transport=self._transport
+            )
+            try:
+                client.wait_healthy(self.startup_seconds, self._is_running)
+            except EngineExited:
+                self._end_process()
+                if attempt + 1 == START_ATTEMPTS:
+                    raise
+                continue
+            except EngineError:
+                self.stop()
+                raise
+            return client
+        raise EngineExited()  # unreachable: the last attempt raises
+
+    def _spawn(self, environment: dict[str, str], port: int) -> None:
         argv = [
             *self.command,
             "serve",
@@ -363,34 +414,30 @@ class DynamicEngine:
                 ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE, "the engine could not be started"
             ) from None
         self._process = process
-        _RUNNING_ENGINES.add(os.getpgid(process.pid))
-        client = EngineClient(f"http://127.0.0.1:{port}", self.directory, transport=self._transport)
-        try:
-            client.wait_healthy(self.startup_seconds)
-        except EngineError:
-            self.stop()
-            raise
-        return client
+        _RUNNING_ENGINES.add(process.pid)
+
+    def _is_running(self) -> bool:
+        return self._process is not None and self._process.poll() is None
 
     def _kill_group(self, sig: int) -> None:
         process = self._process
         if process is None:
             return
         try:
-            os.killpg(os.getpgid(process.pid), sig)
+            os.killpg(process.pid, sig)
         except (ProcessLookupError, PermissionError):
             return
 
     def stop(self) -> None:
         """End the whole owned process group and remove the private scratch directory."""
+        self._end_process()
+        shutil.rmtree(self._scratch, ignore_errors=True)
+
+    def _end_process(self) -> None:
         process = self._process
         if process is not None:
-            try:
-                pgid = os.getpgid(process.pid)
-            except ProcessLookupError:
-                pgid = None
-            if pgid is not None:
-                _RUNNING_ENGINES.discard(pgid)
+            # The engine leads its own session, so its pid is its process group id.
+            _RUNNING_ENGINES.discard(process.pid)
             self._kill_group(signal.SIGTERM)
             try:
                 process.wait(timeout=5.0)
@@ -401,7 +448,6 @@ class DynamicEngine:
             # A helper the engine started that ignored SIGTERM goes too: the group is ours.
             self._kill_group(signal.SIGKILL)
         self._process = None
-        shutil.rmtree(self._scratch, ignore_errors=True)
 
     # -- run ------------------------------------------------------------------
 
@@ -444,11 +490,13 @@ class DynamicEngine:
         )
         # The fixed core, the verified head and the skill are the agent's prompt in the trusted
         # config; only the delimited untrusted input travels as a message part.
+        prompt = compose_user_prompt(inputs)
+        self.ledger.check_input_bytes(len(prompt.encode("utf-8")))
         client.send_message(
             session_id,
             model=dynamic.model,
-            parts=[{"type": "text", "text": compose_user_prompt(inputs)}],
-            schema=self.model_schema,
+            parts=[{"type": "text", "text": prompt}],
+            schema=_bounded_schema(self.model_schema, dynamic.limits.max_findings),
         )
 
     def _count_tool_parts(self, client: EngineClient, session_id: str) -> None:
@@ -488,7 +536,8 @@ class DynamicEngine:
 
     def _validate(self, client: EngineClient) -> EngineAnswer:
         base = self.job.base
-        assert base is not None
+        dynamic = self.job.dynamic
+        assert base is not None and dynamic is not None
         raw = structured_answer(client.last_message)
         if raw is None:
             return EngineAnswer(
@@ -497,7 +546,14 @@ class DynamicEngine:
                     ErrorCode.LLM_OUTPUT_INVALID, "the engine returned no structured answer"
                 ),
             )
+        # `exported_paths` is not passed yet: the set of prepared files comes with the sanitized
+        # export (#196/#199); until then a finding path is only checked to be lexically safe.
         findings = parse_dynamic_findings(raw)
+        if len(findings.findings) > dynamic.limits.max_findings:
+            raise LimitError(
+                ErrorCode.DYNAMIC_BUDGET_EXCEEDED,
+                "the answer has more findings than the job allows",
+            )
         if findings.reviewed_sha != base.head_sha:
             raise FindingsError(
                 ErrorCode.DYNAMIC_POLICY_VIOLATION,
@@ -506,11 +562,28 @@ class DynamicEngine:
         return EngineAnswer(findings=findings, error=None)
 
 
+def _bounded_schema(schema: dict[str, Any], max_findings: int) -> dict[str, Any]:
+    """A copy of the findings schema narrowed to the job's own finding bound (never widened)."""
+    bounded: dict[str, Any] = copy.deepcopy(schema)
+    definitions = as_object(bounded.get("$defs"))
+    envelope = as_object(definitions.get("DynamicFindings")) if definitions else None
+    properties = as_object(envelope.get("properties")) if envelope else None
+    findings = as_object(properties.get("findings")) if properties else None
+    if findings is None:
+        raise EngineError(ErrorCode.DYNAMIC_CONFIG_INVALID, "the findings schema has no findings")
+    current: Any = findings.get("maxItems")
+    if not isinstance(current, int) or max_findings < current:
+        findings["maxItems"] = max_findings
+    return bounded
+
+
 def _tool_path(raw: Any) -> str | None:
     value = as_object(raw)
     if value is None:
         return None
-    found: Any = value.get("filePath") or value.get("path") or value.get("pattern")
+    # Only a real path names a file. A grep/glob `pattern` is a search expression, not a file, and
+    # must not inflate the distinct-file budget.
+    found: Any = value.get("filePath") or value.get("path")
     return found if isinstance(found, str) and found else None
 
 

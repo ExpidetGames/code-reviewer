@@ -32,6 +32,11 @@ from typing import Any, TextIO
 from loguru import logger
 
 from code_reviewer_runner import __version__
+from code_reviewer_runner.capabilities import (
+    ENGINE_DYNAMIC,
+    advertised_engines,
+    fail_closed_self_check,
+)
 from code_reviewer_runner.comment_recorder import CommentRecorder, install_comment_recorder
 from code_reviewer_runner.dynamic_review import findings_schema
 from code_reviewer_runner.dynamic_review.adapter import DynamicEngine, shutdown_engines
@@ -206,6 +211,8 @@ def run_dynamic_job(
     started: float,
     environment: Mapping[str, str],
     timeout_seconds: float | None = None,
+    *,
+    engines: Sequence[str] = (),
 ) -> JobResult:
     """Run a Dynamic job with the read-only stock engine (#197).
 
@@ -216,11 +223,21 @@ def run_dynamic_job(
 
     The engine is stock and is never started in production until #202 proves the isolation
     (`capabilities.py` stays fail-closed, so `opencode` is not advertised and no Dynamic job
-    reaches a runner).
+    reaches a runner). This function does not rely on that alone: `engines` is what the runner
+    advertised, and a Dynamic job is refused unless it contains `opencode`, whatever else is
+    configured. The default (nothing advertised) refuses.
     """
     dynamic = job.dynamic
     base = job.base
     assert dynamic is not None and base is not None  # parse_job guarantees the tagged shape
+
+    if ENGINE_DYNAMIC not in engines:
+        return _failure(
+            ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE,
+            "the Dynamic engine is not advertised by this runner",
+            started,
+            capture,
+        )
 
     command = shlex.split(environment.get(OPENCODE_COMMAND_VARIABLE, "").strip())
     if not command:
@@ -449,7 +466,14 @@ def main(
             else None
         )
         try:
-            result = run_dynamic_job(job, None, started, saved_env, dynamic_timeout)
+            result = run_dynamic_job(
+                job,
+                None,
+                started,
+                saved_env,
+                dynamic_timeout,
+                engines=advertised_engines(fail_closed_self_check()),
+            )
         except KeyboardInterrupt:
             raise
         except BaseException:

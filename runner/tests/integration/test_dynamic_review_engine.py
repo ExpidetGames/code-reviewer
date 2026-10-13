@@ -11,9 +11,11 @@ ends.
 
 import json
 import os
+import socket
 import sys
 import threading
 import time
+from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -157,16 +159,40 @@ def tool_part(call_id: str, tool: str, path: str, output: str) -> dict[str, Any]
     }
 
 
+def search_part(call_id: str, tool: str, pattern: str) -> dict[str, Any]:
+    """A grep/glob tool part: its input is a pattern, not a file."""
+    return {
+        "type": "tool",
+        "callID": call_id,
+        "tool": tool,
+        "state": {"input": {"pattern": pattern}, "output": "matches", "metadata": {}},
+    }
+
+
+def findings_of(count: int) -> dict[str, Any]:
+    document = findings()
+    template = document["findings"][0]
+    document["findings"] = [{**template, "id": f"f-{index}"} for index in range(count)]
+    return document
+
+
 class Fixture:
     """One scripted engine: the script, the trace and the running fakes."""
 
-    def __init__(self, tmp_path: Path, script: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        tmp_path: Path,
+        script: dict[str, Any],
+        limits: DynamicLimits | None = None,
+        port_source: Callable[[], int] | None = None,
+    ) -> None:
         self.directory = tmp_path / "export"
-        self.directory.mkdir()
+        self.directory.mkdir(parents=True)
         self.script_path = self.directory / ".fake-opencode-script.json"
         self.script_path.write_text(json.dumps(script), encoding="utf-8")
         self.trace_path = self.directory / ".fake-opencode-trace.jsonl"
-        self.ledger = BudgetLedger(DynamicLimits())
+        self.ledger = BudgetLedger(limits or DynamicLimits())
+        self.port_source = port_source
         self.capability = ""
 
     def traces(self) -> list[dict[str, Any]]:
@@ -207,6 +233,7 @@ class Fixture:
                 agent_prompt=compose_system_prompt(dynamic.skill, base.head_sha),
                 model_schema=findings_schema(),
                 startup_seconds=2.0,
+                port_source=self.port_source or free_port,
             )
             return engine.run()
         finally:
@@ -485,3 +512,153 @@ def test_the_engine_process_receives_only_the_closed_environment(
     joined = "\n".join(environment.values())
     for secret in ("ghs_runner_token_value", API_KEY, "aws-secret-value", fixture.capability):
         assert secret not in joined
+
+
+# #197-T05
+def test_a_search_pattern_is_not_counted_as_a_file(tmp_path: Path) -> None:
+    fixture = Fixture(
+        tmp_path,
+        {
+            "answer": "structured",
+            "findings": findings(),
+            "proxy_calls": 1,
+            "messages": [
+                {
+                    "parts": [
+                        search_part("c1", "grep", "TODO"),
+                        search_part("c2", "glob", "**/*.ts"),
+                        tool_part("c3", "read", "src/api/handler.ts", "content"),
+                    ]
+                }
+            ],
+        },
+    )
+
+    with FakeUpstream() as upstream:
+        answer = fixture.run(upstream)
+
+    assert answer.ok
+    assert fixture.ledger.tool_calls == 3
+    assert fixture.ledger.files == 1
+
+
+# #197-T12
+def test_the_untrusted_input_over_the_input_bound_is_refused_before_the_engine_sees_it(
+    tmp_path: Path,
+) -> None:
+    fixture = Fixture(
+        tmp_path,
+        {"answer": "structured", "findings": findings(), "proxy_calls": 1},
+        limits=DynamicLimits(max_input_bytes=10),
+    )
+
+    with FakeUpstream() as upstream:
+        answer = fixture.run(upstream)
+
+    assert not answer.ok
+    assert answer.error is not None
+    assert answer.error.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
+    assert not any("message_request" in entry for entry in fixture.traces())
+    assert upstream.requests == []
+
+
+# #197-T13
+def test_the_job_finding_bound_narrows_the_schema_and_the_accepted_answer(tmp_path: Path) -> None:
+    # The job names at most 5 findings (the packaged schema allows 30).
+    within = Fixture(
+        tmp_path / "within", {"answer": "structured", "findings": findings_of(5), "proxy_calls": 1}
+    )
+    over = Fixture(
+        tmp_path / "over", {"answer": "structured", "findings": findings_of(6), "proxy_calls": 1}
+    )
+
+    with FakeUpstream() as upstream:
+        accepted = within.run(upstream)
+        refused = over.run(upstream)
+
+    assert accepted.ok
+    sent = next(e["message_request"] for e in within.traces() if "message_request" in e)
+    schema = sent["format"]["schema"]
+    assert schema["$defs"]["DynamicFindings"]["properties"]["findings"]["maxItems"] == 5
+    # The packaged schema itself is shared and stays untouched.
+    assert findings_schema()["$defs"]["DynamicFindings"]["properties"]["findings"]["maxItems"] == 30
+
+    assert not refused.ok
+    assert refused.error is not None
+    assert refused.error.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
+
+
+class Occupant:
+    """A loopback listener that holds a port and answers every request 503, like a stranger."""
+
+    def __init__(self) -> None:
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                self.send_response(503)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+            def log_message(self, format: str, *args: Any) -> None:
+                return
+
+        self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._thread.start()
+
+    @property
+    def port(self) -> int:
+        return int(self._server.server_address[1])
+
+    def close(self) -> None:
+        self._server.shutdown()
+        self._server.server_close()
+        self._thread.join(timeout=5.0)
+
+
+def free_port() -> int:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return int(probe.getsockname()[1])
+
+
+# #197-T07
+def test_a_port_taken_between_probe_and_bind_is_retried_on_another_port(tmp_path: Path) -> None:
+    occupant = Occupant()
+    ports = iter([occupant.port, free_port()])
+    fixture = Fixture(
+        tmp_path,
+        {"answer": "structured", "findings": findings(), "proxy_calls": 1},
+        port_source=lambda: next(ports),
+    )
+    try:
+        with FakeUpstream() as upstream:
+            answer = fixture.run(upstream)
+    finally:
+        occupant.close()
+
+    # The first engine could not bind its port (a stranger held it), exited, and was replaced; the
+    # run did not talk to the stranger and does not fail because of it.
+    assert answer.ok
+    pids = [entry["pid"] for entry in fixture.traces() if "pid" in entry]
+    assert len(pids) == 2
+    for pid in pids:
+        assert process_is_gone(pid)
+
+
+# #197-T07
+def test_an_engine_that_never_gets_a_port_is_a_stable_error(tmp_path: Path) -> None:
+    occupant = Occupant()
+    fixture = Fixture(
+        tmp_path,
+        {"answer": "structured", "findings": findings()},
+        port_source=lambda: occupant.port,
+    )
+    try:
+        with FakeUpstream() as upstream:
+            answer = fixture.run(upstream)
+    finally:
+        occupant.close()
+
+    assert not answer.ok
+    assert answer.error is not None
+    assert answer.error.code is ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE
