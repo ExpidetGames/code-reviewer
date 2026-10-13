@@ -752,7 +752,7 @@ def test_non_ascii_text_is_reserved_at_its_utf_8_size_not_its_escaped_size() -> 
     assert len(upstream.requests) == 1
 
 
-# #232-T09
+# #232-T08
 @pytest.mark.parametrize("lone", ["\ud800", "\udfff"])
 def test_a_lone_surrogate_in_the_history_is_forwarded_escaped_and_never_raises(lone: str) -> None:
     upstream = Upstream()

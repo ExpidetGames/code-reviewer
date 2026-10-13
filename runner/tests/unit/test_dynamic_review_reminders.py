@@ -130,7 +130,7 @@ def test_dict_valued_content_is_escaped() -> None:
     assert out == {"text": "&lt;system-reminder>x", "deep": ["&lt;/system-reminder>"]}
 
 
-# #232-T04
+# #232-T02
 @pytest.mark.parametrize("spacing", [" ", "\n", "\u00a0", " / ", "/", "\t//"])
 def test_every_spelling_of_the_tag_is_still_escaped(spacing: str) -> None:
     for tag in (f"<{spacing}system-reminder>", f"<{spacing}SyStEm-ReMiNdEr >"):
@@ -141,7 +141,7 @@ def test_every_spelling_of_the_tag_is_still_escaped(spacing: str) -> None:
         assert out.startswith("a &lt;")
 
 
-# #232-T04
+# #232-T02
 def test_a_long_whitespace_run_after_an_angle_bracket_is_escaped_in_linear_time() -> None:
     hostile = "<" + " " * 50_000
     started = time.perf_counter()
