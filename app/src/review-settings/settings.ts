@@ -67,6 +67,17 @@ export type ProjectDynamicSettings = {
 /** A project layer: only the fields somebody set. */
 export type ProjectDynamicOverrides = Partial<ProjectDynamicSettings>;
 
+/**
+ * A project-only patch (#194, #200): a field that is left out is kept, and `null` on the Dynamic
+ * model or the review skill clears that override, so the built-in default applies again (the same
+ * `null` the skill already used).
+ */
+export type ProjectDynamicPatch = {
+  reviewKind?: ProjectReviewKind;
+  dynamicModel?: string | null;
+  reviewSkill?: string | null;
+};
+
 export type ProjectDynamicSettingField = keyof ProjectDynamicSettings;
 
 export const PROJECT_DYNAMIC_SETTING_FIELDS = [

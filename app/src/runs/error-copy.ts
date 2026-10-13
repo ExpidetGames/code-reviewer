@@ -27,7 +27,7 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
   no_capable_runner:
     "No runner that can run this kind of review picked up the run within the time limit, so it was cancelled. It will run again on the next push or review request.",
   dynamic_review_disabled:
-    "Dynamic Review is not switched on for this instance yet, so this run could not start.",
+    "Dynamic Review is not switched on for this instance yet, so this run could not start. Ask whoever runs the server to turn it on, or switch the project to Diff Review on its settings page.",
 
   // The claim of the runner API
   llm_not_configured:

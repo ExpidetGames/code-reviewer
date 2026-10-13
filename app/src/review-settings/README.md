@@ -195,7 +195,7 @@ project-only fields keeps the stored Diff group, so switching kind, changing the
 resetting the skill removes nothing of the Diff configuration, and an empty request still replaces the
 Diff group with nothing (every Diff field taken back to its default). The project-only fields are
 always merged over the stored ones, so a request that does not mention them keeps them and a
-`reviewSkill` of `""`/`null` clears only that override.
+`reviewSkill` or `dynamicModel` of `""`/`null` clears only that override.
 
 The write goes through `projects.updateSettingsWith` in one transaction. The stored settings are read
 under a lock on the workspace-scoped repository row: SQLite already holds the single write lock
@@ -207,10 +207,18 @@ waiting reviews on a kind change; a rejecting hook rolls the write or the reset 
 full reset (`DELETE`) clears every override, including the project-only fields, and reports the kind
 change back to Diff.
 
-`ui/form-state.ts` deliberately does **not** send the project-only settings: it only sends the Diff
-fields the person set (plus their preserved Diff overrides), and the server keeps the stored
-project-only fields a request does not mention. A form that was opened before another client changed
-the kind, model or skill therefore cannot overwrite the newer value with its stale one.
+`ui/project-save.ts` turns a project form into requests (#200) and keeps those rules in one place: an
+**untouched form sends nothing** (an empty request would clear the Diff overrides, so the form says "No
+changes to save." instead); the Diff group is sent as a whole, only when it changed; a project-only
+field (kind, Dynamic model, skill) is sent only when the person changed it, so a form that was opened
+before another client changed the kind, model or skill cannot overwrite the newer value with its stale
+one; the skill is reset with `reviewSkill: null` and the Dynamic model with `dynamicModel: null` (the
+built-in default applies again), and a custom skill text equal to the shipped text is sent as that
+reset, never as a copy. Taking every Diff override back is an **explicit empty request**. One
+request cannot both clear the Diff group and carry project-only fields, so a save that does both sends
+the empty reset first and the project-only fields second; if the second fails, the first stays saved and
+the Review kind card says what was not saved (`adoptCards` takes the saved cards from the answer and
+keeps the typed values of the others). Global defaults still use `buildPatch` (`ui/form-state.ts`).
 
 `getProjectSettings` / `resolveForRepository` expose the `dynamic` view: the effective kind, model and
 skill, where each comes from, the shipped defaults, whether the skill is the default, the default
@@ -236,7 +244,29 @@ the answer of the server is shown the same way, including `EXCEEDS_MODEL_CONTEXT
 field takes the focus. The estimated
 cost updates while typing (`estimateReviewCost`) and shows the `above_limit` and `cost_unknown`
 warnings and a token budget above the context window; warnings never block a save. The **fallback
-model** is stored but not sent to the runner in the MVP: the form says so next to the field and the cost summary lists it as "not used yet" without an estimate or a cost warning (a context window that is too small still blocks the save, so that warning stays). A form is keyed on the server data, so a page that Next keeps mounted after a navigation starts from fresh data when it is shown again. For a project, the reset asks for a confirmation first; the workspace-wide reset is a danger zone on `/settings/advanced` (an empty patch through the same global route, `ui/reset-defaults.tsx`). A later issue (#200) adds a "Review kind" card between the last card and the footer.
+model** is stored but not sent to the runner in the MVP: the form says so next to the field and the cost summary lists it as "not used yet" without an estimate or a cost warning (a context window that is too small still blocks the save, so that warning stays). A form is keyed on the server data, so a page that Next keeps mounted after a navigation starts from fresh data when it is shown again. For a project, the reset asks for a confirmation first; the workspace-wide reset is a danger zone on `/settings/advanced` (an empty patch through the same global route, `ui/reset-defaults.tsx`). A project form has a fourth card, **Review kind** (#200, `ui/review-kind-fieldset.tsx`), above the others
+because they follow its choice: exactly one of Diff Review and Dynamic Review (a radio group, never two
+checkboxes). With Dynamic Review chosen it holds the Dynamic model (a default, not an allow-list;
+`messages.ts` names a bad one, and "Reset to default" puts the built-in model back) and the review skill
+(`ui/skill-editor.tsx`): the shipped skill is shown
+read-only with its id, version and SHA-256, "Edit skill" starts an override from that text, "Reset review
+skill to default" stages the shipped skill again until Save, and a counter shows the UTF-8 bytes against
+the 16 KiB limit. The Model card (model, fallback model, token budget and the cost estimate), the chunking
+and inline switches and the project rules are PR-Agent's and are not shown for Dynamic Review; their values
+stay in the form and are kept when the person switches back (a problem in a field the selected kind does not
+show is reported on the card, which says which kind to choose to see it). Dynamic Review has no cost
+estimate: the card says so, and the Diff estimate comes back with Diff Review. A switch of the kind is
+confirmed in a dialog when the person saves (waiting reviews of the old kind are cancelled, the next review
+posts a fresh summary comment, no finding is carried over, #193). "Discard changes" takes every unsaved
+change of a project form back.
+
+**The instance gate.** Dynamic Review is only queued while the instance setting `dynamic_review` is on
+(`jobs/dynamic-review-gate.ts`, default off until #202). The page reads it with `isDynamicReviewEnabled`
+and the card says the truth: while it is off, the Dynamic option carries "Not enabled on this instance yet."
+and choosing it shows that reviews of the project fail until an instance admin turns it on (the run ends
+with `dynamic_review_disabled`, see `runs/error-copy.ts`). The choice stays **available** so a project can
+be prepared before the gate is turned on, like an inactive project can be configured before it is
+activated; the card never claims it works. Static text, no live region.
 
 The claim of the runner API and the webhook intake use `service.resolveForRepository(repositoryId)`
 (`shared.ts`: `getReviewSettingsService()`), then `toRunnerSettings` and the checks above.

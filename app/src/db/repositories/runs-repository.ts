@@ -14,7 +14,11 @@ import type { Job } from "../../jobs/job-types.ts";
 import type { RunRowSource } from "../../runs/run-view.ts";
 import type { Database } from "../schema.ts";
 import type { WorkspaceId } from "../workspace-scope.ts";
-import { decodeJobVocabulary, toJob } from "./jobs-repository.ts";
+import {
+  decodeJobVocabulary,
+  decodeReviewKind,
+  toJob,
+} from "./jobs-repository.ts";
 
 /** A job with the `owner/name` of the repository it is about. */
 export type StoredRun = { job: Job; project: string };
@@ -67,6 +71,7 @@ export function createRunsRepository(
           "jobs.pr_number",
           "jobs.pr_url",
           "jobs.command",
+          "jobs.review_kind",
           "jobs.trigger_kind",
           "jobs.actor_login",
           "jobs.status",
@@ -99,6 +104,7 @@ export function createRunsRepository(
               prNumber: row.pr_number,
               prUrl: row.pr_url,
               command,
+              reviewKind: decodeReviewKind(row),
               triggerKind,
               actorLogin: row.actor_login,
               status,

@@ -18,6 +18,10 @@ import {
   validateReviewSettingsPatch,
   type ReviewSettingIssue,
 } from "../validate.ts";
+import {
+  initialDynamicValues,
+  type DynamicFormValues,
+} from "./dynamic-form-state.ts";
 import type { SettingsFormModel } from "./form-model.ts";
 
 export type FormValues = {
@@ -38,6 +42,8 @@ export type FormState = {
   values: FormValues;
   /** Fields the person set for this layer; the others are inherited. */
   overridden: Record<ReviewSettingField, boolean>;
+  /** The project-only review kind, Dynamic model and skill (#200); absent for the global defaults. */
+  dynamic?: DynamicFormValues;
 };
 
 function valuesOf(settings: ReviewSettings): FormValues {
@@ -59,7 +65,13 @@ export function initialFormState(model: SettingsFormModel): FormState {
   const overridden = {} as Record<ReviewSettingField, boolean>;
   for (const field of REVIEW_SETTING_FIELDS)
     overridden[field] = Object.hasOwn(model.overrides, field);
-  return { values: valuesOf(model.effective), overridden };
+  return {
+    values: valuesOf(model.effective),
+    overridden,
+    ...(model.dynamic === undefined
+      ? {}
+      : { dynamic: initialDynamicValues(model.dynamic) }),
+  };
 }
 
 export type TextField =
@@ -76,6 +88,7 @@ export function setText(
   value: string,
 ): FormState {
   return {
+    ...state,
     values: { ...state.values, [field]: value },
     overridden: { ...state.overridden, [field]: true },
   };
@@ -87,6 +100,7 @@ export function setBoolean(
   value: boolean,
 ): FormState {
   return {
+    ...state,
     values: { ...state.values, [field]: value },
     overridden: { ...state.overridden, [field]: true },
   };
@@ -101,6 +115,7 @@ export function setCommand(
   if (allowed) chosen.add(command);
   else chosen.delete(command);
   return {
+    ...state,
     values: {
       ...state.values,
       // The canonical order, so the same choice always reads the same.
@@ -118,6 +133,7 @@ export function resetField(
 ): FormState {
   const inherited = valuesOf(model.inherited);
   return {
+    ...state,
     values: { ...state.values, [field]: inherited[field] },
     overridden: { ...state.overridden, [field]: false },
   };
@@ -151,7 +167,7 @@ const NUMBER_FIELDS: readonly ReviewSettingField[] = [
 ];
 
 /** The fields the person set, as typed values, checked with the same validator the server uses. */
-function diffPatch(state: FormState): {
+export function diffPatch(state: FormState): {
   raw: Record<string, unknown>;
   issues: ReviewSettingIssue[];
 } {

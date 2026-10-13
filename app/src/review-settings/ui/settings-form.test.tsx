@@ -9,7 +9,14 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { estimateReviewCost } from "../cost.ts";
-import { builtInReviewSettings, type ReviewSettings } from "../settings.ts";
+import { DEFAULT_REVIEW_SKILL } from "../default-skill.ts";
+import type { ProjectDynamicView } from "../service.ts";
+import {
+  builtInReviewSettings,
+  DEFAULT_DYNAMIC_MODEL,
+  PROJECT_DYNAMIC_LIMITS,
+  type ReviewSettings,
+} from "../settings.ts";
 import type { SettingsApi } from "./api.ts";
 import type { SettingsFormModel } from "./form-model.ts";
 import { SettingsForm } from "./settings-form.tsx";
@@ -17,6 +24,33 @@ import { SettingsForm } from "./settings-form.tsx";
 afterEach(cleanup);
 
 const BUILT_IN = builtInReviewSettings("anthropic/claude-haiku-5.5");
+
+// The project-only view every project form has since #194: Diff Review, the shipped model and skill.
+const DYNAMIC_VIEW: ProjectDynamicView = {
+  overrides: {},
+  effective: {
+    reviewKind: "diff",
+    dynamicModel: DEFAULT_DYNAMIC_MODEL,
+    reviewSkill: DEFAULT_REVIEW_SKILL.text,
+  },
+  sources: {
+    reviewKind: "built_in",
+    dynamicModel: "built_in",
+    reviewSkill: "built_in",
+  },
+  defaults: {
+    reviewKind: "diff",
+    dynamicModel: DEFAULT_DYNAMIC_MODEL,
+    reviewSkill: DEFAULT_REVIEW_SKILL.text,
+  },
+  reviewSkillIsDefault: true,
+  defaultSkill: {
+    id: DEFAULT_REVIEW_SKILL.id,
+    version: DEFAULT_REVIEW_SKILL.version,
+    hash: DEFAULT_REVIEW_SKILL.hash,
+  },
+  limits: { reviewSkillMaxBytes: PROJECT_DYNAMIC_LIMITS.reviewSkillMaxBytes },
+};
 
 function projectModel(
   overrides: SettingsFormModel["overrides"] = {},
@@ -37,6 +71,7 @@ function projectModel(
     sources,
     cost: estimateReviewCost(effective),
     lastSaved: null,
+    dynamic: DYNAMIC_VIEW,
   };
 }
 
@@ -48,6 +83,7 @@ function answerFor(model: SettingsFormModel) {
     sources: model.sources,
     inherited: model.inherited,
     cost: model.cost,
+    dynamic: model.dynamic,
   };
 }
 
@@ -57,6 +93,16 @@ function fakeApi(
   const save = vi.fn<SettingsApi["save"]>(async () => result);
   const reset = vi.fn<NonNullable<SettingsApi["reset"]>>(async () => result);
   return { api: { save, reset } satisfies SettingsApi, save, reset };
+}
+
+/**
+ * Since #200 a project form that was not changed sends nothing (an empty request would clear the Diff
+ * overrides), so a test about what happens to a request makes one change first.
+ */
+async function changeSomething(user: ReturnType<typeof userEvent.setup>) {
+  const findings = screen.getByLabelText("Most findings per review");
+  await user.clear(findings);
+  await user.type(findings, "12");
 }
 
 describe("the settings form", () => {
@@ -309,6 +355,7 @@ describe("the settings form", () => {
       <SettingsForm workspaceSlug="acme" initial={projectModel()} api={api} />,
     );
 
+    await changeSomething(user);
     await user.click(
       screen.getByRole("button", { name: "Save review settings" }),
     );
@@ -367,6 +414,10 @@ describe("the settings form", () => {
 
     await user.click(screen.getByRole("button", { name: "Reset everything" }));
     expect(reset).not.toHaveBeenCalled();
+    // The copy names what a full reset takes away (#200 review).
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog.textContent).toMatch(/Review kind/);
+    expect(dialog.textContent).toMatch(/review skill/);
     await user.click(screen.getByRole("button", { name: "Reset to defaults" }));
 
     expect(reset).toHaveBeenCalledTimes(1);
@@ -433,6 +484,7 @@ describe("the settings form", () => {
       <SettingsForm workspaceSlug="acme" initial={projectModel()} api={api} />,
     );
 
+    await changeSomething(user);
     await user.click(
       screen.getByRole("button", { name: "Save review settings" }),
     );
@@ -456,6 +508,7 @@ describe("the settings form", () => {
       />,
     );
 
+    await changeSomething(user);
     await user.click(
       screen.getByRole("button", { name: "Save review settings" }),
     );
@@ -599,6 +652,7 @@ describe("the settings form", () => {
       />,
     );
 
+    await changeSomething(user);
     await user.click(
       screen.getByRole("button", { name: "Save review settings" }),
     );

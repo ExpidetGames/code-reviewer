@@ -326,3 +326,73 @@ describe("routing a claimed job by the runner's engines", () => {
     expect(h.logLines().join("\n")).not.toContain(TEST_LLM_API_KEY);
   });
 });
+
+describe("the previous reviewed head of a Dynamic job", () => {
+  // #199-T01 (app side)
+  it("carries the head of the last successful Dynamic review as previousReviewedSha", async () => {
+    const h = await startDynamicHarness();
+    const previousHead = "e".repeat(40);
+    await h.seedHistoricalJob({
+      command: "review",
+      prNumber: 8,
+      headSha: previousHead,
+      reviewKind: "dynamic",
+    });
+    const dynamic = await h.enqueueNew({
+      prNumber: 8,
+      headSha: "f".repeat(40),
+      reviewKind: "dynamic",
+    });
+
+    const body = await h.claimed({ engines: ["pr-agent", "opencode"] });
+
+    expect(body.job.id).toBe(dynamic.id);
+    expect(body.job.input.base).toMatchObject({
+      headSha: "f".repeat(40),
+      previousReviewedSha: previousHead,
+    });
+    expectValid("ClaimResponse", body);
+  });
+
+  // #199-T01 (app side)
+  it("never treats the review of the other kind as the previous review", async () => {
+    const h = await startDynamicHarness();
+    await h.seedHistoricalJob({
+      command: "review",
+      prNumber: 8,
+      headSha: "e".repeat(40),
+      reviewKind: "diff",
+    });
+    await h.enqueueNew({
+      prNumber: 8,
+      headSha: "f".repeat(40),
+      reviewKind: "dynamic",
+    });
+
+    const body = await h.claimed({ engines: ["pr-agent", "opencode"] });
+
+    expect(body.job.input.base).toMatchObject({ previousReviewedSha: null });
+  });
+
+  // #199-T01 (app side)
+  it("does not count a failed review as a previous review", async () => {
+    const h = await startDynamicHarness();
+    await h.seedHistoricalJob({
+      command: "review",
+      prNumber: 8,
+      headSha: "e".repeat(40),
+      reviewKind: "dynamic",
+      status: "failed",
+      errorCode: "timeout",
+    });
+    await h.enqueueNew({
+      prNumber: 8,
+      headSha: "f".repeat(40),
+      reviewKind: "dynamic",
+    });
+
+    const body = await h.claimed({ engines: ["pr-agent", "opencode"] });
+
+    expect(body.job.input.base).toMatchObject({ previousReviewedSha: null });
+  });
+});

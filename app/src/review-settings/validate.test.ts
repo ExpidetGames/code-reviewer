@@ -463,6 +463,14 @@ describe("validating the project-only settings", () => {
     ]);
   });
 
+  // #200 review: the model, like the skill, has an explicit `null` reset to the built-in default.
+  it("accept a null Dynamic model as the reset to the built-in default", () => {
+    expect(validateProjectSettingsPatch({ dynamicModel: null })).toEqual({
+      ok: true,
+      value: { review: {}, dynamic: { dynamicModel: null } },
+    });
+  });
+
   it("only uses stable codes and never echoes a value", () => {
     const secretLooking = "sk-dummy-skill-should-not-be-echoed";
     const issues = projectIssuesOf({
@@ -512,5 +520,12 @@ describe("validating the project-only settings", () => {
     expect(parseStoredProjectDynamicOverrides({ reviewSkill: null })).toEqual(
       {},
     );
+    // #200 review: a stored null model is "no override" too, not a stored value.
+    expect(
+      parseStoredProjectDynamicOverrides({
+        reviewKind: "dynamic",
+        dynamicModel: null,
+      }),
+    ).toEqual({ reviewKind: "dynamic" });
   });
 });

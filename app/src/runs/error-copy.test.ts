@@ -43,6 +43,23 @@ describe("the sentences for error codes", () => {
     }
   });
 
+  // #200: the codes a Dynamic project's run can end with are read by people on the Runs pages.
+  it("tells a person what to do about a Dynamic Review that is not enabled, and about a model the engine cannot use", () => {
+    expect(describeErrorCode("dynamic_review_disabled").text).toMatch(
+      /instance|server/i,
+    );
+    expect(describeErrorCode("dynamic_review_disabled").text).toMatch(
+      /Diff Review/,
+    );
+    expect(describeErrorCode("no_capable_runner").text).toMatch(/runner/);
+    expect(
+      describeErrorCode("dynamic_model_features_unsupported").text,
+    ).toMatch(/Choose another model/);
+    expect(describeErrorCode("dynamic_config_invalid").text).toMatch(
+      /project page/,
+    );
+  });
+
   it("has no sentence for a code that does not exist", () => {
     const extra = Object.keys(ERROR_COPY).filter(
       (code) => !ALL_CODES.includes(code),

@@ -101,6 +101,12 @@ export type ClaimDeps = {
    */
   repositories: (workspaceId: string) => Pick<RepositoriesRepository, "get">;
   integrations: (workspaceId: string) => Pick<IntegrationsRepository, "get">;
+  /**
+   * The exact head of the last successful review of the claimed job's pull request for the same
+   * review kind (#199), or null when there is none. Only a Dynamic claim asks; it becomes the
+   * `previousReviewedSha` the checkout and the publisher compare against.
+   */
+  previousReviewedSha: (job: Job) => Promise<string | null>;
   registry: IntegrationRegistry;
   guard: ClaimGuard;
   jobOptions: JobOptionsSource;
@@ -224,19 +230,20 @@ function dynamicOptionsOf(options: JobOptions): DynamicReviewOptions | null {
 /**
  * The checkout facts a Dynamic job carries. The head SHA is the one that was queued; the base is the
  * identity the provider reported. `comparison` is a declared mode, not proof: the checkout verifies
- * completeness before it trusts it, and `previousReviewedSha` is null until #199 supplies it. Nothing
- * here is a permission or an endpoint.
+ * completeness before it trusts it, and `previousReviewedSha` is the head of the last successful
+ * review of the same kind (#199), or null. Nothing here is a permission or an endpoint.
  */
 function claimBaseOf(
   repositoryFullName: string,
   baseRef: string,
   headSha: string,
+  previousReviewedSha: string | null,
 ): ClaimBase {
   return {
     repository: repositoryFullName,
     baseRef,
     headSha,
-    previousReviewedSha: null,
+    previousReviewedSha,
     comparison: "full",
   };
 }
@@ -368,6 +375,10 @@ async function prepare(
   // replace them. The job never carries `fallbackModels`: the MVP has no fallback chain.
   const llmAccess = revealLlmAccess(llm.access);
   const maxTokens = llmOptions.maxTokens ?? llmAccess.contextWindowTokens;
+  // #199: the head of the last successful Dynamic review of this pull request, so the dynamic job
+  // can compare against it. A Diff job never carries a base, so it is not looked up.
+  const previousReviewedSha =
+    job.reviewKind === "dynamic" ? await deps.previousReviewedSha(job) : null;
   // The exact legacy Diff payload for every Diff job, whatever kind of runner asked: the keys are in
   // the order the previous release wrote them, byte for byte (prUrl, command, git, llm, env;
   // llm.provider, model, apiKey, maxTokens), so a golden serialization matches. A Dynamic job is only
@@ -396,7 +407,12 @@ async function prepare(
           command,
           reviewKind: "dynamic",
           dynamic,
-          base: claimBaseOf(repo.fullName, baseRef, job.headSha),
+          base: claimBaseOf(
+            repo.fullName,
+            baseRef,
+            job.headSha,
+            previousReviewedSha,
+          ),
           git: {
             provider: "github",
             baseUrl: git.baseUrl,

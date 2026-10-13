@@ -2,6 +2,8 @@
 
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { getDatabase } from "@/db/startup";
+import { isDynamicReviewEnabled } from "@/jobs/dynamic-review-gate";
 import { getConfigStatusFor } from "@/config-status/shared";
 import { configAudienceOf } from "@/config-status/status";
 import { getWorkspaceLlm } from "@/llm/shared";
@@ -57,6 +59,8 @@ async function ProjectSettingsContent({
     settings: reviewSettingsServiceFor(workspaceId),
     // Only the instance admin gets the names of the variables that are wrong.
     config: () => getConfigStatusFor(user),
+    // Shown on the Review kind card: Dynamic Review runs only while the instance has turned it on.
+    dynamicReviewEnabled: () => isDynamicReviewEnabled(getDatabase()),
   });
   if (data.kind === "not_found") notFound();
   // The workspace's LLM hint is a row of the page's one "Needs attention" strip, not its own region.
