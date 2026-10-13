@@ -5,10 +5,8 @@
 import type { Metadata } from "next";
 import { requireAdmin } from "@/admin/session";
 import { getAdminService } from "@/admin/shared";
-import { SignUpRuleForm } from "@/admin/ui/sign-up-form";
-import { failClosedAttention } from "@/admin/ui/notices";
+import { SignUpSection } from "@/admin/ui/sign-up-section";
 import { Breadcrumbs } from "@/components/breadcrumbs";
-import { NeedsAttention } from "@/components/needs-attention";
 import { PageHeader } from "@/components/page-header";
 
 export const metadata: Metadata = { title: "Sign-up · Admin" };
@@ -24,17 +22,14 @@ export default async function AdminSetupSignUpPage() {
           <Breadcrumbs
             items={[
               { label: "Admin", href: "/admin" },
-              { label: "Setup", href: "/admin/setup" },
+              { label: "Setup", href: "/admin/setup/instance" },
               { label: "Sign-up" },
             ]}
           />
         }
       />
       <div className="flex max-w-[44rem] flex-col gap-6 pt-6">
-        {settings.signUpRuleState.failClosed ? (
-          <NeedsAttention notices={[failClosedAttention()]} />
-        ) : null}
-        <SignUpRuleForm settings={settings} />
+        <SignUpSection settings={settings} />
       </div>
     </>
   );

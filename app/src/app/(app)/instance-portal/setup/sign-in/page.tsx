@@ -21,7 +21,7 @@ export default async function AdminSetupSignInPage() {
           <Breadcrumbs
             items={[
               { label: "Admin", href: "/admin" },
-              { label: "Setup", href: "/admin/setup" },
+              { label: "Setup", href: "/admin/setup/instance" },
               { label: "Sign-in" },
             ]}
           />

@@ -4,7 +4,8 @@
 // The ways to sign in (#181): email with password and GitHub, as one card with one form. At least one
 // stays on; GitHub only while it is configured; GitHub as the only way needs the admin's own GitHub
 // account linked. The server judges every change (src/admin/sign-in-methods.ts); the form shows what is
-// not possible and why.
+// not possible and why. Each switch's wrapper is a `<label for>` (the same 44px target as the project
+// toggle, epic #165); a refused save moves focus to the control it is about (rulebook R20).
 import { useId, useState, type FormEvent } from "react";
 import { Button } from "../../components/button.tsx";
 import {
@@ -21,6 +22,7 @@ import {
 import { Switch } from "../../components/ui/switch.tsx";
 import type { AdminSettingsView } from "../service.ts";
 import type { AdminApi } from "./api.ts";
+import { useFocusFirstError } from "./focus-first-error.tsx";
 import { LastChanged } from "./last-changed.tsx";
 import { SaveResult, useSave } from "./use-save.tsx";
 
@@ -38,15 +40,20 @@ export function SignInMethodsForm({
   );
   const [github, setGithub] = useState(settings.signInMethods.effective.github);
   const { pending, status, save } = useSave(api);
+  const focusTargetRef = useFocusFirstError();
 
-  function submit(event: FormEvent) {
+  async function submit(event: FormEvent) {
     event.preventDefault();
-    void save({ signInMethods: { emailPassword, github } });
+    const [outcome] = await save({ signInMethods: { emailPassword, github } });
+    // The refusal is about GitHub only when it can be switched on; otherwise the first switch.
+    if (outcome?.kind === "failed")
+      focusTargetRef.current =
+        settings.githubConfigured && !github ? `${ids}-github` : `${ids}-email`;
   }
 
   return (
     <form
-      onSubmit={submit}
+      onSubmit={(event) => void submit(event)}
       aria-label="Ways to sign in"
       className="flex max-w-[44rem] flex-col gap-6"
     >
@@ -60,14 +67,17 @@ export function SignInMethodsForm({
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <Field orientation="horizontal" className="items-start">
-            <span className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center">
+            <label
+              htmlFor={`${ids}-email`}
+              className="inline-flex min-h-11 min-w-11 shrink-0 cursor-pointer items-center justify-center"
+            >
               <Switch
                 id={`${ids}-email`}
                 checked={emailPassword}
                 onCheckedChange={setEmailPassword}
                 aria-describedby={`${ids}-email-hint`}
               />
-            </span>
+            </label>
             <div className="flex flex-col gap-1">
               <FieldLabel htmlFor={`${ids}-email`}>
                 Email with password
@@ -79,7 +89,10 @@ export function SignInMethodsForm({
             </div>
           </Field>
           <Field orientation="horizontal" className="items-start">
-            <span className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center">
+            <label
+              htmlFor={`${ids}-github`}
+              className="inline-flex min-h-11 min-w-11 shrink-0 cursor-pointer items-center justify-center"
+            >
               <Switch
                 id={`${ids}-github`}
                 checked={github}
@@ -87,7 +100,7 @@ export function SignInMethodsForm({
                 disabled={!settings.githubConfigured}
                 aria-describedby={`${ids}-github-hint`}
               />
-            </span>
+            </label>
             <div className="flex flex-col gap-1">
               <FieldLabel htmlFor={`${ids}-github`}>GitHub</FieldLabel>
               <FieldDescription id={`${ids}-github-hint`}>

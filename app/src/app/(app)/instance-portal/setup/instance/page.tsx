@@ -20,11 +20,7 @@ export default async function AdminSetupInstancePage() {
         title="Instance"
         breadcrumb={
           <Breadcrumbs
-            items={[
-              { label: "Admin", href: "/admin" },
-              { label: "Setup", href: "/admin/setup" },
-              { label: "Instance" },
-            ]}
+            items={[{ label: "Admin", href: "/admin" }, { label: "Setup" }]}
           />
         }
       />

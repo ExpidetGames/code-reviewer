@@ -3,10 +3,11 @@
 "use client";
 // The instance settings of the portal (#181): the tenancy and the workspace limit as two cards of one
 // form, with one explicit save named after what it saves ("Save instance settings") and the saved state
-// inline next to it. The tenancy copy is shared with the first-run wizard (`signup/ui/tenancy-copy.ts`);
-// the rules are the server's (src/admin/tenancy.ts and src/admin/service.ts), and the form shows the
-// reason when a change is refused. A save sends only the settings that changed, so it does not touch the
-// other one's "last changed".
+// inline next to each card. The tenancy copy is shared with the first-run wizard
+// (`signup/ui/tenancy-copy.ts`); the rules are the server's (src/admin/tenancy.ts and
+// src/admin/service.ts). A save sends only the settings that changed, runs all of them (a refusal of one
+// card never drops the other change), shows each card's own result or error, and moves focus to the
+// first invalid control (rulebook R20).
 import { useId, useState, type FormEvent } from "react";
 import { Button } from "../../components/button.tsx";
 import {
@@ -33,9 +34,10 @@ import {
 } from "../../signup/ui/tenancy-copy.ts";
 import type { AdminSettingsView } from "../service.ts";
 import type { AdminApi, SettingChange } from "./api.ts";
+import { useFocusFirstError } from "./focus-first-error.tsx";
 import { LastChanged } from "./last-changed.tsx";
 import { describeAdminIssue } from "./messages.ts";
-import { SaveResult, useSave } from "./use-save.tsx";
+import { SaveResult, useSave, type SaveStatus } from "./use-save.tsx";
 
 function isTenancy(value: string): value is TenancyKind {
   return value === "single" || value === "multi";
@@ -54,40 +56,71 @@ export function InstanceForm({
   api?: AdminApi;
 }) {
   const ids = useId();
+  const tenancyHeadingId = `${ids}-tenancy-heading`;
+  const limitsHeadingId = `${ids}-limits-heading`;
   const [tenancy, setTenancy] = useState<TenancyKind>(settings.tenancy.value);
   const [limitText, setLimitText] = useState(
     String(settings.maxWorkspacesPerUser.value),
   );
-  const { pending, status, save } = useSave(api, settings.workspaceCount);
+  const [results, setResults] = useState<{
+    tenancy: SaveStatus;
+    limits: SaveStatus;
+  }>({ tenancy: null, limits: null });
+  const { pending, save } = useSave(api, settings.workspaceCount);
+  const focusTargetRef = useFocusFirstError();
 
-  function submit(event: FormEvent) {
+  async function submit(event: FormEvent) {
     event.preventDefault();
+    // Only what changed is sent, so a save does not touch the other setting's "last changed".
+    const wanted: Array<"tenancy" | "limits"> = [];
     const changes: SettingChange[] = [];
-    if (tenancy !== settings.tenancy.value) changes.push({ tenancy });
-    if (limitText !== String(settings.maxWorkspacesPerUser.value))
+    if (tenancy !== settings.tenancy.value) {
+      wanted.push("tenancy");
+      changes.push({ tenancy });
+    }
+    if (limitText !== String(settings.maxWorkspacesPerUser.value)) {
+      wanted.push("limits");
       changes.push({ limits: { maxWorkspacesPerUser: Number(limitText) } });
-    void save(...changes);
+    }
+    const outcomes = await save(...changes);
+    const next: typeof results = { tenancy: null, limits: null };
+    wanted.forEach((key, index) => {
+      next[key] = outcomes[index] ?? null;
+    });
+    setResults(next);
+    const failed = outcomes.findIndex((outcome) => outcome.kind === "failed");
+    if (failed !== -1)
+      focusTargetRef.current =
+        wanted[failed] === "limits" ? `${ids}-max` : `${ids}-tenancy`;
   }
 
   const limitIssue =
-    status?.kind === "failed"
-      ? status.issues.find((issue) => issue.field === "maxWorkspacesPerUser")
+    results.limits?.kind === "failed"
+      ? results.limits.issues.find(
+          (issue) => issue.field === "maxWorkspacesPerUser",
+        )
       : undefined;
 
   return (
     <form
-      onSubmit={submit}
+      onSubmit={(event) => void submit(event)}
       aria-label="Instance settings"
       className="flex max-w-[44rem] flex-col gap-6"
     >
-      <Card>
+      <Card role="group" aria-labelledby={tenancyHeadingId}>
         <CardHeader>
           <CardTitle>
-            <h2 className="text-lg font-semibold tracking-tight">Tenancy</h2>
+            <h2
+              id={tenancyHeadingId}
+              className="text-lg font-semibold tracking-tight"
+            >
+              Tenancy
+            </h2>
           </CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <RadioGroup
+            id={`${ids}-tenancy`}
             value={tenancy}
             onValueChange={(value) => {
               if (isTenancy(value)) setTenancy(value);
@@ -131,16 +164,22 @@ export function InstanceForm({
             This instance has {workspaces(settings.workspaceCount)} now.
           </FieldDescription>
           <LastChanged setting={settings.tenancy} />
+          <SaveResult status={results.tenancy} />
         </CardContent>
       </Card>
 
-      <Card>
+      <Card role="group" aria-labelledby={limitsHeadingId}>
         <CardHeader>
           <CardTitle>
-            <h2 className="text-lg font-semibold tracking-tight">Limits</h2>
+            <h2
+              id={limitsHeadingId}
+              className="text-lg font-semibold tracking-tight"
+            >
+              Limits
+            </h2>
           </CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="flex flex-col gap-4">
           <Field>
             <FieldLabel htmlFor={`${ids}-max`}>
               Maximum number of workspaces one user may own
@@ -162,6 +201,7 @@ export function InstanceForm({
             ) : null}
           </Field>
           <LastChanged setting={settings.maxWorkspacesPerUser} />
+          <SaveResult status={results.limits} />
         </CardContent>
       </Card>
 
@@ -169,7 +209,6 @@ export function InstanceForm({
         <Button type="submit" loading={pending} loadingLabel="Saving">
           Save instance settings
         </Button>
-        <SaveResult status={status} />
       </div>
     </form>
   );

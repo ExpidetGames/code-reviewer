@@ -2,11 +2,12 @@
 
 // @vitest-environment jsdom
 // Pins down the setup forms of the portal (#181): the instance form (tenancy and the limit as two
-// cards of one form, saving only what changed), the sign-up rule form, and the ways-to-sign-in form.
-// What each one sends, the sentences for what the server refuses, and — #181-T02 — that each form is
+// cards of one form, saving only what changed, running both changes and showing each card's own
+// result), the sign-up rule form, and the ways-to-sign-in form. What each one sends, the sentences for
+// what the server refuses, the focus the refused field gets (R20), and — #181-T02 — that each form is
 // exactly one form whose saved state is inline (no remount key). The rules themselves are the server's
-// (src/admin/service.integration.test.ts); these tests only prove that the forms ask for the right
-// thing and say the reasons. The tenancy copy comes from one owner, shared with the wizard (#181-T05).
+// (src/admin/service.integration.test.ts). The tenancy copy comes from one owner, shared with the
+// wizard (#181-T05).
 import {
   cleanup,
   render,
@@ -23,6 +24,7 @@ import type { AdminSettingsView } from "../service.ts";
 import type { AdminApi, SettingChange } from "./api.ts";
 import { InstanceForm } from "./instance-form.tsx";
 import { SignInMethodsForm } from "./sign-in-form.tsx";
+import { SignUpSection } from "./sign-up-section.tsx";
 import { SignUpRuleForm } from "./sign-up-form.tsx";
 
 const navigation = vi.hoisted(() => ({ refresh: vi.fn() }));
@@ -31,6 +33,8 @@ vi.mock("next/navigation", () => ({
 }));
 
 afterEach(cleanup);
+
+type Answer = RequestResult<{ ok: true; settings: AdminSettingsView }>;
 
 function view(overrides: Partial<AdminSettingsView> = {}): AdminSettingsView {
   const never = { updatedBy: null, updatedAt: null };
@@ -55,12 +59,21 @@ function view(overrides: Partial<AdminSettingsView> = {}): AdminSettingsView {
   };
 }
 
-function apiAnswering(
-  result: RequestResult<{ ok: true; settings: AdminSettingsView }>,
-) {
-  const change = vi.fn<(change: SettingChange) => Promise<typeof result>>(() =>
+function apiAnswering(result: Answer) {
+  const change = vi.fn<(change: SettingChange) => Promise<Answer>>(() =>
     Promise.resolve(result),
   );
+  const testMail = vi.fn<AdminApi["testMail"]>(() =>
+    Promise.resolve({ ok: true, data: { ok: true } } as const),
+  );
+  return { api: { change, testMail } satisfies AdminApi, change };
+}
+
+/** An api whose `change` answers with `results` in order, then repeats the last one. */
+function apiSequencing(...results: Answer[]) {
+  const change = vi.fn<(change: SettingChange) => Promise<Answer>>();
+  for (const result of results) change.mockResolvedValueOnce(result);
+  change.mockResolvedValue(results.at(-1) ?? SAVED);
   const testMail = vi.fn<AdminApi["testMail"]>(() =>
     Promise.resolve({ ok: true, data: { ok: true } } as const),
   );
@@ -73,9 +86,13 @@ const refused = (
   issues: Array<{ field: string; code: string }> = [],
 ) => ({ ok: false, status: 409, code, issues }) as const;
 
+function card(name: "Tenancy" | "Limits"): HTMLElement {
+  return screen.getByRole("group", { name });
+}
+
 describe("the instance form", () => {
   // #98-AD-07
-  it("sends the chosen tenancy and says it was saved", async () => {
+  it("sends the chosen tenancy and says on the card that it was saved", async () => {
     const { api, change } = apiAnswering(SAVED);
     const user = userEvent.setup();
     render(<InstanceForm settings={view()} api={api} />);
@@ -86,7 +103,9 @@ describe("the instance form", () => {
     );
 
     await waitFor(() =>
-      expect(screen.getByRole("status").textContent).toBe("Saved."),
+      expect(within(card("Tenancy")).getByRole("status").textContent).toBe(
+        "Saved.",
+      ),
     );
     expect(change).toHaveBeenCalledWith({ tenancy: "multi" });
     expect(navigation.refresh).toHaveBeenCalled();
@@ -110,6 +129,11 @@ describe("the instance form", () => {
       limits: { maxWorkspacesPerUser: 3 },
     });
     expect(change).toHaveBeenCalledTimes(1);
+    await waitFor(() =>
+      expect(within(card("Limits")).getByRole("status").textContent).toBe(
+        "Saved.",
+      ),
+    );
   });
 
   // #98-AD-06
@@ -132,8 +156,81 @@ describe("the instance form", () => {
     );
 
     await waitFor(() =>
-      expect(screen.getByRole("alert").textContent).toContain("3 workspaces"),
+      expect(within(card("Tenancy")).getByRole("alert").textContent).toContain(
+        "3 workspaces",
+      ),
     );
+  });
+
+  it("runs the second change and shows both results when the first is refused", async () => {
+    const { api, change } = apiSequencing(
+      refused("too_many_workspaces"),
+      SAVED,
+    );
+    const user = userEvent.setup();
+    render(
+      <InstanceForm
+        settings={view({
+          tenancy: { value: "multi", updatedBy: null, updatedAt: null },
+          workspaceCount: 3,
+        })}
+        api={api}
+      />,
+    );
+
+    await user.click(screen.getByRole("radio", { name: /Single-tenant/ }));
+    const field = screen.getByLabelText(/Maximum number of workspaces/);
+    await user.clear(field);
+    await user.type(field, "3");
+    await user.click(
+      screen.getByRole("button", { name: "Save instance settings" }),
+    );
+
+    // The independent limit change is not dropped because the tenancy was refused.
+    await waitFor(() => expect(change).toHaveBeenCalledTimes(2));
+    expect(change).toHaveBeenNthCalledWith(1, { tenancy: "single" });
+    expect(change).toHaveBeenNthCalledWith(2, {
+      limits: { maxWorkspacesPerUser: 3 },
+    });
+    await waitFor(() =>
+      expect(within(card("Tenancy")).getByRole("alert").textContent).toContain(
+        "3 workspaces",
+      ),
+    );
+    expect(within(card("Limits")).getByRole("status").textContent).toBe(
+      "Saved.",
+    );
+    // The limit was saved, so the page data (and "last changed") is refreshed.
+    expect(navigation.refresh).toHaveBeenCalled();
+  });
+
+  it("shows the saved card next to the refused one when the second is refused", async () => {
+    const { api } = apiSequencing(
+      SAVED,
+      refused("invalid_input", [
+        { field: "maxWorkspacesPerUser", code: "number_out_of_range" },
+      ]),
+    );
+    const user = userEvent.setup();
+    render(<InstanceForm settings={view()} api={api} />);
+
+    await user.click(screen.getByRole("radio", { name: /Multi-tenant/ }));
+    const field = screen.getByLabelText(/Maximum number of workspaces/);
+    await user.clear(field);
+    await user.type(field, "abc");
+    await user.click(
+      screen.getByRole("button", { name: "Save instance settings" }),
+    );
+
+    await waitFor(() =>
+      expect(within(card("Tenancy")).getByRole("status").textContent).toBe(
+        "Saved.",
+      ),
+    );
+    expect(
+      within(card("Limits")).getByText(/Enter a whole number/),
+    ).toBeTruthy();
+    expect(navigation.refresh).toHaveBeenCalled();
   });
 
   // #98-AD-14
@@ -184,6 +281,52 @@ describe("the instance form", () => {
       expect(
         screen.getByText("Enter a whole number from 1 to 1000."),
       ).toBeTruthy(),
+    );
+  });
+
+  // #181-T06 (rulebook R20)
+  it("moves focus to the limit field when the limit is refused", async () => {
+    const { api } = apiAnswering(
+      refused("invalid_input", [
+        { field: "maxWorkspacesPerUser", code: "number_out_of_range" },
+      ]),
+    );
+    const user = userEvent.setup();
+    render(<InstanceForm settings={view()} api={api} />);
+    const field = screen.getByLabelText(/Maximum number of workspaces/);
+
+    await user.clear(field);
+    await user.type(field, "abc");
+    await user.click(
+      screen.getByRole("button", { name: "Save instance settings" }),
+    );
+
+    await waitFor(() => expect(document.activeElement).toBe(field));
+  });
+
+  // #181-T06 (rulebook R20)
+  it("moves focus to the tenancy choice when the tenancy is refused", async () => {
+    const { api } = apiAnswering(refused("too_many_workspaces"));
+    const user = userEvent.setup();
+    render(
+      <InstanceForm
+        settings={view({
+          tenancy: { value: "multi", updatedBy: null, updatedAt: null },
+          workspaceCount: 3,
+        })}
+        api={api}
+      />,
+    );
+
+    await user.click(screen.getByRole("radio", { name: /Single-tenant/ }));
+    await user.click(
+      screen.getByRole("button", { name: "Save instance settings" }),
+    );
+
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("radio", { name: /Single-tenant/ }),
+      ),
     );
   });
 });
@@ -258,6 +401,54 @@ describe("the sign-up rule form", () => {
       screen.getByLabelText("Email addresses").getAttribute("aria-invalid"),
     ).toBe("true");
   });
+
+  // #181-T06 (rulebook R20)
+  it("moves focus to the entries when the server refuses them", async () => {
+    const { api } = apiAnswering({
+      ok: false,
+      status: 422,
+      code: "invalid_input",
+      issues: [{ field: "signUp.entries", code: "entry_invalid" }],
+    });
+    const user = userEvent.setup();
+    render(<SignUpRuleForm settings={view()} api={api} />);
+
+    await user.click(
+      screen.getByRole("radio", { name: /A list of email addresses/ }),
+    );
+    const entries = screen.getByLabelText("Email addresses");
+    await user.type(entries, "not an email");
+    await user.click(screen.getByRole("button", { name: "Save sign-up rule" }));
+
+    await waitFor(() => expect(document.activeElement).toBe(entries));
+  });
+});
+
+describe("the sign-up page body", () => {
+  // #181: the negative case of the fail-closed notice (the old "and not otherwise").
+  it("shows the fail-closed notice only while the rule cannot work yet", () => {
+    const closed = render(
+      <SignUpSection
+        settings={view({
+          signUpRule: {
+            value: { kind: "domains", entries: ["a.com"] },
+            updatedBy: null,
+            updatedAt: null,
+          },
+          signUpRuleState: { failClosed: true },
+        })}
+      />,
+    );
+    expect(
+      screen.getByRole("region", { name: "Needs attention" }).textContent,
+    ).toContain("does not work yet");
+    closed.unmount();
+
+    render(<SignUpSection settings={view()} />);
+    expect(
+      screen.queryByRole("region", { name: "Needs attention" }),
+    ).toBeNull();
+  });
 });
 
 describe("the form of the ways to sign in", () => {
@@ -268,6 +459,19 @@ describe("the form of the ways to sign in", () => {
     const github = screen.getByRole("switch", { name: /GitHub/ });
     expect((github as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText(/set up the GitHub App/)).toBeTruthy();
+  });
+
+  // #181: the wrapper is a real 44px target, a `<label for>` like the project toggle.
+  it("wraps each switch in a label associated with it", () => {
+    render(<SignInMethodsForm settings={view({ githubConfigured: true })} />);
+
+    for (const name of [/Email with password/, /GitHub/]) {
+      const control = screen.getByRole("switch", { name });
+      const wrapper = control.closest("label");
+      expect(wrapper).not.toBeNull();
+      expect(wrapper?.getAttribute("for")).toBe(control.id);
+      expect(wrapper?.className).toContain("min-h-11");
+    }
   });
 
   // #98-SIGN-IN-METHODS
@@ -329,6 +533,28 @@ describe("the form of the ways to sign in", () => {
       ),
     );
   });
+
+  // #181-T06 (rulebook R20)
+  it("moves focus to the GitHub switch when that way is refused", async () => {
+    const { api } = apiAnswering(refused("admin_needs_github_identity"));
+    const user = userEvent.setup();
+    render(
+      <SignInMethodsForm
+        settings={view({ githubConfigured: true })}
+        api={api}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Save ways to sign in" }),
+    );
+
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("switch", { name: /GitHub/ }),
+      ),
+    );
+  });
 });
 
 describe("a failure that is not about a field", () => {
@@ -348,7 +574,7 @@ describe("a failure that is not about a field", () => {
     );
 
     await waitFor(() =>
-      expect(screen.getByRole("alert").textContent).toContain(
+      expect(within(card("Tenancy")).getByRole("alert").textContent).toContain(
         "could not be reached",
       ),
     );
@@ -360,23 +586,24 @@ describe("the shape of the setup forms", () => {
   it("renders every setup form as exactly one form with the saved state inline, not via a remount key", async () => {
     const user = userEvent.setup();
     const renders = [
-      <InstanceForm key="instance" settings={view()} />,
-      <SignUpRuleForm key="sign-up" settings={view()} />,
-      <SignInMethodsForm key="sign-in" settings={view()} />,
+      { key: "instance", element: <InstanceForm settings={view()} /> },
+      { key: "sign-up", element: <SignUpRuleForm settings={view()} /> },
+      {
+        key: "sign-in",
+        element: <SignInMethodsForm settings={view()} />,
+      },
     ];
-    for (const element of renders) {
-      const { container, unmount } = render(element);
+    for (const { key, element } of renders) {
+      const { container, unmount } = render(<div key={key}>{element}</div>);
       expect(container.querySelectorAll("form")).toHaveLength(1);
-      // The saved state is one inline status inside the form, not a remount of the form.
+      // Every form owns at least one inline live region; the instance form has one per card.
       expect(
-        within(container.querySelector("form") as HTMLElement).getAllByRole(
-          "status",
-        ),
-      ).toHaveLength(1);
+        container.querySelectorAll("form [role='status']").length,
+      ).toBeGreaterThanOrEqual(1);
       unmount();
     }
 
-    // A save keeps what was chosen (the form is not remounted) and shows "Saved." next to the button.
+    // A save keeps what was chosen (the form is not remounted) and shows "Saved." inline.
     const { api } = apiAnswering(SAVED);
     render(<InstanceForm settings={view()} api={api} />);
     await user.click(screen.getByRole("radio", { name: /Multi-tenant/ }));
@@ -384,7 +611,9 @@ describe("the shape of the setup forms", () => {
       screen.getByRole("button", { name: "Save instance settings" }),
     );
     await waitFor(() =>
-      expect(screen.getByRole("status").textContent).toBe("Saved."),
+      expect(within(card("Tenancy")).getByRole("status").textContent).toBe(
+        "Saved.",
+      ),
     );
     expect(
       (

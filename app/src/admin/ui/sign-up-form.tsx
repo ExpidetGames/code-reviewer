@@ -31,6 +31,7 @@ import {
 } from "../../signup/ui/rule-copy.ts";
 import type { AdminSettingsView } from "../service.ts";
 import type { AdminApi } from "./api.ts";
+import { useFocusFirstError } from "./focus-first-error.tsx";
 import { LastChanged } from "./last-changed.tsx";
 import { describeAdminIssue } from "./messages.ts";
 import { SaveResult, useSave } from "./use-save.tsx";
@@ -62,15 +63,21 @@ export function SignUpRuleForm({
     rule.kind === "everyone" ? "" : rule.entries.join("\n"),
   );
   const { pending, status, save } = useSave(api);
+  const focusTargetRef = useFocusFirstError();
 
-  function submit(event: FormEvent) {
+  async function submit(event: FormEvent) {
     event.preventDefault();
-    void save({
+    const [outcome] = await save({
       signUp:
         kind === "everyone"
           ? { kind: "everyone" }
           : { kind, entries: splitEntries(entriesText) },
     });
+    if (outcome?.kind === "failed")
+      focusTargetRef.current =
+        outcome.issues[0]?.field === "signUp.entries"
+          ? `${ids}-entries`
+          : `${ids}-rule`;
   }
 
   const entriesIssue =
@@ -80,7 +87,7 @@ export function SignUpRuleForm({
 
   return (
     <form
-      onSubmit={submit}
+      onSubmit={(event) => void submit(event)}
       aria-label="Sign-up rule"
       className="flex max-w-[44rem] flex-col gap-6"
     >
@@ -94,6 +101,7 @@ export function SignUpRuleForm({
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <RadioGroup
+            id={`${ids}-rule`}
             value={kind}
             onValueChange={(value) => {
               if (isSignUpRuleKind(value)) setKind(value);
