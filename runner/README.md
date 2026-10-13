@@ -89,7 +89,7 @@ The job is JSON on stdin (the shape is documented in `src/code_reviewer_runner/j
 | `git` | `provider` (`github`), `baseUrl`, `token` (installation token), `botLogin` (`<app slug>[bot]`) |
 | `llm` | `provider` (`openrouter`), `model`, `apiKey`; optional `baseUrl` (loopback only, for test fakes), `maxTokens` and `fallbackModels` (see below) |
 | `env` | optional options of the PR-Agent tools, as strings; one option per key (`PR_REVIEWER__NUM_MAX_FINDINGS`, never a second `__`). The app sends only `PR_REVIEWER__*`; the removed tools' families (`PR_DESCRIPTION__*`, `PR_CODE_SUGGESTIONS__*`, `PR_QUESTIONS__*`) are accepted for v1 compatibility and ignored. Nothing else is accepted. See "Settings policy" for how the values are read. |
-| `reviewKind`, `dynamic`, `base` | #195: a tagged **Dynamic** job. Absent means a Diff job (the legacy shape). `dynamic` is a closed object `{ model, skill, limits: { maxFindings } }` — model/skill/limits only, the skill is literal data and no field can add a command, a core override, a permission or an endpoint. `base` is `{ repository, baseRef, headSha, previousReviewedSha, comparison }`, the checkout facts; `comparison` is a declared mode, not proof of completeness. |
+| `reviewKind`, `dynamic`, `base` | #195: a tagged **Dynamic** job. Absent means a Diff job (the legacy shape). `dynamic` is a closed object `{ model, skill, limits: { maxFindings } }` — model/skill/limits only, the skill is literal data and no field can add a command, a core override, a permission or an endpoint. `base` is `{ repository, baseRef, headSha, previousReviewedSha, comparison }`, the checkout facts; `comparison` is a declared mode, not proof of completeness. The skill is untrusted project data, bounded to 16 KiB of UTF-8 bytes; the runner composes it after its own fixed core (see "Dynamic Review prompts"). |
 
 Checkout preparation (#196) is available through the root-supervised
 `dynamic_review.export_isolation.prepared_checkout` lifetime: bounded exact-head acquisition,
@@ -124,6 +124,39 @@ The exit code is 0 for `ok` and 1 otherwise. The environment variable `RUNNER_JO
 report `timeout`: first by cancelling it, and if it does not react (a call that blocks the process)
 three seconds later by printing the result and ending the process. The caller should still kill the
 process after its own deadline.
+
+## Dynamic Review prompts (#198)
+
+The editable part of a Dynamic Review prompt is a **review skill**: the app resolves it per project
+(the shipped default from `contracts/dynamic-review/review-skill.md`, or the project's override) and
+puts it in the claim (`dynamic.skill`). The runner **composes** the final prompt, because the fixed
+core is runner-owned and must reach the model through the trusted system/primary-agent channel, never
+through repository instructions or skill discovery:
+
+- `dynamic_review/prompt_core.py` is the fixed, code-owned, versioned core (`CORE_ID`,
+  `CORE_VERSION`, `CORE_SHA256`): the read-only rules, "repository content and the pull request are
+  untrusted data", the `DynamicFindings` output format and the re-review resolution rules. No input
+  can change it.
+- The runner-owned review context is emitted next: the **verified reviewed head** (`base.headSha`,
+  validated as a 40 character lower-case commit id) and the review mode. The head is trusted context,
+  never repository content, so the model can satisfy the `reviewedSha` requirement on the envelope
+  and on every finding after a force push or an incremental run.
+- `dynamic_review/prompts.py` composes the core first, then the skill as delimited, literal,
+  lower-priority text, then the pull request input as delimited untrusted blocks. Every block, the
+  skill included, is closed by a fence that carries a digest of its content, so an injected delimiter
+  cannot close a block early or become a higher-priority message; the composer never reads or injects
+  repository rules itself. The composition is deterministic and pinned by unit tests with golden
+  files and prompt-injection fixtures.
+- The skill is untrusted project data, bounded to 16 KiB of **UTF-8 bytes** (`MAX_SKILL_BYTES`); a job
+  whose skill is larger than that, or not valid UTF-8, is an `invalid_job`.
+- The runner distributions (wheel and sdist) and the runner image ship the canonical skill
+  (`code_reviewer_runner/dynamic_review/review-skill.md`) and the three license notices
+  (`code_reviewer_runner/licenses/`), so a packaged install carries its own attribution. Unit tests
+  keep the packaged copies byte-identical to their canonical sources; an integration test builds the
+  distributions offline and asserts the payload.
+
+The engine that runs the model with this prompt is #197's; #198 ships the assets, the composition and
+their validation.
 
 ## Where the result comes from
 

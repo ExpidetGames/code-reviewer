@@ -1338,3 +1338,37 @@ def test_a_dynamic_skill_stays_literal_data() -> None:
 
     assert parsed.dynamic is not None
     assert parsed.dynamic.skill == skill
+
+
+# #198-T02: the skill bound is 16 KiB of UTF-8 bytes, not characters, so a multibyte value cannot
+# carry more bytes than an ASCII value of the same length.
+@pytest.mark.parametrize(
+    ("length", "char", "accepted"),
+    [
+        (16 * 1024, "a", True),
+        (16 * 1024 + 1, "a", False),
+        (8000, "\u00e9", True),  # 16 000 bytes, under the limit
+        (9000, "\u00e9", False),  # 18 000 bytes, over the limit although only 9 000 characters
+    ],
+)
+def test_a_dynamic_skill_is_bounded_in_utf8_bytes(length: int, char: str, accepted: bool) -> None:
+    job = dynamic_job_json(dynamic={**dynamic_job_json()["dynamic"], "skill": char * length})
+
+    if accepted:
+        parsed = parse_job(json.dumps(job))
+        assert parsed.dynamic is not None
+        assert parsed.dynamic.skill == char * length
+    else:
+        with pytest.raises(JobError) as refused:
+            parse_job(json.dumps(job))
+        assert refused.value.code is ErrorCode.INVALID_JOB
+
+
+# #198-T02: a skill that cannot be encoded as UTF-8 (a lone surrogate) is refused, not kept.
+def test_a_dynamic_skill_with_a_lone_surrogate_is_refused() -> None:
+    job = dynamic_job_json(dynamic={**dynamic_job_json()["dynamic"], "skill": "\ud800"})
+
+    with pytest.raises(JobError) as refused:
+        parse_job(json.dumps(job))
+
+    assert refused.value.code is ErrorCode.INVALID_JOB
