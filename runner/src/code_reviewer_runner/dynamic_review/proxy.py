@@ -52,6 +52,7 @@ from code_reviewer_runner.dynamic_review.budget import BudgetLedger, LimitError
 from code_reviewer_runner.dynamic_review.completion_stream import completion_as_stream
 from code_reviewer_runner.dynamic_review.config import PROXY_CAPABILITY_BYTES, PROXY_PROVIDER_ID
 from code_reviewer_runner.dynamic_review.net import no_redirect_opener
+from code_reviewer_runner.error_mapping import llm_status_code
 from code_reviewer_runner.job_loop.jsonvalues import as_object
 from code_reviewer_runner.result import ErrorCode
 
@@ -280,12 +281,16 @@ class ModelProxy:
         self._check_model(request)
         wants_stream = request.get("stream") is True
         # The tool results the engine is about to show the model are audited before anything is
-        # forwarded: content over a bound is never sent to the provider.
-        self.audit.results_in_request(request.get("messages"))
+        # forwarded: content over a bound is never sent to the provider. The audit also hands back
+        # the history with the reminder wrappers neutralised (#232); that is what is forwarded,
+        # counted and reserved.
+        if "messages" in request:
+            request["messages"] = self.audit.results_in_request(request["messages"])
         # A request the policy refuses spends nothing: build it before reserving the call.
         forwarded = self._forward_body(request)
         reservation = self.ledger.reserve_call(
-            body.decode("utf-8", errors="replace"), output_tokens=self._output_allowance(request)
+            forwarded.decode("utf-8", errors="replace"),
+            output_tokens=self._output_allowance(request),
         )
         try:
             status, response_body = self._post(
@@ -384,7 +389,14 @@ class ModelProxy:
         forwarded["model"] = self.upstream_model
         forwarded["max_tokens"] = self._output_allowance(request)
         forwarded["stream"] = False
-        return json.dumps(forwarded).encode("utf-8")
+        # Compact UTF-8 like the engine's own serialisation: the reservation is made on these bytes,
+        # and `\uXXXX` escapes of non-ASCII text would inflate it. A lone surrogate (a JSON escape
+        # the engine or the provider can emit when a token splits an emoji) has no UTF-8 form: that
+        # one request is escaped as ASCII instead, and those bytes are the ones reserved and sent.
+        try:
+            return json.dumps(forwarded, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        except UnicodeEncodeError:
+            return json.dumps(forwarded, ensure_ascii=True, separators=(",", ":")).encode("ascii")
 
     @staticmethod
     def _completion(body: bytes) -> dict[str, Any]:
@@ -416,12 +428,8 @@ class ModelProxy:
 
     @staticmethod
     def _provider_error(status: int) -> tuple[bytes, ErrorCode]:
-        code = {
-            401: ErrorCode.LLM_AUTH,
-            402: ErrorCode.LLM_QUOTA,
-            403: ErrorCode.LLM_AUTH,
-            429: ErrorCode.LLM_RATE_LIMIT,
-        }.get(status, ErrorCode.LLM_UNAVAILABLE if status >= 500 else ErrorCode.LLM_BAD_REQUEST)
+        # The static path's table (error_mapping.py); a status it has no rule for is a bad request.
+        code = llm_status_code(status) or ErrorCode.LLM_BAD_REQUEST
         return error_body(code, "the model provider refused the request"), code
 
     def _models_body(self) -> bytes:

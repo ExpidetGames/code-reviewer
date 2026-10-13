@@ -23,6 +23,7 @@ from typing import Any
 
 from code_reviewer_runner.dynamic_review import findings_schema
 from code_reviewer_runner.dynamic_review.adapter import DynamicEngine, EngineAnswer
+from code_reviewer_runner.dynamic_review.audit import ToolAudit
 from code_reviewer_runner.dynamic_review.budget import BudgetLedger, DynamicLimits
 from code_reviewer_runner.dynamic_review.checkout import PreparedContent
 from code_reviewer_runner.dynamic_review.config import new_proxy_capability
@@ -30,6 +31,7 @@ from code_reviewer_runner.dynamic_review.inputs import review_inputs
 from code_reviewer_runner.dynamic_review.prompts import compose_system_prompt
 from code_reviewer_runner.dynamic_review.proxy import ModelProxy, capabilities_from_config
 from code_reviewer_runner.job import Job, parse_job
+from code_reviewer_runner.job_loop.jsonvalues import as_object
 
 RUNNER = Path(__file__).resolve().parents[2]
 API_KEY = "dummy-openrouter-key-0123456789"
@@ -242,12 +244,35 @@ def findings_for(head_sha: str, path: str = "src/app.py") -> dict[str, Any]:
     }
 
 
+class RecordingAudit(ToolAudit):
+    """The proxy's audit, which also keeps what the engine sent: the result texts before the
+    proxy neutralised them (#232), so a test can tell what the engine really emits from what the
+    model is shown."""
+
+    def __init__(self, ledger: BudgetLedger) -> None:
+        super().__init__(ledger)
+        self.engine_sent: dict[str, str] = {}
+
+    def results_in_request(self, messages: object) -> Any:
+        history = messages
+        if isinstance(messages, list):
+            entries: list[Any] = messages  # pyright: ignore[reportUnknownVariableType]
+            for item in entries:
+                message = as_object(item)
+                if message is not None and message.get("role") == "tool":
+                    self.engine_sent.setdefault(
+                        str(message.get("tool_call_id")), str(message.get("content"))
+                    )
+        return super().results_in_request(history)
+
+
 @dataclass
 class Run:
     answer: EngineAnswer
     ledger: BudgetLedger
     proxy: ModelProxy
     capability: str
+    engine_sent: dict[str, str] = field(default_factory=lambda: {})
 
 
 def run_engine(
@@ -275,6 +300,8 @@ def run_engine(
         capabilities=capabilities_from_config(CAPABILITIES),
         capability=capability,
     )
+    audit = RecordingAudit(ledger)
+    proxy.audit = audit
     directory = export or content.export
     proxy.audit.set_export_root(str(directory))
     job = dynamic_job(content.head_sha)
@@ -300,4 +327,10 @@ def run_engine(
         answer = engine.run()
     finally:
         server.stop()
-    return Run(answer=answer, ledger=ledger, proxy=proxy, capability=capability)
+    return Run(
+        answer=answer,
+        ledger=ledger,
+        proxy=proxy,
+        capability=capability,
+        engine_sent=audit.engine_sent,
+    )

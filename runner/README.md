@@ -243,6 +243,13 @@ input and the boundaries around it (the epic's binding decision). Modules:
   a bound reaches neither the provider nor the model). Each call and result is audited once by its
   call id. Files are counted from the pinned shapes of `read` (the file, not a directory listing),
   `grep` (every file it lists) and `glob`. The engine's session list is never read.
+- `dynamic_review/reminders.py` (#232) neutralises `<system-reminder>` text in tool results in the
+  same pass, before anything is counted or forwarded. The stock engine appends the text of nearby
+  `AGENTS.md`/`CLAUDE.md`/`CONTEXT.md` files to a `read` result in such a wrapper (uncapped, and its
+  own prompt tells the model the tag is system-added): the wrapper is **dropped** and replaced by a
+  short notice, the files stay readable by an explicit `read`. Any other tag text (a file or a grep
+  line that contains it) is escaped (`<` becomes `&lt;`), so no `<system-reminder>` tag reaches the
+  provider in a tool result. The bounds and the token reservation count the forwarded text.
 - `dynamic_review/completion_stream.py`: the pinned engine always asks for a streamed answer. The
   proxy asks the provider for the whole answer (bounded, audited, usage settled) and only then returns
   it as a short event stream; nothing reaches the engine before the checks passed.
@@ -391,7 +398,7 @@ and the enum agree. Callers branch on the code, never on the text.
 | `git_unavailable` | GitHub could not be reached, timed out or answered 5xx |
 | `git_unprocessable` | GitHub answered 422 |
 | `git_provider_init` | PR-Agent could not create its GitHub client and no cause is known |
-| `llm_auth` | The LLM provider rejected the key (401, 403). Called `llm_auth_failed` in some planning notes; this is the same thing |
+| `llm_auth` | The LLM provider rejected the key (401, 403). Called `llm_auth_failed` in some planning notes; this is the same thing. In a Dynamic Review the engine sees HTTP 403 both for this and for a budget refusal; the cause of the job is the code the ledger recorded, not the engine's HTTP status |
 | `llm_quota` | The LLM account has no credit left (402) |
 | `llm_rate_limit` | The LLM provider rate limit (429) |
 | `llm_timeout` | The LLM provider did not answer in time |
