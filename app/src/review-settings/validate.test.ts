@@ -7,13 +7,25 @@ import { describe, expect, it } from "vitest";
 import {
   REVIEW_SETTING_ISSUE_CODES,
   parseStoredOverrides,
+  parseStoredProjectDynamicOverrides,
+  validateProjectSettingsPatch,
   validateReviewSettingsPatch,
 } from "./validate.ts";
-import { REVIEW_SETTING_LIMITS, builtInReviewSettings } from "./settings.ts";
+import {
+  PROJECT_DYNAMIC_LIMITS,
+  REVIEW_SETTING_LIMITS,
+  builtInReviewSettings,
+} from "./settings.ts";
 import { isCommandAllowed, resolveReviewSettings } from "./effective.ts";
 
 function issuesOf(input: unknown) {
   const result = validateReviewSettingsPatch(input);
+  if (result.ok) throw new Error("expected the settings to be refused");
+  return result.issues;
+}
+
+function projectIssuesOf(input: unknown) {
+  const result = validateProjectSettingsPatch(input);
   if (result.ok) throw new Error("expected the settings to be refused");
   return result.issues;
 }
@@ -341,5 +353,164 @@ describe("the documented limits", () => {
       maxFindings: { min: 1, max: 30 },
       maxTokens: { min: 8_000, max: 2_000_000 },
     });
+    expect(PROJECT_DYNAMIC_LIMITS).toEqual({ reviewSkillMaxBytes: 16_384 });
+  });
+});
+
+// #194-T02, #194-T08: the project-only fields (kind, Dynamic model, skill) with the skill treated as
+// untrusted, size-bounded text and stable value-free codes.
+describe("validating the project-only settings", () => {
+  // #194-T08
+  it("accept a valid project-only set and keep the Dynamic model identifier literally", () => {
+    expect(
+      validateProjectSettingsPatch({
+        reviewKind: "dynamic",
+        dynamicModel: "vendor/alt-model-2",
+        reviewSkill: "Prefer explicit errors.",
+      }),
+    ).toEqual({
+      ok: true,
+      value: {
+        review: {},
+        dynamic: {
+          reviewKind: "dynamic",
+          dynamicModel: "vendor/alt-model-2",
+          reviewSkill: "Prefer explicit errors.",
+        },
+      },
+    });
+  });
+
+  it("separate the Diff overrides from the project-only fields", () => {
+    expect(
+      validateProjectSettingsPatch({ maxFindings: 3, reviewKind: "dynamic" }),
+    ).toEqual({
+      ok: true,
+      value: { review: { maxFindings: 3 }, dynamic: { reviewKind: "dynamic" } },
+    });
+  });
+
+  // #194-T02
+  it("treat an empty or blank skill override as an explicit reset to the shipped default", () => {
+    for (const value of ["", "   ", "\n\t "])
+      expect(validateProjectSettingsPatch({ reviewSkill: value })).toEqual({
+        ok: true,
+        value: { review: {}, dynamic: { reviewSkill: null } },
+      });
+    expect(validateProjectSettingsPatch({ reviewSkill: null })).toEqual({
+      ok: true,
+      value: { review: {}, dynamic: { reviewSkill: null } },
+    });
+  });
+
+  // #194-T02: the bounds apply to the raw text, before a blank value is read as a reset.
+  it("refuse blank text that holds a forbidden control or is over the byte limit", () => {
+    for (const value of ["\u000b", "\u000c", "\u0000 "]) {
+      expect(projectIssuesOf({ reviewSkill: value })).toEqual([
+        { field: "reviewSkill", code: "FORBIDDEN_CHARACTERS" },
+      ]);
+    }
+    const over = " ".repeat(PROJECT_DYNAMIC_LIMITS.reviewSkillMaxBytes + 1);
+    expect(projectIssuesOf({ reviewSkill: over })).toEqual([
+      { field: "reviewSkill", code: "TOO_LONG" },
+    ]);
+  });
+
+  // #194-T02
+  it("accept exactly 16 KiB of multibyte text and refuse one byte more", () => {
+    const max = PROJECT_DYNAMIC_LIMITS.reviewSkillMaxBytes;
+    // "ü" is two UTF-8 bytes, so half the limit in characters is exactly the limit in bytes.
+    const exact = "ü".repeat(max / 2);
+    // One ASCII byte more than the limit, and one more multibyte character too.
+    const oneByteOver = `${exact}a`;
+    const oneCharacterOver = `${exact}ü`;
+
+    expect(validateProjectSettingsPatch({ reviewSkill: exact })).toEqual({
+      ok: true,
+      value: { review: {}, dynamic: { reviewSkill: exact } },
+    });
+    expect(projectIssuesOf({ reviewSkill: oneByteOver })).toEqual([
+      { field: "reviewSkill", code: "TOO_LONG" },
+    ]);
+    expect(projectIssuesOf({ reviewSkill: oneCharacterOver })).toEqual([
+      { field: "reviewSkill", code: "TOO_LONG" },
+    ]);
+  });
+
+  // #194-T02
+  it("refuse a skill with control characters or an unpaired surrogate", () => {
+    expect(projectIssuesOf({ reviewSkill: "rule\u0000x" })).toEqual([
+      { field: "reviewSkill", code: "FORBIDDEN_CHARACTERS" },
+    ]);
+    expect(projectIssuesOf({ reviewSkill: "rule\ud800x" })).toEqual([
+      { field: "reviewSkill", code: "FORBIDDEN_CHARACTERS" },
+    ]);
+  });
+
+  // #194-T02
+  it("refuse an unknown kind and an invalid model with stable codes", () => {
+    expect(projectIssuesOf({ reviewKind: "auto" })).toEqual([
+      { field: "reviewKind", code: "INVALID_FORMAT" },
+    ]);
+    expect(projectIssuesOf({ reviewKind: 5 })).toEqual([
+      { field: "reviewKind", code: "INVALID_TYPE" },
+    ]);
+    expect(projectIssuesOf({ dynamicModel: "has space" })).toEqual([
+      { field: "dynamicModel", code: "INVALID_FORMAT" },
+    ]);
+    expect(projectIssuesOf({ dynamicModel: "" })).toEqual([
+      { field: "dynamicModel", code: "EMPTY" },
+    ]);
+  });
+
+  it("only uses stable codes and never echoes a value", () => {
+    const secretLooking = "sk-dummy-skill-should-not-be-echoed";
+    const issues = projectIssuesOf({
+      reviewKind: secretLooking,
+      dynamicModel: `${secretLooking} x`,
+      reviewSkill: 5,
+    });
+
+    for (const issue of issues)
+      expect(REVIEW_SETTING_ISSUE_CODES).toContain(issue.code);
+    expect(JSON.stringify(issues)).not.toContain(secretLooking);
+  });
+
+  // #194-T02: the project-only fields cannot become workspace-wide defaults.
+  it("are unknown to the global defaults validation, so they stay project-only", () => {
+    expect(issuesOf({ reviewKind: "dynamic" })).toEqual([
+      { field: "reviewKind", code: "UNKNOWN_FIELD" },
+    ]);
+    expect(issuesOf({ dynamicModel: "vendor/model" })).toEqual([
+      { field: "dynamicModel", code: "UNKNOWN_FIELD" },
+    ]);
+    expect(issuesOf({ reviewSkill: "text" })).toEqual([
+      { field: "reviewSkill", code: "UNKNOWN_FIELD" },
+    ]);
+  });
+
+  it("reads stored project-only fields and drops the ones this version would not accept", () => {
+    expect(
+      parseStoredProjectDynamicOverrides({
+        reviewKind: "dynamic",
+        dynamicModel: "vendor/alt-model-2",
+        reviewSkill: "kept",
+        removedField: true,
+      }),
+    ).toEqual({
+      reviewKind: "dynamic",
+      dynamicModel: "vendor/alt-model-2",
+      reviewSkill: "kept",
+    });
+    expect(
+      parseStoredProjectDynamicOverrides({
+        reviewKind: "auto",
+        dynamicModel: "x".repeat(300),
+        reviewSkill: "rule\u0000x",
+      }),
+    ).toEqual({});
+    expect(parseStoredProjectDynamicOverrides({ reviewSkill: null })).toEqual(
+      {},
+    );
   });
 });

@@ -5,7 +5,11 @@
 // form serves the global defaults and one project; the only difference is the layer below the one
 // being edited (`inherited`): the built-in values for the global defaults, the global defaults
 // (or the built-in values) for a project.
-import type { GlobalSettingsView, ProjectSettingsView } from "../service.ts";
+import type {
+  GlobalSettingsView,
+  ProjectDynamicView,
+  ProjectSettingsView,
+} from "../service.ts";
 import type { ReviewCostGuard } from "../cost.ts";
 import type { SettingSource } from "../effective.ts";
 import {
@@ -27,6 +31,13 @@ export type SettingsFormModel = {
   cost: ReviewCostGuard;
   /** Who saved the global defaults last and when; null for a project or before the first save. */
   lastSaved: { at: string; by: string | null } | null;
+  /**
+   * The project-only review kind, Dynamic model and skill (#194); absent for the global defaults,
+   * which cannot hold them. The form does not edit them yet (#200) and does not send them: the server
+   * keeps the stored values a request does not mention, so a stale form cannot overwrite them, and a
+   * `reviewSkill` of `null` (or `""`) clears the skill override.
+   */
+  dynamic?: ProjectDynamicView;
 };
 
 export function modelFromGlobalView(
@@ -57,6 +68,7 @@ export function modelFromProjectView(
     sources: view.sources,
     cost: view.cost,
     lastSaved: null,
+    dynamic: view.dynamic,
   };
 }
 

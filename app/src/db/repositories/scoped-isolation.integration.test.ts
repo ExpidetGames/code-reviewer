@@ -348,6 +348,14 @@ const CASES: Case[] = [
     expectAnswer: (answer) => expect(answer).toBeUndefined(),
   },
   {
+    name: "projects.updateSettingsWith",
+    run: (a, b) =>
+      a.projects.updateSettingsWith(b.repository.id, () => ({
+        hijacked: true,
+      })),
+    expectAnswer: (answer) => expect(answer).toBeUndefined(),
+  },
+  {
     name: "projects.list",
     run: (a) => a.projects.list(),
     expectAnswer: (answer, a) =>
