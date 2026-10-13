@@ -3,7 +3,11 @@
 """#198-T07: the runner package ships the canonical default skill and the license notices, byte for
 byte. The canonical sources (`contracts/dynamic-review/review-skill.md` and the three repository
 license files) stay the single source of truth; a divergent package copy fails here, before a build
-even runs."""
+even runs.
+
+#197: the same rule for the findings schema. The engine's `format` mode needs
+`contracts/dynamic-review/schema.v1.json` at run time and the runner ships its own copy
+(`dynamic_review/findings-schema.v1.json`), kept byte-identical here so the two can never drift."""
 
 from pathlib import Path
 
@@ -16,6 +20,10 @@ PACKAGED_ASSETS = [
     (
         PACKAGE / "dynamic_review" / "review-skill.md",
         REPO_ROOT / "contracts" / "dynamic-review" / "review-skill.md",
+    ),
+    (
+        PACKAGE / "dynamic_review" / "findings-schema.v1.json",
+        REPO_ROOT / "contracts" / "dynamic-review" / "schema.v1.json",
     ),
     (PACKAGE / "licenses" / "LICENSE", REPO_ROOT / "LICENSE"),
     (PACKAGE / "licenses" / "NOTICE", REPO_ROOT / "NOTICE"),
