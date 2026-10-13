@@ -23,7 +23,7 @@ from code_reviewer_runner.dynamic_review.proxy import (
     UpstreamPost,
     capabilities_from_config,
 )
-from code_reviewer_runner.error_mapping import classify_failure
+from code_reviewer_runner.error_mapping import _LLM_STATUS, classify_failure  # pyright: ignore[reportPrivateUsage]
 from code_reviewer_runner.result import ErrorCode
 
 UPSTREAM_KEY = "sk-or-v1-workspace-key-0123456789"
@@ -254,7 +254,9 @@ def static_path_code(status: int) -> ErrorCode | None:
     return classify_failure([error], [])
 
 
-PROVIDER_STATUSES = (400, 401, 402, 403, 404, 408, 422, 429, 500, 502, 503, 504)
+# Every status the shared table knows, so a new entry is covered here without touching the test,
+# plus a few 5xx for the rule that is not in the table.
+PROVIDER_STATUSES = (*sorted(_LLM_STATUS), 500, 502, 503, 504)
 
 
 # #240-T03
@@ -289,6 +291,20 @@ def test_a_provider_timeout_and_unknown_model_keep_their_own_codes(
     assert error_code(response) == code.value
     assert subject.ledger.failure is not None
     assert subject.ledger.failure.code is code
+
+
+# #240: a status no rule knows has no exception class to inspect, so the proxy answers bad request
+@pytest.mark.parametrize("status", [409, 413])
+def test_a_provider_status_with_no_rule_is_a_bad_request(status: int) -> None:
+    subject = proxy(Upstream(status=status, body={"error": "provider message with data in it"}))
+
+    response = post(subject, request_body())
+
+    assert response.status == status
+    assert error_code(response) == ErrorCode.LLM_BAD_REQUEST.value
+    assert b"provider message" not in response.body
+    assert subject.ledger.failure is not None
+    assert subject.ledger.failure.code is ErrorCode.LLM_BAD_REQUEST
 
 
 # #197-T05

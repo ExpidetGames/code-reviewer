@@ -120,9 +120,9 @@ def _from_type(error: BaseException) -> ErrorCode | None:
     if "requests" in modules and "RequestException" in names:
         return ErrorCode.GIT_UNAVAILABLE
     if modules & {"openai", "litellm"}:
-        status_known = llm_status_code(status_code) if isinstance(status_code, int) else None
-        if status_known is not None:
-            return status_known
+        llm_code = llm_status_code(status_code) if isinstance(status_code, int) else None
+        if llm_code is not None:
+            return llm_code
         for module, name in classes:
             if module in ("openai", "litellm") and name in _LLM_CLASS_NAMES:
                 return _LLM_CLASS_NAMES[name]
