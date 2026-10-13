@@ -153,6 +153,51 @@ object), `403 REVIEW_SETTINGS_CROSS_SITE_REQUEST`, `413 REVIEW_SETTINGS_BODY_TOO
 `415 REVIEW_SETTINGS_CONTENT_TYPE_UNSUPPORTED`, `404 REVIEW_SETTINGS_PROJECT_NOT_FOUND` (there is no such
 repository, or the platform no longer lists it and it has no project). The settings pages (below) call these routes from the browser.
 
+## The project-only settings: review kind, Dynamic model and skill (#194)
+
+A project also selects the one review kind it runs (#193). These fields live in the same
+`projects.settings` JSON as the Diff overrides but are **project-only**: the global defaults and the
+built-in layer never hold them (`validateReviewSettingsPatch` reports them as `UNKNOWN_FIELD`), so a
+review kind can never become a workspace-wide default.
+
+| Field          | Meaning                                                                               | Default                   |
+| -------------- | ------------------------------------------------------------------------------------- | ------------------------- |
+| `reviewKind`   | `diff` (the existing PR-Agent review) or `dynamic` (the read-only agent of the epic)  | `diff`                    |
+| `dynamicModel` | The model a Dynamic review uses, as the configured provider spells it, kept literally | `deepseek-v4.1-flash`     |
+| `reviewSkill`  | The project's review-skill override, or absent for the shipped default skill          | the shipped default skill |
+
+`dynamicModel` is a **default, not an allow-list** (#194-T08): any identifier the provider serves is
+kept as-is, with no provider rewrite and no routing field. How a configured model is resolved and
+whether it can serve the engine's needs is #197's business, not a project setting. `reviewKind` is
+independent of the Diff `model`, so each kind keeps its own model and skill across a switch.
+
+**No SQL migration.** The fields are JSON inside `projects.settings`, and missing values read as Diff
+Review, `deepseek-v4.1-flash` and the shipped skill (`resolveProjectDynamicSettings`,
+`builtInProjectDynamicSettings`). An existing project therefore behaves exactly as before; a
+legacy-data integration fixture pins this (`service.integration.test.ts`, #194-T06).
+
+The skill is **untrusted data**: it is stored as text, bounded to `PROJECT_DYNAMIC_LIMITS.reviewSkillMaxBytes`
+(16 KiB of UTF-8, so multibyte characters count as their bytes), refused with a stable code on
+forbidden control characters or an unpaired surrogate, and never interpreted. An empty or null value is
+an explicit reset to the shipped default, never another project's skill. A `deepseek-v4.1-flash`-like
+provider/model slug, a URL, a permission or a credential is not part of these settings.
+
+`default-skill.ts` is the **reader seam** for the shipped default skill (id, version, hash and text);
+#198 replaces the provisional text with the attributed Codex-based asset and keeps the identity shape.
+The service, the route and the runner packaging share this one seam.
+
+A project save replaces the Diff override set as a whole (a field left out is inherited again) but
+**merges** the project-only fields over the stored ones, so a save that does not know them - the
+current form, an older client - cannot accidentally remove them (#194-T06). A full reset (`DELETE`)
+clears every override, including the project-only fields; a `reviewSkill` of `""`/`null` clears only
+the skill. The write goes through `projects.updateSettingsWith` in one transaction and calls
+`hooks.ts` `onProjectSettingsChanged` inside it, so #195 can cancel the project's waiting reviews on a
+kind change together with the save (a rejecting hook rolls the write back, #194-T07).
+
+`getProjectSettings` / `resolveForRepository` expose the `dynamic` view: the effective kind, model and
+skill, where each comes from, the shipped defaults, whether the skill is the default, the default
+skill's identity and the size limit.
+
 ## The pages
 
 `/settings` holds the instance state (GitHub App, LLM access) and the form for the global defaults;
