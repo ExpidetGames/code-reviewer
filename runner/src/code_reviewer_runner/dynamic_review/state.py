@@ -132,7 +132,10 @@ def _parse_state_payload(payload: dict[str, Any]) -> ReviewState:
         raise _invalid("findings must be a list")
     findings: list[Finding] = []
     for entry in findings_value:
-        findings.append(parse_finding(entry, reviewed_sha))
+        # An active finding the latest run did not re-raise is carried over unchanged, so it keeps
+        # the head it was raised at: it is validated against its own `reviewedSha`, not the state's.
+        raised_sha = _sha(_object(entry, "a finding").get("reviewedSha"), "findings.reviewedSha")
+        findings.append(parse_finding(entry, raised_sha))
     if len(findings) > 30:
         raise _invalid("findings may hold at most 30 entries")
     resolved_value = payload.get("resolved")

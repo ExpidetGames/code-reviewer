@@ -112,6 +112,32 @@ def test_one_comment_is_created_then_edited_across_pushes(
     assert all("/issues/" in path for _, path in server.requests)
 
 
+# #199-T01
+def test_a_finding_omitted_in_a_later_push_survives_the_write_and_the_next_read(
+    server: FakeGithubComments, publisher: Publisher
+) -> None:
+    publisher.publish(run(finding()), head_sha=SHA, previous_reviewed_sha=None)
+
+    # Push 2 does not mention f-1 at all: omitted is not resolved, it stays active at its own head.
+    publisher.publish(
+        run(finding("f-2", sha=NEXT, path="src/b.ts", title="Another"), sha=NEXT),
+        head_sha=NEXT,
+        previous_reviewed_sha=SHA,
+    )
+    written = decode_state(server.comments[0]["body"])
+    assert written is not None
+    assert {item.id: item.reviewed_sha for item in written.findings} == {"f-2": NEXT, "f-1": SHA}
+
+    # Push 3 must read that state back and update it.
+    publisher.publish(run(resolved=("f-1",), sha=THIRD), head_sha=THIRD, previous_reviewed_sha=NEXT)
+    state = decode_state(server.comments[0]["body"])
+    assert state is not None
+    assert state.reviewed_sha == THIRD
+    assert [item.id for item in state.findings] == ["f-2"]
+    assert [entry.finding.id for entry in state.resolved] == ["f-1"]
+    assert len(server.comments) == 1
+
+
 # #199-T04
 def test_a_human_or_foreign_marker_never_authorizes_an_edit(
     server: FakeGithubComments, publisher: Publisher

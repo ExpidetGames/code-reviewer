@@ -75,6 +75,19 @@ def test_a_state_round_trips_through_the_marker() -> None:
     assert decoded == original
 
 
+def test_a_carried_over_finding_keeps_the_head_it_was_raised_at() -> None:
+    older = "b" * 40
+    original = ReviewState(
+        reviewed_sha=SHA,
+        findings=(finding("new"), finding("carried", reviewed_sha=older)),
+        resolved=(),
+    )
+
+    decoded = decode_state(encode_state(original))
+
+    assert decoded == original
+
+
 def test_an_empty_state_encodes_to_nothing() -> None:
     assert encode_state(ReviewState(reviewed_sha="", findings=(), resolved=())) == ""
 
