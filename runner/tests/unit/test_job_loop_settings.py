@@ -100,3 +100,29 @@ def test_the_diff_job_user_is_unset_by_default_and_read_as_uid_and_gid() -> None
 def test_a_diff_job_user_that_is_root_or_not_numeric_is_refused(value: str) -> None:
     with pytest.raises(SettingsError, match="RUNNER_DIFF_JOB_USER"):
         settings_from_environment({**BASE, "RUNNER_DIFF_JOB_USER": value})
+
+
+# #197-T04
+def test_the_engine_user_of_a_root_loop_defaults_to_the_image_user_and_follows_the_variables() -> (
+    None
+):
+    assert settings_from_environment(BASE).dynamic_engine_user is None  # not the Dynamic runner
+    root = {**BASE, "RUNNER_DIFF_JOB_USER": "10001:10001"}
+    assert settings_from_environment(root).dynamic_engine_user == (10101, 10101)
+    custom = {**root, "RUNNER_DYNAMIC_ENGINE_UID": "20001", "RUNNER_DYNAMIC_ENGINE_GID": "20002"}
+    assert settings_from_environment(custom).dynamic_engine_user == (20001, 20002)
+
+
+# #197-T04
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"RUNNER_DYNAMIC_ENGINE_UID": "10001"},  # the Diff jobs' user
+        {"RUNNER_DYNAMIC_ENGINE_GID": "10001"},  # the Diff jobs' group
+        {"RUNNER_DYNAMIC_ENGINE_UID": "0"},
+        {"RUNNER_DYNAMIC_ENGINE_GID": "engine"},
+    ],
+)
+def test_an_engine_user_that_is_the_diff_job_user_or_root_is_refused(extra: dict[str, str]) -> None:
+    with pytest.raises(SettingsError, match=r"RUNNER_DYNAMIC_ENGINE_[UG]ID"):
+        settings_from_environment({**BASE, "RUNNER_DIFF_JOB_USER": "10001:10001", **extra})

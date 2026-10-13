@@ -23,10 +23,11 @@ Rules the code below follows (see the CR-29 decisions):
 import asyncio
 import json
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
-from code_reviewer_runner.job import JobError, ReviewKind, parse_job
+from code_reviewer_runner.dynamic_review.engine_user import sweep_user
+from code_reviewer_runner.job import Job, JobError, ReviewKind, parse_job
 from code_reviewer_runner.job_loop.api import (
     MAX_RETRY_AFTER_SECONDS,
     ApiError,
@@ -107,6 +108,7 @@ class RunnerLoop:
         logger: logging.Logger | None = None,
         environment: Mapping[str, str] | None = None,
         masker: SecretMasker | None = None,
+        sweeper: Callable[[int, int], bool] = sweep_user,
     ) -> None:
         self._settings = settings
         self._api = api
@@ -119,6 +121,11 @@ class RunnerLoop:
         self._hard_stop = asyncio.Event()
         self._force = asyncio.Event()
         self._tasks: set[asyncio.Task[None]] = set()
+        # Ends everything the engine user runs (uid, gid); it is only called once no Dynamic job
+        # process runs, under the lock that also guards the start of one.
+        self._sweeper = sweeper
+        self._engine_lock = asyncio.Lock()
+        self._engine_jobs = 0
 
     # -- control ------------------------------------------------------------------------------
 
@@ -287,7 +294,7 @@ class RunnerLoop:
                     None if job.review_kind is ReviewKind.DYNAMIC else self._settings.diff_job_user
                 ),
             )
-            process = await self._launcher.start(spec)
+            process = await self._start_process(spec, job)
         except Exception as error:
             self._log.error(
                 "job %s: cannot start the job process (%s)", claimed.id, type(error).__name__
@@ -299,7 +306,10 @@ class RunnerLoop:
             )
             await self._report(claimed, result, window=self._settings.complete_retry_window)
             return
-        result = await self._supervise(claimed, process, redactor, started)
+        try:
+            result = await self._supervise(claimed, process, redactor, started)
+        finally:
+            await self._after_process(job)
         if result is None:
             return
         await self._report(
@@ -312,6 +322,45 @@ class RunnerLoop:
             ),
             shutdown=result["errorCode"] == RUNNER_SHUTDOWN,
         )
+
+    def _engine_user(self, job: Job) -> tuple[int, int] | None:
+        """The engine user whose leftovers follow this job's process, if it has one."""
+        if job.review_kind is not ReviewKind.DYNAMIC:
+            return None
+        return self._settings.dynamic_engine_user
+
+    async def _start_process(self, spec: ProcessSpec, job: Job) -> RunningProcess:
+        if self._engine_user(job) is None:
+            return await self._launcher.start(spec)
+        # Under the lock that guards the sweep: a sweep that runs while this process is being
+        # started would end the engine of a job that has only just begun.
+        async with self._engine_lock:
+            process = await self._launcher.start(spec)
+            self._engine_jobs += 1
+            return process
+
+    async def _after_process(self, job: Job) -> None:
+        """The job process is gone (however it ended): end what its engine user still runs.
+
+        A job killed outright (SIGKILL, an OOM kill) cannot clean up after itself, and a helper
+        may have left the engine's process group. The loop is root and holds `KILL`; whatever it
+        cannot end here is met by the next job, which sweeps again right after taking the lease
+        and does not start while the user still runs something.
+        """
+        user = self._engine_user(job)
+        if user is None:
+            return
+        async with self._engine_lock:
+            self._engine_jobs -= 1
+            if self._engine_jobs > 0:
+                return  # the user belongs to another job's engine now; its end will sweep
+            try:
+                ended = await asyncio.shield(asyncio.to_thread(self._sweeper, *user))
+            except Exception as error:
+                self._log.error("the engine user could not be swept (%s)", type(error).__name__)
+                return
+        if not ended:
+            self._log.warning("a process of the engine user survived the sweep")
 
     async def _supervise(
         self,

@@ -162,6 +162,9 @@ def test_no_job_starts_while_a_predecessors_process_survives_the_first_sweep(
 def test_a_missing_interpreter_is_a_failed_sweep(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(engine_user.shutil, "which", lambda *args, **kwargs: None)  # pyright: ignore[reportUnknownLambdaType]
+    def no_interpreter(command: str, path: str | None = None) -> None:
+        return None
+
+    monkeypatch.setattr(engine_user.shutil, "which", no_interpreter)
 
     assert launch(tmp_path).sweep() is False

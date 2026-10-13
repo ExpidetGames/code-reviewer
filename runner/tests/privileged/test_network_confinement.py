@@ -121,8 +121,8 @@ def test_datagrams_of_the_engine_user_to_any_address_are_refused_and_flow_again_
         arrived: dict[str, bool] = {}
         try:
             for address, family in cases:
+                sentinel = socket.socket(family, socket.SOCK_DGRAM)
                 try:
-                    sentinel = socket.socket(family, socket.SOCK_DGRAM)
                     sentinel.bind((address, 0))
                 except OSError:
                     sentinel.close()

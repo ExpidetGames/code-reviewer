@@ -29,6 +29,11 @@ from code_reviewer_runner.capabilities import (
     advertised_engines,
     fail_closed_self_check,
 )
+from code_reviewer_runner.dynamic_review.supervisor import (
+    DEFAULT_ENGINE_ID,
+    ENGINE_GID_VARIABLE,
+    ENGINE_UID_VARIABLE,
+)
 
 DEFAULT_CONCURRENCY = 3
 DEFAULT_POLL_INTERVAL_SECONDS = 5.0
@@ -74,6 +79,10 @@ class LoopSettings:
     # (uid, gid) of the user every non-Dynamic job process drops to. Set only for a loop that runs
     # as root (the Dynamic runner, #197); unset, jobs run as the loop's own user.
     diff_job_user: tuple[int, int] | None = None
+    # (uid, gid) of the dedicated engine user of Dynamic Review. Set together with `diff_job_user`
+    # (a root loop, the Dynamic runner): after every Dynamic job process the loop ends whatever
+    # that user still runs, which a job killed outright could not.
+    dynamic_engine_user: tuple[int, int] | None = None
 
 
 def _number(
@@ -139,6 +148,33 @@ def _diff_job_user(environment: Mapping[str, str]) -> tuple[int, int] | None:
     return int(uid), int(gid)
 
 
+def _dynamic_engine_user(
+    environment: Mapping[str, str], diff_job_user: tuple[int, int] | None
+) -> tuple[int, int] | None:
+    """The engine user of a root loop; it must be nobody a Diff job runs as."""
+    if diff_job_user is None:
+        return None
+    uid, gid = (
+        _identifier(environment, ENGINE_UID_VARIABLE),
+        _identifier(environment, ENGINE_GID_VARIABLE),
+    )
+    # One user for both would make the drop of Diff jobs and the engine's boundary meaningless.
+    if uid == diff_job_user[0] or gid == diff_job_user[1]:
+        raise SettingsError(
+            f"{ENGINE_UID_VARIABLE} and {ENGINE_GID_VARIABLE} must differ from RUNNER_DIFF_JOB_USER"
+        )
+    return uid, gid
+
+
+def _identifier(environment: Mapping[str, str], name: str) -> int:
+    raw = environment.get(name, "").strip()
+    if not raw:
+        return DEFAULT_ENGINE_ID
+    if not raw.isascii() or not raw.isdigit() or int(raw) == 0:
+        raise SettingsError(f"{name} must be a number other than 0")
+    return int(raw)
+
+
 def settings_from_environment(environment: Mapping[str, str]) -> LoopSettings:
     api_url = environment.get("RUNNER_API_URL", "").strip()
     if not api_url:
@@ -153,9 +189,11 @@ def settings_from_environment(environment: Mapping[str, str]) -> LoopSettings:
     )
     if concurrency != int(concurrency):
         raise SettingsError("RUNNER_CONCURRENCY must be a whole number")
+    diff_job_user = _diff_job_user(environment)
     return LoopSettings(
         job_command=_job_command(environment),
-        diff_job_user=_diff_job_user(environment),
+        diff_job_user=diff_job_user,
+        dynamic_engine_user=_dynamic_engine_user(environment, diff_job_user),
         engines=advertised_engines(fail_closed_self_check()),
         api_url=_api_url(api_url),
         token=token,
