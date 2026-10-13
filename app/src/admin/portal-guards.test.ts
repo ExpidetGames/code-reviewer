@@ -52,6 +52,20 @@ describe("the guards of the admin portal", () => {
     expect(layout).toMatch(/await requireAdmin\(\)/);
   });
 
+  // #182-T05
+  it("guard the GitHub App page of the portal like every other page", () => {
+    const page = discoverRoutes().find(
+      ({ route }) =>
+        concretePath(route) === "/instance-portal/integrations/github",
+    );
+
+    expect(page).toBeDefined();
+    // The proxy recognizes the new sub-page as a portal path (src/admin/paths.ts) ...
+    expect(isInternalPortalPath(concretePath(page!.route))).toBe(true);
+    // ... and the page asks for the admin itself.
+    expect(readFileSync(page!.file, "utf8")).toMatch(/\brequireAdmin\(\)/);
+  });
+
   it("are handed to the handlers by every data route", () => {
     const handlers = routes.filter(({ file }) => /route\.tsx?$/.test(file));
     expect(handlers.length).toBeGreaterThan(0);

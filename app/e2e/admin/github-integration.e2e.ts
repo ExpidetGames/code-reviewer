@@ -67,10 +67,13 @@ test.describe("the GitHub integration of the admin portal", () => {
     page,
   }) => {
     await signInAsAdmin(page);
-    await page.goto("/admin/integrations");
-    await expect(page.getByRole("heading", { name: /^GitHub/ })).toContainText(
-      "Not configured",
-    );
+    await page.goto("/admin/integrations/github");
+    await expect(
+      page.getByRole("heading", { level: 1, name: "GitHub App" }),
+    ).toBeVisible();
+    await expect(
+      page.getByText("Not configured", { exact: true }),
+    ).toBeVisible();
 
     await page.getByRole("button", { name: "Create GitHub App" }).click();
     // GitHub's page: the person confirms there.
@@ -79,18 +82,20 @@ test.describe("the GitHub integration of the admin portal", () => {
     ).toBeVisible();
     await page.getByRole("button", { name: "Create GitHub App" }).click();
 
-    await expect(page).toHaveURL(/\/admin\/integrations\?github=created$/);
+    await expect(page).toHaveURL(
+      /\/admin\/integrations\/github\?github=created$/,
+    );
     await expect(
       page
         .getByRole("status")
         .filter({ hasText: "The GitHub App was created" }),
     ).toBeVisible();
-    await expect(page.getByRole("heading", { name: /^GitHub/ })).toContainText(
-      "Configured",
-    );
+    await expect(page.getByText("Configured", { exact: true })).toBeVisible();
     await expect(page.getByText("Created from this page.")).toBeVisible();
     // The manifest asks for the user authorization too, so signing in with GitHub is enabled.
-    await expect(page.getByText("Enabled.", { exact: true })).toBeVisible();
+    await expect(
+      page.getByText("Enabled", { exact: true }).first(),
+    ).toBeVisible();
     // No secret reaches the page.
     expect(await page.content()).not.toContain("PRIVATE KEY");
     // The sign in with GitHub is on the login page now.
@@ -130,15 +135,17 @@ test.describe("the GitHub integration of the admin portal", () => {
     page,
   }) => {
     await signInAsAdmin(page);
-    await page.goto("/admin/integrations");
-    await expect(page.getByText("Not linked.")).toBeVisible();
+    await page.goto("/account");
+    await expect(
+      page.getByRole("button", { name: "Link GitHub account" }),
+    ).toBeVisible();
 
     await page.getByRole("button", { name: "Link GitHub account" }).click();
     await page
       .getByRole("button", { name: `Authorize ${operator.login}` })
       .click();
 
-    await expect(page).toHaveURL(/\/admin\/integrations\?github=merged$/);
+    await expect(page).toHaveURL(/\/account\?github=merged$/);
     await expect(
       page.getByRole("status").filter({ hasText: "merged into this one" }),
     ).toBeVisible();
@@ -181,7 +188,8 @@ test.describe("the GitHub integration of the admin portal", () => {
   }) => {
     await signInWithGithub(page, operator);
     await expect(page).toHaveURL(/\/projects$/);
-    await page.goto("/admin/integrations");
+    await page.goto("/admin/integrations/github");
+    await page.getByRole("tab", { name: "Enter values by hand" }).click();
     const form = page.getByRole("form", { name: "Enter the values by hand" });
 
     await form.getByLabel("App ID").fill(e2eEnv.githubAppId);

@@ -18,6 +18,7 @@ describe("which paths belong to the admin portal", () => {
     "/admin/setup/sign-up",
     "/admin/setup/sign-in",
     "/admin/integrations",
+    "/admin/integrations/github",
     "/admin/mail/anything/below",
     "/api/admin",
     "/api/admin/settings",

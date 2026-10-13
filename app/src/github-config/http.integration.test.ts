@@ -44,7 +44,6 @@ const ROUTES: Array<[string, string]> = [
   ["POST", "/api/admin/github/manifest"],
   ["GET", "/api/admin/github/manifest/callback?code=x&state=y"],
   ["POST", "/api/admin/github/check"],
-  ["POST", "/api/admin/github/link"],
 ];
 
 describe("who reaches the GitHub routes", () => {
@@ -202,7 +201,7 @@ describe("the manifest flow through the routes", () => {
   }
 
   // #102-GH-19
-  it("creates the App from the first click to the stored credentials, and lands on the integrations page", async () => {
+  it("creates the App from the first click to the stored credentials, and lands on the GitHub App page", async () => {
     const { portal } = await start();
     const started = await startFlow(portal);
     const { postUrl, manifest } = (await started.json()) as {
@@ -220,7 +219,7 @@ describe("the manifest flow through the routes", () => {
     expect(started.status).toBe(200);
     expect(callback.status).toBe(302);
     expect(callback.headers.get("location")).toBe(
-      "/admin/integrations?github=created",
+      "/admin/integrations/github?github=created",
     );
     expect(callback.headers.get("referrer-policy")).toBe("no-referrer");
     const view = await portal.visit("/api/admin/github", {
@@ -299,7 +298,7 @@ describe("the manifest flow through the routes", () => {
 
     expect(callback.status).toBe(302);
     expect(callback.headers.get("location")).toBe(
-      "/admin/integrations?github_error=state_invalid",
+      "/admin/integrations/github?github_error=state_invalid",
     );
     expect(fake.conversionCodes()).toEqual([]);
     expect((await portal.credentials.load()).source).toBe("none");
@@ -375,7 +374,7 @@ describe("the check of the permissions through the route", () => {
   });
 
   // #102-GH-08
-  it.each(["/api/admin/github/check", "/api/admin/github/link"])(
+  it.each(["/api/admin/github/check"])(
     "only takes a JSON object: %s refuses form data and plain text with 415 and does nothing",
     async (path) => {
       const { portal } = await start();
