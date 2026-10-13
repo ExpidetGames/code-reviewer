@@ -23,7 +23,8 @@ to the same page of the first workspace of the person (old bookmarks), `workspac
 the two places outside a workspace, and `/` redirects to the first workspace (or `/no-access`).
 
 The admin portal (`/admin`, `src/admin/README.md`) renders behind its own layout and its own shadcn
-`Sidebar` (`src/admin/ui/admin-nav.tsx`, grouped: Admin / Setup / Integrations) with its own
+`Sidebar` (`src/admin/ui/admin-nav.tsx`, grouped: Admin / Setup / Integrations, with the GitHub App
+page nested under Integrations) with its own
 `SidebarProvider` and trigger: on a wide screen the sidebar's container is `absolute` inside the
 admin frame (not the primitive's `fixed` one), so it lines up with the centered content, and on a
 narrow screen it is the same Sheet drawer as the workspace. The admin check runs before any section

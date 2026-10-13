@@ -1,13 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // A section that a later issue fills (mail, integrations): a heading and a sentence on what will be
-// here. On the component kit (#185): the shadcn `Empty` block instead of the deleted legacy wrapper.
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyTitle,
-} from "@/components/ui/empty";
+// here. On the component kit (#185): the shadcn `Empty` block instead of the deleted legacy wrapper,
+// with the title as an `<h2>` so the section is reachable by heading (R61).
+import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty";
 
 export function Placeholder({
   title,
@@ -20,7 +16,7 @@ export function Placeholder({
     <section aria-label={title}>
       <Empty>
         <EmptyHeader>
-          <EmptyTitle>{title}</EmptyTitle>
+          <h2 className="text-lg font-medium tracking-tight">{title}</h2>
           <EmptyDescription>{children}</EmptyDescription>
         </EmptyHeader>
       </Empty>
