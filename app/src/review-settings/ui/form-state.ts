@@ -11,6 +11,7 @@ import {
 } from "../../integrations/types.ts";
 import {
   REVIEW_SETTING_FIELDS,
+  type ProjectDynamicOverrides,
   type ReviewSettingField,
   type ReviewSettings,
 } from "../settings.ts";
@@ -38,6 +39,11 @@ export type FormState = {
   values: FormValues;
   /** Fields the person set for this layer; the others are inherited. */
   overridden: Record<ReviewSettingField, boolean>;
+  /**
+   * The project-only settings this form does not edit (#194), carried through a save unchanged so an
+   * ordinary save of the Diff fields cannot remove them. Empty for the global defaults.
+   */
+  preserved: ProjectDynamicOverrides;
 };
 
 function valuesOf(settings: ReviewSettings): FormValues {
@@ -59,7 +65,11 @@ export function initialFormState(model: SettingsFormModel): FormState {
   const overridden = {} as Record<ReviewSettingField, boolean>;
   for (const field of REVIEW_SETTING_FIELDS)
     overridden[field] = Object.hasOwn(model.overrides, field);
-  return { values: valuesOf(model.effective), overridden };
+  return {
+    values: valuesOf(model.effective),
+    overridden,
+    preserved: model.dynamic?.overrides ?? {},
+  };
 }
 
 type TextField =
@@ -78,6 +88,7 @@ export function setText(
   return {
     values: { ...state.values, [field]: value },
     overridden: { ...state.overridden, [field]: true },
+    preserved: state.preserved,
   };
 }
 
@@ -89,6 +100,7 @@ export function setBoolean(
   return {
     values: { ...state.values, [field]: value },
     overridden: { ...state.overridden, [field]: true },
+    preserved: state.preserved,
   };
 }
 
@@ -107,6 +119,7 @@ export function setCommand(
       allowedCommands: REVIEW_COMMANDS.filter((known) => chosen.has(known)),
     },
     overridden: { ...state.overridden, allowedCommands: true },
+    preserved: state.preserved,
   };
 }
 
@@ -120,6 +133,7 @@ export function resetField(
   return {
     values: { ...state.values, [field]: inherited[field] },
     overridden: { ...state.overridden, [field]: false },
+    preserved: state.preserved,
   };
 }
 
@@ -150,8 +164,11 @@ const NUMBER_FIELDS: readonly ReviewSettingField[] = [
   "maxTokens",
 ];
 
-/** The body of the save request: the fields the person set, checked. */
-export function buildPatch(state: FormState): PatchResult {
+/** The fields the person set, as typed values, checked with the same validator the server uses. */
+function diffPatch(state: FormState): {
+  raw: Record<string, unknown>;
+  issues: ReviewSettingIssue[];
+} {
   const raw: Record<string, unknown> = {};
   const issues: ReviewSettingIssue[] = [];
   for (const field of REVIEW_SETTING_FIELDS) {
@@ -165,23 +182,31 @@ export function buildPatch(state: FormState): PatchResult {
   }
   const checked = validateReviewSettingsPatch(raw);
   if (!checked.ok) issues.push(...checked.issues);
+  return { raw, issues };
+}
+
+/** The body of the save request: the fields the person set, checked, plus the project-only fields the form does not edit. */
+export function buildPatch(state: FormState): PatchResult {
+  const { raw, issues } = diffPatch(state);
   if (issues.length > 0) return { ok: false, issues };
   // The request carries the typed values of the fields that are fine, so what the person sees is
-  // what is sent; the server normalizes them (trimmed names, canonical command order) again.
-  return { ok: true, patch: raw };
+  // what is sent; the server normalizes them (trimmed names, canonical command order) again. The
+  // preserved project-only fields ride along so an ordinary save cannot remove them (#194-T06).
+  return { ok: true, patch: { ...state.preserved, ...raw } };
 }
 
 /**
  * The settings a review would use with the values as typed, for the live cost estimate; null while
- * a value is wrong (there is nothing sensible to estimate).
+ * a value is wrong (there is nothing sensible to estimate). Project-only fields do not change the
+ * Diff estimate (#200), so only the Diff fields are applied.
  */
 export function previewSettings(
   model: SettingsFormModel,
   state: FormState,
 ): ReviewSettings | null {
-  const result = buildPatch(state);
-  if (!result.ok) return null;
-  const checked = validateReviewSettingsPatch(result.patch);
+  const { raw, issues } = diffPatch(state);
+  if (issues.length > 0) return null;
+  const checked = validateReviewSettingsPatch(raw);
   if (!checked.ok) return null;
   return { ...model.inherited, ...checked.value };
 }

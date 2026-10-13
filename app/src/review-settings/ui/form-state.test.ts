@@ -21,6 +21,7 @@ const BUILT_IN = builtInReviewSettings("anthropic/claude-haiku-5.5");
 
 function model(
   overrides: SettingsFormModel["overrides"] = {},
+  dynamic?: SettingsFormModel["dynamic"],
 ): SettingsFormModel {
   const effective = { ...BUILT_IN, ...overrides };
   return {
@@ -42,6 +43,7 @@ function model(
     },
     cost: estimateReviewCost(effective),
     lastSaved: null,
+    ...(dynamic === undefined ? {} : { dynamic }),
   };
 }
 
@@ -224,5 +226,71 @@ describe("the preview of the cost", () => {
     const state = setText(initialFormState(model()), "maxTokens", "abc");
 
     expect(previewSettings(model(), state)).toBeNull();
+  });
+});
+
+// #194-T06: an ordinary save of the Diff fields must not remove the project-only settings the form
+// does not edit. The serialization carries them through unchanged.
+describe("the project-only settings in the form serialization", () => {
+  const dynamic = {
+    overrides: {
+      reviewKind: "dynamic" as const,
+      dynamicModel: "vendor/dynamic-model",
+      reviewSkill: "review for the Dynamic kind",
+    },
+    effective: {
+      reviewKind: "dynamic" as const,
+      dynamicModel: "vendor/dynamic-model",
+      reviewSkill: "review for the Dynamic kind",
+    },
+    sources: {
+      reviewKind: "project" as const,
+      dynamicModel: "project" as const,
+      reviewSkill: "project" as const,
+    },
+    defaults: {
+      reviewKind: "diff" as const,
+      dynamicModel: "deepseek-v4.1-flash",
+      reviewSkill: "shipped skill",
+    },
+    reviewSkillIsDefault: false,
+    defaultSkill: {
+      id: "codex-review-skill",
+      version: "v1",
+      hash: "hash",
+    },
+    limits: { reviewSkillMaxBytes: 16_384 },
+  };
+
+  it("ride along a save of the Diff fields", () => {
+    let state = initialFormState(model({ maxFindings: 9 }, dynamic));
+    state = setText(state, "maxFindings", "12");
+
+    expect(buildPatch(state)).toEqual({
+      ok: true,
+      patch: {
+        reviewKind: "dynamic",
+        dynamicModel: "vendor/dynamic-model",
+        reviewSkill: "review for the Dynamic kind",
+        maxFindings: 12,
+      },
+    });
+  });
+
+  it("stay out of the estimate of the Diff review", () => {
+    const m = model({ maxFindings: 9 }, dynamic);
+    const state = initialFormState(m);
+
+    expect(previewSettings(m, state)?.maxFindings).toBe(9);
+  });
+
+  it("are empty for the global defaults, which cannot hold them", () => {
+    const global: SettingsFormModel = {
+      ...model(),
+      mode: "global",
+      dynamic: undefined,
+    };
+
+    expect(initialFormState(global).preserved).toEqual({});
   });
 });
