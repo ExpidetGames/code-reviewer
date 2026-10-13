@@ -736,3 +736,144 @@ describe("a project settings change that fails", () => {
     });
   });
 });
+
+// #194-T03, #194-T06: the Diff settings and the project-only settings are independent. A request
+// that only touches the kind, the Dynamic model or the skill must not remove the Diff overrides.
+describe("keeping the Diff settings across a project-only change", () => {
+  // #194-T03
+  it("keep the stored Diff overrides when a request only changes the kind and the Dynamic model", async () => {
+    const app = await setupReviewSettings();
+    await app.projects.activate(app.first.id);
+    await app.service.updateProjectSettings(app.first.id, {
+      model: "vendor/diff",
+      maxFindings: 2,
+    });
+
+    const view = await app.service.updateProjectSettings(app.first.id, {
+      reviewKind: "dynamic",
+      dynamicModel: "vendor/new",
+    });
+
+    expect(view.effective.model).toBe("vendor/diff");
+    expect(view.effective.maxFindings).toBe(2);
+    expect(view.dynamic.effective.reviewKind).toBe("dynamic");
+    expect(view.dynamic.effective.dynamicModel).toBe("vendor/new");
+    expect((await app.projects.get(app.first.id))?.settings).toEqual({
+      model: "vendor/diff",
+      maxFindings: 2,
+      reviewKind: "dynamic",
+      dynamicModel: "vendor/new",
+    });
+  });
+
+  // #194-T06
+  it("reset only the skill override without resending the Diff fields", async () => {
+    const app = await setupReviewSettings();
+    await app.projects.activate(app.first.id);
+    await app.service.updateProjectSettings(app.first.id, {
+      model: "vendor/diff",
+      maxFindings: 2,
+      reviewKind: "dynamic",
+      dynamicModel: "vendor/model",
+      reviewSkill: "Review for the Dynamic kind.",
+    });
+
+    const view = await app.service.updateProjectSettings(app.first.id, {
+      reviewSkill: "",
+    });
+
+    expect(view.dynamic.reviewSkillIsDefault).toBe(true);
+    expect(view.dynamic.overrides.reviewSkill).toBeUndefined();
+    expect(view.dynamic.effective.reviewKind).toBe("dynamic");
+    expect(view.effective.model).toBe("vendor/diff");
+    expect(view.effective.maxFindings).toBe(2);
+  });
+
+  // #194-T06
+  it("do not let a stale form overwrite a newer project-only value", async () => {
+    const app = await setupReviewSettings();
+    await app.projects.activate(app.first.id);
+    await app.service.updateProjectSettings(app.first.id, {
+      model: "vendor/diff",
+      dynamicModel: "vendor/old",
+    });
+    // Another client changes the Dynamic model.
+    await app.service.updateProjectSettings(app.first.id, {
+      dynamicModel: "vendor/new",
+    });
+
+    // The stale form only sends the Diff fields it knows; it never resends the Dynamic settings.
+    const view = await app.service.updateProjectSettings(app.first.id, {
+      model: "vendor/diff",
+      maxFindings: 3,
+    });
+
+    expect(view.dynamic.effective.dynamicModel).toBe("vendor/new");
+    expect(view.effective.model).toBe("vendor/diff");
+    expect(view.effective.maxFindings).toBe(3);
+  });
+});
+
+// #194-T07: a full reset runs the settings-change hook inside the reset transaction, so a kind
+// change back to Diff is announced and a rejecting hook rolls the reset back.
+describe("a full reset and the settings-change hook", () => {
+  it("announce a reset of a Dynamic project as a kind change back to Diff", async () => {
+    const events: Array<{
+      previousKind: string;
+      nextKind: string;
+      kindChanged: boolean;
+    }> = [];
+    const app = await setupReviewSettings(undefined, {
+      hooks: {
+        onProjectSettingsChanged: async (event) => {
+          events.push({
+            previousKind: event.previousKind,
+            nextKind: event.nextKind,
+            kindChanged: event.kindChanged,
+          });
+        },
+      },
+    });
+    await app.projects.activate(app.first.id);
+    await app.service.updateProjectSettings(app.first.id, {
+      reviewKind: "dynamic",
+      dynamicModel: "vendor/model",
+    });
+    events.length = 0;
+
+    const view = await app.service.resetProjectSettings(app.first.id);
+
+    expect(view.dynamic.effective.reviewKind).toBe("diff");
+    expect(events).toEqual([
+      { previousKind: "dynamic", nextKind: "diff", kindChanged: true },
+    ]);
+  });
+
+  it("roll the reset back when the hook rejects, leaving the stored settings", async () => {
+    let failing = false;
+    const app = await setupReviewSettings(undefined, {
+      hooks: {
+        onProjectSettingsChanged: async () => {
+          if (failing) throw new Error("settings hook failed");
+        },
+      },
+    });
+    await app.projects.activate(app.first.id);
+    await app.service.updateProjectSettings(app.first.id, {
+      model: "vendor/diff",
+      reviewKind: "dynamic",
+      dynamicModel: "vendor/model",
+    });
+
+    failing = true;
+    await expect(
+      app.service.resetProjectSettings(app.first.id),
+    ).rejects.toThrow("settings hook failed");
+
+    expect((await app.projects.get(app.first.id))?.settings).toEqual({
+      model: "vendor/diff",
+      reviewKind: "dynamic",
+      dynamicModel: "vendor/model",
+    });
+  });
+});

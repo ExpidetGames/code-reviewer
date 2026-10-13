@@ -156,18 +156,19 @@ function reviewKind(value: unknown): FieldResult<ProjectReviewKind> {
 }
 
 // The skill is untrusted text: a size bound in UTF-8 bytes (multibyte characters count as their
-// bytes), no forbidden control characters, no unpaired surrogate. An empty (or blank) value is an
-// explicit reset to the shipped default, not an error.
+// bytes), no forbidden control characters, no unpaired surrogate. Those are checked on the raw text
+// before an empty (or blank) value is read as an explicit reset to the shipped default, so forbidden
+// or oversized text is refused rather than silently normalized away.
 const UTF8 = new TextEncoder();
 
 function reviewSkill(value: unknown): FieldResult<string | null> {
   if (value === null) return ok(null);
   if (typeof value !== "string") return fail("INVALID_TYPE");
-  if (value.trim() === "") return ok(null);
   if (FORBIDDEN_TEXT.test(value) || hasLoneSurrogate(value))
     return fail("FORBIDDEN_CHARACTERS");
   if (UTF8.encode(value).length > PROJECT_DYNAMIC_LIMITS.reviewSkillMaxBytes)
     return fail("TOO_LONG");
+  if (value.trim() === "") return ok(null);
   return ok(value);
 }
 

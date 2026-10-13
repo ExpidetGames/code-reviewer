@@ -403,18 +403,36 @@ describe("validating the project-only settings", () => {
     });
   });
 
+  // #194-T02: the bounds apply to the raw text, before a blank value is read as a reset.
+  it("refuse blank text that holds a forbidden control or is over the byte limit", () => {
+    for (const value of ["\u000b", "\u000c", "\u0000 "]) {
+      expect(projectIssuesOf({ reviewSkill: value })).toEqual([
+        { field: "reviewSkill", code: "FORBIDDEN_CHARACTERS" },
+      ]);
+    }
+    const over = " ".repeat(PROJECT_DYNAMIC_LIMITS.reviewSkillMaxBytes + 1);
+    expect(projectIssuesOf({ reviewSkill: over })).toEqual([
+      { field: "reviewSkill", code: "TOO_LONG" },
+    ]);
+  });
+
   // #194-T02
   it("accept exactly 16 KiB of multibyte text and refuse one byte more", () => {
     const max = PROJECT_DYNAMIC_LIMITS.reviewSkillMaxBytes;
     // "ü" is two UTF-8 bytes, so half the limit in characters is exactly the limit in bytes.
     const exact = "ü".repeat(max / 2);
-    const over = `${exact}ü`;
+    // One ASCII byte more than the limit, and one more multibyte character too.
+    const oneByteOver = `${exact}a`;
+    const oneCharacterOver = `${exact}ü`;
 
     expect(validateProjectSettingsPatch({ reviewSkill: exact })).toEqual({
       ok: true,
       value: { review: {}, dynamic: { reviewSkill: exact } },
     });
-    expect(projectIssuesOf({ reviewSkill: over })).toEqual([
+    expect(projectIssuesOf({ reviewSkill: oneByteOver })).toEqual([
+      { field: "reviewSkill", code: "TOO_LONG" },
+    ]);
+    expect(projectIssuesOf({ reviewSkill: oneCharacterOver })).toEqual([
       { field: "reviewSkill", code: "TOO_LONG" },
     ]);
   });

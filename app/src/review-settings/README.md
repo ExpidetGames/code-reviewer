@@ -186,13 +186,28 @@ provider/model slug, a URL, a permission or a credential is not part of these se
 #198 replaces the provisional text with the attributed Codex-based asset and keeps the identity shape.
 The service, the route and the runner packaging share this one seam.
 
-A project save replaces the Diff override set as a whole (a field left out is inherited again) but
-**merges** the project-only fields over the stored ones, so a save that does not know them - the
-current form, an older client - cannot accidentally remove them (#194-T06). A full reset (`DELETE`)
-clears every override, including the project-only fields; a `reviewSkill` of `""`/`null` clears only
-the skill. The write goes through `projects.updateSettingsWith` in one transaction and calls
-`hooks.ts` `onProjectSettingsChanged` inside it, so #195 can cancel the project's waiting reviews on a
-kind change together with the save (a rejecting hook rolls the write back, #194-T07).
+A project save keeps the two groups apart. A request that carries **any** Diff field replaces the
+Diff override set as a whole (a field left out is inherited again); a request that carries **only**
+project-only fields keeps the stored Diff group, so switching kind, changing the Dynamic model or
+resetting the skill removes nothing of the Diff configuration, and an empty request still replaces the
+Diff group with nothing (every Diff field taken back to its default). The project-only fields are
+always merged over the stored ones, so a request that does not mention them keeps them and a
+`reviewSkill` of `""`/`null` clears only that override.
+
+The write goes through `projects.updateSettingsWith` in one transaction. The stored settings are read
+under a lock on the workspace-scoped repository row: SQLite already holds the single write lock
+(`begin immediate`), Postgres takes the row's `FOR UPDATE` lock before the read, so two instances
+cannot lose an update by reading the same settings and writing them back
+(`projects-repository.postgres.integration.test.ts`). The same transaction calls `hooks.ts`
+`onProjectSettingsChanged`, for a save **and** for a full reset, so #195 can cancel the project's
+waiting reviews on a kind change; a rejecting hook rolls the write or the reset back (`#194-T07`). A
+full reset (`DELETE`) clears every override, including the project-only fields, and reports the kind
+change back to Diff.
+
+`ui/form-state.ts` deliberately does **not** send the project-only settings: it only sends the Diff
+fields the person set (plus their preserved Diff overrides), and the server keeps the stored
+project-only fields a request does not mention. A form that was opened before another client changed
+the kind, model or skill therefore cannot overwrite the newer value with its stale one.
 
 `getProjectSettings` / `resolveForRepository` expose the `dynamic` view: the effective kind, model and
 skill, where each comes from, the shipped defaults, whether the skill is the default, the default

@@ -194,22 +194,37 @@ function checkedProject(input: unknown): ProjectSettingsPatch {
 }
 
 /**
- * The settings a project save stores: the Diff overrides are replaced as a whole (a field left out is
- * inherited again), while the project-only fields are merged over the stored ones. That is what lets
- * a save that does not know them (the current form, an older client) keep the review kind, the
- * Dynamic model and a skill override instead of dropping them. A `reviewSkill` of `null` clears the
- * override and resolves to the shipped default.
+ * The settings a project save stores.
+ *
+ * - The **Diff group** is replaced as a whole when the request carries any Diff field (a field left
+ *   out is inherited again). A request that only carries project-only fields keeps the stored Diff
+ *   group, so switching kind, changing the Dynamic model or resetting the skill removes nothing of
+ *   the Diff configuration. An empty request still replaces the Diff group with nothing (the
+ *   "Use default" of every Diff field).
+ * - The **project-only fields** are merged over the stored ones, so a save that does not know them
+ *   (an older client) keeps them. A `reviewSkill` of `null` clears the override and resolves to the
+ *   shipped default.
  */
 function mergeProjectSettings(
   current: ProjectSettings,
   patch: ProjectSettingsPatch,
 ): ProjectSettings {
+  const hasDiffFields = Object.keys(patch.review).length > 0;
+  const hasProjectFields = Object.keys(patch.dynamic).length > 0;
+  // A project-only request (project fields, no Diff field) never touches the Diff group; anything
+  // else replaces it, including an empty request (every Diff override cleared).
+  const review =
+    hasProjectFields && !hasDiffFields
+      ? parseStoredOverrides(current)
+      : patch.review;
+
   const storedDynamic = parseStoredProjectDynamicOverrides(current);
   const dynamic: ProjectDynamicOverrides = {
     ...storedDynamic,
     ...patch.dynamic,
   };
-  const next: ProjectSettings = { ...patch.review };
+
+  const next: ProjectSettings = { ...review };
   if (dynamic.reviewKind !== undefined) next.reviewKind = dynamic.reviewKind;
   if (dynamic.dynamicModel !== undefined)
     next.dynamicModel = dynamic.dynamicModel;
@@ -272,6 +287,11 @@ export function createReviewSettingsService(deps: {
       updatedAt: stored?.updatedAt ?? null,
       updatedBy: stored?.updatedBy ?? null,
     };
+  }
+
+  /** The effective review kind of a stored settings object (Diff Review when none is set). */
+  function kindOf(settings: ProjectSettings): ProjectReviewKind {
+    return parseStoredProjectDynamicOverrides(settings).reviewKind ?? "diff";
   }
 
   function viewOf(
@@ -402,12 +422,8 @@ export function createReviewSettingsService(deps: {
         repositoryId,
         (current) => {
           const next = mergeProjectSettings(current, patch);
-          const before =
-            parseStoredProjectDynamicOverrides(current).reviewKind ?? "diff";
-          const after =
-            parseStoredProjectDynamicOverrides(next).reviewKind ?? "diff";
-          previousKind = before;
-          kindChanged = before !== after;
+          previousKind = kindOf(current);
+          kindChanged = previousKind !== kindOf(next);
           return next;
         },
         async (updated, executor) => {
@@ -416,9 +432,7 @@ export function createReviewSettingsService(deps: {
               projectId: updated.id,
               repositoryId: updated.repositoryId,
               previousKind,
-              nextKind:
-                parseStoredProjectDynamicOverrides(updated.settings)
-                  .reviewKind ?? "diff",
+              nextKind: kindOf(updated.settings),
               kindChanged,
             },
             executor,
@@ -433,7 +447,30 @@ export function createReviewSettingsService(deps: {
       // Nothing to remove, so no row is created just for this.
       if ((await projects.get(repositoryId)) === undefined)
         return viewOfRepository(repositoryId);
-      const project = await projects.updateSettings(repositoryId, {});
+      // A full reset clears every override (Diff and project-only) and notifies the same hook as a
+      // save, so a kind change back to Diff cancels waiting reviews and a rejecting hook rolls the
+      // reset back.
+      let previousKind: ProjectReviewKind = "diff";
+      const project = await projects.updateSettingsWith(
+        repositoryId,
+        (current) => {
+          previousKind = kindOf(current);
+          return {};
+        },
+        async (updated, executor) => {
+          const nextKind = kindOf(updated.settings);
+          await hooks.onProjectSettingsChanged(
+            {
+              projectId: updated.id,
+              repositoryId: updated.repositoryId,
+              previousKind,
+              nextKind,
+              kindChanged: previousKind !== nextKind,
+            },
+            executor,
+          );
+        },
+      );
       if (project === undefined) throw notFound();
       return projectView(repositoryId, project);
     },

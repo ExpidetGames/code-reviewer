@@ -11,7 +11,6 @@ import {
 } from "../../integrations/types.ts";
 import {
   REVIEW_SETTING_FIELDS,
-  type ProjectDynamicOverrides,
   type ReviewSettingField,
   type ReviewSettings,
 } from "../settings.ts";
@@ -39,11 +38,6 @@ export type FormState = {
   values: FormValues;
   /** Fields the person set for this layer; the others are inherited. */
   overridden: Record<ReviewSettingField, boolean>;
-  /**
-   * The project-only settings this form does not edit (#194), carried through a save unchanged so an
-   * ordinary save of the Diff fields cannot remove them. Empty for the global defaults.
-   */
-  preserved: ProjectDynamicOverrides;
 };
 
 function valuesOf(settings: ReviewSettings): FormValues {
@@ -65,11 +59,7 @@ export function initialFormState(model: SettingsFormModel): FormState {
   const overridden = {} as Record<ReviewSettingField, boolean>;
   for (const field of REVIEW_SETTING_FIELDS)
     overridden[field] = Object.hasOwn(model.overrides, field);
-  return {
-    values: valuesOf(model.effective),
-    overridden,
-    preserved: model.dynamic?.overrides ?? {},
-  };
+  return { values: valuesOf(model.effective), overridden };
 }
 
 type TextField =
@@ -88,7 +78,6 @@ export function setText(
   return {
     values: { ...state.values, [field]: value },
     overridden: { ...state.overridden, [field]: true },
-    preserved: state.preserved,
   };
 }
 
@@ -100,7 +89,6 @@ export function setBoolean(
   return {
     values: { ...state.values, [field]: value },
     overridden: { ...state.overridden, [field]: true },
-    preserved: state.preserved,
   };
 }
 
@@ -119,7 +107,6 @@ export function setCommand(
       allowedCommands: REVIEW_COMMANDS.filter((known) => chosen.has(known)),
     },
     overridden: { ...state.overridden, allowedCommands: true },
-    preserved: state.preserved,
   };
 }
 
@@ -133,7 +120,6 @@ export function resetField(
   return {
     values: { ...state.values, [field]: inherited[field] },
     overridden: { ...state.overridden, [field]: false },
-    preserved: state.preserved,
   };
 }
 
@@ -185,14 +171,15 @@ function diffPatch(state: FormState): {
   return { raw, issues };
 }
 
-/** The body of the save request: the fields the person set, checked, plus the project-only fields the form does not edit. */
+/** The body of the save request: the fields the person set, checked. The project-only settings are left to the server. */
 export function buildPatch(state: FormState): PatchResult {
   const { raw, issues } = diffPatch(state);
   if (issues.length > 0) return { ok: false, issues };
   // The request carries the typed values of the fields that are fine, so what the person sees is
   // what is sent; the server normalizes them (trimmed names, canonical command order) again. The
-  // preserved project-only fields ride along so an ordinary save cannot remove them (#194-T06).
-  return { ok: true, patch: { ...state.preserved, ...raw } };
+  // project-only fields are not sent: the server keeps the stored ones a request does not mention,
+  // so a stale form cannot overwrite a newer kind, model or skill (#194-T06).
+  return { ok: true, patch: raw };
 }
 
 /**

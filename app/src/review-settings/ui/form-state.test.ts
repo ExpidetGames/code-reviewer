@@ -229,8 +229,8 @@ describe("the preview of the cost", () => {
   });
 });
 
-// #194-T06: an ordinary save of the Diff fields must not remove the project-only settings the form
-// does not edit. The serialization carries them through unchanged.
+// #194-T06: the form does not send the project-only settings it does not edit. The server keeps the
+// stored ones a request does not mention, so a stale form cannot overwrite a newer kind/model/skill.
 describe("the project-only settings in the form serialization", () => {
   const dynamic = {
     overrides: {
@@ -262,18 +262,13 @@ describe("the project-only settings in the form serialization", () => {
     limits: { reviewSkillMaxBytes: 16_384 },
   };
 
-  it("ride along a save of the Diff fields", () => {
+  it("stay out of the save, so a stale form cannot overwrite a newer value", () => {
     let state = initialFormState(model({ maxFindings: 9 }, dynamic));
     state = setText(state, "maxFindings", "12");
 
     expect(buildPatch(state)).toEqual({
       ok: true,
-      patch: {
-        reviewKind: "dynamic",
-        dynamicModel: "vendor/dynamic-model",
-        reviewSkill: "review for the Dynamic kind",
-        maxFindings: 12,
-      },
+      patch: { maxFindings: 12 },
     });
   });
 
@@ -282,15 +277,5 @@ describe("the project-only settings in the form serialization", () => {
     const state = initialFormState(m);
 
     expect(previewSettings(m, state)?.maxFindings).toBe(9);
-  });
-
-  it("are empty for the global defaults, which cannot hold them", () => {
-    const global: SettingsFormModel = {
-      ...model(),
-      mode: "global",
-      dynamic: undefined,
-    };
-
-    expect(initialFormState(global).preserved).toEqual({});
   });
 });

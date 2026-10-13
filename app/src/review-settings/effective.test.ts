@@ -10,7 +10,6 @@ import {
   resolveReviewSettings,
 } from "./effective.ts";
 import {
-  DEFAULT_DYNAMIC_MODEL,
   DEFAULT_MAX_TOKENS,
   builtInProjectDynamicSettings,
   builtInReviewSettings,
@@ -143,7 +142,9 @@ describe("the project-only review kind, model and skill", () => {
     });
 
     expect(dynamic.reviewKind).toBe("diff");
-    expect(dynamic.dynamicModel).toBe(DEFAULT_DYNAMIC_MODEL);
+    // The required default model, pinned literally so a mutation of the production constant cannot
+    // pass this test (#194-T01).
+    expect(dynamic.dynamicModel).toBe("deepseek-v4.1-flash");
     expect(dynamic.reviewSkill).toBe(SHIPPED_SKILL);
     expect(dynamic.reviewSkillIsDefault).toBe(true);
     expect(dynamic.sources).toEqual({
