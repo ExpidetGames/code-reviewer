@@ -21,6 +21,12 @@ with prepared_checkout(job, Path.cwd() / "dynamic", identity) as (content, lifet
     ...
 ```
 
+`run_dynamic_job` consumes the result through its `prepare` seam (#197, see
+[the engine page](dynamic-engine.md)): the model is given `content.diff`, the title and body from
+`content.metadata` (`{"title", "body"}` JSON, otherwise the body), the incremental diff when
+`content.comparison` really is incremental, `content.prior_state` and the skipped/omitted paths, and
+a finding may only point at a path in `content.files`.
+
 `prepare_job_content`/`prepare_content` alone produce a **private trusted intermediate**, not an
 agent launch authorization. `PreparedJob.seal` removes write permission, verifies ownership and
 rejects symlinks, hardlinks and special files. An actual-uid, isolated Python probe opens every

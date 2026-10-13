@@ -17,7 +17,7 @@ help:
 	@echo "make test-integration  integration tests that run on the host (app and runner)"
 	@echo "make check-licenses    fail when a dependency has a license outside license-policy.json (needs make install)"
 	@echo "make fix-spdx-headers  add the SPDX license header to every source file that lacks it (a unit test fails without it)"
-	@echo "make test-engine       the real PR-Agent against the fake GitHub and LLM (about 4 minutes, not part of verify)"
+	@echo "make test-engine       the real PR-Agent and the pinned OpenCode against the fakes (about 5 minutes, not part of verify)"
 	@echo "make test-e2e          Playwright journeys against a production build (ARGS=... to filter)"
 	@echo "make test-images       build both container images and run their smoke tests (needs Docker)"
 	@echo "make test-compose      build both images and smoke test the Docker Compose stack (needs Docker)"
@@ -64,10 +64,12 @@ check-licenses:
 fix-spdx-headers:
 	$(APP) spdx:add
 
-# The real PR-Agent through the job entry point against the fakes (runner/tests/engine). The first
-# step needs the internet once (tiktoken encoding); the tests themselves never leave loopback.
+# The real PR-Agent and the real pinned OpenCode against the fakes (runner/tests/engine). The first
+# steps need the internet once (tiktoken encoding, the checksum-verified OpenCode release) and the
+# OpenCode suite needs a ripgrep on the PATH; the tests themselves never leave loopback.
 test-engine:
 	$(RUNNER) run python scripts/prime_tiktoken_cache.py
+	$(RUNNER) run python scripts/fetch_opencode.py
 	$(RUNNER) run pytest -m engine
 
 # Needs a browser. Without a downloaded Chromium, use an installed Chrome:

@@ -1,7 +1,8 @@
 name: Engine tests
 
 # The engine suite: the real, pinned PR-Agent through the job entry point against a fake GitHub and
-# a fake LLM (runner/tests/engine). One definition for the two workflows that run it: ci.yml (pull
+# a fake LLM, and the real, pinned stock OpenCode behind the runner's model proxy against a scripted
+# loopback model (runner/tests/engine). One definition for the two workflows that run it: ci.yml (pull
 # requests that change the runner and pull requests into main) and nightly.yml. It is not started
 # by anything else. No repository secrets: the fakes need none, and the suite must never talk to a
 # real model or a real GitHub. The caller's token (contents: read) is all this workflow can use.
@@ -28,6 +29,10 @@ jobs:
           cache-dependency-glob: runner/uv.lock
       - name: Install dependencies
         run: uv sync --locked
+      # The engine's grep and glob run ripgrep; the pinned OpenCode downloads one when none is on
+      # its PATH, which the runner never allows. The runner image will carry the same tool (#202).
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends ripgrep
       # PR-Agent counts tokens with a tiktoken encoding that it downloads on first use. The
       # download is the only network use of this job besides the installation, so it is cached.
       - name: Restore the tiktoken encoding
@@ -35,7 +40,14 @@ jobs:
         with:
           path: /tmp/data-gym-cache
           key: tiktoken-o200k_base-v1
-      # Fills the cache if needed (with retries), then runs `pytest -m engine` in a network
+      # The pinned OpenCode (runner/opencode-pin.json) is downloaded by scripts/fetch_opencode.py,
+      # which accepts it only with the pinned size and SHA-256; the cache just saves the download.
+      - name: Restore the pinned OpenCode
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/code-reviewer/opencode
+          key: opencode-${{ hashFiles('runner/opencode-pin.json') }}
+      # Fills the caches if needed (with retries), then runs `pytest -m engine` in a network
       # namespace that has a loopback interface and nothing else.
       - name: Engine tests without network
         run: scripts/run_engine_offline.sh

@@ -96,7 +96,9 @@ def build_engine_config(
                 "mode": "primary",
                 "model": f"{PROXY_PROVIDER_ID}/{model}",
                 "prompt": system_prompt,
-                "tools": {**{tool: True for tool in ALLOWED_TOOLS}, "*": False},
+                # No `tools` map: in the pinned release `{"*": false}` removes every tool, the
+                # structured-output return included (found against the real binary). The tool
+                # set is the permission block above, default-deny.
             }
         },
         # One provider, the loopback proxy. Bundled `@ai-sdk/openai-compatible`, so no package is

@@ -21,8 +21,7 @@ jobs running. It is configured by environment variables:
 | `RUNNER_SHUTDOWN_GRACE_SECONDS` | How long running jobs may finish after `SIGTERM` | 60 |
 | `RUNNER_ID` | Free-form id sent as `X-Runner-Id` (bookkeeping only) | `runner-<hostname>` |
 | `PR_AGENT_COMMAND` | The command that runs one job, split like a shell would. Only for test stacks that replace PR-Agent with a fake | `python -m code_reviewer_runner.runner` |
-| `RUNNER_OPENCODE_COMMAND` | #197: the pinned stock engine that runs one Dynamic job, split like a shell would (the adapter appends `serve --hostname 127.0.0.1 --port <job port>`). Unset means a Dynamic job is refused with `dynamic_engine_unavailable`; never falls back to PR-Agent | unset |
-| `RUNNER_DYNAMIC_CHECKOUT` | #197: the prepared read-only export of the PR head (#196) the engine may read. Unset means the run ends with `checkout_incomplete` | unset |
+| `RUNNER_OPENCODE_COMMAND` | #197: the pinned stock engine that runs one Dynamic job, split like a shell would (the adapter appends `serve --hostname 127.0.0.1 --port <job port>`). The executable is the one `scripts/fetch_opencode.py` verified against `opencode-pin.json`. Unset means a Dynamic job is refused with `dynamic_engine_unavailable`; never falls back to PR-Agent. The engine also needs a trusted `rg` (ripgrep) on its `PATH`, or it is not started | unset |
 | `RUNNER_DYNAMIC_CAPABILITIES` | #197: trusted JSON descriptor of the selected model/destination: `{"tool_choice_required": true, "structured_output": true, "max_output_tokens": 8192}`. Operator-owned; unset or without a required feature means `dynamic_model_features_unsupported`, no fallback | unset |
 | `RUNNER_DYNAMIC_NODE_BIN` | #197: directory of the Node runtime the engine needs, if it is not on the runner's own `PATH` | unset |
 
@@ -199,27 +198,66 @@ input and the boundaries around it (the epic's binding decision). Modules:
   plus one byte, checks the protocol byte bounds both ways, validates the destination's required
   features and takes usage from the provider as authoritative. `steps` and events are never trusted
   for enforcement.
-- `dynamic_review/adapter.py` starts the engine in its own process group on a private loopback port,
-  waits for a healthy pinned server, opens one session, sends the untrusted input as one structured
-  turn (bounded by the input byte limit), counts the tool parts (a session whose tool parts cannot be
-  observed fails with `dynamic_accounting_failed`, never a success with nothing counted) and
-  validates the answer with the typed findings parser, bounded by the job's `maxFindings`
-  (`dynamic_findings.py`). The reviewed head comes from the validated claim (`base.headSha`), never from
-  repository content. On any limit, engine exit or unusable answer the whole process group is killed
-  and the private scratch removed; `shutdown_engines()` is also called by the entry point's watchdog so
-  a timed-out run leaks nothing.
+- `dynamic_review/audit.py` enforces the tool, file and result-byte bounds **at the proxy**, from the
+  model requests themselves: every request carries the whole history, so the tool calls of a provider
+  answer are counted before the engine gets the answer (the call over the bound is never handed over,
+  so it never runs), and the tool results in the next request are checked against the per-result and
+  cumulative byte bounds and the distinct-file bound before the request is forwarded (the content over
+  a bound reaches neither the provider nor the model). Each call and result is audited once by its
+  call id. Files are counted from the pinned shapes of `read` (the file, not a directory listing),
+  `grep` (every file it lists) and `glob`. The engine's session list is never read.
+- `dynamic_review/completion_stream.py`: the pinned engine always asks for a streamed answer. The
+  proxy asks the provider for the whole answer (bounded, audited, usage settled) and only then returns
+  it as a short event stream; nothing reaches the engine before the checks passed.
+- `dynamic_review/schema.py` turns the contract schema (definitions under `$defs`, no root type) into
+  the self-contained object schema the engine passes to its `StructuredOutput` tool, narrowed to the
+  job's `maxFindings`.
+- `dynamic_review/inputs.py` maps the verified preparation (`PreparedContent`, #196) to the prompt:
+  the real title and body (`metadata` as `{"title","body"}` JSON, otherwise the body), the base-to-head
+  diff, the incremental diff when the preparation really ended in incremental mode, the prior state
+  and the list of skipped and omitted paths.
+- `dynamic_review/adapter.py` starts the engine in its own process group on a private loopback port
+  (no ripgrep on the engine `PATH` is a refusal, because the pinned release would download one),
+  waits for a healthy pinned server (short per-request timeouts: before its listening marker the server
+  can accept a connection and never answer), opens one session, sends the untrusted input as one
+  structured turn (bounded by the input byte limit) and validates the answer with the typed findings
+  parser, bounded by the job's `maxFindings`, against the files the export really holds (a finding
+  outside it is `checkout_incomplete`). While the message runs, a watch ends the run the moment the
+  proxy records a limit or a provider refusal (the stable code of the first cause is the result,
+  also if the engine still produced an answer), the whole-job deadline passes or the engine dies. The
+  reviewed head comes from the validated claim (`base.headSha`), never from repository content. On any
+  limit, engine exit or unusable answer the whole process group is killed and the private scratch
+  removed; `shutdown_engines()` is also called by the entry point's watchdog so a timed-out run leaks
+  nothing.
+
+`run_dynamic_job` takes the sanitized export from a `prepare` seam (a context manager yielding
+`PreparedContent`): the supervisor that owns the privileges supplies it (#196 `prepared_checkout`, with
+the dedicated engine user of part 2b/#202); without one the run ends with `checkout_incomplete`.
+
+The pinned executable: `opencode-pin.json` names the exact release (version, tag, source commit),
+and per platform the asset, archive size and SHA-256 and the executable's SHA-256. `scripts/fetch_opencode.py`
+downloads it only over https, accepts it only when size and digest equal the pin, unpacks exactly one
+regular file and checks that it reports the pinned version; nothing at run time downloads anything.
+The runner image build calls the same pin (#202). `make test-engine` and the engine CI job fetch it
+the same way.
 
 The answer's schema is the packaged copy of `contracts/dynamic-review/schema.v1.json`
 (`dynamic_review/findings-schema.v1.json`), sent as the engine's `format`, and validated again by
-`parse_dynamic_findings`. Publication of the findings is #199 (below). The real pinned-engine suite with its
-isolation probes (#202; the rest of #197) follows; until then the engine is not advertised
+`parse_dynamic_findings`. Publication of the findings is #199 (below). The isolation (dedicated uid and the
+per-job network boundary, part 2b of #197 and #202) follows; until then the engine is not advertised
 (`capabilities.py` stays fail-closed) and `opencode` never claims a Dynamic job. The runner does not
 rely on the app alone: `run_dynamic_job` refuses a Dynamic job with `dynamic_engine_unavailable`
 unless the runner itself advertised `opencode`.
 
-The tool, file and result-byte bounds are accounted from the session's tool parts after the fact.
-That is observation, not enforcement; the enforcing channel (counting the tool results at the model
-proxy, the only way content reaches the model) belongs to the second half of #197.
+What the real-binary engine suite (`tests/engine/test_engine_opencode.py`) proves today, with the
+unmodified pinned release behind the real proxy: a hostile repository (plugins in `.opencode/` and
+named by an `opencode.json`, nested config, agents, commands, tools, skills, AGENTS.md, instruction
+files) goes through the real #196 export and nothing of it is loaded or executed, while the same tree
+unsanitized does execute its plugins (the control); every write, shell, network, task and unknown tool
+and every read outside the export is denied; the bounds above stop a run before the content reaches
+the model; a provider refusal and a hung provider end the run with their stable code; and the engine
+completes with the pinned server's message-list defect in place. It runs as the test user without a
+per-job network namespace: the dedicated uid and the proxy-only network proof are not in it yet.
 
 ## Dynamic Review publication and re-review (#199)
 

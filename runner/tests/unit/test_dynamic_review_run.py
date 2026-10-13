@@ -9,12 +9,15 @@ capability descriptor the run ends with a stable code before any process or cred
 
 import io
 import json
+from collections.abc import Generator
+from contextlib import contextmanager
 from typing import Any
 
 import pytest
 
 from code_reviewer_runner import runner
 from code_reviewer_runner.capabilities import ALL_ENGINES, ENGINE_DIFF
+from code_reviewer_runner.dynamic_review.checkout import PreparedContent
 from code_reviewer_runner.job import Job, parse_job
 from code_reviewer_runner.result import ErrorCode
 
@@ -62,6 +65,12 @@ def dynamic_job(**llm: Any) -> Job:
     return parse_job(json.dumps(dynamic_document(**llm)))
 
 
+@contextmanager
+def never_prepared(job: Job) -> Generator[PreparedContent]:
+    raise AssertionError("a refused job must not prepare a checkout")
+    yield  # pragma: no cover
+
+
 # #197-T11
 def test_a_dynamic_job_without_an_engine_is_refused_and_pr_agent_is_never_used() -> None:
     result = runner.run_dynamic_job(dynamic_job(), None, 0.0, {}, engines=ALL_ENGINES)
@@ -92,9 +101,9 @@ def test_a_dynamic_job_without_a_capability_descriptor_is_refused() -> None:
         0.0,
         {
             runner.OPENCODE_COMMAND_VARIABLE: "opencode",
-            runner.DYNAMIC_CHECKOUT_VARIABLE: "/export",
         },
         engines=ALL_ENGINES,
+        prepare=never_prepared,
     )
 
     assert result.ok is False
@@ -109,12 +118,12 @@ def test_an_unusable_capability_descriptor_is_refused_before_the_engine_starts()
         0.0,
         {
             runner.OPENCODE_COMMAND_VARIABLE: "opencode",
-            runner.DYNAMIC_CHECKOUT_VARIABLE: "/export",
             runner.DYNAMIC_CAPABILITIES_VARIABLE: json.dumps(
                 {"tool_choice_required": False, "structured_output": True, "max_output_tokens": 1}
             ),
         },
         engines=ALL_ENGINES,
+        prepare=never_prepared,
     )
 
     assert result.ok is False
@@ -127,12 +136,13 @@ def test_a_dynamic_job_is_refused_when_the_runner_did_not_advertise_the_engine()
     # nonexistent command proves nothing was launched (it would fail differently).
     environment = {
         runner.OPENCODE_COMMAND_VARIABLE: "/nonexistent/opencode",
-        runner.DYNAMIC_CHECKOUT_VARIABLE: "/export",
         runner.DYNAMIC_CAPABILITIES_VARIABLE: CAPABILITIES,
     }
 
     for engines in ((), (ENGINE_DIFF,)):
-        result = runner.run_dynamic_job(dynamic_job(), None, 0.0, environment, engines=engines)
+        result = runner.run_dynamic_job(
+            dynamic_job(), None, 0.0, environment, engines=engines, prepare=never_prepared
+        )
 
         assert result.ok is False
         assert result.error_code is ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE
@@ -146,7 +156,6 @@ def test_the_runner_process_never_runs_a_dynamic_job_while_the_isolation_check_f
     # Production advertises only what the self-check proved; until #202 supplies the probes that is
     # never `opencode`, so even a fully configured environment cannot start the stock engine.
     monkeypatch.setenv(runner.OPENCODE_COMMAND_VARIABLE, "/nonexistent/opencode")
-    monkeypatch.setenv(runner.DYNAMIC_CHECKOUT_VARIABLE, "/export")
     monkeypatch.setenv(runner.DYNAMIC_CAPABILITIES_VARIABLE, CAPABILITIES)
 
     def must_not_start(*args: Any, **kwargs: Any) -> None:
