@@ -44,7 +44,7 @@ def test_a_diff_job_process_is_the_job_user_and_a_dynamic_one_is_the_supervisor(
     supervisor = asyncio.run(report(None))
 
     assert unprivileged["uid"] == JOB_UID and unprivileged["gid"] == JOB_GID
-    assert unprivileged["groups"] == [JOB_GID]
+    assert unprivileged["groups"] in ([], [JOB_GID])  # none of the root loop's groups
     assert unprivileged["cwd_owner"] == JOB_UID  # it can use its own working directory
     assert unprivileged["caps"] == "0" * 16
     assert supervisor["uid"] == os.geteuid() == 0

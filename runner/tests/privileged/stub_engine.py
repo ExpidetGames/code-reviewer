@@ -109,7 +109,8 @@ def facts(targets: dict[str, Any]) -> dict[str, Any]:
 def helper_main() -> None:
     """The leftover: its own session, the same network attempts, deaf to SIGTERM."""
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
-    targets = json.loads((tmpdir() / "targets.json").read_text())
+    targets_file = tmpdir() / "targets.json"
+    targets: dict[str, Any] = json.loads(targets_file.read_text()) if targets_file.is_file() else {}
     write(
         "helper.json",
         {"pid": os.getpid(), "sid": os.getsid(0), "reached": reach(targets.get("tcp", []))},

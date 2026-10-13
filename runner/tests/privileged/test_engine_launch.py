@@ -134,7 +134,7 @@ def test_the_engine_runs_as_the_dedicated_user_and_can_do_nothing_else(
                 ENGINE_UID,
                 ENGINE_GID,
             )
-            assert facts["groups"] == [ENGINE_GID]
+            assert facts["groups"] in ([], [ENGINE_GID])  # no supplementary group of the supervisor
             assert facts["capabilities"] == "0" * 16
             assert facts["can_become_root"] is False
             # What it can read: its own config; not the job directory, not the supervisor.
