@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// The pull requests a person can pick from: one radio button per open pull request with number,
-// title and author. Titles and names come from GitHub and are only ever rendered as text. With
-// nothing open the list says so.
+// The pull requests a person can pick from (#174): one radio button per open pull request with number,
+// title and author, and the link to GitHub for the repositories whose address is allowed. Titles and
+// names come from GitHub and are only ever rendered as text. With nothing open the list says so.
+import { Badge } from "../../components/ui/badge.tsx";
 import { safeGithubUrl } from "../../runs/run-view.ts";
 import type { PullRequestChoice } from "../service.ts";
 
@@ -20,38 +21,49 @@ export function PullRequestList({
 }) {
   if (pullRequests.length === 0)
     return (
-      <p className="muted" data-testid="no-open-pull-requests">
+      <p
+        className="text-sm text-muted-foreground"
+        data-testid="no-open-pull-requests"
+      >
         There are no open pull requests in this repository. Open one on GitHub,
         then refresh the list.
       </p>
     );
   return (
-    <fieldset className="pr-picker">
-      <legend>Pull request</legend>
-      <ul className="pr-list">
+    <fieldset className="flex flex-col gap-1">
+      <legend className="text-sm font-medium">Pull request</legend>
+      <ul className="m-0 flex list-none flex-col gap-1 p-0">
         {pullRequests.map((pr) => {
           const link = safeGithubUrl(pr.url);
           return (
-            <li key={pr.number} className="pr-row">
-              <label className="check-line">
+            <li
+              key={pr.number}
+              className="flex items-center justify-between gap-3 border-t border-border py-2 first:border-t-0"
+            >
+              <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-sm">
                 <input
                   type="radio"
                   name={name}
                   value={pr.number}
                   checked={selected === pr.number}
                   onChange={() => onSelect(pr.number)}
+                  className="size-4 accent-primary"
                 />
-                <span className="pr-number">#{pr.number}</span>{" "}
-                <span className="pr-title">{pr.title}</span>{" "}
-                <span className="muted small">by {pr.author}</span>{" "}
-                {pr.draft ? <span className="badge">Draft</span> : null}
+                <span className="text-muted-foreground">#{pr.number}</span>{" "}
+                <span className="truncate font-medium text-foreground">
+                  {pr.title}
+                </span>{" "}
+                <span className="shrink-0 text-muted-foreground">
+                  by {pr.author}
+                </span>{" "}
+                {pr.draft ? <Badge variant="neutral">Draft</Badge> : null}
               </label>
               {link !== null ? (
                 <a
                   href={link}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="small"
+                  className="shrink-0 text-sm text-primary underline-offset-4 hover:underline"
                   aria-label={`Open pull request ${pr.number} on GitHub`}
                 >
                   GitHub

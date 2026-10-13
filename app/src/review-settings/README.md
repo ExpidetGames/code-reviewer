@@ -156,15 +156,19 @@ repository, or the platform no longer lists it and it has no project). The setti
 ## The pages
 
 `/settings` holds the instance state (GitHub App, LLM access) and the form for the global defaults;
-`/w/:workspace/projects/:repositoryId` holds the same form for one project. The form (`ui/settings-form.tsx`) shows
-the value in force and where it comes from (built-in, global, this project); changing a field sets it
-for the layer, "Use default" takes it back; a save sends only the fields that are set and replaces the
-layer. `ui/form-state.ts` checks the values with `validateReviewSettingsPatch` before sending, so a
+`/w/:workspace/projects/:repositoryId` holds the same form for one project. The form (`ui/settings-form.tsx`)
+shows the value in force and where it comes from (built-in, global, this project); changing a field sets it
+for the layer, "Reset to default" takes it back; a save sends only the fields that are set and replaces the
+layer. Since #174 it is three cards (Model, Review, When to review, from `ui/model-fieldset.tsx`,
+`ui/review-fieldset.tsx` and `ui/when-fieldset.tsx`) in one form with one footer; the estimated cost sits in
+the Model card and resetting the whole project is a separate card at the bottom whose confirmation is a
+dialog. `ui/form-state.ts` checks the values with `validateReviewSettingsPatch` before sending, so a
 wrong value is named next to its field with a sentence from `ui/messages.ts` (a code is never shown);
-the answer of the server is shown the same way, including `EXCEEDS_MODEL_CONTEXT`. The estimated
+the answer of the server is shown the same way, including `EXCEEDS_MODEL_CONTEXT`, and the first marked
+field takes the focus. The estimated
 cost updates while typing (`estimateReviewCost`) and shows the `above_limit` and `cost_unknown`
 warnings and a token budget above the context window; warnings never block a save. The **fallback
-model** is stored but not sent to the runner in the MVP: the form says so next to the field and the cost summary lists it as "not used yet" without an estimate or a cost warning (a context window that is too small still blocks the save, so that warning stays). A form is keyed on the server data, so a page that Next keeps mounted after a navigation starts from fresh data when it is shown again; "Use the defaults for everything" asks for a confirmation first.
+model** is stored but not sent to the runner in the MVP: the form says so next to the field and the cost summary lists it as "not used yet" without an estimate or a cost warning (a context window that is too small still blocks the save, so that warning stays). A form is keyed on the server data, so a page that Next keeps mounted after a navigation starts from fresh data when it is shown again; the reset asks for a confirmation first. A later issue (#200) adds a "Review kind" card between the last card and the footer.
 
 The claim of the runner API and the webhook intake use `service.resolveForRepository(repositoryId)`
 (`shared.ts`: `getReviewSettingsService()`), then `toRunnerSettings` and the checks above.
