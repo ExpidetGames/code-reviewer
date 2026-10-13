@@ -124,12 +124,18 @@ docker compose -f compose.yml -f compose.dynamic.yml up -d --wait
 
 The container drops every capability, sets `no-new-privileges`, bounds its process count (512) and
 has no swap, so a memory peak shows up as an OOM kill of the job rather than as a slow host. It
-publishes no port and reaches only the app. The same service block works for Coolify (copy it into
-the Compose application); a `compose.coolify.yml` variant follows with the real image.
+publishes no port and reaches only the app. The same service block should work for Coolify (copy it
+into the Compose application; untested, see `deployment-coolify.md`, "What is verified"); a
+`compose.coolify.yml` variant follows with the real image.
+
+With one slot (`RUNNER_DYNAMIC_CONCURRENCY=1`) a long Diff job can occupy the Dynamic runner's only
+slot, because that runner also serves Diff jobs. A Dynamic job can then end with `no_capable_runner`
+although a capable runner exists. Do not raise the concurrency before the memory matrix exists; a later
+change can keep Diff jobs off this runner.
 
 This file does **not** make Dynamic Review work: with today's image the runner starts, fails its
-self-check and keeps serving Diff jobs only. Do not set `RUNNER_OPENCODE_COMMAND` or
-`RUNNER_DYNAMIC_CHECKOUT` by hand to get around that.
+self-check and keeps serving Diff jobs only. Do not set `RUNNER_OPENCODE_COMMAND` by
+hand to get around that.
 
 ## Activation order (once the engine ships)
 
