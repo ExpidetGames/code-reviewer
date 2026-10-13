@@ -8,7 +8,10 @@
 // which carries a signed, single-use state bound to this session. The manifest is then posted to GitHub by
 // the browser, as GitHub documents it.
 import { useId, useState, type FormEvent } from "react";
-import { Button } from "../../ui/button.tsx";
+import { Button } from "../../components/button.tsx";
+import { FieldError } from "../../components/ui/field.tsx";
+import { Input } from "../../components/ui/input.tsx";
+import { Label } from "../../components/ui/label.tsx";
 import {
   browserGithubApi,
   postManifestToGithub,
@@ -64,30 +67,33 @@ export function ManifestForm({
   const error = (field: string) => {
     const issue = issueFor(field);
     return issue ? (
-      <p id={`${ids}-${field}-error`} className="field-error">
+      <FieldError id={`${ids}-${field}-error`}>
         {describeGithubIssue(issue)}
-      </p>
+      </FieldError>
     ) : null;
   };
 
   return (
-    <form onSubmit={submit} className="settings-form" aria-labelledby={ids}>
-      <h3 id={ids}>Create the App with one click</h3>
-      <p className="muted">
-        You are sent to GitHub with everything filled in: the name, this
-        instance&apos;s address, the webhook, the permissions and the events.
-        Press <strong>Create GitHub App</strong> there; GitHub sends you back
-        here and the credentials are saved, encrypted, without you copying
-        anything.{" "}
+    <form
+      onSubmit={submit}
+      className="flex flex-col gap-6"
+      aria-labelledby={ids}
+    >
+      <h3 id={ids} className="text-base font-semibold text-foreground">
+        Create the App with one click
+      </h3>
+      <p className="text-sm text-muted-foreground">
+        GitHub opens with everything filled in: the name, this instance&apos;s
+        address, the webhook, the permissions and the events. Press{" "}
+        <strong>Create GitHub App</strong> there and GitHub sends you back; the
+        credentials are saved, encrypted.{" "}
         {tenancy === "single"
           ? "On a single-tenant instance the App is created private: it can only be installed on the account that owns it."
           : "On a multi-tenant instance the App is created public, so any account can install it."}
       </p>
-      <div className="field">
-        <label htmlFor={`${ids}-name`} className="field-label">
-          Name of the App
-        </label>
-        <input
+      <div className="flex flex-col gap-2">
+        <Label htmlFor={`${ids}-name`}>Name of the App</Label>
+        <Input
           id={`${ids}-name`}
           type="text"
           autoComplete="off"
@@ -99,11 +105,9 @@ export function ManifestForm({
         />
         {error("name")}
       </div>
-      <div className="field">
-        <label htmlFor={`${ids}-organization`} className="field-label">
-          Organization (optional)
-        </label>
-        <input
+      <div className="flex flex-col gap-2">
+        <Label htmlFor={`${ids}-organization`}>Organization (optional)</Label>
+        <Input
           id={`${ids}-organization`}
           type="text"
           autoComplete="off"
@@ -119,26 +123,29 @@ export function ManifestForm({
         {error("organization")}
       </div>
       {configured ? (
-        <div className="field">
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={replace}
-              onChange={(event) => setReplace(event.target.checked)}
-            />
-            <span>
-              Replace the App that is configured now. Installations of the old
-              App stop working here.
-            </span>
-          </label>
-        </div>
+        <label className="flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={replace}
+            onChange={(event) => setReplace(event.target.checked)}
+          />
+          <span>
+            Replace the App that is configured now. Installations of the old App
+            stop working here.
+          </span>
+        </label>
       ) : null}
-      <div className="form-actions">
-        <Button type="submit" disabled={pending || (configured && !replace)}>
-          {pending ? "Opening GitHub..." : "Create GitHub App"}
+      <div className="flex flex-wrap items-center gap-3">
+        <Button
+          type="submit"
+          loading={pending}
+          loadingLabel="Opening GitHub"
+          disabled={configured && !replace}
+        >
+          Create GitHub App
         </Button>
         {failure !== null ? (
-          <span role="alert" className="field-error">
+          <span role="alert" className="text-sm text-destructive">
             {failure.text}
           </span>
         ) : (

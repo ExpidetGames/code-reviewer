@@ -47,7 +47,7 @@ test.describe("signing in and out", () => {
     await page.goto("/account");
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "Your account" }),
+      page.getByRole("heading", { level: 1, name: "Account" }),
     ).toBeVisible();
     await expect(page.getByText(account.email ?? "")).toBeVisible();
     await expect(page.getByText("Verified", { exact: true })).toBeVisible();
