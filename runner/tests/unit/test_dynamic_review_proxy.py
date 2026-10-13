@@ -272,7 +272,7 @@ def test_a_call_that_would_cross_the_token_cap_is_refused_before_the_provider_se
 
 # #231-T07
 def test_a_provider_error_keeps_its_reservation_spent() -> None:
-    # Conservative on purpose: a refused call is not given back, so a retry cannot reopen the budget.
+    # Conservative on purpose: a refused call is not given back, so a retry cannot reopen it.
     upstream = Upstream(status=503, body={"error": "unavailable"})
     ledger = BudgetLedger(DynamicLimits(max_total_tokens=5000))
     subject = proxy(upstream, ledger=ledger)
