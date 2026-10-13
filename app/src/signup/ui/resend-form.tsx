@@ -5,7 +5,7 @@
 import { useId, useState, type FormEvent } from "react";
 import { Button } from "@/components/button";
 import { StatusRegion } from "@/components/status-region";
-import { Alert } from "@/components/ui/alert";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { requestJson, type FetchLike } from "../../ui/json-request.ts";
@@ -51,7 +51,11 @@ export function ResendForm({
       className="flex flex-col gap-4"
       aria-label="Request a new link"
     >
-      {problem ? <Alert variant="destructive">{problem}</Alert> : null}
+      {problem ? (
+        <Alert variant="destructive">
+          <AlertDescription>{problem}</AlertDescription>
+        </Alert>
+      ) : null}
       {sent ? (
         <StatusRegion className="text-success">
           If this address is waiting to be confirmed, a new link is on its way.

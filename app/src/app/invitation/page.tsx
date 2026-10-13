@@ -6,16 +6,17 @@
 // session, so a mail scanner or a link preview that opens every link of a message cannot use the invitation
 // up. A link that is not an invitation (unknown, damaged) gets one generic answer; a revoked, used or expired
 // one says so. The token is in the address, so the page asks the browser not to send its address on as a
-// referrer (a header, set in next.config.ts, and the same in the metadata).
+// referrer (a header, set in next.config.ts, and the same in the metadata). The frame is the shared AuthCard
+// (#170).
 import type { Metadata } from "next";
 import Link from "next/link";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { signOut } from "@/auth/actions";
 import { currentLookup } from "@/auth/session";
+import { AuthCard } from "@/components/auth-card";
 import { Button } from "@/components/button";
-import { Alert } from "@/components/ui/alert";
-import { Card, CardContent } from "@/components/ui/card";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { getInvitationService } from "@/workspaces/shared";
 import { InvitationView } from "@/workspaces/ui/invitation-view";
 import { describeInvitationState } from "@/workspaces/ui/messages";
@@ -26,19 +27,15 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
+const TITLE = "You have an invitation";
+
 export default function InvitationPage({
   searchParams,
 }: PageProps<"/invitation">) {
   return (
-    <main className="flex min-h-svh items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-md">
-        <CardContent>
-          <Suspense fallback={null}>
-            <InvitationContent searchParams={searchParams} />
-          </Suspense>
-        </CardContent>
-      </Card>
-    </main>
+    <Suspense fallback={<AuthCard title={TITLE} />}>
+      <InvitationContent searchParams={searchParams} />
+    </Suspense>
   );
 }
 
@@ -50,15 +47,16 @@ async function InvitationContent({
   const result = await getInvitationService().preview(token);
   if (!result.ok)
     return (
-      <div className="flex flex-col gap-4">
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-          You have an invitation
-        </h1>
-        <Alert variant="warning">{describeInvitationState(result.error)}</Alert>
+      <AuthCard title={TITLE}>
+        <Alert variant="warning">
+          <AlertDescription>
+            {describeInvitationState(result.error)}
+          </AlertDescription>
+        </Alert>
         <Button asChild className="w-full">
           <Link href="/">Go to the start page</Link>
         </Button>
-      </div>
+      </AuthCard>
     );
   const { workspaceName, role, email } = result.preview;
 
@@ -77,13 +75,15 @@ async function InvitationContent({
   }
 
   return (
-    <InvitationView
-      token={String(token)}
-      workspaceName={workspaceName}
-      role={role}
-      email={email}
-      signedInAs={signedInAs}
-      signOutAction={signOut}
-    />
+    <AuthCard title={TITLE}>
+      <InvitationView
+        token={String(token)}
+        workspaceName={workspaceName}
+        role={role}
+        email={email}
+        signedInAs={signedInAs}
+        signOutAction={signOut}
+      />
+    </AuthCard>
   );
 }

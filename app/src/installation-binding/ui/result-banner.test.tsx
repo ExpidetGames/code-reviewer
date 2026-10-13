@@ -2,8 +2,8 @@
 
 // @vitest-environment jsdom
 // Pins down the tone of the banner on the GitHub result page: an outcome that is not a failure or a
-// success is information, and the page must say so with the neutral `info` tone. The old page
-// rendered the warning fallback for every tone that was neither `success` nor `error` (#171).
+// success is information, and the page must say so with the neutral `info` tone. The old page rendered
+// the warning fallback for every tone that was neither `success` nor `error` (#171).
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { ResultBanner } from "./result-banner.tsx";
@@ -19,12 +19,12 @@ describe("the result banner of the GitHub flow", () => {
       />,
     );
 
-    const alert = screen.getByRole("alert");
-    expect(alert.textContent).toContain("Choose the installation to connect.");
-    expect(alert.getAttribute("data-variant")).toBe("info");
+    const banner = screen.getByRole("status");
+    expect(banner.textContent).toContain("Choose the installation to connect.");
+    expect(banner.getAttribute("data-variant")).toBe("info");
   });
 
-  it("renders a failure as a destructive alert and a success as a success alert", () => {
+  it("renders a failure as an alert and a success as a success status", () => {
     const { unmount } = render(
       <ResultBanner
         result={{ tone: "error", text: "Nothing was connected." }}
@@ -40,7 +40,7 @@ describe("the result banner of the GitHub flow", () => {
         result={{ tone: "success", text: "GitHub is connected." }}
       />,
     );
-    expect(screen.getByRole("alert").getAttribute("data-variant")).toBe(
+    expect(screen.getByRole("status").getAttribute("data-variant")).toBe(
       "success",
     );
   });
@@ -48,7 +48,7 @@ describe("the result banner of the GitHub flow", () => {
   it("says nothing was connected when the code names no outcome", () => {
     render(<ResultBanner result={null} />);
 
-    expect(screen.getByRole("alert").textContent).toContain(
+    expect(screen.getByRole("status").textContent).toContain(
       "Nothing was connected.",
     );
   });

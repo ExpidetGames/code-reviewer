@@ -6,7 +6,7 @@
 // text, never markup.
 import Link from "next/link";
 import { Button } from "@/components/button";
-import { Alert } from "@/components/ui/alert";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { canonicalEmail } from "../../signup/rule.ts";
 import type { WorkspaceRole } from "../roles.ts";
 import { AcceptInvitation } from "./accept-invitation.tsx";
@@ -44,9 +44,6 @@ export function InvitationView({
 
   return (
     <>
-      <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-        You have an invitation
-      </h1>
       <p className="text-sm text-muted-foreground text-pretty">
         You are invited to join <strong>{workspaceName}</strong> at Code
         Reviewer as {role === "admin" ? "an" : "a"} {ROLE_LABEL[role]}. The
@@ -70,8 +67,10 @@ export function InvitationView({
       ) : (
         <div className="flex flex-col gap-3">
           <Alert variant="warning">
-            You are signed in with a different address than this invitation is
-            for. Sign out and sign in with the invited address.
+            <AlertDescription>
+              You are signed in with a different address than this invitation is
+              for. Sign out and sign in with the invited address.
+            </AlertDescription>
           </Alert>
           <form action={signOutAction}>
             <Button type="submit" variant="secondary" className="w-full">

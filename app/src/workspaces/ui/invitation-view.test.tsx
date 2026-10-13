@@ -6,6 +6,7 @@
 // (#171).
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AuthCard } from "@/components/auth-card";
 import type { AccountApi } from "./api.ts";
 import { InvitationView } from "./invitation-view.tsx";
 
@@ -34,10 +35,18 @@ const base = {
   signOutAction: vi.fn(async () => undefined),
 };
 
+function renderInCard(props: Parameters<typeof InvitationView>[0]) {
+  return render(
+    <AuthCard title="You have an invitation">
+      <InvitationView {...props} />
+    </AuthCard>,
+  );
+}
+
 describe("the page of a valid invitation", () => {
   // #171-T02
   it("names the workspace and the address once and offers a single primary accept", () => {
-    render(<InvitationView {...base} signedInAs={base.email} />);
+    renderInCard({ ...base, signedInAs: base.email });
 
     expect(
       screen.getByRole("heading", {
@@ -55,7 +64,7 @@ describe("the page of a valid invitation", () => {
   });
 
   it("points a signed out visitor at the sign-in and the sign-up with the invitation", () => {
-    render(<InvitationView {...base} signedInAs={null} />);
+    renderInCard({ ...base, signedInAs: null });
 
     expect(
       screen.getByRole("link", { name: "Sign in" }).getAttribute("href"),
@@ -69,7 +78,7 @@ describe("the page of a valid invitation", () => {
 
   // The mismatch branch used to repeat the invited address; it now says it in one sentence.
   it("tells a person signed in as another address what to do without repeating the address", () => {
-    render(<InvitationView {...base} signedInAs="other@example.com" />);
+    renderInCard({ ...base, signedInAs: "other@example.com" });
 
     const alert = screen.getByRole("alert");
     expect(alert.textContent).toMatch(/different address/);

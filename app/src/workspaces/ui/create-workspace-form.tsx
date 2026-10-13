@@ -6,7 +6,7 @@
 // second, hard-coded limit (#171).
 import { useId, useState, type FormEvent } from "react";
 import { Button } from "@/components/button";
-import { Alert } from "@/components/ui/alert";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { workspaceHome } from "../paths.ts";
@@ -46,7 +46,11 @@ export function CreateWorkspaceForm({
       className="flex flex-col gap-4"
       aria-label="Create a workspace"
     >
-      {problem !== null ? <Alert variant="destructive">{problem}</Alert> : null}
+      {problem !== null ? (
+        <Alert variant="destructive">
+          <AlertDescription>{problem}</AlertDescription>
+        </Alert>
+      ) : null}
       <Field>
         <FieldLabel htmlFor={id}>Name of the workspace</FieldLabel>
         <Input

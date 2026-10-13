@@ -10,7 +10,7 @@ import Link from "next/link";
 import { useId, useState, type FormEvent } from "react";
 import { Button } from "@/components/button";
 import { StatusRegion } from "@/components/status-region";
-import { Alert } from "@/components/ui/alert";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { requestJson, type FetchLike } from "../../ui/json-request.ts";
@@ -66,7 +66,11 @@ export function VerifyEmailForm({
       className="flex flex-col gap-4"
       aria-label="Confirm email address"
     >
-      {problem ? <Alert variant="destructive">{problem}</Alert> : null}
+      {problem ? (
+        <Alert variant="destructive">
+          <AlertDescription>{problem}</AlertDescription>
+        </Alert>
+      ) : null}
       <Field>
         <FieldLabel htmlFor={id}>Password</FieldLabel>
         <Input
