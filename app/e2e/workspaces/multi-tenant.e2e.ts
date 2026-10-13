@@ -37,7 +37,7 @@ test.describe("a multi-tenant instance", () => {
     await expect(page).toHaveURL(/\/no-access$/);
     const create = page.getByRole("form", { name: "Create a workspace" });
     await create.getByLabel("Name of the workspace").fill("Team A");
-    await create.getByRole("button", { name: "Create the workspace" }).click();
+    await create.getByRole("button", { name: "Create workspace" }).click();
     await expect(page).toHaveURL(/\/w\/team-a\/projects$/);
     await expect(page.getByRole("button", { name: /Workspace/ })).toContainText(
       "Team A",
@@ -66,7 +66,7 @@ test.describe("a multi-tenant instance", () => {
     await expect(page).toHaveURL(/\/workspaces\/new$/);
     const again = page.getByRole("form", { name: "Create a workspace" });
     await again.getByLabel("Name of the workspace").fill("Team A");
-    await again.getByRole("button", { name: "Create the workspace" }).click();
+    await again.getByRole("button", { name: "Create workspace" }).click();
     await expect(page).toHaveURL(/\/w\/team-a-2\/projects$/);
 
     // Both are in the switcher, and the navigation follows the one chosen.
@@ -116,7 +116,7 @@ test.describe("a multi-tenant instance", () => {
     const create = page.getByRole("form", { name: "Create a workspace" });
     await page.goto("/no-access");
     await create.getByLabel("Name of the workspace").fill("Mine");
-    await create.getByRole("button", { name: "Create the workspace" }).click();
+    await create.getByRole("button", { name: "Create workspace" }).click();
     await expect(page).toHaveURL(/\/w\/mine\/projects$/);
     // Now a member of a workspace, the other ones are still a path that does not exist.
     const still = await page.request.get("/api/w/team-a/runs");

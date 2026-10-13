@@ -20,11 +20,18 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
   SidebarSeparator,
   useSidebar,
 } from "@/components/ui/sidebar";
 import { SIDEBAR_LINK_CLASS } from "@/shell/nav-items.ts";
-import { ADMIN_NAV_GROUPS, isCurrentSection } from "./nav-items.ts";
+import {
+  ADMIN_NAV_GROUPS,
+  isCurrentSection,
+  type AdminNavItem,
+} from "./nav-items.ts";
 
 export function SectionLinks({ pathname }: { pathname: string | null }) {
   return (
@@ -69,7 +76,39 @@ function AdminLink({
           {item.label}
         </Link>
       </SidebarMenuButton>
+      {item.children === undefined ? null : (
+        <SidebarMenuSub>
+          {item.children.map((child) => (
+            <AdminSubLink key={child.href} item={child} pathname={pathname} />
+          ))}
+        </SidebarMenuSub>
+      )}
     </SidebarMenuItem>
+  );
+}
+
+function AdminSubLink({
+  item,
+  pathname,
+}: {
+  item: NonNullable<AdminNavItem["children"]>[number];
+  pathname: string | null;
+}) {
+  const { setOpenMobile } = useSidebar();
+  const current = isCurrentSection(pathname, item);
+  return (
+    <SidebarMenuSubItem>
+      <SidebarMenuSubButton asChild isActive={current}>
+        <Link
+          href={item.href}
+          aria-current={current ? "page" : undefined}
+          className={SIDEBAR_LINK_CLASS}
+          onClick={() => setOpenMobile(false)}
+        >
+          {item.label}
+        </Link>
+      </SidebarMenuSubButton>
+    </SidebarMenuSubItem>
   );
 }
 

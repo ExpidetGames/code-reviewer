@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// The color mode. By default the page follows the system setting (the CSS in globals.css reacts to
+// The color mode. By default the page follows the system setting (the CSS in theme.css reacts to
 // `prefers-color-scheme`). A person can override it with the toggle; the choice is kept per browser
 // in localStorage and applied as `data-theme="light|dark"` on <html>. No attribute means "follow the
 // system". Everything here is plain functions so it can be tested without a browser; the hook

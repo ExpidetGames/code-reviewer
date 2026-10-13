@@ -68,6 +68,20 @@ describe("the auth card", () => {
     expect(card?.className).toContain("custom-frame");
     expect(card?.className).toContain("max-w-[34rem]");
   });
+
+  // #185: the first-run setup brings its own h1 per step, so the card renders no heading when it
+  // is given no title.
+  it("renders no heading of its own when no title is given", () => {
+    render(
+      <AuthCard>
+        <h1>Set up Code Reviewer</h1>
+      </AuthCard>,
+    );
+
+    const headings = screen.getAllByRole("heading", { level: 1 });
+    expect(headings).toHaveLength(1);
+    expect(headings[0]?.textContent).toBe("Set up Code Reviewer");
+  });
 });
 
 describe("the status region", () => {

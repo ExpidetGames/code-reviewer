@@ -3,9 +3,7 @@
 import type { Metadata } from "next";
 import { initialThemeScript } from "@/theme/theme";
 import { ThemeSync } from "@/theme/theme-sync";
-// The legacy kit and the Tailwind v4 theme live next to each other during the migration (#165);
-// `theme.css` holds every color token and brings in Tailwind (see the file's header).
-import "./globals.css";
+// The one stylesheet of the app: the Tailwind v4 theme, the preflight reset and the base rules (#185).
 import "./theme.css";
 
 export const metadata: Metadata = {

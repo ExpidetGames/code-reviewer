@@ -18,10 +18,10 @@ import {
 describe("isSourceFile", () => {
   it.each([
     "app/src/auth/session.ts",
-    "app/src/ui/button.tsx",
+    "app/src/components/button.tsx",
     "app/eslint.config.mjs",
     "app/vitest.config.mts",
-    "app/src/app/globals.css",
+    "app/src/app/theme.css",
     "app/src/db/migrations/0001_create_app_meta.ts",
     "runner/src/code_reviewer_runner/cli.py",
     "runner/tests/unit/test_cli.py",

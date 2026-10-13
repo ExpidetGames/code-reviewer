@@ -2,7 +2,9 @@
 
 // The configuration hints at the top of the pages: one alert per problem, nothing at all while the
 // configuration is complete. The text comes from `describeConfigNotices`, so it names variables (for the
-// instance admin only) and never values.
+// instance admin only) and never values. On the component kit (#185): the tone maps to the shadcn
+// `Alert` variants, an error is the assertive role and a warning the polite one.
+import { Alert, AlertDescription } from "../components/ui/alert.tsx";
 import { describeConfigNotices } from "./notices.ts";
 import type { ConfigAudience, ConfigStatus } from "./status.ts";
 
@@ -17,16 +19,21 @@ export function ConfigNotices({
   const notices = describeConfigNotices(status, audience);
   if (notices.length === 0) return null;
   return (
-    <section className="notices" aria-label="Configuration problems">
+    <section
+      className="mb-6 flex flex-col gap-3"
+      aria-label="Configuration problems"
+    >
       {notices.map((notice) => (
-        <div
+        <Alert
           key={notice.id}
-          className={`alert alert-${notice.severity}`}
+          variant={notice.severity === "error" ? "destructive" : "warning"}
           role={notice.severity === "error" ? "alert" : "status"}
         >
-          <strong>{notice.title}</strong>
-          <p>{notice.detail}</p>
-        </div>
+          <AlertDescription>
+            <strong>{notice.title}</strong>
+            <p>{notice.detail}</p>
+          </AlertDescription>
+        </Alert>
       ))}
     </section>
   );

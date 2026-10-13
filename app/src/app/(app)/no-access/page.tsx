@@ -19,6 +19,7 @@ import { Suspense } from "react";
 import { currentLookup } from "@/auth/session";
 import { loginPath } from "@/auth/session-user";
 import { PageHeader } from "@/components/page-header";
+import { PageLoading } from "@/components/page-loading";
 import { loadAccountView } from "@/workspaces/account-view";
 import { workspaceHome } from "@/workspaces/paths";
 import { NoAccessContent } from "@/workspaces/ui/no-access-content";
@@ -29,7 +30,7 @@ export default function NoAccessPage() {
   return (
     <>
       <PageHeader title="No workspace yet" />
-      <Suspense fallback={<div className="page-loading" aria-busy="true" />}>
+      <Suspense fallback={<PageLoading label="Loading what to do next" />}>
         <WhatToDo />
       </Suspense>
     </>

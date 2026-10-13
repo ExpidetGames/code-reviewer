@@ -116,8 +116,8 @@ issue for it.
 - Identifiers, comments, documentation and every user visible string are in English.
 - The app is styled with Tailwind CSS v4 and shadcn/ui (components copied into
   `app/src/components/ui/`). Every colour lives only in `app/src/app/theme.css`; a check under
-  `app/src/ci/colors` fails on a colour literal anywhere else. `app/src/app/globals.css` is the one
-  documented exception during the migration and is removed by the cleanup issue (#185).
+  `app/src/ci/colors` fails on a colour literal in any other source file, with no exception. The
+  stylesheet also carries the Tailwind preflight reset and the project's base rules.
 - Keep secrets out of code, logs, test output and commits. Configuration comes from environment
   variables, documented in the `.env.example` files.
 - Update the documentation next to the code you change, and `TESTING.md` if you change how
