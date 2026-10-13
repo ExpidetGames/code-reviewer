@@ -16,7 +16,8 @@ The order is deliberate and mirrors the epic's:
 3. the adapter waits for a healthy pinned server, then opens one session;
 4. the untrusted input is sent as one structured turn; the reviewed head comes from the validated
    claim (`base.head_sha`), never from repository content;
-5. the tool parts the engine reports are counted against the ledger (tools, files, result bytes) and
+5. the tool parts the engine reports are counted against the ledger (tools, files, result bytes) —
+   a run whose tool parts cannot be observed fails closed with `dynamic_accounting_failed` — and
    the structured answer is validated with the typed findings parser;
 6. any limit, any engine exit and any unusable answer ends the run with a stable code; the whole
    owned process group is stopped and its private scratch directory removed. No fallback, no partial
@@ -199,20 +200,31 @@ class EngineClient:
     def messages(self, session_id: str) -> list[dict[str, Any]]:
         """The session's messages, for the tool parts the ledger counts.
 
-        The pinned server has a known structured-message codec defect (#85): the list may answer
-        400. The structured answer already arrived on the message POST, so a broken list is
-        tolerated; it is never replaced by an invented empty answer.
+        The tool, file and result-byte bounds are accounted from these parts, so a list that cannot
+        be read is not an empty one: the pinned server has a known structured-message codec defect
+        (#85) that answers this list with 400, and a run that cannot observe its tool parts fails
+        closed instead of reporting success with nothing counted.
         """
         status, body = self._call("GET", f"/session/{session_id}/message")
+        unobservable = EngineError(
+            ErrorCode.DYNAMIC_ACCOUNTING_FAILED, "the tool calls of the session cannot be observed"
+        )
         if status != 200:
-            return []
+            raise unobservable
         try:
             value: Any = json.loads(body)
         except ValueError:
-            return []
+            raise unobservable from None
         if not isinstance(value, list):
-            return []
-        return [item for item in value if isinstance(item, dict)]  # type: ignore[misc]
+            raise unobservable
+        messages: list[dict[str, Any]] = []
+        entries: list[Any] = value  # pyright: ignore[reportUnknownVariableType]
+        for item in entries:
+            message = as_object(item)
+            if message is None:
+                raise unobservable
+            messages.append(message)
+        return messages
 
     def abort(self, session_id: str) -> None:
         try:
@@ -457,7 +469,10 @@ class DynamicEngine:
         self.ledger.count_tool_call(name if isinstance(name, str) else "")
         state = as_object(block.get("state"))
         if state is None:
-            return
+            # The result the model received cannot be sized: not observed, so not accounted.
+            raise LimitError(
+                ErrorCode.DYNAMIC_ACCOUNTING_FAILED, "a tool part carries no observable result"
+            )
         path = _tool_path(state.get("input"))
         if path is not None:
             self.ledger.count_file(path)

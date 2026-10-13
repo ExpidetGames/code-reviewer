@@ -18,6 +18,7 @@ engine's own working directory, the export the runner gives it. Every key of the
       "message_status": 200,
       "messages_status": 200,      # 400 reproduces the pinned structured-message codec defect
       "messages": [ ... ],         # the session's messages, with tool parts
+      "messages_body": ...,        # any JSON as the 200 list answer (a malformed list)
       "spawn_helper": false        # leave a sleeping child in the engine's process group
     }
 
@@ -115,7 +116,7 @@ class Handler(BaseHTTPRequestHandler):
                 _trace({"messages_status": status})
                 self._answer(status, {"error": "Expected OutputFormatJsonSchema"})
                 return
-            self._answer(200, script.get("messages", []))
+            self._answer(200, script.get("messages_body", script.get("messages", [])))
             return
         self._answer(404, {"error": "not found"})
 

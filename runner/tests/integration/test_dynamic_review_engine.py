@@ -283,10 +283,11 @@ def test_the_adapter_drives_the_engine_and_returns_the_validated_findings(tmp_pa
     assert process_is_gone(helper)
 
 
-# #197-T13
-def test_the_runner_side_codec_tolerates_the_pinned_message_list_defect(tmp_path: Path) -> None:
-    # #85: with a stored JSON-schema format the message list answers 400; the structured answer
-    # still arrives on the message POST, so the run is valid.
+# #197-T05
+def test_a_run_whose_tool_parts_cannot_be_observed_fails_closed(tmp_path: Path) -> None:
+    # #85: with a stored JSON-schema format the pinned message list answers 400. The structured
+    # answer still arrived, but the tool limits could not be accounted for: the run is not a
+    # success with zero accounting.
     fixture = Fixture(
         tmp_path,
         {"answer": "structured", "findings": findings(), "messages_status": 400, "proxy_calls": 1},
@@ -295,8 +296,56 @@ def test_the_runner_side_codec_tolerates_the_pinned_message_list_defect(tmp_path
     with FakeUpstream() as upstream:
         answer = fixture.run(upstream)
 
-    assert answer.ok
+    assert not answer.ok
+    assert answer.findings is None
+    assert answer.error is not None
+    assert answer.error.code is ErrorCode.DYNAMIC_ACCOUNTING_FAILED
     assert any(entry.get("messages_status") == 400 for entry in fixture.traces())
+
+
+# #197-T05
+def test_a_malformed_message_list_or_tool_part_fails_closed(tmp_path: Path) -> None:
+    malformed: list[Any] = [
+        {"error": "not a list"},
+        "text",
+        [{"parts": []}, "not a message"],
+        # A tool part without a state: its result bytes cannot be counted.
+        [{"parts": [{"type": "tool", "callID": "c1", "tool": "read"}]}],
+    ]
+    for index, body in enumerate(malformed):
+        (tmp_path / str(index)).mkdir()
+        fixture = Fixture(
+            tmp_path / str(index),
+            {
+                "answer": "structured",
+                "findings": findings(),
+                "proxy_calls": 1,
+                "messages_body": body,
+            },
+        )
+
+        with FakeUpstream() as upstream:
+            answer = fixture.run(upstream)
+
+        assert not answer.ok, body
+        assert answer.error is not None
+        assert answer.error.code is ErrorCode.DYNAMIC_ACCOUNTING_FAILED, body
+
+
+# #197-T05
+def test_a_session_without_tool_calls_is_an_observed_empty_list_and_succeeds(
+    tmp_path: Path,
+) -> None:
+    fixture = Fixture(
+        tmp_path,
+        {"answer": "structured", "findings": findings(), "proxy_calls": 1, "messages": []},
+    )
+
+    with FakeUpstream() as upstream:
+        answer = fixture.run(upstream)
+
+    assert answer.ok
+    assert fixture.ledger.tool_calls == 0
 
 
 # #197-T13
