@@ -352,3 +352,91 @@ def test_the_transport_is_told_to_read_at_most_one_byte_past_the_response_bound(
     post(subject, request_body())
 
     assert upstream.limits == [1235]
+
+
+# #197-T10
+def test_a_request_that_names_a_route_or_destination_is_refused_and_never_forwarded() -> None:
+    for field in (
+        "provider",
+        "route",
+        "models",
+        "transforms",
+        "plugins",
+        "endpoint",
+        "base_url",
+        "api_base",
+        "url",
+    ):
+        upstream = Upstream()
+        subject = proxy(upstream)
+
+        response = post(subject, request_body(**{field: {"order": ["attacker-host"]}}))
+
+        assert error_code(response) == ErrorCode.DYNAMIC_POLICY_VIOLATION.value, field
+        assert upstream.requests == [], field
+        assert subject.ledger.model_calls == 0, field
+
+
+# #197-T10
+def test_only_the_allowlisted_request_fields_reach_the_provider() -> None:
+    upstream = Upstream()
+    subject = proxy(upstream)
+
+    response = post(
+        subject,
+        request_body(
+            temperature=0.1,
+            top_p=0.9,
+            seed=7,
+            stop=["END"],
+            parallel_tool_calls=False,
+            response_format={"type": "text"},
+            user="someone",
+            n=5,
+            logit_bias={"1": 100},
+            metadata={"anything": "else"},
+            reasoning={"effort": "high"},
+            unknown_future_field=True,
+        ),
+    )
+
+    assert response.status == 200
+    forwarded = json.loads(upstream.requests[0][1])
+    assert set(forwarded) == {
+        "model",
+        "messages",
+        "tools",
+        "tool_choice",
+        "temperature",
+        "top_p",
+        "seed",
+        "stop",
+        "parallel_tool_calls",
+        "response_format",
+        "max_tokens",
+    }
+    assert forwarded["model"] == "deepseek/deepseek-v4.1-flash"
+    assert forwarded["tool_choice"] == "required"
+
+
+# #197-T12
+def test_the_forwarded_output_bound_never_exceeds_the_trusted_limit() -> None:
+    # The capability descriptor allows 4096 output tokens.
+    cases: list[tuple[dict[str, Any], int]] = [
+        ({}, 4096),
+        ({"max_tokens": 100}, 100),
+        ({"max_tokens": 1_000_000}, 4096),
+        ({"max_completion_tokens": 1_000_000}, 4096),
+        ({"max_completion_tokens": 50}, 50),
+        ({"max_tokens": "lots"}, 4096),
+        ({"max_tokens": -5}, 4096),
+    ]
+    for extra, expected in cases:
+        upstream = Upstream()
+        subject = proxy(upstream)
+
+        assert post(subject, request_body(**extra)).status == 200
+
+        forwarded = json.loads(upstream.requests[0][1])
+        assert forwarded["max_tokens"] == expected, extra
+        assert "max_completion_tokens" not in forwarded

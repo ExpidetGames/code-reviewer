@@ -52,6 +52,39 @@ REQUIRED_TOOL_CHOICE = "required"
 STRUCTURED_OUTPUT_TOOL = "StructuredOutput"
 
 _REQUEST_TIMEOUT_SECONDS = 120.0
+# The only request fields that reach the provider. Everything else the engine sends is dropped, and
+# the destination, the model and the output bound come from trusted configuration, never from here.
+# `stream` is absent on purpose: a streaming request is refused, not downgraded.
+_FORWARDED_FIELDS = frozenset(
+    {
+        "messages",
+        "tools",
+        "tool_choice",
+        "parallel_tool_calls",
+        "temperature",
+        "top_p",
+        "frequency_penalty",
+        "presence_penalty",
+        "seed",
+        "stop",
+        "response_format",
+    }
+)
+# Fields that would steer a request to another route or destination. They are not merely dropped:
+# an engine that sends one is misbehaving and the run stops.
+_ROUTING_FIELDS = frozenset(
+    {
+        "provider",
+        "route",
+        "models",
+        "transforms",
+        "plugins",
+        "endpoint",
+        "base_url",
+        "api_base",
+        "url",
+    }
+)
 # `secrets.token_urlsafe(n)` yields ceil(4n/3) characters: the shortest acceptable capability.
 _MIN_CAPABILITY_CHARS = -(-PROXY_CAPABILITY_BYTES * 4 // 3)
 _BEARER = "bearer "
@@ -230,10 +263,11 @@ class ModelProxy:
         self.ledger.check_request_bytes(len(body))
         request = self._decode(body)
         self._check_model(request)
+        # A request the policy refuses spends nothing: build it before reserving the call.
+        forwarded = self._forward_body(request)
         reservation = self.ledger.reserve_call(
             body.decode("utf-8", errors="replace"), output_tokens=self._output_allowance(request)
         )
-        forwarded = self._forward_body(request)
         status, response_body = self._post(
             self.upstream_url,
             forwarded,
@@ -284,17 +318,25 @@ class ModelProxy:
         return min(raw, self.capabilities.max_output_tokens)
 
     def _forward_body(self, request: dict[str, Any]) -> bytes:
-        """The request as the trusted destination takes it: the model is rewritten, nothing else is
-        added. The tool choice the engine asked for is kept — refusing it would be a silent
-        downgrade."""
-        forwarded = dict(request)
-        forwarded["model"] = self.upstream_model
-        if forwarded.get("stream") is True:
+        """The request as the trusted destination takes it: built from an allowlist of fields.
+
+        The model, the output bound and (through the transport) the destination and credential are
+        set here from trusted configuration; whatever else the caller sent is dropped. The tool
+        choice the engine asked for is kept — refusing it would be a silent downgrade."""
+        if request.get("stream") is True:
             raise LimitError(
                 ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED,
                 "streaming responses are not accounted for yet",
             )
-        forwarded.pop("stream", None)
+        if _ROUTING_FIELDS & request.keys():
+            raise LimitError(
+                ErrorCode.DYNAMIC_POLICY_VIOLATION, "the request tries to choose a route"
+            )
+        forwarded: dict[str, Any] = {
+            field: value for field, value in request.items() if field in _FORWARDED_FIELDS
+        }
+        forwarded["model"] = self.upstream_model
+        forwarded["max_tokens"] = self._output_allowance(request)
         return json.dumps(forwarded).encode("utf-8")
 
     @staticmethod
