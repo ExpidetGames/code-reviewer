@@ -221,3 +221,32 @@ def test_unterminated_private_key_markers_are_redacted_without_a_catastrophic_re
     result = redact_text(text, Redactor(()))
     assert time.monotonic() - started < 10
     assert "PRIVATE KEY" not in result
+
+
+# #196-T05
+@pytest.mark.parametrize(
+    "header,size", [("RSA PRIVATE KEY", 10 * 1024), ("PGP PRIVATE KEY BLOCK", 20 * 1024)]
+)
+def test_a_long_terminated_private_key_block_is_redacted_in_full(header: str, size: int) -> None:
+    body = ("A" * 63 + "\n") * (size // 64)
+    text = f"before\n-----BEGIN {header}-----\n{body}-----END {header}-----\nafter\n"
+    assert redact_text(text, Redactor(())) == "before\n[REDACTED]\nafter\n"
+
+
+# #196-T05
+def test_an_unterminated_private_key_block_is_redacted_to_the_end_of_the_file() -> None:
+    text = "before\n-----BEGIN PRIVATE KEY-----\n" + "secret-body\n" * 2000
+    assert redact_text(text, Redactor(())) == "before\n[REDACTED]"
+
+
+# #196-T05
+def test_unterminated_markers_after_a_long_block_stay_linear() -> None:
+    import time
+
+    block = "-----BEGIN PRIVATE KEY-----\n" + "A" * 100_000 + "\n-----END PRIVATE KEY-----\n"
+    line = "-----BEGIN RSA PRIVATE KEY-----\n"
+    text = block + line * (512 * 1024 // len(line))
+    started = time.monotonic()
+    result = redact_text(text, Redactor(()))
+    assert time.monotonic() - started < 10
+    assert "PRIVATE KEY" not in result and "AAAA" not in result

@@ -32,9 +32,6 @@ _CREDENTIAL_NAMES = {
 }
 _PRIVATE_KEY_BEGIN = "-----BEGIN "
 _PRIVATE_KEY_END = "-----END "
-# A recognized PEM/PGP key block is small; bounding the search span keeps redaction linear
-# even for an allowed text file that repeats a BEGIN marker without ever closing it.
-_MAX_KEY_BLOCK = 8 * 1024
 _ASSIGNMENT = re.compile(
     r"(?im)\b(?:password|passwd|api[_-]?key|access[_-]?token|secret[_-]?key|"
     r"client[_-]?secret|private[_-]?key|token)\b[\"']?(?P<prefix>\s*[:=]\s*)"
@@ -44,9 +41,8 @@ _PLACEHOLDERS = {"placeholder", "changeme", "example", "your-api-key", "your-tok
 
 
 def _private_key_end(text: str, search: int) -> int | None:
-    limit = search + _MAX_KEY_BLOCK
     while True:
-        marker = text.find(_PRIVATE_KEY_END, search, limit)
+        marker = text.find(_PRIVATE_KEY_END, search)
         if marker < 0:
             return None
         after = marker + len(_PRIVATE_KEY_END)
@@ -61,7 +57,12 @@ def _is_private_key_header(header: str) -> bool:
 
 
 def _redact_private_keys(text: str) -> str:
-    """Linearly replace whole PEM/PGP private-key blocks, without a catastrophic regex."""
+    """Linearly replace whole PEM/PGP private-key blocks, without a catastrophic regex.
+
+    One forward pass pairs each BEGIN with the next valid END, however long the block. An
+    unterminated block is redacted to the end of the text, so the scan never restarts behind
+    a BEGIN and stays linear.
+    """
     if _PRIVATE_KEY_BEGIN not in text:
         return text
     result: list[str] = []
@@ -80,7 +81,7 @@ def _redact_private_keys(text: str) -> str:
         end = _private_key_end(text, header_end + 5)
         result.append(text[position:start])
         result.append("[REDACTED]")
-        position = end if end is not None else header_end + 5
+        position = end if end is not None else len(text)
 
 
 def _looks_like_secret(value: str) -> bool:
