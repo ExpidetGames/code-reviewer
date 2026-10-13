@@ -165,9 +165,9 @@ second status comment) and reconciles each run with the earlier ones:
   written can always be read back; `fit_state` makes a larger state fit, deterministically: the
   oldest resolved history goes first (no visible note; a trimmed id can only re-open as a new
   finding), then the lowest priority and, within a priority, oldest active findings. Those are
-  counted in `omittedFindings` and shown as "N further findings not shown"; they are never marked
-  resolved. `render_previous_state` is the bounded text handed to the model so it can keep ids stable and name
-  resolved ids.
+  counted in `omittedFindings` for the current write and shown as "N further findings not shown"
+  (cleared when a later write fits); they are never marked resolved. `render_previous_state` is the
+  bounded text handed to the model so it can keep ids stable and name resolved ids.
 - `dynamic_review/reconcile.py` applies the fixed core's rules to untrusted model output: a finding
   is resolved only when the run names its id (`resolvedIds`), an omitted or unreadable previous
   finding stays active (no resolution by absence), a moved or rephrased finding keeps its id, a

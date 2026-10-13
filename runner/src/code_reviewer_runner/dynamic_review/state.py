@@ -82,9 +82,8 @@ class ReviewState:
     """The active findings, the resolved history and the exact head they are current as of.
 
     `findings` is newest first: the findings of the latest run, then the carried-over ones in their
-    earlier order. `omitted_findings` counts active findings that were dropped to keep the state
-    within its caps (never resolved): "at least this many", since a dropped finding that the model
-    raises again is counted again if it is dropped again.
+    earlier order. `omitted_findings` counts active findings that were dropped in the current write
+    to keep the state within its caps (never resolved); it is not carried forward across writes.
     """
 
     reviewed_sha: str
@@ -263,6 +262,7 @@ def fit_state(state: ReviewState) -> ReviewState:
 
     A dropped active finding is only counted in `omitted_findings`; it is never marked resolved.
     """
+    total_findings = len(state.findings)
     if len(state.findings) > MAX_FINDINGS:
         state = _keep_findings(state, MAX_FINDINGS)
     if _fits_budget(state):
@@ -276,8 +276,11 @@ def fit_state(state: ReviewState) -> ReviewState:
         return replace(state, resolved=resolved[len(resolved) - kept :])
     state = replace(state, resolved=())
     findings = len(state.findings)
-    count = _largest_fitting(findings, lambda count: _fits_budget(_keep_findings(state, count)))
-    return _keep_findings(state, max(count, 0))
+    count = _largest_fitting(
+        findings,
+        lambda count: _fits_budget(_keep_findings(state, count, total_findings=total_findings)),
+    )
+    return _keep_findings(state, max(count, 0), total_findings=total_findings)
 
 
 def _fits_budget(state: ReviewState) -> bool:
@@ -299,7 +302,9 @@ def _largest_fitting(limit: int, fits: Callable[[int], bool]) -> int:
     return low
 
 
-def _keep_findings(state: ReviewState, count: int) -> ReviewState:
+def _keep_findings(
+    state: ReviewState, count: int, *, total_findings: int | None = None
+) -> ReviewState:
     if count >= len(state.findings):
         return state
     ranked = sorted(
@@ -307,10 +312,11 @@ def _keep_findings(state: ReviewState, count: int) -> ReviewState:
         key=lambda index: (_PRIORITY_RANK[state.findings[index].priority], index),
     )
     kept = sorted(ranked[:count])
+    total = len(state.findings) if total_findings is None else total_findings
     return replace(
         state,
         findings=tuple(state.findings[index] for index in kept),
-        omitted_findings=min(MAX_OMITTED, state.omitted_findings + len(state.findings) - len(kept)),
+        omitted_findings=min(MAX_OMITTED, total - len(kept)),
     )
 
 

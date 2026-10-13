@@ -103,7 +103,6 @@ def reconcile(previous: ReviewState | None, run: DynamicFindings) -> ReviewState
         reviewed_sha=run.reviewed_sha,
         findings=tuple(active),
         resolved=tuple(resolved),
-        omitted_findings=prior.omitted_findings,
     )
 
 

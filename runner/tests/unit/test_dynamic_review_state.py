@@ -12,7 +12,9 @@ import json
 
 import pytest
 
-from code_reviewer_runner.dynamic_findings import Finding
+from code_reviewer_runner.dynamic_findings import DynamicFindings, Finding
+from code_reviewer_runner.dynamic_review.reconcile import reconcile
+from code_reviewer_runner.dynamic_review.render import render_comment
 from code_reviewer_runner.dynamic_review.state import (
     MARKER_PREFIX,
     MARKER_SUFFIX,
@@ -22,6 +24,7 @@ from code_reviewer_runner.dynamic_review.state import (
     ReviewState,
     StateError,
     decode_state,
+    empty_state,
     encode_state,
     fit_state,
     parse_state_payload,
@@ -231,20 +234,53 @@ def test_dropped_findings_are_never_recorded_as_resolved() -> None:
 
 
 # #199-T10
-def test_the_omitted_count_accumulates_across_writes_and_round_trips() -> None:
-    first = fit_state(ReviewState(reviewed_sha=SHA, findings=many(33, "a"), resolved=()))
-    second = fit_state(
-        ReviewState(
-            reviewed_sha=SHA,
-            findings=(*first.findings, *many(4, "b")),
-            resolved=(),
-            omitted_findings=first.omitted_findings,
-        )
-    )
+def test_re_raising_the_same_findings_shows_only_the_current_dropped_count_and_clears() -> None:
+    sha1 = "1" * 40
+    sha2 = "2" * 40
+    sha3 = "3" * 40
+    findings_push1 = many(35, "f", reviewed_sha=sha1)
+    run1 = DynamicFindings(reviewed_sha=sha1, findings=findings_push1, resolved_ids=())
+    reconciled1 = reconcile(empty_state(), run1)
+    comment1 = render_comment(reconciled1, repository="acme/repo")
+    state1 = decode_state(comment1)
 
-    assert first.omitted_findings == 3
-    assert second.omitted_findings == 7
-    assert decode_state(encode_state(second)) == second
+    assert state1 is not None
+    assert len(state1.findings) == 30
+    assert state1.omitted_findings == 5
+    assert "5 further findings not shown" in comment1
+    assert decode_state(encode_state(state1)) == state1
+
+    # Push 2 re-raises the same 35 findings: still 5 dropped, does not accumulate.
+    findings_push2 = tuple(
+        finding(f.id, title=f.title, path=f.path, reviewed_sha=sha2) for f in findings_push1
+    )
+    run2 = DynamicFindings(reviewed_sha=sha2, findings=findings_push2, resolved_ids=())
+    reconciled2 = reconcile(state1, run2)
+    comment2 = render_comment(reconciled2, repository="acme/repo")
+    state2 = decode_state(comment2)
+
+    assert state2 is not None
+    assert len(state2.findings) == 30
+    assert state2.omitted_findings == 5
+    assert "5 further findings not shown" in comment2
+    assert decode_state(encode_state(state2)) == state2
+
+    # Push 3 has no overflow (2 active findings): no "further findings" line, count clears.
+    kept_ids = {f.id for f in findings_push1[:2]}
+    resolved_ids = tuple(f.id for f in state2.findings if f.id not in kept_ids)
+    findings_push3 = tuple(
+        finding(f.id, title=f.title, path=f.path, reviewed_sha=sha3) for f in findings_push1[:2]
+    )
+    run3 = DynamicFindings(reviewed_sha=sha3, findings=findings_push3, resolved_ids=resolved_ids)
+    reconciled3 = reconcile(state2, run3)
+    comment3 = render_comment(reconciled3, repository="acme/repo")
+    state3 = decode_state(comment3)
+
+    assert state3 is not None
+    assert len(state3.findings) == 2
+    assert state3.omitted_findings == 0
+    assert "further findings" not in comment3
+    assert decode_state(encode_state(state3)) == state3
 
 
 # #199-T10

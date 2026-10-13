@@ -140,9 +140,9 @@ def test_summary_counts_groups_by_priority() -> None:
 
 
 # #199-T10
-def test_the_count_of_dropped_findings_is_carried_forward() -> None:
+def test_a_new_reconcile_starts_with_zero_omitted_findings() -> None:
     prior = replace(state(finding("f-1")), omitted_findings=4)
 
     result = reconcile(prior, run(finding("f-2", title="Other"), sha=NEXT))
 
-    assert result.omitted_findings == 4
+    assert result.omitted_findings == 0
