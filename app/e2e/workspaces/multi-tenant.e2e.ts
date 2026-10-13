@@ -141,7 +141,7 @@ test.describe("a multi-tenant instance", () => {
     await page
       .getByLabel("Maximum number of workspaces one user may own")
       .fill("1");
-    await page.getByRole("button", { name: "Save limit" }).click();
+    await page.getByRole("button", { name: "Save instance settings" }).click();
     await expect(page.getByText("Saved.")).toBeVisible();
 
     const response = await page.request.post("/api/workspaces", {

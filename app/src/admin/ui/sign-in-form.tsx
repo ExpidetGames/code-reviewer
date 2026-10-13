@@ -1,11 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
 "use client";
-// The ways to sign in: email with password and GitHub. At least one stays on; GitHub only when it is
-// configured; GitHub as the only way needs your own linked GitHub account. The server judges every
-// change (src/admin/sign-in-methods.ts); the form shows what is not possible and why.
+// The ways to sign in (#181): email with password and GitHub, as one card with one form. At least one
+// stays on; GitHub only while it is configured; GitHub as the only way needs the admin's own GitHub
+// account linked. The server judges every change (src/admin/sign-in-methods.ts); the form shows what is
+// not possible and why.
 import { useId, useState, type FormEvent } from "react";
-import { Button } from "../../ui/button.tsx";
+import { Button } from "../../components/button.tsx";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "../../components/ui/card.tsx";
+import {
+  Field,
+  FieldDescription,
+  FieldLabel,
+} from "../../components/ui/field.tsx";
+import { Switch } from "../../components/ui/switch.tsx";
 import type { AdminSettingsView } from "../service.ts";
 import type { AdminApi } from "./api.ts";
 import { LastChanged } from "./last-changed.tsx";
@@ -32,49 +45,65 @@ export function SignInMethodsForm({
   }
 
   return (
-    <form onSubmit={submit} className="settings-form" aria-labelledby={ids}>
-      <h2 id={ids}>Ways to sign in</h2>
-      <fieldset className="setup-options">
-        <legend className="sr-only">Ways to sign in</legend>
-        <label className="setup-option">
-          <input
-            type="checkbox"
-            checked={emailPassword}
-            onChange={(event) => setEmailPassword(event.target.checked)}
-          />
-          <span>
-            <strong>Email with password</strong>
-            <span className="muted">
-              The admin account always signs in this way unless you switch it
-              off.
+    <form
+      onSubmit={submit}
+      aria-label="Ways to sign in"
+      className="flex max-w-[44rem] flex-col gap-6"
+    >
+      <Card>
+        <CardHeader>
+          <CardTitle>Ways to sign in</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <Field orientation="horizontal" className="items-start">
+            <span className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center">
+              <Switch
+                id={`${ids}-email`}
+                checked={emailPassword}
+                onCheckedChange={setEmailPassword}
+                aria-describedby={`${ids}-email-hint`}
+              />
             </span>
-          </span>
-        </label>
-        <label className="setup-option">
-          <input
-            type="checkbox"
-            checked={github}
-            disabled={!settings.githubConfigured}
-            onChange={(event) => setGithub(event.target.checked)}
-          />
-          <span>
-            <strong>GitHub</strong>
-            <span className="muted">
-              {settings.githubConfigured
-                ? "Sign in with the GitHub App. Switch email with password off to make this the only way, which needs your own GitHub account linked to this admin account."
-                : "Not available: set up the GitHub App and enable its sign-in under Integrations first."}
+            <div className="flex flex-col gap-1">
+              <FieldLabel htmlFor={`${ids}-email`}>
+                Email with password
+              </FieldLabel>
+              <FieldDescription id={`${ids}-email-hint`}>
+                The admin account always signs in this way unless you switch it
+                off.
+              </FieldDescription>
+            </div>
+          </Field>
+          <Field orientation="horizontal" className="items-start">
+            <span className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center">
+              <Switch
+                id={`${ids}-github`}
+                checked={github}
+                onCheckedChange={setGithub}
+                disabled={!settings.githubConfigured}
+                aria-describedby={`${ids}-github-hint`}
+              />
             </span>
-          </span>
-        </label>
-      </fieldset>
-      <p className="muted small">
-        Switching a way off does not sign anybody out: people who are signed in
-        stay signed in until their session ends or they sign out.
-      </p>
-      <LastChanged setting={settings.signInMethods} />
-      <div className="form-actions">
-        <Button type="submit" disabled={pending}>
-          {pending ? "Saving..." : "Save ways to sign in"}
+            <div className="flex flex-col gap-1">
+              <FieldLabel htmlFor={`${ids}-github`}>GitHub</FieldLabel>
+              <FieldDescription id={`${ids}-github-hint`}>
+                {settings.githubConfigured
+                  ? "Sign in with the GitHub App. Switch email with password off to make this the only way, which needs your own GitHub account linked to this admin account."
+                  : "Not available: set up the GitHub App and enable its sign-in under Integrations first."}
+              </FieldDescription>
+            </div>
+          </Field>
+          <FieldDescription>
+            Switching a way off does not sign anybody out: people who are signed
+            in stay signed in until their session ends or they sign out.
+          </FieldDescription>
+          <LastChanged setting={settings.signInMethods} />
+        </CardContent>
+      </Card>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <Button type="submit" loading={pending} loadingLabel="Saving">
+          Save ways to sign in
         </Button>
         <SaveResult status={status} />
       </div>

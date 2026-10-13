@@ -14,6 +14,9 @@ describe("which paths belong to the admin portal", () => {
   it.each([
     "/admin",
     "/admin/setup",
+    "/admin/setup/instance",
+    "/admin/setup/sign-up",
+    "/admin/setup/sign-in",
     "/admin/integrations",
     "/admin/mail/anything/below",
     "/api/admin",
@@ -66,6 +69,9 @@ describe("where a portal path is served", () => {
   it.each([
     ["/admin", "/instance-portal"],
     ["/admin/setup", "/instance-portal/setup"],
+    ["/admin/setup/instance", "/instance-portal/setup/instance"],
+    ["/admin/setup/sign-up", "/instance-portal/setup/sign-up"],
+    ["/admin/setup/sign-in", "/instance-portal/setup/sign-in"],
     ["/admin/mail/anything/below", "/instance-portal/mail/anything/below"],
     ["/api/admin/settings", "/api/instance-portal/settings"],
     ["/%61dmin/setup", "/instance-portal/setup"],
