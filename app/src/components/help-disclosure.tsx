@@ -17,11 +17,18 @@ import {
 
 export function HelpDisclosure({
   label,
+  ariaLabel,
   children,
   className,
 }: {
   /** The trigger text, a short question or noun phrase, for example "What makes a good password". */
   label: string;
+  /**
+   * The accessible name when the same visible label repeats on one screen (one disclosure per row):
+   * a distinct name per control, for example "Evidence for acme". Left out, the visible label is the
+   * name.
+   */
+  ariaLabel?: string;
   /** The explanation itself. */
   children: ReactNode;
   className?: string;
@@ -38,6 +45,7 @@ export function HelpDisclosure({
       <CollapsibleTrigger asChild>
         <button
           type="button"
+          aria-label={ariaLabel}
           aria-controls={contentId}
           className="inline-flex min-h-11 cursor-pointer items-center gap-1.5 rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
         >
