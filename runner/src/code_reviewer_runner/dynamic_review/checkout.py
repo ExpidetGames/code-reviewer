@@ -168,7 +168,8 @@ def prepare_content(
         if previous is not None:
             required |= changed_paths(head, previous)
         omissions: dict[str, Omission] = {}
-        skipped: dict[str, Skipped] = {}
+        # Per tree (head, base, previous): changed paths whose content is binary or oversized.
+        tree_skips: list[dict[str, SkipReason]] = [{}, {}, {}]
         texts: dict[str, str] = {}
         cache: dict[str, str | None] = {}
         eligible: set[str] = set()
@@ -208,11 +209,8 @@ def prepare_content(
                 for path, omission in omissions.items()
                 if path in head or path in base_tree
             }
-            skipped = {
-                path: skip for path, skip in skipped.items() if path in head or path in base_tree
-            }
         # Apply policy to every endpoint before any blob reads, including deleted evidence.
-        for tree in (head, base_tree, previous or {}):
+        for index, tree in enumerate((head, base_tree, previous or {})):
             for path, entry in tree.items():
                 budget.check()
                 reason = omission_reason(path, entry.mode)
@@ -240,17 +238,31 @@ def prepare_content(
                         skip_reason = _skip_reason(reason)
                         if skip_reason is None:
                             raise CheckoutError()
-                        skipped[path] = Skipped(redact_text(path, redactor), skip_reason)
+                        tree_skips[index][path] = skip_reason
+        # Classify per comparison: a path is skipped in a diff only when one of that diff's two
+        # sides is binary or oversized, so a third revision cannot hide a text change.
+        base_skips = _pair_skips(head, base_tree, tree_skips[0], tree_skips[1])
+        previous_skips = (
+            _pair_skips(head, previous, tree_skips[0], tree_skips[2]) if previous is not None else {}
+        )
         diff = endpoint_diff(
-            _diffable(base_tree, skipped), _diffable(head, skipped), cache, budget, redactor
+            _diffable(base_tree, base_skips), _diffable(head, base_skips), cache, budget, redactor
         )
         previous_diff = (
             endpoint_diff(
-                _diffable(previous, skipped), _diffable(head, skipped), cache, budget, redactor
+                _diffable(previous, previous_skips),
+                _diffable(head, previous_skips),
+                cache,
+                budget,
+                redactor,
             )
             if previous is not None
             else ""
         )
+        skipped = {
+            path: Skipped(redact_text(path, redactor), reason)
+            for path, reason in {**previous_skips, **base_skips}.items()
+        }
         metadata = _bounded_text(metadata, budget, redactor)
         prior_state = _bounded_text(prior_state, budget, redactor)
         export = directory / "checkout"
@@ -347,7 +359,20 @@ def _skip_reason(reason: OmissionReason) -> SkipReason | None:
     return None
 
 
-def _diffable(tree: dict[str, Entry], skipped: dict[str, Skipped]) -> dict[str, Entry]:
+def _pair_skips(
+    left: dict[str, Entry],
+    right: dict[str, Entry],
+    left_skips: dict[str, SkipReason],
+    right_skips: dict[str, SkipReason],
+) -> dict[str, SkipReason]:
+    return {
+        path: left_skips.get(path) or right_skips[path]
+        for path in changed_paths(left, right)
+        if path in left_skips or path in right_skips
+    }
+
+
+def _diffable(tree: dict[str, Entry], skipped: dict[str, SkipReason]) -> dict[str, Entry]:
     return {path: entry for path, entry in tree.items() if path not in skipped}
 
 

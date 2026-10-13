@@ -115,14 +115,18 @@ payload is executed/fetched. UTF-8 text with disallowed control bytes, NUL or in
 binary and omitted. Known credential paths (including `.env*` except `.env.example`, private keys,
 credential stores and recognized credential-shaped names) are denied before hydration/reads.
 Known job credentials, token shapes, private-key blocks and credential assignments are redacted
-in file text, diffs, metadata and prior state. Harmless example placeholders remain readable.
+in file text, diffs, metadata and prior state. A private-key block is redacted from its `BEGIN`
+line to the next valid `END` line however long it is; an unterminated block is redacted to the end
+of the text. Harmless example placeholders remain readable.
 
 Omissions use `OmissionReason` stable values and a bounded explicit manifest. A changed or deleted
 **denied or unsafe** file needed by either comparison (engine discovery, credential path, symlink
 or other non-regular mode) fails with `checkout_incomplete`. A changed **binary** file or a changed
 file over 512 KiB is instead excluded from the checkout and listed in the evidence `skipped` array
 with the stable reason code `binary` or `too_large`, so the review can say the file was not
-reviewed; it never fails the job. Unchanged exclusions remain visible in the manifest; consumers
+reviewed; it never fails the job. A file is skipped per comparison: only when one of the two sides
+of that diff is binary or oversized, so a binary earlier revision does not hide a text change from
+the base-to-head diff. Unchanged exclusions remain visible in the manifest; consumers
 must retain that limitation rather than claim that excluded content was reviewed. No excluded
 config/plugin payload is relocated into another exposed file. Sanitized prior state is retained,
 including in full mode; checkout never infers a finding resolution. #199 owns parsing and lossless
