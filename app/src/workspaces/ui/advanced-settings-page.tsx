@@ -3,7 +3,8 @@
 // The Advanced sub-page of the workspace settings (#178): the destructive actions, each in its own
 // danger zone with a confirmation before the request. Removing the workspace key needs
 // `manage_llm_key`, resetting the review defaults needs `manage_review_defaults`; a person with
-// neither only reads that these actions are not theirs.
+// neither only reads that these actions are not theirs. `RemoveWorkspaceKey` owns whether the key is
+// still there, so its confirmation survives the refresh that removes the zone (#178 review M1).
 import type { LlmKeyApi } from "../../llm/ui/api.ts";
 import { RemoveWorkspaceKey } from "../../llm/ui/remove-workspace-key.tsx";
 import type { SettingsApi } from "../../review-settings/ui/api.ts";
@@ -29,24 +30,23 @@ export function AdvancedSettingsPageContent({
   removeApi?: LlmKeyApi;
   resetApi?: Pick<SettingsApi, "save">;
 }) {
-  const showRemove = canManageKey && keyConfigured;
-  const showReset = canResetDefaults;
   return (
     <SettingsScreen workspaceSlug={workspaceSlug} current="advanced">
       <div className="flex max-w-[64rem] flex-col gap-6">
-        {showRemove ? (
+        {canManageKey ? (
           <RemoveWorkspaceKey
             workspaceSlug={workspaceSlug}
+            keyConfigured={keyConfigured}
             {...(removeApi === undefined ? {} : { api: removeApi })}
           />
         ) : null}
-        {showReset ? (
+        {canResetDefaults ? (
           <ResetReviewDefaults
             workspaceSlug={workspaceSlug}
             {...(resetApi === undefined ? {} : { api: resetApi })}
           />
         ) : null}
-        {!showRemove && !showReset ? (
+        {!canManageKey && !canResetDefaults ? (
           <p className="text-sm text-muted-foreground">
             Only an Admin or an Owner of this workspace can remove the key or
             reset the defaults.

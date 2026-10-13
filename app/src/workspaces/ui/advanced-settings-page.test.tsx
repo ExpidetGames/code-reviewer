@@ -49,13 +49,13 @@ function renderAdvanced(
 }
 
 describe("the Advanced settings sub-page", () => {
-  // #178-T04
-  it("confirms removing the workspace key in a dialog before the request", async () => {
+  // #178-T04, #178 review M1
+  it("confirms removing the workspace key before the request, and keeps the confirmation after the refresh", async () => {
     const user = userEvent.setup();
     const api = fakeKeyApi();
-    const { container } = renderAdvanced({ removeApi: api });
+    const view = renderAdvanced({ removeApi: api });
 
-    expect(container.querySelectorAll("form")).toHaveLength(0);
+    expect(view.container.querySelectorAll("form")).toHaveLength(0);
     await user.click(screen.getByRole("button", { name: "Remove the key…" }));
     expect(api.remove).not.toHaveBeenCalled();
 
@@ -63,6 +63,22 @@ describe("the Advanced settings sub-page", () => {
     await waitFor(() => expect(api.remove).toHaveBeenCalledTimes(1));
     expect(await screen.findByText("The key is removed.")).toBeTruthy();
     expect(navigation.refresh).toHaveBeenCalled();
+
+    // What `router.refresh()` does: the server re-renders the page with the key gone. The zone goes,
+    // the confirmation stays (the component owns the state, so the refresh does not unmount it).
+    view.rerender(
+      <AdvancedSettingsPageContent
+        workspaceSlug="acme"
+        canManageKey
+        keyConfigured={false}
+        canResetDefaults
+        removeApi={api}
+      />,
+    );
+    expect(screen.getByText("The key is removed.")).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: "Remove the key…" }),
+    ).toBeNull();
   });
 
   it("confirms resetting every review default before the request", async () => {
