@@ -103,6 +103,20 @@ export type AfterDeactivate = (
   executor: Kysely<Database>,
 ) => Promise<void>;
 
+/** Computes the next settings from the stored ones, inside the write transaction (`updateSettingsWith`). */
+export type ChangeProjectSettings = (
+  current: ProjectSettings,
+) => ProjectSettings;
+
+/**
+ * Runs inside the settings write transaction, with the project after the change and the executor to
+ * use for its own queries. A failure rolls the write back, so no partial setting change is left.
+ */
+export type AfterSettingsChange = (
+  project: StoredProject,
+  executor: Kysely<Database>,
+) => Promise<void>;
+
 export type ProjectsRepository = {
   /** The project of a repository, switched on or not. */
   get(repositoryId: string): Promise<StoredProject | undefined>;
@@ -136,10 +150,24 @@ export type ProjectsRepository = {
    * gets one that is switched off, so settings can be saved before the first activation. Returns
    * the project after the change, or undefined (nothing written) when the repository does not exist
    * or the platform no longer lists it and it has no project.
+   *
+   * `afterChange` runs in the same transaction, so a change and whatever it triggers commit together
+   * or not at all (`AfterSettingsChange`).
    */
   updateSettings(
     repositoryId: string,
     settings: ProjectSettings,
+    afterChange?: AfterSettingsChange,
+  ): Promise<StoredProject | undefined>;
+  /**
+   * Like `updateSettings`, but the next settings are computed from the stored ones inside the
+   * transaction: `change` reads what is stored and returns what should be stored. This is the one
+   * way a save can preserve fields it does not touch without a lost update between two savers.
+   */
+  updateSettingsWith(
+    repositoryId: string,
+    change: ChangeProjectSettings,
+    afterChange?: AfterSettingsChange,
   ): Promise<StoredProject | undefined>;
   /**
    * Every repository the platform lists, plus the ones that disappeared but have a project, joined
@@ -317,6 +345,72 @@ export function createProjectsRepository(
     };
   }
 
+  /**
+   * The one settings write: replaces or creates the project row of a repository with the settings
+   * `change` computes from the stored ones, in one transaction. `afterChange` runs in that same
+   * transaction, so the write and whatever it triggers commit together or roll back together.
+   */
+  function applySettings(
+    repositoryId: string,
+    change: ChangeProjectSettings,
+    afterChange?: AfterSettingsChange,
+  ): Promise<StoredProject | undefined> {
+    return inTransaction(async (trx) => {
+      const timestamp = formatTimestamp(now());
+      const existing = await trx
+        .selectFrom("projects")
+        .selectAll()
+        .where("repository_id", "=", repositoryId)
+        .where("repository_id", "in", (eb) =>
+          eb
+            .selectFrom("repositories")
+            .select("id")
+            .where("workspace_id", "=", workspaceId),
+        )
+        .executeTakeFirst();
+      if (existing !== undefined) {
+        const next = change(readSettings(existing.settings, existing.id, warn));
+        const row = await trx
+          .updateTable("projects")
+          .set({ settings: encodeJson(next), updated_at: timestamp })
+          .where("id", "=", existing.id)
+          .returningAll()
+          .executeTakeFirstOrThrow();
+        const project = toStored(row);
+        if (afterChange !== undefined) await afterChange(project, trx);
+        return project;
+      }
+
+      // No project yet: make one that is switched off. The repository must be one the list shows
+      // (the platform still lists it). Unlike activating, a suspended or removed installation does
+      // not matter: the row is off and only keeps settings, which is also what the settings page
+      // of an unavailable repository promises ("its settings are kept").
+      const repository = await trx
+        .selectFrom("repositories")
+        .select("id")
+        .where("workspace_id", "=", workspaceId)
+        .where("id", "=", repositoryId)
+        .where("active", "=", encodeBoolean(true))
+        .executeTakeFirst();
+      if (repository === undefined) return undefined;
+      const row = await trx
+        .insertInto("projects")
+        .values({
+          id: newId(),
+          repository_id: repositoryId,
+          active: encodeBoolean(false),
+          settings: encodeJson(change({})),
+          created_at: timestamp,
+          updated_at: timestamp,
+        })
+        .returningAll()
+        .executeTakeFirstOrThrow();
+      const project = toStored(row);
+      if (afterChange !== undefined) await afterChange(project, trx);
+      return project;
+    });
+  }
+
   return {
     async get(repositoryId) {
       const row = await db
@@ -452,49 +546,12 @@ export function createProjectsRepository(
       });
     },
 
-    updateSettings(repositoryId, settings) {
-      return inTransaction(async (trx) => {
-        const timestamp = formatTimestamp(now());
-        const updated = await trx
-          .updateTable("projects")
-          .set({ settings: encodeJson(settings), updated_at: timestamp })
-          .where("repository_id", "=", repositoryId)
-          .where("repository_id", "in", (eb) =>
-            eb
-              .selectFrom("repositories")
-              .select("id")
-              .where("workspace_id", "=", workspaceId),
-          )
-          .returningAll()
-          .executeTakeFirst();
-        if (updated !== undefined) return toStored(updated);
+    updateSettings(repositoryId, settings, afterChange) {
+      return applySettings(repositoryId, () => settings, afterChange);
+    },
 
-        // No project yet: make one that is switched off. The repository must be one the list shows
-        // (the platform still lists it). Unlike activating, a suspended or removed installation does
-        // not matter: the row is off and only keeps settings, which is also what the settings page
-        // of an unavailable repository promises ("its settings are kept").
-        const repository = await trx
-          .selectFrom("repositories")
-          .select("id")
-          .where("workspace_id", "=", workspaceId)
-          .where("id", "=", repositoryId)
-          .where("active", "=", encodeBoolean(true))
-          .executeTakeFirst();
-        if (repository === undefined) return undefined;
-        const row = await trx
-          .insertInto("projects")
-          .values({
-            id: newId(),
-            repository_id: repositoryId,
-            active: encodeBoolean(false),
-            settings: encodeJson(settings),
-            created_at: timestamp,
-            updated_at: timestamp,
-          })
-          .returningAll()
-          .executeTakeFirstOrThrow();
-        return toStored(row);
-      });
+    updateSettingsWith(repositoryId, change, afterChange) {
+      return applySettings(repositoryId, change, afterChange);
     },
 
     async list() {

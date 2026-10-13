@@ -11,9 +11,10 @@ import { describe, expect, it } from "vitest";
 import { ReviewSettingsError } from "./errors.ts";
 import {
   setupReviewSettings,
+  TEST_DEFAULT_SKILL,
   TEST_MODEL,
 } from "../test-support/review-settings-harness.ts";
-import { DEFAULT_MAX_TOKENS } from "./settings.ts";
+import { DEFAULT_DYNAMIC_MODEL, DEFAULT_MAX_TOKENS } from "./settings.ts";
 
 async function refusal(
   promise: Promise<unknown>,
@@ -488,5 +489,250 @@ describe("resolving the settings for a review", () => {
     expect(
       await app.service.resolveForRepository(app.second.id),
     ).toBeUndefined();
+  });
+});
+
+// #194-T01, #194-T03, #194-T06: the project-only review kind, Dynamic model and skill as seen
+// through the service and the database.
+describe("the project-only settings of a project", () => {
+  // #194-T01
+  it("default to Diff Review with the shipped Dynamic model and skill", async () => {
+    const app = await setupReviewSettings();
+    await app.projects.activate(app.first.id);
+
+    const view = await app.service.getProjectSettings(app.first.id);
+
+    expect(view.dynamic.overrides).toEqual({});
+    expect(view.dynamic.effective).toEqual({
+      reviewKind: "diff",
+      dynamicModel: DEFAULT_DYNAMIC_MODEL,
+      reviewSkill: TEST_DEFAULT_SKILL.text,
+    });
+    expect(view.dynamic.reviewSkillIsDefault).toBe(true);
+    expect(view.dynamic.sources).toEqual({
+      reviewKind: "built_in",
+      dynamicModel: "built_in",
+      reviewSkill: "built_in",
+    });
+    expect(view.dynamic.defaults).toEqual({
+      reviewKind: "diff",
+      dynamicModel: DEFAULT_DYNAMIC_MODEL,
+      reviewSkill: TEST_DEFAULT_SKILL.text,
+    });
+    expect(view.dynamic.defaultSkill).toEqual({
+      id: TEST_DEFAULT_SKILL.id,
+      version: TEST_DEFAULT_SKILL.version,
+      hash: TEST_DEFAULT_SKILL.hash,
+    });
+    expect(view.dynamic.limits).toEqual({ reviewSkillMaxBytes: 16_384 });
+  });
+
+  // #194-T03
+  it("save and reload Dynamic settings while the Diff model is preserved", async () => {
+    const app = await setupReviewSettings();
+    await app.projects.activate(app.first.id);
+
+    const saved = await app.service.updateProjectSettings(app.first.id, {
+      model: "qwen/qwen3-coder",
+      reviewKind: "dynamic",
+      dynamicModel: "vendor/dynamic-model",
+      reviewSkill: "Review for the Dynamic kind.",
+    });
+
+    expect(saved.dynamic.effective).toEqual({
+      reviewKind: "dynamic",
+      dynamicModel: "vendor/dynamic-model",
+      reviewSkill: "Review for the Dynamic kind.",
+    });
+    expect(saved.dynamic.sources).toEqual({
+      reviewKind: "project",
+      dynamicModel: "project",
+      reviewSkill: "project",
+    });
+
+    const reloaded = await app.service.getProjectSettings(app.first.id);
+    expect(reloaded.dynamic.effective.reviewKind).toBe("dynamic");
+    expect(reloaded.dynamic.effective.dynamicModel).toBe(
+      "vendor/dynamic-model",
+    );
+    expect(reloaded.dynamic.effective.reviewSkill).toBe(
+      "Review for the Dynamic kind.",
+    );
+    // The Diff model of the same project survives the kind switch.
+    expect(reloaded.effective.model).toBe("qwen/qwen3-coder");
+  });
+
+  // #194-T03
+  it("can be saved on a project that was never activated and leave it inactive", async () => {
+    const app = await setupReviewSettings();
+
+    const view = await app.service.updateProjectSettings(app.first.id, {
+      reviewKind: "dynamic",
+      dynamicModel: "vendor/dynamic-model",
+    });
+
+    expect(view.active).toBe(false);
+    expect(view.projectId).not.toBeNull();
+    expect(view.dynamic.effective.reviewKind).toBe("dynamic");
+    expect(await app.projectRows()).toMatchObject([
+      { repository_id: app.first.id, active: 0 },
+    ]);
+    expect(
+      await app.projects.findActiveForRepository(app.first.id),
+    ).toBeUndefined();
+  });
+
+  // #194-T06
+  it("resolve through resolveForRepository together with the Diff settings", async () => {
+    const app = await setupReviewSettings();
+    await app.projects.activate(app.first.id);
+    await app.service.updateProjectSettings(app.first.id, {
+      maxFindings: 2,
+      reviewKind: "dynamic",
+      dynamicModel: "vendor/dynamic-model",
+    });
+
+    const resolved = await app.service.resolveForRepository(app.first.id);
+
+    expect(resolved?.settings.maxFindings).toBe(2);
+    expect(resolved?.dynamic.reviewKind).toBe("dynamic");
+    expect(resolved?.dynamic.dynamicModel).toBe("vendor/dynamic-model");
+    expect(resolved?.dynamic.reviewSkill).toBe(TEST_DEFAULT_SKILL.text);
+  });
+
+  // #194-T06
+  it("read old settings JSON without the project-only fields as Diff Review", async () => {
+    const app = await setupReviewSettings();
+    await app.projects.activate(app.first.id);
+    await app.projects.updateSettings(app.first.id, {
+      model: "qwen/qwen3-coder",
+      maxFindings: 2,
+    });
+
+    const view = await app.service.getProjectSettings(app.first.id);
+
+    expect(view.effective.model).toBe("qwen/qwen3-coder");
+    expect(view.effective.maxFindings).toBe(2);
+    expect(view.dynamic.effective).toEqual({
+      reviewKind: "diff",
+      dynamicModel: DEFAULT_DYNAMIC_MODEL,
+      reviewSkill: TEST_DEFAULT_SKILL.text,
+    });
+  });
+
+  // #194-T06
+  it("keep the project-only fields when an ordinary Diff-only save replaces the Diff set", async () => {
+    const app = await setupReviewSettings();
+    await app.projects.activate(app.first.id);
+    await app.service.updateProjectSettings(app.first.id, {
+      model: "qwen/qwen3-coder",
+      maxFindings: 2,
+      reviewKind: "dynamic",
+      dynamicModel: "vendor/dynamic-model",
+      reviewSkill: "Review for the Dynamic kind.",
+    });
+
+    const view = await app.service.updateProjectSettings(app.first.id, {
+      maxFindings: 3,
+    });
+
+    expect(view.overrides).toEqual({ maxFindings: 3 });
+    expect(view.dynamic.overrides).toEqual({
+      reviewKind: "dynamic",
+      dynamicModel: "vendor/dynamic-model",
+      reviewSkill: "Review for the Dynamic kind.",
+    });
+    expect((await app.projects.get(app.first.id))?.settings).toEqual({
+      maxFindings: 3,
+      reviewKind: "dynamic",
+      dynamicModel: "vendor/dynamic-model",
+      reviewSkill: "Review for the Dynamic kind.",
+    });
+  });
+
+  // #194-T06
+  it("reset only the skill override and keep the kind, the model and the Diff overrides", async () => {
+    const app = await setupReviewSettings();
+    await app.projects.activate(app.first.id);
+    await app.service.updateProjectSettings(app.first.id, {
+      model: "qwen/qwen3-coder",
+      reviewKind: "dynamic",
+      dynamicModel: "vendor/dynamic-model",
+      reviewSkill: "Review for the Dynamic kind.",
+    });
+
+    const view = await app.service.updateProjectSettings(app.first.id, {
+      model: "qwen/qwen3-coder",
+      reviewSkill: "",
+    });
+
+    expect(view.dynamic.reviewSkillIsDefault).toBe(true);
+    expect(view.dynamic.effective.reviewSkill).toBe(TEST_DEFAULT_SKILL.text);
+    expect(view.dynamic.overrides.reviewSkill).toBeUndefined();
+    expect(view.dynamic.overrides.reviewKind).toBe("dynamic");
+    expect(view.dynamic.overrides.dynamicModel).toBe("vendor/dynamic-model");
+    expect(view.effective.model).toBe("qwen/qwen3-coder");
+  });
+
+  // #194-T06
+  it("a full reset clears the project-only settings and returns to Diff Review", async () => {
+    const app = await setupReviewSettings();
+    await app.projects.activate(app.first.id);
+    await app.service.updateProjectSettings(app.first.id, {
+      reviewKind: "dynamic",
+      dynamicModel: "vendor/dynamic-model",
+      reviewSkill: "Review for the Dynamic kind.",
+    });
+
+    const view = await app.service.resetProjectSettings(app.first.id);
+
+    expect(view.overrides).toEqual({});
+    expect(view.dynamic.overrides).toEqual({});
+    expect(view.dynamic.effective.reviewKind).toBe("diff");
+    expect(view.dynamic.effective.dynamicModel).toBe(DEFAULT_DYNAMIC_MODEL);
+    expect(view.dynamic.reviewSkillIsDefault).toBe(true);
+  });
+
+  // #194-T06
+  it("cannot be broken by stored project-only data this version would not accept", async () => {
+    const app = await setupReviewSettings();
+    await app.projects.activate(app.first.id);
+    await app.projects.updateSettings(app.first.id, {
+      reviewKind: "auto",
+      dynamicModel: "bad model",
+      reviewSkill: "rule\u0000x",
+    });
+
+    const view = await app.service.getProjectSettings(app.first.id);
+
+    expect(view.dynamic.overrides).toEqual({});
+    expect(view.dynamic.effective.reviewKind).toBe("diff");
+    expect(view.dynamic.effective.dynamicModel).toBe(DEFAULT_DYNAMIC_MODEL);
+  });
+});
+
+describe("a project settings change that fails", () => {
+  // #194-T07
+  it("rolls the write back when the settings-change hook rejects, leaving no partial change", async () => {
+    const app = await setupReviewSettings(undefined, {
+      hooks: {
+        onProjectSettingsChanged: async () => {
+          throw new Error("settings hook failed");
+        },
+      },
+    });
+    await app.projects.activate(app.first.id);
+    await app.projects.updateSettings(app.first.id, { maxFindings: 2 });
+
+    await expect(
+      app.service.updateProjectSettings(app.first.id, {
+        maxFindings: 9,
+        reviewKind: "dynamic",
+      }),
+    ).rejects.toThrow("settings hook failed");
+
+    expect((await app.projects.get(app.first.id))?.settings).toEqual({
+      maxFindings: 2,
+    });
   });
 });
