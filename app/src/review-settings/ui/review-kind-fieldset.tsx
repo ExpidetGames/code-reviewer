@@ -101,14 +101,14 @@ export function ReviewKindFieldset({
             <div
               key={kind}
               className={cn(
-                "flex flex-col gap-1 rounded-lg border border-border bg-card p-4 transition-colors",
+                "flex flex-col rounded-lg border border-border bg-card transition-colors",
                 "focus-within:ring-2 focus-within:ring-ring/50 hover:border-ring",
                 selected && "border-primary bg-accent",
               )}
             >
               <FieldLabel
                 htmlFor={optionId}
-                className="flex min-h-6 w-full cursor-pointer items-start gap-3"
+                className="flex min-h-11 w-full cursor-pointer items-start gap-3 p-4 pb-1"
               >
                 <RadioGroupItem
                   value={kind}
@@ -122,7 +122,7 @@ export function ReviewKindFieldset({
               </FieldLabel>
               <div
                 id={hintId}
-                className="flex flex-wrap items-center gap-2 pl-7"
+                className="flex flex-wrap items-center gap-2 pr-4 pb-4 pl-11"
               >
                 <FieldDescription>{KIND_HINTS[kind]}</FieldDescription>
                 {kind === "dynamic" && !dynamicReviewEnabled ? (

@@ -527,6 +527,28 @@ describe("the review skill editor", () => {
     expect(save).toHaveBeenCalledWith({ reviewSkill: null });
   });
 
+  it("brings the edited text back with Edit skill after an accidental reset, until the save", async () => {
+    const user = userEvent.setup();
+    renderForm(
+      projectModel(
+        {},
+        dynamicView({ reviewKind: "dynamic", reviewSkill: custom }),
+      ),
+      fakeApi().api,
+    );
+    const skill = screen.getByLabelText("Review skill") as HTMLTextAreaElement;
+    await user.type(skill, " And more.");
+
+    await user.click(
+      screen.getByRole("button", { name: "Reset review skill to default" }),
+    );
+    expect(skill.value).toBe(SHIPPED);
+    expect(screen.getByText(/comes back with Edit skill/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Edit skill" }));
+
+    expect(skill.value).toBe(`${custom} And more.`);
+  });
+
   it("takes every staged change back with Discard changes, and sends nothing", async () => {
     const user = userEvent.setup();
     const { api, save } = fakeApi();

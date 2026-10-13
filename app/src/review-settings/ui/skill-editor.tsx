@@ -51,7 +51,7 @@ export function SkillEditor({
   const describedBy = [metaId, countId, error === undefined ? null : errorId]
     .filter(Boolean)
     .join(" ");
-  const buttonClass = "min-h-11 sm:min-h-8 pointer-coarse:min-h-11";
+  const buttonClass = "min-h-8 pointer-coarse:min-h-11";
   return (
     <div data-field="reviewSkill" className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -114,6 +114,9 @@ export function SkillEditor({
               {view.defaultSkill.hash}
             </code>
             .
+            {values.draft !== null
+              ? " Your edited text comes back with Edit skill until you save."
+              : ""}
           </>
         )}
       </FieldDescription>

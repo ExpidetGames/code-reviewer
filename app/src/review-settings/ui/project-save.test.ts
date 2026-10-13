@@ -222,6 +222,21 @@ describe("the review skill in a save", () => {
     ]);
   });
 
+  it("keeps the custom text of a reset until the save, so Edit skill brings it back", () => {
+    const m = model({}, dynamicView({ reviewSkill: "My own skill" }));
+    let state = setSkillText(initialFormState(m), "My edited skill");
+    state = resetSkill(state, SHIPPED);
+
+    expect(state.dynamic?.skillText).toBe(SHIPPED);
+    expect(state.dynamic?.draft).toBe("My edited skill");
+    state = editSkill(state, SHIPPED);
+    expect(state.dynamic?.skillText).toBe("My edited skill");
+    expect(state.dynamic?.draft).toBeNull();
+    expect(plan(m, state).steps).toEqual([
+      { cards: ["kind"], body: { reviewSkill: "My edited skill" } },
+    ]);
+  });
+
   it("counts the bytes of the text, not its characters", () => {
     expect(skillByteLength("abc")).toBe(3);
     expect(skillByteLength("ä")).toBe(2);
