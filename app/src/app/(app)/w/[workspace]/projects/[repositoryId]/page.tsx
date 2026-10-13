@@ -4,7 +4,8 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getConfigStatusFor } from "@/config-status/shared";
 import { configAudienceOf } from "@/config-status/status";
-import { WorkspaceLlmNotice } from "@/llm/ui/workspace-llm-notice";
+import { getWorkspaceLlm } from "@/llm/shared";
+import { llmAccessAttention } from "@/llm/ui/llm-access-notice";
 import { projectServiceFor } from "@/projects/shared";
 import {
   loadProjectSettingsPage,
@@ -58,18 +59,18 @@ async function ProjectSettingsContent({
     config: () => getConfigStatusFor(user),
   });
   if (data.kind === "not_found") notFound();
+  // The workspace's LLM hint is a row of the page's one "Needs attention" strip, not its own region.
+  const llmNotice = llmAccessAttention({
+    workspaceSlug,
+    summary: await getWorkspaceLlm().summaryFor(workspaceId),
+    canManage: canManageLlmKey,
+  });
   return (
-    <>
-      <WorkspaceLlmNotice
-        workspaceId={workspaceId}
-        workspaceSlug={workspaceSlug}
-        canManage={canManageLlmKey}
-      />
-      <ProjectSettingsPageContent
-        workspaceSlug={workspaceSlug}
-        audience={configAudienceOf(user)}
-        data={data}
-      />
-    </>
+    <ProjectSettingsPageContent
+      workspaceSlug={workspaceSlug}
+      audience={configAudienceOf(user)}
+      llmNotice={llmNotice}
+      data={data}
+    />
   );
 }

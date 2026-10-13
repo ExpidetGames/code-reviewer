@@ -84,14 +84,17 @@ test.describe("the project list and the settings pages", () => {
     await page
       .getByLabel("Most findings per review", { exact: true })
       .fill("12");
-    await page.getByRole("button", { name: "Save project settings" }).click();
+    await page.getByRole("button", { name: "Save review settings" }).click();
     await expect(page.getByRole("status")).toContainText("Saved.");
     await page.reload();
     await expect(
       page.getByLabel("Most findings per review", { exact: true }),
     ).toHaveValue("12");
 
-    await page.getByRole("link", { name: "All projects" }).click();
+    await page
+      .getByRole("navigation", { name: "Main" })
+      .getByRole("link", { name: "Projects" })
+      .click();
     const again = page.getByRole("row").filter({ hasText: REPOSITORY });
     await again.getByRole("switch", { name: `Review ${REPOSITORY}` }).click();
     await expect(again.getByText("Inactive")).toBeVisible();
@@ -145,7 +148,7 @@ test.describe("the project list and the settings pages", () => {
       .getByLabel("Model", { exact: true })
       .fill("anthropic/claude-sonnet-5.5");
     await expect(page.getByText(/is above the limit of \$0\.10/)).toBeVisible();
-    await page.getByRole("button", { name: "Save project settings" }).click();
+    await page.getByRole("button", { name: "Save review settings" }).click();
     await expect(
       page.getByRole("status").filter({ hasText: "Saved." }),
     ).toBeVisible();
@@ -171,10 +174,15 @@ test.describe("the project list and the settings pages", () => {
         .filter({ visible: true });
     await expect(budget()).toHaveValue("100000");
     await expect(
-      page.locator(".field", { has: budget() }).getByText("Built-in value"),
+      page
+        .locator("[data-field]", { has: budget() })
+        .getByText("Built-in value"),
     ).toBeVisible();
 
-    await page.getByRole("link", { name: "Settings", exact: true }).click();
+    await page
+      .getByRole("navigation", { name: "Main" })
+      .getByRole("link", { name: "Settings", exact: true })
+      .click();
     await expect(
       page.getByRole("heading", { level: 1, name: "Settings" }),
     ).toBeVisible();
@@ -184,14 +192,19 @@ test.describe("the project list and the settings pages", () => {
       page.getByRole("status").filter({ hasText: "Saved." }),
     ).toBeVisible();
     // No reload here: it would drop the pages Next keeps mounted, which is what this step is about.
-    await page.getByRole("link", { name: "Projects" }).click();
+    await page
+      .getByRole("navigation", { name: "Main" })
+      .getByRole("link", { name: "Projects" })
+      .click();
     await page.getByRole("link", { name: REPOSITORY, exact: true }).click();
     await expect(
       page.getByRole("heading", { level: 1, name: REPOSITORY }),
     ).toBeVisible();
     await expect(budget()).toHaveValue("60000");
     await expect(
-      page.locator(".field", { has: budget() }).getByText("Global default"),
+      page
+        .locator("[data-field]", { has: budget() })
+        .getByText("Global default"),
     ).toBeVisible();
     await page.reload();
     await expect(budget()).toHaveValue("60000");

@@ -19,7 +19,7 @@ import { formatUtc } from "../../ui/format-time.ts";
 import { NoRepositories } from "./no-repositories.tsx";
 import { ProjectToggle } from "./project-toggle.tsx";
 import type { ProjectsApi } from "./api.ts";
-import { PROJECT_STATE_LABEL } from "./messages.ts";
+import { PROJECT_STATE_BADGE, PROJECT_STATE_LABEL } from "./messages.ts";
 import { RUN_STATUS_PRESENTATION } from "../../runs/run-status.ts";
 import type { LastRun, ProjectListView, ProjectRowView } from "./list-view.ts";
 
@@ -51,12 +51,6 @@ function LastRunStatus({
       </Link>
     </span>
   );
-}
-
-function stateBadgeVariant(status: ProjectRowView["status"]) {
-  if (status === "active") return "success" as const;
-  if (status === "unavailable") return "warning" as const;
-  return "neutral" as const;
 }
 
 function blockedReasonOf(
@@ -136,7 +130,7 @@ export function ProjectList({
               {row.installation}
             </TableCell>
             <TableCell className="align-top">
-              <Badge variant={stateBadgeVariant(row.status)}>
+              <Badge variant={PROJECT_STATE_BADGE[row.status]}>
                 {PROJECT_STATE_LABEL[row.status]}
               </Badge>
             </TableCell>

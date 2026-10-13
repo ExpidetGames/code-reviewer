@@ -3,8 +3,10 @@
 // @vitest-environment jsdom
 // Pins down the settings page of a project with real data: a repository that was never activated,
 // a project that follows the defaults, the effect of changing the global defaults, a value saved on
-// the project, and text from GitHub rendered as text. Real SQLite, the real services and routes'
-// handlers; the rendering is the real component tree.
+// the project, and text from GitHub rendered as text. The page carries exactly one form (the manual
+// review panel lives on its own page since #174), the estimated cost sits in the Model card and the
+// trail starts at the Projects list. Real SQLite, the real services and routes' handlers; the rendering
+// is the real component tree.
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -19,7 +21,6 @@ import {
   statusForMembers,
 } from "../../config-status/status.ts";
 import { createProjectsRepository } from "../../db/repositories/projects-repository.ts";
-import type { ManualReviewApi } from "../../manual-reviews/ui/api.ts";
 import { createReviewSettingsRouteHandlers } from "../../review-settings/http.ts";
 import { createProjectSettingsApi } from "../../review-settings/ui/api.ts";
 import { setupReviewSettings } from "../../test-support/review-settings-harness.ts";
@@ -28,30 +29,11 @@ import { createProjectService } from "../service.ts";
 import {
   loadProjectSettingsPage,
   ProjectSettingsPageContent,
+  type ProjectSettingsPageData,
 } from "./project-settings-page.tsx";
 import { defaultWorkspaceId } from "../../test-support/workspaces.ts";
 
 afterEach(cleanup);
-
-// The "Review now" panel loads pull requests when it is shown; these tests are about the settings,
-// so it gets a repository without any.
-const quietManualReviews: ManualReviewApi = {
-  listPullRequests: async () => ({
-    ok: true,
-    data: {
-      repositoryId: "repo",
-      fullName: "acme/widgets",
-      allowedCommands: ["review"],
-      pullRequests: [],
-    },
-  }),
-  startReview: async () => ({
-    ok: false,
-    status: 500,
-    code: "UNEXPECTED_RESPONSE",
-    issues: [],
-  }),
-};
 
 async function openProject(options: { activate?: boolean } = {}) {
   const s = await setupReviewSettings();
@@ -93,6 +75,21 @@ async function openProject(options: { activate?: boolean } = {}) {
   return { ...s, projects, api, load };
 }
 
+function renderReady(
+  app: Awaited<ReturnType<typeof openProject>>,
+  data: Extract<ProjectSettingsPageData, { kind: "ready" }>,
+  options: { audience?: "member" | "operator" } = {},
+) {
+  return render(
+    <ProjectSettingsPageContent
+      workspaceSlug="acme"
+      audience={options.audience ?? "member"}
+      data={data}
+      api={app.api}
+    />,
+  );
+}
+
 describe("the settings page of a repository that was never activated", () => {
   // #80
   it("shows the form with the default settings and says that no reviews run until it is activated", async () => {
@@ -100,24 +97,18 @@ describe("the settings page of a repository that was never activated", () => {
     const data = await app.load();
     if (data.kind !== "ready") throw new Error("expected the form");
 
-    render(
-      <ProjectSettingsPageContent
-        workspaceSlug="acme"
-        data={data}
-        api={app.api}
-        manualReviewApi={quietManualReviews}
-      />,
-    );
+    renderReady(app, data);
 
     expect(
-      screen.getByText(
-        /Inactive: no reviews run until the project is activated/,
-      ),
+      screen.getByText(/No reviews run until the project is activated/),
     ).toBeTruthy();
     expect(
-      screen.getByRole("button", { name: "Save project settings" }),
+      screen.getByRole("button", { name: "Save review settings" }),
     ).toBeTruthy();
-    expect(screen.queryByRole("heading", { name: "Review now" })).toBeNull();
+    // The manual review panel is its own page since #174, never on the settings page.
+    expect(
+      screen.queryByRole("heading", { name: "Open pull requests" }),
+    ).toBeNull();
     expect(await app.projectRows()).toEqual([]);
   });
 
@@ -127,20 +118,13 @@ describe("the settings page of a repository that was never activated", () => {
     const app = await openProject({ activate: false });
     const data = await app.load();
     if (data.kind !== "ready") throw new Error("expected the form");
-    render(
-      <ProjectSettingsPageContent
-        workspaceSlug="acme"
-        data={data}
-        api={app.api}
-        manualReviewApi={quietManualReviews}
-      />,
-    );
+    renderReady(app, data);
 
     const findings = screen.getByLabelText("Most findings per review");
     await user.clear(findings);
     await user.type(findings, "11");
     await user.click(
-      screen.getByRole("button", { name: "Save project settings" }),
+      screen.getByRole("button", { name: "Save review settings" }),
     );
 
     expect((await screen.findByRole("status")).textContent).toMatch(/Saved\./);
@@ -166,6 +150,50 @@ describe("the settings page of a repository that was never activated", () => {
 });
 
 describe("the settings page of a project", () => {
+  // #174-T01
+  it("has exactly one form and shows the estimated cost inside the Model card", async () => {
+    const app = await openProject();
+    const data = await app.load();
+    if (data.kind !== "ready") throw new Error("expected a project");
+
+    const { container } = renderReady(app, data);
+
+    expect(container.querySelectorAll("form")).toHaveLength(1);
+    const modelCard = screen
+      .getByRole("heading", { name: "Model" })
+      .closest('[data-slot="card"]') as HTMLElement;
+    expect(
+      within(modelCard).getByText(/Estimated cost per review/),
+    ).toBeTruthy();
+  });
+
+  // #174-T03
+  it("offers a Review now action that leads to the review page of the same project", async () => {
+    const app = await openProject();
+    const data = await app.load();
+    if (data.kind !== "ready") throw new Error("expected a project");
+
+    renderReady(app, data);
+
+    const action = screen.getByRole("link", {
+      name: `Review ${data.row.fullName} now`,
+    });
+    expect(action.getAttribute("href")).toBe(
+      `/w/acme/projects/${app.first.id}/review`,
+    );
+    const sections = screen.getByRole("navigation", { name: "Project" });
+    expect(
+      within(sections)
+        .getByRole("link", { name: "Review now" })
+        .getAttribute("href"),
+    ).toBe(`/w/acme/projects/${app.first.id}/review`);
+    expect(
+      within(sections)
+        .getByRole("link", { name: "Settings" })
+        .getAttribute("aria-current"),
+    ).toBe("page");
+  });
+
   // CR-34-T04
   it("starts with the global defaults after it was activated", async () => {
     const app = await openProject();
@@ -193,20 +221,13 @@ describe("the settings page of a project", () => {
 
     expect(data.model.effective.maxFindings).toBe(3);
     expect(data.model.effective.maxTokens).toBe(50_000);
-    render(
-      <ProjectSettingsPageContent
-        workspaceSlug="acme"
-        data={data}
-        api={app.api}
-        manualReviewApi={quietManualReviews}
-      />,
-    );
+    renderReady(app, data);
     const own = screen
       .getByLabelText("Most findings per review")
-      .closest(".field") as HTMLElement;
+      .closest("[data-field]") as HTMLElement;
     const inherited = screen
       .getByLabelText("Token budget")
-      .closest(".field") as HTMLElement;
+      .closest("[data-field]") as HTMLElement;
     expect(within(own).getByText("Set for this project")).toBeTruthy();
     expect(within(inherited).getByText("Global default")).toBeTruthy();
   });
@@ -216,14 +237,7 @@ describe("the settings page of a project", () => {
     const app = await openProject();
     const before = await app.load();
     if (before.kind !== "ready") throw new Error("expected a project");
-    const view = render(
-      <ProjectSettingsPageContent
-        workspaceSlug="acme"
-        data={before}
-        api={app.api}
-        manualReviewApi={quietManualReviews}
-      />,
-    );
+    const view = renderReady(app, before);
     expect(
       (screen.getByLabelText("Token budget") as HTMLInputElement).value,
     ).toBe("100000");
@@ -236,13 +250,12 @@ describe("the settings page of a project", () => {
         workspaceSlug="acme"
         data={after}
         api={app.api}
-        manualReviewApi={quietManualReviews}
       />,
     );
 
     const field = screen
       .getByLabelText("Token budget")
-      .closest(".field") as HTMLElement;
+      .closest("[data-field]") as HTMLElement;
     expect(
       (screen.getByLabelText("Token budget") as HTMLInputElement).value,
     ).toBe("70000");
@@ -256,20 +269,13 @@ describe("the settings page of a project", () => {
     const running = await app.service.resolveForRepository(app.first.id);
     const data = await app.load();
     if (data.kind !== "ready") throw new Error("expected a project");
-    render(
-      <ProjectSettingsPageContent
-        workspaceSlug="acme"
-        data={data}
-        api={app.api}
-        manualReviewApi={quietManualReviews}
-      />,
-    );
+    renderReady(app, data);
 
     const findings = screen.getByLabelText("Most findings per review");
     await user.clear(findings);
     await user.type(findings, "11");
     await user.click(
-      screen.getByRole("button", { name: "Save project settings" }),
+      screen.getByRole("button", { name: "Save review settings" }),
     );
 
     expect((await screen.findByRole("status")).textContent).toMatch(/Saved\./);
@@ -289,14 +295,7 @@ describe("the settings page of a project", () => {
     const data = await app.load();
     if (data.kind !== "ready") throw new Error("expected a project");
     // A budget the model cannot hold: the client check passes, the service refuses.
-    render(
-      <ProjectSettingsPageContent
-        workspaceSlug="acme"
-        data={data}
-        api={app.api}
-        manualReviewApi={quietManualReviews}
-      />,
-    );
+    renderReady(app, data);
 
     const model = screen.getByLabelText("Model");
     await user.clear(model);
@@ -305,60 +304,30 @@ describe("the settings page of a project", () => {
     await user.clear(tokens);
     await user.type(tokens, "500000");
     await user.click(
-      screen.getByRole("button", { name: "Save project settings" }),
+      screen.getByRole("button", { name: "Save review settings" }),
     );
 
-    const field = tokens.closest(".field") as HTMLElement;
+    const field = tokens.closest("[data-field]") as HTMLElement;
     expect(
       await within(field).findByText(/context window of the chosen model/),
     ).toBeTruthy();
     expect(await app.projectRows()).toEqual(before);
   });
 
-  it("offers the Review now panel for the repository of an active project", async () => {
-    const app = await openProject();
-    const data = await app.load();
-    if (data.kind !== "ready") throw new Error("expected a project");
-    const asked: string[] = [];
-
-    render(
-      <ProjectSettingsPageContent
-        workspaceSlug="acme"
-        data={data}
-        api={app.api}
-        manualReviewApi={{
-          ...quietManualReviews,
-          listPullRequests: async (repositoryId) => {
-            asked.push(repositoryId);
-            return quietManualReviews.listPullRequests(repositoryId);
-          },
-        }}
-      />,
-    );
-
-    expect(screen.getByRole("heading", { name: "Review now" })).toBeTruthy();
-    await screen.findByText(/There are no open pull requests/);
-    expect(asked).toEqual([app.first.id]);
-  });
-
-  it("offers no Review now panel while the project is switched off, and says why", async () => {
+  it("offers no manual review on the settings page while the project is switched off, and says why", async () => {
     const app = await openProject();
     await app.projects.deactivateProject(app.first.id);
     const data = await app.load();
     if (data.kind !== "ready") throw new Error("expected a project");
 
-    render(
-      <ProjectSettingsPageContent
-        workspaceSlug="acme"
-        data={data}
-        api={app.api}
-        manualReviewApi={quietManualReviews}
-      />,
-    );
+    renderReady(app, data);
 
-    expect(screen.queryByRole("heading", { name: "Review now" })).toBeNull();
     expect(
-      screen.getByText(/started by hand only while the project is active/),
+      screen.queryByRole("heading", { name: "Open pull requests" }),
+    ).toBeNull();
+    expect(screen.getByText("Project is inactive")).toBeTruthy();
+    expect(
+      screen.getByText(/No reviews run until the project is activated/),
     ).toBeTruthy();
   });
 
@@ -373,14 +342,7 @@ describe("the settings page of a project", () => {
     const data = await app.load();
     if (data.kind === "not_found") throw new Error("expected the repository");
 
-    const { container } = render(
-      <ProjectSettingsPageContent
-        workspaceSlug="acme"
-        data={data}
-        api={app.api}
-        manualReviewApi={quietManualReviews}
-      />,
-    );
+    const { container } = renderReady(app, data);
 
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
       "acme/<img src=x onerror=alert(1)>",
@@ -406,7 +368,6 @@ describe("the settings page of a project", () => {
         audience="member"
         data={data}
         api={app.api}
-        manualReviewApi={quietManualReviews}
       />,
     );
 
