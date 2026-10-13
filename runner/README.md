@@ -23,10 +23,29 @@ jobs running. It is configured by environment variables:
 | `PR_AGENT_COMMAND` | The command that runs one job, split like a shell would. Only for test stacks that replace PR-Agent with a fake | `python -m code_reviewer_runner.runner` |
 | `RUNNER_OPENCODE_COMMAND` | #197: the pinned stock engine that runs one Dynamic job, split like a shell would (the adapter appends `serve --hostname 127.0.0.1 --port <job port>`). The executable is the one `scripts/fetch_opencode.py` verified against `opencode-pin.json`. Unset means a Dynamic job is refused with `dynamic_engine_unavailable`; never falls back to PR-Agent. The engine also needs a trusted `rg` (ripgrep) on its `PATH`, or it is not started | unset |
 | `RUNNER_DYNAMIC_CAPABILITIES` | #197: trusted JSON descriptor of the selected model/destination: `{"tool_choice_required": true, "structured_output": true, "max_output_tokens": 8192}`. Operator-owned; unset or without a required feature means `dynamic_model_features_unsupported`, no fallback | unset |
+| `RUNNER_DYNAMIC_ENGINE_UID`, `RUNNER_DYNAMIC_ENGINE_GID` | #197: the numeric dedicated unprivileged user (and its own group) the engine runs as; it must exist in the image and be neither root nor the runner's own user. The Dynamic job process is the root supervisor that starts the engine as this user | `10101` and `10101` |
+| `RUNNER_DIFF_JOB_USER` | #197: `uid:gid` the loop drops every non-Dynamic job process to, with no other group, in a working directory it owns. Set only on a loop that runs as root (`compose.dynamic.yml`), so PR-Agent never runs as root; unset runs jobs as the loop's own user | unset |
 | `RUNNER_DYNAMIC_NODE_BIN` | #197: directory of the Node runtime the engine needs, if it is not on the runner's own `PATH` | unset |
 
 `compose.dynamic.yml` is the opt-in deployment of a separate Dynamic runner (one job at a time, memory
-limit, hardened container); it cannot claim Dynamic jobs yet. See `docs/dynamic-review.md`.
+limit, a root supervisor with a short capability list); it cannot claim Dynamic jobs yet. See
+`docs/dynamic-review.md`, "The engine boundary".
+
+**The Dynamic job process is the supervisor (#197 part 2b).** It runs as root with only the
+capabilities of that file (`SETUID`, `SETGID`, `KILL`, `CHOWN`, `DAC_OVERRIDE`, `FOWNER`,
+`NET_ADMIN`; `no-new-privileges` stays on). Per job it (1) prepares and seals the read-only export
+for the dedicated engine user (`export_isolation.prepared_checkout`, which also leases that user and
+its group exclusively), (2) installs nft rules that let that user open new connections only to this
+job's model proxy and the engine's own server port, and proves them with a probe run as that user
+before the engine exists (`netguard.py`; a failure is `dynamic_isolation_self_check_failed` and no
+engine), (3) starts the engine with `setuid` in the child, no supplementary group and a closed
+environment, with its config file readable by that user only, and checks that the user, and nobody
+else, listens on the engine's port (`engine_user.py`), and (4) at the end, on SIGTERM (lease loss,
+shutdown, timeout) and in the watchdog, kills the engine's process group and then every process of
+that user, including helpers that left the group, removes the rules and the job's files. The first
+start of a job also clears whatever a previous, killed job left running as that user. Without root
+(or without the user) the production preparation refuses with `dynamic_isolation_self_check_failed`:
+the engine never runs unconfined. The proofs need root and live in `tests/privileged` (below).
 
 Rules (the CR-29 decisions; tests in `tests/unit/test_job_loop*.py` and `tests/integration/test_job_loop*.py`):
 
