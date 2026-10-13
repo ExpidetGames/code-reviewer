@@ -155,7 +155,7 @@ describe("changing a setting", () => {
     });
   });
 
-  // #202-T11
+  // #202 (gate control)
   it("switches Dynamic Review on and off for the instance and shows who did it", async () => {
     const portal = await startPortal();
     const before = await portal.visit("/api/admin/settings", {
@@ -183,7 +183,7 @@ describe("changing a setting", () => {
     });
   });
 
-  // #202-T11
+  // #202 (gate control)
   it("refuses a gate change that is not an object with a boolean", async () => {
     const portal = await startPortal();
 

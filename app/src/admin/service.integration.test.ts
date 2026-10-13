@@ -415,7 +415,7 @@ describe("changing the limits", () => {
 });
 
 describe("changing the Dynamic Review gate", () => {
-  // #202-T11
+  // #202 (gate control)
   it("reads off while nothing was saved", async () => {
     const { service } = await startService();
 
@@ -426,7 +426,7 @@ describe("changing the Dynamic Review gate", () => {
     });
   });
 
-  // #202-T11
+  // #202 (gate control)
   it("switches the gate the enqueue reads on and off, with the admin and the time", async () => {
     const { db, service, setTime } = await startService();
     setTime("2026-10-13T12:00:00.000Z");
@@ -451,7 +451,7 @@ describe("changing the Dynamic Review gate", () => {
     });
   });
 
-  // #202-T11
+  // #202 (gate control)
   it("goes through the repository setter: switching off cancels the waiting Dynamic jobs and keeps the running one", async () => {
     const { db, service } = await startService();
     const fixture = await createJobQueueFixture({
@@ -475,7 +475,7 @@ describe("changing the Dynamic Review gate", () => {
     expect(await fixture.queue.get(running.id)).toEqual(claim?.job);
   });
 
-  // #202-T11
+  // #202 (gate control)
   it.each([
     undefined,
     null,

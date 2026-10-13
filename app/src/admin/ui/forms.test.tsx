@@ -92,7 +92,7 @@ function card(name: "Tenancy" | "Limits" | "Dynamic Review"): HTMLElement {
 }
 
 describe("the Dynamic Review card of the instance form", () => {
-  // #202-T11
+  // #202 (gate control)
   it("is off by default and says what turning it on does", () => {
     const { api } = apiAnswering(SAVED);
     render(<InstanceForm settings={view()} api={api} />);
@@ -106,7 +106,7 @@ describe("the Dynamic Review card of the instance form", () => {
     expect(dynamic.textContent).toMatch(/dynamic_review_disabled/);
   });
 
-  // #202-T11
+  // #202 (gate control)
   it("sends the gate only after the rollout order was confirmed, and nothing else", async () => {
     const { api, change } = apiAnswering(SAVED);
     const user = userEvent.setup();
@@ -138,7 +138,7 @@ describe("the Dynamic Review card of the instance form", () => {
     expect(change).toHaveBeenCalledWith({ dynamicReview: { enabled: true } });
   });
 
-  // #202-T11
+  // #202 (gate control)
   it("turns the gate off without a confirmation", async () => {
     const { api, change } = apiAnswering(SAVED);
     const user = userEvent.setup();
@@ -172,7 +172,7 @@ describe("the Dynamic Review card of the instance form", () => {
     );
   });
 
-  // #202-T11
+  // #202 (gate control)
   it("shows the sentence for a refused change on its own card", async () => {
     const { api } = apiAnswering(refused("unavailable"));
     const user = userEvent.setup();
