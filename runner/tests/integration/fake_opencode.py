@@ -29,6 +29,7 @@ config the runner wrote, so a test can assert on the whole run.
 import argparse
 import json
 import os
+import stat
 import subprocess
 import sys
 import threading
@@ -203,7 +204,18 @@ def main(argv: list[str]) -> int:
     serve.add_argument("--print-logs", action="store_true")
     args = parser.parse_args(argv)
 
-    _trace({"pid": os.getpid(), "env": dict(os.environ)})
+    config_path = Path(_env("OPENCODE_CONFIG"))
+    scratch_dir = Path(_env("OPENCODE_CONFIG_DIR"))
+    config_mode = stat.S_IMODE(config_path.stat().st_mode) if config_path.is_file() else None
+    scratch_mode = stat.S_IMODE(scratch_dir.stat().st_mode) if scratch_dir.is_dir() else None
+    _trace(
+        {
+            "pid": os.getpid(),
+            "env": dict(os.environ),
+            "config_mode": config_mode,
+            "scratch_mode": scratch_mode,
+        }
+    )
     server = ThreadingHTTPServer((args.hostname, args.port), Handler)
     server.daemon_threads = True
     thread = threading.Thread(target=server.serve_forever, daemon=True)

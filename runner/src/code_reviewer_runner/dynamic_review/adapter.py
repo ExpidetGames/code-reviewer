@@ -345,6 +345,7 @@ class DynamicEngine:
         dynamic = self.job.dynamic
         assert dynamic is not None  # narrowed in __init__
         self._scratch.mkdir(parents=True, exist_ok=True)
+        os.chmod(self._scratch, 0o700)
         (self._scratch / "home").mkdir(parents=True, exist_ok=True)
         config = build_engine_config(
             proxy_url=self.proxy_url,

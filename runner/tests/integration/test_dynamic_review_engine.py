@@ -12,6 +12,7 @@ ends.
 import json
 import os
 import socket
+import stat
 import sys
 import threading
 import time
@@ -512,6 +513,39 @@ def test_the_engine_process_receives_only_the_closed_environment(
     joined = "\n".join(environment.values())
     for secret in ("ghs_runner_token_value", API_KEY, "aws-secret-value", fixture.capability):
         assert secret not in joined
+    trace_startup = next(entry for entry in fixture.traces() if "config_mode" in entry)
+    assert trace_startup["config_mode"] == 0o600
+    assert trace_startup["scratch_mode"] == 0o700
+
+
+# #197-T02
+def test_the_engine_config_file_is_mode_0600_and_scratch_dir_0700(tmp_path: Path) -> None:
+    job = dynamic_job()
+    dynamic = job.dynamic
+    base = job.base
+    assert dynamic is not None and base is not None
+    export_dir = tmp_path / "export"
+    export_dir.mkdir(parents=True)
+    engine = DynamicEngine(
+        job,
+        ledger=BudgetLedger(DynamicLimits()),
+        command=[sys.executable, str(FAKE_ENGINE)],
+        directory=str(export_dir),
+        proxy_url="http://127.0.0.1:9",
+        proxy_capability=new_proxy_capability(),
+        agent_prompt=compose_system_prompt(dynamic.skill, base.head_sha),
+        model_schema=findings_schema(),
+        startup_seconds=2.0,
+    )
+    _ = engine.start()
+    try:
+        scratch_dir = engine._scratch  # pyright: ignore[reportPrivateUsage]
+        config_path = scratch_dir / "opencode.json"
+        assert config_path.is_file()
+        assert stat.S_IMODE(config_path.stat().st_mode) == 0o600
+        assert stat.S_IMODE(scratch_dir.stat().st_mode) == 0o700
+    finally:
+        engine.stop()
 
 
 # #197-T05
