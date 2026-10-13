@@ -70,7 +70,9 @@ describe("the Review defaults sub-page", () => {
     const findings = screen.getByLabelText("Most findings per review");
     await user.clear(findings);
     await user.type(findings, "9");
-    await user.click(screen.getByRole("button", { name: "Save defaults" }));
+    await user.click(
+      screen.getByRole("button", { name: "Save review defaults" }),
+    );
 
     expect((await screen.findByRole("status")).textContent).toMatch(/Saved\./);
     expect(
@@ -94,7 +96,9 @@ describe("the Review defaults sub-page", () => {
     const findings = screen.getByLabelText("Most findings per review");
     await user.clear(findings);
     await user.type(findings, "none");
-    await user.click(screen.getByRole("button", { name: "Save defaults" }));
+    await user.click(
+      screen.getByRole("button", { name: "Save review defaults" }),
+    );
 
     expect(await screen.findByText("Enter a whole number.")).toBeTruthy();
     expect(await app.appSettingRows()).toEqual([]);

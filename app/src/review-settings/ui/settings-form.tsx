@@ -212,7 +212,7 @@ export function SettingsForm({
   };
   const disabled = busy || readOnly;
   const saveLabel =
-    model.mode === "project" ? "Save review settings" : "Save defaults";
+    model.mode === "project" ? "Save review settings" : "Save review defaults";
 
   return (
     <div className="flex max-w-[44rem] flex-col gap-6">

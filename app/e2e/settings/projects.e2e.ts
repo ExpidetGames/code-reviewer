@@ -194,7 +194,7 @@ test.describe("the project list and the settings pages", () => {
       page.getByRole("heading", { level: 1, name: "Review defaults" }),
     ).toBeVisible();
     await budget().fill("60000");
-    await page.getByRole("button", { name: "Save defaults" }).click();
+    await page.getByRole("button", { name: "Save review defaults" }).click();
     await expect(
       page.getByRole("status").filter({ hasText: "Saved." }),
     ).toBeVisible();
