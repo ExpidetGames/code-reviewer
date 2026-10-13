@@ -43,6 +43,12 @@ export type JobQueue = {
   /** Cancels all waiting jobs of a repository (project deactivated); running jobs finish. */
   cancelWaitingForRepository(repositoryId: string): Promise<number>;
   /**
+   * Cancels all waiting jobs of a repository because the project's review kind changed (#195). The
+   * #194 settings hook calls this in the settings transaction: waiting jobs are cancelled with
+   * `review_kind_changed`, running jobs finish, and a rejecting call rolls the settings change back.
+   */
+  cancelWaitingForReviewKindChange(repositoryId: string): Promise<number>;
+  /**
    * Cancels every waiting job of a pull request (it was closed): the automatic ones and the ones a
    * person started with a comment or the start button. A running job finishes.
    */
@@ -93,6 +99,8 @@ export function createJobQueue(
     },
     cancelWaitingForRepository: (repositoryId) =>
       jobs.cancelWaitingForRepository(repositoryId),
+    cancelWaitingForReviewKindChange: (repositoryId) =>
+      jobs.cancelWaitingForReviewKindChange(repositoryId),
     discardWaitingForPr: (repositoryId, prNumber) =>
       jobs.discardWaitingForPr(repositoryId, prNumber),
     discardWaitingAutomaticForPr: (repositoryId, prNumber) =>

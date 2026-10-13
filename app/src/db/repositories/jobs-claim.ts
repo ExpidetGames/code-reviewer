@@ -17,7 +17,8 @@
 // transaction that hit an error cannot run another statement until it is rolled back to a savepoint.
 // (An earlier version of this comment claimed `FOR UPDATE SKIP LOCKED` was the only line a port
 // would change; it is not, and the index is the reason.)
-import { sql, type Kysely } from "kysely";
+import { sql, type Kysely, type Selectable } from "kysely";
+import type { ProjectReviewKind } from "../../review-settings/settings.ts";
 import { formatTimestamp } from "../codecs.ts";
 import { errorCode } from "../errors.ts";
 import type { Database, JobsTable } from "../schema.ts";
@@ -38,15 +39,20 @@ const MAX_CLAIM_ATTEMPTS = 100;
 /**
  * Hands the oldest due job to `runnerId`, or returns undefined when there is none.
  *
- * A job is due when it is `queued` and its `run_after` has passed. A pull request with a running job
- * is skipped, so at most one job runs per pull request; the first job of another pull request goes
- * instead. Call it inside a transaction, after expired leases have been dealt with.
+ * A job is due when it is `queued`, its `run_after` has passed and its review kind (#195) is one the
+ * runner's engines can run. A pull request with a running job is skipped, so at most one job runs per
+ * pull request; the first eligible job of another pull request goes instead. An unsupported job is
+ * never selected, so it keeps waiting without an attempt being counted or credentials being created.
+ * Call it inside a transaction, after expired leases have been dealt with.
  */
 export async function claimOldestDueJob(
   executor: Kysely<Database>,
   claim: JobClaim,
-): Promise<JobsTable | undefined> {
-  const { rows } = await claimQuery(executor, claim, { skipLocked: false });
+  reviewKinds: readonly ProjectReviewKind[],
+): Promise<Selectable<JobsTable> | undefined> {
+  const { rows } = await claimQuery(executor, claim, reviewKinds, {
+    skipLocked: false,
+  });
   return rows[0];
 }
 
@@ -58,13 +64,16 @@ export async function claimOldestDueJob(
 export async function claimOldestDueJobPostgres(
   executor: Kysely<Database>,
   claim: JobClaim,
-): Promise<JobsTable | undefined> {
+  reviewKinds: readonly ProjectReviewKind[],
+): Promise<Selectable<JobsTable> | undefined> {
   // One savepoint for the whole attempt loop: a rolled-back-to savepoint stays usable, and the outer
   // transaction can keep going after each unique violation.
   await sql`savepoint claim_attempt`.execute(executor);
   for (let attempt = 0; attempt < MAX_CLAIM_ATTEMPTS; attempt += 1) {
     try {
-      const { rows } = await claimQuery(executor, claim, { skipLocked: true });
+      const { rows } = await claimQuery(executor, claim, reviewKinds, {
+        skipLocked: true,
+      });
       return rows[0];
     } catch (error) {
       if (errorCode(error) !== UNIQUE_VIOLATION) throw error;
@@ -81,10 +90,18 @@ export async function claimOldestDueJobPostgres(
 function claimQuery(
   executor: Kysely<Database>,
   claim: JobClaim,
+  reviewKinds: readonly ProjectReviewKind[],
   { skipLocked }: { skipLocked: boolean },
 ) {
   const now = formatTimestamp(claim.now);
-  return sql<JobsTable>`
+  // #195: the runner only gets jobs of a kind one of its engines can run. A caller with no engines is
+  // a previous-release runner and the caller passes `DEFAULT_ENGINES` (`pr-agent`); an empty list
+  // would select nothing, so it is never built here.
+  const kinds = sql.join(
+    reviewKinds.map((kind) => sql`${kind}`),
+    sql`, `,
+  );
+  return sql<Selectable<JobsTable>>`
     update jobs
     set status = 'running',
         runner_id = ${claim.runnerId},
@@ -98,6 +115,7 @@ function claimQuery(
       from jobs as due
       where due.status = 'queued'
         and due.command = 'review'
+        and due.review_kind in (${kinds})
         and due.run_after <= ${now}
         and not exists (
           select 1

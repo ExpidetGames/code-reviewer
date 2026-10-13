@@ -37,6 +37,7 @@ describe("enqueueing a job", () => {
       prNumber: 7,
       prUrl: "https://github.test/acme/widgets/pull/7",
       headSha: sha("a"),
+      reviewKind: "diff",
       command: "review",
       args: "",
       triggerKind: "webhook",

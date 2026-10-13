@@ -6,8 +6,9 @@ other way round, so a change to the format has to change the file and both sides
 
 | File                         | What                                                                                                                                                                                         |
 | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `runner-api.v1.json`         | The wire format of the runner API v1 (JSON Schema, draft 2020-12): the claim response, the heartbeat and complete requests and responses, and every error. The `$defs` are the named bodies. |
+| `runner-api.v1.json`         | The wire format of the runner API v1 (JSON Schema, draft 2020-12): the claim request, the claim response, the heartbeat and complete requests and responses, and every error. The `$defs` are the named bodies. |
 | `examples/<Definition>.json` | One valid document per body. Both test suites validate them, so an example can never drift from the schema. They hold dummy values only.                                                     |
+| `dynamic-review/schema.v1.json` | The neutral findings of a Dynamic Review (#195), before the runner renders them: opaque id, P0–P3, confidence, bounded title/body, a safe repository-relative path and line range, evidence references, resolved ids and the reviewed SHA. No permission, provider, routing, endpoint or command field. `dynamic-review/example.v1.json` is validated by both suites. |
 
 ## Who checks what
 
@@ -34,6 +35,11 @@ other way round, so a change to the format has to change the file and both sides
   `unknown` (the original stays in the stored result).
 - Secrets (`git.token`, `llm.apiKey`, `leaseToken`) appear in the claim response and in requests that
   prove a claim, and nowhere else.
+- #195 grows v1 without breaking a reader: the optional `ClaimRequest` body (`engines`), the optional
+  `reviewKind`/`dynamic`/`base` fields of `RunnerJobInput` for a tagged Dynamic job, and the new
+  `Engine`, `ReviewKind`, `DynamicReview`, `ClaimBase` definitions and Dynamic failure codes. A
+  previous-release app ignores the claim body; a previous-release runner sends none (pr-agent only) and
+  never receives the tagged fields, so its closed `RunnerJobInput` parsing is unchanged.
 
 The meaning of the calls (status codes, the lease, what happens on failure) is in
 `app/src/runner-api/README.md`.

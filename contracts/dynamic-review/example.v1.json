@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "reviewedSha": "1f3a5c7e9b2d4f60a8c1e3b5d7f90a2c4e6b8d01",
+  "findings": [
+    {
+      "id": "f-1a2b3c",
+      "priority": "P1",
+      "confidence": 0.8,
+      "title": "Missing authorization check",
+      "body": "The handler trusts the path parameter without checking the workspace.",
+      "path": "src/api/handler.ts",
+      "lineStart": 42,
+      "lineEnd": 47,
+      "evidence": ["src/api/handler.ts:42", "docs/decisions/0001.md"],
+      "resolvedIds": [],
+      "reviewedSha": "1f3a5c7e9b2d4f60a8c1e3b5d7f90a2c4e6b8d01"
+    }
+  ]
+}

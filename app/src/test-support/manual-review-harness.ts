@@ -9,6 +9,7 @@ import { createAppSettingsRepository } from "../db/repositories/app-settings-rep
 import { createProjectsRepository } from "../db/repositories/projects-repository.ts";
 import { createTestQueue } from "./jobs.ts";
 import { createManualReviewService } from "../manual-reviews/service.ts";
+import { createReviewKindResolver } from "../jobs/review-kind.ts";
 import { createReviewSettingsService } from "../review-settings/service.ts";
 import { builtInReviewSettings } from "../review-settings/settings.ts";
 import { startWebhookHarness } from "./webhook-harness.ts";
@@ -62,6 +63,7 @@ export async function startManualReviewHarness(
     integrations: h.integrations,
     projects: h.projects,
     settings,
+    reviewKind: createReviewKindResolver(settings),
     registry: h.registry,
     queue,
     log: (line) => lines.push(line),

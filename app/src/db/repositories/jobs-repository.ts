@@ -12,11 +12,15 @@
 // database take the write lock up front (`begin immediate`, see `dialect.ts`), so the check "is there
 // a job already?" and the insert that follows it cannot be separated by another writer.
 import "server-only";
-import type { Kysely } from "kysely";
+import type { Kysely, Selectable } from "kysely";
 import {
   STORED_REVIEW_COMMANDS,
   type JsonValue,
 } from "../../integrations/types.ts";
+import {
+  PROJECT_REVIEW_KINDS,
+  type ProjectReviewKind,
+} from "../../review-settings/settings.ts";
 import type { ValidEnqueueInput } from "../../jobs/job-input.ts";
 import {
   SLOT_HOLDING_STATUSES,
@@ -55,6 +59,11 @@ export type JobsRepository = {
   enqueue(input: ValidEnqueueInput): Promise<EnqueueResult>;
   /** Cancels every waiting job of a repository (its project was deactivated); returns how many. */
   cancelWaitingForRepository(repositoryId: string): Promise<number>;
+  /**
+   * Cancels every waiting job of a repository because its project's review kind changed (#195):
+   * they were queued for the other engine. Running jobs finish.
+   */
+  cancelWaitingForReviewKindChange(repositoryId: string): Promise<number>;
   /** Cancels the waiting jobs of one pull request (it was closed); returns how many. */
   discardWaitingForPr(repositoryId: string, prNumber: number): Promise<number>;
   discardWaitingAutomaticForPr(
@@ -92,8 +101,21 @@ export function decodeJobVocabulary(
   return { status: row.status, command, triggerKind };
 }
 
+/** The stored review kind of a job (#195); a value this version does not know fails loudly. */
+export function decodeReviewKind(row: {
+  id: string;
+  review_kind: string;
+}): ProjectReviewKind {
+  const kind = PROJECT_REVIEW_KINDS.find((known) => known === row.review_kind);
+  if (kind === undefined)
+    throw new Error(
+      `Stored job ${row.id} has the unknown review kind "${row.review_kind}".`,
+    );
+  return kind;
+}
+
 /** A stored row as the rest of the app sees it; also used by the read side (`runs-repository.ts`). */
-export function toJob(row: JobsTable): Job {
+export function toJob(row: Selectable<JobsTable>): Job {
   const { status, command, triggerKind } = decodeJobVocabulary(row);
   return {
     id: row.id,
@@ -102,6 +124,7 @@ export function toJob(row: JobsTable): Job {
     prNumber: row.pr_number,
     prUrl: row.pr_url,
     headSha: row.head_sha,
+    reviewKind: decodeReviewKind(row),
     command,
     args: row.args,
     triggerKind,
@@ -229,7 +252,10 @@ export function createJobsRepository(
             .where("workspace_id", "=", workspaceId)
             .where("repository_id", "=", input.repositoryId)
             .where("pr_number", "=", input.prNumber)
-            .where("command", "=", input.command);
+            .where("command", "=", input.command)
+            // #195: a Diff job and a Dynamic job are different jobs. Dedupe and supersession must
+            // never treat one kind's job as a duplicate of the other's.
+            .where("review_kind", "=", input.reviewKind);
 
         if (input.triggerKind === "webhook") {
           // 2. One automatic job per head commit and command, whatever became of it, unless it was
@@ -289,6 +315,7 @@ export function createJobsRepository(
             pr_url: input.prUrl,
             head_sha: input.headSha,
             command: input.command,
+            review_kind: input.reviewKind,
             args: input.args,
             trigger_kind: input.triggerKind,
             actor_login: input.actorLogin,
@@ -346,6 +373,14 @@ export function createJobsRepository(
 
     cancelWaitingForRepository(repositoryId) {
       return cancelWaiting({ repositoryId }, "project_deactivated");
+    },
+
+    // #195: the project's review kind changed (Diff <-> Dynamic), so every waiting job of the
+    // repository was queued for the wrong engine. The settings change and this cancellation run in
+    // one transaction (the #194 hook), so a failed save keeps the kind and the jobs. A running job
+    // finishes.
+    cancelWaitingForReviewKindChange(repositoryId) {
+      return cancelWaiting({ repositoryId }, "review_kind_changed");
     },
 
     discardWaitingForPr(repositoryId, prNumber) {

@@ -8,6 +8,7 @@ import { createRepositoriesRepository } from "../db/repositories/repositories-re
 import { createWebhookDeliveriesRepository } from "../db/repositories/webhook-deliveries-repository.ts";
 import { getDatabase } from "../db/startup.ts";
 import { jobQueueFor } from "../jobs/shared.ts";
+import { createReviewKindResolver } from "../jobs/review-kind.ts";
 import { getGithubCredentialStore } from "../github-config/shared.ts";
 import { integrationRegistry } from "../integrations/registry.ts";
 import { getIntegrationSync } from "../integrations/sync/shared.ts";
@@ -35,6 +36,8 @@ export function getJobQueueReviewTriggerIntake(
     queue: jobQueueFor(workspaceId),
     repositories: createRepositoriesRepository(getDatabase(), workspaceId),
     logger: consoleWebhookLogger,
+    // #195: the project's kind at the moment of the enqueue, through the one shared resolver.
+    reviewKind: createReviewKindResolver(reviewSettingsServiceFor(workspaceId)),
   });
 }
 

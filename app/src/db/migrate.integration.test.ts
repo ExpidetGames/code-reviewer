@@ -84,6 +84,7 @@ describe("the migrations of both epics", () => {
       "20261012140100_create_job_claimed_keys",
       "20261012150000_create_installation_binding",
       "20261012160000_remove_commands",
+      "20261013090000_add_job_review_kind",
     ]);
   });
 

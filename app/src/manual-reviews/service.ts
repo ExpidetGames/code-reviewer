@@ -21,6 +21,7 @@ import type {
 } from "../integrations/types.ts";
 import { JobQueueError } from "../jobs/errors.ts";
 import type { JobQueue } from "../jobs/job-queue.ts";
+import type { ReviewKindResolver } from "../jobs/review-kind.ts";
 import type { ProjectService } from "../projects/service.ts";
 import type { ReviewSettingsService } from "../review-settings/service.ts";
 import { REVIEW_COMMANDS } from "../integrations/types.ts";
@@ -81,6 +82,8 @@ export type ManualReviewDependencies = {
   integrations: Pick<IntegrationsRepository, "get">;
   projects: Pick<ProjectService, "getActiveProjectForRepository">;
   settings: Pick<ReviewSettingsService, "resolveForRepository">;
+  /** #195: the one shared resolver that pins the review kind of the new job from the project. */
+  reviewKind: ReviewKindResolver;
   registry: Pick<IntegrationRegistry, "resolve">;
   queue: Pick<JobQueue, "enqueue">;
   /** One line per started review; never carries a question or a token. */
@@ -253,6 +256,7 @@ export function createManualReviewService(
           prNumber: pullRequest.number,
           prUrl: pullRequest.url,
           headSha: pullRequest.headSha,
+          reviewKind: await deps.reviewKind(repositoryId),
           command,
           args: "",
           triggerKind: "manual",

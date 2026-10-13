@@ -67,6 +67,7 @@ async function twoWorkspaces() {
       queue: createJobQueue(h.db, workspaceId),
       repositories: createRepositoriesRepository(h.db, workspaceId),
       logger: { info: () => undefined, error: () => undefined },
+      reviewKind: async () => "diff",
     }),
   }));
   return { h, a, b, route };

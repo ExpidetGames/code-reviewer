@@ -18,6 +18,11 @@ import {
   DEFAULT_JOB_QUEUE_LIMITS,
   type JobQueueLimits,
 } from "../../jobs/job-limits.ts";
+import {
+  DEFAULT_ENGINES,
+  reviewKindsForEngines,
+  type RunnerEngine,
+} from "../../jobs/runner-capabilities.ts";
 import type { JobStatus } from "../../jobs/job-status.ts";
 import type {
   CancelClaimedResult,
@@ -56,10 +61,14 @@ export type RunnerJobsRepositoryOptions = {
 
 export type RunnerJobsRepository = {
   /**
-   * Expires stale leases and runtimes, then hands the oldest due job to the runner (or null). The
-   * result carries the lease token the runner must present from then on.
+   * Expires stale leases and runtimes, then hands the oldest due job the runner's engines can run to
+   * the runner (or null). `engines` defaults to `pr-agent` for a previous-release caller that sends
+   * no capability list. The result carries the lease token the runner must present from then on.
    */
-  claimNext(runnerId: string): Promise<ClaimResult>;
+  claimNext(
+    runnerId: string,
+    engines?: readonly RunnerEngine[],
+  ): Promise<ClaimResult>;
   /**
    * Extends the lease of the claim `leaseToken` belongs to. A job past the hard limit is failed with
    * `timeout` by this call and answers `not_holder`.
@@ -283,7 +292,7 @@ export function createRunnerJobsRepository(
   }
 
   return {
-    claimNext(runnerId) {
+    claimNext(runnerId, engines = DEFAULT_ENGINES) {
       return inTransaction(async (trx) => {
         const current = now();
         await expire(trx, current);
@@ -294,9 +303,10 @@ export function createRunnerJobsRepository(
           now: current,
           leaseExpiresAt: new Date(current.getTime() + limits.leaseMs),
         };
+        const reviewKinds = reviewKindsForEngines(engines);
         const row = await (
           driver === "postgres" ? claimOldestDueJobPostgres : claimOldestDueJob
-        )(trx, claim);
+        )(trx, claim, reviewKinds);
         return row === undefined ? null : { job: toJob(row), leaseToken };
       });
     },

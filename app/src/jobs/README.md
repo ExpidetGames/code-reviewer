@@ -32,12 +32,36 @@ by the code that enqueues (the trigger policy of the webhook handler, CR-31), no
 queued --claim--> running --complete--> succeeded | failed
 queued --newer automatic job--> superseded     running --lease lost or release--> queued (attempts + 1)
 queued --project off / PR closed--> cancelled  running --last attempt lost, or too long--> failed
+queued --review kind changed--> cancelled
 ```
 
 `succeeded`, `failed`, `superseded` and `cancelled` are final; nothing leads back from them. A
 superseded job keeps `superseded_by`; a cancelled or failed job keeps its `error_code`
-(`project_deactivated`, `pull_request_closed`, `lease_expired`, `timeout`, or the code a runner
-reported).
+(`project_deactivated`, `pull_request_closed`, `review_kind_changed`, `lease_expired`, `timeout`, or
+the code a runner reported).
+
+## The review kind of a job (#195)
+
+A job is queued for exactly one review kind, `diff` (PR-Agent) or `dynamic` (the read-only agent of
+the epic), stored in `jobs.review_kind`. It is pinned when the job is enqueued, from the project's
+settings, through the one shared resolver (`review-kind.ts`); a producer never invents a kind. A
+missing value is `diff`: every job from before the column and a project that never chose a kind is a
+Diff Review (`validateEnqueueInput` fills it in, the migration backfilled it).
+
+The kind widens what the queue treats as "the same job": the automatic per-head uniqueness, the
+comment/manual duplicate check and supersession all include it, so a Diff job and a Dynamic job of one
+pull request are two jobs. Per-PR serialization (one running job per pull request) is **not** split by
+kind: two waiting kinds of one pull request still run one after the other.
+
+A runner only ever claims a kind one of its engines can run (`runner-capabilities.ts`,
+`runner-queue.ts`): the claim filters on `review_kind` in the atomic statement, so an ineligible job is
+never selected — it keeps waiting without an attempt being counted and without credentials being
+created. "No capable runner" is therefore a waiting state, never a failed review.
+
+When the project's review kind changes, #194's `ReviewSettingsHooks.onProjectSettingsChanged` calls
+`cancelWaitingForReviewKindChange` in the settings transaction: the project's waiting jobs become
+`cancelled` with `review_kind_changed`, a running job finishes, and a rejecting hook rolls the
+settings change back. The hook is `createJobReviewSettingsHooks`, wired in `review-settings/shared.ts`.
 
 ## Enqueueing
 

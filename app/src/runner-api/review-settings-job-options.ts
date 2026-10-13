@@ -22,6 +22,21 @@ export function createReviewSettingsJobOptionsSource(deps: {
       // No project: the claim guard refuses such a job before it asks for options, so this is a job
       // that raced with a deletion. No options is the safe answer (the runner's defaults apply).
       if (resolved === undefined) return { env: {} };
+      // #195: a Dynamic job gets the project's model and skill, and **no** PR-Agent env: those options
+      // grant nothing to the read-only agent and must never be promoted into its permissions.
+      if (resolved.dynamic.reviewKind === "dynamic")
+        return {
+          env: {},
+          llm: {
+            model: resolved.dynamic.dynamicModel,
+            maxTokens: resolved.settings.maxTokens,
+          },
+          dynamic: {
+            model: resolved.dynamic.dynamicModel,
+            skill: resolved.dynamic.reviewSkill,
+            maxFindings: resolved.settings.maxFindings,
+          },
+        };
       const { llm, env, fallbackModels } = toRunnerSettings(resolved.settings);
       return { env, llm: { ...llm, fallbackModels } };
     },
