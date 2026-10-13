@@ -13,7 +13,8 @@ to it, under `ui/`, and keep their MIT header (see `THIRD_PARTY_LICENSES.md` and
   - `@/components/button` — the Button for screens: variants `primary | secondary | ghost |
 destructive`, sizes `sm | default | icon`, the `loading`/`loadingLabel` convention and the
     icon-only accessible-name guard. Prefer it over `@/components/ui/button`.
-  - `@/components/page-header` — one `h1`, a breadcrumb slot and the page actions.
+  - `@/components/page-header` — one `h1`, a breadcrumb slot, a badge slot next to the title (a short
+    status of the page's subject, never colour alone) and the page actions.
   - `@/components/breadcrumbs` — the trail of a page below an area root (#179 lead decision): the trail
     starts at the area root, ancestors are links, and only the last crumb is the current page
     (`aria-current="page"`, no link). An **area root** (Projects list, Account, Invitations, Admin
