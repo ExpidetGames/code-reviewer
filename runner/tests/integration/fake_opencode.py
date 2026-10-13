@@ -21,7 +21,8 @@ engine's own working directory, the export the runner gives it. Every key of the
       "answer": "structured",      # "structured" | "text" | "none"
       "message_status": 200,
       "messages_status": 200,      # 400 reproduces the pinned structured-message codec defect
-      "spawn_helper": false        # leave a sleeping child in the engine's process group
+      "spawn_helper": false,       # leave a sleeping child in the engine's process group
+      "exit_early": false          # leave that child behind and exit before serving (#202)
     }
 
 The model loop is the engine's: each proxy answer with tool calls is "executed" (the scripted
@@ -279,6 +280,11 @@ def main(argv: list[str]) -> int:
             "scratch_mode": scratch_mode,
         }
     )
+    if bool(_script().get("exit_early", False)):
+        # The leader ends on its own while a helper keeps the process group alive.
+        helper = subprocess.Popen(["sleep", "60"])
+        _trace({"helper_pid": helper.pid})
+        return 0
     server = ThreadingHTTPServer((args.hostname, args.port), Handler)
     server.daemon_threads = True
     thread = threading.Thread(target=server.serve_forever, daemon=True)

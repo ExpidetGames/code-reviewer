@@ -59,8 +59,9 @@ enqueue/settings, exclusive for gate changes and runner transitions; multi-row o
 jobs by ascending id (full order: `contracts/README.md`). Disabling cancels queued Dynamic work and
 leaves running jobs, their leases/heartbeats and PR slots unchanged. A release or lease expiry with
 the gate off fails Dynamic work with `dynamic_review_disabled` instead of requeueing it. Use the
-instance settings repository setter; a raw SQL update bypasses this boundary. There is no UI or CLI
-for this stored instance setting; #202 owns those controls. See `contracts/README.md` for the
+instance settings repository setter; a raw SQL update bypasses this boundary. The instance admin
+switches it on the portal's Instance page (the Dynamic Review card, `src/admin/`), which uses that
+setter; there is no CLI. See `contracts/README.md` for the
 upgrade/rollback order.
 
 The kind widens what the queue treats as "the same job": the automatic per-head uniqueness, the

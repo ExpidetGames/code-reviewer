@@ -474,6 +474,21 @@ by whoever runs it (neither is part of the shipped files nor tested):
 After either, run a review (`/review` on a test pull request) and check the runner log for
 `no answer from the app` or model and GitHub errors (`git_unavailable`, `llm_unavailable`).
 
+### Dynamic Review runner (not yet activatable)
+
+Dynamic Review needs a runner of its own, sized separately from the PR-Agent runner above. The opt-in
+override file `compose.dynamic.yml` describes it for plain Docker Compose; it is **not yet
+activatable**, because the engine is not in the runner image and the runner's isolation self-check
+still fails closed, so no runner claims a Dynamic job. Nothing in `compose.coolify.yml` changes and a
+Coolify installation needs nothing from it today. When the engine ships, a Coolify variant follows;
+until then [`docs/dynamic-review.md`](dynamic-review.md) has the status, the activation order and the
+sizing reasoning. The settings, all optional and without secrets, are `RUNNER_DYNAMIC_IMAGE`,
+`RUNNER_DYNAMIC_CONCURRENCY` (default 1: one Dynamic job at a time),
+`RUNNER_DYNAMIC_MEMORY_LIMIT` (`2g`), `RUNNER_DYNAMIC_MEMORY_RESERVATION` (`1536m`) and
+`RUNNER_DYNAMIC_CAPABILITIES` (the operator's JSON description of the model). The memory figures are
+an unmeasured, conservative proposal; do not raise the concurrency before the measurements in
+`docs/dynamic-review.md` exist.
+
 ## 10. One app instance only
 
 Run exactly **one** app container, and never two Coolify applications on the same volumes:

@@ -22,7 +22,9 @@ import {
   FieldError,
   FieldLabel,
 } from "../../components/ui/field.tsx";
+import { Checkbox } from "../../components/ui/checkbox.tsx";
 import { Input } from "../../components/ui/input.tsx";
+import { Label } from "../../components/ui/label.tsx";
 import {
   RadioGroup,
   RadioGroupItem,
@@ -58,21 +60,28 @@ export function InstanceForm({
   const ids = useId();
   const tenancyHeadingId = `${ids}-tenancy-heading`;
   const limitsHeadingId = `${ids}-limits-heading`;
+  const dynamicHeadingId = `${ids}-dynamic-heading`;
   const [tenancy, setTenancy] = useState<TenancyKind>(settings.tenancy.value);
   const [limitText, setLimitText] = useState(
     String(settings.maxWorkspacesPerUser.value),
   );
+  const [dynamicEnabled, setDynamicEnabled] = useState(
+    settings.dynamicReview.value,
+  );
+  const [rolloutConfirmed, setRolloutConfirmed] = useState(false);
+  const [dynamicRefusal, setDynamicRefusal] = useState(false);
   const [results, setResults] = useState<{
     tenancy: SaveStatus;
     limits: SaveStatus;
-  }>({ tenancy: null, limits: null });
+    dynamic: SaveStatus;
+  }>({ tenancy: null, limits: null, dynamic: null });
   const { pending, save } = useSave(api, settings.workspaceCount);
   const focusTargetRef = useFocusFirstError();
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     // Only what changed is sent, so a save does not touch the other setting's "last changed".
-    const wanted: Array<"tenancy" | "limits"> = [];
+    const wanted: Array<"tenancy" | "limits" | "dynamic"> = [];
     const changes: SettingChange[] = [];
     if (tenancy !== settings.tenancy.value) {
       wanted.push("tenancy");
@@ -82,16 +91,33 @@ export function InstanceForm({
       wanted.push("limits");
       changes.push({ limits: { maxWorkspacesPerUser: Number(limitText) } });
     }
+    // Turning the gate on needs the operator's confirmation of the rollout order (contracts/README.md).
+    const turningOn = dynamicEnabled && !settings.dynamicReview.value;
+    const blocked = turningOn && !rolloutConfirmed;
+    setDynamicRefusal(blocked);
+    if (dynamicEnabled !== settings.dynamicReview.value && !blocked) {
+      wanted.push("dynamic");
+      changes.push({ dynamicReview: { enabled: dynamicEnabled } });
+    }
     const outcomes = await save(...changes);
-    const next: typeof results = { tenancy: null, limits: null };
+    const next: typeof results = { tenancy: null, limits: null, dynamic: null };
     wanted.forEach((key, index) => {
       next[key] = outcomes[index] ?? null;
     });
     setResults(next);
+    // The confirmation belongs to this save: the next time the gate is turned on it is asked again.
+    const dynamicIndex = wanted.indexOf("dynamic");
+    if (dynamicIndex !== -1 && outcomes[dynamicIndex]?.kind === "saved")
+      setRolloutConfirmed(false);
     const failed = outcomes.findIndex((outcome) => outcome.kind === "failed");
     if (failed !== -1)
       focusTargetRef.current =
-        wanted[failed] === "limits" ? `${ids}-max` : `${ids}-tenancy`;
+        wanted[failed] === "limits"
+          ? `${ids}-max`
+          : wanted[failed] === "dynamic"
+            ? `${ids}-dynamic`
+            : `${ids}-tenancy`;
+    else if (blocked) focusTargetRef.current = `${ids}-rollout`;
   }
 
   const limitIssue =
@@ -202,6 +228,77 @@ export function InstanceForm({
           </Field>
           <LastChanged setting={settings.maxWorkspacesPerUser} />
           <SaveResult status={results.limits} />
+        </CardContent>
+      </Card>
+
+      <Card role="group" aria-labelledby={dynamicHeadingId}>
+        <CardHeader>
+          <CardTitle>
+            <h2
+              id={dynamicHeadingId}
+              className="text-lg font-semibold tracking-tight"
+            >
+              Dynamic Review
+            </h2>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <Field>
+            <span className="flex items-start gap-2">
+              <Checkbox
+                id={`${ids}-dynamic`}
+                checked={dynamicEnabled}
+                onCheckedChange={(checked) =>
+                  setDynamicEnabled(checked === true)
+                }
+                aria-describedby={`${ids}-dynamic-hint`}
+              />
+              <Label htmlFor={`${ids}-dynamic`} className="font-normal">
+                Allow Dynamic Review on this instance
+              </Label>
+            </span>
+            <FieldDescription id={`${ids}-dynamic-hint`}>
+              Off by default. While it is off, a project set to Dynamic Review
+              gets a failed run with the code{" "}
+              <code>dynamic_review_disabled</code>, never a Diff review. While
+              it is on, those runs are queued and wait for a runner that can run
+              it; one that no runner claims within 30 minutes is cancelled with{" "}
+              <code>no_capable_runner</code>. Turning it off cancels the waiting
+              runs and leaves the running ones to finish. Dynamic Review cannot
+              be activated yet: no runner offers the engine until it ships.
+            </FieldDescription>
+          </Field>
+          {dynamicEnabled && !settings.dynamicReview.value ? (
+            <Field>
+              <span className="flex items-start gap-2">
+                <Checkbox
+                  id={`${ids}-rollout`}
+                  checked={rolloutConfirmed}
+                  onCheckedChange={(checked) =>
+                    setRolloutConfirmed(checked === true)
+                  }
+                  aria-invalid={dynamicRefusal}
+                />
+                <Label htmlFor={`${ids}-rollout`} className="font-normal">
+                  Every app instance already runs the version that supports
+                  Dynamic Review
+                </Label>
+              </span>
+              <FieldDescription>
+                A previous-release app on the same database could hand a Dynamic
+                job to a runner as a Diff job. The order is in
+                contracts/README.md, section &quot;Rolling out Dynamic
+                Review&quot;.
+              </FieldDescription>
+              {dynamicRefusal ? (
+                <span role="alert" className="text-sm text-destructive">
+                  Confirm the rollout order before turning Dynamic Review on.
+                </span>
+              ) : null}
+            </Field>
+          ) : null}
+          <LastChanged setting={settings.dynamicReview} />
+          <SaveResult status={results.dynamic} />
         </CardContent>
       </Card>
 

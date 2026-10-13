@@ -27,3 +27,4 @@ Every record is a file `NNNN-short-title.md` (four digits, counting up) with the
 | No. | Title | Status |
 |---|---|---|
 | [0001](0001-editions-setup-and-accounts.md) | One codebase for self-hosted and hosted, first-run setup, accounts and workspaces | Accepted |
+| [0002](0002-dynamic-review-deployment.md) | How Dynamic Review is deployed and switched on | Accepted |

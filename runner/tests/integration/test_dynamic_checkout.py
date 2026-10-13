@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Trusted preparation against real local Git objects, never GitHub or a model."""
 
+import os
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -899,3 +900,28 @@ def test_missing_prior_blob_declares_full_mode_without_losing_prior_findings(
     )
     assert result.comparison == "full" and not result.previous_diff
     assert result.prior_state == "prior-findings" and result.files["source.py"] == "updated\n"
+
+
+# #202 (process-group reuse)
+def test_the_git_helper_group_is_only_signalled_while_its_leader_is_not_reaped(
+    repo: GitFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    signals: list[tuple[int, bool]] = []
+    real_killpg = os.killpg
+
+    def killpg(pgid: int, sig: int) -> None:
+        try:
+            os.waitid(os.P_PID, pgid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+            unreaped = True
+        except ChildProcessError:
+            unreaped = False
+        signals.append((pgid, unreaped))
+        real_killpg(pgid, sig)
+
+    monkeypatch.setattr(os, "killpg", killpg)
+
+    prepare_content(claim(repo), 196, LocalTransport(repo.path), tmp_path / "job", Redactor(()))
+
+    # Every transfer ended its helper's group, and never after the leader's id could be reused.
+    assert signals
+    assert all(unreaped for _, unreaped in signals)

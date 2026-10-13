@@ -72,8 +72,11 @@ Order:
    rollback; retain the forward migration and historical Dynamic rows. Resume compatible runners.
 
 Removing the setting is equivalent to disabling it. Use the repository setter, not raw SQL, which
-would bypass the lock and cancellation. The stored setting has no UI, API route or CLI; #202 owns
-operator controls and activation instructions. It stays off until #202's real runner checks ship.
+would bypass the lock and cancellation. The operator control is the instance admin's **Dynamic Review**
+card on the portal's Instance page (`PUT /api/admin/settings` with `{ "dynamicReview": { "enabled":
+boolean } }`, admin only, server side), which calls that setter; it asks the admin to confirm step 1
+before it turns the gate on. It stays off until #202's real runner checks ship; the status and the
+activation steps are in `docs/dynamic-review.md`.
 
 ### Queue lock order
 

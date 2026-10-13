@@ -6,13 +6,11 @@ installation credential is held only by the trusted HTTP client, never written t
 """
 
 import base64
-import contextlib
 import http.client
 import io
 import os
 import re
 import select
-import signal
 import socket
 import subprocess
 from collections.abc import Generator
@@ -20,6 +18,7 @@ from pathlib import Path
 from typing import BinaryIO, Protocol, cast
 from urllib.parse import urlsplit
 
+from code_reviewer_runner.process_group import end_group, exited_with_zero, wait_for_exit
 from code_reviewer_runner.result import ErrorCode
 
 from .limits import Budget, CheckoutError
@@ -241,12 +240,14 @@ class LocalTransport:
                     break
                 budget.charge(len(chunk))
                 yield chunk
-            if process.wait(timeout=budget.remaining()) != 0:
+            # Observe the exit without reaping: the group id stays ours until it is ended below.
+            if not wait_for_exit(process, budget.remaining()):
+                budget.check()
+                raise CheckoutError(ErrorCode.TIMEOUT)
+            if not exited_with_zero(process):
                 raise CheckoutError(ErrorCode.GIT_UNAVAILABLE)
         finally:
-            with contextlib.suppress(ProcessLookupError):
-                os.killpg(process.pid, signal.SIGKILL)
-            process.wait()
+            end_group(process, grace=0)
             if process.stdin is not None:
                 process.stdin.close()
             if process.stdout is not None:
