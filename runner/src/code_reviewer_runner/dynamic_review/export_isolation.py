@@ -211,14 +211,23 @@ def _read_only(path: Path, gid: int) -> None:
     os.chmod(path, 0o550)
 
 
+def _nothing() -> None:
+    return None
+
+
 @contextmanager
-def prepared_job(parent: Path, identity: AgentIdentity) -> Generator[PreparedJob]:
+def prepared_job(
+    parent: Path, identity: AgentIdentity, *, on_lease: Callable[[], None] = _nothing
+) -> Generator[PreparedJob]:
     """One root-supervised lifetime; the caller keeps it open through launch and completion.
 
     A uid/gid is exclusive across all jobs in the container. Parallel slots require distinct
     users AND primary groups. The shared lock is outside agent access and is not a Git cache.
     The caller must terminate its engine process group before leaving this lifetime; trusted
     preparation owns no engine process. Failures/cancellation/signals must unwind this context.
+
+    `on_lease` runs once the user is leased and before anything of this job exists: whatever an
+    earlier job left running as that user is ended there, before it could read this job's files.
     """
     identity.validate()
     _clean_ancestors(parent.parent)
@@ -236,6 +245,7 @@ def prepared_job(parent: Path, identity: AgentIdentity) -> Generator[PreparedJob
                 fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
                 raise _refuse() from None
+        on_lease()
         root = Path(tempfile.mkdtemp(prefix="job-", dir=parent))
         runtime = root / "runtime"
         runtime.mkdir(mode=0o700)
@@ -273,6 +283,7 @@ def prepared_checkout(
     metadata: str = "",
     prior_state: str = "",
     content_for: Callable[..., PreparedContent] = prepare_job_content,
+    on_lease: Callable[[], None] = _nothing,
 ) -> Generator[tuple[PreparedContent, PreparedJob]]:
     """The root-supervised integration seam for #197; keep open until all owned processes end.
 
@@ -294,7 +305,7 @@ def prepared_checkout(
     parent = parent.resolve()
     if not parent.is_relative_to(working_directory):
         raise _refuse()
-    with prepared_job(parent, identity) as lifetime:
+    with prepared_job(parent, identity, on_lease=on_lease) as lifetime:
         try:
             # The supervisor's mkdtemp starts at 0700. Grant only the leased job group
             # traversal through this owned working directory, without directory listing.

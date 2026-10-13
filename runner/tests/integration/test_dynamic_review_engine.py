@@ -1034,8 +1034,9 @@ class ScriptedLaunch(EngineLaunch):
         self.calls.append("sweep")
         return True
 
-    def close(self) -> None:
+    def close(self) -> bool:
         self.calls.append("close")
+        return True
 
 
 # #197-T04 #197-T09

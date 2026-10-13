@@ -135,7 +135,13 @@ def test_the_engine_runs_as_the_dedicated_user_and_can_do_nothing_else(
                 ENGINE_GID,
             )
             assert facts["groups"] in ([], [ENGINE_GID])  # no supplementary group of the supervisor
-            assert facts["capabilities"] == "0" * 16
+            # Not one capability in any set the process can use or inherit, and no way to gain
+            # one (the compose-level `no-new-privileges` is what the suite itself runs under).
+            status = facts["status"]
+            assert isinstance(status, dict)
+            for name in ("CapEff", "CapPrm", "CapAmb"):
+                assert status[name] == "0" * 16, name
+            assert status["NoNewPrivs"] == "1"
             assert facts["can_become_root"] is False
             # What it can read: its own config; not the job directory, not the supervisor.
             assert facts["can_read_config"] is True
@@ -252,6 +258,77 @@ def test_the_first_start_ends_processes_a_killed_job_left_behind(
     finally:
         stray.kill()
         stray.wait()
+
+
+# #197-T07
+def test_what_a_killed_job_left_is_ended_before_anything_of_the_next_job_exists(
+    repo: Repo, environment: dict[str, str], job_dir: Path
+) -> None:
+    stray = subprocess.Popen(
+        [python3(), "-I", "-c", "import time; time.sleep(600)"],
+        user=ENGINE_UID,
+        group=ENGINE_GID,
+        extra_groups=[],
+        start_new_session=True,
+        env={"PATH": "/usr/bin:/bin"},
+    )
+    try:
+        assert stray.pid in user_pids(ENGINE_UID)
+        parent = job_dir / "dynamic"
+        with production_preparer(environment, content_for=repo.content_for)(
+            dynamic_job(repo.head)
+        ) as prepared:
+            assert isinstance(prepared, Prepared)
+            # The survivor is gone by the time the job's directories and its export exist.
+            assert stray.pid not in user_pids(ENGINE_UID)
+            assert any(parent.iterdir())
+    finally:
+        stray.kill()
+        stray.wait()
+
+
+# #197-T07
+def test_the_user_is_swept_after_its_lease_is_taken_and_before_the_job_directory_is_made(
+    job_dir: Path,
+) -> None:
+    parent = job_dir / "dynamic"
+    identity = AgentIdentity(ENGINE_UID, ENGINE_GID)
+    seen: dict[str, object] = {}
+
+    def on_lease() -> None:
+        seen["directories"] = list(parent.iterdir())
+        try:  # the lease is held: a second job on the same user is refused right now
+            with prepared_job(parent, identity):
+                seen["second"] = "allowed"
+        except Exception as error:
+            seen["second"] = type(error).__name__
+
+    with prepared_job(parent, identity, on_lease=on_lease):
+        pass
+
+    assert seen["directories"] == []
+    assert seen["second"] == "CheckoutError"
+
+
+# #197-T07
+def test_a_sweep_that_fails_after_the_lease_leaves_no_directory_and_frees_the_lease(
+    job_dir: Path,
+) -> None:
+    parent = job_dir / "dynamic"
+    identity = AgentIdentity(ENGINE_UID, ENGINE_GID)
+
+    def refuse() -> None:
+        raise RuntimeError("the sweep failed")
+
+    try:
+        with prepared_job(parent, identity, on_lease=refuse):
+            raise AssertionError("the job must not start")
+    except RuntimeError:
+        pass
+
+    assert list(parent.iterdir()) == []
+    with prepared_job(parent, identity) as again:
+        assert again.root.exists()
 
 
 # #196-T08 #197-T07

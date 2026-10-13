@@ -65,6 +65,36 @@ def user_pids(uid: int) -> list[int]:
     return found
 
 
+def sweep_user(uid: int, gid: int) -> bool:
+    """Kill every process of user `uid`, wherever it went. True when none is left.
+
+    Needs the privilege to become that user (the supervisor and the job loop both are root).
+    """
+    python = shutil.which("python3", path=_TRUSTED_PATH)
+    if python is None:
+        return False
+    for _ in range(_SWEEP_ROUNDS):
+        if not user_pids(uid):
+            return True
+        try:
+            subprocess.run(
+                [python, "-I", "-c", _SWEEP],
+                user=uid,
+                group=gid,
+                extra_groups=(),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=_SWEEP_SECONDS,
+                check=False,
+                env={"PATH": _TRUSTED_PATH},
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        time.sleep(0.02)
+    return not user_pids(uid)
+
+
 def listener_uids(port: int, tables: dict[str, str]) -> set[int]:
     """The owners of every listening socket on `port`, read from /proc/net/tcp{,6} texts."""
     owners: set[int] = set()
@@ -138,8 +168,8 @@ class EngineLaunch:
         without a chance to clean up (SIGKILL, an OOM kill) leaves its engine behind, and the
         lease on the user is free again the moment that process is gone.
         """
-        if not self._verified:
-            self.sweep()
+        if not self._verified and not self.sweep():
+            raise IsolationError("a process of the engine user from an earlier job cannot be ended")
         self.confinement.apply(proxy_port, engine_port)
         if not self._verified:
             verify_confinement(self.uid, self.gid, proxy_port)
@@ -154,34 +184,19 @@ class EngineLaunch:
 
     def sweep(self) -> bool:
         """Kill every process of the engine user, wherever it went. True when none is left."""
-        python = shutil.which("python3", path=_TRUSTED_PATH)
-        if python is None:
+        return sweep_user(self.uid, self.gid)
+
+    def close(self) -> bool:
+        """End the job's use of the user: nothing of it runs, its network rules are gone.
+
+        True when that is so. If the sweep cannot finish, the rules stay: a process of that user
+        that is still alive must not be left without its boundary. The next job installs its
+        rules over this table (and its first sweep fails closed while the process lives).
+        """
+        if not self.sweep():
             return False
-        for _ in range(_SWEEP_ROUNDS):
-            if not user_pids(self.uid):
-                return True
-            try:
-                subprocess.run(
-                    [python, "-I", "-c", _SWEEP],
-                    user=self.uid,
-                    group=self.gid,
-                    extra_groups=(),
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    timeout=_SWEEP_SECONDS,
-                    check=False,
-                    env={"PATH": _TRUSTED_PATH},
-                )
-            except (OSError, subprocess.TimeoutExpired):
-                return False
-            time.sleep(0.02)
-        return not user_pids(self.uid)
-
-    def close(self) -> None:
-        """End the job's use of the user: nothing of it runs, its network rules are gone."""
-        self.sweep()
         self.confinement.remove()
+        return True
 
 
-__all__ = ["EngineLaunch", "IsolationError", "listener_uids", "user_pids"]
+__all__ = ["EngineLaunch", "IsolationError", "listener_uids", "sweep_user", "user_pids"]

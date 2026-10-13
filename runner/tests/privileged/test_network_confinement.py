@@ -8,6 +8,7 @@ the rules refuse it; the namespace has no route out, so a refusal can only be th
 """
 
 import errno
+import shutil
 import socket
 import time
 from collections.abc import Generator
@@ -216,3 +217,35 @@ def test_applying_again_replaces_the_rules_of_the_user_and_does_not_stack_them()
 
     assert reached["first"]["connected"] is False  # the first port was replaced, not added to
     assert reached["second"]["connected"] is True
+
+
+# #197-T09
+def test_the_engine_user_cannot_change_the_rules_that_confine_it() -> None:
+    nft = shutil.which("nft", path="/usr/sbin:/sbin:/usr/bin:/bin")
+    assert nft is not None
+    with listener() as proxy:
+        confinement = NetworkConfinement(ENGINE_UID)
+        confinement.apply(proxy, free_port())
+        try:
+            listing = run_as(
+                ENGINE_UID,
+                ENGINE_GID,
+                "import subprocess, sys; "
+                "sys.exit(subprocess.call([sys.argv[1], 'list', 'tables']))",
+                nft,
+            )
+            flushing = run_as(
+                ENGINE_UID,
+                ENGINE_GID,
+                "import subprocess, sys; "
+                "sys.exit(subprocess.call([sys.argv[1], 'delete', 'table', 'inet', sys.argv[2]]))",
+                nft,
+                table_name(ENGINE_UID),
+            )
+            still_there = table_name(ENGINE_UID) in nft_tables()
+        finally:
+            confinement.remove()
+
+    assert listing.returncode != 0
+    assert flushing.returncode != 0
+    assert still_there

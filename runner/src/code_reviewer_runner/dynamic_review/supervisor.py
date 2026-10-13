@@ -26,7 +26,7 @@ from code_reviewer_runner.job import Job
 from code_reviewer_runner.result import ErrorCode
 
 from .checkout import PreparedContent, prepare_job_content
-from .engine_user import EngineLaunch
+from .engine_user import EngineLaunch, sweep_user
 from .export_isolation import AgentIdentity, prepared_checkout
 from .limits import CheckoutError
 
@@ -70,6 +70,22 @@ def engine_identity(environment: Mapping[str, str]) -> AgentIdentity:
     return AgentIdentity(uid, gid)
 
 
+def _sweep_first(identity: AgentIdentity) -> Callable[[], None]:
+    """The first thing a job does with the leased user: end what an earlier job left running.
+
+    A job process that was killed outright (SIGKILL, an OOM kill) leaves its engine behind, and
+    the lease is free again the moment that process is gone. Nothing of this job exists yet when
+    this runs, so the survivor cannot read the export, the config or the capability. If it cannot
+    be ended the job does not start.
+    """
+
+    def sweep() -> None:
+        if not sweep_user(identity.uid, identity.gid):
+            raise CheckoutError(ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED)
+
+    return sweep
+
+
 def production_preparer(
     environment: Mapping[str, str],
     *,
@@ -87,7 +103,12 @@ def production_preparer(
         identity = engine_identity(environment)
         parent = Path.cwd().resolve() / PARENT_NAME
         with prepared_checkout(
-            job, parent, identity, cancelled=cancelled, content_for=content_for
+            job,
+            parent,
+            identity,
+            cancelled=cancelled,
+            content_for=content_for,
+            on_lease=_sweep_first(identity),
         ) as (content, lifetime):
             yield Prepared(
                 content,

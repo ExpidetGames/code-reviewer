@@ -67,11 +67,15 @@ def can(action: Any) -> bool:
     return True
 
 
-def capabilities() -> str:
+def status_fields() -> dict[str, str]:
+    """The capability sets and `no_new_privs` of this process, as the kernel reports them."""
+    wanted = ("CapInh", "CapPrm", "CapEff", "CapBnd", "CapAmb", "NoNewPrivs")
+    found: dict[str, str] = {}
     for line in Path("/proc/self/status").read_text().splitlines():
-        if line.startswith("CapEff:"):
-            return line.split()[1]
-    return "unknown"
+        name, _, value = line.partition(":")
+        if name in wanted:
+            found[name] = value.strip()
+    return found
 
 
 def facts(targets: dict[str, Any]) -> dict[str, Any]:
@@ -93,7 +97,7 @@ def facts(targets: dict[str, Any]) -> dict[str, Any]:
         "euid": os.geteuid(),
         "gid": os.getgid(),
         "groups": os.getgroups(),
-        "capabilities": capabilities(),
+        "status": status_fields(),
         "pid": os.getpid(),
         "environment": dict(os.environ),
         "can_read_config": can(lambda: config.read_bytes()),

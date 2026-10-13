@@ -101,3 +101,57 @@ def test_the_production_preparation_hands_the_adapter_the_users_directories(
     # The roots of the jobs live inside the job process's own working directory.
     assert seen["parent"] == tmp_path.resolve() / supervisor.PARENT_NAME
     assert (seen["identity"].uid, seen["identity"].gid) == (20001, 20002)
+
+
+def lease_hook(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, swept: bool
+) -> tuple[Any, list[Any]]:
+    """The `on_lease` hook the production preparer gives the checkout, and what it swept."""
+    seen: dict[str, Any] = {}
+    sweeps: list[Any] = []
+
+    @contextmanager
+    def fake_checkout(
+        job: Job, parent: Path, identity: Any, **options: Any
+    ) -> Generator[tuple[Any, Any]]:
+        seen.update(options)
+        yield (
+            SimpleNamespace(export=tmp_path),
+            SimpleNamespace(root=tmp_path, environment={"HOME": "h", "TMPDIR": "t"}),
+        )
+
+    def sweep(uid: int, gid: int) -> bool:
+        sweeps.append((uid, gid))
+        return swept
+
+    monkeypatch.setattr(supervisor, "prepared_checkout", fake_checkout)
+    monkeypatch.setattr(supervisor, "sweep_user", sweep)
+    monkeypatch.chdir(tmp_path)
+    environment = {ENGINE_UID_VARIABLE: "20001", ENGINE_GID_VARIABLE: "20002"}
+    with production_preparer(environment)(dynamic_job()):
+        pass
+    return seen["on_lease"], sweeps
+
+
+# #197-T07
+def test_the_first_sweep_runs_as_soon_as_the_user_is_leased(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    on_lease, sweeps = lease_hook(monkeypatch, tmp_path, swept=True)
+
+    assert sweeps == []  # not before the checkout takes the lease: the hook is what it calls
+    on_lease()
+
+    assert sweeps == [(20001, 20002)]
+
+
+# #197-T07
+def test_a_job_does_not_start_when_the_leftovers_of_the_user_cannot_be_ended(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    on_lease, _ = lease_hook(monkeypatch, tmp_path, swept=False)
+
+    with pytest.raises(CheckoutError) as caught:
+        on_lease()
+
+    assert caught.value.code is ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED

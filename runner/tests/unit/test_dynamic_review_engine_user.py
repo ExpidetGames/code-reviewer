@@ -12,11 +12,16 @@ import os
 import stat
 from pathlib import Path
 
+import pytest
+
+from code_reviewer_runner.dynamic_review import engine_user
 from code_reviewer_runner.dynamic_review.engine_user import (
     EngineLaunch,
     listener_uids,
     user_pids,
 )
+from code_reviewer_runner.dynamic_review.netguard import IsolationError, table_name
+from code_reviewer_runner.result import ErrorCode
 
 HEADER = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid"
 
@@ -103,3 +108,60 @@ def test_a_planted_link_in_place_of_the_config_is_not_followed(tmp_path: Path) -
 def test_the_processes_of_a_user_are_listed_without_zombies() -> None:
     assert os.getpid() in user_pids(os.getuid())
     assert user_pids(2**31 - 5) == []
+
+
+def recorded(mine: EngineLaunch) -> list[str]:
+    """Replace the nft call of `mine` by a list of the scripts it was asked to run."""
+    scripts: list[str] = []
+    mine.confinement.run = scripts.append
+    return scripts
+
+
+# #197-T07
+def test_the_network_rules_stay_when_the_sweep_cannot_finish(tmp_path: Path) -> None:
+    mine = launch(tmp_path, uid=10101, gid=10101)
+    scripts = recorded(mine)
+    mine.confinement.apply(4000, 4001)
+    mine.sweep = lambda: False  # type: ignore[method-assign]  # a process stuck in D state
+
+    swept = mine.close()
+
+    # Deleting the table now would leave a survivor of that user without any boundary.
+    assert swept is False
+    assert len(scripts) == 1
+    assert f"delete table inet {table_name(10101)}" not in "".join(scripts)
+
+
+# #197-T07
+def test_the_network_rules_go_once_the_sweep_has_finished(tmp_path: Path) -> None:
+    mine = launch(tmp_path, uid=10101, gid=10101)
+    scripts = recorded(mine)
+    mine.confinement.apply(4000, 4001)
+    mine.sweep = lambda: True  # type: ignore[method-assign]
+
+    assert mine.close() is True
+    assert scripts[-1] == f"delete table inet {table_name(10101)}\n"
+
+
+# #197-T07
+def test_no_job_starts_while_a_predecessors_process_survives_the_first_sweep(
+    tmp_path: Path,
+) -> None:
+    mine = launch(tmp_path, uid=10101, gid=10101)
+    scripts = recorded(mine)
+    mine.sweep = lambda: False  # type: ignore[method-assign]
+
+    with pytest.raises(IsolationError) as caught:
+        mine.confine(4000, 4001)
+
+    assert caught.value.code is ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED
+    assert scripts == []  # nothing was installed and no engine can follow
+
+
+# #197-T07
+def test_a_missing_interpreter_is_a_failed_sweep(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(engine_user.shutil, "which", lambda *args, **kwargs: None)  # pyright: ignore[reportUnknownLambdaType]
+
+    assert launch(tmp_path).sweep() is False
