@@ -7,6 +7,7 @@ external host" are loopback listeners the test owns, so each of them accepts a c
 the rules refuse it; the namespace has no route out, so a refusal can only be the rules at work.
 """
 
+import errno
 import socket
 import time
 from collections.abc import Generator
@@ -29,6 +30,10 @@ from code_reviewer_runner.dynamic_review.netguard import (
     table_name,
     verify_confinement,
 )
+
+# What a refused connection looks like to the user: an immediate error from the reject, never a
+# timeout (a silent drop). How long it takes is not part of that: a SYN retransmit may add a second.
+REFUSED = {errno.EACCES, errno.ECONNREFUSED, errno.EHOSTUNREACH, errno.ENETUNREACH}
 
 
 @contextmanager
@@ -56,7 +61,7 @@ def test_the_engine_user_reaches_its_proxy_and_nothing_else_and_other_users_are_
         if ipv6 is not None:  # a kernel without IPv6 loopback has nothing to refuse
             targets.append(("ipv6 loopback", "::1", ipv6))
         confinement = NetworkConfinement(ENGINE_UID)
-        confinement.apply([proxy, free_port()])
+        confinement.apply(proxy, free_port())
         try:
             engine = connect_as(ENGINE_UID, ENGINE_GID, targets)
             stranger = connect_as(STRANGER_UID, STRANGER_GID, targets)
@@ -67,8 +72,8 @@ def test_the_engine_user_reaches_its_proxy_and_nothing_else_and_other_users_are_
     assert engine["proxy"]["connected"] is True
     for label in (target[0] for target in targets[1:]):
         assert engine[label]["connected"] is False, label
-        # Refused, not a silent drop: a drop would run into the 2 s connect timeout of the probe.
-        assert engine[label]["seconds"] < 1.9, label
+        # Refused by the reject, not silently dropped (a drop ends in a timeout: no errno).
+        assert engine[label]["errno"] in REFUSED, label
     # The rules name one user: another job's user reaches everything, as before.
     assert all(result["connected"] for result in stranger.values())
     # Removing the rules gives the user its network back (the table is gone with the job).
@@ -76,32 +81,100 @@ def test_the_engine_user_reaches_its_proxy_and_nothing_else_and_other_users_are_
     assert table_name(ENGINE_UID) not in nft_tables()
 
 
+SEND = (
+    "import socket, sys; "
+    "s = socket.socket(int(sys.argv[1]), socket.SOCK_DGRAM); "
+    "s.bind((sys.argv[2], int(sys.argv[3]))); "
+    "s.sendto(b'x', (sys.argv[4], int(sys.argv[5])))"
+)
+
+
+def arrives(sentinel: socket.socket) -> bool:
+    try:
+        sentinel.recvfrom(16)
+    except OSError:
+        return False
+    return True
+
+
+def send_datagram_as_engine(family: int, source: str, source_port: int, to: str, port: int) -> None:
+    done = run_as(
+        ENGINE_UID, ENGINE_GID, SEND, str(int(family)), source, str(source_port), to, str(port)
+    )
+    # A refused send may or may not be an error to the sender; only what arrives is judged.
+    assert done.returncode in (0, 1), done.stderr
+
+
 # #197-T09
-def test_datagrams_of_the_engine_user_are_refused_too() -> None:
+def test_datagrams_of_the_engine_user_to_any_address_are_refused_and_flow_again_without_rules() -> (
+    None
+):
+    cases = [
+        ("127.0.0.1", socket.AF_INET),
+        ("127.0.0.2", socket.AF_INET),
+        ("::1", socket.AF_INET6),
+    ]
+    with listener() as proxy:
+        confinement = NetworkConfinement(ENGINE_UID)
+        confinement.apply(proxy, free_port())
+        arrived: dict[str, bool] = {}
+        try:
+            for address, family in cases:
+                try:
+                    sentinel = socket.socket(family, socket.SOCK_DGRAM)
+                    sentinel.bind((address, 0))
+                except OSError:
+                    sentinel.close()
+                    continue  # a kernel without that loopback address has nothing to refuse
+                with sentinel:
+                    sentinel.settimeout(1.0)
+                    port = int(sentinel.getsockname()[1])
+                    send_datagram_as_engine(family, address, 0, address, port)
+                    arrived[address] = arrives(sentinel)
+        finally:
+            confinement.remove()
+    assert arrived and not any(arrived.values()), arrived
+
+    # The same send arrives once the rules are gone, so the refusal above was the rules.
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sentinel:
+        sentinel.bind(("127.0.0.1", 0))
+        sentinel.settimeout(2.0)
+        send_datagram_as_engine(
+            socket.AF_INET, "127.0.0.1", 0, "127.0.0.1", int(sentinel.getsockname()[1])
+        )
+        assert arrives(sentinel)
+
+
+# #197-T09
+def test_the_engine_user_cannot_send_on_a_udp_flow_somebody_else_opened_and_closed() -> None:
+    # The supervisor's own DNS lookups look like this: a datagram, an answer, the socket closed.
+    # The connection tracker keeps that flow "established" for a while, and the same source port
+    # is free again: a rule that accepts established flows would let the engine user send to the
+    # sentinel on it.
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sentinel, listener() as proxy:
         sentinel.bind(("127.0.0.1", 0))
         sentinel.settimeout(1.0)
-        port = int(sentinel.getsockname()[1])
-        send = (
-            "import socket, sys; s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); "
-            "s.sendto(b'x', ('127.0.0.1', int(sys.argv[1])))"
-        )
+        sentinel_port = int(sentinel.getsockname()[1])
         confinement = NetworkConfinement(ENGINE_UID)
-        confinement.apply([proxy, free_port()])
+        confinement.apply(proxy, free_port())  # first: only flows seen from now on are tracked
         try:
-            run_as(ENGINE_UID, ENGINE_GID, send, str(port))
-            try:
-                sentinel.recvfrom(16)
-                arrived_confined = True
-            except OSError:
-                arrived_confined = False
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as root_side:
+                root_side.bind(("127.0.0.1", 0))
+                root_side.settimeout(1.0)
+                source_port = int(root_side.getsockname()[1])
+                root_side.sendto(b"query", ("127.0.0.1", sentinel_port))
+                _, client = sentinel.recvfrom(16)
+                assert client == ("127.0.0.1", source_port)
+                sentinel.sendto(b"answer", client)
+                assert root_side.recvfrom(16)[0] == b"answer"  # the flow now has its reply
+            send_datagram_as_engine(
+                socket.AF_INET, "127.0.0.1", source_port, "127.0.0.1", sentinel_port
+            )
+            reused = arrives(sentinel)
         finally:
             confinement.remove()
-        run_as(ENGINE_UID, ENGINE_GID, send, str(port))
-        sentinel.settimeout(2.0)
-        sentinel.recvfrom(16)  # the same send arrives once the rules are gone
 
-    assert arrived_confined is False
+    assert reused is False
 
 
 # #197-T09
@@ -119,7 +192,7 @@ def test_the_production_proof_passes_with_the_rules_and_fails_closed_without_the
         assert time.monotonic() - started < 30
 
         confinement = NetworkConfinement(ENGINE_UID)
-        confinement.apply([proxy, free_port()])
+        confinement.apply(proxy, free_port())
         try:
             verify_confinement(ENGINE_UID, ENGINE_GID, proxy)
         finally:
@@ -130,8 +203,8 @@ def test_the_production_proof_passes_with_the_rules_and_fails_closed_without_the
 def test_applying_again_replaces_the_rules_of_the_user_and_does_not_stack_them() -> None:
     with listener() as proxy, listener() as second:
         confinement = NetworkConfinement(ENGINE_UID)
-        confinement.apply([proxy, free_port()])
-        confinement.apply([second, free_port()])
+        confinement.apply(proxy, free_port())
+        confinement.apply(second, free_port())
         try:
             reached = connect_as(
                 ENGINE_UID,

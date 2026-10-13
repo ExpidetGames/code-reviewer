@@ -140,7 +140,7 @@ class EngineLaunch:
         """
         if not self._verified:
             self.sweep()
-        self.confinement.apply([proxy_port, engine_port])
+        self.confinement.apply(proxy_port, engine_port)
         if not self._verified:
             verify_confinement(self.uid, self.gid, proxy_port)
             self._verified = True

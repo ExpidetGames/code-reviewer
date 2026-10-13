@@ -6,8 +6,9 @@ network boundary, so the operating system enforces one: an nftables output filte
 socket owner (`meta skuid`) that lets that one user open new connections only to the loopback
 address of this job's model proxy (and to the engine's own server port). Everything else it tries
 (another job's loopback service, any other address, IPv6, UDP, raw sends) is rejected at once.
-Replies on the allowed connections pass by connection tracking. The supervisor that owns the root
-privileges (the job process, `NET_ADMIN`) installs the rules; the engine user cannot change them.
+Only the answers of the engine's own server pass as replies (never "any tracked flow"). The
+supervisor that owns the root privileges (the job process, `NET_ADMIN`) installs the rules; the
+engine user cannot change them.
 
 A per-job network namespace would need `SYS_ADMIN`, a user namespace is excluded by the lead
 decisions and a container-level rule cannot tell the supervisor (GitHub, the model upstream) from
@@ -21,7 +22,7 @@ import json
 import shutil
 import socket
 import subprocess
-from collections.abc import Callable, Collection
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -81,28 +82,36 @@ def table_name(uid: int) -> str:
     return f"code_reviewer_engine_{uid}"
 
 
-def ruleset(uid: int, ports: Collection[int]) -> str:
-    """The nft script that confines `uid` to loopback connections to `ports`.
+def ruleset(uid: int, proxy_port: int, engine_port: int) -> str:
+    """The nft script that confines `uid` to loopback TCP to `proxy_port` and `engine_port`.
 
     `add table` + `flush table` makes it idempotent: installing again replaces the rules of this
     uid (the engine's own port changes when a start is retried on another one).
+
+    Nothing is accepted by connection state alone: a flow another process opened (the
+    supervisor's DNS lookup, say) stays tracked for a while after its socket closed, and the user
+    could send on it from the same source port. Replies are accepted only as the answers of the
+    engine's own server port.
     """
-    if uid <= 0 or not ports or any(not 0 < port < 65536 for port in ports):
+    ports = (proxy_port, engine_port)
+    if uid <= 0 or any(not 0 < port < 65536 for port in ports) or proxy_port == engine_port:
         raise IsolationError("the network rules are given an unusable user or port")
     table = table_name(uid)
-    allowed = ", ".join(str(port) for port in sorted(set(ports)))
+    loopback = f'oifname "lo" ip daddr {PROXY_HOST}'
     return "\n".join(
         [
             f"add table inet {table}",
             f"flush table inet {table}",
             f"add chain inet {table} output {{ type filter hook output priority 0 ; "
             "policy accept ; }",
-            # Replies on connections somebody else opened to the engine (the supervisor to the
-            # engine's server).
-            f"add rule inet {table} output meta skuid {uid} ct state established,related accept",
+            # The answers of the engine's own server to whoever connected to it (the supervisor).
+            f'add rule inet {table} output meta skuid {uid} oifname "lo" ip saddr {PROXY_HOST} '
+            f"ip daddr {PROXY_HOST} tcp sport {engine_port} ct state established accept",
             # The only new connections: this job's proxy and the engine's own server.
-            f'add rule inet {table} output meta skuid {uid} oifname "lo" ip daddr {PROXY_HOST} '
-            f"tcp dport {{ {allowed} }} accept",
+            f"add rule inet {table} output meta skuid {uid} {loopback} tcp dport {proxy_port} "
+            "accept",
+            f"add rule inet {table} output meta skuid {uid} {loopback} tcp dport {engine_port} "
+            "accept",
             # Every other packet of that user: refused at once, not silently dropped.
             f"add rule inet {table} output meta skuid {uid} "
             "reject with icmpx type admin-prohibited",
@@ -138,8 +147,8 @@ class NetworkConfinement:
     run: NftRunner = _run_nft
     _installed: bool = False
 
-    def apply(self, ports: Collection[int]) -> None:
-        self.run(ruleset(self.uid, ports))
+    def apply(self, proxy_port: int, engine_port: int) -> None:
+        self.run(ruleset(self.uid, proxy_port, engine_port))
         self._installed = True
 
     def remove(self) -> None:

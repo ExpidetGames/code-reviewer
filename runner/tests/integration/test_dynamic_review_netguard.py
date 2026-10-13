@@ -28,32 +28,48 @@ GID = 10101
 
 # #197-T09
 def test_the_rules_let_one_user_reach_only_its_proxy_and_server_port_on_loopback() -> None:
-    script = ruleset(UID, [41000, 41001])
+    script = ruleset(UID, 41000, 41001)
 
     rules = [line for line in script.splitlines() if line.startswith("add rule")]
-    assert len(rules) == 3
-    # The accept rules name the user, the interface, the address and the ports; nothing else.
-    assert "ct state established,related accept" in rules[0]
+    assert len(rules) == 4
     assert all(f"meta skuid {UID}" in rule for rule in rules)
+    # Replies are accepted only from the engine's own server port, on loopback; never "any
+    # established flow" (a lingering UDP flow of somebody else would let the user send on it).
     assert re.search(
-        r'oifname "lo" ip daddr 127\.0\.0\.1 tcp dport \{ 41000, 41001 \} accept', rules[1]
+        r'oifname "lo" ip saddr 127\.0\.0\.1 ip daddr 127\.0\.0\.1 tcp sport 41001 '
+        r"ct state established accept$",
+        rules[0],
     )
+    # The new connections: the proxy and the engine's own port, in separate rules, TCP only.
+    assert re.search(r'oifname "lo" ip daddr 127\.0\.0\.1 tcp dport 41000 accept$', rules[1])
+    assert re.search(r'oifname "lo" ip daddr 127\.0\.0\.1 tcp dport 41001 accept$', rules[2])
     # The last rule refuses everything else of that user, immediately (not a silent drop).
-    assert rules[2].endswith("reject with icmpx type admin-prohibited")
+    assert rules[3].endswith(f"meta skuid {UID} reject with icmpx type admin-prohibited")
     assert "policy accept" in script  # other users, the supervisor included, are untouched
     assert script.index("flush table") < script.index("add rule")
+    # No rule anywhere accepts by connection state alone.
+    assert not any("ct state" in rule and "sport" not in rule for rule in rules)
 
 
 # #197-T09
 @pytest.mark.parametrize(
-    ("uid", "ports"),
-    [(0, [4000]), (-1, [4000]), (UID, []), (UID, [0]), (UID, [70000]), (UID, [-5])],
+    ("uid", "proxy_port", "engine_port"),
+    [
+        (0, 4000, 4001),
+        (-1, 4000, 4001),
+        (UID, 0, 4001),
+        (UID, 70000, 4001),
+        (UID, -5, 4001),
+        (UID, 4000, 0),
+        (UID, 4000, 70000),
+        (UID, 4000, 4000),  # one port cannot be both the proxy and the engine
+    ],
 )
-def test_rules_are_refused_for_root_no_ports_or_a_port_out_of_range(
-    uid: int, ports: list[int]
+def test_rules_are_refused_for_root_or_a_port_out_of_range_or_shared(
+    uid: int, proxy_port: int, engine_port: int
 ) -> None:
     with pytest.raises(IsolationError):
-        ruleset(uid, ports)
+        ruleset(uid, proxy_port, engine_port)
 
 
 # #197-T09
@@ -61,8 +77,8 @@ def test_applying_twice_replaces_the_rules_and_removing_deletes_only_this_users_
     scripts: list[str] = []
     confinement = NetworkConfinement(UID, run=scripts.append)
 
-    confinement.apply([4000])
-    confinement.apply([4000, 4001])
+    confinement.apply(4000, 4002)
+    confinement.apply(4000, 4001)
     confinement.remove()
     confinement.remove()  # a second remove does nothing
 
@@ -77,7 +93,7 @@ def test_a_refused_ruleset_is_the_isolation_code_and_names_no_value() -> None:
         raise IsolationError("the network filter was refused by the kernel")
 
     with pytest.raises(IsolationError) as caught:
-        NetworkConfinement(UID, run=refuse).apply([4000])
+        NetworkConfinement(UID, run=refuse).apply(4000, 4001)
 
     assert caught.value.code is ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED
 
