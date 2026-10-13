@@ -206,6 +206,12 @@ input and the boundaries around it (the epic's binding decision). Modules:
   plus one byte, checks the protocol byte bounds both ways, validates the destination's required
   features and takes usage from the provider as authoritative. `steps` and events are never trusted
   for enforcement.
+  The upstream call honours the operator's `HTTP(S)_PROXY` / `NO_PROXY` (the https upstream goes
+  through a CONNECT tunnel, so a proxy sees the destination but not the key; an operator proxy that
+  terminates TLS with its own CA could read the key, which is the operator's trust decision, as for
+  the static PR-Agent path). A transient provider or transport failure ends the Dynamic run at the
+  first recorded cause even if the engine would have retried successfully (fail-closed, each retry
+  is a paid call), the same as a provider 429/5xx.
 - `dynamic_review/audit.py` enforces the tool, file and result-byte bounds **at the proxy**, from the
   model requests themselves: every request carries the whole history, so the tool calls of a provider
   answer are counted before the engine gets the answer (the call over the bound is never handed over,
@@ -231,8 +237,10 @@ input and the boundaries around it (the epic's binding decision). Modules:
   structured turn (bounded by the input byte limit) and validates the answer with the typed findings
   parser, bounded by the job's `maxFindings`, against the files the export really holds (a finding
   outside it is `checkout_incomplete`). While the message runs, a watch ends the run the moment the
-  proxy records a limit or a provider refusal (the stable code of the first cause is the result,
-  also if the engine still produced an answer), the whole-job deadline passes or the engine dies. The
+  proxy records a limit, a provider refusal or a transport failure to the provider (timeout →
+  `llm_timeout` with a 504, refused or reset connection → `llm_unavailable` with a 502; the
+  reservation stays spent; the stable code of the first cause is the result, also if the engine
+  still produced an answer), the whole-job deadline passes or the engine dies. The
   reviewed head comes from the validated claim (`base.headSha`), never from repository content. On any
   limit, engine exit or unusable answer the whole process group is killed and the private scratch
   removed. A group is only ever signalled while its leader is still unreaped (`process_group.py`: the

@@ -8,6 +8,7 @@ how much of an upstream answer is read. Both ends are loopback fakes; nothing le
 """
 
 import json
+import socket
 import threading
 from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -15,6 +16,9 @@ from typing import Any
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+import pytest
+
+from code_reviewer_runner.dynamic_review import proxy as proxy_module
 from code_reviewer_runner.dynamic_review.adapter import _http_request  # pyright: ignore[reportPrivateUsage]
 from code_reviewer_runner.dynamic_review.budget import BudgetLedger, DynamicLimits
 from code_reviewer_runner.dynamic_review.config import new_proxy_capability
@@ -110,9 +114,11 @@ def call(url: str, token: str | None) -> tuple[int, Any]:
         return error.code, json.loads(error.read())
 
 
-def started_proxy(upstream_url: str, capability: str, **limits: int) -> Any:
+def started_proxy(
+    upstream_url: str, capability: str, ledger: BudgetLedger | None = None, **limits: int
+) -> Any:
     proxy = ModelProxy(
-        ledger=BudgetLedger(DynamicLimits(**limits)),
+        ledger=ledger or BudgetLedger(DynamicLimits(**limits)),
         base_path="/v1",
         model="deepseek-v4.1-flash",
         upstream_url=f"{upstream_url}/v1/chat/completions",
@@ -219,3 +225,83 @@ def test_the_engine_client_does_not_follow_a_redirect_either() -> None:
 
     assert status == 307
     assert elsewhere.requests == []
+
+
+class SilentListener:
+    """A loopback server that accepts one connection and never answers it."""
+
+    def __init__(self) -> None:
+        self._socket = socket.socket()
+        self._socket.bind(("127.0.0.1", 0))
+        self._socket.listen(1)
+        self._held: list[socket.socket] = []
+        self._thread = threading.Thread(target=self._accept, daemon=True)
+
+    def _accept(self) -> None:
+        try:
+            self._held.append(self._socket.accept()[0])
+        except OSError:
+            return
+
+    @property
+    def url(self) -> str:
+        return f"http://127.0.0.1:{self._socket.getsockname()[1]}"
+
+    def __enter__(self) -> "SilentListener":
+        self._thread.start()
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self._socket.close()
+        for connection in self._held:
+            connection.close()
+        self._thread.join(timeout=5.0)
+
+
+def unused_loopback_url() -> str:
+    probe = socket.socket()
+    probe.bind(("127.0.0.1", 0))
+    port = probe.getsockname()[1]
+    probe.close()
+    return f"http://127.0.0.1:{port}"
+
+
+# #236-T04
+def test_an_upstream_that_never_answers_ends_the_call_with_llm_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1")
+    monkeypatch.setattr(proxy_module, "_REQUEST_TIMEOUT_SECONDS", 0.3)
+    capability = new_proxy_capability()
+    ledger = BudgetLedger(DynamicLimits())
+    with SilentListener() as upstream:
+        server = started_proxy(upstream.url, capability, ledger)
+        try:
+            code, document = call(server.url, capability)
+        finally:
+            server.stop()
+
+    # A 5xx of its own, not the 403 of a refusal and not a budget code.
+    assert code == 504
+    assert document["error"]["code"] == ErrorCode.LLM_TIMEOUT.value
+    assert ledger.failure is not None
+    assert ledger.failure.code is ErrorCode.LLM_TIMEOUT
+
+
+# #236-T05
+def test_an_upstream_that_refuses_the_connection_ends_the_call_with_llm_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("NO_PROXY", "127.0.0.1")
+    capability = new_proxy_capability()
+    ledger = BudgetLedger(DynamicLimits())
+    server = started_proxy(unused_loopback_url(), capability, ledger)
+    try:
+        code, document = call(server.url, capability)
+    finally:
+        server.stop()
+
+    assert code == 502
+    assert document["error"]["code"] == ErrorCode.LLM_UNAVAILABLE.value
+    assert ledger.failure is not None
+    assert ledger.failure.code is ErrorCode.LLM_UNAVAILABLE
