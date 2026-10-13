@@ -226,9 +226,12 @@ class SubprocessLauncher:
             )
             pipes = await _connect_pipes(process)
         except BaseException:
-            if process is not None:
-                await asyncio.shield(asyncio.to_thread(end_group, process, 0))
-            shutil.rmtree(workdir, ignore_errors=True)
+            try:
+                if process is not None:
+                    await asyncio.shield(asyncio.to_thread(end_group, process, 0))
+            finally:
+                # Also when the start is cancelled a second time while the group is being ended.
+                shutil.rmtree(workdir, ignore_errors=True)
             raise
         return _SubprocessJob(process, spec.stdin, pipes, workdir, self._terminate_grace)
 
@@ -237,7 +240,18 @@ async def _connect_pipes(process: subprocess.Popen[bytes]) -> _Pipes:
     stdin, stdout, stderr = process.stdin, process.stdout, process.stderr
     assert stdin is not None and stdout is not None and stderr is not None  # all three are PIPE
     loop = asyncio.get_running_loop()
-    out, out_transport = await _connect_reader(loop, stdout)
-    err, err_transport = await _connect_reader(loop, stderr)
-    writer = await _connect_writer(loop, stdin)
+    transports: list[asyncio.BaseTransport] = []
+    try:
+        out, out_transport = await _connect_reader(loop, stdout)
+        transports.append(out_transport)
+        err, err_transport = await _connect_reader(loop, stderr)
+        transports.append(err_transport)
+        writer = await _connect_writer(loop, stdin)
+    except BaseException:
+        # A failed start must not leave the files open until the garbage collector finds them.
+        for transport in transports:
+            transport.close()
+        for pipe in (stdin, stdout, stderr):
+            pipe.close()
+        raise
     return _Pipes(writer, out, err, (out_transport, err_transport, writer.transport))
