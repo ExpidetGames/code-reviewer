@@ -31,8 +31,11 @@ jobs:
         run: uv sync --locked
       # The engine's grep and glob run ripgrep; the pinned OpenCode downloads one when none is on
       # its PATH, which the runner never allows. The runner image will carry the same tool (#202).
-      - name: Install ripgrep
-        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends ripgrep
+      # Both come from the runner's apt and are not version-pinned: the supply-chain audit of what
+      # the image installs (with the OpenCode binary and its Bun lock) is part of #202. nftables is
+      # what the privileged step needs to prove the engine user's network rules.
+      - name: Install ripgrep and nftables
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends ripgrep nftables
       # PR-Agent counts tokens with a tiktoken encoding that it downloads on first use. The
       # download is the only network use of this job besides the installation, so it is cached.
       - name: Restore the tiktoken encoding
@@ -51,3 +54,8 @@ jobs:
       # namespace that has a loopback interface and nothing else.
       - name: Engine tests without network
         run: scripts/run_engine_offline.sh
+      # The privileged suite (#197): root with exactly the capabilities of compose.dynamic.yml, the
+      # dedicated engine user, the per-user nft rules and the kill of that user's processes, in a
+      # namespace with nothing but loopback. Uses the pinned OpenCode fetched above.
+      - name: Privileged tests (dedicated engine user, network rules)
+        run: scripts/run_privileged_offline.sh

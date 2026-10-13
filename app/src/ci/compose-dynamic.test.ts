@@ -29,6 +29,7 @@ type Service = {
   pids_limit?: number | string;
   cap_drop?: string[];
   cap_add?: string[];
+  user?: string;
   privileged?: boolean;
   security_opt?: string[];
   stop_grace_period?: string;
@@ -38,6 +39,19 @@ type Service = {
 type Compose = { services: Record<string, Service> };
 
 const source = read("compose.dynamic.yml");
+const privilegedScript = read("runner/scripts/run_privileged_offline.sh");
+// What the root supervisor of the Dynamic job needs (#197): launch the engine as another user
+// (SETUID, SETGID), end what that user runs (KILL), seal and remove the export (CHOWN,
+// DAC_OVERRIDE, FOWNER) and install the user's nft rules (NET_ADMIN).
+const SUPERVISOR_CAPABILITIES = [
+  "CHOWN",
+  "DAC_OVERRIDE",
+  "FOWNER",
+  "KILL",
+  "NET_ADMIN",
+  "SETGID",
+  "SETUID",
+];
 const dynamic = parse(source) as Compose;
 const plain = parse(read("compose.yml")) as Compose;
 
@@ -112,16 +126,55 @@ describe("compose.dynamic.yml", () => {
     expect(service.memswap_limit).toBe(service.mem_limit);
   });
 
-  // #202-T08
-  it("hardens the container: no capability, no privilege escalation, a bounded number of processes", () => {
+  // #197-T04 #202-T08
+  it("runs the supervisor as root with exactly the capabilities it needs and no privilege escalation", () => {
     const service = runnerDynamic();
 
+    // The job process is the root supervisor (it starts the engine as another user); everything
+    // else is dropped, and no-new-privileges means nothing can regain a capability.
+    expect(service.user).toBe("0:0");
     expect(service.cap_drop).toEqual(["ALL"]);
-    expect(service).not.toHaveProperty("cap_add");
+    expect([...(service.cap_add ?? [])].sort()).toEqual(SUPERVISOR_CAPABILITIES);
+    for (const forbidden of [
+      "SYS_ADMIN",
+      "SYS_PTRACE",
+      "SYS_MODULE",
+      "NET_RAW",
+      "NET_BIND_SERVICE",
+      "MKNOD",
+      "SETPCAP",
+    ]) {
+      expect(service.cap_add).not.toContain(forbidden);
+    }
     expect(service.privileged).not.toBe(true);
     expect(service.security_opt).toContain("no-new-privileges:true");
     expect(Number(service.pids_limit)).toBeGreaterThan(0);
     expect(Number(service.pids_limit)).toBeLessThanOrEqual(1024);
+  });
+
+  // #197-T04
+  it("keeps the capability list of the privileged suite equal to the file", () => {
+    // The suite runs as root with exactly these capabilities (tests/privileged/conftest.py checks
+    // the effective set), so what it proves is what the container holds.
+    const bounding = /--bounding-set=-all((?:,\+[a-z_]+)+)/.exec(privilegedScript);
+    expect(bounding, "no --bounding-set in the script").not.toBeNull();
+    const names = (bounding?.[1] ?? "")
+      .split(",")
+      .filter((name) => name !== "")
+      .map((name) => name.slice(1).toUpperCase())
+      .sort();
+
+    expect(names).toEqual(SUPERVISOR_CAPABILITIES);
+    expect(privilegedScript).toContain("--no-new-privs");
+    expect(privilegedScript).toContain("unshare --net");
+  });
+
+  // #197-T04
+  it("drops Diff jobs to the unprivileged job user and sets the home the root loop does not have", () => {
+    const environment = runnerDynamic().environment ?? {};
+
+    expect(environment.RUNNER_DIFF_JOB_USER).toBe("10001:10001");
+    expect(environment.HOME).toBe("/home/runner");
   });
 
   // #202-T08
