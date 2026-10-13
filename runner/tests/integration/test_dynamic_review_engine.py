@@ -93,8 +93,11 @@ class FakeUpstream:
         *,
         status: int = 200,
         hold: float = 0.0,
+        usage: dict[str, Any] | None = None,
     ) -> None:
         self.requests: list[tuple[dict[str, str], Any]] = []
+        self.paths: list[str] = []
+        self._usage = usage or UPSTREAM_USAGE
         self._answers = answers or [{"role": "assistant", "content": "{}"}]
         self._status = status
         self._hold = hold
@@ -110,6 +113,7 @@ class FakeUpstream:
                 body: Any = json.loads(self.rfile.read(length))
                 headers = {key: value for key, value in self.headers.items()}
                 test.requests.append((headers, body))
+                test.paths.append(self.path)
                 if test._hold:
                     test._released.wait(test._hold)
                 index = min(len(test.requests) - 1, len(test._answers) - 1)
@@ -117,7 +121,7 @@ class FakeUpstream:
                     {
                         "id": "chatcmpl-1",
                         "choices": [{"message": test._answers[index], "finish_reason": "stop"}],
-                        "usage": UPSTREAM_USAGE,
+                        "usage": test._usage,
                     }
                 ).encode()
                 self.send_response(test._status)

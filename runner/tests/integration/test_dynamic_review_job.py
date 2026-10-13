@@ -34,7 +34,13 @@ from code_reviewer_runner.job import parse_job
 from code_reviewer_runner.result import ErrorCode
 
 
-def job_for(upstream_url: str) -> Any:
+def job_for(
+    upstream_url: str,
+    *,
+    model: str = "deepseek-v4.1-flash",
+    upstream_model: str = "deepseek/deepseek-v4.1-flash",
+    api_key: str = "dummy-openrouter-key-0123456789",
+) -> Any:
     return parse_job(
         json.dumps(
             {
@@ -42,7 +48,7 @@ def job_for(upstream_url: str) -> Any:
                 "command": "review",
                 "reviewKind": "dynamic",
                 "dynamic": {
-                    "model": "deepseek-v4.1-flash",
+                    "model": model,
                     "skill": "Look.",
                     "limits": {"maxFindings": 5},
                 },
@@ -61,8 +67,8 @@ def job_for(upstream_url: str) -> Any:
                 },
                 "llm": {
                     "provider": "openrouter",
-                    "model": "deepseek/deepseek-v4.1-flash",
-                    "apiKey": "dummy-openrouter-key-0123456789",
+                    "model": upstream_model,
+                    "apiKey": api_key,
                     "baseUrl": upstream_url,
                 },
             }
@@ -215,3 +221,97 @@ def test_a_preparation_that_fails_is_its_stable_code_and_no_engine_starts(
     assert not result.ok
     assert result.error_code is ErrorCode.CHECKOUT_INCOMPLETE
     assert upstream.requests == []
+
+
+# Two different, compatible model and provider configurations. Nothing in them is known to the
+# code: different logical and upstream model names, different destination paths and keys, and
+# different usage shapes (one with detail counters that are already part of the totals).
+MODEL_FIXTURES = {
+    "default": {
+        "model": "deepseek-v4.1-flash",
+        "upstream_model": "deepseek/deepseek-v4.1-flash",
+        "api_key": "dummy-key-for-the-first-provider-0123",
+        "prefix": "/api/v1",
+        "usage": {
+            "prompt_tokens": 40,
+            "completion_tokens": 9,
+            "completion_tokens_details": {"reasoning_tokens": 5},
+        },
+    },
+    "alternative": {
+        "model": "acme-large-2",
+        "upstream_model": "acme-corp/large-2-instruct",
+        "api_key": "dummy-key-for-the-second-provider-4567",
+        "prefix": "/openai/v1",
+        "usage": {
+            "prompt_tokens": 61,
+            "completion_tokens": 12,
+            "total_tokens": 73,
+            "prompt_tokens_details": {"cached_tokens": 30},
+        },
+    },
+}
+
+
+# #197-T10
+@pytest.mark.parametrize("name", sorted(MODEL_FIXTURES))
+def test_a_configured_model_and_provider_run_through_the_same_protocol_without_special_cases(
+    tmp_path: Path, name: str
+) -> None:
+    fixture = MODEL_FIXTURES[name]
+    usage: dict[str, Any] = fixture["usage"]  # pyright: ignore[reportAssignmentType]
+    script = {
+        "proxy_calls": 2,
+        "answer": "structured",
+        "findings": findings(),
+        "results": {"c1": read_result("src/api/handler.ts")},
+    }
+    preparer = Preparer(tmp_path / "export", script)
+
+    with FakeUpstream(
+        [
+            asks(tool_call("c1", "read", {"filePath": "src/api/handler.ts"})),
+            asks(tool_call("c2", "StructuredOutput", findings())),
+        ],
+        usage=usage,
+    ) as upstream:
+        result = runner.run_dynamic_job(
+            job_for(
+                f"{upstream.url}{fixture['prefix']}",
+                model=str(fixture["model"]),
+                upstream_model=str(fixture["upstream_model"]),
+                api_key=str(fixture["api_key"]),
+            ),
+            None,
+            0.0,
+            environment(),
+            engines=ALL_ENGINES,
+            prepare=preparer,
+        )
+
+    assert result.ok, result.log_tail
+    # The selected model, destination and key were used exactly as configured, for every call, and
+    # nothing about a hosting provider or a route was added.
+    assert len(upstream.requests) == 2
+    for (headers, body), path in zip(upstream.requests, upstream.paths, strict=True):
+        assert path == f"{fixture['prefix']}/chat/completions"
+        assert body["model"] == fixture["upstream_model"]
+        assert headers["Authorization"] == f"Bearer {fixture['api_key']}"
+        assert not {"provider", "route", "models", "transforms"} & set(body)
+    # The engine was pointed at the logical model of the job, through the one local provider.
+    trace = [
+        json.loads(line)
+        for line in (tmp_path / "export" / ".fake-opencode-trace.jsonl").read_text().splitlines()
+    ]
+    request = next(e["message_request"] for e in trace if "message_request" in e)
+    assert request["model"]["modelID"] == fixture["model"]
+    # The reported usage is summed over the real calls; detail counters are not added twice, and
+    # cost is not guessed.
+    assert result.usage is not None
+    assert result.usage.model == fixture["upstream_model"]
+    assert result.usage.ai_calls == 2
+    assert result.usage.prompt_tokens == 2 * usage["prompt_tokens"]
+    assert result.usage.completion_tokens == 2 * usage["completion_tokens"]
+    assert result.usage.total_tokens == 2 * (usage["prompt_tokens"] + usage["completion_tokens"])
+    assert result.usage.cost_usd is None
+    assert result.usage.fallback_used is False
