@@ -145,6 +145,32 @@ def test_a_message_call_that_fails_before_the_deadline_is_the_engine_being_unava
     assert raised.value.code is ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE
 
 
+# #241-T02
+def test_a_message_call_that_fails_just_before_the_deadline_is_a_budget_outcome(
+    tmp_path: Path,
+) -> None:
+    # The socket timeout and the ledger read two clocks a few milliseconds apart: a call that ends
+    # within the tolerance of the deadline is the deadline.
+    clock = Clock()
+    engine, client = engine_with(tmp_path, clock, failing_message_call(clock, at=DEADLINE - 0.2))
+    with pytest.raises(LimitError) as raised:
+        engine._send(client, "session")  # pyright: ignore[reportPrivateUsage]
+
+    assert raised.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
+
+
+# #241-T02
+def test_the_tolerance_does_not_reach_a_call_that_failed_clearly_before_the_deadline(
+    tmp_path: Path,
+) -> None:
+    clock = Clock()
+    engine, client = engine_with(tmp_path, clock, failing_message_call(clock, at=DEADLINE - 0.3))
+    with pytest.raises(EngineError) as raised:
+        engine._send(client, "session")  # pyright: ignore[reportPrivateUsage]
+
+    assert raised.value.code is ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE
+
+
 def hung_message_call(release: threading.Event) -> Callable[..., tuple[int, bytes]]:
     def transport(
         method: str, url: str, body: bytes | None, headers: Mapping[str, str], timeout: float

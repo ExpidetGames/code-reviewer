@@ -82,6 +82,8 @@ SHORT_TIMEOUT_SECONDS = 2.0
 SESSION_TIMEOUT_SECONDS = 30.0
 # How often the run checks the ledger, the deadline and the engine process while a message runs.
 WATCH_INTERVAL_SECONDS = 0.05
+# A failed message call this close before the whole-job deadline is counted as the deadline.
+DEADLINE_TOLERANCE_SECONDS = 0.25
 # The agent the runner defines and selects; the request may never name another.
 REVIEW_AGENT = "review"
 # The largest startup/answer body the adapter will read before the ledger refuses it.
@@ -598,8 +600,9 @@ class DynamicEngine:
         self._raise_recorded_failure()
         if outcome:
             # A call that ran into its timeout at the whole-job deadline is the deadline, not an
-            # unreachable engine: both end at the same moment and the order must not matter.
-            self.ledger.check_deadline()
+            # unreachable engine: both end at the same moment and the order must not matter. The
+            # socket timeout and the ledger do not read the same clock to the millisecond.
+            self.ledger.check_deadline(tolerance=DEADLINE_TOLERANCE_SECONDS)
             raise outcome[0]
 
     def _validate(self, client: EngineClient) -> EngineAnswer:
