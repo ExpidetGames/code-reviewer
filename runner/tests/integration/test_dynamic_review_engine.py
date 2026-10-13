@@ -34,6 +34,8 @@ from code_reviewer_runner.dynamic_review.adapter import (
 )
 from code_reviewer_runner.dynamic_review.budget import BudgetLedger, DynamicLimits
 from code_reviewer_runner.dynamic_review.config import engine_environment, new_proxy_capability
+from code_reviewer_runner.dynamic_review.engine_user import EngineLaunch
+from code_reviewer_runner.dynamic_review.netguard import IsolationError
 from code_reviewer_runner.dynamic_review.prompts import ReviewInputs, compose_system_prompt
 from code_reviewer_runner.dynamic_review.proxy import ModelProxy, capabilities_from_config
 from code_reviewer_runner.job import Job, parse_job
@@ -230,6 +232,7 @@ class Fixture:
         self.port_source = port_source
         self.capability = ""
         self.exported: frozenset[str] = EXPORTED
+        self.launch: EngineLaunch | None = None
 
     def traces(self) -> list[dict[str, Any]]:
         if not self.trace_path.is_file():
@@ -279,6 +282,7 @@ class Fixture:
                 require_ripgrep=False,  # the fake engine never searches
                 startup_seconds=2.0,
                 port_source=self.port_source or free_port,
+                launch=self.launch,
             )
             return engine.run()
         finally:
@@ -951,3 +955,126 @@ def test_the_shutdown_of_the_engines_never_signals_a_finished_run(
 
     # The group id of the finished run may belong to somebody else by now: nothing is signalled.
     assert signals == []
+
+
+class ScriptedLaunch(EngineLaunch):
+    """A dedicated-user launch without root: the user is the current one and the rules are noted.
+
+    It records what the adapter asked of the boundary, in order; the real setuid, the nft rules
+    and the leftover kill are proven as root by the privileged suite.
+    """
+
+    def __init__(self, tmp_path: Path) -> None:
+        config_dir = tmp_path / "job"
+        config_dir.mkdir(parents=True)
+        (tmp_path / "home").mkdir()
+        (tmp_path / "scratch").mkdir()
+        super().__init__(
+            uid=os.getuid(),
+            gid=os.getgid(),
+            home=str(tmp_path / "home"),
+            tmpdir=str(tmp_path / "scratch"),
+            config_dir=config_dir,
+        )
+        self.calls: list[str] = []
+        self.refuse_network = False
+        self.listener_is_ours = True
+
+    def spawn_options(self) -> dict[str, Any]:
+        self.calls.append("spawn_options")
+        return {"umask": 0o077}  # a Popen keyword a non-root process may pass
+
+    def confine(self, proxy_port: int, engine_port: int) -> None:
+        self.calls.append(f"confine:{proxy_port}:{engine_port}")
+        if self.refuse_network:
+            raise IsolationError("the engine user can reach a service other than its model proxy")
+
+    def owns_listener(self, port: int, *, tables: dict[str, str] | None = None) -> bool:
+        self.calls.append(f"owns_listener:{port}")
+        return self.listener_is_ours
+
+    def sweep(self) -> bool:
+        self.calls.append("sweep")
+        return True
+
+    def close(self) -> None:
+        self.calls.append("close")
+
+
+# #197-T04 #197-T09
+def test_a_launched_engine_runs_behind_its_network_rules_and_in_its_users_directories(
+    tmp_path: Path,
+) -> None:
+    fixture = Fixture(tmp_path, {"answer": "structured", "findings": findings(), "proxy_calls": 1})
+    launch = ScriptedLaunch(tmp_path / "launch")
+    fixture.launch = launch
+
+    with FakeUpstream() as upstream:
+        answer = fixture.run(upstream)
+
+    assert answer.ok, answer.error
+    startup = next(entry for entry in fixture.traces() if "config_mode" in entry)
+    # The config is the launch's file (mode 0400), not a runner scratch file; HOME is its home.
+    assert startup["config_mode"] == 0o400
+    assert startup["env"]["HOME"] == launch.home
+    assert startup["env"]["TMPDIR"] == launch.tmpdir
+    # The network rules come first (the proxy port, then the engine's own), the engine is started
+    # with the launch's options, and nothing of the user is left at the end.
+    confine = next(call for call in launch.calls if call.startswith("confine:"))
+    proxy_port = int(confine.split(":")[1])
+    assert proxy_port != int(confine.split(":")[2])
+    assert launch.calls.index("spawn_options") > launch.calls.index(confine)
+    assert launch.calls[-1] == "close"
+    assert "sweep" in launch.calls
+    # The job's lifetime owns the directories of the user; the adapter leaves them in place.
+    assert Path(launch.home).is_dir() and Path(launch.tmpdir).is_dir()
+
+
+# #197-T09
+def test_a_network_boundary_that_cannot_be_proven_means_no_engine_at_all(tmp_path: Path) -> None:
+    fixture = Fixture(tmp_path, {"answer": "structured", "findings": findings(), "proxy_calls": 1})
+    launch = ScriptedLaunch(tmp_path / "launch")
+    launch.refuse_network = True
+    fixture.launch = launch
+
+    with FakeUpstream() as upstream:
+        answer = fixture.run(upstream)
+
+    assert not answer.ok
+    assert answer.error is not None
+    assert answer.error.code is ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED
+    assert fixture.traces() == []  # the engine never started
+    assert upstream.requests == []
+    assert "spawn_options" not in launch.calls
+    assert launch.calls[-1] == "close"
+
+
+# #197-T04
+def test_an_answer_from_a_port_the_engine_user_does_not_hold_is_not_trusted(
+    tmp_path: Path,
+) -> None:
+    fixture = Fixture(tmp_path, {"answer": "structured", "findings": findings(), "proxy_calls": 1})
+    launch = ScriptedLaunch(tmp_path / "launch")
+    launch.listener_is_ours = False
+    fixture.launch = launch
+
+    with FakeUpstream() as upstream:
+        answer = fixture.run(upstream)
+
+    assert not answer.ok
+    assert answer.error is not None
+    assert answer.error.code is ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE
+    assert not any("message_request" in entry for entry in fixture.traces())
+    assert upstream.requests == []
+    assert launch.calls[-1] == "close"
+
+
+# #197-T07
+def test_the_watchdog_also_ends_the_users_leftovers_and_rules(tmp_path: Path) -> None:
+    launch = ScriptedLaunch(tmp_path / "launch")
+    adapter_module._RUNNING_LAUNCHES.append(launch)  # pyright: ignore[reportPrivateUsage]
+
+    adapter_module.shutdown_engines()
+    adapter_module.shutdown_engines()  # twice is safe
+
+    assert launch.calls == ["close"]
