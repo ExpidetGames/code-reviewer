@@ -39,4 +39,19 @@ describe("the help disclosure", () => {
     expect(content?.hasAttribute("hidden")).toBe(false);
     expect(content?.textContent).toContain("A long passphrase");
   });
+
+  // #183-T03: a screen can repeat the same disclosure (one per request), so it must be able to give
+  // each one a distinct accessible name while the visible label stays short.
+  it("takes a distinct accessible name when the same disclosure repeats", () => {
+    render(
+      <HelpDisclosure label="Evidence" ariaLabel="Evidence for acme">
+        Who asked and what their role is.
+      </HelpDisclosure>,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Evidence for acme" }),
+    ).toBeTruthy();
+    expect(screen.getByText("Evidence")).toBeTruthy();
+  });
 });

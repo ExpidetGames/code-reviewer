@@ -24,7 +24,8 @@ destructive`, sizes `sm | default | icon`, the `loading`/`loadingLabel` conventi
     Escape closes, 44px hit area).
   - `@/components/help-disclosure` — the "how it works" trigger over the Collapsible: the text stays
     in the DOM and is hidden while closed, the trigger announces `aria-expanded`/`aria-controls` and
-    has a 44px target.
+    has a 44px target. An optional `ariaLabel` gives a repeated disclosure a distinct accessible name
+    (one per row, for example "Evidence for acme") while the visible label stays short.
   - `@/components/status-region` — `role="status"`, `aria-live="polite"`.
   - `@/components/needs-attention` — the one attention region of a screen: a labelled "Needs attention"
     section with up to `maxRows` (default 2) `Alert` rows and the rest behind a `HelpDisclosure`.
