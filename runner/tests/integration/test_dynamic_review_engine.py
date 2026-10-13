@@ -83,8 +83,8 @@ class FakeUpstream:
     """An OpenRouter-shaped provider: records every request, answers with usage.
 
     `answers` are the assistant messages in order (the last one repeats); without any the model
-    answers `{}` in prose. `status` makes every call fail like a provider error; `hold` makes a
-    call wait (a hung provider) until the test ends.
+    answers `{}` in prose. `usage` is what every answer reports. `status` makes every call fail
+    like a provider error; `hold` makes a call wait (a hung provider) until the test ends.
     """
 
     def __init__(
@@ -433,6 +433,36 @@ def test_the_message_list_defect_of_the_pinned_server_cannot_fail_or_blind_a_run
     assert fixture.ledger.tool_calls == 2
     assert fixture.ledger.files == 1
     assert not any(entry.get("messages_requested") for entry in fixture.traces())
+
+
+# #231-T05
+def test_a_second_call_that_would_cross_the_token_cap_is_refused_before_the_provider(
+    tmp_path: Path,
+) -> None:
+    fixture = Fixture(
+        tmp_path,
+        {"answer": "structured", "findings": findings(), "proxy_calls": 3},
+        limits=DynamicLimits(max_total_tokens=6_000),
+    )
+
+    # Each call reserves its request (a few hundred bytes) plus the 4096 output tokens the
+    # descriptor allows, so each fits 6,000 alone. The first settles at 4097; the second would end
+    # above the cap and never leaves the proxy.
+    with FakeUpstream(
+        [
+            asks(tool_call("c1", "read", {"filePath": "src/api/handler.ts"})),
+            asks(tool_call("c3", "StructuredOutput", findings())),
+        ],
+        usage={"prompt_tokens": 1, "completion_tokens": 4096},
+    ) as upstream:
+        answer = fixture.run(upstream)
+    assert not answer.ok
+    assert answer.error is not None
+    assert answer.error.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
+    assert len(upstream.requests) == 1
+    assert fixture.ledger.model_calls == 1
+    answers = next(e["proxy_answers"] for e in fixture.traces() if "proxy_answers" in e)
+    assert answers == [200, 403]
 
 
 # #197-T05
