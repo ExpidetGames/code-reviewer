@@ -46,7 +46,9 @@ export function Breadcrumbs({
                   <span className="text-foreground">{item.label}</span>
                 ) : (
                   <BreadcrumbLink asChild>
-                    <Link href={item.href}>{item.label}</Link>
+                    <Link href={item.href} className="no-underline">
+                      {item.label}
+                    </Link>
                   </BreadcrumbLink>
                 )}
               </BreadcrumbItem>

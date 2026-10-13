@@ -69,6 +69,37 @@ describe("the GitHub App status card", () => {
       screen.getByRole("heading", { level: 2, name: "Status" }),
     ).toBeTruthy();
   });
+
+  // #185 (#182 lead note): every address is copyable.
+  it("offers a copy button for every address", () => {
+    render(
+      <GithubStatusCard
+        view={view({
+          status: "configured",
+          source: "database",
+          app: {
+            appId: "424242",
+            slug: "code-reviewer-e2e",
+            privateApp: true,
+            origin: "manifest",
+            installUrl: null,
+          },
+          userAuthorization: { configured: true, clientId: "Iv1.x" },
+        })}
+      />,
+    );
+
+    expect(
+      screen
+        .getAllByRole("button", { name: /^Copy the / })
+        .map((button) => button.getAttribute("aria-label")),
+    ).toEqual([
+      "Copy the Homepage URL",
+      "Copy the Webhook URL",
+      "Copy the Callback URL",
+      "Copy the Setup URL",
+    ]);
+  });
 });
 
 describe("the GitHub App page", () => {

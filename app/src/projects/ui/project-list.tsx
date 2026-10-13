@@ -110,7 +110,7 @@ export function ProjectList({
                   workspaceSlug,
                   `/projects/${encodeURIComponent(row.repositoryId)}`,
                 )}
-                className="block truncate font-medium text-foreground"
+                className="block truncate font-medium text-foreground no-underline"
               >
                 {row.fullName}
               </Link>
@@ -120,7 +120,7 @@ export function ProjectList({
                   rel="noreferrer noopener"
                   target="_blank"
                   aria-label={`${row.fullName} on GitHub`}
-                  className="text-xs text-muted-foreground hover:text-foreground"
+                  className="text-xs text-muted-foreground hover:text-foreground no-underline"
                 >
                   On GitHub
                 </a>

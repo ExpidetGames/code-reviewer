@@ -2,8 +2,8 @@
 
 // The color guard of the UI redesign (#166): every color of the app lives in exactly one file,
 // `app/src/app/theme.css`. This module finds a color literal in the text of a source file, and the
-// test beside it scans the real tree. `app/src/app/globals.css` is the one documented exception
-// during the incremental migration; the cleanup issue (#185) removes it together with the file.
+// test beside it scans the real tree. The migration is finished (#185): the legacy `globals.css` and
+// its exception are gone, so the guard scans every tracked source file with no exception.
 //
 // It catches three forms a component could use to write a color on its own:
 //   1. a CSS literal — a hex value, an rgb/hsl/oklch function, or one of the CSS color names — as
@@ -18,16 +18,8 @@
 /** The one file that may hold color literals. */
 export const COLOR_FILE = "app/src/app/theme.css";
 
-/** The documented exception of the migration: the legacy stylesheet. */
-export const COLOR_FILE_EXCEPTION = "app/src/app/globals.css";
-
-export const COLOR_EXCEPTION_PATHS = [
-  COLOR_FILE,
-  COLOR_FILE_EXCEPTION,
-] as const;
-
 export function isColorException(path: string): boolean {
-  return (COLOR_EXCEPTION_PATHS as readonly string[]).includes(path);
+  return path === COLOR_FILE;
 }
 
 export type ColorFinding = {

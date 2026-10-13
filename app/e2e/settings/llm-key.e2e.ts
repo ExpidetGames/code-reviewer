@@ -72,7 +72,7 @@ test.describe("the LLM key of a workspace", () => {
     await expect(page).toHaveURL(/\/no-access$/);
     const create = page.getByRole("form", { name: "Create a workspace" });
     await create.getByLabel("Name of the workspace").fill("LLM Team");
-    await create.getByRole("button", { name: "Create the workspace" }).click();
+    await create.getByRole("button", { name: "Create workspace" }).click();
     await expect(page).toHaveURL(/\/w\/llm-team(-\d+)?\/projects$/);
     slug = new URL(page.url()).pathname.split("/")[2] ?? "";
 

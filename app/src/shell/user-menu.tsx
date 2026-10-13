@@ -60,13 +60,13 @@ export function UserMenu({
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
-          <Link href="/account" className="text-foreground">
+          <Link href="/account" className="text-foreground no-underline">
             Account
           </Link>
         </DropdownMenuItem>
         {user.isInstanceAdmin === true ? (
           <DropdownMenuItem asChild>
-            <Link href="/admin" className="text-foreground">
+            <Link href="/admin" className="text-foreground no-underline">
               Admin
             </Link>
           </DropdownMenuItem>

@@ -69,7 +69,7 @@ export function CreateWorkspaceForm({
         loadingLabel="Creating"
         className="w-full"
       >
-        Create the workspace
+        Create workspace
       </Button>
     </form>
   );

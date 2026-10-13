@@ -71,6 +71,7 @@ describe("the sections of the portal", () => {
       "Sign-up",
       "Sign-in",
       "Integrations",
+      "GitHub App",
       "Mail",
     ]);
     expect(links.map((link) => link.getAttribute("href"))).toEqual(
@@ -81,6 +82,23 @@ describe("the sections of the portal", () => {
         .filter((link) => link.getAttribute("aria-current") === "page")
         .map((link) => link.textContent),
     ).toEqual(["Instance"]);
+  });
+
+  // #185: the nested GitHub App page under Integrations (#182 lead note).
+  it("marks the nested GitHub App page and not the Integrations index", () => {
+    navigation.pathname = "/admin/integrations/github";
+    renderAdminNav();
+
+    const nav = screen.getByRole("navigation", { name: "Admin" });
+    const links = Array.from(nav.querySelectorAll("a"));
+    expect(
+      links
+        .filter((link) => link.getAttribute("aria-current") === "page")
+        .map((link) => link.textContent),
+    ).toEqual(["GitHub App"]);
+    expect(nav.querySelectorAll('[data-slot="sidebar-menu-sub"]').length).toBe(
+      1,
+    );
   });
 
   it("do not mark Overview on the other pages, which are all below /admin", () => {
@@ -119,6 +137,7 @@ describe("the sections on a narrow screen", () => {
       "Sign-up",
       "Sign-in",
       "Integrations",
+      "GitHub App",
       "Mail",
     ]);
   });

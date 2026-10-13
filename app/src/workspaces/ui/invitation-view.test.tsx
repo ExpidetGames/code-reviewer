@@ -7,25 +7,9 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthCard } from "@/components/auth-card";
-import type { AccountApi } from "./api.ts";
 import { InvitationView } from "./invitation-view.tsx";
 
 afterEach(cleanup);
-
-function accountApi(): AccountApi {
-  return {
-    createWorkspace: vi.fn() as never,
-    accept: vi.fn(async () => ({
-      ok: true,
-      data: {
-        ok: true,
-        workspace: { slug: "acme", name: "Acme" },
-        role: "member",
-        alreadyMember: false,
-      },
-    })) as never,
-  };
-}
 
 const base = {
   token: "T".repeat(43),

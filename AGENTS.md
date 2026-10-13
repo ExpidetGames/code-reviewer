@@ -75,9 +75,9 @@ Run from the repository root.
   `SPDX-License-Identifier: MIT` plus a provenance line (`app/src/ci/spdx-headers/rules.ts`); do not
   "fix" them.
 - The app is styled with Tailwind CSS v4 and shadcn/ui. Every colour lives only in
-  `app/src/app/theme.css` (`@theme inline`, tokens per light/dark/system); a check under
-  `app/src/ci/colors` fails on a colour literal elsewhere. `app/src/app/globals.css` is the documented
-  exception of the incremental migration and goes away with the cleanup issue (#185).
+  `app/src/app/theme.css` (`@theme inline`, tokens per light/dark/system, plus the base rules and the
+  preflight reset); a check under `app/src/ci/colors` fails on a colour literal in any other source
+  file, with no exception.
 - TypeScript strict. No `any` without a comment explaining why. Python is checked with pyright in
   strict mode.
 - Stable error codes (`as const` sets in TypeScript, enums or constants in Python) for anything a

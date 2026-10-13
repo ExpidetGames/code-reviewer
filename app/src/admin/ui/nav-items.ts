@@ -1,10 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // The sections of the admin portal, grouped the way the sidebar shows them. One list feeds the
-// links and the active state. The Setup group holds the three sub-pages of the split (#181); the
-// Integrations → GitHub App sub-page arrives with #182.
+// links and the active state. The Setup group holds the three sub-pages of the split (#181) and the
+// Integrations group nests the GitHub App page under its index (#182/#185).
 
-export type AdminNavItem = { href: string; label: string; exact: boolean };
+export type AdminNavItem = {
+  href: string;
+  label: string;
+  exact: boolean;
+  /** Sub-pages of this section, rendered nested under its link (for example GitHub App under Integrations). */
+  children?: AdminNavItem[];
+};
 export type AdminNavGroup = { label: string; items: AdminNavItem[] };
 
 export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
@@ -26,15 +32,27 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
   {
     label: "Integrations",
     items: [
-      { href: "/admin/integrations", label: "Integrations", exact: false },
+      {
+        href: "/admin/integrations",
+        label: "Integrations",
+        exact: true,
+        // The index owns only its own path; the GitHub App page is its nested child (#182 lead note).
+        children: [
+          {
+            href: "/admin/integrations/github",
+            label: "GitHub App",
+            exact: false,
+          },
+        ],
+      },
       { href: "/admin/mail", label: "Mail", exact: false },
     ],
   },
 ];
 
-/** Every section in one list, in the order the sidebar shows them. */
+/** Every section in one list, in the order the sidebar shows them (a parent before its children). */
 export const ADMIN_NAV_ITEMS: AdminNavItem[] = ADMIN_NAV_GROUPS.flatMap(
-  (group) => group.items,
+  (group) => group.items.flatMap((item) => [item, ...(item.children ?? [])]),
 );
 
 /** Whether `pathname` is the section `item` (Overview only on its own path, the others also below it). */
