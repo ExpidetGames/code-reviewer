@@ -230,14 +230,6 @@ def completion(model: str, content: str) -> dict[str, Any]:
 
 
 def classify(request: LlmRequest) -> str:
-    """Which PR-Agent tool a prompt belongs to, from the first sentence of its system prompt."""
-    system = request.system[:400].lower()
-    if "evaluating code suggestions" in system:
-        return "reflect"
-    if "code analysis and suggestions" in system:
-        return "improve"
-    if "full description" in system:
-        return "describe"
-    if "answer questions" in system:
-        return "ask"
+    """Which prompt a request holds. `/review` is the only tool (#203), so everything is a review
+    (a new canned answer for another kind of prompt is added here when a tool returns)."""
     return "review"

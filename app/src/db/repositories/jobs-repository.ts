@@ -13,7 +13,10 @@
 // a job already?" and the insert that follows it cannot be separated by another writer.
 import "server-only";
 import type { Kysely } from "kysely";
-import { REVIEW_COMMANDS, type JsonValue } from "../../integrations/types.ts";
+import {
+  STORED_REVIEW_COMMANDS,
+  type JsonValue,
+} from "../../integrations/types.ts";
 import type { ValidEnqueueInput } from "../../jobs/job-input.ts";
 import {
   SLOT_HOLDING_STATUSES,
@@ -74,7 +77,7 @@ export function decodeJobVocabulary(
     throw new Error(
       `Stored job ${row.id} has the unknown status "${row.status}".`,
     );
-  const command = REVIEW_COMMANDS.find((known) => known === row.command);
+  const command = STORED_REVIEW_COMMANDS.find((known) => known === row.command);
   if (command === undefined)
     throw new Error(
       `Stored job ${row.id} has the unknown command "${row.command}".`,

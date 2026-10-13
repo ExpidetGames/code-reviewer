@@ -1,15 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// The content of the Connections page of a workspace: the GitHub installations linked to it, what an Owner or
-// Admin can do (connect GitHub, link an existing installation, disconnect, and the requests the instance admin
-// still has to decide), and what a flow just ended with. `loadConnectionsPage` gathers the data from the
-// services (passed in, so a test uses the real ones against a test database), `ConnectionsPageContent`
-// renders it. The page file only wires the real services. Names that come from GitHub (account logins) are
-// untrusted and rendered as text.
+// The content of the Connections page of a workspace (#176): the GitHub installations linked to it, what an
+// Owner or Admin can do (connect GitHub, link an existing installation, disconnect, and the requests the
+// instance admin still has to decide), and what a flow just ended with. The page is one h1 with a
+// `Settings / Connections` trail and three cards, each rendered by its own component (`installations-card`,
+// `connect-card`, `requests-card`). `loadConnectionsPage` gathers the data from the services (passed in, so a
+// test uses the real ones against a test database), `ConnectionsPageContent` renders it. The page file only
+// wires the real services. Names that come from GitHub (account logins) are untrusted and rendered as text.
+import { Breadcrumbs } from "../../components/breadcrumbs.tsx";
+import { PageHeader } from "../../components/page-header.tsx";
 import type { InstallationLinkRequestsRepository } from "../../db/repositories/installation-link-requests-repository.ts";
 import type { IntegrationsRepository } from "../../db/repositories/integrations-repository.ts";
 import type { RepositoriesRepository } from "../../db/repositories/repositories-repository.ts";
 import type { IntegrationStatus } from "../../integrations/types.ts";
+import { workspacePath } from "../../workspaces/paths.ts";
 import { isBindingResultCode } from "../errors.ts";
 import type { InstallationLinkRequestStatus } from "../requests.ts";
 import type {
@@ -132,11 +136,27 @@ export function ConnectionsPageContent({
   api?: BindingApi;
 }) {
   return (
-    <ConnectionsPanel
-      workspaceSlug={workspaceSlug}
-      canManage={canManage}
-      data={data}
-      {...(api === undefined ? {} : { api })}
-    />
+    <>
+      <PageHeader
+        title="Connections"
+        breadcrumb={
+          <Breadcrumbs
+            items={[
+              {
+                label: "Settings",
+                href: workspacePath(workspaceSlug, "/settings"),
+              },
+              { label: "Connections" },
+            ]}
+          />
+        }
+      />
+      <ConnectionsPanel
+        workspaceSlug={workspaceSlug}
+        canManage={canManage}
+        data={data}
+        {...(api === undefined ? {} : { api })}
+      />
+    </>
   );
 }

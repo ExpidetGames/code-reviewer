@@ -70,12 +70,11 @@ def everything_sent(engine: Engine, outcome: Outcome) -> str:
     return "\n".join([sent_to_fakes(engine.github, engine.llm), outcome.stdout, outcome.stderr])
 
 
-# CR-41-T13
-@pytest.mark.parametrize("command", ["review", "ask"])
+# CR-41-T13, #203
+@pytest.mark.parametrize("command", ["review"])
 def test_a_repository_file_cannot_move_a_request_a_credential_the_model_or_the_budget(
     engine: Engine, github: FakeGithub, llm: FakeLlm, canary: Canary, command: str
 ) -> None:
-    # `ask` builds a GitHub provider of its own after the repository settings were merged.
     github.put_file(SETTINGS_PATH, host_overrides(canary))
 
     outcome = engine.run(command)

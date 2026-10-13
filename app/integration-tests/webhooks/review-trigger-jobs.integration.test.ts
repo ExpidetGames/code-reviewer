@@ -211,14 +211,15 @@ describe("a pull request delivery with the job queue behind the route", () => {
   });
 });
 
+// #203-T04
 describe("a comment delivery with the job queue behind the route", () => {
-  it("creates a comment job with the command and its arguments", async () => {
+  it("creates a review job with the review command and no arguments", async () => {
     const { h, queue, send } = await startHarness();
     await h.seedInstallation();
     addOpenPullRequest(h);
     h.fake.setCollaboratorPermission("acme/widgets", "bob", "write");
 
-    const response = await send("issue_comment.created.ask", {
+    const response = await send("issue_comment.created.review", {
       deliveryId: "d-1",
     });
 
@@ -227,8 +228,8 @@ describe("a comment delivery with the job queue behind the route", () => {
       {
         prNumber: 7,
         headSha: OPENED_HEAD,
-        command: "ask",
-        args: "what does the cache key contain?\nPlease be brief.",
+        command: "review",
+        args: "",
         triggerKind: "comment",
         actorLogin: "bob",
         status: "queued",
@@ -236,14 +237,14 @@ describe("a comment delivery with the job queue behind the route", () => {
     ]);
   });
 
-  it("drops a command whose arguments are too long instead of failing the delivery again and again", async () => {
+  it("drops a trigger that carries review arguments instead of failing the delivery again and again", async () => {
     const { h, queue, intake, logLines } = await startHarness();
     const integration = await h.seedInstallation();
 
     await intake.enqueueReviewTrigger(
       {
         kind: "command",
-        command: "ask",
+        command: "review",
         args: "SECRET-QUESTION ".repeat(1000),
         repo: {
           integrationId: integration.id,
@@ -264,19 +265,23 @@ describe("a comment delivery with the job queue behind the route", () => {
     expect(await queue.list()).toEqual([]);
     const logged = logLines.join("\n");
     expect(logged).toContain("trigger dropped");
-    expect(logged).toContain("fields=args:too_long");
+    expect(logged).toContain("fields=args:invalid");
     expect(logged).not.toContain("SECRET-QUESTION");
   });
 
-  it("does not log the arguments of a command", async () => {
-    const { h, send, logLines } = await startHarness();
+  // #203-T03
+  it("ignores a removed-command comment: no job, and the text is never logged", async () => {
+    const { h, queue, send, logLines } = await startHarness();
     await h.seedInstallation();
     addOpenPullRequest(h);
     h.fake.setCollaboratorPermission("acme/widgets", "bob", "write");
 
-    await send("issue_comment.created.ask", { deliveryId: "d-1" });
+    const response = await send("issue_comment.created.ask", {
+      deliveryId: "d-1",
+    });
 
-    expect(logLines.join("\n")).toContain("job created");
+    expect(response.status).toBe(202);
+    expect(await queue.list()).toEqual([]);
     expect(logLines.join("\n")).not.toContain("cache key");
   });
 });

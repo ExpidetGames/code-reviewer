@@ -29,7 +29,7 @@ describe("the panel without a client handed in", () => {
         pullRequests: [
           { number: 7, title: "Add caching", author: "alice", draft: false },
         ],
-        allowedCommands: ["review", "describe"],
+        allowedCommands: ["review"],
       }),
     );
     vi.stubGlobal("fetch", fetchMock);
@@ -37,10 +37,6 @@ describe("the panel without a client handed in", () => {
     render(<StartReviewPanel workspaceSlug="team-a" repositoryId="repo-1" />);
 
     await user.click(await screen.findByRole("radio", { name: /#7/ }));
-    await user.selectOptions(
-      screen.getByLabelText("Command to run"),
-      "describe",
-    );
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
 
     expect(fetchMock).toHaveBeenCalledTimes(1);

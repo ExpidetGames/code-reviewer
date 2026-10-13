@@ -40,7 +40,7 @@ def test_a_free_slot_and_a_waiting_job_start_exactly_one_process_with_the_input_
 ):
     async def scenario() -> None:
         harness = Harness(concurrency=3)
-        claim = make_claim(1, command="improve")
+        claim = make_claim(1)
         harness.api.claims = [claim]
         await harness.start()
 
@@ -757,14 +757,13 @@ def test_a_heartbeat_that_fails_in_an_unexpected_way_does_not_stop_the_beating(
     run(scenario)
 
 
-# CR-29: a lone surrogate in the input or in the output is not a poison value.
-def test_a_question_with_a_lone_surrogate_is_passed_on_and_reported_normally() -> None:
+# CR-29: a lone surrogate in the output is not a poison value.
+def test_a_lone_surrogate_in_the_output_is_reported_normally() -> None:
     async def scenario() -> None:
         harness = Harness()
-        harness.api.claims = [make_claim(1, command="ask", args=["why \ud800 this?"])]
+        harness.api.claims = [make_claim(1)]
         await harness.start()
         process = only(harness.launcher.processes)
-        assert json.loads(process.spec.stdin)["args"] == ["why \ud800 this?"]
 
         process.finish(outcome(stdout=result_line(logTail="broken \ud800 text")))
         await settle()

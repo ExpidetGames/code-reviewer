@@ -10,7 +10,6 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 import pytest
-from pr_agent.algo.utils import decode_user_text_args
 
 from code_reviewer_runner.job import RESERVED_OPTIONS, Job, parse_job
 from code_reviewer_runner.pr_agent_config import (
@@ -244,7 +243,6 @@ def test_typed_settings_switch_review_labels_progress_comments_and_the_update_me
     assert settings["config.output_run_cost"] is True
     assert settings["config.fallback_models"] == []
     assert settings["pr_reviewer.final_update_message"] is False
-    assert settings["pr_description.final_update_message"] is False
     assert settings["pr_reviewer.enable_review_labels_security"] is False
     assert settings["pr_reviewer.enable_review_labels_effort"] is False
     assert settings["litellm.turn_off_message_logging"] is True
@@ -277,8 +275,7 @@ def test_the_options_the_runner_pins_are_exactly_the_reserved_options_of_the_job
     pinned = {
         key
         for key in {**build_typed_settings(make_job()), **{p: 0 for p in PROTECTED_SETTINGS}}
-        if key.split(".")[0]
-        in ("pr_reviewer", "pr_description", "pr_code_suggestions", "pr_questions")
+        if key.split(".")[0] == "pr_reviewer"
     }
 
     assert {key.replace(".", "__").upper() for key in pinned} == RESERVED_OPTIONS
@@ -376,31 +373,13 @@ def test_an_option_pr_agent_does_not_know_is_kept_as_text() -> None:
     assert settings == {"pr_reviewer.not_an_option": "7"}
 
 
-# CR-45-T04
-def test_options_of_all_four_tools_map_to_their_settings_section() -> None:
-    names = {
-        "PR_REVIEWER__A": "pr_reviewer.a",
-        "PR_DESCRIPTION__A_B": "pr_description.a_b",
-        "PR_CODE_SUGGESTIONS__A1": "pr_code_suggestions.a1",
-        "PR_QUESTIONS__A": "pr_questions.a",
-    }
+# CR-45-T04, #203
+def test_a_review_option_maps_to_its_settings_section() -> None:
+    settings = build_option_settings({"PR_REVIEWER__A": "x"}, defaults({}))
 
-    settings = build_option_settings({key: "x" for key in names}, defaults({}))
-
-    assert set(settings) == set(names.values())
+    assert settings == {"pr_reviewer.a": "x"}
 
 
-# CR-10-T01
-def test_review_improve_and_describe_become_a_single_word_request() -> None:
+# CR-10-T01, #203
+def test_review_becomes_a_single_word_request() -> None:
     assert build_request(make_job("review")) == ["review"]
-    assert build_request(make_job("improve")) == ["improve"]
-    assert build_request(make_job("describe")) == ["describe"]
-
-
-def test_ask_encodes_the_question_so_it_can_never_be_read_as_a_settings_override() -> None:
-    request = build_request(make_job("ask", args=["--config.model=evil What changed?"]))
-
-    assert request[0] == "ask"
-    assert len(request) == 2
-    assert request[1].startswith("__pr_agent_encoded_text__:")
-    assert decode_user_text_args([request[1]]) == "--config.model=evil What changed?"

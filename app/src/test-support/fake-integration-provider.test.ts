@@ -213,20 +213,27 @@ describe("the fake integration provider", () => {
     });
   });
 
-  it("turns a comment that starts with a command into a command trigger with its arguments", async () => {
+  it("turns a /review comment into a command trigger with no arguments", async () => {
     expect(
       await parse({
         action: "comment",
-        comment: { body: "/ask why is this slow?" },
+        comment: { body: "/review --pr_reviewer.num_max_findings=99" },
       }),
     ).toMatchObject({
       kind: "review_trigger",
-      trigger: { kind: "command", command: "ask", args: "why is this slow?" },
+      trigger: { kind: "command", command: "review", args: "" },
     });
   });
 
-  it("ignores a comment that is not a command, including a longer word that starts with one", async () => {
-    for (const body of ["looks good", "/ask-me later", "/reviewer please"]) {
+  it("ignores a comment that is not a command, including the removed commands and a longer word", async () => {
+    for (const body of [
+      "looks good",
+      "/ask-me later",
+      "/ask why?",
+      "/improve this",
+      "/describe",
+      "/reviewer please",
+    ]) {
       expect(
         await parse({ action: "comment", comment: { body } }),
       ).toMatchObject({ kind: "ignored" });

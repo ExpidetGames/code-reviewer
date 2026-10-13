@@ -97,6 +97,7 @@ function claimQuery(
       select due.id
       from jobs as due
       where due.status = 'queued'
+        and due.command = 'review'
         and due.run_after <= ${now}
         and not exists (
           select 1

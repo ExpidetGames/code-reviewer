@@ -2,7 +2,10 @@
 
 // The vocabulary of the job queue: what a job is and what goes in and out. Everything here is plain
 // data; the rules live in job-status.ts, job-input.ts and job-queue.ts.
-import type { ReviewCommand } from "../integrations/types.ts";
+import type {
+  ReviewCommand,
+  StoredReviewCommand,
+} from "../integrations/types.ts";
 import type { JsonValue } from "../integrations/types.ts";
 import type { JobStatus } from "./job-status.ts";
 
@@ -24,7 +27,8 @@ export type Job = {
   prUrl: string;
   /** The head commit of the pull request when the job was created (a reference, not a promise). */
   headSha: string;
-  command: ReviewCommand;
+  /** The command of the job. Historical rows may still carry a removed one (#203). */
+  command: StoredReviewCommand;
   /** Text after the command; an empty string when there is none. Untrusted: it comes from a comment. */
   args: string;
   triggerKind: JobTriggerKind;
@@ -115,6 +119,8 @@ export const JOB_ERROR_CODES = [
   "pull_request_closed",
   /** Cancelled because the pull request was turned into a draft (automatic jobs only). */
   "pull_request_draft",
+  /** Cancelled because the job's command was removed from the product (#203). */
+  "command_removed",
 ] as const;
 export type JobErrorCode = (typeof JOB_ERROR_CODES)[number];
 
@@ -143,6 +149,8 @@ export type ReleaseResult =
   | { status: "requeued"; job: Job }
   /** That was the last allowed attempt: the job is failed with the given reason. */
   | { status: "failed"; job: Job }
+  /** The job carried a removed command (#203) and was cancelled instead of requeued. */
+  | { status: "cancelled"; job: Job }
   | { status: "not_holder" };
 
 /**

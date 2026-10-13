@@ -22,6 +22,7 @@ import {
   userMenuButton,
 } from "../helpers/github-fake";
 import { startRunner, type RunnerProcess } from "../helpers/runner-process";
+import { claimRun, completeRun } from "../helpers/job-queue";
 import { readSetupCode } from "../helpers/setup";
 import {
   environmentOfTheNewRelease,
@@ -238,7 +239,26 @@ test.describe(
       expect(
         readUpgradeDatabase<{ n: number }>("select count(*) as n from jobs")[0]
           ?.n,
-      ).toBe(2);
+      ).toBe(4);
+      // #203-T17: the runs of the removed commands stay, with their original command and status.
+      expect(
+        readUpgradeDatabase(
+          "select command, status from jobs where command in ('ask','improve') order by command",
+        ),
+      ).toEqual([
+        { command: "ask", status: "succeeded" },
+        { command: "improve", status: "succeeded" },
+      ]);
+      // #203-T08/T17: the stored review defaults no longer name the removed commands.
+      expect(
+        (
+          JSON.parse(
+            readUpgradeDatabase<{ value: string }>(
+              "select value from app_settings where key = 'review_defaults'",
+            )[0]?.value ?? "{}",
+          ) as { allowedCommands?: string[] }
+        ).allowedCommands,
+      ).toEqual(["review"]);
       // Whoever is not a member has no session any more, and the tokens of the earlier sign in are gone.
       expect(
         readUpgradeDatabase("select user_id from sessions order by user_id"),
@@ -428,6 +448,95 @@ test.describe(
           "select value from instance_settings where key = 'sign_in_methods'",
         )[0]?.value,
       ).toBe('{"emailPassword":true,"github":false}');
+    });
+
+    // #203-T17
+    test("a historical run of a removed command stays readable in the browser and Review now starts a fresh review", async ({
+      page,
+    }) => {
+      test.setTimeout(180_000);
+      await signInAsOperator(page);
+
+      await page.getByRole("link", { name: "Runs", exact: true }).click();
+      await expect(
+        page.getByRole("heading", { level: 1, name: "Runs" }),
+      ).toBeVisible();
+      // The seeded `/ask` run (PR #4 of the widgets project) is in the list with its old command.
+      const historical = page
+        .getByRole("listitem")
+        .filter({ hasText: `${UPGRADE_WIDGETS.fullName} #4` });
+      await expect(historical).toContainText("/ask");
+      await historical
+        .getByRole("link", { name: `${UPGRADE_WIDGETS.fullName} #4` })
+        .click();
+      await expect(
+        page.getByRole("heading", {
+          level: 1,
+          name: `${UPGRADE_WIDGETS.fullName} #4`,
+        }),
+      ).toBeVisible();
+      await expect(page.getByText("/ask", { exact: true })).toBeVisible();
+      // The historical question is read-only text and escaped (never rendered as HTML).
+      await expect(page.locator(".run-question")).toContainText(
+        "<img src=x onerror=alert(1)> a historical question",
+      );
+      await expect(page.locator(".run-question img")).toHaveCount(0);
+
+      // Review now works on the upgraded installation. The real runner is stood in for by the queue
+      // helper here (its own tests cover the real path, and it would race the child after the app
+      // restarts): the run is followed through completion.
+      await page.getByRole("link", { name: "Projects", exact: true }).click();
+      const projectLink = page.getByRole("link", {
+        name: UPGRADE_WIDGETS.fullName,
+        exact: true,
+      });
+      await expect(projectLink).toBeVisible();
+      // The row overlay of the redesigned list intercepts a direct click; follow the link's address.
+      await page.goto((await projectLink.getAttribute("href")) ?? "/");
+      await expect(
+        page.getByRole("heading", {
+          level: 1,
+          name: UPGRADE_WIDGETS.fullName,
+        }),
+      ).toBeVisible();
+      await runner?.stop();
+      await page.getByRole("radio").first().check();
+      await page.getByRole("button", { name: "Review now" }).click();
+      const started = page.locator(".alert-success");
+      await expect(started).toContainText("Started: review for pull request");
+      await started.getByRole("link", { name: "View the run" }).click();
+      await expect(page).toHaveURL(/\/runs\/[0-9a-fA-F-]{36}$/);
+      const runId = new URL(page.url()).pathname.split("/").at(-1) ?? "";
+      const claim = await claimRun(runId, "e2e-runner", upgradePaths.database);
+      await completeRun(
+        claim,
+        {
+          ok: true,
+          result: {
+            ok: true,
+            durationMs: 4200,
+            commentUrl:
+              "https://github.com/upgrade-org/widgets/pull/21#issuecomment-1",
+            errorCode: null,
+            logTail: "posted the review",
+            logTruncated: false,
+          },
+        },
+        upgradePaths.database,
+      );
+      await expect(
+        page.locator(".run-facts").getByText("/review", { exact: true }),
+      ).toBeVisible();
+      await expect(page.locator(".run-facts .badge-run")).toContainText(
+        "Succeeded",
+        { timeout: 20_000 },
+      );
+
+      // The real runner comes back for the later steps of the update.
+      runner = await startRunner({
+        appUrl: e2eEnv.upgradeAppUrl,
+        llmBaseUrl: theLlm().baseUrl,
+      });
     });
 
     // #106-IM-07

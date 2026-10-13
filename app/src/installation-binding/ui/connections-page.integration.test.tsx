@@ -81,7 +81,7 @@ describe("the Connections page", () => {
       },
     });
 
-    const list = screen.getByRole("list", { name: "Connections" });
+    const list = screen.getByRole("list", { name: "Installations" });
     expect(list.textContent).toContain("acme");
     expect(list.textContent).toContain("2 repositories");
     expect(list.textContent).toContain("Connected");
@@ -105,7 +105,7 @@ describe("the Connections page", () => {
       },
     });
 
-    expect(screen.getByRole("list", { name: "Connections" })).toBeTruthy();
+    expect(screen.getByRole("list", { name: "Installations" })).toBeTruthy();
     expect(screen.queryByRole("button")).toBeNull();
     expect(
       screen.queryByRole("list", { name: "Requests for the instance admin" }),
