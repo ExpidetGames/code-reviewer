@@ -8,7 +8,7 @@
 // name comes from GitHub) and are rendered as text.
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useTransition } from "react";
+import { useId, useTransition } from "react";
 import { Button } from "../../components/button.tsx";
 import {
   Select,
@@ -25,7 +25,7 @@ import type { RunsFilter } from "../run-view.ts";
 const ANY = "any";
 
 /** The Runs page of a workspace, without the filter. */
-export function runsPath(workspaceSlug: string): string {
+function runsPath(workspaceSlug: string): string {
   return workspacePath(workspaceSlug, "/runs");
 }
 
@@ -44,6 +44,8 @@ export function RunsFilterToolbar({
   const router = useRouter();
   const pathname = usePathname();
   const [pending, startTransition] = useTransition();
+  const projectLabelId = useId();
+  const statusLabelId = useId();
 
   function apply(next: RunsFilter): void {
     const params = new URLSearchParams();
@@ -63,48 +65,71 @@ export function RunsFilterToolbar({
       className="flex flex-wrap items-end gap-3"
       aria-busy={pending || undefined}
     >
-      <Select
-        value={filter.repositoryId ?? ANY}
-        onValueChange={(value) =>
-          apply({
-            ...filter,
-            repositoryId: value === ANY ? undefined : value,
-          })
-        }
-      >
-        <SelectTrigger aria-label="Project" className="min-w-44">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value={ANY}>All projects</SelectItem>
-          {projects.map((project) => (
-            <SelectItem key={project.id} value={project.id}>
-              {project.name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <Select
-        value={filter.status ?? ANY}
-        onValueChange={(value) =>
-          apply({
-            ...filter,
-            status: value === ANY ? undefined : (value as RunsFilter["status"]),
-          })
-        }
-      >
-        <SelectTrigger aria-label="Status" className="min-w-40">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value={ANY}>All statuses</SelectItem>
-          {RUN_STATUS_ORDER.map((status) => (
-            <SelectItem key={status} value={status}>
-              {RUN_STATUS_PRESENTATION[status].label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      <div className="flex flex-col gap-1">
+        <span
+          id={projectLabelId}
+          className="text-xs font-medium text-muted-foreground"
+        >
+          Project
+        </span>
+        <Select
+          value={filter.repositoryId ?? ANY}
+          onValueChange={(value) =>
+            apply({
+              ...filter,
+              repositoryId: value === ANY ? undefined : value,
+            })
+          }
+        >
+          <SelectTrigger
+            aria-labelledby={projectLabelId}
+            className="min-h-11 min-w-44"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ANY}>All projects</SelectItem>
+            {projects.map((project) => (
+              <SelectItem key={project.id} value={project.id}>
+                {project.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="flex flex-col gap-1">
+        <span
+          id={statusLabelId}
+          className="text-xs font-medium text-muted-foreground"
+        >
+          Status
+        </span>
+        <Select
+          value={filter.status ?? ANY}
+          onValueChange={(value) =>
+            apply({
+              ...filter,
+              status:
+                value === ANY ? undefined : (value as RunsFilter["status"]),
+            })
+          }
+        >
+          <SelectTrigger
+            aria-labelledby={statusLabelId}
+            className="min-h-11 min-w-40"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ANY}>All statuses</SelectItem>
+            {RUN_STATUS_ORDER.map((status) => (
+              <SelectItem key={status} value={status}>
+                {RUN_STATUS_PRESENTATION[status].label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
       {active ? (
         <Button asChild variant="ghost">
           <Link href={runsPath(workspaceSlug)}>Reset filter</Link>

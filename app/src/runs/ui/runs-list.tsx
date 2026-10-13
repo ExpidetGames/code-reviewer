@@ -82,6 +82,9 @@ function RunTableRow({
       <TableCell className="min-w-0 align-top whitespace-normal">
         <Link
           href={runPath(workspaceSlug, run.id)}
+          // The project name alone repeats for every run of a repository; the PR number makes the
+          // link name of a row unique in a screen reader's link list.
+          aria-label={`${run.project} #${String(run.prNumber)}`}
           className="block truncate font-medium text-foreground"
         >
           {run.project}

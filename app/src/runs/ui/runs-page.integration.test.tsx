@@ -288,6 +288,16 @@ describe("the page of one run", () => {
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
       `acme/gadgets #${String(job.prNumber)}`,
     );
+    // #165 breadcrumb rule: the detail starts at the Runs list (the area root) and ends at the run.
+    const crumbs = screen.getByRole("navigation", { name: "breadcrumb" });
+    expect(
+      within(crumbs).getByRole("link", { name: "Runs" }).getAttribute("href"),
+    ).toBe("/w/acme/runs");
+    expect(
+      within(crumbs)
+        .getByText(`acme/gadgets #${String(job.prNumber)}`)
+        .getAttribute("aria-current"),
+    ).toBe("page");
     expect(
       screen.getByText(
         "GitHub is limiting requests right now. Try again later.",

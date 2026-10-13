@@ -54,6 +54,24 @@ describe("the runs filter", () => {
     );
   });
 
+  // The toolbar labels its two controls visibly and gives them a 44px touch target.
+  it("labels both controls visibly and gives them a 44px target", () => {
+    render(
+      <RunsFilterToolbar
+        workspaceSlug="acme"
+        filter={{}}
+        projects={projects}
+      />,
+    );
+
+    const project = screen.getByRole("combobox", { name: "Project" });
+    const status = screen.getByRole("combobox", { name: "Status" });
+    expect(screen.getByText("Project")).toBeTruthy();
+    expect(screen.getByText("Status")).toBeTruthy();
+    expect(project.className).toContain("min-h-11");
+    expect(status.className).toContain("min-h-11");
+  });
+
   // #175-T01
   it("carries both filters and offers a reset that drops them", () => {
     render(

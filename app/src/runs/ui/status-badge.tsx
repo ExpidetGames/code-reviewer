@@ -33,7 +33,13 @@ export function RunStatusBadge({
 }) {
   const presentation = RUN_STATUS_PRESENTATION[status];
   const badge = (
-    <Badge variant={STATUS_TONE[status]} data-status={status}>
+    // The description is reachable without a second control per row: a non-interactive `title` on the
+    // list badge, and the focusable "?" (`hint`) on the run detail.
+    <Badge
+      variant={STATUS_TONE[status]}
+      data-status={status}
+      title={presentation.description}
+    >
       <span aria-hidden="true">{presentation.symbol}</span>
       {presentation.label}
     </Badge>

@@ -185,9 +185,7 @@ test.describe("the runs pages", () => {
       POLL_WAIT,
     );
 
-    await run
-      .getByRole("link", { name: WIDGETS.fullName, exact: true })
-      .click();
+    await run.getByRole("link", { name: `${WIDGETS.fullName} #7` }).click();
     await expect(
       page.getByRole("heading", { level: 1, name: `${WIDGETS.fullName} #7` }),
     ).toBeVisible();
@@ -304,7 +302,7 @@ test.describe("the runs pages", () => {
       .locator("[data-run-id]")
       .filter({ hasText: GADGETS.fullName })
       .filter({ hasText: "#21" })
-      .getByRole("link", { name: GADGETS.fullName, exact: true })
+      .getByRole("link", { name: `${GADGETS.fullName} #21` })
       .click();
     // The Runs list stays mounted (hidden) behind the run page; its row carries the same sentence as
     // the status banner, so every assertion of the page is scoped to the visible run detail.

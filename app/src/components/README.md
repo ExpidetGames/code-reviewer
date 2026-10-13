@@ -8,7 +8,10 @@ to it, under `ui/`, and keep their MIT header (see `THIRD_PARTY_LICENSES.md` and
 
 - **Primitives**: `@/components/ui/<name>` (`button`, `card`, `badge`, `alert`, `field`, `empty`,
   `table`, `dialog`, `sheet`, `dropdown-menu`, `select`, `tabs`, ...). These are the copied shadcn
-  components; each file is adapted only where a short comment says so.
+  components; each file is adapted only where a short comment says so. The `badge` carries the
+  `neutral | info | success | warning | danger` tones; a status is never told by colour alone (the
+  label is always in the badge). `danger` is the soft tone for a failed state, next to the solid
+  `destructive` used for errors.
 - **App wrappers** (ours, in this folder): use these instead of hand-writing the pattern.
   - `@/components/button` — the Button for screens: variants `primary | secondary | ghost |
 destructive`, sizes `sm | default | icon`, the `loading`/`loadingLabel` convention and the

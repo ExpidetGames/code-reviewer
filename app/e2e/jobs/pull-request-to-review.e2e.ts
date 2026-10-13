@@ -320,7 +320,7 @@ test.describe("a pull request on its way to a review comment", () => {
       RUN_TIMEOUT,
     );
     await run
-      .getByRole("link", { name: WIDGETS.fullName, exact: true })
+      .getByRole("link", { name: `${WIDGETS.fullName} #${String(number)}` })
       .click();
     // The Runs list stays mounted (hidden) behind the run page; its row carries the same failure
     // sentence, so every assertion of the page is scoped to the visible run detail.

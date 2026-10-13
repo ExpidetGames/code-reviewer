@@ -21,10 +21,7 @@ export default async function RunsPage({
   const { workspace } = await requireWorkspace(slug);
   return (
     <>
-      <PageHeader
-        title="Runs"
-        description="Every review Code Reviewer has started."
-      />
+      <PageHeader title="Runs" />
       <RunsContent
         workspaceId={workspace.id}
         workspaceSlug={workspace.slug}

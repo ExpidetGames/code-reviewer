@@ -119,9 +119,33 @@ describe("the rows of the list", () => {
     expect(second?.textContent).toContain("time limit");
     expect(
       within(first as HTMLElement)
-        .getByRole("link", { name: "acme/widgets" })
+        .getByRole("link", { name: "acme/widgets #7" })
         .getAttribute("href"),
     ).toBe("/w/acme/runs/6b1f0a52-5f43-4a53-9d0e-8d4a0f1c2e11");
+  });
+
+  // #175 review: two runs of one project must be told apart in a screen reader's link list.
+  it("names each run link with its project and pull request", () => {
+    render(
+      <RunsList
+        workspaceSlug="acme"
+        initial={snapshot([
+          run({ id: "a", prNumber: 7 }),
+          run({ id: "b", prNumber: 9 }),
+        ])}
+        filter={{}}
+        api={apiAnswering([])}
+      />,
+    );
+
+    const links = screen.getAllByRole("link", { name: /^acme\/widgets #/ });
+    expect(links.map((link) => link.getAttribute("aria-label"))).toEqual([
+      "acme/widgets #7",
+      "acme/widgets #9",
+    ]);
+    expect(new Set(links.map((link) => link.getAttribute("href"))).size).toBe(
+      2,
+    );
   });
 
   it("tell a waiting run from one that started, and show how long a run took", () => {

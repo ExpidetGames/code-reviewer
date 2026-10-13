@@ -468,7 +468,7 @@ test.describe(
         .filter({ hasText: "#4" });
       await expect(historical).toContainText("/ask");
       await historical
-        .getByRole("link", { name: UPGRADE_WIDGETS.fullName, exact: true })
+        .getByRole("link", { name: `${UPGRADE_WIDGETS.fullName} #4` })
         .click();
       // The Runs list stays mounted (hidden) behind the run page; its row carries the same command
       // text, so every assertion of the page is scoped to the visible run detail.

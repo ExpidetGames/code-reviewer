@@ -51,6 +51,16 @@ describe("the status badge", () => {
     expect(container.textContent).toContain("Failed");
   });
 
+  // The list keeps the description reachable with a non-interactive title, not a control per row.
+  it("keeps the status description as a title without a second control", () => {
+    const { container } = render(<RunStatusBadge status="failed" />);
+
+    expect(container.firstElementChild?.getAttribute("title")).toBe(
+      RUN_STATUS_PRESENTATION.failed.description,
+    );
+    expect(container.querySelector("button")).toBeNull();
+  });
+
   // The description is available from the badge, not printed beside the label.
   it("keeps the status description behind the badge's hint on request", async () => {
     const user = userEvent.setup();
