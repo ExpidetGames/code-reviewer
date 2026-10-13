@@ -270,6 +270,22 @@ def test_a_call_that_would_cross_the_token_cap_is_refused_before_the_provider_se
     assert subject.ledger.failure is not None
 
 
+# #231-T07
+def test_a_provider_error_keeps_its_reservation_spent() -> None:
+    # Conservative on purpose: a refused call is not given back, so a retry cannot reopen the budget.
+    upstream = Upstream(status=503, body={"error": "unavailable"})
+    ledger = BudgetLedger(DynamicLimits(max_total_tokens=5000))
+    subject = proxy(upstream, ledger=ledger)
+
+    assert post(subject, request_body()).status == 503
+
+    # Nothing settled, yet the reservation (request plus the 4096 output allowance) still counts.
+    with pytest.raises(LimitError) as refused:
+        ledger.reserve_call("x" * 1000, output_tokens=4096)
+    assert refused.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
+    assert len(upstream.requests) == 1
+
+
 # #197-T04
 def test_a_request_without_the_job_capability_is_refused_and_never_forwarded() -> None:
     upstream = Upstream()

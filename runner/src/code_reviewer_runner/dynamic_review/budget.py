@@ -182,9 +182,11 @@ class BudgetLedger:
         allowance = self.output_tokens if output_tokens is None else output_tokens
         counters = self._counters
         with self._lock:
-            # The byte count is the proven bound. The last settled prompt is a lower bound on this
-            # one (a prompt in a tool loop only grows) and covers what the provider adds that the
-            # bytes do not show, such as its chat template; it only ever raises the reservation.
+            # The byte count is the proven bound. The last settled prompt is a heuristic safety
+            # net, not a bound: it usually predicts the next prompt in a tool loop and may cover
+            # what the provider adds that the bytes do not show, such as its chat template, but
+            # after a compaction or a hidden call with another prompt it can over-reserve. It only
+            # ever raises the reservation, so soundness rests on the byte count alone.
             input_tokens = max(estimate, counters.last_prompt_tokens)
             if input_tokens + allowance > self.window_tokens:
                 raise LimitError(

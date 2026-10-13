@@ -170,6 +170,42 @@ def test_in_flight_reservations_and_settled_usage_are_summed() -> None:
     subject.reserve_call("x" * 100, output_tokens=50)  # 170 settled + 150: fits again
 
 
+class SlowTokenCap(DynamicLimits):
+    """A token cap that is slow to read, so a ledger that checks outside its lock is raced."""
+
+    def __getattribute__(self, name: str) -> Any:
+        if name == "max_total_tokens":
+            time.sleep(0.002)
+        return super().__getattribute__(name)
+
+
+# #231-T06
+def test_concurrent_reservations_cannot_together_exceed_the_cap() -> None:
+    # Each reservation is 100 + 50 tokens, so a cap of 460 fits three and not a fourth.
+    shared = BudgetLedger(SlowTokenCap(max_total_tokens=460))
+    outcomes: list[bool] = []
+    gate = threading.Barrier(16)
+
+    def worker() -> None:
+        gate.wait()
+        try:
+            shared.reserve_call("x" * 100, output_tokens=50)
+        except LimitError as refused:
+            assert refused.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
+            outcomes.append(False)
+        else:
+            outcomes.append(True)
+
+    threads = [threading.Thread(target=worker) for _ in range(16)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert outcomes.count(True) == 3
+    assert shared.model_calls == 3
+
+
 # #197-T05
 def test_a_request_that_does_not_fit_the_window_is_refused() -> None:
     subject = BudgetLedger(
