@@ -21,7 +21,10 @@ import {
 import { Input } from "../../components/ui/input.tsx";
 import { Textarea } from "../../components/ui/textarea.tsx";
 import { cn } from "../../lib/utils.ts";
-import type { ReviewSettingField } from "../settings.ts";
+import type {
+  ProjectDynamicSettingField,
+  ReviewSettingField,
+} from "../settings.ts";
 import type { SettingsFormModel } from "./form-model.ts";
 import type { BooleanField, FormState, TextField } from "./form-state.ts";
 import type { ReviewCommand } from "../../integrations/types.ts";
@@ -76,7 +79,7 @@ export function settingsOrigin({
   };
 }
 
-function Origin({ origin }: { origin: SettingsOrigin }) {
+export function Origin({ origin }: { origin: SettingsOrigin }) {
   return (
     <span className="flex flex-wrap items-center gap-2">
       <Badge variant="neutral">{origin.source}</Badge>
@@ -97,7 +100,7 @@ function Origin({ origin }: { origin: SettingsOrigin }) {
 }
 
 type FieldBase = {
-  name: ReviewSettingField;
+  name: ReviewSettingField | ProjectDynamicSettingField;
   label: string;
   hint?: ReactNode;
   error?: string;
