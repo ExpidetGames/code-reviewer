@@ -31,6 +31,7 @@ The order is deliberate and mirrors the epic's:
 
 import contextlib
 import json
+import logging
 import os
 import shutil
 import signal
@@ -100,6 +101,11 @@ _RUNNING_ENGINES: set[int] = set()
 # The dedicated users whose engines run, so the watchdog also ends what left the process group.
 _RUNNING_LAUNCHES: list[EngineLaunch] = []
 _ENGINES_LOCK = threading.Lock()
+_log = logging.getLogger(__name__)
+_SURVIVOR = (
+    "a process of the engine's dedicated user could not be ended; its network rules stay and the "
+    "next Dynamic job refuses to start until it is gone"
+)
 
 
 def shutdown_engines() -> None:
@@ -114,7 +120,8 @@ def shutdown_engines() -> None:
     # Whatever the dedicated user still runs (a helper in a session of its own) goes too, and its
     # network rules with it.
     for launch in launches:
-        launch.close()
+        if not launch.close():
+            _log.warning(_SURVIVOR)
 
 
 class EngineError(Exception):
@@ -506,7 +513,8 @@ class DynamicEngine:
             with _ENGINES_LOCK:
                 if self.launch in _RUNNING_LAUNCHES:
                     _RUNNING_LAUNCHES.remove(self.launch)
-            self.launch.close()
+            if not self.launch.close():
+                _log.warning(_SURVIVOR)
         else:
             shutil.rmtree(self._scratch, ignore_errors=True)
 
