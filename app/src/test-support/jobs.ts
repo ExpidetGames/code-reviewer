@@ -5,6 +5,7 @@
 import type { Kysely } from "kysely";
 import { formatTimestamp } from "../db/codecs.ts";
 import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
+import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import { toJob } from "../db/repositories/jobs-repository.ts";
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
 import type { Database } from "../db/schema.ts";
@@ -135,6 +136,13 @@ export async function createJobQueueFixture(
       })();
   const { db } = created;
   const clock = createTestClock();
+  // Both enqueue and lease-loss policy read the stored instance gate.
+  if (options.dynamicReview === true)
+    await createInstanceSettingsRepository(db, clock.now).set(
+      "dynamic_review",
+      { enabled: true },
+      null,
+    );
   const workspaceId = await defaultWorkspaceId(db);
   const integration = await createIntegrationsRepository(
     db,

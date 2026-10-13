@@ -499,7 +499,7 @@ describePostgres("the job queue on Postgres", () => {
     },
   );
   // #195-T04: PostgreSQL rollback must leave no live Dynamic row an older app could reclaim.
-  it("fences running Dynamic work on PostgreSQL before a rollback", async () => {
+  it("preserves the running Dynamic lease on disable and fails its expiry before rollback", async () => {
     const postgres = await createPostgresTestDatabase();
     const fixture = await createJobQueueFixture({ database: postgres.db });
     const settings = createInstanceSettingsRepository(
@@ -515,6 +515,7 @@ describePostgres("the job queue on Postgres", () => {
       prNumber: 8,
     });
     await settings.set("dynamic_review", { enabled: false }, null);
+    expect(await fixture.queue.get(running.id)).toEqual(claim?.job);
     fixture.clock.advance(60 * 60 * 1000);
     expect((await fixture.queue.expireStaleJobs()).requeued).toBe(0);
     expect(await fixture.queue.get(running.id)).toMatchObject({

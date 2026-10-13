@@ -12,6 +12,10 @@
 // database take the write lock up front (`begin immediate`, see `dialect.ts`), so the check "is there
 // a job already?" and the insert that follows it cannot be separated by another writer.
 import "server-only";
+import {
+  lockDynamicReviewGate,
+  lockJobRowsInOrder,
+} from "../dynamic-review-lock.ts";
 import type { Kysely, Selectable } from "kysely";
 import {
   STORED_REVIEW_COMMANDS,
@@ -180,7 +184,11 @@ export function createJobsRepository(
   function inTransaction<T>(
     run: (executor: Kysely<Database>) => Promise<T>,
   ): Promise<T> {
-    return db.isTransaction ? run(db) : db.transaction().execute(run);
+    const guarded = async (trx: Kysely<Database>) => {
+      await lockDynamicReviewGate(trx, false);
+      return run(trx);
+    };
+    return db.isTransaction ? guarded(db) : db.transaction().execute(guarded);
   }
 
   async function cancelWaiting(
@@ -192,24 +200,35 @@ export function createJobsRepository(
     },
     errorCode: JobErrorCode,
   ): Promise<number> {
-    const timestamp = formatTimestamp(now());
-    let query = db
-      .updateTable("jobs")
-      .set({
-        status: "cancelled",
-        error_code: errorCode,
-        finished_at: timestamp,
-        updated_at: timestamp,
-      })
-      .where("workspace_id", "=", workspaceId)
-      .where("status", "in", statusesThatCanBecome("cancelled"))
-      .where("repository_id", "=", where.repositoryId);
-    if (where.prNumber !== undefined)
-      query = query.where("pr_number", "=", where.prNumber);
-    if (where.automaticOnly === true)
-      query = query.where("trigger_kind", "=", "webhook");
-    const result = await query.executeTakeFirst();
-    return Number(result.numUpdatedRows);
+    return inTransaction(async (trx) => {
+      const timestamp = formatTimestamp(now());
+      let query = trx
+        .updateTable("jobs")
+        .set({
+          status: "cancelled",
+          error_code: errorCode,
+          finished_at: timestamp,
+          updated_at: timestamp,
+        })
+        .where("workspace_id", "=", workspaceId)
+        .where("status", "in", statusesThatCanBecome("cancelled"))
+        .where("repository_id", "=", where.repositoryId);
+      if (where.prNumber !== undefined)
+        query = query.where("pr_number", "=", where.prNumber);
+      if (where.automaticOnly === true)
+        query = query.where("trigger_kind", "=", "webhook");
+      await lockJobRowsInOrder(
+        trx,
+        trx
+          .selectFrom("jobs")
+          .select("id")
+          .where("workspace_id", "=", workspaceId)
+          .where("repository_id", "=", where.repositoryId)
+          .where("status", "=", "queued"),
+      );
+      const result = await query.executeTakeFirst();
+      return Number(result.numUpdatedRows);
+    });
   }
 
   return {
@@ -229,6 +248,16 @@ export function createJobsRepository(
             ? repository.forUpdate()
             : repository
         ).executeTakeFirst();
+
+        await lockJobRowsInOrder(
+          trx,
+          trx
+            .selectFrom("jobs")
+            .select("id")
+            .where("workspace_id", "=", workspaceId)
+            .where("repository_id", "=", input.repositoryId)
+            .where("status", "in", ["queued", "running"]),
+        );
 
         // #195 (finding 3): resolve the kind here, in the same transaction as the insert, so a
         // concurrent settings change cannot slip between the read and the write. A kind named by the

@@ -5,7 +5,10 @@
 // setup markers live here (see src/setup/README.md); the typed service and the admin portal build
 // on this table.
 import "server-only";
-import { lockDynamicReviewGate } from "../dynamic-review-lock.ts";
+import {
+  lockDynamicReviewGate,
+  lockJobRowsInOrder,
+} from "../dynamic-review-lock.ts";
 import type { Kysely } from "kysely";
 import { decodeJson, encodeJson, formatTimestamp } from "../codecs.ts";
 import type { StoredGithubApp } from "../../github-config/settings.ts";
@@ -105,22 +108,27 @@ export function createInstanceSettingsRepository(
       const result = await change(trx);
       if (!disabling) return result;
       const timestamp = formatTimestamp(now());
-      // Fence every live Dynamic row before rollback is safe, including a holder that may release
-      // or lose its lease later. Retain its token so a late completion remains fenced.
-      for (const status of ["queued", "running"] as const) {
-        await trx
-          .updateTable("jobs")
-          .set({
-            status: status === "running" ? "failed" : "cancelled",
-            error_code: "dynamic_review_disabled",
-            lease_expires_at: null,
-            finished_at: timestamp,
-            updated_at: timestamp,
-          })
+      // Running jobs retain their lease and PR slot until completion or a lost attempt. Only
+      // waiting work is cancelled here; loseAttempt reads the gate under the same lock discipline.
+      await lockJobRowsInOrder(
+        trx,
+        trx
+          .selectFrom("jobs")
+          .select("id")
           .where("review_kind", "=", "dynamic")
-          .where("status", "=", status)
-          .execute();
-      }
+          .where("status", "=", "queued"),
+      );
+      await trx
+        .updateTable("jobs")
+        .set({
+          status: "cancelled",
+          error_code: "dynamic_review_disabled",
+          finished_at: timestamp,
+          updated_at: timestamp,
+        })
+        .where("review_kind", "=", "dynamic")
+        .where("status", "=", "queued")
+        .execute();
       return result;
     };
     return db.isTransaction ? run(db) : db.transaction().execute(run);

@@ -54,9 +54,11 @@ The rollout gate: Dynamic Review is only **queued** when the instance setting `d
 `{ enabled: true }` (`dynamic-review-gate.ts`), default off until #202 ships. With the gate off, a
 Dynamic project still gets a run, and that run is created `failed` with `dynamic_review_disabled` —
 visible in Runs, never a silent Diff review and never a Dynamic row a previous-release app could
-claim. Gate reads hold a shared PostgreSQL transaction advisory lock; gate writes/removal take it
-exclusively, including when the setting has no row. Disabling atomically cancels queued Dynamic work
-and fails running Dynamic work with `dynamic_review_disabled`, fencing later lease retries. Use the
+claim. PostgreSQL queue writers take the instance gate advisory lock before row locks: shared for
+enqueue/settings, exclusive for gate changes and runner transitions; multi-row operations then lock
+jobs by ascending id (full order: `contracts/README.md`). Disabling cancels queued Dynamic work and
+leaves running jobs, their leases/heartbeats and PR slots unchanged. A release or lease expiry with
+the gate off fails Dynamic work with `dynamic_review_disabled` instead of requeueing it. Use the
 instance settings repository setter; a raw SQL update bypasses this boundary. There is no UI or CLI
 for this stored instance setting; #202 owns those controls. See `contracts/README.md` for the
 upgrade/rollback order.

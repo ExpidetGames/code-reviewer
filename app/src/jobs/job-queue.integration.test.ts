@@ -1778,9 +1778,9 @@ describe("resolving the review kind inside the enqueue transaction (#195)", () =
   });
 });
 
-// #195-T04: rollback fences both waiting and running work before an old app can start.
+// #195-T04: disable preserves running leases; their later loss fails instead of requeueing.
 it.each(["disable", "remove"] as const)(
-  "%s of the Dynamic gate drains waiting and running jobs and prevents lease requeue",
+  "%s of the Dynamic gate cancels waiting jobs, preserves running leases and prevents requeue",
   async (action) => {
     const fixture = await createJobQueueFixture();
     const settings = createInstanceSettingsRepository(
@@ -1802,12 +1802,14 @@ it.each(["disable", "remove"] as const)(
       status: "cancelled",
       errorCode: "dynamic_review_disabled",
     });
+    expect(await fixture.queue.get(running.id)).toEqual(claim?.job);
+    fixture.clock.advance(60 * MINUTE);
+    await fixture.queue.expireStaleJobs();
     expect(await fixture.queue.get(running.id)).toMatchObject({
       status: "failed",
       errorCode: "dynamic_review_disabled",
+      attempts: 1,
     });
-    fixture.clock.advance(60 * MINUTE);
-    await fixture.queue.expireStaleJobs();
     expect(
       await fixture.queue.release(
         running.id,

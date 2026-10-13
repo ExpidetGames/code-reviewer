@@ -58,20 +58,42 @@ Order:
    are safe next to old apps.
 2. Only then set `dynamic_review` to `{ enabled: true }` (and after #202 ships the engine).
 3. To roll back, keep every app instance on this gate-aware version while calling the instance
-   settings repository's `set("dynamic_review", { enabled: false }, operatorId)`. Wait for the
-   transaction to commit: it waits for in-flight enabled enqueues, cancels queued Dynamic jobs and
-   fails running Dynamic jobs with `dynamic_review_disabled`. Their lease tokens are fenced; a late
-   heartbeat, release, completion or lease expiry cannot requeue them.
-4. Confirm there are **zero Dynamic jobs in `queued` or `running` status** on the shared database.
-   Only after that boundary may an older app instance start serving claims. Keep the setting off
-   throughout rollback; retain the forward migration and historical Dynamic rows.
+   settings repository's `set("dynamic_review", { enabled: false }, operatorId)`. Wait for commit:
+   it stops new Dynamic enqueue and cancels **queued** Dynamic jobs with `dynamic_review_disabled`.
+   **Running jobs are untouched**: their leases, heartbeats and PR slots stay valid until they finish.
+   A release or lease expiry with the gate off fails the job with `dynamic_review_disabled` instead
+   of requeueing it, including on the last attempt and for a requested delayed retry.
+4. Keep the gate-aware app and runners serving the remaining leases until the Dynamic work finishes.
+   Before downgrade, quiesce the runners and verify **all Dynamic engine processes have ended** as
+   well as **zero Dynamic jobs in `queued` or `running` status**. If a runner is stopped, terminate
+   and confirm cleanup of its engine processes before releasing its claims; handle any expired
+   claims with the gate-aware app. Terminal database rows alone do not prove process termination.
+5. Only after that boundary may an older app start serving claims. Keep the setting off throughout
+   rollback; retain the forward migration and historical Dynamic rows. Resume compatible runners.
 
-Enqueue holds a shared transaction advisory lock before reading the gate on PostgreSQL; setting
-writes and removal hold the same lock exclusively through the drain. The lock also covers a missing
-setting row. SQLite uses its immediate transaction write lock. Removing the setting is equivalent
-to disabling it. Use the repository setter, not a raw SQL setting update, which would bypass the
-lock and drain. The stored setting has no UI, API route or CLI; #202 owns the operator control and
-activation instructions. It must remain off until #202's real runner checks ship.
+Removing the setting is equivalent to disabling it. Use the repository setter, not raw SQL, which
+would bypass the lock and cancellation. The stored setting has no UI, API route or CLI; #202 owns
+operator controls and activation instructions. It stays off until #202's real runner checks ship.
+
+### Queue lock order
+
+All queue writers acquire locks in this order, held through commit:
+
+1. **Instance gate transaction advisory lock `(195, 1)`**, before any repository, project, setting
+   or job row. Enqueue, project writes and waiting-job cancellation take it shared;
+   gate writes/removal and runner mutations (expiry, release, claim, heartbeat, completion and
+   claimed cancellation) take it exclusive. This covers a missing gate row as well. A transaction
+   that will run a runner mutation must take the exclusive lock first; never upgrade after row locks.
+2. **Workspace-scoped repository, then project row**, for producers/settings that need them. Enqueue
+   and settings saves retain the same repository `FOR UPDATE` lock from kind resolution through write.
+3. **Job rows in ascending `id`**, reserving a multi-row transition's complete live candidate set
+   before its first update. Expiry/claim reserve live jobs once before expiry passes and selection;
+   disable reserves only queued Dynamic rows. Single-job lease operations touch only their own row.
+
+Runner mutations briefly serialize on the gate, keeping drain and expiry from holding opposing job
+rows and making the gate read/lease transition atomic. Locks cover database work only, never engine,
+network or credential preparation. SQLite uses its immediate transaction write lock. Callers using
+an existing transaction must take the appropriate gate lock before any row locks in that transaction.
 
 The meaning of the calls (status codes, the lease, what happens on failure) is in
 `app/src/runner-api/README.md`.
