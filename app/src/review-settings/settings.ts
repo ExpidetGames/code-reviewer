@@ -38,6 +38,43 @@ export type ReviewSettings = {
 
 export type ReviewSettingField = keyof ReviewSettings;
 
+/**
+ * The one review kind a project selects (#193, #194). Diff Review is the existing PR-Agent review;
+ * Dynamic Review is the read-only agent of the epic. A project has exactly one.
+ */
+export const PROJECT_REVIEW_KINDS = ["diff", "dynamic"] as const;
+export type ProjectReviewKind = (typeof PROJECT_REVIEW_KINDS)[number];
+
+/**
+ * The default model of Dynamic Review. It is a **default, not an allow-list**: a project may name any
+ * model the configured provider serves (#194-T08), and the operator's model/provider resolution is
+ * #197's business, not a project setting. No hosting-provider or routing field exists.
+ */
+export const DEFAULT_DYNAMIC_MODEL = "deepseek-v4.1-flash";
+
+/**
+ * The settings that only a project has (#194): one review kind, the Dynamic model and an optional
+ * skill override. They live in `projects.settings` next to the Diff overrides but are never workspace
+ * defaults: the global layer cannot hold them (`validate.ts`, `REVIEW_SETTINGS_...`).
+ */
+export type ProjectDynamicSettings = {
+  reviewKind: ProjectReviewKind;
+  dynamicModel: string;
+  /** The project's skill override, or `null` for the shipped default skill. */
+  reviewSkill: string | null;
+};
+
+/** A project layer: only the fields somebody set. */
+export type ProjectDynamicOverrides = Partial<ProjectDynamicSettings>;
+
+export type ProjectDynamicSettingField = keyof ProjectDynamicSettings;
+
+export const PROJECT_DYNAMIC_SETTING_FIELDS = [
+  "reviewKind",
+  "dynamicModel",
+  "reviewSkill",
+] as const satisfies readonly ProjectDynamicSettingField[];
+
 export const REVIEW_SETTING_FIELDS = [
   "model",
   "fallbackModel",
@@ -62,9 +99,29 @@ export const REVIEW_SETTING_LIMITS = {
   maxTokens: { min: 8_000, max: 2_000_000 },
 } as const;
 
+/** The limits of the project-only settings (#194): the skill override is data and is bounded in bytes. */
+export const PROJECT_DYNAMIC_LIMITS = {
+  /** UTF-8 bytes of a skill override. 16 KiB, inside the 64 KiB HTTP body bound. */
+  reviewSkillMaxBytes: 16 * 1024,
+} as const;
+
 /** PR-Agent's own limit is 32000; the point of this setting is to go well beyond it. */
 export const DEFAULT_MAX_TOKENS = 100_000;
 export const DEFAULT_MAX_FINDINGS = 5;
+
+/**
+ * The project-only values nobody has changed: Diff Review, the shipped Dynamic model and the shipped
+ * default skill.
+ */
+export function builtInProjectDynamicSettings(
+  dynamicModel: string = DEFAULT_DYNAMIC_MODEL,
+): ProjectDynamicSettings {
+  return {
+    reviewKind: "diff",
+    dynamicModel,
+    reviewSkill: null,
+  };
+}
 
 /**
  * The values nobody has changed. `model` is the instance's model (`LLM_MODEL`, or the default

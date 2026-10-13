@@ -304,6 +304,14 @@ complete list in one transaction.
 `projects` (migration `20261010190000_create_projects`, repository `projects-repository.ts`) holds
 the repositories that are reviewed: one row per repository (`repository_id` unique), created by the
 first activation or the first save of settings (then off), switched off with `active = 0`, never deleted; see `src/projects/README.md`.
+`settings` holds the project's JSON overrides: the Diff review settings and, for one project, the
+project-only review kind, Dynamic model and optional skill (`src/review-settings/README.md`). Missing
+keys read as their defaults, so no migration is needed for new JSON fields. `updateSettingsWith`
+computes the next settings from the stored ones in the write transaction, reading them under a lock on
+the workspace-scoped repository row (SQLite's `begin immediate` write lock; Postgres `FOR UPDATE`), so
+a read-modify-write on either database cannot lose a concurrent update. `updateSettings` /
+`updateSettingsWith` run an optional `afterChange` hook in that same transaction (the settings-change
+hook #195 uses).
 
 `webhook_deliveries` (migration `20261010170000_create_webhook_deliveries`, repository
 `webhook-deliveries-repository.ts`) holds the delivery ids the webhook route has accepted, so a

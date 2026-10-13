@@ -150,8 +150,11 @@ const NUMBER_FIELDS: readonly ReviewSettingField[] = [
   "maxTokens",
 ];
 
-/** The body of the save request: the fields the person set, checked. */
-export function buildPatch(state: FormState): PatchResult {
+/** The fields the person set, as typed values, checked with the same validator the server uses. */
+function diffPatch(state: FormState): {
+  raw: Record<string, unknown>;
+  issues: ReviewSettingIssue[];
+} {
   const raw: Record<string, unknown> = {};
   const issues: ReviewSettingIssue[] = [];
   for (const field of REVIEW_SETTING_FIELDS) {
@@ -165,23 +168,32 @@ export function buildPatch(state: FormState): PatchResult {
   }
   const checked = validateReviewSettingsPatch(raw);
   if (!checked.ok) issues.push(...checked.issues);
+  return { raw, issues };
+}
+
+/** The body of the save request: the fields the person set, checked. The project-only settings are left to the server. */
+export function buildPatch(state: FormState): PatchResult {
+  const { raw, issues } = diffPatch(state);
   if (issues.length > 0) return { ok: false, issues };
   // The request carries the typed values of the fields that are fine, so what the person sees is
-  // what is sent; the server normalizes them (trimmed names, canonical command order) again.
+  // what is sent; the server normalizes them (trimmed names, canonical command order) again. The
+  // project-only fields are not sent: the server keeps the stored ones a request does not mention,
+  // so a stale form cannot overwrite a newer kind, model or skill (#194-T06).
   return { ok: true, patch: raw };
 }
 
 /**
  * The settings a review would use with the values as typed, for the live cost estimate; null while
- * a value is wrong (there is nothing sensible to estimate).
+ * a value is wrong (there is nothing sensible to estimate). Project-only fields do not change the
+ * Diff estimate (#200), so only the Diff fields are applied.
  */
 export function previewSettings(
   model: SettingsFormModel,
   state: FormState,
 ): ReviewSettings | null {
-  const result = buildPatch(state);
-  if (!result.ok) return null;
-  const checked = validateReviewSettingsPatch(result.patch);
+  const { raw, issues } = diffPatch(state);
+  if (issues.length > 0) return null;
+  const checked = validateReviewSettingsPatch(raw);
   if (!checked.ok) return null;
   return { ...model.inherited, ...checked.value };
 }

@@ -139,7 +139,16 @@ const ENTRIES: Entry[] = [
     method: "PUT",
     minRole: MINIMUM_ROLE.change_project_settings,
     path: (ids) => `/repositories/${ids.repositoryId}/project/settings`,
-    body: () => ({ settings: { maxFindings: 3 } }),
+    // #194-T04: a project-only save (kind, Dynamic model, skill) goes through the same role and
+    // isolation policy as any other settings save.
+    body: () => ({
+      settings: {
+        maxFindings: 3,
+        reviewKind: "dynamic",
+        dynamicModel: "vendor/dynamic-model",
+        reviewSkill: "Review this pull request dynamically.",
+      },
+    }),
     params: (ids) => ({ repositoryId: ids.repositoryId }),
     file: "repositories/[repositoryId]/project/settings/route.ts",
   },
