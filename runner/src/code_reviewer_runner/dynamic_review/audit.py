@@ -15,6 +15,9 @@ state or its events (the stored message list of the pinned server is not even re
   against the per-result bound and added to the cumulative bound, and the distinct content-bearing
   files it names are added to the file bound. A request that would cross a bound is refused, so
   neither the provider nor the model ever sees the offending content, and the run fails.
+- **Reminder wrappers** (#232) are neutralised first, in the same pass: the engine's
+  `<system-reminder>` attachment is dropped and literal tag text is escaped (`reminders.py`). The
+  bounds then count the text the model is actually shown, and the request is forwarded in that form.
 
 Each call and each result is audited once, by the id the provider gave the call: the history is
 resent on every request and must not be counted again. The audit cannot undo a read the engine
@@ -32,6 +35,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from code_reviewer_runner.dynamic_review.budget import BudgetLedger, LimitError
+from code_reviewer_runner.dynamic_review.reminders import neutralize_content
 from code_reviewer_runner.job_loop.jsonvalues import as_object
 from code_reviewer_runner.result import ErrorCode
 
@@ -71,21 +75,29 @@ class ToolAudit:
 
     # -- the engine's request -------------------------------------------------
 
-    def results_in_request(self, messages: object) -> None:
-        """Audit the tool results of a request's history before the request is forwarded."""
+    def results_in_request(self, messages: object) -> Any:
+        """Audit the tool results of a request's history; return the history to forward.
+
+        The result is a new list in which every tool result is neutralised (`reminders.py`); the
+        caller's messages are untouched. Counting is done on the neutralised text.
+        """
         if not isinstance(messages, list):
-            return
+            return messages
         entries: list[Any] = messages  # pyright: ignore[reportUnknownVariableType]
+        forwarded: list[Any] = []
         for item in entries:
             message = as_object(item)
             if message is None:
+                forwarded.append(item)
                 continue
             role = message.get("role")
             if role == "assistant":
                 for call in _tool_calls(message):
                     self._note_call(call)
             elif role == "tool":
-                self._note_result(message)
+                message = self._note_result(message)
+            forwarded.append(message)
+        return forwarded
 
     # -- internals ------------------------------------------------------------
 
@@ -102,20 +114,23 @@ class ToolAudit:
         arguments: Any = function.get("arguments") if function else None
         self._calls[identity] = (name if isinstance(name, str) else "", _arguments(arguments))
 
-    def _note_result(self, message: Mapping[str, Any]) -> None:
+    def _note_result(self, message: Mapping[str, Any]) -> dict[str, Any]:
         identity: Any = message.get("tool_call_id")
         if not isinstance(identity, str) or not identity:
             raise LimitError(
                 ErrorCode.DYNAMIC_ACCOUNTING_FAILED, "a tool result cannot be tied to a call"
             )
-        if identity in self._resulted:
-            return
-        self._resulted.add(identity)
-        text = _content_text(message.get("content"))
-        self._ledger.add_result_bytes(len(text.encode("utf-8", errors="replace")))
         name, arguments = self._calls.get(identity, ("", {}))
+        content = neutralize_content(name, message.get("content"))
+        neutral = {**message, "content": content}
+        if identity in self._resulted:
+            return neutral
+        self._resulted.add(identity)
+        text = _content_text(content)
+        self._ledger.add_result_bytes(len(text.encode("utf-8", errors="replace")))
         for path in _result_files(name, arguments, text):
             self._ledger.count_file(self._normal(path))
+        return neutral
 
     def _normal(self, path: str) -> str:
         """One identity per file: relative to the export when it is inside, however it was named."""
