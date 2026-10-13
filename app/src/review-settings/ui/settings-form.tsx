@@ -183,6 +183,8 @@ export function SettingsForm({
   const datalistId = `${useId()}-models`;
   const formRef = useRef<HTMLFormElement>(null);
   const saveRef = useRef<HTMLButtonElement>(null);
+  // Set synchronously, so a confirmation that fires twice cannot start two saves (#200 review).
+  const savingRef = useRef(false);
   const [model, setModel] = useState(initial);
   const [state, setState] = useState(() => initialFormState(initial));
   const [errors, setErrors] = useState<Errors>({});
@@ -227,10 +229,13 @@ export function SettingsForm({
     target?.focus();
   }, [focusRequest]);
 
-  // A change takes the problem of its field away: the estimate already works with the new value.
+  // A change takes the problem of its field away, and any message of a save that failed: the
+  // person is working on the form again, so a "not saved" of an earlier try no longer applies.
   function edit(next: FormState, changed: string) {
     setState(next);
     setStatus(null);
+    setKindError(null);
+    setFormError(null);
     setErrors((current) => {
       if (current[changed] === undefined) return current;
       const rest = { ...current };
@@ -256,44 +261,50 @@ export function SettingsForm({
 
   // The requests of one project save, in order. The first failure stops the rest; what an earlier
   // request saved stays saved and is shown as saved, the cards of the failed request keep their edits.
+  // The guard is a ref, not `busy`: a second activation of the confirmation can arrive before React
+  // has re-rendered with `busy` true, and would send the same save twice (#200 review).
   async function runSteps(steps: SaveStep[]) {
+    if (savingRef.current) return;
+    savingRef.current = true;
     setBusy(true);
-    let currentModel = model;
-    let currentState = state;
-    for (const [index, step] of steps.entries()) {
-      const result = await api.save(step.body);
-      if (!result.ok) {
-        setBusy(false);
-        const { fieldErrors, general } = splitIssues(result.issues);
-        const failure = [describeSaveFailure(result.code), ...general].join(
-          " ",
-        );
-        const partial = index > 0;
-        // After a saved first request, the card of the failed one says what was not saved.
-        if (partial && step.cards.length === 1 && step.cards[0] === "kind")
-          setKindError(`Not saved. ${failure}`);
-        refuse(
-          fieldErrors,
-          partial
-            ? `Some changes were saved, the others were not. ${failure}`
-            : failure,
-        );
-        return;
+    try {
+      let currentModel = model;
+      let currentState = state;
+      for (const [index, step] of steps.entries()) {
+        const result = await api.save(step.body);
+        if (!result.ok) {
+          const { fieldErrors, general } = splitIssues(result.issues);
+          const failure = [describeSaveFailure(result.code), ...general].join(
+            " ",
+          );
+          const partial = index > 0;
+          // After a saved first request, the card of the failed one says what was not saved.
+          if (partial && step.cards.length === 1 && step.cards[0] === "kind")
+            setKindError(`Not saved. ${failure}`);
+          refuse(
+            fieldErrors,
+            partial
+              ? `Some changes were saved, the others were not. ${failure}`
+              : failure,
+          );
+          return;
+        }
+        const next = modelFromAnswer("project", result.data);
+        if (next === null) {
+          refuse({}, describeSaveFailure("UNEXPECTED_RESPONSE"));
+          return;
+        }
+        currentModel = next;
+        currentState = adoptCards(currentState, next, step.cards);
+        setModel(currentModel);
+        setState(currentState);
       }
-      const next = modelFromAnswer("project", result.data);
-      if (next === null) {
-        setBusy(false);
-        refuse({}, describeSaveFailure("UNEXPECTED_RESPONSE"));
-        return;
-      }
-      currentModel = next;
-      currentState = adoptCards(currentState, next, step.cards);
-      setModel(currentModel);
-      setState(currentState);
+      setErrors({});
+      setStatus("saved");
+    } finally {
+      savingRef.current = false;
+      setBusy(false);
     }
-    setBusy(false);
-    setErrors({});
-    setStatus("saved");
   }
 
   async function submit(event: FormEvent) {
@@ -305,9 +316,12 @@ export function SettingsForm({
     if (projectView !== undefined) {
       const plan = planProjectSave(model, state);
       if (!plan.ok) {
+        const { fieldErrors, general } = splitIssues(plan.issues);
         refuse(
-          splitIssues(plan.issues).fieldErrors,
-          describeSaveFailure("REVIEW_SETTINGS_INVALID"),
+          fieldErrors,
+          [describeSaveFailure("REVIEW_SETTINGS_INVALID"), ...general].join(
+            " ",
+          ),
         );
         return;
       }
@@ -326,9 +340,10 @@ export function SettingsForm({
     }
     const built = buildPatch(state);
     if (!built.ok) {
+      const { fieldErrors, general } = splitIssues(built.issues);
       refuse(
-        splitIssues(built.issues).fieldErrors,
-        describeSaveFailure("REVIEW_SETTINGS_INVALID"),
+        fieldErrors,
+        [describeSaveFailure("REVIEW_SETTINGS_INVALID"), ...general].join(" "),
       );
       return;
     }
@@ -386,9 +401,12 @@ export function SettingsForm({
       edit(resetField(state, name, model), name),
   };
   const shippedSkill = projectView?.defaults.reviewSkill ?? "";
+  const defaultModel = projectView?.defaults.dynamicModel ?? "";
   const kindHandlers: ReviewKindHandlers = {
     setKind: (next) => edit(setReviewKind(state, next), "reviewKind"),
     setModel: (text) => edit(setDynamicModel(state, text), "dynamicModel"),
+    resetModel: () =>
+      edit(setDynamicModel(state, defaultModel), "dynamicModel"),
     editSkill: () => edit(editSkill(state, shippedSkill), "reviewSkill"),
     setSkill: (text) => edit(setSkillText(state, text), "reviewSkill"),
     resetSkill: () => edit(resetSkill(state, shippedSkill), "reviewSkill"),
@@ -504,10 +522,10 @@ export function SettingsForm({
       {api.reset === undefined ? null : (
         <DangerZone
           title="Reset to defaults"
-          description="Removes every value set for this project and follows the workspace defaults again."
+          description="Removes every value set for this project — the Review kind, the Dynamic Review model and the review skill, together with the Diff settings — and follows the workspace defaults again."
           actionLabel="Reset everything"
           confirmTitle="Reset this project to the defaults?"
-          confirmDescription="Every value set for this project is removed and the workspace defaults apply again. Reviews started afterwards use the defaults."
+          confirmDescription="Every value set for this project is removed, including the Review kind, the Dynamic Review model and the review skill, and the workspace defaults apply again. Reviews started afterwards use the defaults."
           confirmLabel="Reset to defaults"
           onConfirm={resetAll}
         />

@@ -195,7 +195,7 @@ project-only fields keeps the stored Diff group, so switching kind, changing the
 resetting the skill removes nothing of the Diff configuration, and an empty request still replaces the
 Diff group with nothing (every Diff field taken back to its default). The project-only fields are
 always merged over the stored ones, so a request that does not mention them keeps them and a
-`reviewSkill` of `""`/`null` clears only that override.
+`reviewSkill` or `dynamicModel` of `""`/`null` clears only that override.
 
 The write goes through `projects.updateSettingsWith` in one transaction. The stored settings are read
 under a lock on the workspace-scoped repository row: SQLite already holds the single write lock
@@ -212,8 +212,9 @@ change back to Diff.
 changes to save." instead); the Diff group is sent as a whole, only when it changed; a project-only
 field (kind, Dynamic model, skill) is sent only when the person changed it, so a form that was opened
 before another client changed the kind, model or skill cannot overwrite the newer value with its stale
-one; the skill is reset with `reviewSkill: null`, and a custom text equal to the shipped text is sent as
-that reset, never as a copy. Taking every Diff override back is an **explicit empty request**. One
+one; the skill is reset with `reviewSkill: null` and the Dynamic model with `dynamicModel: null` (the
+built-in default applies again), and a custom skill text equal to the shipped text is sent as that
+reset, never as a copy. Taking every Diff override back is an **explicit empty request**. One
 request cannot both clear the Diff group and carry project-only fields, so a save that does both sends
 the empty reset first and the project-only fields second; if the second fails, the first stays saved and
 the Review kind card says what was not saved (`adoptCards` takes the saved cards from the answer and
@@ -246,7 +247,8 @@ warnings and a token budget above the context window; warnings never block a sav
 model** is stored but not sent to the runner in the MVP: the form says so next to the field and the cost summary lists it as "not used yet" without an estimate or a cost warning (a context window that is too small still blocks the save, so that warning stays). A form is keyed on the server data, so a page that Next keeps mounted after a navigation starts from fresh data when it is shown again. For a project, the reset asks for a confirmation first; the workspace-wide reset is a danger zone on `/settings/advanced` (an empty patch through the same global route, `ui/reset-defaults.tsx`). A project form has a fourth card, **Review kind** (#200, `ui/review-kind-fieldset.tsx`), above the others
 because they follow its choice: exactly one of Diff Review and Dynamic Review (a radio group, never two
 checkboxes). With Dynamic Review chosen it holds the Dynamic model (a default, not an allow-list;
-`messages.ts` names a bad one) and the review skill (`ui/skill-editor.tsx`): the shipped skill is shown
+`messages.ts` names a bad one, and "Reset to default" puts the built-in model back) and the review skill
+(`ui/skill-editor.tsx`): the shipped skill is shown
 read-only with its id, version and SHA-256, "Edit skill" starts an override from that text, "Reset review
 skill to default" stages the shipped skill again until Save, and a counter shows the UTF-8 bytes against
 the 16 KiB limit. The Model card (model, fallback model, token budget and the cost estimate), the chunking

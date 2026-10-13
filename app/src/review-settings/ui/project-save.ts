@@ -3,7 +3,7 @@
 // How a project form becomes requests (#200). The settings API treats a request as follows (#194):
 // any Diff field replaces the whole Diff group, a request with only project-only fields keeps the
 // stored Diff group, project-only fields that are left out are kept, an empty request clears the Diff
-// group, and `reviewSkill: null` removes the skill override. So the form
+// group, and `reviewSkill: null` (or `dynamicModel: null`) removes that override. So the form
 //
 // - sends nothing when nothing changed (an untouched form must never clear the Diff group),
 // - sends the Diff group, as a whole, only when it changed,
@@ -82,12 +82,14 @@ function projectOnlyChanges(
   if (values.reviewKind !== view.effective.reviewKind)
     body.reviewKind = values.reviewKind;
 
+  // The built-in default typed again (or put back by "Reset to default") clears an override; any
+  // other value is the new override.
   const typedModel = values.dynamicModel.trim();
-  if (
-    typedModel !== view.effective.dynamicModel &&
-    check({ dynamicModel: values.dynamicModel })
-  )
-    body.dynamicModel = typedModel;
+  if (typedModel !== view.effective.dynamicModel) {
+    const wanted =
+      typedModel === view.defaults.dynamicModel ? null : typedModel;
+    if (check({ dynamicModel: wanted })) body.dynamicModel = wanted;
+  }
 
   const shipped = view.defaults.reviewSkill;
   const current = view.reviewSkillIsDefault ? null : view.effective.reviewSkill;

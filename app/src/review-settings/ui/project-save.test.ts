@@ -173,6 +173,19 @@ describe("a project save that changed only the project-only settings", () => {
     expect(plan(m, state).steps).toEqual([]);
   });
 
+  // #200 review: the model follows the same reset as the skill, `null` clears the override.
+  it("clears the Dynamic model override when the built-in default is put back", () => {
+    const m = model(
+      {},
+      dynamicView({ reviewKind: "dynamic", dynamicModel: "vendor/agent-1" }),
+    );
+    const state = setDynamicModel(initialFormState(m), DEFAULT_DYNAMIC_MODEL);
+
+    expect(plan(m, state).steps).toEqual([
+      { cards: ["kind"], body: { dynamicModel: null } },
+    ]);
+  });
+
   it("has no kind change to confirm when the kind stays", () => {
     const m = model({}, dynamicView({ reviewKind: "dynamic" }));
     const state = setDynamicModel(initialFormState(m), "vendor/agent-1");

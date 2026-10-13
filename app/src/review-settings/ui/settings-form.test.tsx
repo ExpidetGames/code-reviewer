@@ -414,6 +414,10 @@ describe("the settings form", () => {
 
     await user.click(screen.getByRole("button", { name: "Reset everything" }));
     expect(reset).not.toHaveBeenCalled();
+    // The copy names what a full reset takes away (#200 review).
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog.textContent).toMatch(/Review kind/);
+    expect(dialog.textContent).toMatch(/review skill/);
     await user.click(screen.getByRole("button", { name: "Reset to defaults" }));
 
     expect(reset).toHaveBeenCalledTimes(1);

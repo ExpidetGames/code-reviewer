@@ -19,6 +19,7 @@ import type { ProjectDynamicView } from "../service.ts";
 import type { ProjectReviewKind } from "../settings.ts";
 import type { DynamicFormValues } from "./dynamic-form-state.ts";
 import {
+  RESET_LABEL,
   SettingsCard,
   SettingsTextField,
   type SettingsOrigin,
@@ -45,6 +46,7 @@ function isKind(value: string): value is ProjectReviewKind {
 export type ReviewKindHandlers = {
   setKind: (kind: ProjectReviewKind) => void;
   setModel: (text: string) => void;
+  resetModel: () => void;
   editSkill: () => void;
   setSkill: (text: string) => void;
   resetSkill: () => void;
@@ -74,14 +76,20 @@ export function ReviewKindFieldset({
 }) {
   const ids = useId();
   const dynamic = values.reviewKind === "dynamic";
+  const kindErrorId = `${ids}-kind-error`;
+  // The model follows the same "Reset to default" affordance as every other field: it appears while
+  // the value is not the built-in default, puts the default back, and the save clears the override.
   const modelOrigin: SettingsOrigin = {
     source:
       view.sources.dynamicModel === "project"
         ? "Set for this project"
         : "Built-in value",
-    resetLabel: null,
-    resetAriaLabel: "",
-    onReset: () => undefined,
+    resetLabel:
+      values.dynamicModel.trim() === view.defaults.dynamicModel
+        ? null
+        : RESET_LABEL,
+    resetAriaLabel: "Reset to default for Dynamic Review model",
+    onReset: handlers.resetModel,
   };
   return (
     <SettingsCard title="Review kind" disabled={disabled}>
@@ -91,6 +99,9 @@ export function ReviewKindFieldset({
           if (isKind(value)) handlers.setKind(value);
         }}
         aria-label="Review kind"
+        aria-describedby={
+          errors.reviewKind === undefined ? undefined : kindErrorId
+        }
         className="gap-2"
       >
         {KINDS.map((kind) => {
@@ -113,7 +124,12 @@ export function ReviewKindFieldset({
                 <RadioGroupItem
                   value={kind}
                   id={optionId}
-                  aria-describedby={hintId}
+                  aria-describedby={
+                    errors.reviewKind === undefined
+                      ? hintId
+                      : `${hintId} ${kindErrorId}`
+                  }
+                  aria-invalid={errors.reviewKind !== undefined}
                   className="mt-0.5"
                 />
                 <span className="font-medium text-foreground">
@@ -133,6 +149,12 @@ export function ReviewKindFieldset({
           );
         })}
       </RadioGroup>
+
+      {errors.reviewKind !== undefined ? (
+        <p id={kindErrorId} className="text-sm text-destructive">
+          {errors.reviewKind}
+        </p>
+      ) : null}
 
       {dynamic && !dynamicReviewEnabled ? (
         // Static text, not a live region: it is true from the moment the page loads.

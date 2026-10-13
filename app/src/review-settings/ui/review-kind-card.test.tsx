@@ -5,6 +5,7 @@
 // model and the skill editor, an honest message while the instance has not enabled Dynamic Review, the
 // confirmation of a kind switch, and a save that sends only what changed.
 import {
+  act,
   cleanup,
   render,
   screen,
@@ -242,6 +243,38 @@ describe("the Review kind card", () => {
     ).toBe("vendor/agent-1");
   });
 
+  // #200-T01
+  it("takes the Dynamic model back to the built-in default with a reset action", async () => {
+    const user = userEvent.setup();
+    const saved = projectModel({}, dynamicView({ reviewKind: "dynamic" }));
+    const { api, save } = fakeApi({ ok: true, data: answerFor(saved) });
+    renderForm(
+      projectModel(
+        {},
+        dynamicView({ reviewKind: "dynamic", dynamicModel: "vendor/agent-1" }),
+      ),
+      api,
+    );
+    const reset = () =>
+      screen.queryByRole("button", {
+        name: "Reset to default for Dynamic Review model",
+      });
+
+    const model = screen.getByLabelText(
+      "Dynamic Review model",
+    ) as HTMLInputElement;
+    expect(model.value).toBe("vendor/agent-1");
+    expect(reset()).toBeTruthy();
+
+    await user.click(reset() as HTMLElement);
+
+    expect(model.value).toBe(DEFAULT_DYNAMIC_MODEL);
+    expect(reset()).toBeNull();
+    await user.click(screen.getByRole("button", SAVE));
+    // A reset clears the override instead of storing the default as one (#200 review).
+    expect(save).toHaveBeenCalledWith({ dynamicModel: null });
+  });
+
   // #200-T06
   it("shows no cost estimate for Dynamic Review and brings the Diff estimate back when the person switches back", async () => {
     const user = userEvent.setup();
@@ -401,6 +434,31 @@ describe("switching the review kind", () => {
         .getByRole("radio", { name: "Dynamic Review" })
         .getAttribute("aria-checked"),
     ).toBe("true");
+  });
+
+  // #200-T03
+  it("does not send the same save twice when the confirmation is activated twice", async () => {
+    const user = userEvent.setup();
+    const saved = projectModel({}, dynamicView({ reviewKind: "dynamic" }));
+    const { api, save } = fakeApi({ ok: true, data: answerFor(saved) });
+    renderForm(projectModel({ maxFindings: 9 }), api);
+
+    await user.click(screen.getByRole("radio", { name: "Dynamic Review" }));
+    await user.click(screen.getByRole("button", SAVE));
+    const confirm = within(await screen.findByRole("alertdialog")).getByRole(
+      "button",
+      { name: "Switch to Dynamic Review" },
+    );
+
+    await act(async () => {
+      confirm.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      confirm.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toMatch(/Saved\./),
+    );
+    expect(save).toHaveBeenCalledTimes(1);
   });
 
   it("sends nothing when the person cancels, keeps the choice and puts the focus back on Save", async () => {
@@ -680,6 +738,35 @@ describe("problems with the Dynamic settings", () => {
     expect(screen.getByRole("alert").textContent).toMatch(/marked fields/);
   });
 
+  // #200-T03
+  it("shows a server problem with the kind at the kind card and focuses it", async () => {
+    const user = userEvent.setup();
+    const { api } = fakeApi({
+      ok: false,
+      status: 400,
+      code: "REVIEW_SETTINGS_INVALID",
+      issues: [{ field: "reviewKind", code: "INVALID_FORMAT" }],
+    });
+    renderForm(projectModel({}, dynamicView({ reviewKind: "dynamic" })), api);
+
+    const model = screen.getByLabelText("Dynamic Review model");
+    await user.clear(model);
+    await user.type(model, "vendor/agent-1");
+    await user.click(screen.getByRole("button", SAVE));
+
+    expect(
+      await screen.findByText("Choose Diff Review or Dynamic Review."),
+    ).toBeTruthy();
+    const first = screen.getByRole("radio", { name: "Diff Review" });
+    expect(first.getAttribute("aria-invalid")).toBe("true");
+    expect(
+      screen
+        .getByRole("radio", { name: "Dynamic Review" })
+        .getAttribute("aria-invalid"),
+    ).toBe("true");
+    expect(document.activeElement).toBe(first);
+  });
+
   it("points at the other kind when the problem is in a field the selected kind does not show", async () => {
     const user = userEvent.setup();
     renderForm(projectModel(), fakeApi().api);
@@ -750,6 +837,11 @@ describe("a save that needs two requests", () => {
         .value,
     ).toBe("5");
     expect(screen.queryByText(/Saved\./)).toBeNull();
+
+    // #200 review: an edit takes the lingering "not saved" messages away again.
+    await user.type(screen.getByLabelText("Dynamic Review model"), "x");
+    expect(within(card).queryByRole("alert")).toBeNull();
+    expect(screen.queryByText(/Some changes were saved/)).toBeNull();
   });
 });
 
