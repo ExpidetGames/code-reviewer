@@ -53,6 +53,18 @@ function accountTypeLabel(accountType: string): string {
   return "Account";
 }
 
+/**
+ * The quiet badge variant of a decision (#183 review): approved is success, denied is warning and a
+ * request that was connected in the meantime is neutral. The label stays the meaning either way.
+ */
+function decidedBadgeVariant(
+  status: InstallationLinkRequestView["status"],
+): "success" | "warning" | "neutral" {
+  if (status === "approved") return "success";
+  if (status === "denied") return "warning";
+  return "neutral";
+}
+
 function Evidence({ request }: { request: InstallationLinkRequestView }) {
   const { evidence } = request;
   const detail = describeRoleDetail(evidence.roleDetail);
@@ -188,7 +200,9 @@ function DecidedTab({ decided }: { decided: InstallationLinkRequestView[] }) {
               )}
             </span>
           </div>
-          <Badge>{REQUEST_STATUS_COPY[request.status]}</Badge>
+          <Badge variant={decidedBadgeVariant(request.status)}>
+            {REQUEST_STATUS_COPY[request.status]}
+          </Badge>
         </li>
       ))}
     </ul>
@@ -263,7 +277,7 @@ export function ApprovalsPageContent({
       <div className="flex max-w-[64rem] flex-col gap-6 pt-6">
         <Suspense
           fallback={
-            <div role="status" aria-live="polite">
+            <div role="status" aria-live="polite" aria-busy="true">
               <Skeleton className="h-11 w-64" aria-hidden="true" />
               <span className="sr-only">Loading the request states</span>
             </div>

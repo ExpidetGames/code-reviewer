@@ -98,6 +98,12 @@ function evidenceOf(label: string): string {
   return term.nextElementSibling?.textContent ?? "";
 }
 
+/** The variant of the status badge that carries this text. */
+function badgeVariant(text: string): string | null {
+  const badge = screen.getByText(text).closest("[data-slot='badge']");
+  return badge?.getAttribute("data-variant") ?? null;
+}
+
 async function openEvidence(
   user: ReturnType<typeof userEvent.setup>,
   accountLogin: string,
@@ -392,6 +398,12 @@ describe("the page without requests", () => {
             accountLogin: "beta",
             decidedAt: "2026-10-12T11:00:00.000Z",
           }),
+          request({
+            id: "r4",
+            status: "withdrawn",
+            accountLogin: "gamma",
+            decidedAt: "2026-10-12T10:30:00.000Z",
+          }),
         ]}
         api={api()}
       />,
@@ -404,6 +416,11 @@ describe("the page without requests", () => {
       /beta.*Denied by the admin of the instance/,
     );
     expect(screen.queryByRole("button", { name: /Approve|Deny/ })).toBeNull();
+    // #183 review: one quiet variant per decision, never the primary fill; the label stays the
+    // meaning, so the status is not told by color alone.
+    expect(badgeVariant("Approved")).toBe("success");
+    expect(badgeVariant("Denied by the admin of the instance")).toBe("warning");
+    expect(badgeVariant("Connected in the meantime")).toBe("neutral");
   });
 
   // #183-T01
