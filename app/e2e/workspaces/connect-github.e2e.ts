@@ -190,7 +190,7 @@ test.describe("connecting GitHub to a workspace", () => {
     await expect(page.getByRole("status").first()).toContainText(
       "GitHub is connected",
     );
-    const connections = page.getByRole("list", { name: "Connections" });
+    const connections = page.getByRole("list", { name: "Installations" });
     await expect(connections.getByRole("listitem")).toHaveCount(1);
     await expect(connections).toContainText(ORG_A.login);
     await expect(connections).toContainText("Connected");
@@ -218,10 +218,10 @@ test.describe("connecting GitHub to a workspace", () => {
 
     await expect(
       page
-        .getByRole("alert")
+        .getByRole("status")
         .filter({ hasText: "Only the owner of a personal account" }),
     ).toBeVisible();
-    await expect(page.getByRole("list", { name: "Connections" })).toHaveCount(
+    await expect(page.getByRole("list", { name: "Installations" })).toHaveCount(
       0,
     );
     await page.goto(`/w/${slug}/projects`);
@@ -291,9 +291,9 @@ test.describe("connecting GitHub to a workspace", () => {
     await expect(o.page.getByRole("status").first()).toContainText(
       "admin of this instance has to approve",
     );
-    await expect(o.page.getByRole("list", { name: "Connections" })).toHaveCount(
-      0,
-    );
+    await expect(
+      o.page.getByRole("list", { name: "Installations" }),
+    ).toHaveCount(0);
     const requests = o.page.getByRole("list", {
       name: "Requests for the instance admin",
     });
@@ -349,7 +349,7 @@ test.describe("connecting GitHub to a workspace", () => {
     // The workspace now has the connection and its repositories.
     await o.page.goto(`/w/${o.slug}/connections`);
     await expect(
-      o.page.getByRole("list", { name: "Connections" }),
+      o.page.getByRole("list", { name: "Installations" }),
     ).toContainText(ORG_OPAQUE.login);
     await expect(
       o.page.getByRole("list", { name: "Requests for the instance admin" }),
@@ -378,11 +378,12 @@ test.describe("connecting GitHub to a workspace", () => {
     await page
       .getByRole("button", { name: `Disconnect ${ORG_A.login}` })
       .click();
+    await expect(page.getByRole("alertdialog")).toBeVisible();
     await page
       .getByRole("button", { name: `Confirm disconnecting ${ORG_A.login}` })
       .click();
 
-    const connections = page.getByRole("list", { name: "Connections" });
+    const connections = page.getByRole("list", { name: "Installations" });
     await expect(connections).toContainText("Disconnected");
     await expect(
       page.getByRole("button", { name: `Disconnect ${ORG_A.login}` }),
@@ -404,10 +405,10 @@ test.describe("connecting GitHub to a workspace", () => {
     });
     await expect(
       page
-        .getByRole("alert")
+        .getByRole("status")
         .filter({ hasText: "connected already and cannot be connected here" }),
     ).toBeVisible();
-    await expect(page.getByRole("list", { name: "Connections" })).toHaveCount(
+    await expect(page.getByRole("list", { name: "Installations" })).toHaveCount(
       0,
     );
     await context.close();

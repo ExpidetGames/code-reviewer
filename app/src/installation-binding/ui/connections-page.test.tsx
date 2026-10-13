@@ -15,7 +15,10 @@ vi.mock("next/navigation", () => ({
 
 import type { BindingApi } from "./api.ts";
 import { ConnectionsPanel } from "./connections-panel.tsx";
-import type { ConnectionsPageData } from "./connections-page.tsx";
+import {
+  ConnectionsPageContent,
+  type ConnectionsPageData,
+} from "./connections-page.tsx";
 
 afterEach(() => {
   cleanup();
@@ -83,6 +86,33 @@ function renderPanel(
   return { api: calls, go };
 }
 
+describe("the page", () => {
+  // #176-T01
+  it("renders one h1 and three cards with the expected headings", () => {
+    render(
+      <ConnectionsPageContent
+        workspaceSlug="acme"
+        canManage
+        data={data()}
+        api={api()}
+      />,
+    );
+
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Connections" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Installations" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Connect" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Requests" }),
+    ).toBeTruthy();
+  });
+});
+
 describe("the buttons", () => {
   // #103-IB-02
   it("sends the browser to the address the route answered when an Owner or Admin presses Connect GitHub", async () => {
@@ -113,12 +143,12 @@ describe("the buttons", () => {
       { canManage: false },
     );
 
-    expect(screen.getByRole("list", { name: "Connections" })).toBeTruthy();
+    expect(screen.getByRole("list", { name: "Installations" })).toBeTruthy();
     expect(screen.queryByRole("button")).toBeNull();
     expect(screen.queryByText("Connect GitHub")).toBeNull();
   });
 
-  // #103-IB-22
+  // #103-IB-22, #176-T03
   it.each([
     ["app_not_configured", /not set up yet/],
     [
@@ -126,7 +156,7 @@ describe("the buttons", () => {
       /Connecting GitHub is not available yet/,
     ],
   ] as const)(
-    "does not offer Connect GitHub while it cannot work (%s), and says why",
+    "does not offer Connect GitHub while it cannot work (%s), and says why in exactly one alert",
     (connect, reason) => {
       renderPanel(data({ connect, picker: false }));
 
@@ -137,7 +167,9 @@ describe("the buttons", () => {
           }) as HTMLButtonElement
         ).disabled,
       ).toBe(true);
-      expect(screen.getByRole("note").textContent).toMatch(reason);
+      const reasons = screen.getAllByRole("note");
+      expect(reasons).toHaveLength(1);
+      expect(reasons[0]?.textContent).toMatch(reason);
       expect(
         screen.queryByRole("button", { name: "Link an existing installation" }),
       ).toBeNull();
@@ -218,9 +250,7 @@ describe("the buttons", () => {
 
     await user.click(screen.getByRole("button", { name: "Connect GitHub" }));
 
-    expect((await screen.findByRole("alert")).textContent).toMatch(
-      /Too many attempts/,
-    );
+    expect(await screen.findByText(/Too many attempts/)).toBeTruthy();
     expect(go).not.toHaveBeenCalled();
   });
 });
@@ -239,7 +269,7 @@ describe("what a flow ended with", () => {
   });
 
   // #103-IB-04
-  it("shows the notice of a refusal as an alert", () => {
+  it("shows the notice of a refusal as a polite status, not a dialog", () => {
     renderPanel(
       data({
         notice: {
@@ -249,9 +279,10 @@ describe("what a flow ended with", () => {
       }),
     );
 
-    expect(screen.getByRole("alert").textContent).toBe(
+    expect(screen.getByRole("status").textContent).toBe(
       "That installation cannot be connected.",
     );
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });
 
@@ -264,29 +295,34 @@ describe("a connection", () => {
     repositoryCount: 1,
   };
 
-  // #103-IB-14
-  it("is ended in two steps: the first press asks, the second ends it and the page reloads", async () => {
+  // #103-IB-14, #176-T02
+  it("is ended in two steps: the first press opens a dialog, the confirmation ends it and the page reloads", async () => {
     const user = userEvent.setup();
     const { api: calls } = renderPanel(data({ connections: [connection] }));
 
     await user.click(screen.getByRole("button", { name: "Disconnect acme" }));
     expect(calls.disconnect).not.toHaveBeenCalled();
-    expect(screen.getByText(/Projects and runs stay/)).toBeTruthy();
+    const dialog = await screen.findByRole("alertdialog");
+    expect(within(dialog).getByText(/Projects and runs stay/)).toBeTruthy();
     await user.click(
-      screen.getByRole("button", { name: "Confirm disconnecting acme" }),
+      within(dialog).getByRole("button", {
+        name: "Confirm disconnecting acme",
+      }),
     );
 
+    expect(calls.disconnect).toHaveBeenCalledTimes(1);
     expect(calls.disconnect).toHaveBeenCalledWith("i1");
     expect(navigation.refresh).toHaveBeenCalledTimes(1);
   });
 
-  // #103-IB-14
-  it("is not ended when the person cancels", async () => {
+  // #103-IB-14, #176-T02
+  it("is not ended when the person cancels the dialog", async () => {
     const user = userEvent.setup();
     const { api: calls } = renderPanel(data({ connections: [connection] }));
 
     await user.click(screen.getByRole("button", { name: "Disconnect acme" }));
-    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    const dialog = await screen.findByRole("alertdialog");
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
 
     expect(calls.disconnect).not.toHaveBeenCalled();
     expect(
@@ -363,5 +399,15 @@ describe("the requests", () => {
     expect(
       screen.queryByRole("list", { name: "Requests for the instance admin" }),
     ).toBeNull();
+  });
+
+  // #176-T01
+  it("shows one empty line while no request waits", () => {
+    renderPanel(data({ requests: [] }));
+
+    expect(
+      screen.queryByRole("list", { name: "Requests for the instance admin" }),
+    ).toBeNull();
+    expect(screen.getByText("No requests waiting.")).toBeTruthy();
   });
 });

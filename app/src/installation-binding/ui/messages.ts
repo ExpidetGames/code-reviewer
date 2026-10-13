@@ -116,6 +116,10 @@ export const AVAILABILITY_COPY: Record<
     "This instance cannot check your rights on GitHub, so the admin of the instance approves every connection. Connect GitHub sends the request.",
 };
 
+/** The "how it works" text of the Connect card, behind its disclosure (#176). */
+export const CONNECT_HELP_COPY =
+  "You connect an installation of the GitHub App if you own the account it is on: a personal account, or an organization you are an owner of. GitHub asks you to authorize the app, which proves that.";
+
 export function describeResultCode(code: string): {
   tone: ResultTone;
   text: string;
