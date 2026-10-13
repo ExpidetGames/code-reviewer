@@ -120,7 +120,8 @@ test.describe("an Owner invites a colleague who accepts", () => {
 
     const form = page.getByRole("form", { name: "Invite a person" });
     await form.getByLabel("Email address").fill(colleague);
-    await form.getByLabel("Role").selectOption("member");
+    await form.getByRole("combobox", { name: "Role", exact: true }).click();
+    await page.getByRole("option", { name: "Member" }).click();
     await form.getByRole("button", { name: "Send invitation" }).click();
 
     const link = form.getByLabel("Invitation link");
@@ -224,7 +225,7 @@ test.describe("an Owner invites a colleague who accepts", () => {
     );
     await expect(
       page.getByRole("combobox", { name: `Role of ${colleague}` }),
-    ).toHaveValue("member");
+    ).toContainText("Member");
   });
 
   // #101-WM-08, #101-WM-11
