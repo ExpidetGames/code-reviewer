@@ -104,7 +104,6 @@ def ruleset(uid: int, proxy_port: int, engine_port: int) -> str:
             f"flush table inet {table}",
             f"add chain inet {table} output {{ type filter hook output priority 0 ; "
             "policy accept ; }",
-            f"add rule inet {table} output meta skuid {uid} ct state established,related accept",
             # The answers of the engine's own server to whoever connected to it (the supervisor).
             f'add rule inet {table} output meta skuid {uid} oifname "lo" ip saddr {PROXY_HOST} '
             f"ip daddr {PROXY_HOST} tcp sport {engine_port} ct state established accept",
