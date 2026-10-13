@@ -60,8 +60,7 @@ const ISSUE_COPY: Record<ReviewSettingIssueCode, (field: string) => string> = {
       ? `Use at most ${numberWithCommas(REVIEW_SETTING_LIMITS.extraInstructionsMaxChars)} characters.`
       : "This text is too long.",
   INVALID_FORMAT: (field) => {
-    if (field === "allowedCommands")
-      return "Only the commands review, improve, describe and ask exist.";
+    if (field === "allowedCommands") return "Only the command review exists.";
     if (MODEL_FIELDS.includes(field))
       return "Use a model name as OpenRouter spells it, for example anthropic/claude-haiku-5.5 (letters, digits and . _ : / + -, no spaces).";
     return GENERIC_ISSUE;

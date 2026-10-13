@@ -107,6 +107,12 @@ Back up two things, **separately**:
   start two different versions that write the same tables for long.
 - Rollback means starting the previous image tag again. A migration that has already run is not
   undone; keep the previous image ready.
+- A release that removes a comment command (`/ask`, `/improve`, `/describe`) follows the order of the
+  single-server guide: stop the old app producers, let the new app migrate (it cancels waiting jobs of a
+  removed command with `command_removed`), then replace the runners. A runner holding a claimed job may
+  finish it under its lease; a removed command a new runner receives fails with `invalid_command` and is
+  reported. The runner API stays version 1 and keeps accepting the previous release's review payload. A
+  rollback neither resurrects a cancelled job nor restores normalized `allowedCommands`.
 
 ## 7. Out of scope
 

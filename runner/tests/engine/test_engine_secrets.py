@@ -74,7 +74,7 @@ def assert_no_secret(engine: Engine, outcome: Outcome, secrets: list[str]) -> No
 
 # CR-41-T12
 @pytest.mark.parametrize("scenario", list(SCENARIOS))
-@pytest.mark.parametrize("command", ["review", "improve", "ask", "describe"])
+@pytest.mark.parametrize("command", ["review"])
 def test_no_credential_of_the_job_is_in_any_output_of_a_run(
     engine: Engine, github: FakeGithub, llm: FakeLlm, command: str, scenario: str
 ) -> None:
@@ -96,8 +96,8 @@ def assert_secret_replaced_in_place(outcome: Outcome, expected_text: str) -> Non
     assert expected_text in result["logTail"]
 
 
-# CR-41-T12
-@pytest.mark.parametrize("command", ["review", "ask"])
+# CR-41-T12, #203
+@pytest.mark.parametrize("command", ["review"])
 def test_a_quoted_llm_key_is_replaced_in_place_in_the_log_tail(
     engine: Engine, github: FakeGithub, llm: FakeLlm, command: str
 ) -> None:

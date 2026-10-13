@@ -16,8 +16,6 @@ import type { OpenPullRequests, StartedReview } from "../service.ts";
 export type StartRequest = {
   prNumber: number;
   command: ReviewCommand;
-  /** Only for `ask`. */
-  question?: string;
 };
 
 export type ManualReviewApi = {

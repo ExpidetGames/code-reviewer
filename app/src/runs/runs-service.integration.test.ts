@@ -16,10 +16,15 @@ describe("the runs list", () => {
       ok: true,
       result: { ok: true, commentUrl: null, logTail: "" },
     });
-    const second = await f.finished(
-      { ok: false, errorCode: "timeout" },
-      { repositoryId: f.otherRepositoryId, command: "improve" },
-    );
+    f.clock.advance(1000);
+    // A historical run of a removed command (#203): seeded directly, since the queue cannot create
+    // one any more. It must stay readable with its original command and status.
+    const second = await f.seedHistoricalJob({
+      command: "improve",
+      repositoryId: f.otherRepositoryId,
+      status: "failed",
+      errorCode: "timeout",
+    });
     const third = await f.running({ triggerKind: "manual" });
     const fourth = await f.waiting({ repositoryId: f.otherRepositoryId });
 
@@ -390,5 +395,34 @@ describe("the read side with many jobs", () => {
       "status",
       "triggerKind",
     ]);
+  });
+});
+
+// #203-T12
+describe("a historical run of a removed command", () => {
+  it("keeps its original command, its read-only question and its result", async () => {
+    const f = await createRunsFixture();
+    const run = await f.seedHistoricalJob({
+      command: "ask",
+      status: "succeeded",
+      args: "why is ![x](https://evil.test/a.png) this?",
+      result: {
+        ok: true,
+        commentUrl: "https://github.com/acme/widgets/pull/7#issuecomment-9",
+        logTail: "the answer",
+      },
+    });
+
+    const listed = (await f.runs.list({})).runs.find(
+      (entry) => entry.id === run.id,
+    );
+    expect(listed).toMatchObject({ command: "ask" });
+
+    const detail = await f.runs.get(run.id);
+    expect(detail?.run).toMatchObject({
+      command: "ask",
+      args: "why is ![x](https://evil.test/a.png) this?",
+      commentUrl: "https://github.com/acme/widgets/pull/7#issuecomment-9",
+    });
   });
 });

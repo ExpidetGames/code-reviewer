@@ -30,7 +30,7 @@ the global defaults last.
 | `inlineKeyIssues`   | Also post every finding as an inline comment                                                                           | off                                            | boolean                                                          |
 | `autoReviewOnOpen`  | Review when a pull request is opened, reopened or marked ready                                                         | on                                             | boolean                                                          |
 | `autoReviewOnPush`  | Review again when commits are pushed                                                                                   | on                                             | boolean                                                          |
-| `allowedCommands`   | The comment commands people may use (`review`, `improve`, `describe`, `ask`)                                           | all four                                       | any subset, no duplicates                                        |
+| `allowedCommands`   | The comment commands people may use (`review`; the removed commands became `[]` on upgrade)                            | `["review"]`                                   | a subset of `["review"]`, no duplicates                          |
 
 The limits are `REVIEW_SETTING_LIMITS`; `validate.ts` checks every field and reports each problem as
 `{ field, code }` with a stable code (`REVIEW_SETTING_ISSUE_CODES`), never with the value.

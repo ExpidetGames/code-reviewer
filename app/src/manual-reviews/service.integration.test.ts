@@ -85,12 +85,12 @@ describe("listing the open pull requests of a project", () => {
   it("reports the commands the project allows", async () => {
     const { service, repository, settings } = await start();
     await settings.updateProjectSettings(repository.id, {
-      allowedCommands: ["review", "ask"],
+      allowedCommands: ["review"],
     });
 
     expect(
       (await service.listOpenPullRequests(repository.id)).allowedCommands,
-    ).toEqual(["review", "ask"]);
+    ).toEqual(["review"]);
   });
 
   it("leaves out everything of a pull request but what the picker shows", async () => {
@@ -252,46 +252,51 @@ describe("starting a command for a pull request", () => {
     ]);
   });
 
-  it("creates an ask job that carries the question", async () => {
+  // #203-T05
+  it("refuses a supplied question, and creates no job", async () => {
     const { h, service, repository, queue } = await start();
     h.fake.addPullRequest("acme/widgets", pullRequest(7));
 
-    await service.startReview(USER, repository.id, {
-      prNumber: 7,
-      command: "ask",
-      question: "  Why was the cache removed?  ",
-    });
+    const error = await failureOf(
+      service.startReview(USER, repository.id, {
+        prNumber: 7,
+        command: "review",
+        question: "  Why was the cache removed?  ",
+      }),
+    );
 
-    expect(await queue.list()).toMatchObject([
-      { command: "ask", args: "Why was the cache removed?" },
-    ]);
+    expect(error).toMatchObject({
+      code: "MANUAL_REVIEW_REQUEST_INVALID",
+      issues: [{ field: "question", code: "invalid" }],
+    });
+    expect(await queue.list()).toEqual([]);
   });
 
-  it("starts a command for a draft pull request", async () => {
+  it("starts a review for a draft pull request", async () => {
     const { h, service, repository, queue } = await start();
     h.fake.addPullRequest("acme/widgets", pullRequest(7, { draft: true }));
 
     await service.startReview(USER, repository.id, {
       prNumber: 7,
-      command: "improve",
+      command: "review",
     });
 
-    expect(await queue.list()).toMatchObject([{ command: "improve" }]);
+    expect(await queue.list()).toMatchObject([{ command: "review" }]);
   });
 
-  it("logs who started what, and never the question", async () => {
+  it("logs who started what, and never a question", async () => {
     const { h, service, repository, lines } = await start();
     h.fake.addPullRequest("acme/widgets", pullRequest(7));
 
     await service.startReview(USER, repository.id, {
       prNumber: 7,
-      command: "ask",
-      question: "secret-looking question",
+      command: "review",
     });
 
     expect(lines).toHaveLength(1);
-    expect(lines[0]).toContain("repo=acme/widgets pr=7 command=ask by=octocat");
-    expect(lines[0]).not.toContain("secret-looking");
+    expect(lines[0]).toContain(
+      "repo=acme/widgets pr=7 command=review by=octocat",
+    );
   });
 
   // CR-33-T09
@@ -416,36 +421,41 @@ describe("starting a command for a pull request", () => {
     expect((await queue.claimNext("runner-1"))?.job.id).toBe(automatic.job.id);
   });
 
-  it("treats another command or a new commit of the same pull request as a new job", async () => {
+  it("creates a new job after the previous review finished", async () => {
     const { h, service, repository, queue } = await start();
     h.fake.addPullRequest("acme/widgets", pullRequest(7));
-    const review = await service.startReview(USER, repository.id, {
+    const first = await service.startReview(USER, repository.id, {
+      prNumber: 7,
+      command: "review",
+    });
+    const claimed = await queue.claimNext("runner-1");
+    await queue.complete(claimed!.job.id, claimed!.leaseToken, {
+      ok: true,
+      result: {},
+    });
+
+    const again = await service.startReview(USER, repository.id, {
       prNumber: 7,
       command: "review",
     });
 
-    const describe = await service.startReview(USER, repository.id, {
-      prNumber: 7,
-      command: "describe",
-    });
-
-    expect(describe.created).toBe(true);
-    expect(describe.runId).not.toBe(review.runId);
+    expect(again.created).toBe(true);
+    expect(again.runId).not.toBe(first.runId);
     expect(await queue.list()).toHaveLength(2);
   });
 
-  it("refuses a command the project switched off, and creates no job", async () => {
+  it("refuses review when the project switched it off, and creates no job", async () => {
     const { h, service, repository, queue, settings } = await start();
     h.fake.addPullRequest("acme/widgets", pullRequest(7));
     await settings.updateProjectSettings(repository.id, {
-      allowedCommands: ["review"],
+      allowedCommands: [],
     });
 
     expect(
       await failureOf(
         service.startReview(USER, repository.id, {
           prNumber: 7,
-          command: "improve",
+          command: "review",
         }),
       ),
     ).toMatchObject({ code: "MANUAL_REVIEW_COMMAND_NOT_ALLOWED" });
@@ -589,7 +599,8 @@ describe("starting a command for a pull request", () => {
     expect(await queue.list()).toEqual([]);
   });
 
-  it("does not take a question that grows past the limit when its image links are replaced", async () => {
+  // #203-T05
+  it("refuses a removed command value, and creates no job", async () => {
     const { h, service, repository, queue } = await start();
     h.fake.addPullRequest("acme/widgets", pullRequest(7));
 
@@ -597,13 +608,12 @@ describe("starting a command for a pull request", () => {
       service.startReview(USER, repository.id, {
         prNumber: 7,
         command: "ask",
-        question: "![]".repeat(666),
       }),
     );
 
     expect(error).toMatchObject({
       code: "MANUAL_REVIEW_REQUEST_INVALID",
-      issues: [{ field: "question", code: "too_long" }],
+      issues: [{ field: "command", code: "invalid" }],
     });
     expect(await queue.list()).toEqual([]);
   });

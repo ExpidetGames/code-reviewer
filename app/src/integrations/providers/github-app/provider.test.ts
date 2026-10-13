@@ -323,17 +323,7 @@ describe("translating comment deliveries", () => {
     ]);
   });
 
-  it("reads the command at the start in any case, with leading whitespace, and keeps the arguments", async () => {
-    const trigger = triggerOf(await eventOf("issue_comment.created.ask"));
-
-    expect(trigger).toMatchObject({
-      command: "ask",
-      args: "what does the cache key contain?\nPlease be brief.",
-    });
-  });
-
-  // CR-32-T02
-  it("cuts a long question and passes no text on with a command other than /ask", async () => {
+  it("reads /review at the start in any case and with leading whitespace, and passes no text on", async () => {
     const withBody = async (body: string) => {
       const payload = webhookFixture("issue_comment.created.review");
       (payload.comment as { body: string }).body = body;
@@ -347,18 +337,26 @@ describe("translating comment deliveries", () => {
       );
     };
 
-    expect(triggerOf(await withBody("/ask " + "q".repeat(3000)))).toMatchObject(
-      { command: "ask", args: expect.stringContaining("was cut here") },
-    );
+    expect(triggerOf(await withBody("   \t/REVIEW"))).toMatchObject({
+      command: "review",
+      args: "",
+    });
     expect(
       triggerOf(await withBody("/review --pr_reviewer.num_max_findings=99")),
     ).toMatchObject({ command: "review", args: "" });
   });
 
-  // CR-32-T05
-  it("ignores /ask without a question and commands it does not know, and asks GitHub nothing", async () => {
+  // #203-T02
+  it("ignores the removed commands, with or without text, without asking GitHub anything", async () => {
     const { client, provider } = setup();
-    for (const body of ["/ask", "/deploy now"]) {
+    for (const body of [
+      "/ask",
+      "/ask why?",
+      `/ask ${"q".repeat(3000)}`,
+      "/improve please be strict",
+      "/describe",
+      "/ASK why?",
+    ]) {
       const payload = webhookFixture("issue_comment.created.review");
       (payload.comment as { body: string }).body = body;
 
@@ -371,7 +369,28 @@ describe("translating comment deliveries", () => {
         }),
       );
 
-      expect(event).toMatchObject({ kind: "ignored" });
+      expect(event, body).toMatchObject({ kind: "ignored" });
+    }
+    expect(client.calls).toEqual([]);
+  });
+
+  // #203-T01
+  it("ignores commands it does not know and reads no command from a sentence, asking GitHub nothing", async () => {
+    const { client, provider } = setup();
+    for (const body of ["/deploy now", "please /review this", "/reviewer"]) {
+      const payload = webhookFixture("issue_comment.created.review");
+      (payload.comment as { body: string }).body = body;
+
+      const event = await provider.parseEvent(
+        integration,
+        webhookDelivery({
+          event: "issue_comment",
+          payload,
+          secret: TEST_WEBHOOK_SECRET,
+        }),
+      );
+
+      expect(event, body).toMatchObject({ kind: "ignored" });
     }
     expect(client.calls).toEqual([]);
   });

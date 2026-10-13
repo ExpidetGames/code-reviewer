@@ -46,10 +46,10 @@ describe("the copy for a problem with one setting", () => {
     expect(describeIssue("extraInstructions", "TOO_LONG")).toMatch(/4,000/);
   });
 
-  // CR-34-T06
-  it("says an unknown command is not one of the four", () => {
+  // CR-34-T06, #203
+  it("says an unknown command is not one that exists", () => {
     expect(describeIssue("allowedCommands", "INVALID_FORMAT")).toMatch(
-      /review, improve, describe and ask/,
+      /Only the command review exists/,
     );
   });
 

@@ -190,6 +190,48 @@ export function createRunnerJobsRepository(
     };
   }
 
+  /**
+   * Cancels every removed command (#203) that is still waiting or whose running lease ran out. Such
+   * a row can never be executed again, so it must not occupy its pull request or be requeued. The
+   * job keeps its id, command, args, actor, attempts and results; only the status, the error code
+   * and the timestamps change.
+   */
+  async function cancelRemovedCommands(
+    executor: Kysely<Database>,
+    timestamp: string,
+  ): Promise<number> {
+    const waiting = await executor
+      .updateTable("jobs")
+      .set({
+        status: "cancelled",
+        error_code: "command_removed" satisfies JobErrorCode,
+        runner_id: null,
+        lease_token: null,
+        claimed_at: null,
+        heartbeat_at: null,
+        lease_expires_at: null,
+        finished_at: timestamp,
+        updated_at: timestamp,
+      })
+      .where("status", "=", "queued")
+      .where("command", "!=", "review")
+      .executeTakeFirst();
+    const expired = await executor
+      .updateTable("jobs")
+      .set({
+        status: "cancelled",
+        error_code: "command_removed" satisfies JobErrorCode,
+        lease_expires_at: null,
+        finished_at: timestamp,
+        updated_at: timestamp,
+      })
+      .where("status", "=", "running")
+      .where("command", "!=", "review")
+      .where("lease_expires_at", "<=", timestamp)
+      .executeTakeFirst();
+    return Number(waiting.numUpdatedRows) + Number(expired.numUpdatedRows);
+  }
+
   /** Fails running jobs that were claimed longer ago than the hard limit allows. */
   async function failTimedOut(
     executor: Kysely<Database>,
@@ -220,6 +262,10 @@ export function createRunnerJobsRepository(
     current: Date,
   ): Promise<ExpiryReport> {
     const timestamp = formatTimestamp(current);
+    // Removed commands (#203) never run again. A waiting row may still appear after the data
+    // migration (a race); a running one was claimed before the upgrade. They are cancelled here so
+    // they can neither starve review jobs nor be requeued.
+    await cancelRemovedCommands(executor, timestamp);
     const lost = await loseAttempt(
       executor,
       { leaseExpiredBefore: timestamp },
@@ -327,6 +373,23 @@ export function createRunnerJobsRepository(
     release(jobId, leaseToken, reason, releaseOptions = {}) {
       return inTransaction<ReleaseResult>(async (trx) => {
         const timestamp = formatTimestamp(now());
+        // A removed command (#203) that is given back is cancelled, never requeued: no attempt of it
+        // may ever run again. Only the current holder (the lease token) may cancel it this way.
+        const removed = await trx
+          .updateTable("jobs")
+          .set({
+            status: "cancelled",
+            error_code: "command_removed" satisfies JobErrorCode,
+            lease_expires_at: null,
+            finished_at: timestamp,
+            updated_at: timestamp,
+          })
+          .where(runningWhere({ claim: { jobId, leaseToken } }))
+          .where("command", "!=", "review")
+          .returningAll()
+          .executeTakeFirst();
+        if (removed !== undefined)
+          return { status: "cancelled", job: toJob(removed) };
         const lost = await loseAttempt(
           trx,
           { claim: { jobId, leaseToken } },

@@ -5,11 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { MANUAL_REVIEW_ERROR_CODES } from "../errors.ts";
 import { GENERIC_FAILURE } from "../../ui/transport-messages.ts";
-import {
-  describeManualReviewFailure,
-  describeQuestionIssue,
-  staleListFailure,
-} from "./messages.ts";
+import { describeManualReviewFailure, staleListFailure } from "./messages.ts";
 
 describe("the copy for failures of the manual start", () => {
   it.each(MANUAL_REVIEW_ERROR_CODES)(
@@ -38,24 +34,5 @@ describe("the copy for failures of the manual start", () => {
     expect(staleListFailure("MANUAL_REVIEW_PULL_REQUEST_NOT_OPEN")).toBe(true);
     expect(staleListFailure("MANUAL_REVIEW_PULL_REQUEST_NOT_FOUND")).toBe(true);
     expect(staleListFailure("MANUAL_REVIEW_GITHUB_UNAVAILABLE")).toBe(false);
-  });
-
-  it("turns the issues of a refused question into a sentence for the question field", () => {
-    expect(
-      describeQuestionIssue([{ field: "question", code: "too_long" }]),
-    ).toContain("too long");
-    expect(
-      describeQuestionIssue([{ field: "question", code: "required" }]),
-    ).toContain("Write the question");
-  });
-
-  it("has no sentence for issues that are not about the question", () => {
-    expect(describeQuestionIssue([])).toBeNull();
-    expect(
-      describeQuestionIssue([{ field: "prNumber", code: "invalid" }]),
-    ).toBeNull();
-    expect(
-      describeQuestionIssue([{ field: "question", code: "invalid" }]),
-    ).toBeNull();
   });
 });

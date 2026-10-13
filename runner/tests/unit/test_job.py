@@ -5,6 +5,7 @@ the pull request URL and the host it may point to. A bad job must be refused wit
 code before PR-Agent is imported, and the refusal must never echo a value from the job."""
 
 import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -15,6 +16,10 @@ from code_reviewer_runner.result import ErrorCode
 PR_URL = "https://github.com/octo/repo/pull/7"
 TOKEN = "dummy-installation-token-0123456789"
 API_KEY = "dummy-openrouter-key-0123456789"
+# A review job a previous release's app could have sent (frozen in fakes/fixtures).
+PREVIOUS_RELEASE_JOB = (
+    Path(__file__).resolve().parents[3] / "fakes" / "fixtures" / "previous-release-review-job.json"
+)
 
 
 def valid_job(**overrides: Any) -> dict[str, Any]:
@@ -52,7 +57,6 @@ def test_a_valid_job_is_parsed_into_typed_fields() -> None:
     assert job.git.token == TOKEN
     assert job.git.bot_login == "code-reviewer[bot]"
     assert job.llm.api_key == API_KEY
-    assert job.args == ()
     assert job.env == {}
 
 
@@ -62,16 +66,17 @@ def test_the_bot_login_gets_the_bot_suffix_when_it_is_missing() -> None:
     assert job.git.bot_login == "code-reviewer[bot]"
 
 
-@pytest.mark.parametrize("command", ["review", "improve", "describe"])
-def test_every_allowed_command_is_accepted(command: str) -> None:
-    assert parse(valid_job(command=command)).command.value == command
+# #203-T14: /review is the only command; the removed ones are refused before PR-Agent is loaded.
+def test_the_review_command_is_accepted() -> None:
+    assert parse(valid_job(command="review")).command.value == "review"
 
 
-def test_ask_takes_the_question_as_its_only_argument() -> None:
-    job = parse(valid_job(command="ask", args=["What does this change do?"]))
+@pytest.mark.parametrize("command", ["ask", "improve", "describe"])
+def test_a_removed_command_is_an_invalid_command(command: str) -> None:
+    error = refusal(json.dumps(valid_job(command=command)))
 
-    assert job.command is Command.ASK
-    assert job.args == ("What does this change do?",)
+    assert error.code is ErrorCode.INVALID_COMMAND
+    assert command not in error.detail
 
 
 # CR-10-T04
@@ -140,16 +145,35 @@ def test_a_job_without_a_command_is_an_invalid_job() -> None:
     assert refusal(json.dumps(job)).code is ErrorCode.INVALID_JOB
 
 
-def test_arguments_are_only_allowed_for_ask_and_must_be_a_single_question() -> None:
-    assert refusal(json.dumps(valid_job(args=["--config.model=x"]))).code is ErrorCode.INVALID_JOB
-    assert refusal(json.dumps(valid_job(command="ask"))).code is ErrorCode.INVALID_JOB
-    assert refusal(json.dumps(valid_job(command="ask", args=[""]))).code is ErrorCode.INVALID_JOB
-    assert refusal(json.dumps(valid_job(command="ask", args=["a", "b"]))).code is (
-        ErrorCode.INVALID_JOB
-    )
-    assert refusal(json.dumps(valid_job(command="ask", args=["x" * 4001]))).code is (
-        ErrorCode.INVALID_JOB
-    )
+# #203-T13/T14: a review payload from a previous release may carry the legacy `args` and the option
+# families of the removed tools; they are accepted for v1 compatibility and never reach PR-Agent.
+def test_a_previous_release_review_payload_is_accepted_and_its_legacy_fields_are_ignored() -> None:
+    job_input: dict[str, Any] = json.loads(PREVIOUS_RELEASE_JOB.read_text(encoding="utf-8"))
+    job_input["args"] = ["why is this here?"]
+
+    job = parse(job_input)
+
+    assert job.command is Command.REVIEW
+    # Only the review tool's options are kept; the removed tools' options are dropped.
+    assert job.env == {
+        "PR_REVIEWER__EXTRA_INSTRUCTIONS": "Follow the repository rules.",
+        "PR_REVIEWER__NUM_MAX_FINDINGS": "5",
+    }
+
+
+def test_legacy_review_arguments_are_accepted_and_never_echoed() -> None:
+    job = parse(valid_job(command="review", args=[f"--config.model={API_KEY}"]))
+
+    assert job.command is Command.REVIEW
+
+
+# #203-T14: the removed commands are still refused, whatever else the payload carries.
+def test_a_question_with_a_removed_command_is_an_invalid_command() -> None:
+    error = refusal(json.dumps(valid_job(command="ask", args=[f"why {API_KEY}?"])))
+
+    assert error.code is ErrorCode.INVALID_COMMAND
+    assert "why" not in error.detail
+    assert API_KEY not in error.detail
 
 
 # CR-10-T09
@@ -270,14 +294,23 @@ def test_extra_environment_cannot_touch_credentials_endpoints_models_or_outputs(
     assert error.code is ErrorCode.INVALID_JOB
 
 
-def test_extra_environment_is_limited_to_the_settings_of_the_four_tools() -> None:
-    for key in (
-        "PR_REVIEWER__EXTRA_INSTRUCTIONS",
+def test_extra_environment_is_limited_to_the_settings_of_the_review_tool() -> None:
+    assert parse(valid_job(env={"PR_REVIEWER__EXTRA_INSTRUCTIONS": "x"})).env == {
+        "PR_REVIEWER__EXTRA_INSTRUCTIONS": "x"
+    }
+
+
+# #203 v1 compatibility: the removed tools' option families are accepted and ignored.
+@pytest.mark.parametrize(
+    "key",
+    [
         "PR_DESCRIPTION__EXTRA_INSTRUCTIONS",
         "PR_CODE_SUGGESTIONS__EXTRA_INSTRUCTIONS",
         "PR_QUESTIONS__ENABLE_HELP_TEXT",
-    ):
-        assert parse(valid_job(env={key: "x"})).env == {key: "x"}
+    ],
+)
+def test_extra_environment_ignores_the_settings_of_a_removed_tool(key: str) -> None:
+    assert parse(valid_job(env={key: "x"})).env == {}
 
 
 def test_extra_environment_values_are_not_treated_as_secrets() -> None:

@@ -1,6 +1,6 @@
 # Runs
 
-A run is a job as a person sees it: a review (or `/improve`, `/describe`, `/ask`) on one pull request,
+A run is a job as a person sees it: a review on one pull request,
 with its status, who or what started it, its times, the link to the review comment on GitHub and, if
 it did not succeed, why. The **Runs** page lists them (newest first, filtered by project and status),
 the page of one run shows the details, and the project list shows the status of each repository's
@@ -60,7 +60,7 @@ The lease token, the runner id, the delivery id, the heartbeat and lease times, 
 and its `errorMessage` are not in any view, list, detail or polling answer (`run-view.ts` copies listed
 fields only; tests search the answers for them). The log is cleaned (terminal escapes and control
 characters out) and passed through the same redaction the runner API uses for results, with the secrets
-the app knows. Everything that came from outside (project name, login, a question of `/ask`, the log)
+the app knows. Everything that came from outside (project name, login, a historical question of a removed `/ask` run, the log)
 is rendered as text. The links made from stored data are the comment link and the pull request link, and only when they are `https://github.com/` addresses
 (`rel="noopener noreferrer"`, one rule: `safeGithubUrl`). The comment link is shown for succeeded runs
 and for the two failed runs whose review was posted but shortened to GitHub's comment limit

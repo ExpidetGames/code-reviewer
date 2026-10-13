@@ -1,0 +1,23 @@
+{
+  "prUrl": "https://github.com/acme/widgets/pull/7",
+  "command": "review",
+  "git": {
+    "provider": "github",
+    "baseUrl": "https://api.github.com",
+    "token": "previous-release-installation-token",
+    "botLogin": "code-reviewer[bot]"
+  },
+  "llm": {
+    "provider": "openrouter",
+    "model": "vendor/previous-release-model",
+    "apiKey": "previous-release-llm-key",
+    "maxTokens": 100000
+  },
+  "env": {
+    "PR_REVIEWER__EXTRA_INSTRUCTIONS": "Follow the repository rules.",
+    "PR_DESCRIPTION__EXTRA_INSTRUCTIONS": "Follow the repository rules.",
+    "PR_CODE_SUGGESTIONS__EXTRA_INSTRUCTIONS": "Follow the repository rules.",
+    "PR_QUESTIONS__EXTRA_INSTRUCTIONS": "Follow the repository rules.",
+    "PR_REVIEWER__NUM_MAX_FINDINGS": "5"
+  }
+}

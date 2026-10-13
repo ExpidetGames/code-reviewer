@@ -79,11 +79,11 @@ The job is JSON on stdin (the shape is documented in `src/code_reviewer_runner/j
 
 | Field | Meaning |
 |---|---|
-| `prUrl`, `command` | `https://<host>/<owner>/<repo>/pull/<n>` on the host of `git.baseUrl`; one of `review`, `improve`, `describe`, `ask` |
-| `args` | `ask` only: exactly one string, the question |
+| `prUrl`, `command` | `https://<host>/<owner>/<repo>/pull/<n>` on the host of `git.baseUrl`; `review` (the only command; `/ask`, `/improve` and `/describe` were removed) |
+| `args` | legacy field of the removed `/ask`: a previous release may send it; the runner accepts and ignores it and never hands it to PR-Agent |
 | `git` | `provider` (`github`), `baseUrl`, `token` (installation token), `botLogin` (`<app slug>[bot]`) |
 | `llm` | `provider` (`openrouter`), `model`, `apiKey`; optional `baseUrl` (loopback only, for test fakes), `maxTokens` and `fallbackModels` (see below) |
-| `env` | optional options of the four tools, `PR_REVIEWER__*`, `PR_DESCRIPTION__*`, `PR_CODE_SUGGESTIONS__*`, `PR_QUESTIONS__*`, as strings; one option per key (`PR_REVIEWER__NUM_MAX_FINDINGS`, never a second `__`). Nothing else is accepted. See "Settings policy" for how the values are read. |
+| `env` | optional options of the PR-Agent tools, as strings; one option per key (`PR_REVIEWER__NUM_MAX_FINDINGS`, never a second `__`). The app sends only `PR_REVIEWER__*`; the removed tools' families (`PR_DESCRIPTION__*`, `PR_CODE_SUGGESTIONS__*`, `PR_QUESTIONS__*`) are accepted for v1 compatibility and ignored. Nothing else is accepted. See "Settings policy" for how the values are read. |
 
 `llm.maxTokens` (integer, 1000 to 10,000,000) is the context window the runner gives PR-Agent. It
 sets `config.custom_model_max_tokens` (used for a model PR-Agent does not know) and
@@ -115,7 +115,7 @@ posted (or when a tool swallowed its own error). So the result does not come fro
 observes while the command runs:
 
 - `commentUrl`: the comment recorder wraps the two write paths of PR-Agent's GitHub provider
-  (`publish_comment`, `edit_comment`) and picks the review (or improve summary, or answer) comment
+  (`publish_comment`, `edit_comment`) and picks the review comment
   by its hidden marker only: the marker must be an exact line within the first five lines of the
   comment (or its link-reference form), as PR-Agent itself checks it. The visible heading does not
   count: it is configurable, and the "Standalone PR Review" comment that PR-Agent posts when it
@@ -132,9 +132,8 @@ comment is on the pull request: see "The review comment size limit" below. Such 
 `commentUrl` when the comment can be found.
 
 When there is no comment link: `review` reports `ok: false` with `review_not_published` (a review
-that posted nothing, or only a standalone comment, is a failure the caller must see). `improve`, `ask` and `describe` keep
-`ok: true` with `commentUrl: null` (nothing to suggest is a valid outcome; `describe` edits the pull
-request itself and never has a comment).
+that posted nothing, or only a standalone comment, is a failure the caller must see). No other
+command exists to report otherwise.
 
 ## Error codes
 
@@ -144,7 +143,7 @@ and the enum agree. Callers branch on the code, never on the text.
 | Code | Meaning |
 |---|---|
 | `invalid_job` | The job is not valid JSON or a field is missing, malformed or not allowed |
-| `invalid_command` | The command is not one of `review`, `improve`, `describe`, `ask` |
+| `invalid_command` | The command is not `review` |
 | `pr_agent_version_mismatch` | The installed PR-Agent is not the version the runner was written for |
 | `identity_patch_failed` | The method the identity patch replaces is missing or has changed |
 | `runner_error` | A failure inside the runner itself (also reported by the job loop for a process that ended without a result) |
@@ -229,7 +228,7 @@ How a job becomes PR-Agent configuration (`pr_agent_config.py`, `pr_agent_runtim
   PR-Agent's review prompt. The Dynaconf version they were written against is pinned in
   `tests/unit/test_dependency_pin.py`.
 - **`job.env` values keep their type.** They are not read as TOML. The type of an option is the
-  type of PR-Agent's own default for it (all options of the four tools are switches, integers or
+  type of PR-Agent's own default for it (the review tool's options are switches, integers or
   text): a switch takes `true` or `false` (any case), an integer option takes an integer, and
   everything else, instructions above all, stays exactly the text that was sent (`123`, `[1]`,
   `2026-01-01` and `true` in an instructions field are text). A value that does not fit the type of
@@ -248,7 +247,7 @@ How a job becomes PR-Agent configuration (`pr_agent_config.py`, `pr_agent_runtim
   feeds a malicious file with all of these through PR-Agent's own merge function; another compares
   the provider sections with PR-Agent's own list, so a new provider after an upgrade is noticed.
   A job cannot set the options the runner pins itself (`PR_REVIEWER__FINAL_UPDATE_MESSAGE`,
-  `PR_DESCRIPTION__FINAL_UPDATE_MESSAGE`, `PR_REVIEWER__ENABLE_REVIEW_LABELS_SECURITY` and `_EFFORT`): `invalid_job`.
+  `PR_REVIEWER__ENABLE_REVIEW_LABELS_SECURITY` and `_EFFORT`): `invalid_job`.
 - **Where `.pr_agent.toml` comes from.** PR-Agent 0.47.0 reads it from the **default branch** of the
   repository (contents API without a ref), not from the head of the pull request and not from the
   base branch of a pull request into another branch. The author of a pull request therefore cannot
@@ -306,7 +305,7 @@ protect it:
 against a fake GitHub and a fake OpenAI-compatible LLM on loopback ports, with no real network and no
 real model: `uv run python scripts/prime_tiktoken_cache.py` once (the only step that needs the
 internet), then `uv run pytest -m engine` (about 4 minutes; CI runs it in a network namespace for pull requests that change
-the runner and nightly). The suite pins down the four commands, the second review that edits the
+the runner and nightly). The suite pins down the review command, the second review that edits the
 first comment, the error codes for a rate limited, silent, wrong or unreachable model or GitHub, that
 no credential is found in any output, what a hostile `.pr_agent.toml` cannot do, and what happens with
 a comment at GitHub's length limit. See TESTING.md for the design.

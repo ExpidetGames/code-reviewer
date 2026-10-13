@@ -1,21 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Checks the body that starts a review by hand. The values come from the browser, so nothing here
-// trusts a type: every field is looked at as `unknown`. Only `ask` takes text; for the other
-// commands PR-Agent would read text after the command as options, so it never reaches a job.
-import {
-  ASK_QUESTION_MAX_CHARS,
-  ASK_QUESTION_RAW_MAX_CHARS,
-  removeImageLinks,
-} from "../integrations/comment-command.ts";
+// trusts a type: every field is looked at as `unknown`. Since #203 only `/review` exists; it takes
+// no text, and a body that still supplies a `question` (an old client, or a removed ask command) is
+// refused with a value-free field code.
 import { REVIEW_COMMANDS, type ReviewCommand } from "../integrations/types.ts";
 import type { ManualReviewIssue } from "./errors.ts";
 
 export type StartInput = {
   prNumber: number;
   command: ReviewCommand;
-  /** The question of `ask`, trimmed and without image links; an empty string for every other command. */
-  question: string;
 };
 
 export type StartInputCheck =
@@ -47,29 +41,13 @@ export function validateStartInput(body: unknown): StartInputCheck {
   if (command === undefined || command === "")
     issues.push({ field: "command", code: "required" });
   else if (!REVIEW_COMMANDS.some((known) => known === command))
+    // An unknown command and a removed one (`ask`, `improve`, `describe`) are both invalid.
     issues.push({ field: "command", code: "invalid" });
 
-  let question = "";
-  if (command === "ask") {
-    const written = fields.question;
-    if (written === undefined)
-      issues.push({ field: "question", code: "required" });
-    else if (typeof written !== "string")
-      issues.push({ field: "question", code: "invalid" });
-    else if (written.trim() === "")
-      issues.push({ field: "question", code: "required" });
-    // Looked at before the images are removed only so a hostile body is not chewed on at length.
-    else if (written.trim().length > ASK_QUESTION_RAW_MAX_CHARS)
-      issues.push({ field: "question", code: "too_long" });
-    else {
-      // The limit counts what the job carries: every image link grows to the placeholder text, so
-      // the length is checked after they are replaced, not before.
-      const cleaned = removeImageLinks(written.trim()).trim();
-      if (cleaned.length > ASK_QUESTION_MAX_CHARS)
-        issues.push({ field: "question", code: "too_long" });
-      else question = cleaned;
-    }
-  }
+  // `/review` takes no text. A supplied `question` is refused instead of ignored, so it never
+  // reaches a job; the code names the field, never the value.
+  if (fields.question !== undefined)
+    issues.push({ field: "question", code: "invalid" });
 
   if (issues.length > 0) return { ok: false, issues };
   // The checks above narrowed the fields; the casts only restate what they proved.
@@ -78,7 +56,6 @@ export function validateStartInput(body: unknown): StartInputCheck {
     value: {
       prNumber: prNumber as number,
       command: command as ReviewCommand,
-      question,
     },
   };
 }

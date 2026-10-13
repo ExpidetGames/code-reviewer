@@ -41,7 +41,7 @@ const quietManualReviews: ManualReviewApi = {
     data: {
       repositoryId: "repo",
       fullName: "acme/widgets",
-      allowedCommands: ["review", "improve", "describe", "ask"],
+      allowedCommands: ["review"],
       pullRequests: [],
     },
   }),

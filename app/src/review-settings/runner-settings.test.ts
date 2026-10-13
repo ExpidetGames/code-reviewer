@@ -122,18 +122,18 @@ describe("mapping review settings to a runner job", () => {
     expect(result.env[MAX_FINDINGS_VARIABLE]).toBe(String(count));
   });
 
-  // CR-25-T03
-  it("sends the project rules to all four tools", () => {
+  // CR-25-T03, #203
+  it("sends the project rules to the review tool", () => {
     const result = toRunnerSettings(
       withSettings({ extraInstructions: "Check the tests." }),
     );
 
     expect(result.env).toMatchObject({
       PR_REVIEWER__EXTRA_INSTRUCTIONS: "Check the tests.",
-      PR_DESCRIPTION__EXTRA_INSTRUCTIONS: "Check the tests.",
-      PR_CODE_SUGGESTIONS__EXTRA_INSTRUCTIONS: "Check the tests.",
-      PR_QUESTIONS__EXTRA_INSTRUCTIONS: "Check the tests.",
     });
+    expect(
+      Object.keys(result.env).filter((name) => name.includes("EXTRA")),
+    ).toEqual(["PR_REVIEWER__EXTRA_INSTRUCTIONS"]);
   });
 
   // CR-25-T04
@@ -222,11 +222,8 @@ describe("mapping review settings to a runner job", () => {
 
       expect(Object.keys(result.env).sort()).toEqual(
         [
-          "PR_CODE_SUGGESTIONS__EXTRA_INSTRUCTIONS",
-          "PR_DESCRIPTION__EXTRA_INSTRUCTIONS",
           LARGE_PR_CHUNKING_VARIABLE,
           MAX_FINDINGS_VARIABLE,
-          "PR_QUESTIONS__EXTRA_INSTRUCTIONS",
           "PR_REVIEWER__EXTRA_INSTRUCTIONS",
         ].sort(),
       );
@@ -255,7 +252,7 @@ describe("mapping review settings to a runner job", () => {
               largePrChunking: flag,
               inlineKeyIssues: !flag,
               autoReviewOnOpen: flag,
-              allowedCommands: flag ? ["ask"] : [],
+              allowedCommands: flag ? ["review"] : [],
             }),
           );
 

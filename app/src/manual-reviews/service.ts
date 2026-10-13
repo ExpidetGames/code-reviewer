@@ -213,7 +213,7 @@ export function createManualReviewService(
           "The request is not valid.",
           checked.issues as readonly ManualReviewIssue[],
         );
-      const { prNumber, command, question } = checked.value;
+      const { prNumber, command } = checked.value;
 
       const { integration, repo, allowedCommands } =
         await resolveProject(repositoryId);
@@ -254,7 +254,7 @@ export function createManualReviewService(
           prUrl: pullRequest.url,
           headSha: pullRequest.headSha,
           command,
-          args: question,
+          args: "",
           triggerKind: "manual",
           actorLogin: user.githubLogin,
         });

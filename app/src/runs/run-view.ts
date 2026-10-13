@@ -6,7 +6,7 @@
 // among them, and of the stored result only the comment link and the log tail are read. Everything
 // that came from outside (the question of an `/ask`, a login, the log of the runner) is data and is
 // rendered as text; the one link made from stored data is checked here.
-import type { JsonValue, ReviewCommand } from "../integrations/types.ts";
+import type { JsonValue, StoredReviewCommand } from "../integrations/types.ts";
 import type { JobStatus } from "../jobs/job-status.ts";
 import type { Job, JobTriggerKind } from "../jobs/job-types.ts";
 import { describeErrorCode } from "./error-copy.ts";
@@ -23,7 +23,7 @@ export type RunRowView = {
   prNumber: number;
   /** The link to the pull request when it is an `https://github.com/` address, otherwise null. */
   prUrl: string | null;
-  command: ReviewCommand;
+  command: StoredReviewCommand;
   triggerKind: JobTriggerKind;
   /** "Automatic", "Comment by octocat" or "Started by octocat". */
   trigger: string;

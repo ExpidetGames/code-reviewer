@@ -45,7 +45,7 @@ const answerOf = (json: Record<string, unknown>) =>
   (json.choices as Array<{ message: { content: string } }>)[0]?.message.content;
 
 describe("the fake LLM", () => {
-  it("answers each kind of prompt with its canned reply and records who asked", async () => {
+  it("answers a prompt with the review reply and records who asked", async () => {
     const llm = await setup();
 
     const reviewed = await ask(
@@ -53,21 +53,15 @@ describe("the fake LLM", () => {
       "You are PR-Reviewer, a language model designed to review a Git Pull Request.",
       "the-key",
     );
-    const described = await ask(
-      llm.baseUrl,
-      "You are PR-Reviewer, a language model that writes a full description of a pull request.",
-    );
 
     expect(reviewed.status).toBe(200);
     expect(answerOf(reviewed.json)).toBe(review());
-    expect(answerOf(described.json)).toContain("type:");
     expect(llm.requests()).toMatchObject([
       {
         kind: "review",
         authorization: "Bearer the-key",
         model: "openrouter/test/fake-model",
       },
-      { kind: "describe" },
     ]);
     expect(llm.requests()[0]?.prompt).toContain("the diff of the pull request");
   });

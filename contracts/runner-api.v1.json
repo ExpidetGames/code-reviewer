@@ -22,8 +22,9 @@
       "maxLength": 256
     },
     "Command": {
+      "description": "The commands the product executes. Since the removal of /ask, /improve and /describe only /review exists (a historical run keeps its original command in the database, never on the wire).",
       "type": "string",
-      "enum": ["review", "improve", "describe", "ask"]
+      "enum": ["review"]
     },
     "KnownRunnerErrorCode": {
       "description": "The error codes the runner reports in a result (ErrorCode in the runner, plus runner_shutdown from the job loop). A caller branches on the code, never on a message. The app accepts any code of the form below and stores an unknown one as 'unknown' (the original stays in the stored result), so a newer runner never loses a result.",
@@ -59,7 +60,7 @@
       ]
     },
     "JobEnv": {
-      "description": "Extra options of the four PR-Agent tools, as strings. Nothing else is allowed here (credentials, endpoints and the model have their own fields).",
+      "description": "Extra options of the PR-Agent tools, as strings. The review tool's options (PR_REVIEWER__*) are used; a previous release's option families for the removed tools (PR_DESCRIPTION__*, PR_CODE_SUGGESTIONS__*, PR_QUESTIONS__*) are accepted for v1 compatibility and ignored. Nothing else is allowed here (credentials, endpoints and the model have their own fields).",
       "type": "object",
       "propertyNames": {
         "pattern": "^(PR_REVIEWER|PR_DESCRIPTION|PR_CODE_SUGGESTIONS|PR_QUESTIONS)__[A-Z0-9]+(_[A-Z0-9]+)*$"
@@ -76,10 +77,9 @@
         "prUrl": { "type": "string", "minLength": 1, "maxLength": 2048 },
         "command": { "$ref": "#/$defs/Command" },
         "args": {
-          "description": "Only for the ask command: exactly one string, the question.",
+          "description": "Legacy field of the removed /ask command. A previous release may send it; the runner accepts and ignores it and never hands it to PR-Agent. This app sends no args.",
           "type": "array",
-          "items": { "type": "string", "minLength": 1, "maxLength": 4000 },
-          "minItems": 1,
+          "items": { "type": "string", "maxLength": 4000 },
           "maxItems": 1
         },
         "git": {
@@ -117,17 +117,7 @@
           }
         },
         "env": { "$ref": "#/$defs/JobEnv" }
-      },
-      "allOf": [
-        {
-          "if": {
-            "properties": { "command": { "const": "ask" } },
-            "required": ["command"]
-          },
-          "then": { "required": ["args"] },
-          "else": { "not": { "required": ["args"] } }
-        }
-      ]
+      }
     },
     "ClaimResponse": {
       "description": "200 from POST /api/runners/v1/claim. 204 without a body means there is nothing to do. Cache-Control is always no-store.",

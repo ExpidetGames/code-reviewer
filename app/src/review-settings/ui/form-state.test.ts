@@ -81,15 +81,17 @@ describe("the form values", () => {
     expect(state.values.maxFindings).toBe("5");
   });
 
-  it("toggle a command and keep the list in the canonical order", () => {
-    let state = initialFormState(model({ allowedCommands: ["review"] }));
+  it("toggle the review command and keep the list in the canonical order", () => {
+    let state = initialFormState(model({ allowedCommands: [] }));
 
-    state = setCommand(state, "ask", true);
-    state = setCommand(state, "improve", true);
+    state = setCommand(state, "review", true);
+
+    expect(state.values.allowedCommands).toEqual(["review"]);
+    expect(state.overridden.allowedCommands).toBe(true);
+
     state = setCommand(state, "review", false);
 
-    expect(state.values.allowedCommands).toEqual(["improve", "ask"]);
-    expect(state.overridden.allowedCommands).toBe(true);
+    expect(state.values.allowedCommands).toEqual([]);
   });
 });
 

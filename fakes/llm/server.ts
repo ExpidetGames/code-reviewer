@@ -6,15 +6,14 @@
 // every request (headers and body, so a test can read the prompt and the key that arrived) and
 // answers from scripts:
 //
-// - a reply per kind of prompt (review, improve, reflect, describe, ask), chosen from the system
-//   prompt of the request, so one endpoint serves all four commands;
+// - a canned reply; `/review` is the only tool (#203), so every prompt gets the review reply;
 // - an error for every request (429, 401, ...), optionally quoting the received key in the message
 //   like a provider that says "Incorrect API key provided";
 // - `GET <api base>/key`, the cheap call that tells whether a key is accepted (the app's "test key"
 //   button): 200 for an accepted key, 401 for any other once `acceptKeys` names the accepted ones. The
 //   keys that arrived are recorded apart (`keyChecks`), so a test can see which key a check carried.
 //
-// The replies are canned (`canned.ts`). They satisfy the output contract of each PR-Agent tool and
+// The replies are canned (`canned.ts`). They satisfy the output contract of the review tool and
 // say nothing about review quality. The engine suite of the runner has its own Python twin of this
 // fake (runner/tests/engine/fake_llm.py). Dummy values only; state is in memory.
 import { createServer, type Server } from "node:http";
@@ -70,13 +69,9 @@ function textOf(messages: ChatMessage[], role: string): string {
     .join("\n");
 }
 
-/** Which PR-Agent tool a prompt belongs to, from the first sentence of its system prompt. */
+/** The kind of prompt a request holds. `/review` is the only tool (#203). */
 export function classify(system: string): PromptKind {
-  const start = system.slice(0, 400).toLowerCase();
-  if (start.includes("evaluating code suggestions")) return "reflect";
-  if (start.includes("code analysis and suggestions")) return "improve";
-  if (start.includes("full description")) return "describe";
-  if (start.includes("answer questions")) return "ask";
+  void system;
   return "review";
 }
 

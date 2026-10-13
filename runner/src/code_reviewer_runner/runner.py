@@ -143,7 +143,7 @@ def run_job(
         patches.close()
 
     failure_comment = recorder.failure_comment_posted()
-    comment_url = None if failure_comment else recorder.comment_url(job.command)
+    comment_url = None if failure_comment else recorder.comment_url()
     ok = handled and not failed_flag and not failure_comment
     error_code: ErrorCode | None = None
     truncation = _truncation(job.command, watch, recorder) if ok else None

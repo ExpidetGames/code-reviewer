@@ -109,6 +109,14 @@ export function upgradeSeed(
     pins: UPGRADE_PEOPLE.filter((person) => person.pinned === true).map(
       (person) => ({ login: person.login, githubId: person.id }),
     ),
+    // The previous release could run /improve and /ask (#203); a run of each stays in history, and
+    // the review defaults still name them, so the update must normalize both in real startup.
+    historicalRuns: [{ command: "improve" }, { command: "ask" }],
+    reviewDefaults: {
+      maxFindings: 7,
+      largePrChunking: true,
+      allowedCommands: ["review", "improve", "ask"],
+    },
     installations: [
       {
         id: UPGRADE_INSTALLATION_ID,

@@ -103,8 +103,8 @@ Set these four and nothing else. There is **no Checks permission** in the MVP.
 
 | Permission (API name) | Access | What the app uses it for |
 |---|---|---|
-| Pull requests (`pull_requests`) | Read and write | Read the pull request (head commit, state, draft); post the review, inline comments and suggestions; edit the description (`/describe`) |
-| Issues (`issues`) | Read and write | Pull request conversation comments are issue comments: the persistent review comment and the replies to `/ask`; labels and reactions on comments |
+| Pull requests (`pull_requests`) | Read and write | Read the pull request (head commit, state, draft); post the review and inline comments |
+| Issues (`issues`) | Read and write | Pull request conversation comments are issue comments: the persistent review comment; labels and reactions on comments |
 | Contents (`contents`) | Read-only | Read the changed files and the other repository files a review needs, such as `AGENTS.md` (the app never pushes) |
 | Metadata (`metadata`) | Read-only | Mandatory for every app: list the installation's repositories and ask whether a commenter has write access |
 
@@ -138,7 +138,7 @@ no checkbox: GitHub sends them to every app that has a webhook.
 | Event | Subscription | What the app does with it |
 |---|---|---|
 | `pull_request` | Tick "Pull request" | A pull request was opened, reopened, marked ready for review or got new commits: becomes a review trigger |
-| `issue_comment` | Tick "Issue comment" | A comment on a pull request that starts with `/review`, `/improve`, `/describe` or `/ask` from somebody with write access becomes a command trigger |
+| `issue_comment` | Tick "Issue comment" | A comment on a pull request that starts with `/review` from somebody with write access becomes a command trigger (the removed `/ask`, `/improve` and `/describe` are ordinary comments) |
 | `installation` | Always sent, nothing to tick | The app was installed, removed, suspended or unsuspended: creates or disables the installation in the app |
 | `installation_repositories` | Always sent, nothing to tick | Repositories were added to or removed from an installation: keeps the repository list current |
 
