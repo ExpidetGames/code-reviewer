@@ -60,6 +60,9 @@ const PROTECTED_ROUTES = [
   "/instance-portal/limits",
   "/instance-portal/mail",
   "/instance-portal/setup",
+  "/instance-portal/setup/instance",
+  "/instance-portal/setup/sign-in",
+  "/instance-portal/setup/sign-up",
   "/account",
   // The binding of a GitHub installation to a workspace: where GitHub sends the browser after an installation
   // (the Setup URL of the App; a route that redirects) and where a flow ends when no workspace can be named

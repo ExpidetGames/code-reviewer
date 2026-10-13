@@ -31,6 +31,7 @@ import {
   FAIL_CLOSED_WARNING,
   SIGN_UP_RULE_OPTIONS,
 } from "../signup/ui/rule-copy.ts";
+import { TENANCY_OPTIONS } from "../signup/ui/tenancy-copy.ts";
 import { PROJECT_STATE_TEXT } from "../projects/ui/messages.ts";
 import {
   CROSS_SITE_REQUEST,
@@ -87,6 +88,10 @@ const CONSOLIDATED: ReadonlyArray<readonly [string, string]> = [
     option.text,
     "signup/ui/rule-copy.ts",
   ]),
+  ...TENANCY_OPTIONS.map((option): readonly [string, string] => [
+    option.text,
+    "signup/ui/tenancy-copy.ts",
+  ]),
   ...Object.values(PROJECT_STATE_TEXT).map(
     (text): readonly [string, string] => [text, "projects/ui/messages.ts"],
   ),
@@ -125,6 +130,7 @@ const MESSAGE_MODULES = [
   "setup/ui/messages.ts",
   "signup/ui/messages.ts",
   "signup/ui/rule-copy.ts",
+  "signup/ui/tenancy-copy.ts",
   "ui/transport-messages.ts",
   "workspaces/ui/messages.ts",
   "workspaces/ui/role-copy.ts",

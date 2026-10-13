@@ -241,7 +241,7 @@ export function Overview({
               hint={`${String(settings.workspaceCount)} ${
                 settings.workspaceCount === 1 ? "workspace" : "workspaces"
               } now.`}
-              href="/admin/setup"
+              href="/admin/setup/instance"
             />
             <SetupRow
               title="Sign-up rule"
@@ -250,13 +250,13 @@ export function Overview({
               {...(settings.signUpRuleState.failClosed
                 ? { hint: FAIL_CLOSED_TITLE }
                 : {})}
-              href="/admin/setup"
+              href="/admin/setup/sign-up"
             />
             <SetupRow
               title="Ways to sign in"
               status="ok"
               summary={signInMethodsSummary(settings.signInMethods.effective)}
-              href="/admin/setup"
+              href="/admin/setup/sign-in"
             />
           </ul>
         </CardContent>

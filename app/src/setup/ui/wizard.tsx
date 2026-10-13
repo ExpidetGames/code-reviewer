@@ -31,6 +31,10 @@ import {
   SIGN_UP_RULE_OPTIONS,
   type SignUpRuleKind,
 } from "../../signup/ui/rule-copy.ts";
+import {
+  TENANCY_OPTIONS,
+  type TenancyKind,
+} from "../../signup/ui/tenancy-copy.ts";
 import { browserSetupApi, type SetupApi, type WizardRequest } from "./api.ts";
 import {
   describeSetupFailure,
@@ -48,20 +52,6 @@ export function splitEntries(text: string): string[] {
     .filter((entry) => entry !== "");
 }
 
-/** The two answers of step 1, each with the one line that tells them apart. */
-const TENANCY_OPTIONS = [
-  {
-    value: "single",
-    title: "Single-tenant",
-    text: "One team. The instance has one workspace, and you are its owner. People you invite work in it.",
-  },
-  {
-    value: "multi",
-    title: "Multi-tenant",
-    text: "Several unrelated teams. Everyone who signs up creates a workspace of their own. You run the instance.",
-  },
-] as const;
-
 /** The label of the entry field of step 2, per rule. */
 const ENTRIES_LABEL = {
   emails: "Email addresses",
@@ -73,7 +63,7 @@ function progressPercent(step: 1 | 2 | 3): number {
   return Math.round((step / 3) * 100);
 }
 
-function isTenancyKind(value: string): value is "single" | "multi" {
+function isTenancyKind(value: string): value is TenancyKind {
   return value === "single" || value === "multi";
 }
 

@@ -1,29 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Limits: the instance limits. Instance admin only.
+// Limits: one field, folded into the instance section (#181). The old deep link stays working and
+// leads to it. Instance admin only: anybody else gets the 404 of a page that does not exist.
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 import { requireAdmin } from "@/admin/session";
-import { getAdminService } from "@/admin/shared";
-import { LimitsForm } from "@/admin/ui/limits-form";
-import { PageHeader } from "@/ui/page-header";
 
 export const metadata: Metadata = { title: "Limits · Admin" };
 
-export default async function AdminLimitsPage() {
+export default async function AdminLimitsRedirectPage() {
   await requireAdmin();
-  const settings = await getAdminService().readSettings();
-  return (
-    <>
-      <PageHeader
-        title="Limits"
-        description="What users may do on this instance."
-      />
-      <section className="settings-section">
-        <LimitsForm
-          key={JSON.stringify(settings.maxWorkspacesPerUser)}
-          settings={settings}
-        />
-      </section>
-    </>
-  );
+  redirect("/admin/setup/instance");
 }
