@@ -16,12 +16,14 @@ from code_reviewer_runner.dynamic_findings import Finding
 from code_reviewer_runner.dynamic_review.state import (
     MARKER_PREFIX,
     MARKER_SUFFIX,
+    MAX_FINDINGS,
     MAX_STATE_CHARS,
     ResolvedFinding,
     ReviewState,
     StateError,
     decode_state,
     encode_state,
+    fit_state,
     parse_state_payload,
     render_previous_state,
 )
@@ -180,3 +182,129 @@ def _finding_json(finding: Finding) -> dict[str, object]:
         "evidence": list(finding.evidence),
         "reviewedSha": finding.reviewed_sha,
     }
+
+
+def many(count: int, prefix: str, **overrides: object) -> tuple[Finding, ...]:
+    return tuple(
+        finding(f"{prefix}-{index}", title=f"{prefix} {index}", **overrides)
+        for index in range(count)
+    )
+
+
+# #199-T10
+def test_the_encoder_refuses_what_the_decoder_would_reject() -> None:
+    too_many = ReviewState(reviewed_sha=SHA, findings=many(MAX_FINDINGS + 1, "f"), resolved=())
+
+    with pytest.raises(StateError):
+        encode_state(too_many)
+
+
+# #199-T10
+def test_exceeding_the_active_cap_keeps_the_highest_priority_then_the_most_recent() -> None:
+    # The list is newest first (this run's findings, then the carried-over ones).
+    newest = many(20, "new", priority="P2")
+    carried = many(20, "old", priority="P2")
+    urgent = finding("urgent", title="urgent", priority="P0")
+    fitted = fit_state(
+        ReviewState(reviewed_sha=SHA, findings=(*newest, *carried, urgent), resolved=())
+    )
+
+    ids = [item.id for item in fitted.findings]
+    # Everything P2 at the front of the list is newer, so the oldest P2 findings are the ones cut.
+    assert ids == [*(f"new-{i}" for i in range(20)), *(f"old-{i}" for i in range(9)), "urgent"]
+    assert fitted.omitted_findings == 11
+    assert decode_state(encode_state(fitted)) == fitted
+
+
+# #199-T10
+def test_dropped_findings_are_never_recorded_as_resolved() -> None:
+    state = ReviewState(
+        reviewed_sha=SHA,
+        findings=many(MAX_FINDINGS + 5, "f"),
+        resolved=(ResolvedFinding(finding=finding("done"), resolved_sha=SHA),),
+    )
+
+    fitted = fit_state(state)
+
+    assert [entry.finding.id for entry in fitted.resolved] == ["done"]
+    assert fitted.omitted_findings == 5
+
+
+# #199-T10
+def test_the_omitted_count_accumulates_across_writes_and_round_trips() -> None:
+    first = fit_state(ReviewState(reviewed_sha=SHA, findings=many(33, "a"), resolved=()))
+    second = fit_state(
+        ReviewState(
+            reviewed_sha=SHA,
+            findings=(*first.findings, *many(4, "b")),
+            resolved=(),
+            omitted_findings=first.omitted_findings,
+        )
+    )
+
+    assert first.omitted_findings == 3
+    assert second.omitted_findings == 7
+    assert decode_state(encode_state(second)) == second
+
+
+# #199-T10
+def test_a_state_within_the_caps_and_budget_is_returned_unchanged() -> None:
+    state = ReviewState(reviewed_sha=SHA, findings=many(MAX_FINDINGS, "f"), resolved=())
+
+    assert fit_state(state) == state
+
+
+# #199-T10
+def test_over_the_budget_the_oldest_resolved_history_goes_first() -> None:
+    resolved = tuple(
+        ResolvedFinding(
+            finding=finding(f"old-{index}", title="t" * 300, body="b" * 400), resolved_sha=SHA
+        )
+        for index in range(450)
+    )
+    active = many(10, "live")
+    state = ReviewState(reviewed_sha=SHA, findings=active, resolved=resolved)
+    with pytest.raises(StateError):
+        encode_state(state)
+
+    fitted = fit_state(state)
+
+    assert fitted.findings == active
+    assert fitted.omitted_findings == 0
+    assert 0 < len(fitted.resolved) < len(resolved)
+    # The newest history stays, the oldest is trimmed.
+    assert fitted.resolved == resolved[len(resolved) - len(fitted.resolved) :]
+    assert len(encode_state(fitted)) <= MAX_STATE_CHARS
+    assert decode_state(encode_state(fitted)) == fitted
+
+
+# #199-T10
+def test_when_the_active_findings_alone_exceed_the_budget_the_lowest_priority_go() -> None:
+    big = {"body": "x" * 8000, "evidence": ("e" * 1000,) * 5}
+    findings = (
+        *many(15, "low", priority="P3", **big),
+        finding("urgent", title="urgent", priority="P0", **big),
+        *many(14, "mid", priority="P1", **big),
+    )
+    state = ReviewState(reviewed_sha=SHA, findings=findings, resolved=())
+    with pytest.raises(StateError):
+        encode_state(state)
+
+    fitted = fit_state(state)
+
+    ids = [item.id for item in fitted.findings]
+    assert 1 < len(ids) < len(findings)
+    assert ids == ["urgent", *(f"mid-{index}" for index in range(len(ids) - 1))]
+    assert fitted.omitted_findings == len(findings) - len(ids)
+    assert fitted.resolved == ()
+    assert len(encode_state(fitted)) <= MAX_STATE_CHARS
+    assert decode_state(encode_state(fitted)) == fitted
+
+
+# #199-T09
+@pytest.mark.parametrize("value", [-1, True, "3", 1_000_001])
+def test_an_invalid_omitted_count_fails_closed(value: object) -> None:
+    with pytest.raises(StateError) as refused:
+        decode_state(marker_for(payload(omittedFindings=value)))
+
+    assert refused.value.code is ErrorCode.DYNAMIC_POLICY_VIOLATION

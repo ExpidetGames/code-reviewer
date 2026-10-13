@@ -138,6 +138,37 @@ def test_a_finding_omitted_in_a_later_push_survives_the_write_and_the_next_read(
     assert len(server.comments) == 1
 
 
+# #199-T10
+def test_twenty_carried_and_twenty_new_findings_leave_an_updatable_comment(
+    server: FakeGithubComments, publisher: Publisher
+) -> None:
+    def batch(prefix: str, sha: str) -> tuple[Finding, ...]:
+        return tuple(
+            finding(f"{prefix}-{i}", sha=sha, title=f"{prefix} {i}", path=f"src/{prefix}{i}.ts")
+            for i in range(20)
+        )
+
+    publisher.publish(run(*batch("old", SHA)), head_sha=SHA, previous_reviewed_sha=None)
+    publisher.publish(run(*batch("new", NEXT), sha=NEXT), head_sha=NEXT, previous_reviewed_sha=SHA)
+
+    state = decode_state(server.comments[0]["body"])
+    assert state is not None
+    assert len(state.findings) == 30
+    assert state.omitted_findings == 10
+    assert "10 further findings not shown" in server.comments[0]["body"]
+    assert state.resolved == ()
+
+    # The next push can still read, reconcile and write it.
+    publisher.publish(
+        run(resolved=("new-0",), sha=THIRD), head_sha=THIRD, previous_reviewed_sha=NEXT
+    )
+    later = decode_state(server.comments[0]["body"])
+    assert later is not None
+    assert later.reviewed_sha == THIRD
+    assert [entry.finding.id for entry in later.resolved] == ["new-0"]
+    assert len(server.comments) == 1
+
+
 # #199-T04
 def test_a_human_or_foreign_marker_never_authorizes_an_edit(
     server: FakeGithubComments, publisher: Publisher

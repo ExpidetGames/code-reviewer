@@ -7,6 +7,8 @@ names the id, an omitted previous finding stays active, a moved or rephrased fin
 instead of duplicating, a regression is re-opened, and the resolved history is retained.
 """
 
+from dataclasses import replace
+
 from code_reviewer_runner.dynamic_findings import DynamicFindings, Finding
 from code_reviewer_runner.dynamic_review.reconcile import identity_of, reconcile, summary_counts
 from code_reviewer_runner.dynamic_review.state import ResolvedFinding, ReviewState
@@ -135,3 +137,12 @@ def test_summary_counts_groups_by_priority() -> None:
     )
 
     assert counts == {"P0": 2, "P1": 1, "P2": 0, "P3": 0}
+
+
+# #199-T10
+def test_the_count_of_dropped_findings_is_carried_forward() -> None:
+    prior = replace(state(finding("f-1")), omitted_findings=4)
+
+    result = reconcile(prior, run(finding("f-2", title="Other"), sha=NEXT))
+
+    assert result.omitted_findings == 4

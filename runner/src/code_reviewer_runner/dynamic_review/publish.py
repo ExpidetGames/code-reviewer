@@ -212,8 +212,8 @@ def redact_findings(run: DynamicFindings, redactor: Redactor | None) -> DynamicF
 def redact_state(state: ReviewState, redactor: Redactor | None) -> ReviewState:
     if redactor is None:
         return state
-    return ReviewState(
-        reviewed_sha=state.reviewed_sha,
+    return replace(
+        state,
         findings=tuple(_redact_finding(finding, redactor) for finding in state.findings),
         resolved=tuple(
             ResolvedFinding(

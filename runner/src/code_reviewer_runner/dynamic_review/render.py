@@ -11,10 +11,12 @@ Untrusted model output is never rendered raw. Text is HTML-escaped (so a finding
 or a second state marker), `@` is neutralised so a finding cannot mention a person, and links are
 built only from a validated repository-relative path and the reviewed commit — never from a value
 in the finding. Two independent bounds are enforced: 65,000 characters and 64 KiB of UTF-8,
-whichever is hit first. When the state alone cannot fit, the render fails with
-`review_state_truncated`; when the state fits but the visible text cannot, the detail is reduced
-(never an active finding) and, if even the minimal view does not fit, the render fails with
-`review_text_truncated`. In both cases the caller keeps the previous comment.
+whichever is hit first. A state over its caps or its budget is reduced first (`fit_state`: oldest
+resolved history, then the lowest priority active findings, which the view counts in a visible
+"N further findings not shown" line and never marks resolved), so the comment stays updatable. When
+the state fits but the visible text cannot, the detail is reduced (never an active finding) and, if
+even the minimal view does not fit, the render fails with `review_text_truncated` and the caller
+keeps the previous comment.
 """
 
 import html
@@ -28,6 +30,7 @@ from code_reviewer_runner.dynamic_review.state import (
     ReviewState,
     StateError,
     encode_state,
+    fit_state,
 )
 from code_reviewer_runner.result import ErrorCode
 
@@ -147,6 +150,13 @@ def _visible(state: ReviewState, *, repository: str, web_base: str, detail: int)
                 detail=detail,
             )
         )
+    if state.omitted_findings:
+        noun = "finding" if state.omitted_findings == 1 else "findings"
+        parts.append("")
+        parts.append(
+            f"_{state.omitted_findings} further {noun} not shown: the summary keeps the highest "
+            "priority and most recent active findings that fit; none of them was resolved._"
+        )
     if resolved_total:
         parts.append("")
         parts.append(f"### Resolved findings ({resolved_total})")
@@ -178,11 +188,14 @@ def render_comment(
 ) -> str:
     """The full comment body: the visible view plus the hidden state marker.
 
-    Raises `RenderError(REVIEW_STATE_TRUNCATED)` when the state alone cannot fit, and
-    `RenderError(REVIEW_TEXT_TRUNCATED)` when even the minimal view cannot.
+    A state over the caps or the state budget is first reduced by `fit_state` (oldest resolved
+    history, then the lowest priority active findings, which the view then counts), so the comment
+    that is written can always be read and updated by the next run. Raises
+    `RenderError(REVIEW_TEXT_TRUNCATED)` when even the minimal view cannot fit.
     """
+    state = fit_state(state)
     try:
-        marker = encode_state(state)  # raises REVIEW_STATE_TRUNCATED on its own
+        marker = encode_state(state)
     except StateError as error:
         raise RenderError(error.code, error.detail) from None
     suffix = f"\n\n{marker}" if marker else ""

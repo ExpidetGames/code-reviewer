@@ -101,16 +101,50 @@ def test_a_state_at_the_limit_still_round_trips() -> None:
 
 
 # #199-T06
-def test_a_state_that_is_too_large_fails_without_dropping_findings() -> None:
+def test_a_state_over_the_budget_trims_old_history_but_keeps_every_active_finding() -> None:
     resolved = tuple(
         ResolvedFinding(finding=finding(f"old-{index}", title="t" * 300), resolved_sha=SHA)
         for index in range(400)
     )
+    review = state(finding(body="x" * 8000), resolved=resolved)
 
-    with pytest.raises(RenderError) as refused:
-        render_comment(state(finding(body="x" * 8000), resolved=resolved), repository="acme/repo")
+    body = render_comment(review, repository="acme/repo")
 
-    assert refused.value.code is ErrorCode.REVIEW_STATE_TRUNCATED
+    stored = decode_state(body)
+    assert stored is not None
+    assert [item.id for item in stored.findings] == ["f-1"]
+    assert 0 < len(stored.resolved) < len(resolved)
+    assert stored.resolved == resolved[len(resolved) - len(stored.resolved) :]
+
+
+# #199-T10
+def test_findings_over_the_cap_are_counted_in_a_visible_line_and_the_comment_stays_readable() -> (
+    None
+):
+    review = state(
+        *(finding(f"f-{index}", title=f"Finding {index}") for index in range(35)),
+        finding("urgent", title="Urgent one", priority="P0"),
+    )
+
+    body = render_comment(review, repository="acme/repo")
+
+    assert "6 further findings not shown" in body
+    assert "Urgent one" in body
+    stored = decode_state(body)
+    assert stored is not None
+    assert len(stored.findings) == 30
+    assert stored.omitted_findings == 6
+    assert stored.resolved == ()
+
+
+# #199-T10
+def test_one_omitted_finding_reads_in_the_singular() -> None:
+    body = render_comment(
+        state(*(finding(f"f-{index}", title=f"Finding {index}") for index in range(31))),
+        repository="acme/repo",
+    )
+
+    assert "1 further finding not shown" in body
 
 
 # #199-T06

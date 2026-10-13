@@ -20,12 +20,19 @@ The stored state is untrusted input: it is validated exactly like model output. 
 an unknown field, an out-of-range value, a path that is not repository-relative or a state that does
 not fit the byte budget fails closed with `dynamic_policy_violation` — never an empty state that
 would silently forget the history.
+
+What is written is what can be read back. `encode_state` enforces exactly the decoder's caps and
+re-parses its own output, so a state it returns always decodes. A state that would not fit is first
+reduced by `fit_state`, deterministically: the oldest resolved history goes first, then the lowest
+priority (and, within a priority, the oldest) active findings. A dropped finding is never recorded
+as resolved; it is counted in `omitted_findings` and the summary says so.
 """
 
 import base64
 import json
 import re
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, replace
 from typing import Any
 
 from code_reviewer_runner.dynamic_findings import Finding, FindingsError, parse_finding
@@ -37,9 +44,13 @@ MARKER_SUFFIX = " -->"
 # The stored payload is base64 text; this is its hard limit in characters. The renderer keeps the
 # whole comment under a lower, user-facing limit (65,000 characters); this bound is the state alone.
 MAX_STATE_CHARS = 48_000
+# The most active findings a stored state may hold; `fit_state` keeps the highest priority ones.
+MAX_FINDINGS = 30
+MAX_OMITTED = 1_000_000
 # Resolved history is retained losslessly (the spike's 20-entry PR-Agent cap is a concrete blocker);
-# beyond this many entries the state no longer fits and the write fails closed, it is never pruned.
+# the oldest entries are trimmed only when the whole state would not fit the budget (`fit_state`).
 MAX_RESOLVED = 500
+_PRIORITY_RANK = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
 
 _MARKER = re.compile(r"<!--\s*code-reviewer:dynamic-review-state:v1\s+([A-Za-z0-9+/=]+)\s*-->")
 _SHA = re.compile(r"[0-9a-f]{40}")
@@ -68,11 +79,18 @@ class ResolvedFinding:
 
 @dataclass(frozen=True)
 class ReviewState:
-    """The active findings, the resolved history and the exact head they are current as of."""
+    """The active findings, the resolved history and the exact head they are current as of.
+
+    `findings` is newest first: the findings of the latest run, then the carried-over ones in their
+    earlier order. `omitted_findings` counts active findings that were dropped to keep the state
+    within its caps (never resolved): "at least this many", since a dropped finding that the model
+    raises again is counted again if it is dropped again.
+    """
 
     reviewed_sha: str
     findings: tuple[Finding, ...]
     resolved: tuple[ResolvedFinding, ...]
+    omitted_findings: int = 0
 
 
 def empty_state() -> ReviewState:
@@ -122,7 +140,9 @@ def parse_state_payload(payload: dict[str, Any]) -> ReviewState:
 
 
 def _parse_state_payload(payload: dict[str, Any]) -> ReviewState:
-    _fields(payload, {"schemaVersion", "reviewedSha", "findings", "resolved"}, "")
+    _fields(
+        payload, {"schemaVersion", "reviewedSha", "findings", "resolved", "omittedFindings"}, ""
+    )
     version = payload.get("schemaVersion")
     if isinstance(version, bool) or not isinstance(version, int) or version != STATE_SCHEMA_VERSION:
         raise _invalid(f"the state schema version must be {STATE_SCHEMA_VERSION}")
@@ -136,8 +156,11 @@ def _parse_state_payload(payload: dict[str, Any]) -> ReviewState:
         # the head it was raised at: it is validated against its own `reviewedSha`, not the state's.
         raised_sha = _sha(_object(entry, "a finding").get("reviewedSha"), "findings.reviewedSha")
         findings.append(parse_finding(entry, raised_sha))
-    if len(findings) > 30:
-        raise _invalid("findings may hold at most 30 entries")
+    if len(findings) > MAX_FINDINGS:
+        raise _invalid(f"findings may hold at most {MAX_FINDINGS} entries")
+    omitted = payload.get("omittedFindings", 0)
+    if isinstance(omitted, bool) or not isinstance(omitted, int) or not 0 <= omitted <= MAX_OMITTED:
+        raise _invalid("omittedFindings must be a non-negative count")
     resolved_value = payload.get("resolved")
     if not isinstance(resolved_value, list):
         raise _invalid("resolved must be a list")
@@ -152,7 +175,10 @@ def _parse_state_payload(payload: dict[str, Any]) -> ReviewState:
         seen.add(item.finding.id)
         resolved.append(item)
     return ReviewState(
-        reviewed_sha=reviewed_sha, findings=tuple(findings), resolved=tuple(resolved)
+        reviewed_sha=reviewed_sha,
+        findings=tuple(findings),
+        resolved=tuple(resolved),
+        omitted_findings=omitted,
     )
 
 
@@ -172,7 +198,7 @@ def _finding_json(finding: Finding) -> dict[str, Any]:
 
 
 def state_payload(state: ReviewState) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "schemaVersion": STATE_SCHEMA_VERSION,
         "reviewedSha": state.reviewed_sha,
         "findings": [_finding_json(finding) for finding in state.findings],
@@ -184,6 +210,18 @@ def state_payload(state: ReviewState) -> dict[str, Any]:
             for entry in state.resolved
         ],
     }
+    if state.omitted_findings:
+        payload["omittedFindings"] = state.omitted_findings
+    return payload
+
+
+def _encoded(state: ReviewState) -> str:
+    raw = json.dumps(state_payload(state), ensure_ascii=True, separators=(",", ":"))
+    return base64.b64encode(raw.encode("ascii")).decode("ascii")
+
+
+def _is_empty(state: ReviewState) -> bool:
+    return state.reviewed_sha == "" and not state.findings and not state.resolved
 
 
 def encode_state(state: ReviewState) -> str:
@@ -191,17 +229,89 @@ def encode_state(state: ReviewState) -> str:
 
     The payload is base64 so it holds no `-->`, no newline and no `<`: nothing a finding body
     contains can close the marker or split it, and the visible text can never forge it.
+
+    The state must already fit (`fit_state` reduces one that does not): an over-cap or over-budget
+    state raises `review_state_truncated`. The output is re-parsed by `decode_state` before it is
+    returned, so whatever this returns is guaranteed to be readable by the next run.
     """
-    if state.reviewed_sha == "" and not state.findings and not state.resolved:
+    if _is_empty(state):
         return ""
-    raw = json.dumps(state_payload(state), ensure_ascii=True, separators=(",", ":"))
-    encoded = base64.b64encode(raw.encode("ascii")).decode("ascii")
+    if len(state.findings) > MAX_FINDINGS or len(state.resolved) > MAX_RESOLVED:
+        raise StateError(
+            ErrorCode.REVIEW_STATE_TRUNCATED,
+            f"the review state holds more than {MAX_FINDINGS} active or {MAX_RESOLVED} resolved "
+            "findings",
+        )
+    encoded = _encoded(state)
     if len(encoded) > MAX_STATE_CHARS:
         raise StateError(
             ErrorCode.REVIEW_STATE_TRUNCATED,
             f"the review state exceeds {MAX_STATE_CHARS} characters",
         )
-    return f"{MARKER_PREFIX}{encoded}{MARKER_SUFFIX}"
+    marker = f"{MARKER_PREFIX}{encoded}{MARKER_SUFFIX}"
+    decode_state(marker)  # raises StateError when the decoder would reject what was just written
+    return marker
+
+
+def fit_state(state: ReviewState) -> ReviewState:
+    """The state reduced, deterministically, to what `encode_state` accepts. Unchanged if it fits.
+
+    1. More than `MAX_FINDINGS` active findings: keep the highest priority (P0 first) and, within a
+       priority, the most recent (earliest in the newest-first list); the original order is kept.
+    2. Over the byte budget: trim the oldest resolved history first, then apply rule 1 with a
+       smaller cap until it fits.
+
+    A dropped active finding is only counted in `omitted_findings`; it is never marked resolved.
+    """
+    if len(state.findings) > MAX_FINDINGS:
+        state = _keep_findings(state, MAX_FINDINGS)
+    if _fits_budget(state):
+        return state
+    resolved = state.resolved
+    kept = _largest_fitting(
+        len(resolved),
+        lambda count: _fits_budget(replace(state, resolved=resolved[len(resolved) - count :])),
+    )
+    if kept >= 0:
+        return replace(state, resolved=resolved[len(resolved) - kept :])
+    state = replace(state, resolved=())
+    findings = len(state.findings)
+    count = _largest_fitting(findings, lambda count: _fits_budget(_keep_findings(state, count)))
+    return _keep_findings(state, max(count, 0))
+
+
+def _fits_budget(state: ReviewState) -> bool:
+    return len(_encoded(state)) <= MAX_STATE_CHARS
+
+
+def _largest_fitting(limit: int, fits: Callable[[int], bool]) -> int:
+    """The largest count in 0..limit for which `fits` holds (it only gets harder as it grows), or
+    -1 when even 0 does not fit."""
+    if fits(limit):
+        return limit
+    low, high = -1, limit
+    while high - low > 1:
+        middle = (low + high) // 2
+        if fits(middle):
+            low = middle
+        else:
+            high = middle
+    return low
+
+
+def _keep_findings(state: ReviewState, count: int) -> ReviewState:
+    if count >= len(state.findings):
+        return state
+    ranked = sorted(
+        range(len(state.findings)),
+        key=lambda index: (_PRIORITY_RANK[state.findings[index].priority], index),
+    )
+    kept = sorted(ranked[:count])
+    return replace(
+        state,
+        findings=tuple(state.findings[index] for index in kept),
+        omitted_findings=min(MAX_OMITTED, state.omitted_findings + len(state.findings) - len(kept)),
+    )
 
 
 def decode_state(text: str) -> ReviewState | None:
