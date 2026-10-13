@@ -2,10 +2,13 @@
 
 "use client";
 // The two buttons of a request on the Approvals page: approve (links the installation to the workspace) and deny.
-// The route decides again; a page that is out of date gets the refusal in words and is reloaded.
+// The route decides again; a page that is out of date gets the refusal in words and is reloaded. A refusal is an
+// action result, so it is announced politely (role="status"), not as an assertive alert. Each button names the
+// account it decides for, so repeated rows stay distinguishable.
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { Button } from "../../ui/button.tsx";
+import { Button } from "../../components/button.tsx";
+import { StatusRegion } from "../../components/status-region.tsx";
 import { browserApprovalsApi, type ApprovalsApi } from "./api.ts";
 import { describeApprovalFailure } from "./messages.ts";
 
@@ -35,7 +38,7 @@ export function ApprovalActions({
   }
 
   return (
-    <div className="form-actions">
+    <div className="flex flex-wrap items-center gap-3">
       <Button
         disabled={busy}
         aria-label={`Approve ${accountLogin}`}
@@ -51,11 +54,11 @@ export function ApprovalActions({
       >
         Deny
       </Button>
-      {problem !== null ? (
-        <span role="alert" className="field-error">
-          {problem}
-        </span>
-      ) : null}
+      <StatusRegion>
+        {problem === null ? null : (
+          <span className="text-destructive">{problem}</span>
+        )}
+      </StatusRegion>
     </div>
   );
 }
