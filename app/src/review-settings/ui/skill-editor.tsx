@@ -97,7 +97,9 @@ export function SkillEditor({
         aria-invalid={error !== undefined}
         aria-describedby={describedBy}
         onChange={(event) => onChange(event.target.value)}
-        className="font-mono text-xs"
+        // The skill has long unbroken lines (source URLs); the shared Textarea sizes itself to its
+        // content (#200), which would push the whole page sideways on a narrow window.
+        className="field-sizing-fixed max-w-full font-mono text-xs"
       />
       <FieldDescription id={metaId}>
         {custom ? (
