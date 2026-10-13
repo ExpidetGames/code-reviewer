@@ -19,13 +19,14 @@ import { defaultWorkspaceId } from "../test-support/workspaces.ts";
 
 const REMOVE_COMMANDS = "20261012160000_remove_commands";
 
-/** Every migration except the one under test, so the schema is the previous release's. */
+/** Every migration before the one under test, so the schema is the previous release's. */
 const providerBefore: MigrationProvider = {
   async getMigrations() {
-    const all = await migrationProvider.getMigrations();
-    const { [REMOVE_COMMANDS]: _removed, ...rest } = all;
-    void _removed;
-    return rest;
+    return Object.fromEntries(
+      Object.entries(await migrationProvider.getMigrations()).filter(
+        ([name]) => name < REMOVE_COMMANDS,
+      ),
+    );
   },
 };
 

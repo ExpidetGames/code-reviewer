@@ -67,6 +67,26 @@ def test_a_claim_with_a_job_returns_the_lease_and_the_input_and_sends_token_and_
     headers = app.requests[0]["headers"]
     assert headers["Authorization"] == f"Bearer {RUNNER_TOKEN}"
     assert headers["X-Runner-Id"] == "client-test"
+    # #195 finding 9: the client really sends the engines it was configured with.
+    assert app.requests[0]["body"] == {"engines": ["pr-agent"]}
+    assert app.violations == []
+
+
+# #195 finding 9
+def test_a_claim_advertises_the_configured_engines(app: FakeApp) -> None:
+    app.queue.append(claim_response(JOB_ID, JOB_INPUT))
+
+    asyncio.run(
+        HttpRunnerApi(
+            app.url,
+            RUNNER_TOKEN,
+            "client-test",
+            engines=("pr-agent", "opencode"),
+            request_timeout=5,
+        ).claim()
+    )
+
+    assert app.requests[0]["body"] == {"engines": ["pr-agent", "opencode"]}
     assert app.violations == []
 
 

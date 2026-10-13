@@ -5,11 +5,17 @@
 import type { Kysely } from "kysely";
 import { formatTimestamp } from "../db/codecs.ts";
 import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
+import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import { toJob } from "../db/repositories/jobs-repository.ts";
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
 import type { Database } from "../db/schema.ts";
 import { createJobQueue, type JobQueue } from "../jobs/job-queue.ts";
 import { createRunnerQueue, type RunnerQueue } from "../jobs/runner-queue.ts";
+import {
+  dynamicReviewEnabled as allowDynamicReview,
+  type DynamicReviewGate,
+} from "../jobs/dynamic-review-gate.ts";
+import type { ReviewKindResolver } from "../jobs/review-kind.ts";
 import type {
   EnqueueJobInput,
   Job,
@@ -54,7 +60,14 @@ export type TestQueue = JobQueue & RunnerQueue;
 export function createTestQueue(
   db: Kysely<Database>,
   workspaceId: string,
-  options: { now?: () => Date; limits?: Partial<JobQueueLimits> } = {},
+  options: {
+    now?: () => Date;
+    limits?: Partial<JobQueueLimits>;
+    /** #195 rollout gate; default: the instance setting (off). */
+    dynamicReviewEnabled?: DynamicReviewGate;
+    /** #195: override the in-transaction kind resolver (tests). */
+    reviewKind?: ReviewKindResolver;
+  } = {},
 ): TestQueue {
   return {
     ...createJobQueue(db, workspaceId, options),
@@ -111,6 +124,8 @@ export async function createJobQueueFixture(
     limits?: Partial<JobQueueLimits>;
     /** A database to seed instead of a fresh SQLite one (for the Postgres tests). */
     database?: Kysely<Database>;
+    /** #195: enable the Dynamic Review rollout gate for this fixture (default off). */
+    dynamicReview?: boolean;
   } = {},
 ): Promise<JobQueueFixture> {
   const created = options.database
@@ -121,6 +136,13 @@ export async function createJobQueueFixture(
       })();
   const { db } = created;
   const clock = createTestClock();
+  // Both enqueue and lease-loss policy read the stored instance gate.
+  if (options.dynamicReview === true)
+    await createInstanceSettingsRepository(db, clock.now).set(
+      "dynamic_review",
+      { enabled: true },
+      null,
+    );
   const workspaceId = await defaultWorkspaceId(db);
   const integration = await createIntegrationsRepository(
     db,
@@ -156,6 +178,8 @@ export async function createJobQueueFixture(
   const queue = createTestQueue(db, workspaceId, {
     now: clock.now,
     limits: options.limits,
+    dynamicReviewEnabled:
+      options.dynamicReview === true ? allowDynamicReview : undefined,
   });
   const defaults = (overrides: Partial<EnqueueJobInput>): EnqueueJobInput => ({
     repositoryId: first.id,

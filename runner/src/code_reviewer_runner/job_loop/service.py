@@ -43,6 +43,7 @@ async def serve(
         settings.api_url,
         settings.token,
         settings.runner_id,
+        engines=settings.engines,
         request_timeout=settings.request_timeout,
     )
     loop = RunnerLoop(

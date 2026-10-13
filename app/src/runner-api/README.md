@@ -99,6 +99,34 @@ for that job, in this order:
    job is queued, and nothing is cached or kept. The token is revealed (`revealGitAccess`) into the
    response and the local value is dropped with it.
 
+### The engines of a claim (#195)
+
+The claim body is optional: `{ "engines": ["pr-agent", "opencode"] }`. The runner advertises the
+engines it can run; an absent or empty body is a previous-release runner and means `pr-agent` only.
+The claim only hands out a job whose review kind one of those engines can run (`pr-agent` runs Diff,
+`opencode` runs Dynamic), filtered in the atomic SQL claim. An unknown engine, a duplicate or an
+empty list is `400 RUNNER_REQUEST_INVALID`, and a body over 64 KiB is `413`, both before any job is
+claimed and any credential is created. The token check comes first.
+
+A Diff job keeps the exact legacy payload, whatever runner asked: no field is added, so a
+previous-release runner parses it unchanged. A Dynamic job is only ever handed to a runner that
+advertised `opencode`, and its `input` is tagged:
+
+- `reviewKind: "dynamic"`;
+- `dynamic`: `{ model, skill, limits: { maxFindings } }` — model/skill/limits only, a closed object.
+  There is no field for the fixed core, a permission, an executable command or an endpoint, and the
+  skill is literal data;
+- `base`: `{ repository, baseRef, headSha, previousReviewedSha, comparison }` — the exact queued head,
+  the base identity the provider reported, and the _declared_ comparison mode (`full` in this stage;
+  the checkout verifies completeness before it trusts it). `previousReviewedSha` is `null` until #199
+  supplies it;
+- `env: {}`: no PR-Agent option is promoted into the Dynamic job.
+
+The kind, the engines and the tagged shape are also the contract `ClaimRequest`, `Engine`,
+`ReviewKind`, `DynamicReview` and `ClaimBase` in `contracts/runner-api.v1.json`; a Dynamic job whose
+kind is not in the runner's engines ends as `dynamic_engine_unavailable` rather than being run by
+PR-Agent.
+
 A job that cannot run for a reason that will not go away (LLM not configured, pull request
 gone, connection removed or suspended, repository not part of the installation, permissions missing)
 ends as `failed` with a stable code (`CLAIM_FAILURE_CODES` in `claim.ts`; a guard may name its own code),

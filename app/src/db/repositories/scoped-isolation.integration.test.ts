@@ -67,6 +67,7 @@ async function seed(db: Kysely<Database>, workspaceId: string, tag: string) {
     prNumber: 7,
     prUrl: `https://github.test/acme/${tag}/pull/7`,
     headSha: SHA,
+    reviewKind: "diff",
     command: "review",
     args: "",
     triggerKind: "webhook",
@@ -416,6 +417,7 @@ const CASES: Case[] = [
           prNumber: 99,
           prUrl: "https://github.test/acme/b/pull/99",
           headSha: SHA,
+          reviewKind: "diff",
           command: "review",
           args: "",
           triggerKind: "manual",
@@ -435,6 +437,11 @@ const CASES: Case[] = [
   {
     name: "jobs.cancelWaitingForRepository",
     run: (a, b) => a.jobs.cancelWaitingForRepository(b.repository.id),
+    expectAnswer: (answer) => expect(answer).toBe(0),
+  },
+  {
+    name: "jobs.cancelWaitingForReviewKindChange",
+    run: (a, b) => a.jobs.cancelWaitingForReviewKindChange(b.repository.id),
     expectAnswer: (answer) => expect(answer).toBe(0),
   },
   {
@@ -662,6 +669,7 @@ describe("enqueueing under the scope of A against what B already has", () => {
       prNumber: 8,
       prUrl: "https://github.test/acme/b/pull/8",
       headSha: SHA,
+      reviewKind: "diff",
       command: "review",
       args: "",
       triggerKind: "comment",
@@ -679,6 +687,7 @@ describe("enqueueing under the scope of A against what B already has", () => {
     prNumber: 7,
     prUrl: "https://github.test/acme/b/pull/7",
     headSha: SHA,
+    reviewKind: "diff" as const,
     command: "review" as const,
     args: "",
     triggerKind: "manual" as const,

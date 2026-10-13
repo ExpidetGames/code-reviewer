@@ -9,6 +9,7 @@
 // for settings. A repository the platform stopped listing keeps its row too; it is "unavailable" and
 // cannot be activated (the repositories table says so, not this one).
 import "server-only";
+import { lockDynamicReviewGate } from "../dynamic-review-lock.ts";
 import type { Kysely } from "kysely";
 import type {
   IntegrationStatus,
@@ -226,7 +227,11 @@ export function createProjectsRepository(
   function inTransaction<T>(
     run: (executor: Kysely<Database>) => Promise<T>,
   ): Promise<T> {
-    return db.isTransaction ? run(db) : db.transaction().execute(run);
+    const guarded = async (trx: Kysely<Database>) => {
+      await lockDynamicReviewGate(trx, false);
+      return run(trx);
+    };
+    return db.isTransaction ? guarded(db) : db.transaction().execute(guarded);
   }
 
   async function findActive(

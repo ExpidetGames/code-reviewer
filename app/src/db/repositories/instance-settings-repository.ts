@@ -5,6 +5,10 @@
 // setup markers live here (see src/setup/README.md); the typed service and the admin portal build
 // on this table.
 import "server-only";
+import {
+  lockDynamicReviewGate,
+  lockJobRowsInOrder,
+} from "../dynamic-review-lock.ts";
 import type { Kysely } from "kysely";
 import { decodeJson, encodeJson, formatTimestamp } from "../codecs.ts";
 import type { StoredGithubApp } from "../../github-config/settings.ts";
@@ -51,6 +55,13 @@ export type InstanceSettingValues = {
    * overview of the admin portal until the admin dismisses it. No row: nothing to tell.
    */
   import_notice: ImportNotice;
+  /**
+   * #195 rollout gate: whether Dynamic Review may be queued. No row (or `enabled: false`) means every
+   * Dynamic project gets a run that fails visibly with `dynamic_review_disabled` instead of being
+   * queued; turn it on only after every app instance runs the version that routes by `review_kind`,
+   * and turn it off before rolling back to an older app (contracts/README.md).
+   */
+  dynamic_review: { enabled: boolean };
 };
 export type InstanceSettingKey = keyof InstanceSettingValues;
 
@@ -86,6 +97,43 @@ export function createInstanceSettingsRepository(
   db: Kysely<Database>,
   now: () => Date = () => new Date(),
 ): InstanceSettingsRepository {
+  async function changeGate<T>(
+    key: InstanceSettingKey,
+    disabling: boolean,
+    change: (executor: Kysely<Database>) => Promise<T>,
+  ): Promise<T> {
+    if (key !== "dynamic_review") return change(db);
+    const run = async (trx: Kysely<Database>) => {
+      await lockDynamicReviewGate(trx, true);
+      const result = await change(trx);
+      if (!disabling) return result;
+      const timestamp = formatTimestamp(now());
+      // Running jobs retain their lease and PR slot until completion or a lost attempt. Only
+      // waiting work is cancelled here; loseAttempt reads the gate under the same lock discipline.
+      await lockJobRowsInOrder(
+        trx,
+        trx
+          .selectFrom("jobs")
+          .select("id")
+          .where("review_kind", "=", "dynamic")
+          .where("status", "=", "queued"),
+      );
+      await trx
+        .updateTable("jobs")
+        .set({
+          status: "cancelled",
+          error_code: "dynamic_review_disabled",
+          finished_at: timestamp,
+          updated_at: timestamp,
+        })
+        .where("review_kind", "=", "dynamic")
+        .where("status", "=", "queued")
+        .execute();
+      return result;
+    };
+    return db.isTransaction ? run(db) : db.transaction().execute(run);
+  }
+
   return {
     async get(key) {
       const row = await db
@@ -112,11 +160,13 @@ export function createInstanceSettingsRepository(
     },
 
     async remove(key) {
-      const result = await db
-        .deleteFrom("instance_settings")
-        .where("key", "=", key)
-        .executeTakeFirst();
-      return Number(result.numDeletedRows) > 0;
+      return changeGate(key, true, async (executor) => {
+        const result = await executor
+          .deleteFrom("instance_settings")
+          .where("key", "=", key)
+          .executeTakeFirst();
+        return Number(result.numDeletedRows) > 0;
+      });
     },
 
     async set(key, value, updatedBy) {
@@ -126,17 +176,24 @@ export function createInstanceSettingsRepository(
         updated_by: updatedBy,
         updated_at: formatTimestamp(now()),
       };
-      await db
-        .insertInto("instance_settings")
-        .values(row)
-        .onConflict((conflict) =>
-          conflict.column("key").doUpdateSet({
-            value: row.value,
-            updated_by: row.updated_by,
-            updated_at: row.updated_at,
-          }),
-        )
-        .execute();
+      await changeGate(
+        key,
+        key === "dynamic_review" &&
+          !(value as InstanceSettingValues["dynamic_review"]).enabled,
+        async (executor) => {
+          await executor
+            .insertInto("instance_settings")
+            .values(row)
+            .onConflict((conflict) =>
+              conflict.column("key").doUpdateSet({
+                value: row.value,
+                updated_by: row.updated_by,
+                updated_at: row.updated_at,
+              }),
+            )
+            .execute();
+        },
+      );
     },
   };
 }

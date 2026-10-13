@@ -22,6 +22,12 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
     "The pull request was turned into a draft before this run could start.",
   command_removed:
     "This command was removed from the product, so the waiting run was cancelled.",
+  review_kind_changed:
+    "The project's review kind was changed before this run could start, so the waiting run was cancelled.",
+  no_capable_runner:
+    "No runner that can run this kind of review picked up the run within the time limit, so it was cancelled. It will run again on the next push or review request.",
+  dynamic_review_disabled:
+    "Dynamic Review is not switched on for this instance yet, so this run could not start.",
 
   // The claim of the runner API
   llm_not_configured:
@@ -83,6 +89,22 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
     "The AI model answered in a form the review engine could not use.",
   model_unknown: "The configured model is not known to the AI provider.",
   runner_shutdown: "The runner was shut down while it worked on this run.",
+  dynamic_engine_unavailable:
+    "This run needs the Dynamic Review engine, which no runner that answered has available yet.",
+  dynamic_isolation_self_check_failed:
+    "The Dynamic Review engine could not prove its isolation is safe, so no runner advertises it.",
+  dynamic_config_invalid:
+    "The Dynamic Review settings of this project could not be used for this run. Check them on the project page.",
+  checkout_incomplete:
+    "The Dynamic Review could not prepare the repository checkout, so it was not started.",
+  dynamic_policy_violation:
+    "The Dynamic Review stopped because it would have broken a safety rule.",
+  dynamic_budget_exceeded:
+    "The Dynamic Review used more than its allowed budget and was stopped.",
+  dynamic_accounting_failed:
+    "The Dynamic Review's model usage could not be accounted for, so it was stopped.",
+  dynamic_model_features_unsupported:
+    "The configured model does not support the features Dynamic Review requires. Choose another model.",
   unknown: "The run failed for a reason this version does not know.",
 };
 

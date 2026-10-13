@@ -3,6 +3,10 @@
 // Checks what `enqueue` is given before anything is written. The values come from webhooks and
 // comments, so nothing here trusts a type annotation: every field is looked at as `unknown`.
 import { REVIEW_COMMANDS, type ReviewCommand } from "../integrations/types.ts";
+import {
+  PROJECT_REVIEW_KINDS,
+  type ProjectReviewKind,
+} from "../review-settings/settings.ts";
 import type { JobFieldError } from "./errors.ts";
 import {
   JOB_TRIGGER_KINDS,
@@ -19,6 +23,11 @@ export type ValidEnqueueInput = {
   prUrl: string;
   /** Lower case. */
   headSha: string;
+  /**
+   * The review kind, when the caller names one. Left out by the producers: the queue resolves it from
+   * the project inside the enqueue transaction (`review-kind.ts`), so it cannot race a settings change.
+   */
+  reviewKind: ProjectReviewKind | undefined;
   command: ReviewCommand;
   args: string;
   triggerKind: JobTriggerKind;
@@ -72,6 +81,15 @@ export function validateEnqueueInput(
   if (typeof headSha !== "string" || !HEAD_SHA.test(headSha))
     refuse("headSha", "invalid");
 
+  // #195: the kind is pinned at enqueue time. When the caller names one it must be known; when it is
+  // left out the queue resolves it from the project inside the enqueue transaction.
+  const reviewKind = fields.reviewKind;
+  if (
+    reviewKind !== undefined &&
+    !PROJECT_REVIEW_KINDS.some((kind) => kind === reviewKind)
+  )
+    refuse("reviewKind", "invalid");
+
   const command = fields.command;
   if (command === undefined || command === null || command === "")
     refuse("command", "required");
@@ -114,6 +132,7 @@ export function validateEnqueueInput(
       prNumber: prNumber as number,
       prUrl: prUrl as string,
       headSha: (headSha as string).toLowerCase(),
+      reviewKind: reviewKind as ProjectReviewKind | undefined,
       command: command as ReviewCommand,
       args: args as string,
       triggerKind: fields.triggerKind as JobTriggerKind,

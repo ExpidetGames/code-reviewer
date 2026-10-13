@@ -6,8 +6,9 @@ other way round, so a change to the format has to change the file and both sides
 
 | File                         | What                                                                                                                                                                                         |
 | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `runner-api.v1.json`         | The wire format of the runner API v1 (JSON Schema, draft 2020-12): the claim response, the heartbeat and complete requests and responses, and every error. The `$defs` are the named bodies. |
+| `runner-api.v1.json`         | The wire format of the runner API v1 (JSON Schema, draft 2020-12): the claim request, the claim response, the heartbeat and complete requests and responses, and every error. The `$defs` are the named bodies. |
 | `examples/<Definition>.json` | One valid document per body. Both test suites validate them, so an example can never drift from the schema. They hold dummy values only.                                                     |
+| `dynamic-review/schema.v1.json` | The neutral findings of a Dynamic Review (#195), before the runner renders them: opaque id, P0–P3, confidence, bounded title/body, a lexically safe repository-relative path, a line range (ordering is the runner's semantic check), evidence references, and the reviewed SHA. Resolutions of earlier findings sit on the run envelope (`resolvedIds`), so a run that leaves no current finding can still report them. No permission, provider, routing, endpoint or command field. `dynamic-review/example.v1.json` and `example-resolved.v1.json` are validated by both suites. |
 
 ## Who checks what
 
@@ -34,6 +35,65 @@ other way round, so a change to the format has to change the file and both sides
   `unknown` (the original stays in the stored result).
 - Secrets (`git.token`, `llm.apiKey`, `leaseToken`) appear in the claim response and in requests that
   prove a claim, and nowhere else.
+- #195 grows v1 without breaking a reader: the optional `ClaimRequest` body (`engines`), the optional
+  `reviewKind`/`dynamic`/`base` fields of `RunnerJobInput` for a tagged Dynamic job, and the new
+  `Engine`, `ReviewKind`, `DynamicReview`, `ClaimBase` definitions and Dynamic failure codes. A
+  previous-release app ignores the claim body; a previous-release runner sends none (pr-agent only) and
+  never receives the tagged fields, so its closed `RunnerJobInput` parsing is unchanged. The tagged
+  union is enforced on both sides: a Dynamic job must carry `dynamic` and `base`, a Diff job (no
+  `reviewKind`, or `"diff"`) must not, and a Dynamic `model` uses the same character pattern the runner
+  accepts.
+
+### Rolling out Dynamic Review (#195, finding 4)
+
+A previous-release **app** ignores `review_kind` in its claim SQL: on a shared, migrated database it
+could hand a Dynamic row to a runner as an untagged Diff payload — a silent fallback. It must never be
+able to see a Dynamic row, so Dynamic jobs are only enqueued when the instance setting
+`dynamic_review` is `{ enabled: true }` (default off; `dynamic-review-gate.ts`). With the gate off, a
+Dynamic project's run is created `failed` with `dynamic_review_disabled`, visible in Runs.
+
+Order:
+
+1. Deploy every app instance with the version that routes by `review_kind` (this change). New runners
+   are safe next to old apps.
+2. Only then set `dynamic_review` to `{ enabled: true }` (and after #202 ships the engine).
+3. To roll back, keep every app instance on this gate-aware version while calling the instance
+   settings repository's `set("dynamic_review", { enabled: false }, operatorId)`. Wait for commit:
+   it stops new Dynamic enqueue and cancels **queued** Dynamic jobs with `dynamic_review_disabled`.
+   **Running jobs are untouched**: their leases, heartbeats and PR slots stay valid until they finish.
+   A release or lease expiry with the gate off fails the job with `dynamic_review_disabled` instead
+   of requeueing it, including on the last attempt and for a requested delayed retry.
+4. Keep the gate-aware app and runners serving the remaining leases until the Dynamic work finishes.
+   Before downgrade, quiesce the runners and verify **all Dynamic engine processes have ended** as
+   well as **zero Dynamic jobs in `queued` or `running` status**. If a runner is stopped, terminate
+   and confirm cleanup of its engine processes before releasing its claims; handle any expired
+   claims with the gate-aware app. Terminal database rows alone do not prove process termination.
+5. Only after that boundary may an older app start serving claims. Keep the setting off throughout
+   rollback; retain the forward migration and historical Dynamic rows. Resume compatible runners.
+
+Removing the setting is equivalent to disabling it. Use the repository setter, not raw SQL, which
+would bypass the lock and cancellation. The stored setting has no UI, API route or CLI; #202 owns
+operator controls and activation instructions. It stays off until #202's real runner checks ship.
+
+### Queue lock order
+
+All queue writers acquire locks in this order, held through commit:
+
+1. **Instance gate transaction advisory lock `(195, 1)`**, before any repository, project, setting
+   or job row. Enqueue, project writes and waiting-job cancellation take it shared;
+   gate writes/removal and runner mutations (expiry, release, claim, heartbeat, completion and
+   claimed cancellation) take it exclusive. This covers a missing gate row as well. A transaction
+   that will run a runner mutation must take the exclusive lock first; never upgrade after row locks.
+2. **Workspace-scoped repository, then project row**, for producers/settings that need them. Enqueue
+   and settings saves retain the same repository `FOR UPDATE` lock from kind resolution through write.
+3. **Job rows in ascending `id`**, reserving a multi-row transition's complete live candidate set
+   before its first update. Expiry/claim reserve live jobs once before expiry passes and selection;
+   disable reserves only queued Dynamic rows. Single-job lease operations touch only their own row.
+
+Runner mutations briefly serialize on the gate, keeping drain and expiry from holding opposing job
+rows and making the gate read/lease transition atomic. Locks cover database work only, never engine,
+network or credential preparation. SQLite uses its immediate transaction write lock. Callers using
+an existing transaction must take the appropriate gate lock before any row locks in that transaction.
 
 The meaning of the calls (status codes, the lease, what happens on failure) is in
 `app/src/runner-api/README.md`.
