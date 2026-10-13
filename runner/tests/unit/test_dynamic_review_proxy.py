@@ -13,8 +13,8 @@ from typing import Any
 
 import pytest
 
+from code_reviewer_runner.dynamic_review.budget import BudgetLedger, DynamicLimits, LimitError
 from code_reviewer_runner.dynamic_review.config import new_proxy_capability
-from code_reviewer_runner.dynamic_review.limits import BudgetLedger, DynamicLimits, LimitError
 from code_reviewer_runner.dynamic_review.proxy import (
     ModelProxy,
     ProxyResponse,

@@ -16,8 +16,8 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from code_reviewer_runner.dynamic_review.adapter import _http_request  # pyright: ignore[reportPrivateUsage]
+from code_reviewer_runner.dynamic_review.budget import BudgetLedger, DynamicLimits
 from code_reviewer_runner.dynamic_review.config import new_proxy_capability
-from code_reviewer_runner.dynamic_review.limits import BudgetLedger, DynamicLimits
 from code_reviewer_runner.dynamic_review.proxy import (
     ModelProxy,
     _http_post,  # pyright: ignore[reportPrivateUsage]

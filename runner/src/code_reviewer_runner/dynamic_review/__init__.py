@@ -7,7 +7,7 @@ format, re-review rules); `prompts.py` composes it with the editable, lower-prio
 from a claim and demarcates the untrusted pull request input. `dynamic_findings.py` validates the
 model's answer against the contract. The engine that calls the model is `adapter.py` (#197): it
 drives the pinned stock engine through the trusted config (`config.py`), the runner-owned model
-proxy (`proxy.py`) and the shared ledger (`limits.py`).
+proxy (`proxy.py`) and the shared ledger (`budget.py`).
 
 `findings_schema()` reads the packaged copy of `contracts/dynamic-review/schema.v1.json`: the
 engine's `format` mode needs the schema at run time and the runner image ships its own copy, kept

@@ -5,7 +5,7 @@
 One headless engine server per job, driven through the pinned local HTTP API (see the merged #85
 write-up). The engine is stock: this module never patches it, never installs a plugin and never
 reads its internals. The trusted configuration it writes (`config.py`), the model proxy it points
-the engine at (`proxy.py`) and the ledger it shares with both (`limits.py`) are the whole boundary.
+the engine at (`proxy.py`) and the ledger it shares with both (`budget.py`) are the whole boundary.
 
 The order is deliberate and mirrors the epic's:
 
@@ -48,12 +48,12 @@ from code_reviewer_runner.dynamic_findings import (
     FindingsError,
     parse_dynamic_findings,
 )
+from code_reviewer_runner.dynamic_review.budget import BudgetLedger, LimitError
 from code_reviewer_runner.dynamic_review.config import (
     PROXY_PROVIDER_ID,
     build_engine_config,
     engine_environment,
 )
-from code_reviewer_runner.dynamic_review.limits import BudgetLedger, LimitError
 from code_reviewer_runner.dynamic_review.net import no_redirect_opener
 from code_reviewer_runner.dynamic_review.prompts import ReviewInputs, compose_user_prompt
 from code_reviewer_runner.job import Job

@@ -40,8 +40,8 @@ from typing import Any
 from urllib.error import HTTPError
 from urllib.request import Request
 
+from code_reviewer_runner.dynamic_review.budget import BudgetLedger, LimitError
 from code_reviewer_runner.dynamic_review.config import PROXY_CAPABILITY_BYTES, PROXY_PROVIDER_ID
-from code_reviewer_runner.dynamic_review.limits import BudgetLedger, LimitError
 from code_reviewer_runner.dynamic_review.net import no_redirect_opener
 from code_reviewer_runner.job_loop.jsonvalues import as_object
 from code_reviewer_runner.result import ErrorCode

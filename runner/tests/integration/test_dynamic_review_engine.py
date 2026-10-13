@@ -24,8 +24,8 @@ import pytest
 
 from code_reviewer_runner.dynamic_review import findings_schema
 from code_reviewer_runner.dynamic_review.adapter import DynamicEngine, EngineAnswer
+from code_reviewer_runner.dynamic_review.budget import BudgetLedger, DynamicLimits
 from code_reviewer_runner.dynamic_review.config import engine_environment, new_proxy_capability
-from code_reviewer_runner.dynamic_review.limits import BudgetLedger, DynamicLimits
 from code_reviewer_runner.dynamic_review.prompts import compose_system_prompt
 from code_reviewer_runner.dynamic_review.proxy import ModelProxy, capabilities_from_config
 from code_reviewer_runner.job import Job, parse_job

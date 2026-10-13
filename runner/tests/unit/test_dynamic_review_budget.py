@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from code_reviewer_runner.dynamic_review.limits import (
+from code_reviewer_runner.dynamic_review.budget import (
     DEFAULT_OUTPUT_TOKENS,
     DEFAULT_WINDOW_TOKENS,
     BudgetLedger,

@@ -40,14 +40,14 @@ from code_reviewer_runner.capabilities import (
 from code_reviewer_runner.comment_recorder import CommentRecorder, install_comment_recorder
 from code_reviewer_runner.dynamic_review import findings_schema
 from code_reviewer_runner.dynamic_review.adapter import DynamicEngine, shutdown_engines
-from code_reviewer_runner.dynamic_review.config import new_proxy_capability
-from code_reviewer_runner.dynamic_review.limits import (
+from code_reviewer_runner.dynamic_review.budget import (
     DEFAULT_WINDOW_TOKENS,
     TOTAL_DEADLINE_SECONDS,
     BudgetLedger,
     DynamicLimits,
     LimitError,
 )
+from code_reviewer_runner.dynamic_review.config import new_proxy_capability
 from code_reviewer_runner.dynamic_review.prompts import compose_system_prompt
 from code_reviewer_runner.dynamic_review.proxy import ModelProxy, capabilities_from_config
 from code_reviewer_runner.error_mapping import classify_failure

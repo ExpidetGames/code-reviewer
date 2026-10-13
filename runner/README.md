@@ -170,7 +170,7 @@ input and the boundaries around it (the epic's binding decision). Modules:
   proxy) and the discovery/runtime services switched off. The fixed core (#198) is the runner-defined
   `review` agent's prompt, so it reaches the model through the trusted channel. The flags are defence
   in depth, not a security boundary: #196 strips the discovery inputs from the export.
-- `dynamic_review/limits.py` is the epic's hard envelope (600 s, 30 model calls, 120,000 tokens, 200
+- `dynamic_review/budget.py` is the epic's hard envelope (600 s, 30 model calls, 120,000 tokens, 200
   tool calls, 100 files, 64 KiB per result, 4 MiB cumulative content) as a ledger shared by the proxy
   and the adapter. Every call is reserved before it is sent, every tool part is counted, and a missing
   or oversized answer fails closed. The token reservation uses UTF-8 bytes as a proven upper bound on
