@@ -5,6 +5,7 @@
 // source of job options are used (see README.md for what replaces them when the projects land).
 import "server-only";
 import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
+import { createJobsRepository } from "../db/repositories/jobs-repository.ts";
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
 import { getDatabase } from "../db/startup.ts";
 import { integrationRegistry } from "../integrations/registry.ts";
@@ -48,6 +49,15 @@ export function getRunnerApi(): RunnerApi {
       createRepositoriesRepository(db, workspaceId),
     integrations: (workspaceId) =>
       createIntegrationsRepository(db, workspaceId),
+    // #199: the exact head of the last successful Dynamic review of the job's pull request; the
+    // lookup is scoped to the job's own workspace.
+    previousReviewedSha: (job) =>
+      createJobsRepository(db, job.workspaceId).previousReviewedSha({
+        repositoryId: job.repositoryId,
+        prNumber: job.prNumber,
+        reviewKind: job.reviewKind,
+        excludeJobId: job.id,
+      }),
     registry: integrationRegistry,
     // A job runs only while its repository has an active project; see claim-guard.ts.
     guard: createProjectClaimGuard({ projects: projectServiceFor }),

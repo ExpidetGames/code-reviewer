@@ -199,6 +199,15 @@ def _finding(
     )
 
 
+def parse_finding(
+    data: Any,
+    reviewed_sha: str,
+    exported_paths: Collection[str] | None = None,
+) -> Finding:
+    """Validate one finding. Used for model output and for persisted review state (#199)."""
+    return _finding(_object(data, "a finding"), reviewed_sha, exported_paths)
+
+
 def parse_dynamic_findings(
     raw: str | dict[str, Any],
     *,

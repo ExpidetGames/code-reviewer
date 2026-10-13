@@ -118,8 +118,8 @@ advertised `opencode`, and its `input` is tagged:
   skill is literal data;
 - `base`: `{ repository, baseRef, headSha, previousReviewedSha, comparison }` — the exact queued head,
   the base identity the provider reported, and the _declared_ comparison mode (`full` in this stage;
-  the checkout verifies completeness before it trusts it). `previousReviewedSha` is `null` until #199
-  supplies it;
+  the checkout verifies completeness before it trusts it). `previousReviewedSha` is the head of the
+  last successful review of the same kind (#199), or `null` when there is none;
 - `env: {}`: no PR-Agent option is promoted into the Dynamic job.
 
 The kind, the engines and the tagged shape are also the contract `ClaimRequest`, `Engine`,

@@ -23,6 +23,7 @@ import type {
 } from "../jobs/job-types.ts";
 import type { JobStatus } from "../jobs/job-status.ts";
 import type { JobQueueLimits } from "../jobs/job-limits.ts";
+import type { ProjectReviewKind } from "../review-settings/settings.ts";
 import { createTestDatabase } from "./test-database.ts";
 import { defaultWorkspaceId } from "./workspaces.ts";
 
@@ -112,6 +113,10 @@ export type JobQueueFixture = {
     result?: unknown;
     errorCode?: string | null;
     actorLogin?: string;
+    /** #199: the head the historical review saw; defaults to `sha("a")`. */
+    headSha?: string;
+    /** #199: the review kind of the historical review; defaults to the column default (diff). */
+    reviewKind?: ProjectReviewKind;
     /** For a `running` row: the claim token; defaults to a fixed one, and the lease is live. */
     leaseToken?: string;
     /** For a `running` row: an ISO timestamp; defaults to the fixture's now. */
@@ -235,10 +240,13 @@ export async function createJobQueueFixture(
           repository_id: overrides.repositoryId ?? first.id,
           pr_number: overrides.prNumber ?? 7,
           pr_url: "https://github.test/acme/widgets/pull/7",
-          head_sha: sha("a"),
+          head_sha: overrides.headSha ?? sha("a"),
           command: overrides.command,
           args: overrides.args ?? "",
           trigger_kind: overrides.triggerKind ?? "comment",
+          ...(overrides.reviewKind === undefined
+            ? {}
+            : { review_kind: overrides.reviewKind }),
           actor_login: overrides.actorLogin ?? "octocat",
           delivery_id: null,
           status,
