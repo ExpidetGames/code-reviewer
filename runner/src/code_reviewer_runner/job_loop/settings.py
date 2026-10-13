@@ -71,6 +71,9 @@ class LoopSettings:
     # after the fail-closed startup self-check proved the isolation (capabilities.py).
     engines: tuple[str, ...] = (ALL_ENGINES[0],)
     job_command: tuple[str, ...] = field(default_factory=default_job_command)
+    # (uid, gid) of the user every non-Dynamic job process drops to. Set only for a loop that runs
+    # as root (the Dynamic runner, #197); unset, jobs run as the loop's own user.
+    diff_job_user: tuple[int, int] | None = None
 
 
 def _number(
@@ -123,6 +126,19 @@ def _job_command(environment: Mapping[str, str]) -> tuple[str, ...]:
     return tuple(parts)
 
 
+def _diff_job_user(environment: Mapping[str, str]) -> tuple[int, int] | None:
+    """`RUNNER_DIFF_JOB_USER` as `uid:gid` (numeric, neither root)."""
+    raw = environment.get("RUNNER_DIFF_JOB_USER", "").strip()
+    if not raw:
+        return None
+    uid, separator, gid = raw.partition(":")
+    if not separator or not (uid.isascii() and uid.isdigit() and gid.isascii() and gid.isdigit()):
+        raise SettingsError("RUNNER_DIFF_JOB_USER must be uid:gid, both numbers")
+    if int(uid) == 0 or int(gid) == 0:
+        raise SettingsError("RUNNER_DIFF_JOB_USER must not be root")
+    return int(uid), int(gid)
+
+
 def settings_from_environment(environment: Mapping[str, str]) -> LoopSettings:
     api_url = environment.get("RUNNER_API_URL", "").strip()
     if not api_url:
@@ -139,6 +155,7 @@ def settings_from_environment(environment: Mapping[str, str]) -> LoopSettings:
         raise SettingsError("RUNNER_CONCURRENCY must be a whole number")
     return LoopSettings(
         job_command=_job_command(environment),
+        diff_job_user=_diff_job_user(environment),
         engines=advertised_engines(fail_closed_self_check()),
         api_url=_api_url(api_url),
         token=token,

@@ -3,6 +3,7 @@
 """Pins down the small parts of the job loop: output buffers, log masking and back-off."""
 
 import logging
+from typing import Any
 
 import pytest
 
@@ -65,3 +66,38 @@ def test_a_retry_after_longer_than_the_backoff_wins_but_is_capped() -> None:
 
     assert backoff.next(retry_after=100) == 100
     assert backoff.next(retry_after=10_000) == 15 * 60
+
+
+# #197-T04
+def test_a_process_with_a_user_is_started_as_that_user_with_no_other_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+
+    from code_reviewer_runner.job_loop import process as process_module
+    from code_reviewer_runner.job_loop.process import ProcessSpec, SubprocessLauncher
+
+    seen: dict[str, Any] = {}
+    chowned: list[tuple[str, int, int]] = []
+
+    class Stop(Exception):
+        pass
+
+    async def fake_exec(*argv: str, **options: Any) -> Any:
+        seen.update(options)
+        raise Stop
+
+    monkeypatch.setattr(process_module.asyncio, "create_subprocess_exec", fake_exec)
+
+    def record_chown(path: Any, uid: int, gid: int) -> None:
+        chowned.append((str(path), uid, gid))
+
+    monkeypatch.setattr(process_module.os, "chown", record_chown)
+
+    spec = ProcessSpec(argv=("job",), env={}, stdin=b"", run_as=(10001, 10002))
+    with pytest.raises(Stop):
+        asyncio.run(SubprocessLauncher().start(spec))
+
+    assert (seen["user"], seen["group"], seen["extra_groups"]) == (10001, 10002, [])
+    assert [(uid, gid) for _, uid, gid in chowned] == [(10001, 10002)]  # its working directory
+    assert seen["start_new_session"] is True

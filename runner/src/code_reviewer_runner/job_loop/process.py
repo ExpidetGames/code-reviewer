@@ -18,7 +18,7 @@ import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 # The result line of a job is small (a log tail of 4 KB and a few numbers). Anything above this
 # is not a result.
@@ -59,6 +59,9 @@ class ProcessSpec:
     argv: tuple[str, ...]
     env: Mapping[str, str]
     stdin: bytes
+    # (uid, gid) the process drops to, with no other group; None runs it as the loop's own user.
+    # A runner whose loop is root (the Dynamic runner) uses it so that PR-Agent never runs as root.
+    run_as: tuple[int, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -176,7 +179,12 @@ class SubprocessLauncher:
         # A directory of its own per job: PR-Agent reads `[tool.pr-agent]` from a pyproject.toml in
         # its working directory, so that directory must hold nothing the runner did not put there.
         workdir = Path(tempfile.mkdtemp(prefix=JOB_WORKDIR_PREFIX))
+        options: dict[str, Any] = {}
         try:
+            if spec.run_as is not None:
+                uid, gid = spec.run_as
+                os.chown(workdir, uid, gid)
+                options = {"user": uid, "group": gid, "extra_groups": []}
             process = await asyncio.create_subprocess_exec(
                 *spec.argv,
                 stdin=asyncio.subprocess.PIPE,
@@ -185,6 +193,7 @@ class SubprocessLauncher:
                 env=dict(spec.env),
                 cwd=workdir,
                 start_new_session=True,
+                **options,
             )
         except BaseException:
             shutil.rmtree(workdir, ignore_errors=True)

@@ -86,3 +86,17 @@ def test_the_job_command_is_the_job_entry_point_unless_a_test_stack_replaces_it(
 def test_a_job_command_with_an_open_quote_is_refused() -> None:
     with pytest.raises(SettingsError, match="PR_AGENT_COMMAND"):
         settings_from_environment({**BASE, "PR_AGENT_COMMAND": "python 'unfinished"})
+
+
+# #197-T04
+def test_the_diff_job_user_is_unset_by_default_and_read_as_uid_and_gid() -> None:
+    assert settings_from_environment(BASE).diff_job_user is None
+    settings = settings_from_environment({**BASE, "RUNNER_DIFF_JOB_USER": "10001:10002"})
+    assert settings.diff_job_user == (10001, 10002)
+
+
+# #197-T04
+@pytest.mark.parametrize("value", ["10001", "root:root", "0:0", "10001:0", "0:10001", "-1:5", ":"])
+def test_a_diff_job_user_that_is_root_or_not_numeric_is_refused(value: str) -> None:
+    with pytest.raises(SettingsError, match="RUNNER_DIFF_JOB_USER"):
+        settings_from_environment({**BASE, "RUNNER_DIFF_JOB_USER": value})

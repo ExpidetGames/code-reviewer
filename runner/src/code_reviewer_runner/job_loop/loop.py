@@ -26,7 +26,7 @@ import logging
 from collections.abc import Mapping
 from typing import Any
 
-from code_reviewer_runner.job import JobError, parse_job
+from code_reviewer_runner.job import JobError, ReviewKind, parse_job
 from code_reviewer_runner.job_loop.api import (
     MAX_RETRY_AFTER_SECONDS,
     ApiError,
@@ -281,6 +281,11 @@ class RunnerLoop:
                 argv=self._settings.job_command,
                 env=self._child_environment(),
                 stdin=json.dumps(claimed.input).encode("ascii"),
+                # A Dynamic job is the root supervisor (it drops the engine to its own user); every
+                # other job drops to the unprivileged job user when the loop itself is root.
+                run_as=(
+                    None if job.review_kind is ReviewKind.DYNAMIC else self._settings.diff_job_user
+                ),
             )
             process = await self._launcher.start(spec)
         except Exception as error:
