@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from code_reviewer_runner.job import Job
+from code_reviewer_runner.job_loop.process import JOB_WORKDIR_PREFIX
 from code_reviewer_runner.result import ErrorCode
 
 from .checkout import PreparedContent, prepare_job_content
@@ -85,7 +86,9 @@ _ACCESS_PROBE = r"""
 import os, pathlib, sys
 root, export, private, parent = map(pathlib.Path, sys.argv[1:])
 assert os.getuid() != 0
-for directory, dirs, files in os.walk(export):
+def unreadable(error):
+    raise error
+for directory, dirs, files in os.walk(export, onerror=unreadable):
     for name in files:
         path = pathlib.Path(directory, name)
         assert not path.is_symlink()
@@ -279,18 +282,34 @@ def prepared_checkout(
     # Cover the outer job/root, empty runtime directories, identity leases and access probe.
     # Reserve before creating any of them; retain the same deadline through sealing.
     budget.charge(_RUNTIME_RESERVATION_BYTES)
+    working_directory = Path.cwd().resolve()
+    original = working_directory.stat()
+    if (
+        not working_directory.name.startswith(JOB_WORKDIR_PREFIX)
+        or original.st_uid != 0
+        or stat.S_IMODE(original.st_mode) != 0o700
+    ):
+        raise _refuse()
     parent = parent.resolve()
-    if not parent.is_relative_to(Path.cwd().resolve()):
+    if not parent.is_relative_to(working_directory):
         raise _refuse()
     with prepared_job(parent, identity) as lifetime:
-        content = prepare_job_content(
-            job,
-            lifetime.directory,
-            limits=limits,
-            cancelled=cancelled,
-            metadata=metadata,
-            prior_state=prior_state,
-            budget=budget,
-        )
-        lifetime.seal(content)
-        yield content, lifetime
+        try:
+            # The supervisor's mkdtemp starts at 0700. Grant only the leased job group
+            # traversal through this owned working directory, without directory listing.
+            os.chown(working_directory, 0, identity.gid)
+            os.chmod(working_directory, 0o710)
+            content = prepare_job_content(
+                job,
+                lifetime.directory,
+                limits=limits,
+                cancelled=cancelled,
+                metadata=metadata,
+                prior_state=prior_state,
+                budget=budget,
+            )
+            lifetime.seal(content)
+            yield content, lifetime
+        finally:
+            os.chown(working_directory, 0, original.st_gid)
+            os.chmod(working_directory, stat.S_IMODE(original.st_mode))

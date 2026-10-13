@@ -120,11 +120,25 @@ print(json.dumps({"uid": os.getuid(), "readOnly": True, "separated": True}))
             first_path, second_path = first.root, second.root
             assert process.stdout.strip()
         assert not first_path.exists() and not second_path.exists()
+        hidden_parent = parent / "hidden-parent"
+        hidden_parent.mkdir(mode=0o700)
+        with prepared_job(hidden_parent / "exports", identity) as lifetime:
+            result = prepare_content(
+                claim, 196, LocalTransport(repo), lifetime.directory, Redactor(())
+            )
+            try:
+                lifetime.seal(result)
+                raise AssertionError("an unreadable export passed the access probe")
+            except CheckoutError as error:
+                assert error.code.value == "dynamic_isolation_self_check_failed"
         # The public integration seam takes a validated job and seals the exact queued head.
         fixture = Path(sys.argv[1]).parents[1] / "fakes/fixtures/dynamic-review-job.json"
         raw = json.loads(fixture.read_text())
         original_cwd = Path.cwd()
-        os.chdir(parent)
+        job_cwd = parent / "cr-job-probe"
+        job_cwd.mkdir(mode=0o700)
+        cwd_info = job_cwd.stat()
+        os.chdir(job_cwd)
         with git_server(repo) as server:
             host = server.url.removesuffix("/owner/base.git")
             raw["prUrl"] = host + "/owner/base/pull/196"
@@ -137,17 +151,21 @@ print(json.dumps({"uid": os.getuid(), "readOnly": True, "separated": True}))
                 "previousReviewedSha": None,
                 "comparison": "full",
             }
-            with prepared_checkout(parse_job(json.dumps(raw)), parent / "wrapper", identity) as (
+            with prepared_checkout(parse_job(json.dumps(raw)), job_cwd / "wrapper", identity) as (
                 result,
                 lifetime,
             ):
                 assert lifetime.sealed and result.head_sha == head
+                assert job_cwd.stat().st_mode & 0o777 == 0o710
+                assert job_cwd.stat().st_gid == identity.gid
                 public_root = lifetime.root
             assert not public_root.exists()
+            assert job_cwd.stat().st_mode == cwd_info.st_mode
+            assert job_cwd.stat().st_gid == cwd_info.st_gid
             try:
                 with prepared_checkout(
                     parse_job(json.dumps(raw)),
-                    parent / "bounded-wrapper",
+                    job_cwd / "bounded-wrapper",
                     identity,
                     limits=Limits(preparation_bytes=64 * 1024 - 1),
                 ):

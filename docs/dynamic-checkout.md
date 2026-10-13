@@ -24,11 +24,18 @@ with prepared_checkout(job, Path.cwd() / "dynamic", identity) as (content, lifet
 `prepare_job_content`/`prepare_content` alone produce a **private trusted intermediate**, not an
 agent launch authorization. `PreparedJob.seal` removes write permission, verifies ownership and
 rejects symlinks, hardlinks and special files. An actual-uid, isolated Python probe opens every
-exported file for reading, verifies that write opens and directory creation are denied, and
+exported file for reading, fails if any export directory cannot be read (directory-walk errors are never skipped),
+verifies that write opens and directory creation are denied, and
 verifies that a private root file and the credential-bearing parent's proc environment are
 unreadable. Its deadline comes from the same preparation lifetime. Missing root/user/group,
 unclean ancestors or managed discovery, a failed probe or an occupied identity fails closed
 with `dynamic_isolation_self_check_failed`.
+
+The public seam requires the supervisor's root-owned `cr-job-*` working directory, initially
+`0700`. After reserving the identity, it temporarily grants only that primary group traversal
+(`0710`) through the working directory, without listing or write access, and restores the original
+mode/group on every unwind. This lets the actual user reach the sealed export without opening
+another job's parent. Arbitrary/shared working directories are refused.
 
 Files are root-owned `0440`; directories are root-owned `0550`; the job boundary is root-owned
 `0710` with the job's primary group. Per-container uid **and** gid leases are exclusive, including
