@@ -113,6 +113,17 @@ describe("the danger zone", () => {
     );
     const opener = screen.getByRole("button", { name: "Remove key" });
 
+    // The title is the card's heading and gives the card its accessible name (one h2 per card).
+    expect(
+      screen.getByRole("heading", {
+        level: 2,
+        name: "Remove the workspace key",
+      }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("region", { name: "Remove the workspace key" }),
+    ).toBeTruthy();
+
     await user.click(opener);
     const dialog = await screen.findByRole("alertdialog");
     expect(dialog.textContent).toContain("This cannot be undone.");
