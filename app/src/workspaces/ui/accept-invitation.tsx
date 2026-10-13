@@ -5,8 +5,8 @@
 // link preview that opens every link in a message must not use one up). The invitation is named by the
 // link's token or, from the list of a verified address, by its id.
 import { useState } from "react";
-import { Button } from "@/components/button";
-import { Alert } from "@/components/ui/alert";
+import { Button } from "../../components/button.tsx";
+import { Alert, AlertDescription } from "../../components/ui/alert.tsx";
 import { workspaceHome } from "../paths.ts";
 import { browserAccountApi, type AccountApi } from "./api.ts";
 import { describeWorkspaceFailure } from "./messages.ts";
@@ -42,10 +42,13 @@ export function AcceptInvitation({
   }
 
   return (
-    <div className="flex flex-col gap-3">
-      {problem !== null ? <Alert variant="destructive">{problem}</Alert> : null}
+    <div className="flex flex-col items-start gap-2">
+      {problem !== null ? (
+        <Alert variant="destructive" className="w-full">
+          <AlertDescription>{problem}</AlertDescription>
+        </Alert>
+      ) : null}
       <Button
-        className="w-full"
         loading={pending}
         loadingLabel="Joining"
         aria-label={`${label}: ${workspaceName}`}

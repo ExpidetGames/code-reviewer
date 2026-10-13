@@ -2,10 +2,11 @@
 
 // A destructive action at the bottom ("danger zone"): a Card with the destructive treatment and the
 // confirmation in an AlertDialog, which traps the focus and returns it to the opener on close. The
-// composition is ours (Apache-2.0); Card and AlertDialog come from `components/ui/`.
+// title is the card's one h2 and gives the card its accessible name (one h2 per card). The composition
+// is ours (Apache-2.0); Card and AlertDialog come from `components/ui/`.
 "use client";
 
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -46,10 +47,19 @@ export function DangerZone({
   onConfirm: () => void | Promise<void>;
   children?: ReactNode;
 }) {
+  const titleId = useId();
   return (
-    <Card className="border-destructive/40">
+    <Card
+      className="border-destructive/40"
+      role="region"
+      aria-labelledby={titleId}
+    >
       <CardHeader>
-        <CardTitle className="text-destructive">{title}</CardTitle>
+        <CardTitle className="text-destructive">
+          <h2 id={titleId} className="text-lg font-semibold tracking-tight">
+            {title}
+          </h2>
+        </CardTitle>
         {description ? <CardDescription>{description}</CardDescription> : null}
       </CardHeader>
       {children ? <CardContent>{children}</CardContent> : null}

@@ -87,15 +87,16 @@ test.describe("the first-run setup", () => {
     ).toBeVisible();
     expect(await page.content()).not.toContain(code);
 
-    // A wrong code is refused with a sentence, and nothing about it.
-    await page.getByLabel("Setup code").fill("000000");
+    // A wrong code is refused with a sentence, and nothing about it. The form and the input share
+    // the accessible name "Setup code", so the input is addressed by its role (#172).
+    await page.getByRole("textbox", { name: "Setup code" }).fill("000000");
     await page.getByRole("button", { name: "Continue" }).click();
     await expect(
       page.getByRole("alert").filter({ hasText: "not correct" }),
     ).toBeVisible();
 
     // The right one opens the wizard.
-    await page.getByLabel("Setup code").fill(code);
+    await page.getByRole("textbox", { name: "Setup code" }).fill(code);
     await page.getByRole("button", { name: "Continue" }).click();
     await expect(
       page.getByRole("heading", { name: "How is this instance used?" }),
@@ -105,7 +106,7 @@ test.describe("the first-run setup", () => {
     await expect(
       page.getByRole("heading", { name: "Who may sign up?" }),
     ).toBeVisible();
-    await page.getByRole("radio", { name: /Allowed email domains/ }).check();
+    await page.getByRole("radio", { name: /Allowed email domains/ }).click();
     await expect(page.getByText(/nobody except you can sign up/)).toBeVisible();
     await page.getByLabel("Domains", { exact: true }).fill("e2e.test");
     await page.getByRole("button", { name: "Next" }).click();
@@ -130,7 +131,9 @@ test.describe("the first-run setup", () => {
 
     await expect(page).toHaveURL(/\/admin$/);
     await expect(page.getByRole("heading", { name: "Admin" })).toBeVisible();
-    await expect(page.getByText(e2eEnv.adminEmail).first()).toBeVisible();
+    // Signed in as the address the wizard used: the header menu names the account.
+    await page.getByRole("button", { name: "admin", exact: true }).click();
+    await expect(page.getByText(e2eEnv.adminEmail)).toBeVisible();
 
     // The setup is gone: a second visit is a 404, and so is the code form's route.
     const again = await page.goto("/setup");

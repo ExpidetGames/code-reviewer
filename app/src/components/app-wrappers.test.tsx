@@ -6,6 +6,7 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { AuthCard } from "./auth-card.tsx";
 import { DescriptionList } from "./description-list.tsx";
 import { DangerZone } from "./danger-zone.tsx";
 import { PageHeader } from "./page-header.tsx";
@@ -44,6 +45,26 @@ describe("the page header", () => {
     expect(screen.getByText("Repositories of this workspace.")).toBeTruthy();
     expect(screen.getByRole("navigation", { name: "breadcrumb" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Sync" })).toBeTruthy();
+  });
+});
+
+describe("the auth card", () => {
+  it("renders one h1 from the title, its children, and merges the given class", () => {
+    render(
+      <AuthCard title="Sign in" className="custom-frame">
+        <p>Form goes here.</p>
+      </AuthCard>,
+    );
+
+    const headings = screen.getAllByRole("heading", { level: 1 });
+    expect(headings).toHaveLength(1);
+    expect(headings[0]?.textContent).toBe("Sign in");
+    expect(screen.getByText("Form goes here.")).toBeTruthy();
+    const card = screen
+      .getByText("Form goes here.")
+      .closest('[data-slot="card"]');
+    expect(card?.className).toContain("custom-frame");
+    expect(card?.className).toContain("max-w-[34rem]");
   });
 });
 
@@ -91,6 +112,17 @@ describe("the danger zone", () => {
       />,
     );
     const opener = screen.getByRole("button", { name: "Remove key" });
+
+    // The title is the card's heading and gives the card its accessible name (one h2 per card).
+    expect(
+      screen.getByRole("heading", {
+        level: 2,
+        name: "Remove the workspace key",
+      }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("region", { name: "Remove the workspace key" }),
+    ).toBeTruthy();
 
     await user.click(opener);
     const dialog = await screen.findByRole("alertdialog");

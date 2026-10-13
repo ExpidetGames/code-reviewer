@@ -450,9 +450,8 @@ test.describe(
       await expect(notice).toContainText("GITHUB_OAUTH_CLIENT_SECRET");
       await expect(notice).toContainText("3 people are a member");
       // The App is the one of the old environment, and the sign in with GitHub waits for the admin.
-      await expect(page.getByText("is configured.")).toContainText(
-        e2eEnv.githubAppSlug,
-      );
+      const setup = page.getByRole("region", { name: "Setup" });
+      await expect(setup.getByText(e2eEnv.githubAppSlug)).toBeVisible();
       await expect(
         page.getByText("Signing in with GitHub is not enabled yet"),
       ).toBeVisible();
@@ -692,15 +691,17 @@ test.describe(
     }) => {
       const alice = person("upgrade-alice");
       await signInAsOperator(page);
-      await page.goto("/admin/integrations");
-      await expect(page.getByText("Not linked.")).toBeVisible();
+      await page.goto("/account");
+      await expect(
+        page.getByRole("button", { name: "Link GitHub account" }),
+      ).toBeVisible();
 
       await page.getByRole("button", { name: "Link GitHub account" }).click();
       await page
         .getByRole("button", { name: `Authorize ${alice.login}` })
         .click();
 
-      await expect(page).toHaveURL(/\/admin\/integrations\?github=merged$/);
+      await expect(page).toHaveURL(/\/account\?github=merged$/);
       await expect(
         page.getByRole("status").filter({ hasText: "merged into this one" }),
       ).toBeVisible();

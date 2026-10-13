@@ -17,6 +17,5 @@ export async function POST(request: Request): Promise<Response> {
     requireUser: () => requireUser(),
     sessionId: lookupSessionId,
     service: getGithubLinkService(),
-    surface: "account",
   })(request);
 }

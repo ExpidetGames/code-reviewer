@@ -153,19 +153,24 @@ test.describe("the admin portal", () => {
     await expect(sections.getByRole("link")).toHaveText([
       "Overview",
       "Approvals",
-      "Setup",
-      "Limits",
+      "Instance",
+      "Sign-up",
+      "Sign-in",
       "Integrations",
       "Mail",
     ]);
     await expect(
       sections.getByRole("link", { name: "Overview" }),
     ).toHaveAttribute("aria-current", "page");
-    const checklist = page.getByRole("region", { name: "Checklist" });
-    await expect(checklist.getByText("Mail server")).toBeVisible();
-    await expect(checklist.getByText("GitHub", { exact: true })).toBeVisible();
-    await expect(checklist.getByText("Tenancy")).toBeVisible();
-    await expect(checklist.getByText("Sign-up rule")).toBeVisible();
+    const setup = page.getByRole("region", { name: "Setup" });
+    await expect(setup.getByText("Mail server")).toBeVisible();
+    await expect(setup.getByText("GitHub", { exact: true })).toBeVisible();
+    await expect(setup.getByText("Tenancy")).toBeVisible();
+    await expect(setup.getByText("Sign-up rule")).toBeVisible();
+    await expect(setup.getByText("Ways to sign in")).toBeVisible();
+    await expect(setup.getByRole("link", { name: /^Configure / })).toHaveCount(
+      5,
+    );
   });
 
   // #168-T05
@@ -189,8 +194,9 @@ test.describe("the admin portal", () => {
     await expect(nav.getByRole("link")).toHaveText([
       "Overview",
       "Approvals",
-      "Setup",
-      "Limits",
+      "Instance",
+      "Sign-up",
+      "Sign-in",
       "Integrations",
       "Mail",
     ]);
@@ -227,8 +233,8 @@ test.describe("the admin portal", () => {
     expect(portal?.status()).toBe(200);
     const nav = page.getByRole("navigation", { name: "Admin" });
     await expect(nav).toBeVisible();
-    await nav.getByRole("link", { name: "Setup" }).hover();
-    await expect.poll(() => prefetches.has("/admin/setup")).toBe(true);
+    await nav.getByRole("link", { name: "Instance" }).hover();
+    await expect.poll(() => prefetches.has("/admin/setup/instance")).toBe(true);
 
     // A prefetch answer is an admin-only answer: no shared cache may keep it, and never for the year
     // of a prerendered answer.
@@ -245,32 +251,41 @@ test.describe("the admin portal", () => {
   }) => {
     await signInAsAdmin(page);
 
-    await page.goto("/admin/setup");
-    await page.getByRole("radio", { name: /Allowed email domains/ }).check();
+    await page.goto("/admin/setup/sign-up");
+    await page.getByRole("radio", { name: /Allowed email domains/ }).click();
     await page.getByLabel("Domains", { exact: true }).fill("e2e.test");
     await page.getByRole("button", { name: "Save sign-up rule" }).click();
-    // ("Saved." only shows for an instant: the form starts again from the saved values, so the lasting
-    // proof is what the page says once it has the new data.)
-    // Nothing can verify addresses yet, so the notice says the rule does not work.
-    await expect(page.getByRole("note")).toContainText("does not work yet");
+    // ("Saved." stays next to the button: the form is no longer remounted after a save (#181).)
+    await expect(
+      page.getByRole("form", { name: "Sign-up rule" }).getByRole("status"),
+    ).toHaveText("Saved.");
+    // Nothing can verify addresses yet, so the page says the rule does not work.
+    await expect(
+      page.getByRole("region", { name: "Needs attention" }),
+    ).toContainText("does not work yet");
     await expect(
       page
-        .getByRole("form", { name: "Who may sign up" })
+        .getByRole("form", { name: "Sign-up rule" })
         .getByText(`Last changed by ${e2eEnv.adminEmail}`),
     ).toBeVisible();
 
     await page.goto("/admin/limits");
+    await expect(page).toHaveURL(/\/admin\/setup\/instance$/);
+    // The Instance page holds two cards; the limit's "last changed" belongs to the Limits card.
+    const limitsCard = page.locator('[data-slot="card"]', {
+      has: page.getByLabel(/Maximum number of workspaces/),
+    });
     await page.getByLabel(/Maximum number of workspaces/).fill("4");
-    await page.getByRole("button", { name: "Save limit" }).click();
+    await page.getByRole("button", { name: "Save instance settings" }).click();
     await expect(
-      page.getByText(`Last changed by ${e2eEnv.adminEmail}`),
+      limitsCard.getByText(`Last changed by ${e2eEnv.adminEmail}`),
     ).toBeVisible();
     await page.reload();
     await expect(page.getByLabel(/Maximum number of workspaces/)).toHaveValue(
       "4",
     );
     await expect(
-      page.getByText(`Last changed by ${e2eEnv.adminEmail}`),
+      limitsCard.getByText(`Last changed by ${e2eEnv.adminEmail}`),
     ).toBeVisible();
   });
 
@@ -378,7 +393,7 @@ test.describe("the admin portal", () => {
     await signInAsAdmin(page);
     const plain = await observe(page, "/api/admin/settings");
     expect(plain.status).toBe(200);
-    const portal = await observe(page, "/admin/setup", {
+    const portal = await observe(page, "/admin/setup/instance", {
       headers: { accept: "text/html" },
     });
     expect(portal.status).toBe(200);
@@ -397,7 +412,7 @@ test.describe("the admin portal", () => {
       const data = await observe(page, "/api/admin/settings", { headers });
       expect(data.status, `data route ${label}`).toBe(200);
       expect(data.body, `data route ${label}`).toBe(plain.body);
-      const rendered = await observe(page, "/admin/setup", {
+      const rendered = await observe(page, "/admin/setup/instance", {
         headers: { ...headers, accept: "text/html" },
       });
       expect(rendered.status, `page ${label}`).toBe(200);
@@ -427,7 +442,12 @@ test.describe("the admin portal", () => {
         "x-forwarded-proto": forwarded,
         "x-portal-rewrite": "anything",
       };
-      for (const path of ["/api/admin/settings", "/admin", "/admin/setup"]) {
+      for (const path of [
+        "/api/admin/settings",
+        "/admin",
+        "/admin/setup/instance",
+        "/admin/setup/sign-up",
+      ]) {
         const expected = await observe(page, MISSING, { headers });
         const answer = await observe(page, path, { headers });
         expect(answer.status, `${path} ${JSON.stringify(forwarded)}`).toBe(404);

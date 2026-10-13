@@ -53,7 +53,7 @@ test.describe("signing up", () => {
     await page.goto("/login");
     await page.getByRole("link", { name: "Create one" }).click();
     await expect(
-      page.getByRole("heading", { level: 1, name: "Create an account" }),
+      page.getByRole("heading", { level: 1, name: "Create your account" }),
     ).toBeVisible();
     await expect(page).toHaveURL(/\/sign-up$/);
 
@@ -102,7 +102,7 @@ test.describe("signing up", () => {
     page,
   }) => {
     const answer =
-      "Check your inbox. If this address may sign up, we sent it a link to confirm it. The account can be used once the address is confirmed.";
+      "Check your inbox. If this address may sign up, we sent it a link to confirm it.";
     await page.goto("/sign-up");
     await fillSignUp(page, e2eEnv.adminEmail);
     await expect(page.getByRole("status")).toHaveText(answer);

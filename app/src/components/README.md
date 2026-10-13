@@ -14,12 +14,22 @@ to it, under `ui/`, and keep their MIT header (see `THIRD_PARTY_LICENSES.md` and
 destructive`, sizes `sm | default | icon`, the `loading`/`loadingLabel` convention and the
     icon-only accessible-name guard. Prefer it over `@/components/ui/button`.
   - `@/components/page-header` — one `h1`, a breadcrumb slot and the page actions.
+  - `@/components/breadcrumbs` — the trail of a page below an area root (#179 lead decision): the trail
+    starts at the area root, ancestors are links, and only the last crumb is the current page
+    (`aria-current="page"`, no link). An **area root** (Projects list, Account, Invitations, Admin
+    overview, workspace Settings index) shows **no** breadcrumb, and there is no global "Home" crumb:
+    the brand link in the shell already goes home. Goes into the `breadcrumb` slot of `PageHeader`.
+  - `@/components/auth-card` — the centered 34rem frame and action-named `h1` of the public auth pages.
   - `@/components/info-hint` — the focusable "?" next to a label (Tooltip, `aria-describedby`,
     Escape closes, 44px hit area).
   - `@/components/help-disclosure` — the "how it works" trigger over the Collapsible: the text stays
     in the DOM and is hidden while closed, the trigger announces `aria-expanded`/`aria-controls` and
-    has a 44px target.
+    has a 44px target. An optional `ariaLabel` gives a repeated disclosure a distinct accessible name
+    (one per row, for example "Evidence for acme") while the visible label stays short.
   - `@/components/status-region` — `role="status"`, `aria-live="polite"`.
+  - `@/components/needs-attention` — the one attention region of a screen: a labelled "Needs attention"
+    section with up to `maxRows` (default 2) `Alert` rows and the rest behind a `HelpDisclosure`.
+    Screens with notices (#173, #174, #178) use it instead of stacking separate notice regions.
   - `@/components/danger-zone` — a destructive `Card` with the confirmation in an `AlertDialog`.
   - `@/components/description-list` — a dense `<dl>` for run/instance facts.
   - `@/components/query-tabs` — the `Tabs` whose active tab lives in the query string. It calls

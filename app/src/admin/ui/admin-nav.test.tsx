@@ -9,7 +9,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 
-const navigation = vi.hoisted(() => ({ pathname: "/admin/setup" }));
+const navigation = vi.hoisted(() => ({ pathname: "/admin/setup/instance" }));
 vi.mock("next/navigation", () => ({
   usePathname: () => navigation.pathname,
 }));
@@ -23,7 +23,7 @@ const desktopMatchMedia = window.matchMedia;
 afterEach(() => {
   window.matchMedia = desktopMatchMedia;
   cleanup();
-  navigation.pathname = "/admin/setup";
+  navigation.pathname = "/admin/setup/instance";
 });
 
 function narrowScreen() {
@@ -67,8 +67,9 @@ describe("the sections of the portal", () => {
     expect(links.map((link) => link.textContent)).toEqual([
       "Overview",
       "Approvals",
-      "Setup",
-      "Limits",
+      "Instance",
+      "Sign-up",
+      "Sign-in",
       "Integrations",
       "Mail",
     ]);
@@ -79,7 +80,7 @@ describe("the sections of the portal", () => {
       links
         .filter((link) => link.getAttribute("aria-current") === "page")
         .map((link) => link.textContent),
-    ).toEqual(["Setup"]);
+    ).toEqual(["Instance"]);
   });
 
   it("do not mark Overview on the other pages, which are all below /admin", () => {
@@ -114,8 +115,9 @@ describe("the sections on a narrow screen", () => {
     ).toEqual([
       "Overview",
       "Approvals",
-      "Setup",
-      "Limits",
+      "Instance",
+      "Sign-up",
+      "Sign-in",
       "Integrations",
       "Mail",
     ]);

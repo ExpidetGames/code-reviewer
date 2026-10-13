@@ -82,15 +82,22 @@ describe("the form of a reset link", () => {
     );
   });
 
-  // #98-AD-18
-  it("says that the link is not valid, and what to do, when the server refuses the token", async () => {
+  // #170-T04
+  it("says what happened to a used or expired link and the next step, with the detail in a disclosure", async () => {
     await fillAndSend(answer(400, { error: "invalid_token" }));
 
-    await waitFor(() =>
-      expect(screen.getByRole("alert").textContent).toMatch(
-        /not valid any more[\s\S]*admin reset-password/,
-      ),
-    );
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("This link no longer works.");
+    expect(alert.textContent).toMatch(/ask for a new link/i);
+    expect(alert.textContent).not.toContain("30 minutes");
+    expect(
+      screen.getByRole("button", { name: "Why links stop working" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/works once and only for 30 minutes/i),
+    ).toBeTruthy();
+    // A dead link cannot try again with the same token.
+    expect(screen.queryByLabelText("New password")).toBeNull();
   });
 
   it("asks to wait when the server says there were too many attempts", async () => {

@@ -68,12 +68,8 @@ async function setup(options: { failMergeAfterMove?: boolean } = {}) {
   const workspace = { id: await defaultWorkspaceId(db) };
 
   /** The whole linking as a person does it: start, authorize at GitHub as `who`, come back. */
-  async function link(
-    actor: LinkActor,
-    who: string | number = OCTOCAT.login,
-    surface: "account" | "admin" = "account",
-  ) {
-    const started = await service.start(actor, { surface });
+  async function link(actor: LinkActor, who: string | number = OCTOCAT.login) {
+    const started = await service.start(actor);
     if (!started.ok) throw new Error(`did not start: ${started.error}`);
     const back = await github.authorize(started.url, who);
     return service.complete(actor, {
@@ -221,7 +217,7 @@ describe("merging the instance admin with an imported operator", () => {
 
     const result = await ctx.link(ADMIN);
 
-    expect(result).toEqual({ ok: true, outcome: "merged", surface: "account" });
+    expect(result).toEqual({ ok: true, outcome: "merged" });
     expect(
       await ctx.db
         .selectFrom("installation_link_requests")
@@ -338,7 +334,6 @@ describe("merging the instance admin with an imported operator", () => {
     expect(result).toEqual({
       ok: false,
       error: "identity_has_other_credentials",
-      surface: "account",
     });
     expect(await snapshot(ctx)).toEqual(before);
   });
@@ -406,7 +401,7 @@ describe("merging the instance admin with an imported operator", () => {
     const ctx = await setup();
     await adminAndImportedOperator(ctx);
     const before = await snapshot(ctx);
-    const started = await ctx.service.start(ADMIN, { surface: "account" });
+    const started = await ctx.service.start(ADMIN);
     if (!started.ok) throw new Error("did not start");
     const back = await ctx.github.authorize(started.url, "octocat");
     const query = {
@@ -414,7 +409,7 @@ describe("merging the instance admin with an imported operator", () => {
       state: back.searchParams.get("state"),
       error: null,
     };
-    const second = await ctx.service.start(ADMIN, { surface: "account" });
+    const second = await ctx.service.start(ADMIN);
     if (!second.ok) throw new Error("did not start");
     const cancelled = await ctx.github.deny(second.url);
 
@@ -496,7 +491,7 @@ describe("linking a GitHub identity to an account", () => {
 
     const result = await ctx.link(person);
 
-    expect(result).toEqual({ ok: true, outcome: "linked", surface: "account" });
+    expect(result).toEqual({ ok: true, outcome: "linked" });
     const account = await ctx.db
       .selectFrom("accounts")
       .selectAll()
@@ -539,7 +534,6 @@ describe("linking a GitHub identity to an account", () => {
     expect(again).toEqual({
       ok: true,
       outcome: "already_linked",
-      surface: "account",
     });
     expect(
       await ctx.db
@@ -587,8 +581,8 @@ describe("linking a GitHub identity to an account", () => {
     const a = await passwordUser(ctx, "a");
     const b = await passwordUser(ctx, "b");
     const [startedA, startedB] = await Promise.all([
-      ctx.service.start(a, { surface: "account" }),
-      ctx.service.start(b, { surface: "account" }),
+      ctx.service.start(a),
+      ctx.service.start(b),
     ]);
     if (!startedA.ok || !startedB.ok) throw new Error("did not start");
     const [backA, backB] = await Promise.all([
@@ -630,7 +624,7 @@ describe("the state of the linking", () => {
     });
     const actor: LinkActor = { id: "person", sessionId: "s1" };
     const startedFor = async () => {
-      const started = await ctx.service.start(actor, { surface: "account" });
+      const started = await ctx.service.start(actor);
       if (!started.ok) throw new Error("did not start");
       const back = await ctx.github.authorize(started.url, "octocat");
       return {
@@ -669,10 +663,10 @@ describe("the state of the linking", () => {
     const ctx = await setup();
     await insertUser(ctx.db, { id: "person", passwordHash: "h" });
 
-    const started = await ctx.service.start(
-      { id: "person", sessionId: "s1" },
-      { surface: "account" },
-    );
+    const started = await ctx.service.start({
+      id: "person",
+      sessionId: "s1",
+    });
 
     if (!started.ok) throw new Error("did not start");
     const url = new URL(started.url);
@@ -696,7 +690,7 @@ describe("the state of the linking", () => {
 
     const results = [];
     for (let i = 0; i < LINK_USER_MAX + 2; i += 1)
-      results.push(await ctx.service.start(actor, { surface: "account" }));
+      results.push(await ctx.service.start(actor));
 
     expect(results.filter((r) => r.ok)).toHaveLength(LINK_USER_MAX);
     expect(results.at(-1)).toMatchObject({ ok: false, error: "rate_limited" });
@@ -710,18 +704,13 @@ describe("the state of the linking", () => {
       const id = `person-${String(person)}`;
       await insertUser(ctx.db, { id, passwordHash: "h" });
       for (let i = 0; i < LINK_USER_MAX; i += 1)
-        results.push(
-          await ctx.service.start(
-            { id, sessionId: `s-${id}` },
-            { surface: "account" },
-          ),
-        );
+        results.push(await ctx.service.start({ id, sessionId: `s-${id}` }));
     }
 
     expect(results.every((r) => r.ok)).toBe(true);
   });
 
-  it("refuses a start that names no known page, and one while the user authorization is not configured", async () => {
+  it("refuses a start while the user authorization is not configured", async () => {
     const ctx = await setup();
     const none = createGithubLinkService({
       db: ctx.db,
@@ -733,13 +722,7 @@ describe("the state of the linking", () => {
       apiBaseUrl: ctx.github.baseUrl,
     });
 
-    expect(
-      await ctx.service.start(ADMIN, { surface: "https://evil.example" }),
-    ).toMatchObject({
-      ok: false,
-      error: "invalid_input",
-    });
-    expect(await none.start(ADMIN, { surface: "account" })).toEqual({
+    expect(await none.start(ADMIN)).toEqual({
       ok: false,
       error: "github_not_configured",
     });
@@ -768,7 +751,6 @@ describe("the handlers of the linking", () => {
       requireUser: async () => ({ id: "person" }) as never,
       sessionId: async () => "s1",
       service: ctx.service,
-      surface: "account",
     });
     return { ctx, session, callback, start };
   }
@@ -831,7 +813,7 @@ describe("the handlers of the linking", () => {
   it("sends the person to a fixed page with a code from its own list, whatever extra parameters the address carries", async () => {
     const { ctx, callback } = await handlers();
     const actor: LinkActor = { id: "person", sessionId: "s1" };
-    const started = await ctx.service.start(actor, { surface: "account" });
+    const started = await ctx.service.start(actor);
     if (!started.ok) throw new Error("did not start");
     const back = await ctx.github.authorize(started.url, "octocat");
     back.searchParams.set("redirect", "https://evil.example/");
@@ -873,21 +855,5 @@ describe("the handlers of the linking", () => {
 
     expect(response?.headers.get("location")).toBe("/login");
     expect(ctx.github.requests().length).toBe(before);
-  });
-
-  it("returns an admin to the portal's page", async () => {
-    const { ctx, callback } = await handlers();
-    const actor: LinkActor = { id: "person", sessionId: "s1" };
-    const started = await ctx.service.start(actor, { surface: "admin" });
-    if (!started.ok) throw new Error("did not start");
-    const back = await ctx.github.authorize(started.url, "octocat");
-
-    const response = await callback(
-      new Request(`https://app.test${back.pathname}${back.search}`),
-    );
-
-    expect(response?.headers.get("location")).toBe(
-      "/admin/integrations?github=linked",
-    );
   });
 });

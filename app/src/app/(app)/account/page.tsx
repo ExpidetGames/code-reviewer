@@ -1,18 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Your account: the address, and the GitHub account linked to it. Any signed-in person who may use the app.
+// Account: the address, and the GitHub account linked to it. Any signed-in person who may use the app.
 import type { Metadata } from "next";
 import { loadAccount } from "@/account/load";
 import { AccountPageContent } from "@/account/ui/account-view";
 import { requireUser } from "@/auth/session";
 import { getDatabase } from "@/db/startup";
 import { isGithubSignInConfigured } from "@/github-config/shared";
+import { singleSearchParam } from "@/http/search-params";
 
-export const metadata: Metadata = { title: "Your account" };
-
-function single(value: string | string[] | undefined): string | null {
-  return typeof value === "string" && value !== "" ? value : null;
-}
+export const metadata: Metadata = { title: "Account" };
 
 export default async function AccountPage(props: PageProps<"/account">) {
   const user = await requireUser();
@@ -27,7 +24,11 @@ export default async function AccountPage(props: PageProps<"/account">) {
       name={user.name}
       account={account}
       githubSignInAvailable={available}
-      outcome={{ ok: single(query.github), error: single(query.github_error) }}
+      isInstanceAdmin={user.isInstanceAdmin}
+      outcome={{
+        ok: singleSearchParam(query.github),
+        error: singleSearchParam(query.github_error),
+      }}
     />
   );
 }

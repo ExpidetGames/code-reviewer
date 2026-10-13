@@ -154,7 +154,7 @@ test.describe("an Owner invites a colleague who accepts", () => {
     await page.getByRole("link", { name: "Create an account" }).click();
     await expect(page).toHaveURL(/\/sign-up\?invitation=/);
     await signUp(page, colleague);
-    await page.getByRole("link", { name: "Go to the sign-in" }).click();
+    await page.getByRole("link", { name: "Back to sign in" }).click();
     await expect(page).toHaveURL(/\/login\?invitation=/);
     await page.getByLabel("Email address").fill(colleague);
     await page.getByLabel("Password").fill(PASSWORD);
