@@ -36,8 +36,10 @@ from code_reviewer_runner.job_loop.jsonvalues import as_object
 _WRAPPER_START = "\n</content>\n\n<system-reminder>\n"
 _WRAPPER_END = "\n</system-reminder>"
 
-# Any spelling of the tag that a reader could take for it: case, inner spaces, closing slash.
-_TAG = re.compile(r"<(\s*/?\s*)(system-reminder)", re.IGNORECASE)
+# Any spelling of the tag that a reader could take for it: case, inner spaces, closing slash. One
+# run of whitespace and slashes: two adjacent `\s*` would backtrack quadratically on a hostile file
+# (`<` followed by tens of thousands of spaces) on every request.
+_TAG = re.compile(r"<([\s/]*)(system-reminder)", re.IGNORECASE)
 
 
 def dropped_notice(attached_bytes: int) -> str:
