@@ -219,15 +219,15 @@ describe("routing a claimed job by the runner's engines", () => {
   it("keeps one holder per pull request when two capabilities race over two kinds of one PR", async () => {
     const h = await startDynamicHarness();
     await h.projectService.activateProject(h.otherRepositoryId);
-    await h.enqueueNew({ prNumber: 7, reviewKind: "dynamic" });
+    const dynamic = await h.enqueueNew({ prNumber: 7, reviewKind: "dynamic" });
     h.clock.advance(1000);
-    await h.enqueueNew({
+    const diff = await h.enqueueNew({
       prNumber: 7,
       headSha: sha("b"),
       reviewKind: "diff",
     });
     h.clock.advance(1000);
-    await h.enqueueNew({
+    const other = await h.enqueueNew({
       repositoryId: h.otherRepositoryId,
       prNumber: 8,
       prUrl: "https://github.test/acme/gadgets/pull/8",
@@ -240,9 +240,16 @@ describe("routing a claimed job by the runner's engines", () => {
       h.claim({ engines: ["pr-agent", "opencode"], runnerId: "runner-b" }),
     ]);
     const holders = [a, b].filter((response) => response.status === 200);
-    const ids = await Promise.all(
-      holders.map(async (response) => (await response.json()).job.id),
+    expect(holders).toHaveLength(2);
+    const claimed = await Promise.all(
+      holders.map(async (response) => (await response.json()).job),
     );
+    expect([diff.id, other.id]).toContain(claimed[0].id);
+    const ids: string[] = claimed.map((job) => job.id);
+    expect(ids).toContain(other.id);
+    expect(
+      ids.filter((id) => id === dynamic.id || id === diff.id),
+    ).toHaveLength(1);
     // No job was handed out twice.
     expect(new Set(ids).size).toBe(ids.length);
 
@@ -254,7 +261,17 @@ describe("routing a claimed job by the runner's engines", () => {
       .where("pr_number", "=", 7)
       .where("status", "=", "running")
       .execute();
-    expect(runningForPr7.length).toBeLessThanOrEqual(1);
+    expect(runningForPr7).toHaveLength(1);
+    for (const job of claimed)
+      expect((await h.complete(job.id, job.leaseToken)).status).toBe(200);
+    const next = await h.claim({
+      engines: ["pr-agent", "opencode"],
+      runnerId: "runner-next",
+    });
+    expect(next.status).toBe(200);
+    const nextJob = (await next.json()).job;
+    expect(nextJob.id).toBe(ids.includes(dynamic.id) ? diff.id : dynamic.id);
+    expect((await h.complete(nextJob.id, nextJob.leaseToken)).status).toBe(200);
   });
 
   // #195-T05

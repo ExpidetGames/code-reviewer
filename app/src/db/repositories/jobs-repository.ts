@@ -42,6 +42,7 @@ import {
   type Job,
   type JobErrorCode,
 } from "../../jobs/job-types.ts";
+import { databaseDriver } from "../driver.ts";
 import { decodeJson, formatTimestamp } from "../codecs.ts";
 import type { Database, JobsTable } from "../schema.ts";
 import type { WorkspaceId } from "../workspace-scope.ts";
@@ -216,6 +217,18 @@ export function createJobsRepository(
       return inTransaction<EnqueueResult>(async (trx) => {
         const current = now();
         const timestamp = formatTimestamp(current);
+
+        // Settings saves lock this same workspace-scoped row, including before a project exists.
+        const repository = trx
+          .selectFrom("repositories")
+          .select("id")
+          .where("workspace_id", "=", workspaceId)
+          .where("id", "=", input.repositoryId);
+        await (
+          databaseDriver(trx) === "postgres"
+            ? repository.forUpdate()
+            : repository
+        ).executeTakeFirst();
 
         // #195 (finding 3): resolve the kind here, in the same transaction as the insert, so a
         // concurrent settings change cannot slip between the read and the write. A kind named by the

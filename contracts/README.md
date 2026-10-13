@@ -57,10 +57,21 @@ Order:
 1. Deploy every app instance with the version that routes by `review_kind` (this change). New runners
    are safe next to old apps.
 2. Only then set `dynamic_review` to `{ enabled: true }` (and after #202 ships the engine).
-3. To roll back the app, set `dynamic_review` to `{ enabled: false }` **first** and wait for the
-   waiting jobs to drain, so no Dynamic row exists when an older app instance starts serving claims.
+3. To roll back, keep every app instance on this gate-aware version while calling the instance
+   settings repository's `set("dynamic_review", { enabled: false }, operatorId)`. Wait for the
+   transaction to commit: it waits for in-flight enabled enqueues, cancels queued Dynamic jobs and
+   fails running Dynamic jobs with `dynamic_review_disabled`. Their lease tokens are fenced; a late
+   heartbeat, release, completion or lease expiry cannot requeue them.
+4. Confirm there are **zero Dynamic jobs in `queued` or `running` status** on the shared database.
+   Only after that boundary may an older app instance start serving claims. Keep the setting off
+   throughout rollback; retain the forward migration and historical Dynamic rows.
 
-The gate is read inside the enqueue transaction, so enabling/disabling it and queueing serialize.
+Enqueue holds a shared transaction advisory lock before reading the gate on PostgreSQL; setting
+writes and removal hold the same lock exclusively through the drain. The lock also covers a missing
+setting row. SQLite uses its immediate transaction write lock. Removing the setting is equivalent
+to disabling it. Use the repository setter, not a raw SQL setting update, which would bypass the
+lock and drain. The stored setting has no UI, API route or CLI; #202 owns the operator control and
+activation instructions. It must remain off until #202's real runner checks ship.
 
 The meaning of the calls (status codes, the lease, what happens on failure) is in
 `app/src/runner-api/README.md`.

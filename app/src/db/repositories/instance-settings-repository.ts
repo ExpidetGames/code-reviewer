@@ -5,6 +5,7 @@
 // setup markers live here (see src/setup/README.md); the typed service and the admin portal build
 // on this table.
 import "server-only";
+import { lockDynamicReviewGate } from "../dynamic-review-lock.ts";
 import type { Kysely } from "kysely";
 import { decodeJson, encodeJson, formatTimestamp } from "../codecs.ts";
 import type { StoredGithubApp } from "../../github-config/settings.ts";
@@ -93,6 +94,38 @@ export function createInstanceSettingsRepository(
   db: Kysely<Database>,
   now: () => Date = () => new Date(),
 ): InstanceSettingsRepository {
+  async function changeGate<T>(
+    key: InstanceSettingKey,
+    disabling: boolean,
+    change: (executor: Kysely<Database>) => Promise<T>,
+  ): Promise<T> {
+    if (key !== "dynamic_review") return change(db);
+    const run = async (trx: Kysely<Database>) => {
+      await lockDynamicReviewGate(trx, true);
+      const result = await change(trx);
+      if (!disabling) return result;
+      const timestamp = formatTimestamp(now());
+      // Fence every live Dynamic row before rollback is safe, including a holder that may release
+      // or lose its lease later. Retain its token so a late completion remains fenced.
+      for (const status of ["queued", "running"] as const) {
+        await trx
+          .updateTable("jobs")
+          .set({
+            status: status === "running" ? "failed" : "cancelled",
+            error_code: "dynamic_review_disabled",
+            lease_expires_at: null,
+            finished_at: timestamp,
+            updated_at: timestamp,
+          })
+          .where("review_kind", "=", "dynamic")
+          .where("status", "=", status)
+          .execute();
+      }
+      return result;
+    };
+    return db.isTransaction ? run(db) : db.transaction().execute(run);
+  }
+
   return {
     async get(key) {
       const row = await db
@@ -119,11 +152,13 @@ export function createInstanceSettingsRepository(
     },
 
     async remove(key) {
-      const result = await db
-        .deleteFrom("instance_settings")
-        .where("key", "=", key)
-        .executeTakeFirst();
-      return Number(result.numDeletedRows) > 0;
+      return changeGate(key, true, async (executor) => {
+        const result = await executor
+          .deleteFrom("instance_settings")
+          .where("key", "=", key)
+          .executeTakeFirst();
+        return Number(result.numDeletedRows) > 0;
+      });
     },
 
     async set(key, value, updatedBy) {
@@ -133,17 +168,24 @@ export function createInstanceSettingsRepository(
         updated_by: updatedBy,
         updated_at: formatTimestamp(now()),
       };
-      await db
-        .insertInto("instance_settings")
-        .values(row)
-        .onConflict((conflict) =>
-          conflict.column("key").doUpdateSet({
-            value: row.value,
-            updated_by: row.updated_by,
-            updated_at: row.updated_at,
-          }),
-        )
-        .execute();
+      await changeGate(
+        key,
+        key === "dynamic_review" &&
+          !(value as InstanceSettingValues["dynamic_review"]).enabled,
+        async (executor) => {
+          await executor
+            .insertInto("instance_settings")
+            .values(row)
+            .onConflict((conflict) =>
+              conflict.column("key").doUpdateSet({
+                value: row.value,
+                updated_by: row.updated_by,
+                updated_at: row.updated_at,
+              }),
+            )
+            .execute();
+        },
+      );
     },
   };
 }

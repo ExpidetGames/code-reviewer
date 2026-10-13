@@ -11,6 +11,7 @@
 // With the gate off, a Dynamic project still gets a run, and that run fails visibly with
 // `dynamic_review_disabled` instead of silently reviewing as Diff. The gate is read in the enqueue
 // transaction, so enabling/disabling it and queueing serialize.
+import { lockDynamicReviewGate } from "../db/dynamic-review-lock.ts";
 import type { Kysely } from "kysely";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import type { Database } from "../db/schema.ts";
@@ -30,6 +31,7 @@ export type DynamicReviewGate = (
  */
 export function createInstanceDynamicReviewGate(): DynamicReviewGate {
   return async (executor) => {
+    await lockDynamicReviewGate(executor, false);
     const value = await createInstanceSettingsRepository(executor).get(
       DYNAMIC_REVIEW_SETTING_KEY,
     );

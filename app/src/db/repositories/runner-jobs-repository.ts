@@ -292,7 +292,10 @@ export function createRunnerJobsRepository(
       })
       .where("status", "=", "queued")
       .where("review_kind", "=", "dynamic")
+      // A claimed job follows the lease/attempt policy, never this initial capability deadline.
+      .where("attempts", "=", 0)
       .where("created_at", "<=", strandedBefore)
+      .where("run_after", "<=", strandedBefore)
       .executeTakeFirst();
     return Number(result.numUpdatedRows);
   }

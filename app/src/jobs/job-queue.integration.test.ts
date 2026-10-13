@@ -6,6 +6,7 @@
 // job-queue-concurrency.integration.test.ts.
 import { sql } from "kysely";
 import { describe, expect, it } from "vitest";
+import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import { SLOT_HOLDING_STATUSES } from "./job-status.ts";
 import { JobQueueError } from "./errors.ts";
 import { DEFAULT_NO_CAPABLE_RUNNER_MS } from "./job-limits.ts";
@@ -1776,3 +1777,101 @@ describe("resolving the review kind inside the enqueue transaction (#195)", () =
     );
   });
 });
+
+// #195-T04: rollback fences both waiting and running work before an old app can start.
+it.each(["disable", "remove"] as const)(
+  "%s of the Dynamic gate drains waiting and running jobs and prevents lease requeue",
+  async (action) => {
+    const fixture = await createJobQueueFixture();
+    const settings = createInstanceSettingsRepository(
+      fixture.db,
+      fixture.clock.now,
+    );
+    await settings.set("dynamic_review", { enabled: true }, null);
+    const running = await fixture.enqueueNew({ reviewKind: "dynamic" });
+    const claim = await fixture.queue.claimNext("runner", ["opencode"]);
+    expect(claim?.job.id).toBe(running.id);
+    const waiting = await fixture.enqueueNew({
+      prNumber: 8,
+      reviewKind: "dynamic",
+    });
+    if (action === "remove")
+      expect(await settings.remove("dynamic_review")).toBe(true);
+    else await settings.set("dynamic_review", { enabled: false }, null);
+    expect(await fixture.queue.get(waiting.id)).toMatchObject({
+      status: "cancelled",
+      errorCode: "dynamic_review_disabled",
+    });
+    expect(await fixture.queue.get(running.id)).toMatchObject({
+      status: "failed",
+      errorCode: "dynamic_review_disabled",
+    });
+    fixture.clock.advance(60 * MINUTE);
+    await fixture.queue.expireStaleJobs();
+    expect(
+      await fixture.queue.release(
+        running.id,
+        claim!.leaseToken,
+        "runner_shutdown",
+      ),
+    ).toMatchObject({ status: "not_holder" });
+    const { rows } = await sql<{
+      count: number;
+    }>`select count(*) as count from jobs where review_kind = 'dynamic' and status in ('queued', 'running')`.execute(
+      fixture.db,
+    );
+    expect(rows[0]?.count).toBe(0);
+    expect(
+      await fixture.enqueueNew({ prNumber: 9, reviewKind: "dynamic" }),
+    ).toMatchObject({ status: "failed", errorCode: "dynamic_review_disabled" });
+  },
+);
+
+// #195-T01: the deadline starts at eligibility, not creation.
+it("does not expire a scheduled Dynamic job before its eligible waiting deadline", async () => {
+  const fixture = await createJobQueueFixture({ dynamicReview: true });
+  const runAfter = new Date(T0.getTime() + 45 * MINUTE);
+  const job = await fixture.enqueueNew({ reviewKind: "dynamic", runAfter });
+  fixture.clock.advance(30 * MINUTE);
+  expect((await fixture.queue.expireStaleJobs()).noCapableRunner).toBe(0);
+  fixture.clock.set(
+    new Date(runAfter.getTime() + DEFAULT_NO_CAPABLE_RUNNER_MS - 1),
+  );
+  expect((await fixture.queue.expireStaleJobs()).noCapableRunner).toBe(0);
+  expect(await fixture.queue.get(job.id)).toMatchObject({ status: "queued" });
+  fixture.clock.advance(1);
+  expect((await fixture.queue.expireStaleJobs()).noCapableRunner).toBe(1);
+});
+
+// #195-T01: losing a claimed lease follows the retry policy, independently of polling order.
+it.each([false, true])(
+  "preserves Dynamic lease retries when a legacy runner polls first: %s",
+  async (legacyFirst) => {
+    const fixture = await createJobQueueFixture({ dynamicReview: true });
+    const job = await fixture.enqueueNew({ reviewKind: "dynamic" });
+    fixture.clock.advance(29 * MINUTE);
+    expect(
+      (await fixture.queue.claimNext("capable", ["opencode"]))?.job.id,
+    ).toBe(job.id);
+    fixture.clock.advance(2 * MINUTE);
+    if (legacyFirst) expect(await fixture.queue.claimNext("legacy")).toBeNull();
+    const retry = await fixture.queue.claimNext("capable", ["opencode"]);
+    expect(retry?.job).toMatchObject({ id: job.id, attempts: 1 });
+    expect(
+      (
+        await fixture.queue.release(
+          job.id,
+          retry!.leaseToken,
+          "runner_shutdown",
+          { retryAt: new Date(fixture.clock.now().getTime() + 45 * MINUTE) },
+        )
+      ).status,
+    ).toBe("requeued");
+    fixture.clock.advance(30 * MINUTE);
+    expect((await fixture.queue.expireStaleJobs()).noCapableRunner).toBe(0);
+    fixture.clock.advance(15 * MINUTE);
+    expect(
+      (await fixture.queue.claimNext("capable", ["opencode"]))?.job,
+    ).toMatchObject({ id: job.id, attempts: 2 });
+  },
+);

@@ -44,15 +44,22 @@ the code a runner reported).
 
 A job is queued for exactly one review kind, `diff` (PR-Agent) or `dynamic` (the read-only agent of
 the epic), stored in `jobs.review_kind`. It is resolved when the job is enqueued, from the project's
-stored settings, **inside the enqueue transaction** (`review-kind.ts`): the settings write and the
-enqueue take the same write lock, so a concurrent kind change can never leave a stale-kind job
-waiting. A producer never passes a kind; a repository without a project row is Diff.
+stored settings, **inside the enqueue transaction** (`review-kind.ts`). Before resolving the kind,
+`jobs-repository.ts` locks the workspace-scoped repository row, the same row settings saves lock
+with `FOR UPDATE` on PostgreSQL (including before the first project row exists). SQLite uses its
+immediate transaction write lock. Both retain the lock through commit, so a concurrent kind change
+can never leave a stale-kind job waiting. A producer never passes a kind; a repository without a project row is Diff.
 
 The rollout gate: Dynamic Review is only **queued** when the instance setting `dynamic_review` says
 `{ enabled: true }` (`dynamic-review-gate.ts`), default off until #202 ships. With the gate off, a
 Dynamic project still gets a run, and that run is created `failed` with `dynamic_review_disabled` —
 visible in Runs, never a silent Diff review and never a Dynamic row a previous-release app could
-claim. See `contracts/README.md` for the upgrade/rollback order.
+claim. Gate reads hold a shared PostgreSQL transaction advisory lock; gate writes/removal take it
+exclusively, including when the setting has no row. Disabling atomically cancels queued Dynamic work
+and fails running Dynamic work with `dynamic_review_disabled`, fencing later lease retries. Use the
+instance settings repository setter; a raw SQL update bypasses this boundary. There is no UI or CLI
+for this stored instance setting; #202 owns those controls. See `contracts/README.md` for the
+upgrade/rollback order.
 
 The kind widens what the queue treats as "the same job": the automatic per-head uniqueness, the
 comment/manual duplicate check and supersession all include it, so a Diff job and a Dynamic job of one
@@ -65,7 +72,10 @@ never selected — it keeps waiting without an attempt being counted and without
 created. Because every production runner advertises only `pr-agent` until #202, such a job is
 **cancelled** after `noCapableRunnerMs` (default 30 minutes, `RUNNER_NO_CAPABLE_TIMEOUT_SECONDS`) with
 the stable code `no_capable_runner`. That is the one exception to "waiting forever": it is a bounded
-outcome, not a failed review, and no attempt is counted.
+outcome, not a failed review, and no attempt is counted. This initial-claim deadline starts at the
+later of creation and `run_after`, so a scheduled delay does not consume the waiting budget. Jobs
+already claimed (`attempts > 0` after lease loss/release) follow the existing lease/attempt/backoff
+policy instead, independently of which runner polls first.
 
 When the project's review kind changes, #194's `ReviewSettingsHooks.onProjectSettingsChanged` calls
 `cancelWaitingForReviewKindChange` in the settings transaction: the project's waiting jobs become

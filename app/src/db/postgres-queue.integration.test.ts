@@ -7,6 +7,15 @@
 import { randomUUID } from "node:crypto";
 import { sql, type Kysely } from "kysely";
 import { describe, expect, it } from "vitest";
+import { createJobQueue } from "../jobs/job-queue.ts";
+import { createStoredReviewKindResolver } from "../jobs/review-kind.ts";
+import { createInstanceDynamicReviewGate } from "../jobs/dynamic-review-gate.ts";
+import { createInstanceSettingsRepository } from "./repositories/instance-settings-repository.ts";
+import { createProjectsRepository } from "./repositories/projects-repository.ts";
+import { createAppSettingsRepository } from "./repositories/app-settings-repository.ts";
+import { createJobReviewSettingsHooks } from "../jobs/review-settings-hooks.ts";
+import { createReviewSettingsService } from "../review-settings/service.ts";
+import { builtInReviewSettings } from "../review-settings/settings.ts";
 import { createRunnerQueue } from "../jobs/runner-queue.ts";
 import type { Database } from "./schema.ts";
 import { createJobQueueFixture, sha } from "../test-support/jobs.ts";
@@ -37,6 +46,7 @@ async function waitForLockWait(
   db: Kysely<Database>,
   name: string,
   timeoutMs = 5000,
+  holderName?: string,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -45,7 +55,18 @@ async function waitForLockWait(
       where application_name = ${name} and wait_event_type = 'Lock'`.execute(
       db,
     );
-    if ((rows[0]?.count ?? 0) > 0) return;
+    if ((rows[0]?.count ?? 0) > 0) {
+      if (holderName !== undefined) {
+        const { rows: holders } = await sql<{ application_name: string }>`
+          select holder.application_name from pg_stat_activity waiter
+          join pg_stat_activity holder on holder.pid = any(pg_blocking_pids(waiter.pid))
+          where waiter.application_name = ${name}`.execute(db);
+        expect(holders.map((row) => row.application_name)).toEqual([
+          holderName,
+        ]);
+      }
+      return;
+    }
     if (Date.now() >= deadline)
       throw new Error(`Backend ${name} never waited on a lock.`);
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -254,19 +275,20 @@ describePostgres("the job queue on Postgres", () => {
       database: postgres.db,
       dynamicReview: true,
     });
-    await fixture.enqueueNew({
+    const dynamic = await fixture.enqueueNew({
       prNumber: 7,
       headSha: sha("a"),
       reviewKind: "dynamic",
     });
     fixture.clock.advance(1000);
-    await fixture.enqueueNew({
+    const diff = await fixture.enqueueNew({
       prNumber: 7,
       headSha: sha("b"),
       reviewKind: "diff",
     });
     fixture.clock.advance(1000);
-    await fixture.enqueueNew({
+    const other = await fixture.enqueueNew({
+      repositoryId: fixture.otherRepositoryId,
       prNumber: 8,
       headSha: sha("c"),
       reviewKind: "diff",
@@ -279,6 +301,12 @@ describePostgres("the job queue on Postgres", () => {
     const ids = [one?.job.id, two?.job.id].filter(
       (id): id is string => id !== undefined,
     );
+    expect(ids).toHaveLength(2);
+    expect(ids).toContain(other.id);
+    expect(
+      ids.filter((id) => id === dynamic.id || id === diff.id),
+    ).toHaveLength(1);
+    expect(one?.job.reviewKind).toBe("diff");
     expect(new Set(ids).size).toBe(ids.length);
 
     const running = await postgres.db
@@ -288,6 +316,236 @@ describePostgres("the job queue on Postgres", () => {
       .where("pr_number", "=", 7)
       .where("status", "=", "running")
       .execute();
-    expect(running.length).toBeLessThanOrEqual(1);
+    expect(running).toHaveLength(1);
+    for (const claim of [one, two]) {
+      expect(claim).not.toBeNull();
+      expect(
+        await fixture.queue.complete(claim!.job.id, claim!.leaseToken, {
+          ok: true,
+          result: {},
+        }),
+      ).toMatchObject({ status: "completed" });
+    }
+    const next = await fixture.queue.claimNext("runner-next", [
+      "pr-agent",
+      "opencode",
+    ]);
+    expect(next?.job.id).toBe(ids.includes(dynamic.id) ? diff.id : dynamic.id);
+    expect(
+      await fixture.queue.complete(next!.job.id, next!.leaseToken, {
+        ok: true,
+        result: {},
+      }),
+    ).toMatchObject({ status: "completed" });
+  });
+  // #195-T04: PostgreSQL must hold the settings lock from kind resolution through insertion.
+  it.each(["webhook", "manual", "comment"] as const)(
+    "serializes a %s enqueue with a kind change",
+    async (triggerKind) => {
+      const postgres = await createPostgresTestDatabase();
+      const fixture = await createJobQueueFixture({
+        database: postgres.db,
+        dynamicReview: true,
+      });
+      const writer = connectPostgres(
+        withApplicationName(postgres.url, "cr_kind_writer"),
+      );
+      const projects = createProjectsRepository(
+        writer.db,
+        fixture.workspaceId,
+        fixture.clock.now,
+      );
+      await projects.activate(fixture.repositoryId);
+      const service = createReviewSettingsService({
+        appSettings: createAppSettingsRepository(
+          writer.db,
+          fixture.workspaceId,
+        ),
+        projects,
+        builtIn: () => builtInReviewSettings("test/model"),
+        hooks: createJobReviewSettingsHooks(fixture.workspaceId),
+      });
+      let resume!: () => void;
+      let read!: () => void;
+      const paused = new Promise<void>((resolve) => {
+        resume = resolve;
+      });
+      const reached = new Promise<void>((resolve) => {
+        read = resolve;
+      });
+      const enqueuer = connectPostgres(
+        withApplicationName(postgres.url, "cr_kind_enqueue"),
+      );
+      const resolver = createStoredReviewKindResolver(fixture.workspaceId);
+      const queue = createJobQueue(enqueuer.db, fixture.workspaceId, {
+        now: fixture.clock.now,
+        reviewKind: async (trx, id) => {
+          const kind = await resolver(trx, id);
+          read();
+          await paused;
+          return kind;
+        },
+      });
+      const enqueue = queue.enqueue({
+        repositoryId: fixture.repositoryId,
+        prNumber: 7,
+        prUrl: "https://github.test/acme/widgets/pull/7",
+        headSha: sha("a"),
+        command: "review",
+        triggerKind,
+        actorLogin: "octocat",
+      });
+      await Promise.race([
+        reached,
+        enqueue.then(() => {
+          throw new Error("Enqueue did not reach the paused read.");
+        }),
+      ]);
+      const change = service.updateProjectSettings(fixture.repositoryId, {
+        reviewKind: "dynamic",
+      });
+      try {
+        await waitForLockWait(
+          postgres.db,
+          "cr_kind_writer",
+          5000,
+          "cr_kind_enqueue",
+        );
+      } finally {
+        resume();
+        await enqueue;
+        await change;
+      }
+      const result = await enqueue;
+      expect(await queue.get(result.job.id)).toMatchObject({
+        status: "cancelled",
+        errorCode: "review_kind_changed",
+      });
+    },
+  );
+
+  // #195-T04: disabling must wait for an enqueue that already read the enabled gate, then fence it.
+  it.each([true, false])(
+    "serializes gate disable with an in-flight Dynamic enqueue when a saved enabled gate exists: %s",
+    async (savedGate) => {
+      const postgres = await createPostgresTestDatabase();
+      const fixture = await createJobQueueFixture({ database: postgres.db });
+      const settings = createInstanceSettingsRepository(
+        postgres.db,
+        fixture.clock.now,
+      );
+      if (savedGate)
+        await settings.set("dynamic_review", { enabled: true }, null);
+      const writer = connectPostgres(
+        withApplicationName(postgres.url, "cr_gate_writer"),
+      );
+      let resume!: () => void;
+      let read!: () => void;
+      const paused = new Promise<void>((resolve) => {
+        resume = resolve;
+      });
+      const reached = new Promise<void>((resolve) => {
+        read = resolve;
+      });
+      const enqueuer = connectPostgres(
+        withApplicationName(postgres.url, "cr_gate_enqueue"),
+      );
+      const gate = createInstanceDynamicReviewGate();
+      const queue = createJobQueue(enqueuer.db, fixture.workspaceId, {
+        now: fixture.clock.now,
+        dynamicReviewEnabled: async (trx) => {
+          const enabled = await gate(trx);
+          read();
+          await paused;
+          return enabled;
+        },
+      });
+      const enqueue = queue.enqueue({
+        repositoryId: fixture.repositoryId,
+        prNumber: 7,
+        prUrl: "https://github.test/acme/widgets/pull/7",
+        headSha: sha("a"),
+        reviewKind: "dynamic",
+        command: "review",
+        triggerKind: "manual",
+        actorLogin: "octocat",
+      });
+      await Promise.race([
+        reached,
+        enqueue.then(() => {
+          throw new Error("Enqueue did not reach the paused read.");
+        }),
+      ]);
+      const disable = createInstanceSettingsRepository(
+        writer.db,
+        fixture.clock.now,
+      ).set("dynamic_review", { enabled: false }, null);
+      try {
+        await waitForLockWait(
+          postgres.db,
+          "cr_gate_writer",
+          5000,
+          "cr_gate_enqueue",
+        );
+      } finally {
+        resume();
+        await enqueue;
+        await disable;
+      }
+      expect(await queue.get((await enqueue).job.id)).toMatchObject({
+        status: savedGate ? "cancelled" : "failed",
+        errorCode: "dynamic_review_disabled",
+      });
+    },
+  );
+  // #195-T04: PostgreSQL rollback must leave no live Dynamic row an older app could reclaim.
+  it("fences running Dynamic work on PostgreSQL before a rollback", async () => {
+    const postgres = await createPostgresTestDatabase();
+    const fixture = await createJobQueueFixture({ database: postgres.db });
+    const settings = createInstanceSettingsRepository(
+      postgres.db,
+      fixture.clock.now,
+    );
+    await settings.set("dynamic_review", { enabled: true }, null);
+    const running = await fixture.enqueueNew({ reviewKind: "dynamic" });
+    const claim = await fixture.queue.claimNext("runner", ["opencode"]);
+    expect(claim?.job.id).toBe(running.id);
+    const waiting = await fixture.enqueueNew({
+      reviewKind: "dynamic",
+      prNumber: 8,
+    });
+    await settings.set("dynamic_review", { enabled: false }, null);
+    fixture.clock.advance(60 * 60 * 1000);
+    expect((await fixture.queue.expireStaleJobs()).requeued).toBe(0);
+    expect(await fixture.queue.get(running.id)).toMatchObject({
+      status: "failed",
+      errorCode: "dynamic_review_disabled",
+    });
+    expect(await fixture.queue.get(waiting.id)).toMatchObject({
+      status: "cancelled",
+      errorCode: "dynamic_review_disabled",
+    });
+    expect(
+      await fixture.queue.release(
+        running.id,
+        claim!.leaseToken,
+        "runner_shutdown",
+      ),
+    ).toMatchObject({ status: "not_holder" });
+    expect(
+      await fixture.queue.heartbeat(running.id, claim!.leaseToken),
+    ).toMatchObject({ status: "not_holder" });
+    expect(
+      await fixture.queue.complete(running.id, claim!.leaseToken, {
+        ok: true,
+        result: {},
+      }),
+    ).toMatchObject({ status: "outcome_conflict" });
+    const { rows } = await sql<{
+      count: number;
+    }>`select count(*)::int as count from jobs where review_kind = 'dynamic' and status in ('queued', 'running')`.execute(
+      postgres.db,
+    );
+    expect(rows[0]?.count).toBe(0);
   });
 });

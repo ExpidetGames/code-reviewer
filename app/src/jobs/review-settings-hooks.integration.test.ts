@@ -97,6 +97,15 @@ describe("cancelling waiting reviews when the review kind changes", () => {
       async onProjectSettingsChanged(event, executor) {
         // Cancel the waiting jobs (the real work), then fail: both must roll back together.
         await real.onProjectSettingsChanged(event, executor);
+        // Prove the real cancellation happened, through the same transaction, before the failure.
+        expect(
+          await executor
+            .selectFrom("jobs")
+            .select(["status", "error_code"])
+            .where("workspace_id", "=", fixture.workspaceId)
+            .where("id", "=", waiting.id)
+            .executeTakeFirstOrThrow(),
+        ).toEqual({ status: "cancelled", error_code: "review_kind_changed" });
         throw new Error("the settings save failed");
       },
     });
@@ -116,6 +125,16 @@ describe("cancelling waiting reviews when the review kind changes", () => {
     expect(await fixture.queue.get(running.id)).toMatchObject({
       status: "running",
     });
+
+    // The restored waiting job makes progress too.
+    const next = await fixture.queue.claimNext("runner-b", ["opencode"]);
+    expect(next?.job.id).toBe(waiting.id);
+    expect(
+      await fixture.queue.complete(waiting.id, next!.leaseToken, {
+        ok: true,
+        result: {},
+      }),
+    ).toMatchObject({ status: "completed" });
 
     // The preserved running job can still be completed.
     const token = await fixture.tokenOf(running.id);

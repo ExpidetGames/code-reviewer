@@ -2,9 +2,9 @@
 
 // #195: the one resolver of a job's review kind, run **inside the enqueue transaction**. A job's kind
 // is decided when it is enqueued, from the project's stored settings, and never again. Resolving it
-// inside the same transaction as the insert (and reading the settings table through the executor) is
-// what makes the read atomic against a settings change: the settings write and the enqueue take the
-// same write lock, so a job can never be queued for a kind the project just left (the producer cannot
+// inside the same transaction as the insert, after jobs-repository locks the repository row,
+// makes the read atomic against a settings change: the settings write and the enqueue take the
+// same lock, so a job can never be queued for a kind the project just left (the producer cannot
 // read Diff, lose the race to a settings change, and then insert a stale Diff job).
 import type { Kysely } from "kysely";
 import { createProjectsRepository } from "../db/repositories/projects-repository.ts";
