@@ -21,6 +21,10 @@ jobs running. It is configured by environment variables:
 | `RUNNER_SHUTDOWN_GRACE_SECONDS` | How long running jobs may finish after `SIGTERM` | 60 |
 | `RUNNER_ID` | Free-form id sent as `X-Runner-Id` (bookkeeping only) | `runner-<hostname>` |
 | `PR_AGENT_COMMAND` | The command that runs one job, split like a shell would. Only for test stacks that replace PR-Agent with a fake | `python -m code_reviewer_runner.runner` |
+| `RUNNER_OPENCODE_COMMAND` | #197: the pinned stock engine that runs one Dynamic job, split like a shell would (the adapter appends `serve --hostname 127.0.0.1 --port <job port>`). Unset means a Dynamic job is refused with `dynamic_engine_unavailable`; never falls back to PR-Agent | unset |
+| `RUNNER_DYNAMIC_CHECKOUT` | #197: the prepared read-only export of the PR head (#196) the engine may read. Unset means the run ends with `checkout_incomplete` | unset |
+| `RUNNER_DYNAMIC_CAPABILITIES` | #197: trusted JSON descriptor of the selected model/destination: `{"tool_choice_required": true, "structured_output": true, "max_output_tokens": 8192}`. Operator-owned; unset or without a required feature means `dynamic_model_features_unsupported`, no fallback | unset |
+| `RUNNER_DYNAMIC_NODE_BIN` | #197: directory of the Node runtime the engine needs, if it is not on the runner's own `PATH` | unset |
 
 Rules (the CR-29 decisions; tests in `tests/unit/test_job_loop*.py` and `tests/integration/test_job_loop*.py`):
 
@@ -91,9 +95,12 @@ The job is JSON on stdin (the shape is documented in `src/code_reviewer_runner/j
 | `env` | optional options of the PR-Agent tools, as strings; one option per key (`PR_REVIEWER__NUM_MAX_FINDINGS`, never a second `__`). The app sends only `PR_REVIEWER__*`; the removed tools' families (`PR_DESCRIPTION__*`, `PR_CODE_SUGGESTIONS__*`, `PR_QUESTIONS__*`) are accepted for v1 compatibility and ignored. Nothing else is accepted. See "Settings policy" for how the values are read. |
 | `reviewKind`, `dynamic`, `base` | #195: a tagged **Dynamic** job. Absent means a Diff job (the legacy shape). `dynamic` is a closed object `{ model, skill, limits: { maxFindings } }` — model/skill/limits only, the skill is literal data and no field can add a command, a core override, a permission or an endpoint. `base` is `{ repository, baseRef, headSha, previousReviewedSha, comparison }`, the checkout facts; `comparison` is a declared mode, not proof of completeness. The skill is untrusted project data, bounded to 16 KiB of UTF-8 bytes; the runner composes it after its own fixed core (see "Dynamic Review prompts"). |
 
-A Dynamic job is never run by PR-Agent: this stage has no engine yet, so `main` refuses it with the
-stable code `dynamic_engine_unavailable` before any process starts (#197 adds the engine). A Diff job
-is unchanged. An unknown kind, a Dynamic job without its `dynamic`/`base` fields, or a Diff job that
+A Dynamic job is never run by PR-Agent. `main` dispatches on `reviewKind` before the process
+environment is touched or a process starts: an absent or `diff` kind keeps the PR-Agent path, and a
+`dynamic` kind goes to the stock engine (#197, see "Dynamic Review engine"). A Dynamic job without a
+configured engine, without a prepared checkout or with an unusable model capability descriptor is
+refused with its stable code; the runner never falls back to PR-Agent or to Diff Review. A Diff job is
+unchanged. An unknown kind, a Dynamic job without its `dynamic`/`base` fields, or a Diff job that
 carries Dynamic options is an `invalid_job`.
 
 `llm.maxTokens` (integer, 1000 to 10,000,000) is the context window the runner gives PR-Agent. It
@@ -150,6 +157,42 @@ through repository instructions or skill discovery:
 
 The engine that runs the model with this prompt is #197's; #198 ships the assets, the composition and
 their validation.
+
+## Dynamic Review engine (#197)
+
+One stock `anomalyco/opencode` headless server per job, driven over the pinned local HTTP API. The
+runner never patches the engine, never installs a plugin and never reads its internals; it hardens the
+input and the boundaries around it (the epic's binding decision). Modules:
+
+- `dynamic_review/config.py` generates the trusted engine config and the closed environment: a
+  default-deny `permission` block that allows only `read` (which also supplies directory listing in
+  this pin), `grep`, `glob` and the non-filesystem `StructuredOutput`, one loopback provider (the
+  proxy) and the discovery/runtime services switched off. The fixed core (#198) is the runner-defined
+  `review` agent's prompt, so it reaches the model through the trusted channel. The flags are defence
+  in depth, not a security boundary: #196 strips the discovery inputs from the export.
+- `dynamic_review/limits.py` is the epic's hard envelope (600 s, 30 model calls, 120,000 tokens, 200
+  tool calls, 100 files, 64 KiB per result, 4 MiB cumulative content) as a ledger shared by the proxy
+  and the adapter. Every call is reserved before it is sent, every tool part is counted, and a missing
+  or oversized answer fails closed. The token reservation uses UTF-8 bytes as a proven upper bound on
+  BPE tokens; a verified DeepSeek tokenizer may tighten it later without weakening the envelope.
+- `dynamic_review/proxy.py` is the per-job model proxy on loopback. It holds the workspace credential,
+  forwards only `POST <base>/chat/completions` (and answers `GET <base>/models` from the trusted
+  config), refuses every other path, redirect and query, refuses a model or endpoint override, checks
+  the protocol byte bounds both ways, validates the destination's required features and takes usage
+  from the provider as authoritative. `steps` and events are never trusted for enforcement.
+- `dynamic_review/adapter.py` starts the engine in its own process group on a private loopback port,
+  waits for a healthy pinned server, opens one session, sends the untrusted input as one structured
+  turn, counts the tool parts and validates the answer with the typed findings parser
+  (`dynamic_findings.py`). The reviewed head comes from the validated claim (`base.headSha`), never from
+  repository content. On any limit, engine exit or unusable answer the whole process group is killed
+  and the private scratch removed; `shutdown_engines()` is also called by the entry point's watchdog so
+  a timed-out run leaks nothing.
+
+The answer's schema is the packaged copy of `contracts/dynamic-review/schema.v1.json`
+(`dynamic_review/findings-schema.v1.json`), sent as the engine's `format`, and validated again by
+`parse_dynamic_findings`. Publication of the findings (#199) and the real pinned-engine suite with its
+isolation probes (#202; the rest of #197) follow; until then the engine is not advertised
+(`capabilities.py` stays fail-closed) and `opencode` never claims a Dynamic job.
 
 ## Where the result comes from
 
