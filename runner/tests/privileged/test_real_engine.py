@@ -69,11 +69,12 @@ def plugin(sentinel: Path) -> bytes:
 
 # #197-T04 #197-T09
 def test_the_real_engine_reviews_as_the_dedicated_user_and_leaves_nothing_behind(
-    tmp_path: Path, job_dir: Path, engine_binary: Path
+    tmp_path: Path, job_dir: Path, engine_binary: Path, request: pytest.FixtureRequest
 ) -> None:
-    sentinels = tmp_path / "sentinels"
-    sentinels.mkdir()
-    sentinels.chmod(0o777)  # even where the engine user could write, a plugin must not run
+    # Even where the engine user can write, a plugin must not run: a directory it can reach.
+    sentinels = Path(tempfile.mkdtemp(prefix="cr-sentinels-"))
+    sentinels.chmod(0o777)
+    request.addfinalizer(lambda: shutil.rmtree(sentinels, ignore_errors=True))
     repo = Repo(
         tmp_path / "base.git",
         {

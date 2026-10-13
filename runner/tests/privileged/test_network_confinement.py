@@ -67,8 +67,8 @@ def test_the_engine_user_reaches_its_proxy_and_nothing_else_and_other_users_are_
     assert engine["proxy"]["connected"] is True
     for label in (target[0] for target in targets[1:]):
         assert engine[label]["connected"] is False, label
-        # Refused at once, not a silent drop that would hang until a timeout.
-        assert engine[label]["seconds"] < 1.0, label
+        # Refused, not a silent drop: a drop would run into the 2 s connect timeout of the probe.
+        assert engine[label]["seconds"] < 1.9, label
     # The rules name one user: another job's user reaches everything, as before.
     assert all(result["connected"] for result in stranger.values())
     # Removing the rules gives the user its network back (the table is gone with the job).

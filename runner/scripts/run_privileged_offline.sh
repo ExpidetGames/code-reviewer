@@ -29,6 +29,10 @@ sudo --preserve-env env "PATH=$PATH:/usr/sbin:/sbin" "HOME=$HOME" "OPENCODE_BIN=
   unshare --net -- bash -c '
     set -euo pipefail
     ip link set lo up
+    # A temporary root of its own: the engine suite that ran before as the unprivileged runner user
+    # left a pytest directory of that user in /tmp, which pytest refuses to share with root.
+    PYTEST_DEBUG_TEMPROOT="$(mktemp -d)"
+    export PYTEST_DEBUG_TEMPROOT
     for spec in 10101:cr-engine 10201:cr-stranger 10001:cr-job; do
       id="${spec%%:*}"
       name="${spec##*:}"
