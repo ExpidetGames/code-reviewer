@@ -35,6 +35,7 @@ import signal
 import socket
 import subprocess
 import tempfile
+import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -58,6 +59,7 @@ from code_reviewer_runner.dynamic_review.net import no_redirect_opener
 from code_reviewer_runner.dynamic_review.prompts import ReviewInputs, compose_user_prompt
 from code_reviewer_runner.job import Job
 from code_reviewer_runner.job_loop.jsonvalues import as_object
+from code_reviewer_runner.process_group import end_group, has_exited
 from code_reviewer_runner.result import ErrorCode
 
 # The engine's own report of its version; the adapter refuses anything else.
@@ -77,15 +79,20 @@ SESSION_TITLE = "code-reviewer-read-only-review"
 # The process groups of the engines this process started. An engine leads its own group (so ending
 # one job's engine never ends the runner), but then it must be ended explicitly: this registry is
 # what the entry point's watchdog kills when the job process itself has to exit (#197-T07).
+# A group id is only in the registry while its leader is not reaped (process_group.py), so the id
+# cannot have been given to an unrelated group; the lock keeps the watchdog thread from signalling
+# an id while it is taken off the registry.
 _RUNNING_ENGINES: set[int] = set()
+_ENGINES_LOCK = threading.Lock()
 
 
 def shutdown_engines() -> None:
     """End every engine process group this process started. Safe to call twice or with none."""
-    for pgid in list(_RUNNING_ENGINES):
-        with contextlib.suppress(ProcessLookupError, PermissionError):
-            os.killpg(pgid, signal.SIGKILL)
-    _RUNNING_ENGINES.clear()
+    with _ENGINES_LOCK:
+        for pgid in list(_RUNNING_ENGINES):
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.killpg(pgid, signal.SIGKILL)
+        _RUNNING_ENGINES.clear()
 
 
 class EngineError(Exception):
@@ -415,19 +422,12 @@ class DynamicEngine:
                 ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE, "the engine could not be started"
             ) from None
         self._process = process
-        _RUNNING_ENGINES.add(process.pid)
+        with _ENGINES_LOCK:
+            _RUNNING_ENGINES.add(process.pid)
 
     def _is_running(self) -> bool:
-        return self._process is not None and self._process.poll() is None
-
-    def _kill_group(self, sig: int) -> None:
-        process = self._process
-        if process is None:
-            return
-        try:
-            os.killpg(process.pid, sig)
-        except (ProcessLookupError, PermissionError):
-            return
+        # Looking must not reap the engine: while its group is alive its id has to stay ours.
+        return self._process is not None and not has_exited(self._process)
 
     def stop(self) -> None:
         """End the whole owned process group and remove the private scratch directory."""
@@ -437,17 +437,12 @@ class DynamicEngine:
     def _end_process(self) -> None:
         process = self._process
         if process is not None:
-            # The engine leads its own session, so its pid is its process group id.
-            _RUNNING_ENGINES.discard(process.pid)
-            self._kill_group(signal.SIGTERM)
-            try:
-                process.wait(timeout=5.0)
-            except subprocess.TimeoutExpired:
-                self._kill_group(signal.SIGKILL)
-                with contextlib.suppress(subprocess.TimeoutExpired):
-                    process.wait(timeout=5.0)
-            # A helper the engine started that ignored SIGTERM goes too: the group is ours.
-            self._kill_group(signal.SIGKILL)
+            # The engine leads its own session, so its pid is its process group id. Off the registry
+            # first (the watchdog then leaves it to us), then the group is ended and the leader
+            # reaped last, so the id is never signalled after it could belong to somebody else.
+            with _ENGINES_LOCK:
+                _RUNNING_ENGINES.discard(process.pid)
+            end_group(process)
         self._process = None
 
     # -- run ------------------------------------------------------------------

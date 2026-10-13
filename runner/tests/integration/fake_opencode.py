@@ -19,7 +19,8 @@ engine's own working directory, the export the runner gives it. Every key of the
       "messages_status": 200,      # 400 reproduces the pinned structured-message codec defect
       "messages": [ ... ],         # the session's messages, with tool parts
       "messages_body": ...,        # any JSON as the 200 list answer (a malformed list)
-      "spawn_helper": false        # leave a sleeping child in the engine's process group
+      "spawn_helper": false,       # leave a sleeping child in the engine's process group
+      "exit_early": false          # leave that child behind and exit before serving (#202)
     }
 
 The trace records the pid, the process environment, the helper pid, the proxy answers and the
@@ -216,6 +217,11 @@ def main(argv: list[str]) -> int:
             "scratch_mode": scratch_mode,
         }
     )
+    if bool(_script().get("exit_early", False)):
+        # The leader ends on its own while a helper keeps the process group alive.
+        helper = subprocess.Popen(["sleep", "60"])
+        _trace({"helper_pid": helper.pid})
+        return 0
     server = ThreadingHTTPServer((args.hostname, args.port), Handler)
     server.daemon_threads = True
     thread = threading.Thread(target=server.serve_forever, daemon=True)

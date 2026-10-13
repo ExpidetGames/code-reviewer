@@ -23,8 +23,13 @@ from typing import Any
 
 import pytest
 
+from code_reviewer_runner.dynamic_review import adapter as adapter_module
 from code_reviewer_runner.dynamic_review import findings_schema
-from code_reviewer_runner.dynamic_review.adapter import DynamicEngine, EngineAnswer
+from code_reviewer_runner.dynamic_review.adapter import (
+    DynamicEngine,
+    EngineAnswer,
+    shutdown_engines,
+)
 from code_reviewer_runner.dynamic_review.budget import BudgetLedger, DynamicLimits
 from code_reviewer_runner.dynamic_review.config import engine_environment, new_proxy_capability
 from code_reviewer_runner.dynamic_review.prompts import compose_system_prompt
@@ -239,6 +244,28 @@ class Fixture:
             return engine.run()
         finally:
             server.stop()
+
+
+def leader_is_unreaped(pid: int) -> bool:
+    """True while the process is still our child (running or a zombie), so its id is still ours."""
+    try:
+        os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+    except ChildProcessError:
+        return False
+    return True
+
+
+def watch_group_signals(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, bool]]:
+    """Record every process-group signal as (group id, whether the leader was still unreaped)."""
+    signals: list[tuple[int, bool]] = []
+    real_killpg = os.killpg
+
+    def killpg(pgid: int, sig: int) -> None:
+        signals.append((pgid, leader_is_unreaped(pgid)))
+        real_killpg(pgid, sig)
+
+    monkeypatch.setattr(adapter_module.os, "killpg", killpg)
+    return signals
 
 
 def process_is_gone(pid: int) -> bool:
@@ -696,3 +723,61 @@ def test_an_engine_that_never_gets_a_port_is_a_stable_error(tmp_path: Path) -> N
     assert not answer.ok
     assert answer.error is not None
     assert answer.error.code is ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE
+
+
+# #202 (process-group reuse)
+def test_the_engine_group_is_only_signalled_while_its_leader_is_not_reaped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    signals = watch_group_signals(monkeypatch)
+    fixture = Fixture(
+        tmp_path,
+        {"answer": "structured", "findings": findings(), "proxy_calls": 1, "spawn_helper": True},
+    )
+
+    with FakeUpstream() as upstream:
+        answer = fixture.run(upstream)
+
+    assert answer.ok
+    assert signals
+    # A reaped leader frees its id, which an unrelated process group could then reuse.
+    assert all(unreaped for _, unreaped in signals)
+    helper = next(entry["helper_pid"] for entry in fixture.traces() if "helper_pid" in entry)
+    assert process_is_gone(helper)
+
+
+# #202 (process-group reuse)
+def test_an_engine_that_exited_on_its_own_is_not_reaped_before_its_group_is_ended(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    signals = watch_group_signals(monkeypatch)
+    fixture = Fixture(tmp_path, {"exit_early": True})
+
+    with FakeUpstream() as upstream:
+        answer = fixture.run(upstream)
+
+    assert not answer.ok
+    assert answer.error is not None
+    assert answer.error.code is ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE
+    # Looking whether the engine is alive must not reap it: the helper left in its group keeps the
+    # group alive after the leader is gone, and the group is ended before the leader is reaped.
+    assert signals
+    assert all(unreaped for _, unreaped in signals)
+    helpers = [entry["helper_pid"] for entry in fixture.traces() if "helper_pid" in entry]
+    assert helpers
+    assert all(process_is_gone(helper) for helper in helpers)
+
+
+# #202 (process-group reuse)
+def test_the_shutdown_of_the_engines_never_signals_a_finished_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fixture = Fixture(tmp_path, {"answer": "structured", "findings": findings(), "proxy_calls": 1})
+    with FakeUpstream() as upstream:
+        assert fixture.run(upstream).ok
+    signals = watch_group_signals(monkeypatch)
+
+    shutdown_engines()
+
+    # The group id of the finished run may belong to somebody else by now: nothing is signalled.
+    assert signals == []
