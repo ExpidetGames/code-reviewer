@@ -231,8 +231,10 @@ input and the boundaries around it (the epic's binding decision). Modules:
   structured turn (bounded by the input byte limit) and validates the answer with the typed findings
   parser, bounded by the job's `maxFindings`, against the files the export really holds (a finding
   outside it is `checkout_incomplete`). While the message runs, a watch ends the run the moment the
-  proxy records a limit or a provider refusal (the stable code of the first cause is the result,
-  also if the engine still produced an answer), the whole-job deadline passes or the engine dies. The
+  proxy records a limit, a provider refusal or a transport failure to the provider (timeout →
+  `llm_timeout` with a 504, refused or reset connection → `llm_unavailable` with a 502; the
+  reservation stays spent; the stable code of the first cause is the result, also if the engine
+  still produced an answer), the whole-job deadline passes or the engine dies. The
   reviewed head comes from the validated claim (`base.headSha`), never from repository content. On any
   limit, engine exit or unusable answer the whole process group is killed and the private scratch
   removed. A group is only ever signalled while its leader is still unreaped (`process_group.py`: the
