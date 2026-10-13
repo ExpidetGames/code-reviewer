@@ -253,6 +253,39 @@ def test_the_call_budget_stops_the_run_at_the_proxy() -> None:
     assert len(upstream.requests) == 1
 
 
+# #231-T04
+def test_a_call_that_would_cross_the_token_cap_is_refused_before_the_provider_sees_it() -> None:
+    # The descriptor allows 4096 output tokens, so each call reserves its request plus 4096.
+    upstream = Upstream(body=answer_with_usage(prompt=100, completion=4096))
+    subject = proxy(upstream, ledger=BudgetLedger(DynamicLimits(max_total_tokens=5000)))
+
+    assert post(subject, request_body()).status == 200
+    second = post(subject, request_body())
+
+    # 4196 settled + the second request and its allowance is over 5000, with nothing in flight.
+    assert second.status == 403
+    assert error_code(second) == ErrorCode.DYNAMIC_BUDGET_EXCEEDED.value
+    assert len(upstream.requests) == 1
+    assert subject.ledger.model_calls == 1
+    assert subject.ledger.failure is not None
+
+
+# #231-T07
+def test_a_provider_error_keeps_its_reservation_spent() -> None:
+    # Conservative on purpose: a refused call is not given back, so a retry cannot reopen it.
+    upstream = Upstream(status=503, body={"error": "unavailable"})
+    ledger = BudgetLedger(DynamicLimits(max_total_tokens=5000))
+    subject = proxy(upstream, ledger=ledger)
+
+    assert post(subject, request_body()).status == 503
+
+    # Nothing settled, yet the reservation (request plus the 4096 output allowance) still counts.
+    with pytest.raises(LimitError) as refused:
+        ledger.reserve_call("x" * 1000, output_tokens=4096)
+    assert refused.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
+    assert len(upstream.requests) == 1
+
+
 # #197-T04
 def test_a_request_without_the_job_capability_is_refused_and_never_forwarded() -> None:
     upstream = Upstream()

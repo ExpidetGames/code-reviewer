@@ -103,6 +103,109 @@ def test_the_token_budget_counts_the_reservation_before_the_call() -> None:
     assert refused.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
 
 
+# #231-T01
+def test_settled_usage_counts_against_the_cap_before_the_next_call() -> None:
+    subject = ledger(max_total_tokens=299)
+    first = subject.reserve_call("x" * 100, output_tokens=50)
+    subject.settle_call(first, prompt_tokens=100, completion_tokens=50)
+
+    # 150 settled + 100 request + 50 allowance = 300: one over the cap, refused before sending.
+    with pytest.raises(LimitError) as refused:
+        subject.reserve_call("x" * 100, output_tokens=50)
+    assert refused.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
+    assert subject.model_calls == 1
+
+
+# #231-T01
+def test_a_call_that_lands_exactly_on_the_cap_is_allowed() -> None:
+    subject = ledger(max_total_tokens=300)
+    first = subject.reserve_call("x" * 100, output_tokens=50)
+    subject.settle_call(first, prompt_tokens=100, completion_tokens=50)
+
+    second = subject.reserve_call("x" * 100, output_tokens=50)
+
+    assert second.input_tokens == 100
+    assert subject.model_calls == 2
+
+
+# #231-T02
+def test_the_last_settled_prompt_is_a_lower_bound_for_the_next_prompt() -> None:
+    subject = ledger(max_total_tokens=299)
+    first = subject.reserve_call("x" * 100, output_tokens=50)
+    subject.settle_call(first, prompt_tokens=100, completion_tokens=50)
+
+    # The request is 1 byte, but a prompt in a tool loop only grows: it is at least the last
+    # settled prompt (100 tokens). 150 settled + 100 + 50 = 300 > 299.
+    with pytest.raises(LimitError) as refused:
+        subject.reserve_call("a", output_tokens=50)
+    assert refused.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
+
+
+# #231-T02
+def test_the_lower_bound_raises_the_reservation_but_never_lowers_it() -> None:
+    subject = ledger(max_total_tokens=10_000)
+    first = subject.reserve_call("x" * 100, output_tokens=50)
+    subject.settle_call(first, prompt_tokens=60, completion_tokens=10)
+
+    small = subject.reserve_call("a", output_tokens=5)
+    subject.settle_call(small, prompt_tokens=1, completion_tokens=1)
+    large = subject.reserve_call("x" * 500, output_tokens=5)
+
+    assert small.input_tokens == 60  # the last settled prompt
+    assert large.input_tokens == 500  # the byte bound still binds when it is larger
+
+
+# #231-T03
+def test_in_flight_reservations_and_settled_usage_are_summed() -> None:
+    subject = ledger(max_total_tokens=400)
+    first = subject.reserve_call("x" * 100, output_tokens=50)
+    subject.settle_call(first, prompt_tokens=100, completion_tokens=50)
+    in_flight = subject.reserve_call("x" * 100, output_tokens=50)  # 150 settled + 150 in flight
+
+    with pytest.raises(LimitError) as refused:
+        subject.reserve_call("x" * 100, output_tokens=50)  # would be 450
+    assert refused.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
+
+    subject.settle_call(in_flight, prompt_tokens=10, completion_tokens=10)
+    subject.reserve_call("x" * 100, output_tokens=50)  # 170 settled + 150: fits again
+
+
+class SlowTokenCap(DynamicLimits):
+    """A token cap that is slow to read, so a ledger that checks outside its lock is raced."""
+
+    def __getattribute__(self, name: str) -> Any:
+        if name == "max_total_tokens":
+            time.sleep(0.002)
+        return super().__getattribute__(name)
+
+
+# #231-T06
+def test_concurrent_reservations_cannot_together_exceed_the_cap() -> None:
+    # Each reservation is 100 + 50 tokens, so a cap of 460 fits three and not a fourth.
+    shared = BudgetLedger(SlowTokenCap(max_total_tokens=460))
+    outcomes: list[bool] = []
+    gate = threading.Barrier(16)
+
+    def worker() -> None:
+        gate.wait()
+        try:
+            shared.reserve_call("x" * 100, output_tokens=50)
+        except LimitError as refused:
+            assert refused.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
+            outcomes.append(False)
+        else:
+            outcomes.append(True)
+
+    threads = [threading.Thread(target=worker) for _ in range(16)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert outcomes.count(True) == 3
+    assert shared.model_calls == 3
+
+
 # #197-T05
 def test_a_request_that_does_not_fit_the_window_is_refused() -> None:
     subject = BudgetLedger(
