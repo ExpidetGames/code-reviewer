@@ -109,12 +109,16 @@ export const AVAILABILITY_COPY: Record<
   Exclude<ConnectAvailability, "available">,
   string
 > = {
-  app_not_configured: `${GITHUB_NOT_CONFIGURED_COPY} The admin of the instance sets it up in the admin portal.`,
+  app_not_configured: GITHUB_NOT_CONFIGURED_COPY,
   user_authorization_not_configured:
-    "Connecting GitHub is not available yet. It needs the sign in with GitHub of the GitHub App, which the admin of this instance has to set up in the admin portal.",
+    "Connecting GitHub is not available yet. The admin of the instance sets up the sign in with GitHub of the GitHub App in the admin portal.",
   needs_approval:
     "This instance cannot check your rights on GitHub, so the admin of the instance approves every connection. Connect GitHub sends the request.",
 };
+
+/** The "how it works" text of the Connect card, behind its disclosure (#176). */
+export const CONNECT_HELP_COPY =
+  "You connect an installation of the GitHub App if you own the account it is on: a personal account, or an organization you are an owner of. GitHub asks you to authorize the app, which proves that.";
 
 export function describeResultCode(code: string): {
   tone: ResultTone;
