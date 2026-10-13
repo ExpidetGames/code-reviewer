@@ -96,7 +96,7 @@ This works independently of bookworm Git's lack of `--no-lazy-fetch`.
 | 2 MiB diff | Each endpoint diff, incrementally before adding lines; combined serialized evidence has an additional 3 MiB ceiling. |
 | 1 MiB response/data field | Advertisements, HTTP headers and each metadata/prior-state input, plus the whole exposed-content limit. No compare API payload is used. |
 | Paths | 1,024 UTF-8 bytes, 32 components, 255 bytes/component; no absolute, drive/UNC, traversal, backslash, control, `.git`, ambiguous Windows reserved/trailing-dot names. |
-| 300 seconds | One monotonic preparation deadline, including all transfers, expansion, export and effective-access probe; cancellation checked between bounded operations. The job supervisor terminates blocked processes on timeout/lease loss/shutdown. |
+| 300 seconds | One monotonic preparation deadline, including all transfers, expansion, export and effective-access probe; raw HTTP header/chunk-line reads recheck it between bytes and reset socket timeout to the remaining lifetime; cancellation checked between bounded operations. The job supervisor terminates blocked processes on timeout/lease loss/shutdown. |
 
 Trusted limit overrides can only lower these fixed limits. The accounting is deliberately
 conservative: cumulative transfer, expansion and writes are charged even when earlier staging

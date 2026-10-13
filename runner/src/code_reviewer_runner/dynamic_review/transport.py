@@ -38,8 +38,9 @@ def packet(data: bytes) -> bytes:
 class _BudgetReader(io.BufferedIOBase):
     """Bound the raw HTTP input, including status, headers and chunk framing."""
 
-    def __init__(self, stream: BinaryIO, budget: Budget) -> None:
+    def __init__(self, stream: BinaryIO, budget: Budget, sock: socket.socket | None = None) -> None:
         self.stream = stream
+        self.sock = sock
         self.budget = budget
         self.headers = True
         self.header_bytes = 0
@@ -47,6 +48,8 @@ class _BudgetReader(io.BufferedIOBase):
 
     def _size(self, size: int) -> int:
         self.budget.check()
+        if self.sock is not None:
+            self.sock.settimeout(self.budget.remaining())
         available = self.budget.limits.preparation_bytes - self.budget.preparation
         if self.headers:
             available = min(available, self.budget.limits.response_bytes - self.header_bytes)
@@ -61,7 +64,23 @@ class _BudgetReader(io.BufferedIOBase):
         return data
 
     def readline(self, size: int | None = -1, /) -> bytes:
-        return self._charge(self.stream.readline(self._size(-1 if size is None else size)))
+        if size == 0:
+            return b""
+        bound = self._size(-1 if size is None else size)
+        line = bytearray()
+        # Buffered readline can reset an idle timeout indefinitely while a peer dribbles.
+        # Read one available byte at a time so every step checks the absolute deadline.
+        while len(line) < bound:
+            self._size(1)
+            chunk = self._charge(cast(io.BufferedReader, self.stream).read1(1))
+            if not chunk:
+                break
+            line.extend(chunk)
+            if chunk == b"\n":
+                return bytes(line)
+        if len(line) == bound:
+            raise CheckoutError()
+        return bytes(line)
 
     def read(self, size: int | None = -1, /) -> bytes:
         return self._charge(self.stream.read(self._size(-1 if size is None else size)))
@@ -110,7 +129,7 @@ class HttpTransport:
             ) -> None:
                 super().__init__(sock, debuglevel, method, url)
                 assert self.fp is not None
-                self.reader = _BudgetReader(self.fp, budget)
+                self.reader = _BudgetReader(self.fp, budget, sock)
                 # HTTPResponse uses only read/read1/readline/close on its buffered socket file.
                 self.fp = cast(io.BufferedReader, self.reader)
 
