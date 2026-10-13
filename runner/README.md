@@ -91,6 +91,17 @@ The job is JSON on stdin (the shape is documented in `src/code_reviewer_runner/j
 | `env` | optional options of the PR-Agent tools, as strings; one option per key (`PR_REVIEWER__NUM_MAX_FINDINGS`, never a second `__`). The app sends only `PR_REVIEWER__*`; the removed tools' families (`PR_DESCRIPTION__*`, `PR_CODE_SUGGESTIONS__*`, `PR_QUESTIONS__*`) are accepted for v1 compatibility and ignored. Nothing else is accepted. See "Settings policy" for how the values are read. |
 | `reviewKind`, `dynamic`, `base` | #195: a tagged **Dynamic** job. Absent means a Diff job (the legacy shape). `dynamic` is a closed object `{ model, skill, limits: { maxFindings } }` — model/skill/limits only, the skill is literal data and no field can add a command, a core override, a permission or an endpoint. `base` is `{ repository, baseRef, headSha, previousReviewedSha, comparison }`, the checkout facts; `comparison` is a declared mode, not proof of completeness. The skill is untrusted project data, bounded to 16 KiB of UTF-8 bytes; the runner composes it after its own fixed core (see "Dynamic Review prompts"). |
 
+Checkout preparation (#196) is available through the root-supervised
+`dynamic_review.export_isolation.prepared_checkout` lifetime: bounded exact-head acquisition,
+sanitized endpoint evidence, exclusive job identities and an actual-uid verified read-only export.
+The base-to-head diff is against the merge base of the head and the base ref (a missing merge base
+declares a full review of the head); a changed binary or oversized file is excluded and reported as
+`skipped` with reason `binary`/`too_large` instead of failing, while denied and unsafe paths still
+fail closed. It is an integration seam for #197; it does not launch an engine or enable the
+capability/gate. The current non-root runner image cannot act as that root supervisor yet (#202).
+Details, hard bounds, the v1.19.0 discovery deny-list and cleanup obligations:
+[Dynamic checkout](../docs/dynamic-checkout.md).
+
 A Dynamic job is never run by PR-Agent: this stage has no engine yet, so `main` refuses it with the
 stable code `dynamic_engine_unavailable` before any process starts (#197 adds the engine). A Diff job
 is unchanged. An unknown kind, a Dynamic job without its `dynamic`/`base` fields, or a Diff job that

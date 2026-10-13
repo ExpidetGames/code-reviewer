@@ -22,6 +22,7 @@ from typing import Protocol
 
 # The result line of a job is small (a log tail of 4 KB and a few numbers). Anything above this
 # is not a result.
+JOB_WORKDIR_PREFIX = "cr-job-"
 STDOUT_KEEP_BYTES = 256 * 1024
 STDERR_KEEP_BYTES = 64 * 1024
 _READ_CHUNK = 64 * 1024
@@ -174,7 +175,7 @@ class SubprocessLauncher:
     async def start(self, spec: ProcessSpec) -> RunningProcess:
         # A directory of its own per job: PR-Agent reads `[tool.pr-agent]` from a pyproject.toml in
         # its working directory, so that directory must hold nothing the runner did not put there.
-        workdir = Path(tempfile.mkdtemp(prefix="cr-job-"))
+        workdir = Path(tempfile.mkdtemp(prefix=JOB_WORKDIR_PREFIX))
         try:
             process = await asyncio.create_subprocess_exec(
                 *spec.argv,
