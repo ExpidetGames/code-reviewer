@@ -163,7 +163,7 @@ test.describe("an Owner invites a colleague who accepts", () => {
 
     // Signed in, back on the invitation: the button accepts it.
     await expect(page).toHaveURL(/\/invitation\?token=/);
-    await page.getByRole("button", { name: /Accept the invitation/ }).click();
+    await page.getByRole("button", { name: /Accept invitation/ }).click();
     await expect(page).toHaveURL(/\/w\/default\/projects$/);
     await expect(page.getByRole("button", { name: /Workspace/ })).toContainText(
       "Default workspace",
@@ -205,7 +205,7 @@ test.describe("an Owner invites a colleague who accepts", () => {
 
     // Back on the invitation, not on a page that says there is no workspace.
     await expect(page).toHaveURL(/\/invitation\?token=/);
-    await page.getByRole("button", { name: /Accept the invitation/ }).click();
+    await page.getByRole("button", { name: /Accept invitation/ }).click();
     await expect(page).toHaveURL(/\/w\/default\/projects$/);
     await context.close();
   });
@@ -241,7 +241,7 @@ test.describe("an Owner invites a colleague who accepts", () => {
     await signUp(page, member);
     await signIn(page, member, PASSWORD);
     await page.goto(link);
-    await page.getByRole("button", { name: /Accept the invitation/ }).click();
+    await page.getByRole("button", { name: /Accept invitation/ }).click();
     await expect(page).toHaveURL(/\/w\/default\/projects$/);
 
     await page.goto("/w/default/members");

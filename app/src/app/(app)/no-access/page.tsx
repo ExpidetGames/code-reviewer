@@ -8,37 +8,31 @@
 // - in a single-tenant instance, the sentence "ask an admin of this instance for an invitation". Nothing
 //   joins them automatically, however they got their account.
 //
-// A person who has a workspace is sent on to it. The proxy lets a person without a workspace reach this
-// page and a handful of others (src/auth/access.ts, NO_WORKSPACE_PATHS) and nothing else.
+// It lives inside the app frame (`(app)`): signing out is the user menu in the header, not a control in the
+// content flow (#171). A person who has a workspace is sent on to it. The proxy lets a person without a
+// workspace reach this page and a handful of others (src/auth/access.ts, NO_WORKSPACE_PATHS) and nothing
+// else.
 import type { Metadata } from "next";
-import { connection } from "next/server";
 import { redirect } from "next/navigation";
+import { connection } from "next/server";
 import { Suspense } from "react";
-import { signOut } from "@/auth/actions";
 import { currentLookup } from "@/auth/session";
 import { loginPath } from "@/auth/session-user";
+import { PageHeader } from "@/components/page-header";
 import { loadAccountView } from "@/workspaces/account-view";
 import { workspaceHome } from "@/workspaces/paths";
 import { NoAccessContent } from "@/workspaces/ui/no-access-content";
-import { Button } from "@/ui/button";
 
 export const metadata: Metadata = { title: "No workspace yet" };
 
 export default function NoAccessPage() {
   return (
-    <main className="auth-page">
-      <div className="card auth-card">
-        <h1>No workspace yet</h1>
-        <Suspense fallback={null}>
-          <WhatToDo />
-        </Suspense>
-        <form action={signOut}>
-          <Button type="submit" variant="secondary" className="btn-block">
-            Sign out
-          </Button>
-        </form>
-      </div>
-    </main>
+    <>
+      <PageHeader title="No workspace yet" />
+      <Suspense fallback={<div className="page-loading" aria-busy="true" />}>
+        <WhatToDo />
+      </Suspense>
+    </>
   );
 }
 

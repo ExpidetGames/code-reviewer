@@ -115,6 +115,34 @@ describe("a person without a workspace", () => {
         .getAttribute("href"),
     ).toBe("/admin");
   });
+
+  // #171-T04
+  it("renders the same card for the action in both instance modes, with at most one primary action", () => {
+    const single = render(
+      <NoAccessContent
+        multiTenant={false}
+        pending={[]}
+        isInstanceAdmin={false}
+      />,
+    );
+    expect(
+      single.container.querySelectorAll('[data-slot="card"]'),
+    ).toHaveLength(1);
+    expect(
+      single.container.querySelectorAll('button[data-variant="default"]'),
+    ).toHaveLength(0);
+    single.unmount();
+
+    const multi = render(
+      <NoAccessContent multiTenant pending={[]} isInstanceAdmin={false} />,
+    );
+    expect(multi.container.querySelectorAll('[data-slot="card"]')).toHaveLength(
+      1,
+    );
+    expect(
+      multi.container.querySelectorAll('button[data-variant="default"]'),
+    ).toHaveLength(1);
+  });
 });
 
 describe("the form that creates a workspace", () => {
