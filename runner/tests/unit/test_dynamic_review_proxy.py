@@ -370,7 +370,9 @@ def test_a_request_that_names_a_route_or_destination_is_refused_and_never_forwar
         upstream = Upstream()
         subject = proxy(upstream)
 
-        response = post(subject, request_body(**{field: {"order": ["attacker-host"]}}))
+        body = request_body()
+        body[field] = {"order": ["attacker-host"]}
+        response = post(subject, body)
 
         assert error_code(response) == ErrorCode.DYNAMIC_POLICY_VIOLATION.value, field
         assert upstream.requests == [], field
@@ -435,7 +437,9 @@ def test_the_forwarded_output_bound_never_exceeds_the_trusted_limit() -> None:
         upstream = Upstream()
         subject = proxy(upstream)
 
-        assert post(subject, request_body(**extra)).status == 200
+        body = request_body()
+        body.update(extra)
+        assert post(subject, body).status == 200
 
         forwarded = json.loads(upstream.requests[0][1])
         assert forwarded["max_tokens"] == expected, extra
