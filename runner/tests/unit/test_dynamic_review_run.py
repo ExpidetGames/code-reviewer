@@ -175,3 +175,32 @@ def test_the_runner_process_never_runs_a_dynamic_job_while_the_isolation_check_f
     result = json.loads(out.getvalue())
     assert code == 1
     assert result["errorCode"] == ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE.value
+
+
+# #197-T07
+def test_sigterm_unwinds_a_dynamic_job_and_arms_a_backstop_that_ends_the_engines(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import os
+    import signal
+    import time
+
+    stopped: list[str] = []
+    monkeypatch.setattr(runner, "_stop_hard", lambda: stopped.append("hard stop"))
+    monkeypatch.setattr(runner, "SIGTERM_BACKSTOP_SECONDS", 0.05)
+    before = signal.getsignal(signal.SIGTERM)
+    unwound: list[str] = []
+
+    with pytest.raises(KeyboardInterrupt), runner._unwind_on_sigterm():  # pyright: ignore[reportPrivateUsage]
+        try:
+            os.kill(os.getpid(), signal.SIGTERM)
+            time.sleep(1)  # the handler raises before this ends
+        finally:
+            unwound.append("cleanup ran")
+
+    assert unwound == ["cleanup ran"]
+    assert signal.getsignal(signal.SIGTERM) is before  # the previous handler is back
+    deadline = time.monotonic() + 2
+    while not stopped and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert stopped == ["hard stop"]

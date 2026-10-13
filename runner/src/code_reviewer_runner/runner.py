@@ -21,11 +21,12 @@ import asyncio
 import logging
 import os
 import shlex
+import signal
 import sys
 import threading
 import time
-from collections.abc import Mapping, Sequence
-from contextlib import ExitStack
+from collections.abc import Generator, Mapping, Sequence
+from contextlib import ExitStack, contextmanager
 from dataclasses import replace
 from typing import Any, TextIO
 
@@ -405,6 +406,44 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+# After a SIGTERM the job unwinds (engine, proxy, export and leases are released by the `finally`
+# blocks); if that has not finished in this time the engines are killed and the process ends. The
+# job loop sends SIGKILL after its own grace (five seconds by default), so this is shorter.
+SIGTERM_BACKSTOP_SECONDS = 3.0
+
+
+def _stop_hard() -> None:
+    shutdown_engines()
+    os._exit(128 + signal.SIGTERM)
+
+
+@contextmanager
+def _unwind_on_sigterm() -> Generator[None]:
+    """A Dynamic job that gets SIGTERM ends its engine, helpers, proxy and export (#197-T07).
+
+    The job loop ends a job this way on lease loss, shutdown and timeout. The engine leads a
+    process group of its own (and runs as another user), so the default action (die at once) would
+    leave it running. The handler unwinds the job as a `KeyboardInterrupt` and arms a backstop
+    that kills everything if the unwinding takes too long.
+    """
+
+    def on_term(signum: int, frame: object) -> None:
+        backstop = threading.Timer(SIGTERM_BACKSTOP_SECONDS, _stop_hard)
+        backstop.daemon = True
+        backstop.start()
+        raise KeyboardInterrupt
+
+    try:
+        previous = signal.signal(signal.SIGTERM, on_term)
+    except ValueError:  # not the main thread: nothing to install
+        yield
+        return
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+
 def _start_watchdog(
     seconds: float,
     channel: _ResultChannel,
@@ -486,14 +525,15 @@ def main(
             else None
         )
         try:
-            result = run_dynamic_job(
-                job,
-                None,
-                started,
-                saved_env,
-                dynamic_timeout,
-                engines=advertised_engines(fail_closed_self_check()),
-            )
+            with _unwind_on_sigterm():
+                result = run_dynamic_job(
+                    job,
+                    None,
+                    started,
+                    saved_env,
+                    dynamic_timeout,
+                    engines=advertised_engines(fail_closed_self_check()),
+                )
         except KeyboardInterrupt:
             raise
         except BaseException:

@@ -132,7 +132,14 @@ class EngineLaunch:
         return path
 
     def confine(self, proxy_port: int, engine_port: int) -> None:
-        """Install the network rules for this job and, once, prove they are in effect."""
+        """Install the network rules for this job and, once, prove they are in effect.
+
+        The first call also ends whatever the user still runs: a job process that was killed
+        without a chance to clean up (SIGKILL, an OOM kill) leaves its engine behind, and the
+        lease on the user is free again the moment that process is gone.
+        """
+        if not self._verified:
+            self.sweep()
         self.confinement.apply([proxy_port, engine_port])
         if not self._verified:
             verify_confinement(self.uid, self.gid, proxy_port)
