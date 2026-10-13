@@ -83,11 +83,11 @@ def test_a_process_with_a_user_is_started_as_that_user_with_no_other_group(
     class Stop(Exception):
         pass
 
-    async def fake_exec(*argv: str, **options: Any) -> Any:
+    def fake_popen(*argv: Any, **options: Any) -> Any:
         seen.update(options)
         raise Stop
 
-    monkeypatch.setattr(process_module.asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setattr(process_module.subprocess, "Popen", fake_popen)
 
     def record_chown(path: Any, uid: int, gid: int) -> None:
         chowned.append((str(path), uid, gid))
