@@ -9,6 +9,7 @@ export function PageHeader({
   title,
   description,
   breadcrumb,
+  badge,
   actions,
 }: {
   title: string;
@@ -16,6 +17,8 @@ export function PageHeader({
   description?: string;
   /** A `<Breadcrumb>` (from `@/components/ui/breadcrumb`) or any navigation that marks the location. */
   breadcrumb?: ReactNode;
+  /** A short status of the page's subject, shown next to the title (for example the viewer's role). */
+  badge?: ReactNode;
   actions?: ReactNode;
 }) {
   return (
@@ -23,9 +26,12 @@ export function PageHeader({
       {breadcrumb ? <div>{breadcrumb}</div> : null}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex min-w-0 flex-col gap-1">
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-            {title}
-          </h1>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+              {title}
+            </h1>
+            {badge}
+          </div>
           {description ? (
             <p className="text-sm text-muted-foreground">{description}</p>
           ) : null}

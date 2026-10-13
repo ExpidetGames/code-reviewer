@@ -4,15 +4,18 @@
 // The invitations of a workspace that are waiting: who, with which role, until when. Revoking and sending
 // again follow the rights of inviting with that role (an Admin handles Member invitations only); a resend
 // needs a mail server, because a link is shown only once. The link itself is not here: only its hash is
-// stored.
+// stored. The empty state is not here either: the Invitations card owns it (#177).
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { Button } from "../../ui/button.tsx";
+import { Button } from "../../components/button.tsx";
+import { Alert, AlertDescription } from "../../components/ui/alert.tsx";
+import { Badge } from "../../components/ui/badge.tsx";
 import { formatUtc } from "../../ui/format-time.ts";
 import type { OpenInvitation } from "../invitations.ts";
 import { canInviteAs } from "../permissions.ts";
 import type { WorkspaceRole } from "../roles.ts";
 import { browserWorkspaceApi, type WorkspaceApi } from "./api.ts";
+import { ConfirmAction } from "./confirm-action.tsx";
 import { InvitationLink, type ShownInvitation } from "./invitation-link.tsx";
 import { describeWorkspaceFailure } from "./messages.ts";
 import { ROLE_LABEL } from "./role-copy.ts";
@@ -67,29 +70,28 @@ export function InvitationList({
     router.refresh();
   }
 
-  if (invitations.length === 0)
-    return <p className="muted">No invitation is waiting.</p>;
-
   return (
-    <>
+    <div className="flex flex-col gap-3">
       {problem !== null ? (
-        <p role="alert" className="alert alert-error">
-          {problem}
-        </p>
+        <Alert variant="destructive">
+          <AlertDescription>{problem}</AlertDescription>
+        </Alert>
       ) : null}
       {shown !== null ? <InvitationLink shown={shown} /> : null}
-      <ul className="member-list" aria-label="Invitations">
+      <ul className="flex flex-col" aria-label="Invitations">
         {invitations.map((invitation) => {
           const allowed = canInviteAs(viewerRole, invitation.role);
           return (
             <li
               key={invitation.id}
-              className="member-row"
               data-invitation={invitation.id}
+              className="flex flex-wrap items-center gap-3 border-t border-border py-3 first:border-t-0"
             >
-              <div className="member-main">
-                <span className="member-name">{invitation.email}</span>
-                <span className="muted small">
+              <div className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate text-sm font-medium text-foreground">
+                  {invitation.email}
+                </span>
+                <span className="truncate text-sm text-muted-foreground">
                   {invitation.expired ? (
                     "Expired"
                   ) : (
@@ -102,10 +104,10 @@ export function InvitationList({
                   )}
                 </span>
               </div>
-              <div className="member-role">
-                <span className="badge">{ROLE_LABEL[invitation.role]}</span>
+              <div className="shrink-0">
+                <Badge variant="neutral">{ROLE_LABEL[invitation.role]}</Badge>
               </div>
-              <div className="member-actions">
+              <div className="flex shrink-0 items-center gap-2">
                 {allowed && canResend ? (
                   <Button
                     variant="secondary"
@@ -117,20 +119,21 @@ export function InvitationList({
                   </Button>
                 ) : null}
                 {allowed ? (
-                  <Button
-                    variant="secondary"
+                  <ConfirmAction
+                    actionLabel="Revoke"
+                    actionName={`Revoke the invitation for ${invitation.email}`}
+                    title={`Revoke the invitation for ${invitation.email}?`}
+                    description="The link stops working at once. Inviting the address again makes a new one."
+                    confirmLabel="Revoke"
                     disabled={busy}
-                    aria-label={`Revoke the invitation for ${invitation.email}`}
-                    onClick={() => void revoke(invitation.id)}
-                  >
-                    Revoke
-                  </Button>
+                    onConfirm={() => revoke(invitation.id)}
+                  />
                 ) : null}
               </div>
             </li>
           );
         })}
       </ul>
-    </>
+    </div>
   );
 }

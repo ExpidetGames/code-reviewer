@@ -4,7 +4,9 @@
 // Pins down what the Members page offers each role: an Owner changes roles, removes anybody and invites with
 // any role; an Admin removes Members and invites Members; a Member sees the members and can leave. The
 // buttons only show what the rules allow; the routes decide again (src/workspaces/members.integration.test.ts
-// and the route tests). Names and addresses are text somebody else typed, shown as text.
+// and the route tests). Names and addresses are text somebody else typed, shown as text. The redesign (#177)
+// gives each of the two jobs one card, keeps the empty state of the invitations at the card and makes the
+// role help reachable with the keyboard.
 import {
   cleanup,
   render,
@@ -23,6 +25,7 @@ vi.mock("next/navigation", () => ({
 import type { Member } from "../../db/repositories/workspace-members-repository.ts";
 import type { WorkspaceRole } from "../roles.ts";
 import type { WorkspaceApi } from "./api.ts";
+import { InviteForm } from "./invite-form.tsx";
 import { MembersPageContent, type MembersPageData } from "./members-page.tsx";
 
 afterEach(() => {
@@ -104,9 +107,20 @@ function renderFor(
   return api;
 }
 
+/** Picks an option of a kit Select, whose options only exist while it is open. */
+async function choose(
+  user: ReturnType<typeof userEvent.setup>,
+  combobox: HTMLElement,
+  option: string,
+) {
+  await user.click(combobox);
+  await user.click(await screen.findByRole("option", { name: option }));
+}
+
 describe("the Members page for an Owner", () => {
   // #101-WM-27
-  it("offers a role for every member, a button to remove everybody else, and the three roles to invite with", () => {
+  it("offers a role for every member, a button to remove everybody else, and the three roles to invite with", async () => {
+    const user = userEvent.setup();
     renderFor("owner", "owner-1");
 
     const roles = screen.getAllByRole("combobox", { name: /^Role of / });
@@ -122,10 +136,9 @@ describe("the Members page for an Owner", () => {
     ).toBeNull();
     expect(screen.getByRole("button", { name: "Leave" })).toBeTruthy();
     const invite = screen.getByRole("form", { name: "Invite a person" });
+    await user.click(within(invite).getByRole("combobox", { name: "Role" }));
     expect(
-      within(invite)
-        .getAllByRole("option")
-        .map((option) => option.textContent),
+      screen.getAllByRole("option").map((option) => option.textContent),
     ).toEqual(["Owner", "Admin", "Member"]);
   });
 
@@ -134,13 +147,16 @@ describe("the Members page for an Owner", () => {
     const user = userEvent.setup();
     const api = renderFor("owner", "owner-1");
 
-    await user.selectOptions(
+    await choose(
+      user,
       screen.getByRole("combobox", { name: "Role of member-1@example.test" }),
-      "admin",
+      "Admin",
     );
     await user.click(
       screen.getByRole("button", { name: "Remove admin-1@example.test" }),
     );
+    // Removing a member is destructive: it is confirmed in a dialog first.
+    await user.click(await screen.findByRole("button", { name: "Remove" }));
 
     expect(api.changeRole).toHaveBeenCalledWith("member-1", "admin");
     expect(api.removeMember).toHaveBeenCalledWith("admin-1");
@@ -158,9 +174,10 @@ describe("the Members page for an Owner", () => {
     });
     renderFor("owner", "owner-1", DATA, api);
 
-    await user.selectOptions(
+    await choose(
+      user,
       screen.getByRole("combobox", { name: "Role of owner-1@example.test" }),
-      "member",
+      "Member",
     );
 
     expect((await screen.findByRole("alert")).textContent).toBe(
@@ -173,14 +190,38 @@ describe("the Members page for an Owner", () => {
     renderFor("owner", "owner-1");
 
     await user.click(screen.getByRole("button", { name: "Leave" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Leave the workspace" }),
+    );
 
     await waitFor(() => expect(navigation.push).toHaveBeenCalledWith("/"));
+  });
+
+  // #177-T01
+  it("makes the role select editable for an Owner and plain text for a Member", async () => {
+    const user = userEvent.setup();
+    const api = fakeApi();
+    renderFor("owner", "owner-1", DATA, api);
+
+    await choose(
+      user,
+      screen.getByRole("combobox", { name: "Role of member-1@example.test" }),
+      "Admin",
+    );
+    expect(api.changeRole).toHaveBeenCalledWith("member-1", "admin");
+
+    cleanup();
+    renderFor("member", "member-1");
+
+    expect(screen.queryAllByRole("combobox")).toEqual([]);
+    expect(screen.getAllByText("Member").length).toBeGreaterThanOrEqual(1);
   });
 });
 
 describe("the Members page for an Admin", () => {
   // #101-WM-11
-  it("shows the roles as text, removes Members only, invites Members only and handles the invitations of Members only", () => {
+  it("shows the roles as text, removes Members only, invites Members only and handles the invitations of Members only", async () => {
+    const user = userEvent.setup();
     renderFor("admin", "admin-1");
 
     expect(screen.queryAllByRole("combobox", { name: /^Role of / })).toEqual(
@@ -193,11 +234,11 @@ describe("the Members page for an Admin", () => {
       screen.queryByRole("button", { name: "Remove owner-1@example.test" }),
     ).toBeNull();
     const invite = screen.getByRole("form", { name: "Invite a person" });
+    await user.click(within(invite).getByRole("combobox", { name: "Role" }));
     expect(
-      within(invite)
-        .getAllByRole("option")
-        .map((option) => option.textContent),
+      screen.getAllByRole("option").map((option) => option.textContent),
     ).toEqual(["Member"]);
+    await user.keyboard("{Escape}");
     expect(
       screen.getByRole("button", {
         name: "Revoke the invitation for invited@example.test",
@@ -230,6 +271,44 @@ describe("the Members page for a Member", () => {
 
     expect(screen.getByText("<b>Bold</b> Person")).toBeTruthy();
     expect(document.querySelector("b")).toBeNull();
+  });
+});
+
+describe("the Invitations card", () => {
+  // #177-T02
+  it("shows the empty state at the card while no invitation waits", () => {
+    renderFor("owner", "owner-1", { ...DATA, invitations: [] });
+
+    const card = screen.getByRole("region", { name: "Invitations" });
+    expect(within(card).getByText("No invitations waiting.")).toBeTruthy();
+    expect(within(card).queryByRole("list")).toBeNull();
+  });
+
+  // #177-T03
+  it("reaches the role help with the keyboard, announces it and closes it on Escape", async () => {
+    const user = userEvent.setup();
+    render(
+      <InviteForm workspaceSlug="acme" viewerRole="owner" api={fakeApi()} />,
+    );
+
+    await user.tab(); // the email address
+    await user.tab(); // the role help
+    const hint = screen.getByRole("button", { name: "About the roles" });
+    expect(document.activeElement).toBe(hint);
+
+    await waitFor(() =>
+      expect(hint.getAttribute("aria-describedby")).toBeTruthy(),
+    );
+    const describedBy = hint.getAttribute("aria-describedby")!;
+    expect(document.getElementById(describedBy)?.textContent).toContain(
+      "Uses the workspace",
+    );
+
+    await user.keyboard("{Escape}");
+
+    await waitFor(() =>
+      expect(hint.getAttribute("aria-describedby")).toBeNull(),
+    );
   });
 });
 
@@ -279,7 +358,7 @@ describe("inviting from the page", () => {
     expect(document.body.textContent).not.toContain("SECRETTOKEN");
   });
 
-  it("says a refusal in a sentence", async () => {
+  it("says a refusal in a sentence and sends the focus back to the address", async () => {
     const user = userEvent.setup();
     const api = fakeApi();
     vi.mocked(api.invite).mockResolvedValue({
@@ -296,6 +375,7 @@ describe("inviting from the page", () => {
     expect((await screen.findByRole("alert")).textContent).toMatch(
       /sign-up rule of this instance does not let that address in/,
     );
+    expect(document.activeElement).toBe(screen.getByLabelText("Email address"));
   });
 
   it("offers to send an invitation again only when the instance can send mail", () => {

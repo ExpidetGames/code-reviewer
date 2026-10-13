@@ -21,11 +21,12 @@ import {
 afterEach(cleanup);
 
 describe("the page header", () => {
-  it("renders one h1, a breadcrumb slot, a description and the actions", () => {
+  it("renders one h1, a breadcrumb slot, a description, a badge next to the title and the actions", () => {
     render(
       <PageHeader
         title="Projects"
         description="Repositories of this workspace."
+        badge={<span data-testid="badge">Owner</span>}
         breadcrumb={
           <Breadcrumb>
             <BreadcrumbList>
@@ -43,6 +44,7 @@ describe("the page header", () => {
       screen.getByRole("heading", { level: 1, name: "Projects" }),
     ).toBeTruthy();
     expect(screen.getByText("Repositories of this workspace.")).toBeTruthy();
+    expect(screen.getByTestId("badge").textContent).toBe("Owner");
     expect(screen.getByRole("navigation", { name: "breadcrumb" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Sync" })).toBeTruthy();
   });

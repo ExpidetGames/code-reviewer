@@ -2,18 +2,29 @@
 
 "use client";
 // The form that invites a person: an email address and a role (an Owner offers all three, an Admin only
-// Member). Without a mail server the answer holds the link, which is shown once to be copied; with one the
-// link was mailed and is not shown. The page keeps nothing of the link after the next invitation or a
-// reload.
+// Member). The role help sits in one tooltip next to the label, reachable with the keyboard (#177). Without
+// a mail server the answer holds the link, which is shown once to be copied; with one the link was mailed
+// and is not shown. The page keeps nothing of the link after the next invitation or a reload.
 import { useRouter } from "next/navigation";
-import { useId, useState, type FormEvent } from "react";
-import { Button } from "../../ui/button.tsx";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { Button } from "../../components/button.tsx";
+import { InfoHint } from "../../components/info-hint.tsx";
+import { Alert, AlertDescription } from "../../components/ui/alert.tsx";
+import { Field, FieldLabel } from "../../components/ui/field.tsx";
+import { Input } from "../../components/ui/input.tsx";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../../components/ui/select.tsx";
 import { canInviteAs } from "../permissions.ts";
 import { WORKSPACE_ROLES, type WorkspaceRole } from "../roles.ts";
 import { browserWorkspaceApi, type WorkspaceApi } from "./api.ts";
 import { InvitationLink, type ShownInvitation } from "./invitation-link.tsx";
 import { describeWorkspaceFailure } from "./messages.ts";
-import { ROLE_LABEL } from "./role-copy.ts";
+import { ROLE_HELP, ROLE_LABEL } from "./role-copy.ts";
 
 export function InviteForm({
   workspaceSlug,
@@ -27,6 +38,16 @@ export function InviteForm({
 }) {
   const router = useRouter();
   const ids = useId();
+  const headingId = `${ids}-role`;
+  const emailRef = useRef<HTMLInputElement>(null);
+  // Set in the submit handler, read after the render that shows the refusal, so the focus lands on the
+  // address once the disabled fieldset is enabled again (R20, "focus the first error").
+  const focusEmail = useRef(false);
+  useEffect(() => {
+    if (!focusEmail.current) return;
+    focusEmail.current = false;
+    emailRef.current?.focus();
+  });
   const roles = WORKSPACE_ROLES.filter((role) => canInviteAs(viewerRole, role));
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<WorkspaceRole>(roles.at(-1) ?? "member");
@@ -44,6 +65,8 @@ export function InviteForm({
     const result = await api.invite(email, role);
     setPending(false);
     if (!result.ok) {
+      // R20: the address is the field a refusal is about, so it takes the focus back once shown.
+      focusEmail.current = true;
       setProblem(describeWorkspaceFailure(result.code));
       return;
     }
@@ -58,21 +81,19 @@ export function InviteForm({
   return (
     <form
       onSubmit={(event) => void submit(event)}
-      className="settings-form"
+      className="flex flex-col gap-4"
       aria-label="Invite a person"
     >
-      <fieldset disabled={pending}>
-        <legend>Invite a person</legend>
+      <fieldset disabled={pending} className="flex flex-col gap-4">
         {problem !== null ? (
-          <p role="alert" className="alert alert-error">
-            {problem}
-          </p>
+          <Alert variant="destructive">
+            <AlertDescription>{problem}</AlertDescription>
+          </Alert>
         ) : null}
-        <div className="field">
-          <label htmlFor={`${ids}-email`} className="field-label">
-            Email address
-          </label>
-          <input
+        <Field>
+          <FieldLabel htmlFor={`${ids}-email`}>Email address</FieldLabel>
+          <Input
+            ref={emailRef}
             id={`${ids}-email`}
             type="email"
             autoComplete="off"
@@ -80,26 +101,40 @@ export function InviteForm({
             value={email}
             onChange={(event) => setEmail(event.target.value)}
           />
-        </div>
-        <div className="field">
-          <label htmlFor={`${ids}-role`} className="field-label">
-            Role
-          </label>
-          <select
-            id={`${ids}-role`}
+        </Field>
+        <Field>
+          <div className="flex items-center gap-1">
+            <FieldLabel htmlFor={headingId}>Role</FieldLabel>
+            <InfoHint label="About the roles">
+              <span className="flex flex-col gap-1">
+                {roles.map((candidate) => (
+                  <span key={candidate}>
+                    <strong>{ROLE_LABEL[candidate]}</strong>{" "}
+                    {ROLE_HELP[candidate]}
+                  </span>
+                ))}
+              </span>
+            </InfoHint>
+          </div>
+          <Select
             value={role}
-            onChange={(event) => setRole(event.target.value as WorkspaceRole)}
+            onValueChange={(value) => setRole(value as WorkspaceRole)}
           >
-            {roles.map((candidate) => (
-              <option key={candidate} value={candidate}>
-                {ROLE_LABEL[candidate]}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="form-actions">
-          <Button type="submit" disabled={pending}>
-            {pending ? "Inviting..." : "Send invitation"}
+            <SelectTrigger id={headingId} className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {roles.map((candidate) => (
+                <SelectItem key={candidate} value={candidate}>
+                  {ROLE_LABEL[candidate]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+        <div className="flex justify-start">
+          <Button type="submit" loading={pending} loadingLabel="Inviting">
+            Send invitation
           </Button>
         </div>
       </fieldset>
