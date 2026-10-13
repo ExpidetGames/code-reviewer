@@ -93,7 +93,6 @@ function GithubCard({
       <CardContent>
         {identity === null ? (
           <LinkPanel
-            surface="account"
             available={githubSignInAvailable}
             unavailableReason="Signing in with GitHub is not set up on this instance."
             merge={isInstanceAdmin && githubSignInAvailable}

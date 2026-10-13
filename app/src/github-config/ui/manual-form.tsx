@@ -3,14 +3,19 @@
 "use client";
 // The step-by-step way to connect GitHub: the six values of an App that was made by hand (docs/github-app.md),
 // and a required choice (no default) for what GitHub's API does not report: whether the App can only be installed on its own
-// account. The private key, the webhook secret and the client secret are write-only: the page shows whether
-// one is saved, an empty field keeps it while the App id (and, for the client secret, the client id) is
-// unchanged, and the saved value never reaches this page. The server validates before it saves: the key
-// parses, a call to GitHub with the App JWT names the App id and the slug, GitHub accepts the client id and
-// secret as a pair.
+// account. The fields are grouped into "App credentials" and "Sign-in (optional)". The private key, the
+// webhook secret and the client secret are write-only: the page shows whether one is saved, an empty field
+// keeps it while the App id (and, for the client secret, the client id) is unchanged, and the saved value
+// never reaches this page. The server validates before it saves: the key parses, a call to GitHub with the
+// App JWT names the App id and the slug, GitHub accepts the client id and secret as a pair.
 import { useId, useState, type FormEvent } from "react";
-import { Button } from "../../ui/button.tsx";
+import { useRouter } from "next/navigation";
+import { Button } from "../../components/button.tsx";
 import { InfoHint } from "../../components/info-hint.tsx";
+import { FieldError } from "../../components/ui/field.tsx";
+import { Input } from "../../components/ui/input.tsx";
+import { Label } from "../../components/ui/label.tsx";
+import { Textarea } from "../../components/ui/textarea.tsx";
 import type { RequestIssue } from "../../ui/json-request.ts";
 import { STORED_ENCRYPTED_HINT } from "../../secrets/messages.ts";
 import type { GithubConfigView } from "../service.ts";
@@ -20,7 +25,6 @@ import {
   describeGithubIssue,
   PRIVATE_APP_WHERE_HINT,
 } from "./messages.ts";
-import { useRouter } from "next/navigation";
 
 type Status =
   | { kind: "saved" }
@@ -102,80 +106,83 @@ export function ManualForm({
   const error = (field: string) => {
     const issue = issueFor(field);
     return issue ? (
-      <p id={`${ids}-${field}-error`} className="field-error">
+      <FieldError id={`${ids}-${field}-error`}>
         {describeGithubIssue(issue)}
-      </p>
+      </FieldError>
     ) : null;
   };
   const describedBy = (field: string, hint?: string) =>
     [hint, issueFor(field) ? `${ids}-${field}-error` : undefined]
       .filter(Boolean)
       .join(" ") || undefined;
-  const text = (
-    field: string,
-    label: string,
-    value: string,
-    set: (value: string) => void,
-    options: { placeholder?: string; hint?: string } = {},
-  ) => (
-    <div className="field">
-      <label htmlFor={`${ids}-${field}`} className="field-label">
-        {label}
-      </label>
-      <input
-        id={`${ids}-${field}`}
-        type="text"
-        autoComplete="off"
-        spellCheck={false}
-        placeholder={options.placeholder}
-        value={value}
-        onChange={(event) => set(event.target.value)}
-        aria-invalid={issueFor(field) !== undefined}
-        aria-describedby={describedBy(
-          field,
-          options.hint === undefined ? undefined : `${ids}-${field}-hint`,
-        )}
-      />
-      {options.hint === undefined ? null : (
-        <p id={`${ids}-${field}-hint`} className="muted small">
-          {options.hint}
-        </p>
-      )}
-      {error(field)}
-    </div>
-  );
+  const fieldId = (field: string) => `${ids}-${field}`;
 
   return (
-    <form onSubmit={submit} className="settings-form" aria-labelledby={ids}>
-      <h3 id={ids}>Enter the values by hand</h3>
-      <p className="muted">
-        Create the App on GitHub as described in <code>docs/github-app.md</code>{" "}
-        (use the addresses above), then enter its values here. Nothing is saved
-        before GitHub confirms that they belong together.
+    <form
+      onSubmit={submit}
+      className="flex flex-col gap-6"
+      aria-labelledby={ids}
+    >
+      <h3 id={ids} className="text-base font-semibold text-foreground">
+        Enter the values by hand
+      </h3>
+      <p className="text-sm text-muted-foreground">
+        Create the App on GitHub with the addresses above, then enter its values
+        here. Nothing is saved before GitHub confirms that they belong together.
       </p>
-      <fieldset>
-        <legend>The App</legend>
-        {text("appId", "App ID", appId, setAppId, {
-          placeholder: "123456",
-          hint: "The number at the top of the App's settings page.",
-        })}
-        {text("slug", "Slug", slug, setSlug, {
-          placeholder: "code-reviewer-acme",
-          hint: "The last part of the App's public link, github.com/apps/<slug>.",
-        })}
-        <div className="field">
-          <div className="field-head">
-            <label htmlFor={`${ids}-privateKey`} className="field-label">
-              Private key
-            </label>
+
+      <fieldset className="flex flex-col gap-4">
+        <legend className="text-sm font-medium text-foreground">
+          App credentials
+        </legend>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor={fieldId("appId")}>App ID</Label>
+          <Input
+            id={fieldId("appId")}
+            type="text"
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="123456"
+            value={appId}
+            onChange={(event) => setAppId(event.target.value)}
+            aria-invalid={issueFor("appId") !== undefined}
+            aria-describedby={describedBy("appId", `${ids}-appId-hint`)}
+          />
+          <p id={`${ids}-appId-hint`} className="text-sm text-muted-foreground">
+            The number at the top of the App&apos;s settings page.
+          </p>
+          {error("appId")}
+        </div>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor={fieldId("slug")}>Slug</Label>
+          <Input
+            id={fieldId("slug")}
+            type="text"
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="code-reviewer-acme"
+            value={slug}
+            onChange={(event) => setSlug(event.target.value)}
+            aria-invalid={issueFor("slug") !== undefined}
+            aria-describedby={describedBy("slug", `${ids}-slug-hint`)}
+          />
+          <p id={`${ids}-slug-hint`} className="text-sm text-muted-foreground">
+            The last part of the App&apos;s public link, github.com/apps/
+            &lt;slug&gt;.
+          </p>
+          {error("slug")}
+        </div>
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-1">
+            <Label htmlFor={fieldId("privateKey")}>Private key</Label>
             <InfoHint label="About the private key">
               The content of the .pem file, with real line breaks or on one line
               with \n. Enter a new value to replace the saved one.{" "}
               {STORED_ENCRYPTED_HINT}
             </InfoHint>
           </div>
-          <textarea
-            id={`${ids}-privateKey`}
+          <Textarea
+            id={fieldId("privateKey")}
             rows={4}
             autoComplete="off"
             spellCheck={false}
@@ -188,23 +195,24 @@ export function ManualForm({
               `${ids}-privateKey-hint`,
             )}
           />
-          <p id={`${ids}-privateKey-hint`} className="muted small">
+          <p
+            id={`${ids}-privateKey-hint`}
+            className="text-sm text-muted-foreground"
+          >
             {SECRET_HINT[view.secrets.privateKey]}
           </p>
           {error("privateKey")}
         </div>
-        <div className="field">
-          <div className="field-head">
-            <label htmlFor={`${ids}-webhookSecret`} className="field-label">
-              Webhook secret
-            </label>
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-1">
+            <Label htmlFor={fieldId("webhookSecret")}>Webhook secret</Label>
             <InfoHint label="About the webhook secret">
               The string you entered as the webhook secret on GitHub. It is used
               byte for byte, so no trailing space.
             </InfoHint>
           </div>
-          <input
-            id={`${ids}-webhookSecret`}
+          <Input
+            id={fieldId("webhookSecret")}
             type="password"
             autoComplete="new-password"
             value={webhookSecret}
@@ -215,16 +223,19 @@ export function ManualForm({
               `${ids}-webhookSecret-hint`,
             )}
           />
-          <p id={`${ids}-webhookSecret-hint`} className="muted small">
+          <p
+            id={`${ids}-webhookSecret-hint`}
+            className="text-sm text-muted-foreground"
+          >
             {SECRET_HINT[view.secrets.webhookSecret]}
           </p>
           {error("webhookSecret")}
         </div>
-        <fieldset className="field">
-          <legend className="field-label">
+        <fieldset className="flex flex-col gap-2">
+          <legend className="text-sm font-medium text-foreground">
             Where can this App be installed?
           </legend>
-          <label className="check">
+          <label className="flex items-start gap-2 text-sm">
             <input
               type="radio"
               name={`${ids}-privateApp`}
@@ -234,7 +245,7 @@ export function ManualForm({
             />
             <span>Only on its own account (a private App)</span>
           </label>
-          <label className="check">
+          <label className="flex items-start gap-2 text-sm">
             <input
               type="radio"
               name={`${ids}-privateApp`}
@@ -244,7 +255,7 @@ export function ManualForm({
             />
             <span>On any account (a public App)</span>
           </label>
-          <p className="muted small">
+          <p className="text-sm text-muted-foreground">
             {PRIVATE_APP_WHERE_HINT} GitHub does not report it. It decides
             whether a new installation may be attached to the one workspace of a
             single-tenant instance without asking, so there is no default.
@@ -252,21 +263,34 @@ export function ManualForm({
           {error("privateApp")}
         </fieldset>
       </fieldset>
-      <fieldset>
-        <legend>Sign in with GitHub (optional)</legend>
-        <p className="muted small">
+
+      <fieldset className="flex flex-col gap-4">
+        <legend className="text-sm font-medium text-foreground">
+          Sign-in (optional)
+        </legend>
+        <p className="text-sm text-muted-foreground">
           The client id and a client secret of the same App let people sign in
           with GitHub. Leave the client id empty to turn it off.
         </p>
-        {text("clientId", "Client ID", clientId, setClientId, {
-          placeholder: "Iv1.0123456789abcdef",
-        })}
-        <div className="field">
-          <label htmlFor={`${ids}-clientSecret`} className="field-label">
-            Client secret
-          </label>
-          <input
-            id={`${ids}-clientSecret`}
+        <div className="flex flex-col gap-2">
+          <Label htmlFor={fieldId("clientId")}>Client ID</Label>
+          <Input
+            id={fieldId("clientId")}
+            type="text"
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="Iv1.0123456789abcdef"
+            value={clientId}
+            onChange={(event) => setClientId(event.target.value)}
+            aria-invalid={issueFor("clientId") !== undefined}
+            aria-describedby={describedBy("clientId")}
+          />
+          {error("clientId")}
+        </div>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor={fieldId("clientSecret")}>Client secret</Label>
+          <Input
+            id={fieldId("clientSecret")}
             type="password"
             autoComplete="new-password"
             value={clientSecret}
@@ -277,20 +301,30 @@ export function ManualForm({
               `${ids}-clientSecret-hint`,
             )}
           />
-          <p id={`${ids}-clientSecret-hint`} className="muted small">
+          <p
+            id={`${ids}-clientSecret-hint`}
+            className="text-sm text-muted-foreground"
+          >
             {SECRET_HINT[view.secrets.clientSecret]}
           </p>
           {error("clientSecret")}
         </div>
       </fieldset>
-      <div className="form-actions">
-        <Button type="submit" disabled={pending}>
-          {pending ? "Checking with GitHub..." : "Save and check"}
+
+      <div className="flex flex-wrap items-center gap-3">
+        <Button
+          type="submit"
+          loading={pending}
+          loadingLabel="Checking with GitHub"
+        >
+          Save and check
         </Button>
         {status?.kind === "saved" ? (
-          <span role="status">Saved.</span>
+          <span role="status" className="text-sm text-muted-foreground">
+            Saved.
+          </span>
         ) : status?.kind === "failed" ? (
-          <span role="alert" className="field-error">
+          <span role="alert" className="text-sm text-destructive">
             {status.text}
           </span>
         ) : (
@@ -298,9 +332,9 @@ export function ManualForm({
         )}
       </div>
       {issueFor("") === undefined ? null : (
-        <p role="alert" className="field-error">
+        <FieldError>
           {describeGithubIssue(issueFor("") as RequestIssue)}
-        </p>
+        </FieldError>
       )}
     </form>
   );

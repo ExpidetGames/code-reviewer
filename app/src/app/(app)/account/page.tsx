@@ -7,12 +7,9 @@ import { AccountPageContent } from "@/account/ui/account-view";
 import { requireUser } from "@/auth/session";
 import { getDatabase } from "@/db/startup";
 import { isGithubSignInConfigured } from "@/github-config/shared";
+import { singleSearchParam } from "@/http/search-params";
 
 export const metadata: Metadata = { title: "Account" };
-
-function single(value: string | string[] | undefined): string | null {
-  return typeof value === "string" && value !== "" ? value : null;
-}
 
 export default async function AccountPage(props: PageProps<"/account">) {
   const user = await requireUser();
@@ -28,7 +25,10 @@ export default async function AccountPage(props: PageProps<"/account">) {
       account={account}
       githubSignInAvailable={available}
       isInstanceAdmin={user.isInstanceAdmin}
-      outcome={{ ok: single(query.github), error: single(query.github_error) }}
+      outcome={{
+        ok: singleSearchParam(query.github),
+        error: singleSearchParam(query.github_error),
+      }}
     />
   );
 }

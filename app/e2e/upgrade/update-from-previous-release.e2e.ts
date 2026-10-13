@@ -691,15 +691,17 @@ test.describe(
     }) => {
       const alice = person("upgrade-alice");
       await signInAsOperator(page);
-      await page.goto("/admin/integrations");
-      await expect(page.getByText("Not linked.")).toBeVisible();
+      await page.goto("/account");
+      await expect(
+        page.getByRole("button", { name: "Link GitHub account" }),
+      ).toBeVisible();
 
       await page.getByRole("button", { name: "Link GitHub account" }).click();
       await page
         .getByRole("button", { name: `Authorize ${alice.login}` })
         .click();
 
-      await expect(page).toHaveURL(/\/admin\/integrations\?github=merged$/);
+      await expect(page).toHaveURL(/\/account\?github=merged$/);
       await expect(
         page.getByRole("status").filter({ hasText: "merged into this one" }),
       ).toBeVisible();

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Linking a GitHub identity to the signed-in account (docs/decisions/0001-editions-setup-and-accounts.md,
-// sections 2.5 and 2.6), from the account's own page, or from the admin portal for the instance admin.
+// sections 2.5 and 2.6), from the account's own page.
 //
 // - `start` makes the address of GitHub's authorization page: the user authorization of the instance's
 //   GitHub App, with a signed, single-use state bound to the person and the session that started it, and
@@ -15,8 +15,7 @@
 //       instance admin and an imported user without any other credential, who are merged (merge.ts).
 //   An address never links anything here: the person is signed in, and the identity is proven by GitHub.
 //
-// Where the browser lands afterwards is one of two fixed pages, chosen by the state, never an address from
-// the request.
+// Where the browser lands afterwards is one fixed page, never an address from the request.
 import { randomBytes, createHash, randomUUID } from "node:crypto";
 import type { Kysely } from "kysely";
 import { secondsLeft } from "../auth/sign-in-limit.ts";
@@ -37,14 +36,8 @@ import {
   type MergeOptions,
 } from "./merge.ts";
 
-export const LINK_SURFACES = ["account", "admin"] as const;
-export type LinkSurface = (typeof LINK_SURFACES)[number];
-
-/** Where the person lands: fixed pages, one per surface. */
-export const LINK_RETURN_PAGES: Record<LinkSurface, string> = {
-  account: "/account",
-  admin: "/admin/integrations",
-};
+/** Where the person lands after a linking: a fixed path, never an address from the request. */
+export const LINK_RETURN_PAGE = "/account";
 
 export const LINK_WINDOW_MS = 10 * 60 * 1000;
 export const LINK_USER_MAX = 10;
@@ -90,12 +83,10 @@ export type StartLinkResult =
   | { ok: false; error: "rate_limited"; retryAfterSeconds: number };
 
 export type CompleteLinkResult =
-  | { ok: true; outcome: LinkOutcome; surface: LinkSurface }
-  | { ok: false; error: LinkErrorCode; surface: LinkSurface };
+  { ok: true; outcome: LinkOutcome } | { ok: false; error: LinkErrorCode };
 
 export type GithubLinkService = {
-  /** `raw` is the request body, as received: `{ surface: "account" | "admin" }`. */
-  start(actor: LinkActor, raw: unknown): Promise<StartLinkResult>;
+  start(actor: LinkActor): Promise<StartLinkResult>;
   /** `query` is what GitHub put into the address of the callback. */
   complete(
     actor: LinkActor,
@@ -124,10 +115,6 @@ export type GithubLinkServiceOptions = {
   mergeHooks?: Pick<MergeOptions, "beforeCommit">;
 };
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 const MERGE_REFUSALS: Record<MergeErrorCode, LinkErrorCode> = {
   merge_not_available: "identity_belongs_to_other_user",
   identity_belongs_to_other_user: "identity_belongs_to_other_user",
@@ -152,10 +139,7 @@ export function createGithubLinkService({
   const redirectUri = `${publicUrl.replace(/\/+$/, "")}/api/auth/callback/github`;
 
   return {
-    async start(actor, raw) {
-      const surface = isObject(raw) ? raw.surface : undefined;
-      if (!LINK_SURFACES.some((candidate) => candidate === surface))
-        return { ok: false, error: "invalid_input" };
+    async start(actor) {
       const client = await authorization();
       if (client === null) return { ok: false, error: "github_not_configured" };
 
@@ -187,7 +171,6 @@ export function createGithubLinkService({
         userId: actor.id,
         sessionId: actor.sessionId,
         codeVerifier: verifier,
-        data: { surface },
       });
       const url = new URL(
         `${oauthBaseUrl.replace(/\/+$/, "")}/login/oauth/authorize`,
@@ -201,10 +184,9 @@ export function createGithubLinkService({
     },
 
     async complete(actor, query) {
-      let surface: LinkSurface = "account";
       const fail = (error: LinkErrorCode): CompleteLinkResult => {
         log(`[github-link] LINK_FAILED: ${error}`);
-        return { ok: false, error, surface };
+        return { ok: false, error };
       };
 
       const callbacks = await rateLimits.hit(
@@ -224,8 +206,6 @@ export function createGithubLinkService({
         sessionId: actor.sessionId,
       });
       if (!consumed.ok) return fail("state_invalid");
-      if (isObject(consumed.data) && consumed.data.surface === "admin")
-        surface = "admin";
       if (typeof error === "string" && error !== "")
         return fail("access_denied");
       if (typeof code !== "string" || code === "" || code.length > 512)
@@ -267,7 +247,7 @@ export function createGithubLinkService({
       try {
         const owner = await directory.findByGithubId(githubId);
         if (owner?.id === actor.id)
-          return { ok: true, outcome: "already_linked", surface };
+          return { ok: true, outcome: "already_linked" };
 
         if (owner === null) {
           const linked = await linkNewIdentity(db, {
@@ -277,7 +257,7 @@ export function createGithubLinkService({
             now: now(),
           });
           return linked
-            ? { ok: true, outcome: "linked", surface }
+            ? { ok: true, outcome: "linked" }
             : fail("already_linked");
         }
 
@@ -288,7 +268,7 @@ export function createGithubLinkService({
           githubId,
           ...mergeHooks,
         });
-        if (merged.ok) return { ok: true, outcome: "merged", surface };
+        if (merged.ok) return { ok: true, outcome: "merged" };
         return fail(MERGE_REFUSALS[merged.error]);
       } catch {
         // The transaction rolled back (a unique index held, or the database failed): nothing changed.
