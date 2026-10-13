@@ -7,6 +7,7 @@ outside-export discovery requirements are recorded in docs/dynamic-checkout.md.
 
 import itertools
 import re
+from enum import StrEnum
 
 from code_reviewer_runner.redaction import Redactor
 
@@ -35,17 +36,34 @@ _PRIVATE_KEY = re.compile(
     re.DOTALL,
 )
 _ASSIGNMENT = re.compile(
-    r"(?im)\b(?:password|passwd|api[_-]?key|access[_-]?token|secret[_-]?key)\s*[:=]\s*"
-    r"[\"']?[^\s\"',;]+"
+    r"(?im)\b(?:password|passwd|api[_-]?key|access[_-]?token|secret[_-]?key|"
+    r"client[_-]?secret|private[_-]?key|token)[\"']?\s*[:=]\s*[\"']?"
+    r"(?P<value>[^\s\"',;]+)"
 )
+_PLACEHOLDERS = {"placeholder", "changeme", "example", "your-api-key", "your-token", "your-key"}
 
 
-def omission_reason(path: str, mode: str) -> str | None:
+def _redact_assignment(match: re.Match[str]) -> str:
+    value = match.group("value")
+    if value.lower() in _PLACEHOLDERS or (value.startswith("<") and value.endswith(">")):
+        return match.group()
+    return "[REDACTED]"
+
+
+class OmissionReason(StrEnum):
+    ENGINE_DISCOVERY = "engine_discovery"
+    CREDENTIAL_PATH = "credential_path"
+    UNSAFE_MODE = "unsafe_mode"
+    LARGE_FILE = "large_file"
+    BINARY = "binary"
+
+
+def omission_reason(path: str, mode: str) -> OmissionReason | None:
     parts = path.lower().split("/")
     if ".opencode" in parts or parts[-1] in _CONFIG_NAMES:
-        return "engine_discovery"
+        return OmissionReason.ENGINE_DISCOVERY
     if any(a in (".claude", ".agents") and b == "skills" for a, b in itertools.pairwise(parts)):
-        return "engine_discovery"
+        return OmissionReason.ENGINE_DISCOVERY
     if any(
         (part.startswith(".env") and part != ".env.example")
         or part in _CREDENTIAL_DIRS
@@ -53,14 +71,16 @@ def omission_reason(path: str, mode: str) -> str | None:
         or part.endswith((".pem", ".key", ".p12", ".pfx", ".keystore"))
         for part in parts
     ):
-        return "credential_path"
+        return OmissionReason.CREDENTIAL_PATH
     if mode not in ("100644", "100755"):
-        return "unsafe_mode"
+        return OmissionReason.UNSAFE_MODE
     return None
 
 
 def redact_text(text: str, redactor: Redactor) -> str:
-    return _ASSIGNMENT.sub("[REDACTED]", _PRIVATE_KEY.sub("[REDACTED]", redactor.redact(text)))
+    return _ASSIGNMENT.sub(
+        _redact_assignment, _PRIVATE_KEY.sub("[REDACTED]", redactor.redact(text))
+    )
 
 
 def content_text(raw: bytes, redactor: Redactor) -> str | None:

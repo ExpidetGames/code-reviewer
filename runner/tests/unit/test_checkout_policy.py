@@ -137,3 +137,12 @@ def test_allowed_text_redacts_recognized_and_job_credentials() -> None:
     assert text is not None
     assert token not in text and "private-value" not in text and "abc" not in text
     assert "[REDACTED]" in text
+
+
+# #196-T05
+def test_example_placeholders_stay_readable_and_json_credentials_are_redacted() -> None:
+    raw = b'API_KEY=your-api-key\nPASSWORD=<password>\n{"client_secret": "dummy-private-value"}'
+    text = content_text(raw, Redactor(()))
+    assert text is not None
+    assert "your-api-key" in text and "<password>" in text
+    assert "dummy-private-value" not in text

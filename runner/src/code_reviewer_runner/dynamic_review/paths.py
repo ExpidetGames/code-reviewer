@@ -17,7 +17,8 @@ def validate_path(path: str, limits: Limits) -> tuple[str, ...]:
         or "\\" in path
         or ":" in path
         or any(
-            part in ("", ".", "..")
+            len(part.encode("utf-8")) > 255
+            or part in ("", ".", "..")
             or part.lower() == ".git"
             or part.endswith((".", " "))
             or _WINDOWS_RESERVED.fullmatch(part)

@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """One cumulative budget for transfer, expansion, metadata and export, with a deadline."""
 
+import math
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -16,6 +17,10 @@ class CheckoutError(Exception):
         super().__init__(code.value)
 
 
+class ObjectUnavailable(CheckoutError):
+    """The server explicitly refused a wanted object, or an exact tree is absent."""
+
+
 @dataclass(frozen=True)
 class Limits:
     entries: int = 20_000
@@ -29,8 +34,33 @@ class Limits:
     seconds: float = 300
 
     def __post_init__(self) -> None:
-        if any(value <= 0 for value in self.__dict__.values()):
-            raise ValueError("checkout limits must be positive")
+        values = (
+            self.entries,
+            self.file_bytes,
+            self.exposed_bytes,
+            self.preparation_bytes,
+            self.diff_bytes,
+            self.response_bytes,
+            self.path_bytes,
+            self.path_depth,
+            self.seconds,
+        )
+        maxima = (
+            20_000,
+            512 * 1024,
+            64 * 1024 * 1024,
+            256 * 1024 * 1024,
+            2 * 1024 * 1024,
+            1024 * 1024,
+            1024,
+            32,
+            300,
+        )
+        if any(
+            not math.isfinite(value) or not 0 < value <= maximum
+            for value, maximum in zip(values, maxima, strict=True)
+        ):
+            raise ValueError("checkout limits may only lower the fixed envelope")
 
 
 class Budget:
@@ -63,3 +93,6 @@ class Budget:
             self.preparation += count
             if self.preparation > self.limits.preparation_bytes:
                 raise CheckoutError()
+
+
+DEFAULT_LIMITS = Limits()
