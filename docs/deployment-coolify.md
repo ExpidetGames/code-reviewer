@@ -22,7 +22,7 @@ no port and only talks to the app.
 8. [Storage and backups](#8-storage-and-backups)
 9. [Runner sizing and `RUNNER_CONCURRENCY`](#9-runner-sizing-and-runner_concurrency)
 10. [One app instance only](#10-one-app-instance-only)
-11. [Updates and rollback](#11-updates-and-rollback), including [updating an installation from before accounts](#updating-an-installation-from-before-accounts)
+11. [Updates and rollback](#11-updates-and-rollback), including [updating an installation from before accounts](#updating-an-installation-from-before-accounts) and [removing comment commands](#removing-comment-commands)
 12. [First-run checklist](#12-first-run-checklist)
 13. [When something does not work](#13-when-something-does-not-work)
 - [What is verified](#what-is-verified)
@@ -608,6 +608,29 @@ database that the older version cannot open: it stops at start with a `MIGRATION
 ("corrupted migrations: previously executed migration ... is missing"). If that happens, restore the
 backup you made before the update ([section 8](#8-storage-and-backups)), then start the older version. Data
 written since that backup is lost.
+
+### Removing comment commands
+
+A release can remove `/ask`, `/improve` and `/describe`; only `/review` and the automatic review remain.
+Update **app first, runner second**, and do not run an old app producer next to the new app:
+
+1. **Stop the old app producers** (or pause webhook deliveries and manual starts): an old app still queues
+   removed commands that the new queue will not run.
+2. **Deploy the new app and let it become healthy.** Its migration cancels every *waiting* job of a removed
+   command (`cancelled`, error code `command_removed`); the id, command, arguments, attempts and any result
+   stay, and finished runs remain readable.
+3. **Replace the runners.** A runner that already holds a claimed job may finish it under its lease
+   (heartbeats and the completion envelope are unchanged). A removed command that reaches a new runner fails
+   with `invalid_command` and is reported, so the job finishes instead of being stranded.
+
+The runner API stays version 1: a new runner accepts every review payload the previous release sends (the
+legacy `/ask` arguments and the removed tools' option families are ignored, never passed to PR-Agent).
+Running an old app producer alongside the new app is unsupported.
+
+**Rollback.** A cancelled job stays cancelled: the previous version neither resurrects it nor retries a
+removed command. Stored `allowedCommands` that named removed commands were normalized once (for example
+`["ask"]` became `[]`, never `["review"]`); a downgrade does not restore them, so review can stay switched
+off until an admin turns it back on in the project settings.
 
 ## 12. First-run checklist
 
