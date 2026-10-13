@@ -26,6 +26,12 @@ demands of the model boundary happens here, before a byte reaches the provider o
   there is no fallback model or provider.
 - **Bytes are bounded on both sides.** An oversized request is refused before forwarding, an
   oversized answer before it reaches the engine.
+- **The tool loop is audited here** (`audit.py`): the tool calls of an answer are counted before the
+  engine gets it, and the tool results in a request's history are checked against the per-result,
+  cumulative and distinct-file bounds before the request is forwarded. A run that crosses one fails
+  with the first stable cause recorded in the ledger; the engine's own session is never trusted.
+- **Streaming is answered, not relayed.** The engine always asks for a stream; the provider is asked
+  for the whole answer, which is bounded and accounted first, then handed back as a short stream.
 
 `steps`, SSE events and the engine's own accounting are observation only and are never trusted here.
 """
@@ -40,7 +46,9 @@ from typing import Any
 from urllib.error import HTTPError
 from urllib.request import Request
 
+from code_reviewer_runner.dynamic_review.audit import ToolAudit
 from code_reviewer_runner.dynamic_review.budget import BudgetLedger, LimitError
+from code_reviewer_runner.dynamic_review.completion_stream import completion_as_stream
 from code_reviewer_runner.dynamic_review.config import PROXY_CAPABILITY_BYTES, PROXY_PROVIDER_ID
 from code_reviewer_runner.dynamic_review.net import no_redirect_opener
 from code_reviewer_runner.job_loop.jsonvalues import as_object
@@ -54,7 +62,8 @@ STRUCTURED_OUTPUT_TOOL = "StructuredOutput"
 _REQUEST_TIMEOUT_SECONDS = 120.0
 # The only request fields that reach the provider. Everything else the engine sends is dropped, and
 # the destination, the model and the output bound come from trusted configuration, never from here.
-# `stream` is absent on purpose: a streaming request is refused, not downgraded.
+# `stream` and `stream_options` are absent on purpose: the provider is always asked for the whole
+# answer (see `completion_stream.py`), whatever the engine asked for.
 _FORWARDED_FIELDS = frozenset(
     {
         "messages",
@@ -160,6 +169,7 @@ def capabilities_from_config(raw: str | None) -> DynamicCapabilities:
 class ProxyResponse:
     status: int
     body: bytes
+    content_type: str = "application/json"
 
 
 # A transport is what actually sends the forwarded request upstream; a test replaces it so nothing
@@ -223,6 +233,7 @@ class ModelProxy:
         self.upstream_api_key = upstream_api_key
         self.upstream_model = upstream_model
         self.capabilities = capabilities
+        self.audit = ToolAudit(ledger)
         self._post = post
         # The proxy starts only after the capability descriptor was proven: an unusable destination
         # is a failure before the first request, not a downgrade at the first call.
@@ -247,7 +258,10 @@ class ModelProxy:
         try:
             return self._handle(method, path, body)
         except LimitError as error:
-            return ProxyResponse(status=502, body=error_body(error.code, error.detail))
+            # The engine only sees an HTTP error; the stable cause is kept for the run's result.
+            # 403, not 5xx: a deterministic refusal must not be retried (every retry is a call).
+            self.ledger.record_failure(error)
+            return ProxyResponse(status=403, body=error_body(error.code, error.detail))
 
     def _handle(self, method: str, path: str, body: bytes) -> ProxyResponse:
         if path == f"{self.base_path}/models":
@@ -263,6 +277,10 @@ class ModelProxy:
         self.ledger.check_request_bytes(len(body))
         request = self._decode(body)
         self._check_model(request)
+        wants_stream = request.get("stream") is True
+        # The tool results the engine is about to show the model are audited before anything is
+        # forwarded: content over a bound is never sent to the provider.
+        self.audit.results_in_request(request.get("messages"))
         # A request the policy refuses spends nothing: build it before reserving the call.
         forwarded = self._forward_body(request)
         reservation = self.ledger.reserve_call(
@@ -281,8 +299,11 @@ class ModelProxy:
         if status != 200:
             # The run ends with the provider's stable code; no partial success is claimed and no
             # counter is invented for a refused call (the reservation stays spent).
-            return ProxyResponse(status=status, body=self._provider_error(status))
-        usage = self._usage(response_body)
+            refusal, code = self._provider_error(status)
+            self.ledger.record_failure(LimitError(code, "the model provider refused the request"))
+            return ProxyResponse(status=status, body=refusal)
+        completion = self._completion(response_body)
+        usage = self._usage(completion)
         if usage == (None, None):
             raise LimitError(
                 ErrorCode.DYNAMIC_ACCOUNTING_FAILED, "the provider did not report usage"
@@ -290,7 +311,14 @@ class ModelProxy:
         # The provider is authoritative: its counters replace the reservation. A counter above the
         # reservation is not added up, it fails the run.
         self.ledger.settle_call(reservation, prompt_tokens=usage[0], completion_tokens=usage[1])
-        return ProxyResponse(status=status, body=response_body)
+        # The tool calls the model asked for are counted before the engine can run any of them.
+        self.audit.calls_in_answer(completion)
+        if not wants_stream:
+            return ProxyResponse(status=status, body=response_body)
+        stream = completion_as_stream(completion)
+        if stream is None:
+            raise LimitError(ErrorCode.LLM_OUTPUT_INVALID, "the provider answer has no message")
+        return ProxyResponse(status=status, body=stream, content_type="text/event-stream")
 
     def _decode(self, body: bytes) -> dict[str, Any]:
         try:
@@ -322,12 +350,9 @@ class ModelProxy:
 
         The model, the output bound and (through the transport) the destination and credential are
         set here from trusted configuration; whatever else the caller sent is dropped. The tool
-        choice the engine asked for is kept — refusing it would be a silent downgrade."""
-        if request.get("stream") is True:
-            raise LimitError(
-                ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED,
-                "streaming responses are not accounted for yet",
-            )
+        choice the engine asked for is kept — refusing it would be a silent downgrade. The provider
+        is always asked for the whole answer: a streamed request is answered from the bounded,
+        accounted completion, never relayed."""
         if _ROUTING_FIELDS & request.keys():
             raise LimitError(
                 ErrorCode.DYNAMIC_POLICY_VIOLATION, "the request tries to choose a route"
@@ -337,17 +362,26 @@ class ModelProxy:
         }
         forwarded["model"] = self.upstream_model
         forwarded["max_tokens"] = self._output_allowance(request)
+        forwarded["stream"] = False
         return json.dumps(forwarded).encode("utf-8")
 
     @staticmethod
-    def _usage(body: bytes) -> tuple[int | None, int | None]:
+    def _completion(body: bytes) -> dict[str, Any]:
         try:
             value: Any = json.loads(body)
         except (ValueError, UnicodeDecodeError):
-            return None, None
+            raise LimitError(
+                ErrorCode.DYNAMIC_ACCOUNTING_FAILED, "the provider answer is not JSON"
+            ) from None
         document = as_object(value)
         if document is None:
-            return None, None
+            raise LimitError(
+                ErrorCode.DYNAMIC_ACCOUNTING_FAILED, "the provider answer is not an object"
+            )
+        return document
+
+    @staticmethod
+    def _usage(document: dict[str, Any]) -> tuple[int | None, int | None]:
         usage = as_object(document.get("usage"))
         if usage is None:
             return None, None
@@ -360,14 +394,14 @@ class ModelProxy:
         return prompt_tokens, completion_tokens
 
     @staticmethod
-    def _provider_error(status: int) -> bytes:
+    def _provider_error(status: int) -> tuple[bytes, ErrorCode]:
         code = {
             401: ErrorCode.LLM_AUTH,
             402: ErrorCode.LLM_QUOTA,
             403: ErrorCode.LLM_AUTH,
             429: ErrorCode.LLM_RATE_LIMIT,
         }.get(status, ErrorCode.LLM_UNAVAILABLE if status >= 500 else ErrorCode.LLM_BAD_REQUEST)
-        return error_body(code, "the model provider refused the request")
+        return error_body(code, "the model provider refused the request"), code
 
     def _models_body(self) -> bytes:
         return json.dumps(
@@ -391,11 +425,15 @@ class _Handler(BaseHTTPRequestHandler):
         return self.server.proxy  # type: ignore[attr-defined]
 
     def _answer(self, response: ProxyResponse) -> None:
-        self.send_response(response.status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(response.body)))
-        self.end_headers()
-        self.wfile.write(response.body)
+        try:
+            self.send_response(response.status)
+            self.send_header("Content-Type", response.content_type)
+            self.send_header("Content-Length", str(len(response.body)))
+            self.end_headers()
+            self.wfile.write(response.body)
+        except (BrokenPipeError, ConnectionResetError):
+            # The engine went away (a refused run ends its process group): nobody to answer.
+            self.close_connection = True
 
     def _credentials(self) -> dict[str, str]:
         return {"Authorization": self.headers.get("Authorization", "")}

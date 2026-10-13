@@ -81,9 +81,33 @@ describe("engine workflow", () => {
     expect(script).toMatch(/setpriv [^\n]*--no-new-privs/);
   });
 
+  // #197-T02
+  it("fetches the pinned OpenCode and installs ripgrep before the namespace, and caches the pin", () => {
+    expect(script).toContain("scripts/fetch_opencode.py");
+    expect(script.indexOf("scripts/fetch_opencode.py")).toBeLessThan(
+      script.indexOf("unshare --net"),
+    );
+    // The engine needs a trusted ripgrep, or the pinned release downloads one on its first grep.
+    expect(script).toContain("command -v rg");
+    expect(commandLines().join("\n")).toContain("apt-get install");
+    expect(commandLines().join("\n")).toContain("ripgrep");
+
+    const cache = steps.find(
+      (step) =>
+        step.uses?.startsWith("actions/cache@") &&
+        String(step.with?.key).includes("opencode"),
+    );
+    expect(cache?.with?.path).toBe("~/.cache/code-reviewer/opencode");
+    expect(String(cache?.with?.key)).toContain("opencode-pin.json");
+  });
+
   // CR-41-T15
   it("caches the tiktoken encoding", () => {
-    const cache = steps.find((step) => step.uses?.startsWith("actions/cache@"));
+    const cache = steps.find(
+      (step) =>
+        step.uses?.startsWith("actions/cache@") &&
+        String(step.with?.key).includes("tiktoken"),
+    );
 
     expect(cache?.with?.path).toBe("/tmp/data-gym-cache");
     expect(String(cache?.with?.key)).toContain("o200k_base");

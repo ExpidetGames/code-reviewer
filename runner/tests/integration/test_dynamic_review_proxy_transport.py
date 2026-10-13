@@ -174,7 +174,9 @@ def test_a_redirect_from_the_provider_is_never_followed_and_fails_closed() -> No
             # The workspace key was sent once, to the configured destination, and nowhere else.
             assert len(upstream.requests) == 1
             assert elsewhere.requests == []
-        assert code == 502
+        assert (
+            code == 403
+        )  # a deterministic refusal, not a 5xx the engine would retry (each retry is a call)
         assert document["error"]["code"] == ErrorCode.DYNAMIC_POLICY_VIOLATION.value
 
 
@@ -206,14 +208,14 @@ def test_a_provider_answer_over_the_response_bound_fails_closed_through_the_prox
         finally:
             server.stop()
 
-    assert code == 502
+    assert code == 403
     assert document["error"]["code"] == ErrorCode.DYNAMIC_BUDGET_EXCEEDED.value
 
 
 # #197-T04
 def test_the_engine_client_does_not_follow_a_redirect_either() -> None:
     with Listener(answer_ok) as elsewhere, Listener(redirect_to(elsewhere.url, 307)) as engine:
-        status, _ = _http_request("POST", f"{engine.url}/session", b"{}", {})
+        status, _ = _http_request("POST", f"{engine.url}/session", b"{}", {}, 5.0)
 
     assert status == 307
     assert elsewhere.requests == []

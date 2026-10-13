@@ -241,17 +241,6 @@ def test_a_provider_refusal_becomes_a_stable_code_and_is_never_a_partial_success
         assert b"provider message" not in response.body
 
 
-# #197-T12
-def test_a_streaming_request_is_refused_rather_than_left_unaccounted() -> None:
-    upstream = Upstream()
-    subject = proxy(upstream)
-
-    response = post(subject, request_body(stream=True))
-
-    assert error_code(response) == ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED.value
-    assert upstream.requests == []
-
-
 # #197-T05
 def test_the_call_budget_stops_the_run_at_the_proxy() -> None:
     upstream = Upstream()
@@ -416,7 +405,10 @@ def test_only_the_allowlisted_request_fields_reach_the_provider() -> None:
         "parallel_tool_calls",
         "response_format",
         "max_tokens",
+        # Always set by the proxy: the provider is asked for the whole answer.
+        "stream",
     }
+    assert forwarded["stream"] is False
     assert forwarded["model"] == "deepseek/deepseek-v4.1-flash"
     assert forwarded["tool_choice"] == "required"
 
@@ -444,3 +436,142 @@ def test_the_forwarded_output_bound_never_exceeds_the_trusted_limit() -> None:
         forwarded = json.loads(upstream.requests[0][1])
         assert forwarded["max_tokens"] == expected, extra
         assert "max_completion_tokens" not in forwarded
+
+
+def message_answer(message: dict[str, Any], *, finish: str = "stop") -> dict[str, Any]:
+    return {
+        "id": "chatcmpl-2",
+        "created": 1,
+        "model": "deepseek/deepseek-v4.1-flash",
+        "choices": [{"message": message, "finish_reason": finish}],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+    }
+
+
+def stream_events(body: bytes) -> list[Any]:
+    lines = body.decode("utf-8").split("\n\n")
+    return [
+        line[len("data: ") :] if line == "data: [DONE]" else json.loads(line[len("data: ") :])
+        for line in lines
+        if line
+    ]
+
+
+# #197-T13
+def test_a_streamed_request_is_answered_from_the_bounded_whole_answer() -> None:
+    tool_call = {
+        "id": "call_1",
+        "type": "function",
+        "function": {"name": "read", "arguments": '{"filePath":"a.ts"}'},
+    }
+    upstream = Upstream(
+        body=message_answer({"role": "assistant", "content": None, "tool_calls": [tool_call]})
+    )
+    subject = proxy(upstream)
+
+    response = post(subject, request_body(stream=True, stream_options={"include_usage": True}))
+
+    # The provider was asked for the whole answer, never a stream, and learnt nothing of the option.
+    forwarded = json.loads(upstream.requests[0][1])
+    assert forwarded["stream"] is False
+    assert "stream_options" not in forwarded
+    # The engine got a short event stream with the same message and the provider's own usage.
+    assert response.status == 200
+    assert response.content_type == "text/event-stream"
+    events = stream_events(response.body)
+    assert events[-1] == "[DONE]"
+    first, closing = events[0], events[1]
+    assert first["object"] == "chat.completion.chunk" and first["id"] == "chatcmpl-2"
+    delta = first["choices"][0]["delta"]
+    assert delta["role"] == "assistant"
+    assert delta["tool_calls"] == [{**tool_call, "index": 0}]
+    assert closing["choices"][0]["finish_reason"] == "stop"
+    assert closing["usage"] == {"prompt_tokens": 10, "completion_tokens": 5}
+    assert subject.ledger.usage(None).total_tokens == 15
+
+
+# #197-T13
+def test_a_request_that_does_not_stream_gets_the_plain_answer() -> None:
+    subject = proxy(Upstream())
+
+    response = post(subject, request_body())
+
+    assert response.content_type == "application/json"
+    assert json.loads(response.body)["choices"][0]["message"]["content"] == "{}"
+
+
+# #197-T05
+def test_the_tool_call_over_the_bound_is_refused_before_the_engine_gets_the_answer() -> None:
+    call = {"id": "c1", "type": "function", "function": {"name": "read", "arguments": "{}"}}
+    upstream = Upstream(body=message_answer({"role": "assistant", "tool_calls": [call]}))
+    subject = proxy(upstream, ledger=BudgetLedger(DynamicLimits(max_tool_calls=0)))
+
+    response = post(subject, request_body(stream=True))
+
+    assert response.status == 403
+    assert error_code(response) == ErrorCode.DYNAMIC_BUDGET_EXCEEDED.value
+    assert b"tool_calls" not in response.body
+
+
+# #197-T12
+def test_a_result_over_the_bound_in_the_history_is_never_forwarded() -> None:
+    upstream = Upstream()
+    subject = proxy(upstream, ledger=BudgetLedger(DynamicLimits(max_tool_result_bytes=10)))
+    history = [
+        {"role": "user", "content": "review"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {"id": "c1", "type": "function", "function": {"name": "read", "arguments": "{}"}}
+            ],
+        },
+        {"role": "tool", "tool_call_id": "c1", "content": "x" * 11},
+    ]
+
+    response = post(subject, request_body(messages=history))
+
+    assert error_code(response) == ErrorCode.DYNAMIC_BUDGET_EXCEEDED.value
+    assert upstream.requests == []
+    # A refused request spent no model call.
+    assert subject.ledger.model_calls == 0
+
+
+# #197-T06
+def test_the_first_cause_of_a_refusal_is_kept_for_the_run() -> None:
+    subject = proxy(Upstream(), ledger=BudgetLedger(DynamicLimits(max_request_bytes=10)))
+
+    post(subject, request_body())
+    post(subject, request_body(model="another-model"))
+
+    failure = subject.ledger.failure
+    assert failure is not None
+    assert failure.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
+
+
+# #197-T06
+def test_a_provider_refusal_is_recorded_as_the_runs_stable_cause() -> None:
+    for status, code in (
+        (401, ErrorCode.LLM_AUTH),
+        (402, ErrorCode.LLM_QUOTA),
+        (429, ErrorCode.LLM_RATE_LIMIT),
+        (503, ErrorCode.LLM_UNAVAILABLE),
+    ):
+        subject = proxy(Upstream(status=status))
+
+        response = post(subject, request_body())
+
+        assert response.status == status
+        assert subject.ledger.failure is not None
+        assert subject.ledger.failure.code is code
+
+
+# #197-T05
+def test_an_authenticated_request_is_the_only_way_to_record_a_failure() -> None:
+    # A stranger on the loopback port must not be able to stop the job by sending garbage.
+    subject = proxy(Upstream())
+
+    subject.handle("POST", "/v1/chat/completions", b"not json", {})
+    subject.handle("POST", "/v1/chat/completions", b"not json", bearer(OTHER_CAPABILITY))
+
+    assert subject.ledger.failure is None

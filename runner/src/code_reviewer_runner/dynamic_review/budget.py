@@ -128,6 +128,7 @@ class BudgetLedger:
         self._started = clock()
         self._counters = _Counters()
         self._lock = threading.Lock()
+        self._failure: LimitError | None = None
 
     @property
     def started(self) -> float:
@@ -139,6 +140,23 @@ class BudgetLedger:
 
     def expired(self) -> bool:
         return self.remaining_seconds() <= 0
+
+    def record_failure(self, error: LimitError) -> None:
+        """Remember the first thing that stopped the run; later ones never replace it.
+
+        The proxy is where most limits trip, but its caller is the engine, which only sees an HTTP
+        error. The adapter reads the stable code from here, so the run ends with the real cause and
+        never with a generic engine failure, and an answer the engine still produced afterwards is
+        not a success.
+        """
+        with self._lock:
+            if self._failure is None:
+                self._failure = error
+
+    @property
+    def failure(self) -> LimitError | None:
+        with self._lock:
+            return self._failure
 
     def check_deadline(self) -> None:
         if self.expired():

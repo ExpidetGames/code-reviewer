@@ -75,8 +75,10 @@ def test_the_config_defines_only_the_review_agent_with_the_trusted_prompt() -> N
     assert agent["mode"] == "primary"
     assert agent["model"] == f"{PROXY_PROVIDER_ID}/deepseek-v4.1-flash"
     assert agent["prompt"] == compose_system_prompt("look for real bugs", HEAD)
-    assert agent["tools"]["*"] is False
-    assert all(agent["tools"][tool] is True for tool in ALLOWED_TOOLS)
+    # The agent has no `tools` map: against the real v1.19.0 binary `{"*": false}` removed every
+    # tool, StructuredOutput included. The tool set is the default-deny permission block.
+    assert "tools" not in agent
+    assert all(document["permission"][tool] == "allow" for tool in ALLOWED_TOOLS)
 
 
 # #197-T02
