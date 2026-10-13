@@ -35,6 +35,7 @@ function detail(overrides: Partial<RunDetailView> = {}): RunDetailView {
     prNumber: 7,
     prUrl: "https://github.com/acme/widgets/pull/7",
     command: "review",
+    reviewKind: "diff",
     triggerKind: "webhook",
     trigger: "Automatic",
     status: "succeeded",
@@ -106,6 +107,31 @@ describe("the detail page", () => {
     );
     expect(link.getAttribute("rel")).toContain("noopener");
     expect(link.getAttribute("target")).toBe("_blank");
+  });
+
+  // #200
+  it("names the review kind of the run in the summary, for both kinds", () => {
+    const { rerender } = render(
+      <RunDetail
+        workspaceSlug="acme"
+        initial={snap(detail())}
+        api={apiAnswering([])}
+      />,
+    );
+    const kind = () =>
+      screen.getByText("Review kind").nextElementSibling?.textContent;
+
+    expect(kind()).toBe("Diff Review");
+
+    rerender(
+      <RunDetail
+        key="dynamic"
+        workspaceSlug="acme"
+        initial={snap(detail({ reviewKind: "dynamic" }))}
+        api={apiAnswering([])}
+      />,
+    );
+    expect(kind()).toBe("Dynamic Review");
   });
 
   // #175-T03

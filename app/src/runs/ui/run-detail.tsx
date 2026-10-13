@@ -22,6 +22,7 @@ import { formatUtc } from "../../ui/format-time.ts";
 import { useLiveSnapshot } from "../../ui/use-live-snapshot.ts";
 import { workspacePath } from "../../workspaces/paths.ts";
 import { formatDuration } from "../run-duration.ts";
+import { KIND_NAMES } from "../../review-settings/kind-names.ts";
 import { isSettled } from "../run-status.ts";
 import type { RunDetailSnapshot, RunDetailView } from "../run-view.ts";
 import { browserRunsApi, RUNS_POLL, type RunsApi } from "./api.ts";
@@ -189,6 +190,10 @@ export function RunDetail({
     {
       term: "Command",
       description: <code className="font-mono">/{run.command}</code>,
+    },
+    {
+      term: "Review kind",
+      description: KIND_NAMES[run.reviewKind],
     },
   ];
   if (run.args !== "")

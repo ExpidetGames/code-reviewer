@@ -67,9 +67,9 @@ import {
 } from "./form-state.ts";
 import { adoptCards, planProjectSave, type SaveStep } from "./project-save.ts";
 import { ModelFieldset } from "./model-fieldset.tsx";
+import { KIND_NAMES } from "../kind-names.ts";
 import {
   GATE_OFF_WARNING,
-  KIND_NAMES,
   ReviewKindFieldset,
   type ReviewKindHandlers,
 } from "./review-kind-fieldset.tsx";

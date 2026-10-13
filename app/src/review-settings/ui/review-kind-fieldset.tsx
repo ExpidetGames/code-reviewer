@@ -14,6 +14,7 @@ import {
   RadioGroupItem,
 } from "../../components/ui/radio-group.tsx";
 import { cn } from "../../lib/utils.ts";
+import { KIND_NAMES } from "../kind-names.ts";
 import type { ProjectDynamicView } from "../service.ts";
 import type { ProjectReviewKind } from "../settings.ts";
 import type { DynamicFormValues } from "./dynamic-form-state.ts";
@@ -23,11 +24,6 @@ import {
   type SettingsOrigin,
 } from "./settings-fields.tsx";
 import { SkillEditor } from "./skill-editor.tsx";
-
-export const KIND_NAMES: Record<ProjectReviewKind, string> = {
-  diff: "Diff Review",
-  dynamic: "Dynamic Review",
-};
 
 const KIND_HINTS: Record<ProjectReviewKind, string> = {
   diff: "Reviews the changes of the pull request with PR-Agent.",
