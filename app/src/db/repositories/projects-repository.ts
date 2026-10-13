@@ -22,6 +22,7 @@ import {
   encodeJson,
   formatTimestamp,
 } from "../codecs.ts";
+import { databaseDriver, type DatabaseDriver } from "../driver.ts";
 import type { Database, ProjectsTable } from "../schema.ts";
 import type { WorkspaceId } from "../workspace-scope.ts";
 
@@ -216,6 +217,7 @@ export function createProjectsRepository(
   now: () => Date = () => new Date(),
   newId: () => string = () => crypto.randomUUID(),
   warn: (message: string) => void = console.warn,
+  driver: DatabaseDriver = databaseDriver(db),
 ): ProjectsRepository {
   const toStored = (row: ProjectsTable): StoredProject =>
     toStoredProject(row, warn);
@@ -347,8 +349,11 @@ export function createProjectsRepository(
 
   /**
    * The one settings write: replaces or creates the project row of a repository with the settings
-   * `change` computes from the stored ones, in one transaction. `afterChange` runs in that same
-   * transaction, so the write and whatever it triggers commit together or roll back together.
+   * `change` computes from the stored ones, in one transaction. The stored settings are read under a
+   * lock on the workspace-scoped repository row, so a concurrent `change` cannot lose an update:
+   * SQLite already holds the single write lock (`begin immediate`, see `dialect.ts`), Postgres takes
+   * the row's `FOR UPDATE` lock before the read. `afterChange` runs in that same transaction, so the
+   * write and whatever it triggers commit together or roll back together.
    */
   function applySettings(
     repositoryId: string,
@@ -357,16 +362,23 @@ export function createProjectsRepository(
   ): Promise<StoredProject | undefined> {
     return inTransaction(async (trx) => {
       const timestamp = formatTimestamp(now());
+      // Lock the repository row (of this workspace) before reading the project. It exists for every
+      // settings save, project row or not, so it covers the first save too; on SQLite the lock is the
+      // transaction's own write lock and `for update` is not available.
+      const repositoryQuery = trx
+        .selectFrom("repositories")
+        .select(["id", "active"])
+        .where("workspace_id", "=", workspaceId)
+        .where("id", "=", repositoryId);
+      const repository = await (
+        driver === "postgres" ? repositoryQuery.forUpdate() : repositoryQuery
+      ).executeTakeFirst();
+      if (repository === undefined) return undefined;
+
       const existing = await trx
         .selectFrom("projects")
         .selectAll()
         .where("repository_id", "=", repositoryId)
-        .where("repository_id", "in", (eb) =>
-          eb
-            .selectFrom("repositories")
-            .select("id")
-            .where("workspace_id", "=", workspaceId),
-        )
         .executeTakeFirst();
       if (existing !== undefined) {
         const next = change(readSettings(existing.settings, existing.id, warn));
@@ -385,14 +397,7 @@ export function createProjectsRepository(
       // (the platform still lists it). Unlike activating, a suspended or removed installation does
       // not matter: the row is off and only keeps settings, which is also what the settings page
       // of an unavailable repository promises ("its settings are kept").
-      const repository = await trx
-        .selectFrom("repositories")
-        .select("id")
-        .where("workspace_id", "=", workspaceId)
-        .where("id", "=", repositoryId)
-        .where("active", "=", encodeBoolean(true))
-        .executeTakeFirst();
-      if (repository === undefined) return undefined;
+      if (!decodeBoolean(repository.active)) return undefined;
       const row = await trx
         .insertInto("projects")
         .values({
