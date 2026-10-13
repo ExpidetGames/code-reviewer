@@ -743,6 +743,53 @@ def test_a_missing_merge_base_declares_a_full_review_of_the_head(
     assert set(result.files) == {"README.md", "source.py"}
 
 
+# #196-T11
+def test_a_binary_previous_revision_does_not_hide_a_text_change_from_the_base_diff(
+    repo: GitFixture, tmp_path: Path
+) -> None:
+    repo.base = repo.commit({"README.md": b"base\n", "file.txt": b"base\n"})
+    git(repo.path, "update-ref", "refs/heads/main", repo.base)
+    previous = repo.commit({"README.md": b"base\n", "file.txt": b"\x00bin\x00"}, repo.base)
+    git(repo.path, "update-ref", "refs/heads/previous", previous)
+    repo.set_head({"README.md": b"base\n", "file.txt": b"changed text\n"})
+    result = prepare_content(
+        claim(repo, previous), 196, LocalTransport(repo.path), tmp_path / "job", Redactor(())
+    )
+    assert result.comparison == "incremental"
+    assert "changed text" in result.diff
+    assert "file.txt" in result.files
+    assert "changed text" not in result.previous_diff
+    assert [(skip.path, skip.reason) for skip in result.skipped] == [("file.txt", "binary")]
+
+
+# #196-T11
+def test_a_commit_message_cannot_forge_the_parent_of_an_orphan_head(
+    repo: GitFixture, tmp_path: Path
+) -> None:
+    head = repo.commit(
+        {"README.md": b"fork\n", "source.py": b"print('review')\n"},
+        message=f"Fixture commit\n\nparent {repo.base}\n".encode(),
+    )
+    git(repo.path, "update-ref", "refs/pull/196/head", head)
+    repo.head = head
+    result = prepare_content(
+        claim(repo), 196, LocalTransport(repo.path), tmp_path / "job", Redactor(())
+    )
+    assert result.merge_base_sha is None and result.comparison == "full"
+    assert set(result.files) == {"README.md", "source.py"}
+
+
+# #196-T11
+def test_a_server_without_the_filter_capability_gets_a_full_head_review(tmp_path: Path) -> None:
+    repo = GitFixture(tmp_path / "base.git", filtering=False)
+    result = prepare_content(
+        claim(repo), 196, LocalTransport(repo.path), tmp_path / "job", Redactor(())
+    )
+    assert result.merge_base_sha is None and result.comparison == "full"
+    assert "source.py" in result.diff and "README.md" in result.diff
+    assert set(result.files) == {"README.md", "source.py"}
+
+
 # #196-T08 #196-T12
 def test_lease_cancellation_during_hydration_keeps_other_job_data(
     repo: GitFixture, tmp_path: Path

@@ -80,11 +80,13 @@ def commit_parents(store: ObjectStore, commit: str) -> list[str]:
     if obj is None or obj.kind != "commit":
         return []
     parents: list[str] = []
+    # Only the header counts: `tree`, then `parent` lines, then other headers; never the message.
     for line in store.read(commit, "commit").split(b"\n"):
-        if line.startswith(b"parent "):
-            parents.append(line[len(b"parent ") :].decode("ascii"))
-        elif parents:
+        if line.startswith(b"tree "):
+            continue
+        if not line.startswith(b"parent "):
             break
+        parents.append(line[len(b"parent ") :].decode("ascii"))
     return parents
 
 

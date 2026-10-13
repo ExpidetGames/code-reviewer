@@ -41,7 +41,12 @@ class GitFixture:
         git(path, "update-ref", "refs/heads/main", self.base)
         git(path, "update-ref", "refs/pull/196/head", self.head)
 
-    def commit(self, files: dict[str, bytes | tuple[str, bytes]], parent: str | None = None) -> str:
+    def commit(
+        self,
+        files: dict[str, bytes | tuple[str, bytes]],
+        parent: str | None = None,
+        message: bytes = b"Fixture commit\n",
+    ) -> str:
         directories: dict[str, dict[str, tuple[str, str, str]]] = {"": {}}
         for name, content in files.items():
             mode, raw = content if isinstance(content, tuple) else ("100644", content)
@@ -61,7 +66,7 @@ class GitFixture:
                 parent_dir, _, basename = directory.rpartition("/")
                 directories[parent_dir][basename] = ("040000", "tree", tree)
         args = ("-p", parent) if parent else ()
-        return git(self.path, "commit-tree", tree, *args, data=b"Fixture commit\n").decode().strip()
+        return git(self.path, "commit-tree", tree, *args, data=message).decode().strip()
 
     def set_head(self, files: dict[str, bytes | tuple[str, bytes]], *, orphan: bool = False) -> str:
         self.head = self.commit(files, None if orphan else self.base)
