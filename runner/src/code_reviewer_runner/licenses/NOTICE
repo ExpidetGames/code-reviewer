@@ -1,0 +1,43 @@
+code-review.com
+Copyright 2026 Itegro GmbH and the code-review.com contributors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product includes software developed by third parties. The notices that their licenses
+require us to keep are in THIRD_PARTY_LICENSES.md, in particular:
+
+  PR-Agent (https://github.com/qodo-ai/pr-agent)
+  Copyright (c) 2026 The PR Agent
+  Licensed under the MIT License.
+  The runner installs the pinned release of PR-Agent as a dependency and runs it to produce the
+  reviews. The fixed core of Dynamic Review also adapts the untrusted-input sentence PR-Agent uses
+  in its own prompts.
+
+  shadcn/ui (https://ui.shadcn.com)
+  Copyright (c) 2023 shadcn
+  Licensed under the MIT License.
+  The component kit under app/src/components/ui/ is copied from shadcn/ui and keeps its MIT header
+  and provenance line; the full list of components and the MIT text are in THIRD_PARTY_LICENSES.md.
+
+  OpenAI Codex (https://github.com/openai/codex)
+  Copyright 2025 OpenAI
+  Licensed under the Apache License, Version 2.0.
+  The default Dynamic Review review skill adapts the Codex review rubric and the companion
+  review-agent skill. The upstream NOTICE, retained as section 4 of the Apache License requires,
+  reads:
+
+  "OpenAI Codex
+  Copyright 2025 OpenAI
+
+  This project includes code derived from Ratatui (https://github.com/ratatui/ratatui), licensed
+  under the MIT license.
+  Copyright (c) 2016-2022 Florian Dehau
+  Copyright (c) 2023-2025 The Ratatui Developers"
+
+  Google run-gemini-cli (https://github.com/google-github-actions/run-gemini-cli)
+  Licensed under the Apache License, Version 2.0.
+  The fixed core of Dynamic Review adapts the workflow's "Input Demarcation" paragraph.
+
+  The exact source URLs, revisions and modifications of every adapted passage are in
+  THIRD_PARTY_LICENSES.md.
+

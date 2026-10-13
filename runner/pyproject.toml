@@ -66,6 +66,11 @@ src = ["src", "tests"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
 
+[tool.ruff.lint.per-file-ignores]
+# The fixed core is a prompt asset embedded in code (#198): each rule is a single logical line, so
+# its physical lines are intentionally longer than the lint limit.
+"src/code_reviewer_runner/dynamic_review/prompt_core.py" = ["E501"]
+
 [tool.pyright]
 include = ["src", "tests", "scripts", "../fakes"]
 pythonVersion = "3.13"

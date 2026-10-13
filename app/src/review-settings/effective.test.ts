@@ -209,6 +209,28 @@ describe("the project-only review kind, model and skill", () => {
     expect(dynamic.dynamicModel).toBe("vendor/alt-model-2");
     expect(dynamic.sources.dynamicModel).toBe("project");
   });
+
+  // #198-T06
+  it("resolve a reset to the shipped skill of the current version, not a stale one", () => {
+    // The shipped default is resolved from the seam at read time, so a new version of it reaches
+    // every project without an override, while an explicit override stays untouched.
+    const shippedV2 = "# shipped default skill, version 2";
+    const reset = resolveProjectDynamicSettings({
+      builtIn: builtInProjectDynamicSettings(),
+      project: { reviewSkill: null },
+      defaultSkill: shippedV2,
+    });
+    const overridden = resolveProjectDynamicSettings({
+      builtIn: builtInProjectDynamicSettings(),
+      project: { reviewSkill: "keep my own skill" },
+      defaultSkill: shippedV2,
+    });
+
+    expect(reset.reviewSkill).toBe(shippedV2);
+    expect(reset.reviewSkillIsDefault).toBe(true);
+    expect(overridden.reviewSkill).toBe("keep my own skill");
+    expect(overridden.reviewSkillIsDefault).toBe(false);
+  });
 });
 
 describe("automatic reviews and commands", () => {

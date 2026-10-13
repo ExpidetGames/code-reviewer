@@ -182,9 +182,12 @@ forbidden control characters or an unpaired surrogate, and never interpreted. An
 an explicit reset to the shipped default, never another project's skill. A `deepseek-v4.1-flash`-like
 provider/model slug, a URL, a permission or a credential is not part of these settings.
 
-`default-skill.ts` is the **reader seam** for the shipped default skill (id, version, hash and text);
-#198 replaces the provisional text with the attributed Codex-based asset and keeps the identity shape.
-The service, the route and the runner packaging share this one seam.
+`default-skill.ts` is the **reader seam** for the shipped default skill (id, version, hash and text).
+Since #198 the text is the canonical asset `contracts/dynamic-review/review-skill.md`, embedded in the
+module because the app image ships only `app/` and the three license files; `default-skill.test.ts`
+reads the asset and fails when the two differ, so there is never a divergent copy. The service, the
+route and the claim share this one seam, and the runner composes the text after its code-owned fixed
+core (see `runner/README.md`).
 
 A project save keeps the two groups apart. A request that carries **any** Diff field replaces the
 Diff override set as a whole (a field left out is inherited again); a request that carries **only**
