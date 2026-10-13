@@ -2,7 +2,8 @@
 
 // The banner of the GitHub result page: what a connect flow ended with, in words, in the alert tone
 // that matches the outcome. An outcome that is neither a failure nor a success is information: the
-// neutral `info` tone and a polite status region, never the old warning fallback (#171).
+// neutral `info` tone, never the old warning fallback (#171). The banner is server-rendered static
+// content, so every tone is a polite `status`, never an assertive `alert`.
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import type { ResultTone } from "./messages.ts";
 
@@ -22,7 +23,7 @@ export function ResultBanner({
   return (
     <Alert
       variant={tone === null ? "default" : ALERT_VARIANT[tone]}
-      role={tone === "error" ? "alert" : "status"}
+      role="status"
     >
       <AlertDescription>
         {result?.text ?? "Nothing was connected."}

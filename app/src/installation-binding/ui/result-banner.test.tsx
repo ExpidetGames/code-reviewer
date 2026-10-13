@@ -24,13 +24,14 @@ describe("the result banner of the GitHub flow", () => {
     expect(banner.getAttribute("data-variant")).toBe("info");
   });
 
-  it("renders a failure as an alert and a success as a success status", () => {
+  it("renders a failure's tone too, but always as a polite status, never an alert", () => {
     const { unmount } = render(
       <ResultBanner
         result={{ tone: "error", text: "Nothing was connected." }}
       />,
     );
-    expect(screen.getByRole("alert").getAttribute("data-variant")).toBe(
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("status").getAttribute("data-variant")).toBe(
       "destructive",
     );
     unmount();

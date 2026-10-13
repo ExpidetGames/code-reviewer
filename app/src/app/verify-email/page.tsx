@@ -7,6 +7,7 @@
 import type { Metadata } from "next";
 import { connection } from "next/server";
 import { Suspense } from "react";
+import { signOut } from "@/auth/actions";
 import { currentLookup } from "@/auth/session";
 import { AuthCard } from "@/components/auth-card";
 import { VerifyEmailForm } from "@/signup/ui/verify-email-form";
@@ -56,7 +57,11 @@ async function VerifyOrExplain({
   }
   return (
     <AuthCard title={TITLE}>
-      <VerifyEmailHelp email={email} isAdmin={isAdmin} />
+      <VerifyEmailHelp
+        email={email}
+        isAdmin={isAdmin}
+        signOutAction={signOut}
+      />
     </AuthCard>
   );
 }

@@ -7,7 +7,7 @@
 import { useId, useState, type FormEvent } from "react";
 import { Button } from "@/components/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Field, FieldLabel } from "@/components/ui/field";
+import { Field, FieldDescription, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { workspaceHome } from "../paths.ts";
 import { browserAccountApi, type AccountApi } from "./api.ts";
@@ -61,6 +61,7 @@ export function CreateWorkspaceForm({
           value={name}
           onChange={(event) => setName(event.target.value)}
         />
+        <FieldDescription>1 to 80 characters.</FieldDescription>
       </Field>
       <Button
         type="submit"

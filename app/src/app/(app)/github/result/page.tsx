@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { connection } from "next/server";
 import { currentLookup } from "@/auth/session";
+import { loginPath } from "@/auth/session-user";
 import { Button } from "@/components/button";
 import { PageHeader } from "@/components/page-header";
 import { isBindingResultCode } from "@/installation-binding/errors";
@@ -48,7 +49,8 @@ export default async function GithubResultPage({
 async function connectionsPath(): Promise<string> {
   await connection();
   const lookup = await currentLookup();
-  if (lookup.kind !== "user" && lookup.kind !== "no_workspace") return "/login";
+  if (lookup.kind !== "user" && lookup.kind !== "no_workspace")
+    return loginPath(lookup);
   const view = await loadAccountView(lookup.user.id);
   const [first] = view.memberships;
   return first === undefined

@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 // Adapted from shadcn/ui (MIT), https://ui.shadcn.com
 // Local adaptation for Code Reviewer: the info/success/warning tone variants, `alertVariants` is
-// exported for the static attention rows, and `role` is a prop with the alert role as its default so a
-// caller can opt out without depending on the spread order.
+// exported for the static attention rows, `role` is a prop with the alert role as its default so a
+// caller can opt out without depending on the spread order, and the chosen variant is mirrored in the
+// `data-variant` attribute so a test can pin the tone.
 
 import * as React from "react";
 import { cva, type VariantProps } from "class-variance-authority";

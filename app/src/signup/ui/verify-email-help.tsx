@@ -3,19 +3,24 @@
 // The page without a token on it: a signed out visitor who opens it, or a signed in account that still
 // has to confirm its address. One line says what to do; the longer explanation (how long a link lives,
 // what to do when it does not accept the password) is behind a disclosure, and the form asks for a new
-// link. The instance admin gets the one link to the portal that always works for them.
+// link. The instance admin gets the one link to the portal that always works for them. A signed in
+// session keeps a way out: signing out is the one control this public page has for it.
 import Link from "next/link";
+import { Button } from "@/components/button";
 import { HelpDisclosure } from "@/components/help-disclosure";
 import { ResendForm } from "./resend-form.tsx";
 
 export function VerifyEmailHelp({
   email,
   isAdmin,
+  signOutAction,
 }: {
   /** The signed in address this page is about, or null when nobody is signed in. */
   email: string | null;
   /** Whether the person runs this instance. */
   isAdmin: boolean;
+  /** The server action that ends the session; the way out for the signed in person. */
+  signOutAction: () => Promise<void>;
 }) {
   return (
     <div className="flex flex-col gap-4">
@@ -46,7 +51,13 @@ export function VerifyEmailHelp({
         >
           Back to the sign-in
         </Link>
-      ) : null}
+      ) : (
+        <form action={signOutAction} className="self-start">
+          <Button type="submit" variant="ghost" size="sm">
+            Sign out
+          </Button>
+        </form>
+      )}
     </div>
   );
 }
