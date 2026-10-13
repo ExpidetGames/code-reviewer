@@ -26,6 +26,9 @@ jobs running. It is configured by environment variables:
 | `RUNNER_DYNAMIC_CAPABILITIES` | #197: trusted JSON descriptor of the selected model/destination: `{"tool_choice_required": true, "structured_output": true, "max_output_tokens": 8192}`. Operator-owned; unset or without a required feature means `dynamic_model_features_unsupported`, no fallback | unset |
 | `RUNNER_DYNAMIC_NODE_BIN` | #197: directory of the Node runtime the engine needs, if it is not on the runner's own `PATH` | unset |
 
+`compose.dynamic.yml` is the opt-in deployment of a separate Dynamic runner (one job at a time, memory
+limit, hardened container); it cannot claim Dynamic jobs yet. See `docs/dynamic-review.md`.
+
 Rules (the CR-29 decisions; tests in `tests/unit/test_job_loop*.py` and `tests/integration/test_job_loop*.py`):
 
 - **One process per job.** The job (with the git token and the LLM key) goes to the process on
@@ -206,7 +209,9 @@ input and the boundaries around it (the epic's binding decision). Modules:
   validates the answer with the typed findings parser, bounded by the job's `maxFindings`
   (`dynamic_findings.py`). The reviewed head comes from the validated claim (`base.headSha`), never from
   repository content. On any limit, engine exit or unusable answer the whole process group is killed
-  and the private scratch removed; `shutdown_engines()` is also called by the entry point's watchdog so
+  and the private scratch removed. A group is only ever signalled while its leader is still unreaped
+  (`process_group.py`: the exit is observed with `waitid(WNOWAIT)`, the group is ended, the leader is
+  reaped last), so a reused group id can never be signalled (#202); `shutdown_engines()` is also called by the entry point's watchdog so
   a timed-out run leaks nothing.
 
 The answer's schema is the packaged copy of `contracts/dynamic-review/schema.v1.json`

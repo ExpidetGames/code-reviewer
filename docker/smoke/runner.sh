@@ -104,6 +104,23 @@ fi
 rm -f "$errors"
 printf '    %s\n' "$result"
 
+# #202 (follow-up of #198): the Dynamic Review prompt files and the license notices are package data of
+# the installed (non-editable) runner, so the image has them without the repository checkout.
+step "the installed runner package carries the Dynamic Review prompts and the license notices"
+in_image "$image" python -c "
+from importlib.resources import files
+package = files('code_reviewer_runner')
+required = (
+    'dynamic_review/review-skill.md',
+    'dynamic_review/prompt_core.py',
+    'licenses/LICENSE',
+    'licenses/NOTICE',
+    'licenses/THIRD_PARTY_LICENSES.md',
+)
+missing = [name for name in required if not package.joinpath(name).is_file()]
+assert not missing, missing" ||
+  fail "the installed runner package is missing a Dynamic Review prompt file or a license notice"
+
 # CR-17-T07
 step "the image sets a numeric non-root user"
 assert_image_user_is_numeric_non_root "$image"

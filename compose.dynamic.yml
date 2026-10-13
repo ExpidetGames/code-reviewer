@@ -1,0 +1,47 @@
+# Code Reviewer, the opt-in Dynamic Review runner (#202). NOT YET ACTIVATABLE: the engine is not in
+# the runner image and the runner's isolation self-check is still fail-closed, so this runner never
+# advertises `opencode` and never claims a Dynamic job. The file exists so that the deployment shape
+# (one Dynamic slot, its memory, a hardened container) is reviewed and tested before the engine
+# lands. docs/dynamic-review.md has the status, the activation steps and the rollback order.
+#
+# An override file like compose.build.yml; compose.yml and the other topologies do not know it:
+#   docker compose -f compose.yml -f compose.dynamic.yml up -d --wait
+#
+# It adds a SECOND runner next to the Diff one, so a Diff-only installation is unchanged and Diff
+# jobs keep being served if the Dynamic runner fails its self-check. No secret is written here.
+services:
+  runner-dynamic:
+    # The Dynamic image (the engine binary comes with #197/#202) is a different image from the Diff
+    # one, hence a variable of its own. Until that image is published it defaults to the Diff image,
+    # which has no engine.
+    image: ${RUNNER_DYNAMIC_IMAGE:-ghcr.io/expidetgames/code-reviewer-runner:development}
+    restart: unless-stopped
+    # No published port: the runner only talks to the app, over the compose network.
+    # One job at a time is one Dynamic slot. The spike (docs/spike/85-opencode-dynamic-review.md)
+    # recommends at least 1 GiB per Dynamic slot plus the runner and proxy reserve; the default
+    # limit is 2 GiB with 1.5 GiB reserved. Whole-job peaks are not measured yet: do not raise the
+    # concurrency without the worst-case/OOM measurements (docs/dynamic-review.md).
+    mem_limit: ${RUNNER_DYNAMIC_MEMORY_LIMIT:-2g}
+    mem_reservation: ${RUNNER_DYNAMIC_MEMORY_RESERVATION:-1536m}
+    # No swap: the cgroup peak must show up as an OOM kill of this job, not as a slow host.
+    memswap_limit: ${RUNNER_DYNAMIC_MEMORY_LIMIT:-2g}
+    # A bounded number of processes for the job, the engine and its helpers.
+    pids_limit: 512
+    # The runner needs no capability; the engine boundary must not rely on one.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 90s
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      RUNNER_API_URL: http://app:3000
+      RUNNER_TOKEN: ${RUNNER_TOKEN:?RUNNER_TOKEN is required, see .env.example}
+      RUNNER_CONCURRENCY: ${RUNNER_DYNAMIC_CONCURRENCY:-1}
+      RUNNER_JOB_TIMEOUT_SECONDS: ${RUNNER_JOB_TIMEOUT_SECONDS:-1200}
+      RUNNER_POLL_INTERVAL_SECONDS: ${RUNNER_POLL_INTERVAL_SECONDS:-5}
+      # The operator's description of the selected model and destination (JSON). Empty: every
+      # Dynamic job fails with dynamic_model_features_unsupported, there is no fallback.
+      RUNNER_DYNAMIC_CAPABILITIES: ${RUNNER_DYNAMIC_CAPABILITIES:-}
