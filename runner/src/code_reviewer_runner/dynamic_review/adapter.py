@@ -597,6 +597,9 @@ class DynamicEngine:
                 raise EngineError(ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE, "the engine exited")
         self._raise_recorded_failure()
         if outcome:
+            # A call that ran into its timeout at the whole-job deadline is the deadline, not an
+            # unreachable engine: both end at the same moment and the order must not matter.
+            self.ledger.check_deadline()
             raise outcome[0]
 
     def _validate(self, client: EngineClient) -> EngineAnswer:
