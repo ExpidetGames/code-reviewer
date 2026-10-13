@@ -272,6 +272,7 @@ def prepared_checkout(
     cancelled: Callable[[], bool] = lambda: False,
     metadata: str = "",
     prior_state: str = "",
+    content_for: Callable[..., PreparedContent] = prepare_job_content,
 ) -> Generator[tuple[PreparedContent, PreparedJob]]:
     """The root-supervised integration seam for #197; keep open until all owned processes end.
 
@@ -299,7 +300,7 @@ def prepared_checkout(
             # traversal through this owned working directory, without directory listing.
             os.chown(working_directory, 0, identity.gid)
             os.chmod(working_directory, 0o710)
-            content = prepare_job_content(
+            content = content_for(
                 job,
                 lifetime.directory,
                 limits=limits,

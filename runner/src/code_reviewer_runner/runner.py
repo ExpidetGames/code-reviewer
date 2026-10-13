@@ -24,8 +24,8 @@ import shlex
 import sys
 import threading
 import time
-from collections.abc import Callable, Mapping, Sequence
-from contextlib import AbstractContextManager, ExitStack
+from collections.abc import Mapping, Sequence
+from contextlib import ExitStack
 from dataclasses import replace
 from typing import Any, TextIO
 
@@ -47,12 +47,16 @@ from code_reviewer_runner.dynamic_review.budget import (
     DynamicLimits,
     LimitError,
 )
-from code_reviewer_runner.dynamic_review.checkout import PreparedContent
 from code_reviewer_runner.dynamic_review.config import new_proxy_capability
 from code_reviewer_runner.dynamic_review.inputs import review_inputs
 from code_reviewer_runner.dynamic_review.limits import CheckoutError
 from code_reviewer_runner.dynamic_review.prompts import compose_system_prompt
 from code_reviewer_runner.dynamic_review.proxy import ModelProxy, capabilities_from_config
+from code_reviewer_runner.dynamic_review.supervisor import (
+    ContentPreparer,
+    Prepared,
+    production_preparer,
+)
 from code_reviewer_runner.error_mapping import classify_failure
 from code_reviewer_runner.identity_patch import (
     IdentityPatchError,
@@ -207,12 +211,6 @@ DYNAMIC_CAPABILITIES_VARIABLE = "RUNNER_DYNAMIC_CAPABILITIES"
 DYNAMIC_NODE_BIN_VARIABLE = "RUNNER_DYNAMIC_NODE_BIN"
 
 
-# Prepares the sanitized, read-only export of one claimed Dynamic job (#196) and keeps it for the
-# lifetime of the `with` block. The supervisor that owns the privileges (the dedicated engine user,
-# the root-owned job directory) supplies it; `run_dynamic_job` never builds an export itself.
-ContentPreparer = Callable[[Job], AbstractContextManager[PreparedContent]]
-
-
 def run_dynamic_job(
     job: Job,
     capture: LogCapture | None,
@@ -256,10 +254,6 @@ def run_dynamic_job(
             started,
             capture,
         )
-    if prepare is None:
-        return _failure(
-            ErrorCode.CHECKOUT_INCOMPLETE, "no prepared checkout is configured", started, capture
-        )
     try:
         capabilities = capabilities_from_config(environment.get(DYNAMIC_CAPABILITIES_VARIABLE))
     except LimitError as error:
@@ -290,8 +284,16 @@ def run_dynamic_job(
     except LimitError as error:
         # The destination cannot serve the run: fail before the engine starts, with no fallback.
         return _failure(error.code, error.detail, started, capture)
+    # Without an injected preparer this is the root supervisor: the export is prepared and sealed
+    # for the dedicated engine user, and the engine is launched as that user (#197). A process
+    # that is not the supervisor is refused there; the engine never runs unconfined.
+    prepare = prepare or production_preparer(
+        environment, cancelled=lambda: ledger.remaining_seconds() <= 0
+    )
     try:
-        with prepare(job) as content:
+        with prepare(job) as prepared:
+            prepared = prepared if isinstance(prepared, Prepared) else Prepared(prepared)
+            content = prepared.content
             # The export is the one directory the engine may read; the audit names files relative
             # to it, and a finding may only point at a file it really holds.
             proxy.audit.set_export_root(str(content.export))
@@ -308,6 +310,7 @@ def run_dynamic_job(
                     model_schema=findings_schema(),
                     inputs=review_inputs(job.pr_url, content),
                     exported_paths=frozenset(content.files),
+                    launch=prepared.launch,
                     node_bin=environment.get(DYNAMIC_NODE_BIN_VARIABLE) or None,
                 )
                 answer = engine.run()

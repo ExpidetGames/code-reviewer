@@ -79,18 +79,24 @@ def test_a_dynamic_job_without_an_engine_is_refused_and_pr_agent_is_never_used()
     assert result.error_code is ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE
 
 
-# #197-T11
-def test_a_dynamic_job_without_a_prepared_checkout_is_refused() -> None:
+# #197-T04
+def test_a_dynamic_job_without_an_injected_preparer_needs_the_root_supervisor() -> None:
+    # The default is the production preparation: it seals the export for the dedicated user, which
+    # only the root supervisor can do. Anything else is refused with the isolation code (it used
+    # to end `checkout_incomplete` because no preparation existed at all).
     result = runner.run_dynamic_job(
         dynamic_job(),
         None,
         0.0,
-        {runner.OPENCODE_COMMAND_VARIABLE: "opencode"},
+        {
+            runner.OPENCODE_COMMAND_VARIABLE: "opencode",
+            runner.DYNAMIC_CAPABILITIES_VARIABLE: CAPABILITIES,
+        },
         engines=ALL_ENGINES,
     )
 
     assert result.ok is False
-    assert result.error_code is ErrorCode.CHECKOUT_INCOMPLETE
+    assert result.error_code is ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED
 
 
 # #197-T11
