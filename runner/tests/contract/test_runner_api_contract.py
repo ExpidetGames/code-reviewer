@@ -496,7 +496,7 @@ def test_the_dynamic_review_schema_is_version_one_and_has_no_provider_routing_fi
     assert schema["version"] == 1
 
     findings: Document = schema["$defs"]["DynamicFindings"]
-    assert findings["properties"]["schemaVersion"] == {"const": 1}
+    assert findings["properties"]["schemaVersion"] == {"type": "integer", "const": 1}
 
     # No property anywhere in the schema may name a permission, routing or command field. The
     # descriptions may *mention* them (to say they are absent); the property names must not.

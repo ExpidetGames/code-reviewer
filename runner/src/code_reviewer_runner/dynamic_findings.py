@@ -55,8 +55,8 @@ def location_problem(
     """
     if not _PATH.fullmatch(path):
         return _invalid("path is not a safe repository-relative path")
-    if line_start < 1 or line_end < 1:
-        return _invalid("the line range must be positive")
+    if not 1 <= line_start <= 10_000_000 or not 1 <= line_end <= 10_000_000:
+        return _invalid("the line range must be between 1 and 10000000")
     if line_start > line_end:
         return _invalid("lineStart must not be after lineEnd")
     if exported_paths is not None and path not in exported_paths:
@@ -110,9 +110,13 @@ def _string(data: dict[str, Any], key: str, *, max_chars: int) -> str:
 
 def _integer(data: dict[str, Any], key: str) -> int:
     value = data.get(key)
-    if isinstance(value, bool) or not isinstance(value, int):
+    if isinstance(value, bool):
         raise _invalid(f"{key} must be an integer")
-    return value
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    raise _invalid(f"{key} must be an integer")
 
 
 def _ids(value: Any) -> tuple[str, ...]:
@@ -215,7 +219,9 @@ def parse_dynamic_findings(
         value = raw
     document = _object(value, "the findings")
     _fields(document, {"schemaVersion", "reviewedSha", "findings", "resolvedIds"}, "")
-    if document.get("schemaVersion") != 1:
+    version = document.get("schemaVersion")
+    # JSON Schema's integer type includes integral JSON numbers (1.0), but never booleans.
+    if isinstance(version, bool) or not isinstance(version, (int, float)) or version != 1:
         raise _invalid("schemaVersion must be 1")
     reviewed_sha = document.get("reviewedSha")
     if not isinstance(reviewed_sha, str) or not _SHA.fullmatch(reviewed_sha):

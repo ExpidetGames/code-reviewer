@@ -55,12 +55,13 @@
       "additionalProperties": false,
       "required": ["schemaVersion", "reviewedSha", "findings", "resolvedIds"],
       "properties": {
-        "schemaVersion": { "const": 1 },
+        "schemaVersion": { "type": "integer", "const": 1 },
         "reviewedSha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
         "resolvedIds": {
           "description": "Ids of findings of earlier runs this run affirmatively reassessed, independently of the current findings. Never a way to resolve by absence.",
           "type": "array",
-          "items": { "type": "string", "maxLength": 128 },
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "uniqueItems": true,
           "maxItems": 500
         },
         "findings": {

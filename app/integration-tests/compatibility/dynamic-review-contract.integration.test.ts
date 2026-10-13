@@ -78,7 +78,7 @@ describe("the Dynamic Review findings schema", () => {
     expect(schema.version).toBe(1);
     expect(
       schema.$defs.DynamicFindings?.properties?.schemaVersion,
-    ).toStrictEqual({ const: 1 });
+    ).toStrictEqual({ type: "integer", const: 1 });
     expect(validate(example)).toBe(true);
     // A run that resolves every previous finding has no current finding to carry the resolutions.
     expect(validate(resolvedOnly)).toBe(true);
