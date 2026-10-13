@@ -47,6 +47,25 @@ class Comment:
     author: str
     url: str
     updated_at: str
+    # `user.type` as GitHub reports it ("Bot", "User", ...), and the slug of
+    # `performed_via_github_app` when GitHub names the app that wrote the comment.
+    author_type: str = ""
+    app_slug: str | None = None
+
+    def is_written_by(self, bot_login: str) -> bool:
+        """Whether this comment is the job's own bot's.
+
+        The claim carries the bot's login (`<app slug>[bot]`) but not the app or user id, so the
+        identity is: the login, a `Bot` account type, and - when GitHub names the app that wrote
+        the comment - that app's slug equal to the login's. GitHub reserves the `[bot]` suffix, so
+        a person cannot impersonate it; the type and app checks reject a lookalike account or a
+        comment written by another app. An id comparison needs the id in the claim (follow-up).
+        """
+        if self.author.casefold() != bot_login.casefold() or self.author_type != "Bot":
+            return False
+        if self.app_slug is None:
+            return True
+        return self.app_slug.casefold() == bot_login.removesuffix("[bot]").casefold()
 
 
 class CommentsClient(Protocol):
@@ -204,7 +223,11 @@ def _comment(value: Any) -> Comment | None:
     comment_id = data.get("id")
     body = data.get("body")
     user = data.get("user")
-    author = cast("dict[str, Any]", user).get("login") if isinstance(user, dict) else None
+    user_data = cast("dict[str, Any]", user) if isinstance(user, dict) else {}
+    author = user_data.get("login")
+    author_type = user_data.get("type")
+    app = data.get("performed_via_github_app")
+    app_slug = cast("dict[str, Any]", app).get("slug") if isinstance(app, dict) else None
     url = data.get("html_url")
     updated_at = data.get("updated_at")
     if (
@@ -222,6 +245,8 @@ def _comment(value: Any) -> Comment | None:
         author=author,
         url=url,
         updated_at=updated_at if isinstance(updated_at, str) else "",
+        author_type=author_type if isinstance(author_type, str) else "",
+        app_slug=app_slug if isinstance(app_slug, str) else None,
     )
 
 

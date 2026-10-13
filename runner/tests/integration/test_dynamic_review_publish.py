@@ -186,6 +186,41 @@ def test_a_human_or_foreign_marker_never_authorizes_an_edit(
 
 
 # #199-T04
+@pytest.mark.parametrize(
+    ("user_type", "app_slug"),
+    [("User", None), ("Bot", "some-other-app")],
+)
+def test_a_comment_with_the_bot_login_but_another_kind_of_author_is_not_ours(
+    server: FakeGithubComments, publisher: Publisher, user_type: str, app_slug: str | None
+) -> None:
+    seeded = server.seed(
+        IDENTITY_MARKER + "\nnot ours", author=BOT, user_type=user_type, app_slug=app_slug
+    )
+
+    publisher.publish(run(finding()), head_sha=SHA, previous_reviewed_sha=None)
+
+    untouched = next(item["body"] for item in server.comments if item["id"] == seeded["id"])
+    assert untouched == IDENTITY_MARKER + "\nnot ours"
+    assert len(server.comments) == 2
+
+
+# #199-T04
+def test_a_bot_comment_without_app_metadata_is_still_ours_by_login_and_type(
+    server: FakeGithubComments, publisher: Publisher
+) -> None:
+    publisher.publish(run(finding()), head_sha=SHA, previous_reviewed_sha=None)
+    server.comments[0]["performed_via_github_app"] = None
+
+    publisher.publish(
+        run(finding("f-1", sha=NEXT), sha=NEXT), head_sha=NEXT, previous_reviewed_sha=SHA
+    )
+
+    assert len(server.comments) == 1
+    state = decode_state(server.comments[0]["body"])
+    assert state is not None and state.reviewed_sha == NEXT
+
+
+# #199-T04
 def test_a_corrupt_bot_state_fails_closed_without_rewriting_history(
     server: FakeGithubComments, publisher: Publisher
 ) -> None:
@@ -315,6 +350,24 @@ def test_a_newer_published_review_is_not_overwritten(
     with pytest.raises(PublishError) as refused:
         publisher.publish(
             run(finding(sha=NEXT), sha=NEXT), head_sha=NEXT, previous_reviewed_sha=SHA
+        )
+
+    assert refused.value.code is ErrorCode.REVIEW_NOT_PUBLISHED
+    assert server.comments[0]["body"] == before
+
+
+# #199-T08
+def test_a_predecessor_that_published_before_losing_its_lease_is_refused_not_reconciled(
+    server: FakeGithubComments, publisher: Publisher
+) -> None:
+    publisher.publish(run(finding()), head_sha=SHA, previous_reviewed_sha=None)
+    # The predecessor reviewed NEXT and wrote it, but the app never recorded it as reviewed.
+    publisher.publish(run(finding(sha=NEXT), sha=NEXT), head_sha=NEXT, previous_reviewed_sha=SHA)
+    before = server.comments[0]["body"]
+
+    with pytest.raises(PublishError) as refused:
+        publisher.publish(
+            run(finding(sha=THIRD), sha=THIRD), head_sha=THIRD, previous_reviewed_sha=SHA
         )
 
     assert refused.value.code is ErrorCode.REVIEW_NOT_PUBLISHED

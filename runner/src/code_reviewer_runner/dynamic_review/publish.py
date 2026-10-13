@@ -5,8 +5,9 @@
 The publisher owns the whole write:
 
 1. page the pull request's comments and select the bot-owned summary by its exact hidden identity
-   marker **and** its author (the bot login); a human copy of the marker never authorizes an edit,
-   and two bot summaries fail closed;
+   marker **and** its author (the bot login, a `Bot` account and, when GitHub names it, the app
+   slug: `Comment.is_written_by`); a human copy of the marker never authorizes an edit, and two bot
+   summaries fail closed;
 2. read and validate the previous state from that comment; a corrupt or unsupported state fails
    closed, it is never replaced by an empty one;
 3. refuse a stale result: the state of the comment may only be the reviewed head of this job or the
@@ -19,8 +20,14 @@ The publisher owns the whole write:
    creating a second one.
 
 The state only advances with a confirmed successful write: the comment GitHub returns is the new
-state. A write that was already accepted before a lost lease cannot be recalled; the next run
-reconciles from whatever state it finds, which is why staleness is checked before the write.
+state. A write that was already accepted before a lost lease cannot be recalled. The next run
+reconciles from the state it finds **only if** that state is one it can account for: the head it
+reviews, or the head the app reports as the last successful review (`previousReviewedSha`). Any
+other head, including a predecessor that published and then lost its lease (so the app still
+reports the older head), is refused with `review_not_published` and the comment is left as it is.
+That is fail-closed by design - the safe choice, because a state of unknown origin could be a newer
+review that must not be overwritten - and a known limitation: such a re-review is retried only once
+the app has recorded the predecessor's head.
 """
 
 import re
@@ -105,11 +112,10 @@ class Publisher:
     # -- selection and state ---------------------------------------------------------------
 
     def _summary_comment(self, comments: list[Comment]) -> Comment | None:
-        bot = self.bot_login.casefold()
         candidates = [
             comment
             for comment in comments
-            if comment.author.casefold() == bot and IDENTITY_MARKER in comment.body
+            if comment.is_written_by(self.bot_login) and IDENTITY_MARKER in comment.body
         ]
         if len(candidates) > 1:
             raise PublishError(
@@ -139,7 +145,8 @@ class Publisher:
         if previous_reviewed_sha:
             allowed.add(previous_reviewed_sha)
         if state.reviewed_sha and state.reviewed_sha not in allowed:
-            # The summary already holds a newer head (a result that arrived late): do not overwrite.
+            # A head this job cannot account for: a newer review (a result that arrived late) or a
+            # predecessor that published before losing its lease. Both are refused, never merged.
             raise PublishError(
                 ErrorCode.REVIEW_NOT_PUBLISHED,
                 "a newer review is already published for this pull request",
@@ -182,9 +189,8 @@ class Publisher:
             comments = self.client.list_comments(self.pr_number)
         except GitHubError:
             return None
-        bot = self.bot_login.casefold()
         for comment in comments:
-            if comment.author.casefold() != bot or IDENTITY_MARKER not in comment.body:
+            if not comment.is_written_by(self.bot_login) or IDENTITY_MARKER not in comment.body:
                 continue
             try:
                 state = decode_state(comment.body)

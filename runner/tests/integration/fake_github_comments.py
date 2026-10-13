@@ -61,19 +61,46 @@ class FakeGithubComments:
             self._server.shutdown()
             self._server.server_close()
 
-    def seed(self, body: str, *, author: str | None = None) -> dict[str, Any]:
+    def seed(
+        self,
+        body: str,
+        *,
+        author: str | None = None,
+        user_type: str | None = None,
+        app_slug: str | None = None,
+        no_app: bool = False,
+    ) -> dict[str, Any]:
+        """A comment that already exists. `user_type`/`app_slug` default to what GitHub reports for
+        that author; `no_app` leaves `performed_via_github_app` null."""
         with self._lock:
-            return self._create(body, author or self.bot_login)
+            return self._create(
+                body,
+                author or self.bot_login,
+                user_type=user_type,
+                app_slug=app_slug,
+                no_app=no_app,
+            )
 
     # -- internals ----------------------------------------------------------------------------
 
-    def _create(self, body: str, author: str) -> dict[str, Any]:
+    def _create(
+        self,
+        body: str,
+        author: str,
+        *,
+        user_type: str | None = None,
+        app_slug: str | None = None,
+        no_app: bool = False,
+    ) -> dict[str, Any]:
         comment_id = self._next_id
         self._next_id += 1
+        is_bot = author.endswith("[bot]")
+        slug = app_slug or author.removesuffix("[bot]")
         comment = {
             "id": comment_id,
             "body": body,
-            "user": {"login": author},
+            "user": {"login": author, "type": user_type or ("Bot" if is_bot else "User")},
+            "performed_via_github_app": {"id": 1, "slug": slug} if is_bot and not no_app else None,
             "html_url": f"{self.url}/comment/{comment_id}",
             "updated_at": "2026-10-13T12:00:00Z",
         }
