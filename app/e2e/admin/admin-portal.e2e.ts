@@ -271,21 +271,21 @@ test.describe("the admin portal", () => {
 
     await page.goto("/admin/limits");
     await expect(page).toHaveURL(/\/admin\/setup\/instance$/);
+    // The Instance page holds two cards; the limit's "last changed" belongs to the Limits card.
+    const limitsCard = page.locator('[data-slot="card"]', {
+      has: page.getByLabel(/Maximum number of workspaces/),
+    });
     await page.getByLabel(/Maximum number of workspaces/).fill("4");
     await page.getByRole("button", { name: "Save instance settings" }).click();
     await expect(
-      page
-        .getByRole("form", { name: "Instance settings" })
-        .getByText(`Last changed by ${e2eEnv.adminEmail}`),
+      limitsCard.getByText(`Last changed by ${e2eEnv.adminEmail}`),
     ).toBeVisible();
     await page.reload();
     await expect(page.getByLabel(/Maximum number of workspaces/)).toHaveValue(
       "4",
     );
     await expect(
-      page
-        .getByRole("form", { name: "Instance settings" })
-        .getByText(`Last changed by ${e2eEnv.adminEmail}`),
+      limitsCard.getByText(`Last changed by ${e2eEnv.adminEmail}`),
     ).toBeVisible();
   });
 
