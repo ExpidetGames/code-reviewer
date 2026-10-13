@@ -35,7 +35,10 @@ Rules (the CR-29 decisions; tests in `tests/unit/test_job_loop*.py` and `tests/i
   environment (`PATH`, `HOME`, locale, proxy and certificate settings, the tiktoken cache and its
   timeout), so it does not see `RUNNER_TOKEN` or the job of another process, and its own working
   directory (empty, removed afterwards: PR-Agent reads a `pyproject.toml` there). It leads its own
-  process group, so ending a job ends everything it started.
+  process group, so ending a job ends everything it started. The group is only signalled while the
+  leader is still unreaped (`process_group.py`; the process is a `Popen` whose pipes are read through
+  asyncio, because asyncio's own subprocess reaps the child at once), so a reused group id can never
+  be signalled (#233).
 - **The engines of a claim (#195).** The loop sends `{"engines": [...]}` with every claim: `pr-agent`
   always, `opencode` only after the fail-closed startup self-check proved the dedicated unprivileged
   engine user, a read-only export and proxy-only egress (`capabilities.py`; the concrete probes are
