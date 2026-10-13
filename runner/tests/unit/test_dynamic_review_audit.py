@@ -292,3 +292,14 @@ def test_a_result_of_an_unknown_shape_adds_bytes_but_no_files() -> None:
 
     assert ledger.files == 0
     assert ledger.returned_bytes == len("anything")
+
+
+# #232-T06
+def test_a_tool_message_without_content_is_forwarded_without_one() -> None:
+    subject, _ = audit()
+    message = {"role": "tool", "tool_call_id": "a"}
+
+    forwarded = subject.results_in_request([asks(call("a", "read")), message])
+
+    assert forwarded[1] == message
+    assert "content" not in forwarded[1]

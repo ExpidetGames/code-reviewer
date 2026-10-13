@@ -79,6 +79,10 @@ def _neutralize_text(tool: str, text: str) -> str:
 
 
 def _drop_engine_wrapper(text: str) -> str:
+    # The first match wins. That is safe only because `paths.validate_path` rejects control
+    # characters in tracked paths: the `<path>` header is the one place a repository controls text
+    # before the real `</content>`, and a newline in a file name could pull the boundary forward and
+    # hide the file's own content.
     start = text.find(_WRAPPER_START)
     if start < 0 or not text.endswith(_WRAPPER_END):
         return text

@@ -121,8 +121,12 @@ class ToolAudit:
                 ErrorCode.DYNAMIC_ACCOUNTING_FAILED, "a tool result cannot be tied to a call"
             )
         name, arguments = self._calls.get(identity, ("", {}))
-        content = neutralize_content(name, message.get("content"))
-        neutral = {**message, "content": content}
+        if "content" not in message:
+            neutral = dict(message)
+            content = None
+        else:
+            content = neutralize_content(name, message["content"])
+            neutral = {**message, "content": content}
         if identity in self._resulted:
             return neutral
         self._resulted.add(identity)
