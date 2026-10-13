@@ -62,6 +62,15 @@ export type JobListFilter = {
 export const JOB_LIST_DEFAULT_LIMIT = 100;
 export const JOB_LIST_MAX_LIMIT = 500;
 
+/** The lookup of the last reviewed head for one pull request and review kind (#199). */
+export type PreviousReviewedShaInput = {
+  repositoryId: string;
+  prNumber: number;
+  reviewKind: ProjectReviewKind;
+  /** The claimed job itself never counts as its own previous review. */
+  excludeJobId: string;
+};
+
 export type JobsRepositoryOptions = {
   now?: () => Date;
   newId?: () => string;
@@ -94,6 +103,13 @@ export type JobsRepository = {
   ): Promise<number>;
   get(id: string): Promise<Job | undefined>;
   list(filter?: JobListFilter): Promise<Job[]>;
+  /**
+   * The exact head of the most recently successful review of this pull request for the same review
+   * kind (#199), or null when there is none. A Dynamic job carries it as `previousReviewedSha`, so a
+   * re-review compares against the head the earlier review actually saw; the claimed job itself is
+   * never its own previous review.
+   */
+  previousReviewedSha(input: PreviousReviewedShaInput): Promise<string | null>;
 };
 
 /**
@@ -505,6 +521,25 @@ export function createJobsRepository(
         .limit(limit)
         .execute();
       return rows.map(toJob);
+    },
+
+    async previousReviewedSha(input) {
+      // The most recently finished successful review of this pull request and kind. A job that is
+      // still running is not a previous review; the claimed job itself is excluded.
+      const row = await db
+        .selectFrom("jobs")
+        .select("head_sha")
+        .where("workspace_id", "=", workspaceId)
+        .where("repository_id", "=", input.repositoryId)
+        .where("pr_number", "=", input.prNumber)
+        .where("review_kind", "=", input.reviewKind)
+        .where("status", "=", "succeeded")
+        .where("id", "!=", input.excludeJobId)
+        .orderBy("finished_at", "desc")
+        .orderBy("created_at", "desc")
+        .limit(1)
+        .executeTakeFirst();
+      return row?.head_sha ?? null;
     },
   };
 }

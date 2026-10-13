@@ -5,6 +5,7 @@
 // the real GitHub App provider, and the API itself wired to all of them. `claim`, `heartbeat` and
 // `complete` build requests like the runner does. The clock of the queue is the one in `clock`.
 import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
+import { createJobsRepository } from "../db/repositories/jobs-repository.ts";
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
 import { createDefaultIntegrationRegistry } from "../integrations/registry.ts";
 import { loadGithubAppConfig } from "../integrations/registry.ts";
@@ -189,6 +190,13 @@ export async function startRunnerApiHarness(
           workspaceId,
           fixture.clock.now,
         ),
+      previousReviewedSha: (job) =>
+        createJobsRepository(fixture.db, job.workspaceId).previousReviewedSha({
+          repositoryId: job.repositoryId,
+          prNumber: job.prNumber,
+          reviewKind: job.reviewKind,
+          excludeJobId: job.id,
+        }),
       registry,
       guard:
         options.guard ??
