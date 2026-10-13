@@ -158,9 +158,15 @@ second status comment) and reconciles each run with the earlier ones:
 
 - `dynamic_review/state.py` is the persistent state (active findings, resolved history, reviewed
   head), stored as a base64 marker in the comment and validated like model output: an unknown
-  version, an unknown field, a traversal path or an oversized state fails closed with
-  `dynamic_policy_violation` / `review_state_truncated`, never an empty state that forgets history.
-  `render_previous_state` is the bounded text handed to the model so it can keep ids stable and name
+  version, an unknown field or a traversal path fails closed with `dynamic_policy_violation`, never
+  an empty state that forgets history. Each active finding is checked against the head it was
+  raised at (a carried-over finding keeps it). `encode_state` enforces exactly the decoder's caps
+  (30 active findings, 500 resolved, 48,000 characters) and re-parses its own output, so what is
+  written can always be read back; `fit_state` makes a larger state fit, deterministically: the
+  oldest resolved history goes first (no visible note; a trimmed id can only re-open as a new
+  finding), then the lowest priority and, within a priority, oldest active findings. Those are
+  counted in `omittedFindings` and shown as "N further findings not shown"; they are never marked
+  resolved. `render_previous_state` is the bounded text handed to the model so it can keep ids stable and name
   resolved ids.
 - `dynamic_review/reconcile.py` applies the fixed core's rules to untrusted model output: a finding
   is resolved only when the run names its id (`resolvedIds`), an omitted or unreadable previous
@@ -168,12 +174,16 @@ second status comment) and reconciles each run with the earlier ones:
   duplicate is folded, a regression is re-opened, and the resolved history is retained without a cap.
 - `dynamic_review/render.py` renders the reader's view (P0–P3 and confidence, a commit-pinned link,
   bounded evidence) with HTML escaping and neutralised mentions, under two independent bounds
-  (65,000 characters and 64 KiB of UTF-8). A state that cannot fit fails with
-  `review_state_truncated`; a view that cannot `review_text_truncated`, and the previous comment is
-  kept.
+  (65,000 characters and 64 KiB of UTF-8). The state is fitted first (see above), so the comment
+  stays updatable; a view that cannot fit fails with `review_text_truncated` and the previous
+  comment is kept.
 - `dynamic_review/github.py` is the narrow client: page the pull request's comments, create one,
   edit one — nothing else. `dynamic_review/publish.py` selects the bot-owned summary by its exact
-  hidden identity marker **and** author, refuses a stale result, redacts the job's secrets from the
+  hidden identity marker **and** author (the bot login, a `Bot` account and, when GitHub names the
+  app, its slug; the claim has no app id, so an id comparison is a follow-up), refuses a stale
+  result (a head other than the job's own or its `previousReviewedSha`, including a predecessor
+  that published and lost its lease, is refused with `review_not_published` and left as it is: a
+  known, fail-closed limitation), redacts the job's secrets from the
   findings before storing them, and re-reads after an ambiguous create instead of duplicating a
   comment.
 
