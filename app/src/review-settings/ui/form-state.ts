@@ -62,9 +62,9 @@ export function initialFormState(model: SettingsFormModel): FormState {
   return { values: valuesOf(model.effective), overridden };
 }
 
-type TextField =
+export type TextField =
   "model" | "fallbackModel" | "extraInstructions" | "maxFindings" | "maxTokens";
-type BooleanField =
+export type BooleanField =
   | "largePrChunking"
   | "inlineKeyIssues"
   | "autoReviewOnOpen"

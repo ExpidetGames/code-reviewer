@@ -55,7 +55,7 @@ test.describe("the settings of an inactive project", () => {
     await page
       .getByLabel("Most findings per review", { exact: true })
       .fill("7");
-    await page.getByRole("button", { name: "Save project settings" }).click();
+    await page.getByRole("button", { name: "Save review settings" }).click();
     await expect(page.getByRole("status")).toContainText("Saved.");
     await page.reload();
     await expect(
@@ -63,7 +63,10 @@ test.describe("the settings of an inactive project", () => {
     ).toHaveValue("7");
 
     // Saving did not switch the repository on.
-    await page.getByRole("link", { name: "All projects" }).click();
+    await page
+      .getByRole("navigation", { name: "Main" })
+      .getByRole("link", { name: "Projects" })
+      .click();
     const again = page.getByRole("row").filter({ hasText: REPOSITORY });
     await expect(again.getByText("Inactive", { exact: true })).toBeVisible();
     await expect(

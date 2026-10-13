@@ -499,6 +499,12 @@ test.describe(
           name: UPGRADE_WIDGETS.fullName,
         }),
       ).toBeVisible();
+      // The review panel is its own page since #174.
+      await page
+        .getByRole("navigation", { name: "Project" })
+        .getByRole("link", { name: "Review now" })
+        .click();
+      await expect(page).toHaveURL(/\/projects\/[^/]+\/review$/);
       await runner?.stop();
       await page.getByRole("radio").first().check();
       await page.getByRole("button", { name: "Review now" }).click();
