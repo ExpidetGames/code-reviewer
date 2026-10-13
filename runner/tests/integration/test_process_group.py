@@ -112,3 +112,34 @@ def test_end_group_never_signals_a_group_whose_leader_was_reaped(
     end_group(process)
 
     assert calls == []
+
+
+def test_end_group_reaps_the_leader_only_after_the_last_group_signal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process, helper = start_leader()
+    assert wait_for_exit(process, 5.0)
+    real_killpg = os.killpg
+    unreaped: list[tuple[int, bool]] = []
+
+    def killpg(pgid: int, sig: int) -> None:
+        unreaped.append((sig, process.returncode is None and not _is_reaped(process.pid)))
+        real_killpg(pgid, sig)
+
+    monkeypatch.setattr(os, "killpg", killpg)
+
+    end_group(process)
+
+    assert gone(helper)
+    # Every signal, the final SIGKILL included, went out while the leader still held its id.
+    assert unreaped
+    assert unreaped[-1][0] == signal.SIGKILL
+    assert all(still_ours for _, still_ours in unreaped)
+
+
+def _is_reaped(pid: int) -> bool:
+    try:
+        os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+    except ChildProcessError:
+        return True
+    return False
