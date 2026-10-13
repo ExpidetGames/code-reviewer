@@ -240,7 +240,7 @@ def test_concurrent_calls_cannot_overshoot_the_call_and_tool_budgets() -> None:
             for action in (
                 lambda: shared.reserve_call("hello"),
                 lambda: shared.count_tool_call("read"),
-                lambda: shared.count_file(f"file-{index}-{round_}"),
+                lambda name=f"file-{index}-{round_}": shared.count_file(name),
             ):
                 try:
                     action()
