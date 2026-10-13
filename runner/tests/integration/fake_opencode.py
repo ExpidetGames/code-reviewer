@@ -52,6 +52,18 @@ def _env(name: str, default: str = "") -> str:
     return os.environ.get(name, default)
 
 
+def _api_key() -> str:
+    path = _env("OPENCODE_CONFIG")
+    config = (
+        as_object(_read_json(Path(path).read_bytes())) if path and Path(path).is_file() else None
+    )
+    providers = as_object(config.get("provider")) if config else None
+    entry = as_object(providers.get("review-proxy")) if providers else None
+    options = as_object(entry.get("options")) if entry else None
+    key = options.get("apiKey") if options else None
+    return key if isinstance(key, str) else ""
+
+
 def _workdir() -> Path:
     return Path.cwd()
 
@@ -152,7 +164,8 @@ class Handler(BaseHTTPRequestHandler):
             self._answer(200, {"id": "msg-1", "structured": document})
 
     def _call_proxy(self) -> int:
-        """One model call, exactly like the engine's provider would make it."""
+        """One model call, exactly like the engine's provider would make it: the key it presents is
+        the one the runner wrote into the trusted config."""
         url = f"{_env('REVIEW_PROXY_URL')}/v1/chat/completions"
         body = json.dumps(
             {
@@ -166,7 +179,7 @@ class Handler(BaseHTTPRequestHandler):
             url,
             data=body,
             method="POST",
-            headers={"Content-Type": "application/json", "Authorization": "Bearer runner-proxy"},
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {_api_key()}"},
         )
         try:
             with urlopen(request, timeout=MESSAGE_TIMEOUT) as response:

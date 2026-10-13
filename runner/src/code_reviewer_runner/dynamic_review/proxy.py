@@ -2,10 +2,14 @@
 
 """The runner-owned model proxy of one Dynamic Review (#197).
 
-The engine is pointed at this proxy and holds only a local dummy capability; the proxy holds the
+The engine is pointed at this proxy and holds only the job's own capability; the proxy holds the
 workspace credential and is the only thing that talks to the model provider. Everything the epic
 demands of the model boundary happens here, before a byte reaches the provider or the engine:
 
+- **Authenticated per job.** Every request must present the job's random capability as a bearer
+  token (constant-time compare); anything else is refused with 401 before the path, the body or the
+  upstream are looked at. The capability is never forwarded and the workspace key is never accepted
+  from the caller, so another process or another job on the same host cannot spend the credential.
 - **Only the model protocol.** `POST {base}/chat/completions` is forwarded; `GET {base}/models`
   answers from the trusted configuration. Everything else, every redirect and every query is
   refused, so the engine cannot use the proxy as a general forwarder.
@@ -26,16 +30,17 @@ demands of the model boundary happens here, before a byte reaches the provider o
 `steps`, SSE events and the engine's own accounting are observation only and are never trusted here.
 """
 
+import hmac
 import json
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from code_reviewer_runner.dynamic_review.config import PROXY_PROVIDER_ID
+from code_reviewer_runner.dynamic_review.config import PROXY_CAPABILITY_BYTES, PROXY_PROVIDER_ID
 from code_reviewer_runner.dynamic_review.limits import BudgetLedger, LimitError
 from code_reviewer_runner.job_loop.jsonvalues import as_object
 from code_reviewer_runner.result import ErrorCode
@@ -46,6 +51,9 @@ REQUIRED_TOOL_CHOICE = "required"
 STRUCTURED_OUTPUT_TOOL = "StructuredOutput"
 
 _REQUEST_TIMEOUT_SECONDS = 120.0
+# `secrets.token_urlsafe(n)` yields ceil(4n/3) characters: the shortest acceptable capability.
+_MIN_CAPABILITY_CHARS = -(-PROXY_CAPABILITY_BYTES * 4 // 3)
+_BEARER = "bearer "
 
 
 # What a trusted capability descriptor says about one configured model/destination. The operator
@@ -144,6 +152,12 @@ def error_body(code: ErrorCode, detail: str) -> bytes:
     return json.dumps({"error": {"code": code.value, "detail": detail}}).encode("utf-8")
 
 
+UNAUTHORIZED = ProxyResponse(
+    status=401,
+    body=error_body(ErrorCode.DYNAMIC_POLICY_VIOLATION, "the request carries no valid capability"),
+)
+
+
 class ModelProxy:
     """One proxy per job. `handle` is the whole policy; `serve` only puts it on loopback."""
 
@@ -157,8 +171,14 @@ class ModelProxy:
         upstream_api_key: str,
         upstream_model: str,
         capabilities: DynamicCapabilities,
+        capability: str,
         post: UpstreamPost = _http_post,
     ) -> None:
+        if len(capability) < _MIN_CAPABILITY_CHARS:
+            raise LimitError(
+                ErrorCode.DYNAMIC_CONFIG_INVALID, "the proxy capability is not strong enough"
+            )
+        self._capability = capability.encode("utf-8")
         self.ledger = ledger
         self.base_path = base_path.rstrip("/")
         self.model = model
@@ -173,8 +193,20 @@ class ModelProxy:
 
     # -- policy ---------------------------------------------------------------
 
-    def handle(self, method: str, path: str, body: bytes) -> ProxyResponse:
+    def authorized(self, headers: Mapping[str, str]) -> bool:
+        """True only for this job's capability. Constant-time; the real key never qualifies."""
+        value = headers.get("Authorization", "")
+        if value[: len(_BEARER)].lower() != _BEARER:
+            return False
+        presented = value[len(_BEARER) :].encode("utf-8", errors="replace")
+        return hmac.compare_digest(presented, self._capability)
+
+    def handle(
+        self, method: str, path: str, body: bytes, headers: Mapping[str, str]
+    ) -> ProxyResponse:
         """The whole decision for one request. Never raises; every failure is a stable code."""
+        if not self.authorized(headers):
+            return UNAUTHORIZED
         try:
             return self._handle(method, path, body)
         except LimitError as error:
@@ -298,7 +330,8 @@ class ModelProxy:
     # -- transport ------------------------------------------------------------
 
     def serve(self, host: str, port: int = 0) -> "ProxyServer":
-        """Put the policy on loopback. Only the engine of this job may reach it (127.0.0.1)."""
+        """Put the policy on loopback (127.0.0.1). Reaching the port is not enough: only the
+        holder of the job's capability gets an answer."""
         return ProxyServer(self, host, port)
 
 
@@ -317,10 +350,25 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(response.body)
 
+    def _credentials(self) -> dict[str, str]:
+        return {"Authorization": self.headers.get("Authorization", "")}
+
+    def _refuse_unauthorized(self) -> bool:
+        if self.proxy.authorized(self._credentials()):
+            return False
+        # The body is not read for a caller that proved nothing: close instead of draining it.
+        self.close_connection = True
+        self._answer(UNAUTHORIZED)
+        return True
+
     def do_GET(self) -> None:
-        self._answer(self.proxy.handle("GET", self.path, b""))
+        if self._refuse_unauthorized():
+            return
+        self._answer(self.proxy.handle("GET", self.path, b"", self._credentials()))
 
     def do_POST(self) -> None:
+        if self._refuse_unauthorized():
+            return
         length = self.headers.get("Content-Length", "")
         if not length.isdigit():
             self._answer(
@@ -342,7 +390,9 @@ class _Handler(BaseHTTPRequestHandler):
                 )
             )
             return
-        self._answer(self.proxy.handle("POST", self.path, self.rfile.read(remaining)))
+        self._answer(
+            self.proxy.handle("POST", self.path, self.rfile.read(remaining), self._credentials())
+        )
 
     def log_message(self, format: str, *args: Any) -> None:
         return  # never write a request line (it could carry data) anywhere

@@ -20,6 +20,7 @@ from typing import Any
 
 from code_reviewer_runner.dynamic_review import findings_schema
 from code_reviewer_runner.dynamic_review.adapter import DynamicEngine, EngineAnswer
+from code_reviewer_runner.dynamic_review.config import new_proxy_capability
 from code_reviewer_runner.dynamic_review.limits import BudgetLedger, DynamicLimits
 from code_reviewer_runner.dynamic_review.prompts import compose_system_prompt
 from code_reviewer_runner.dynamic_review.proxy import ModelProxy, capabilities_from_config
@@ -175,6 +176,7 @@ class Fixture:
         ]
 
     def run(self, upstream: FakeUpstream) -> EngineAnswer:
+        capability = new_proxy_capability()
         proxy = ModelProxy(
             ledger=self.ledger,
             base_path="/v1",
@@ -183,6 +185,7 @@ class Fixture:
             upstream_api_key=API_KEY,
             upstream_model="deepseek/deepseek-v4.1-flash",
             capabilities=capabilities_from_config(CAPABILITIES),
+            capability=capability,
         )
         server = proxy.serve("127.0.0.1").start()
         try:
@@ -196,6 +199,7 @@ class Fixture:
                 command=[sys.executable, str(FAKE_ENGINE)],
                 directory=str(self.directory),
                 proxy_url=server.url,
+                proxy_capability=capability,
                 agent_prompt=compose_system_prompt(dynamic.skill, base.head_sha),
                 model_schema=findings_schema(),
                 startup_seconds=2.0,
@@ -266,6 +270,11 @@ def test_the_adapter_drives_the_engine_and_returns_the_validated_findings(tmp_pa
     assert HEAD in agent["prompt"]
     assert OTHER_SHA not in agent["prompt"]
     assert agent["tools"]["*"] is False
+    # The engine's only credential is the job's proxy capability, never the workspace key; the
+    # authenticated calls above (model_calls == 2) prove the proxy accepted exactly that one.
+    engine_key = config["config"]["provider"]["review-proxy"]["options"]["apiKey"]
+    assert engine_key != API_KEY and len(engine_key) >= 43
+    assert API_KEY not in json.dumps(config["config"])
 
     # Ending the job ended the whole owned process group, helper included.
     pid = next(entry["pid"] for entry in fixture.traces() if "pid" in entry)

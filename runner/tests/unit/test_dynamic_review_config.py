@@ -13,7 +13,6 @@ from typing import Any
 
 from code_reviewer_runner.dynamic_review.config import (
     ALLOWED_TOOLS,
-    PROXY_API_KEY,
     PROXY_PROVIDER_ID,
     build_engine_config,
     engine_environment,
@@ -23,6 +22,7 @@ from code_reviewer_runner.dynamic_review.prompts import compose_system_prompt
 from code_reviewer_runner.job_loop.jsonvalues import as_object
 
 HEAD = "1f3a5c7e9b2d4f60a8c1e3b5d7f90a2c4e6b8d01"
+CAPABILITY = "job-capability-0123456789abcdef0123456789abcdef"
 
 
 def config() -> dict[str, Any]:
@@ -30,6 +30,7 @@ def config() -> dict[str, Any]:
         proxy_url="http://127.0.0.1:41234",
         model="deepseek-v4.1-flash",
         system_prompt=compose_system_prompt("look for real bugs", HEAD),
+        proxy_capability=CAPABILITY,
     )
 
 
@@ -62,9 +63,8 @@ def test_the_config_allows_one_loopback_provider_and_no_other() -> None:
     assert list(providers) == [PROXY_PROVIDER_ID]
     entry = as_object(providers[PROXY_PROVIDER_ID])
     assert entry is not None
-    assert entry["options"] == {"baseURL": "http://127.0.0.1:41234/v1", "apiKey": PROXY_API_KEY}
-    # The engine never gets a real provider credential: only the local proxy capability.
-    assert PROXY_API_KEY == "runner-proxy"
+    # The engine never gets a real provider credential: only the per-job proxy capability.
+    assert entry["options"] == {"baseURL": "http://127.0.0.1:41234/v1", "apiKey": CAPABILITY}
 
 
 # #197-T03

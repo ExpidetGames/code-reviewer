@@ -13,6 +13,7 @@ from typing import Any
 
 import pytest
 
+from code_reviewer_runner.dynamic_review.config import new_proxy_capability
 from code_reviewer_runner.dynamic_review.limits import BudgetLedger, DynamicLimits, LimitError
 from code_reviewer_runner.dynamic_review.proxy import (
     ModelProxy,
@@ -22,6 +23,8 @@ from code_reviewer_runner.dynamic_review.proxy import (
 from code_reviewer_runner.result import ErrorCode
 
 UPSTREAM_KEY = "sk-or-v1-workspace-key-0123456789"
+CAPABILITY = "job-capability-0123456789abcdef0123456789abcdef"
+OTHER_CAPABILITY = "other-job-capability-0123456789abcdef012345"
 CAPABILITIES = json.dumps(
     {"tool_choice_required": True, "structured_output": True, "max_output_tokens": 4096}
 )
@@ -68,16 +71,26 @@ def proxy(upstream: Upstream, **overrides: Any) -> ModelProxy:
         "upstream_api_key": UPSTREAM_KEY,
         "upstream_model": "deepseek/deepseek-v4.1-flash",
         "capabilities": capabilities_from_config(CAPABILITIES),
+        "capability": CAPABILITY,
         "post": upstream,
     }
     configured.update(overrides)
     return ModelProxy(**configured)
 
 
+def bearer(token: str = CAPABILITY) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
 def post(
-    subject: ModelProxy, body: dict[str, Any], path: str = "/v1/chat/completions"
+    subject: ModelProxy,
+    body: dict[str, Any],
+    path: str = "/v1/chat/completions",
+    headers: dict[str, str] | None = None,
 ) -> ProxyResponse:
-    return subject.handle("POST", path, json.dumps(body).encode("utf-8"))
+    return subject.handle(
+        "POST", path, json.dumps(body).encode("utf-8"), bearer() if headers is None else headers
+    )
 
 
 def error_code(response: ProxyResponse) -> str:
@@ -126,11 +139,11 @@ def test_only_the_model_protocol_paths_are_served() -> None:
     subject = proxy(upstream)
 
     for path in ("/v1/completions", "/v1/chat/completions/../..", "/session/1", "/v1/models/1"):
-        response = subject.handle("POST", path, json.dumps(request_body()).encode())
+        response = subject.handle("POST", path, json.dumps(request_body()).encode(), bearer())
         assert error_code(response) == ErrorCode.DYNAMIC_POLICY_VIOLATION.value
 
     assert upstream.requests == []
-    listed = subject.handle("GET", "/v1/models", b"")
+    listed = subject.handle("GET", "/v1/models", b"", bearer())
     assert listed.status == 200
     assert json.loads(listed.body)["data"][0]["id"] == "deepseek-v4.1-flash"
 
@@ -245,3 +258,83 @@ def test_the_call_budget_stops_the_run_at_the_proxy() -> None:
 
     assert error_code(second) == ErrorCode.DYNAMIC_BUDGET_EXCEEDED.value
     assert len(upstream.requests) == 1
+
+
+# #197-T04
+def test_a_request_without_the_job_capability_is_refused_and_never_forwarded() -> None:
+    upstream = Upstream()
+    subject = proxy(upstream)
+
+    for headers in (
+        {},
+        {"Authorization": ""},
+        {"Authorization": "Bearer "},
+        {"Authorization": CAPABILITY},
+        {"Authorization": f"Basic {CAPABILITY}"},
+        {"Authorization": "Bearer runner-proxy"},
+        {"Authorization": f"Bearer {CAPABILITY}x"},
+        {"Authorization": f"Bearer {CAPABILITY[:-1]}"},
+        {"Authorization": "Bearer \u00e9\u00e9"},
+    ):
+        response = post(subject, request_body(), headers=headers)
+        assert response.status == 401
+        assert error_code(response) == ErrorCode.DYNAMIC_POLICY_VIOLATION.value
+
+    assert subject.handle("GET", "/v1/models", b"", {}).status == 401
+    assert upstream.requests == []
+    assert subject.ledger.model_calls == 0
+
+
+# #197-T04
+def test_the_workspace_key_is_never_accepted_from_the_caller() -> None:
+    upstream = Upstream()
+    subject = proxy(upstream)
+
+    response = post(subject, request_body(), headers=bearer(UPSTREAM_KEY))
+
+    assert response.status == 401
+    assert upstream.requests == []
+
+
+# #197-T04
+def test_another_jobs_capability_is_refused_by_this_jobs_proxy() -> None:
+    first_upstream, second_upstream = Upstream(), Upstream()
+    first = proxy(first_upstream)
+    second = proxy(second_upstream, capability=OTHER_CAPABILITY)
+
+    assert post(first, request_body(), headers=bearer(OTHER_CAPABILITY)).status == 401
+    assert post(second, request_body(), headers=bearer(CAPABILITY)).status == 401
+    assert first_upstream.requests == [] and second_upstream.requests == []
+
+    assert post(first, request_body()).status == 200
+    assert post(second, request_body(), headers=bearer(OTHER_CAPABILITY)).status == 200
+
+
+# #197-T04
+def test_the_job_capability_is_never_forwarded_upstream() -> None:
+    upstream = Upstream()
+    subject = proxy(upstream)
+
+    assert post(subject, request_body()).status == 200
+
+    _, body, headers = upstream.requests[0]
+    assert CAPABILITY not in body.decode()
+    assert CAPABILITY not in json.dumps(headers)
+    assert headers["Authorization"] == f"Bearer {UPSTREAM_KEY}"
+
+
+# #197-T04
+def test_a_weak_job_capability_does_not_start_the_proxy() -> None:
+    for weak in ("", "short", "x" * 31):
+        with pytest.raises(LimitError) as refused:
+            proxy(Upstream(), capability=weak)
+        assert refused.value.code is ErrorCode.DYNAMIC_CONFIG_INVALID
+
+
+# #197-T04
+def test_the_runner_generates_an_unguessable_capability_per_job() -> None:
+    first, second = new_proxy_capability(), new_proxy_capability()
+
+    assert first != second
+    # 32 random bytes in url-safe base64 are 43 characters: at least 256 bits.
+    assert len(first) >= 43

@@ -21,12 +21,21 @@ The spike's caveat is binding: the flags are not proof of isolation. They only n
 misconfiguration can reach; the export and the OS boundary of #196/#202 are what actually protect.
 """
 
+import secrets
 from typing import Any
 
-# The one provider the engine may talk to: the runner-owned model proxy on loopback. The key is a
-# local capability, never the workspace credential; the proxy replaces it with the real one.
+# The one provider the engine may talk to: the runner-owned model proxy on loopback. Its key is the
+# per-job capability (`new_proxy_capability`), never the workspace credential; the proxy checks it
+# on every request and replaces it with the real credential upstream.
 PROXY_PROVIDER_ID = "review-proxy"
-PROXY_API_KEY = "runner-proxy"
+# 32 random bytes: 256 bits. The proxy refuses anything weaker.
+PROXY_CAPABILITY_BYTES = 32
+
+
+def new_proxy_capability() -> str:
+    """A fresh unguessable bearer capability for one job's proxy. Never reused across jobs."""
+    return secrets.token_urlsafe(PROXY_CAPABILITY_BYTES)
+
 
 # The tools the engine may call by name. `read` supplies directory listing in this pin (there is no
 # separate `list` tool); `StructuredOutput` is the prompt-loop's own non-filesystem return.
@@ -64,7 +73,9 @@ def permission_block() -> dict[str, str]:
     return permissions
 
 
-def build_engine_config(*, proxy_url: str, model: str, system_prompt: str) -> dict[str, Any]:
+def build_engine_config(
+    *, proxy_url: str, model: str, system_prompt: str, proxy_capability: str
+) -> dict[str, Any]:
     """The whole engine configuration for one job, as data the runner writes itself.
 
     `model` is the operator-configured model identifier; the proxy resolves it to a destination.
@@ -72,6 +83,8 @@ def build_engine_config(*, proxy_url: str, model: str, system_prompt: str) -> di
     #198): it is the runner-defined agent's prompt, so the fixed core reaches the model through the
     trusted channel and never through repository instructions or skill discovery. The prepared
     export is not a config key: the adapter scopes every request to it with the directory header.
+    `proxy_capability` is the job's bearer capability for the proxy; the config file is the only
+    place the engine receives it (never the environment, never the prompt).
     """
     return {
         "permission": permission_block(),
@@ -92,7 +105,7 @@ def build_engine_config(*, proxy_url: str, model: str, system_prompt: str) -> di
             PROXY_PROVIDER_ID: {
                 "npm": "@ai-sdk/openai-compatible",
                 "name": "Runner model proxy",
-                "options": {"baseURL": f"{proxy_url}/v1", "apiKey": PROXY_API_KEY},
+                "options": {"baseURL": f"{proxy_url}/v1", "apiKey": proxy_capability},
                 "models": {model: {}},
             }
         },

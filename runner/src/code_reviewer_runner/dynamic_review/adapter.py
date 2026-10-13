@@ -263,6 +263,7 @@ class DynamicEngine:
         command: Sequence[str],
         directory: str,
         proxy_url: str,
+        proxy_capability: str,
         agent_prompt: str,
         model_schema: dict[str, Any],
         scratch_dir: str | None = None,
@@ -279,6 +280,7 @@ class DynamicEngine:
         self.command = tuple(command)
         self.directory = directory
         self.proxy_url = proxy_url
+        self._proxy_capability = proxy_capability
         self.agent_prompt = agent_prompt
         self.model_schema = model_schema
         self.node_bin = node_bin
@@ -304,9 +306,13 @@ class DynamicEngine:
             proxy_url=self.proxy_url,
             model=dynamic.model,
             system_prompt=self.agent_prompt,
+            proxy_capability=self._proxy_capability,
         )
         config_path = self._scratch / "opencode.json"
-        config_path.write_text(json.dumps(config), encoding="utf-8")
+        # The config carries the job's proxy capability: owner-only, in the private scratch.
+        descriptor = os.open(config_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(json.dumps(config))
         environment = engine_environment(
             proxy_url=self.proxy_url,
             home=str(self._scratch / "home"),

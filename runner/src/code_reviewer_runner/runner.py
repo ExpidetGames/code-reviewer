@@ -35,6 +35,7 @@ from code_reviewer_runner import __version__
 from code_reviewer_runner.comment_recorder import CommentRecorder, install_comment_recorder
 from code_reviewer_runner.dynamic_review import findings_schema
 from code_reviewer_runner.dynamic_review.adapter import DynamicEngine, shutdown_engines
+from code_reviewer_runner.dynamic_review.config import new_proxy_capability
 from code_reviewer_runner.dynamic_review.limits import (
     DEFAULT_WINDOW_TOKENS,
     TOTAL_DEADLINE_SECONDS,
@@ -248,6 +249,8 @@ def run_dynamic_job(
         output_tokens=capabilities.max_output_tokens,
     )
     upstream = job.llm.base_url or "https://openrouter.ai/api/v1"
+    # One unguessable capability per job: the proxy demands it, the engine config carries it.
+    capability = new_proxy_capability()
     try:
         proxy = ModelProxy(
             ledger=ledger,
@@ -257,6 +260,7 @@ def run_dynamic_job(
             upstream_api_key=job.llm.api_key,
             upstream_model=job.llm.model,
             capabilities=capabilities,
+            capability=capability,
         )
     except LimitError as error:
         # The destination cannot serve the run: fail before the engine starts, with no fallback.
@@ -269,6 +273,7 @@ def run_dynamic_job(
             command=command,
             directory=checkout,
             proxy_url=server.url,
+            proxy_capability=capability,
             agent_prompt=compose_system_prompt(dynamic.skill, base.head_sha),
             model_schema=findings_schema(),
             node_bin=environment.get(DYNAMIC_NODE_BIN_VARIABLE) or None,
