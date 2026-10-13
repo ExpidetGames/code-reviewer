@@ -392,6 +392,7 @@ describe("the read side with many jobs", () => {
       "prNumber",
       "prUrl",
       "repositoryId",
+      "reviewKind",
       "status",
       "triggerKind",
     ]);

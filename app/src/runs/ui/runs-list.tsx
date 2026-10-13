@@ -10,6 +10,7 @@ import Link from "next/link";
 import { useMemo } from "react";
 import { Button } from "../../components/button.tsx";
 import { StatusRegion } from "../../components/status-region.tsx";
+import { Badge } from "../../components/ui/badge.tsx";
 import {
   Empty,
   EmptyContent,
@@ -25,6 +26,7 @@ import {
   TableHeader,
   TableRow,
 } from "../../components/ui/table.tsx";
+import { KIND_NAMES } from "../../review-settings/kind-names.ts";
 import { formatUtc } from "../../ui/format-time.ts";
 import { useLiveSnapshot } from "../../ui/use-live-snapshot.ts";
 import { workspacePath } from "../../workspaces/paths.ts";
@@ -106,6 +108,12 @@ function RunTableRow({
       </TableCell>
       <TableCell className="align-top whitespace-normal">
         <code className="font-mono text-xs">/{run.command}</code>
+        {run.reviewKind === "dynamic" ? (
+          // Diff Review is the default and stays unmarked; the kind that is not is told by its name.
+          <Badge variant="info" className="ml-2">
+            {KIND_NAMES.dynamic}
+          </Badge>
+        ) : null}
         <span className="block text-xs text-muted-foreground">
           {run.trigger}
         </span>

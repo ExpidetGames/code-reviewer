@@ -124,6 +124,7 @@ describe("the row of a run", () => {
       prNumber: 7,
       prUrl: "https://github.com/acme/widgets/pull/7",
       command: "review",
+      reviewKind: "diff",
       triggerKind: "webhook",
       trigger: "Automatic",
       status: "succeeded",
@@ -136,6 +137,14 @@ describe("the row of a run", () => {
     const text = JSON.stringify(view);
     expect(text).not.toContain("runner-secret-name");
     expect(text).not.toContain("delivery-1");
+  });
+
+  // #200
+  it("carries the review kind the run was queued for, in the list and in the detail", () => {
+    const dynamic = job({ reviewKind: "dynamic" });
+
+    expect(toRunRowView(dynamic, "p", NOW).reviewKind).toBe("dynamic");
+    expect(toRunDetailView(dynamic, "p", NOW).reviewKind).toBe("dynamic");
   });
 
   // CR-35-T04

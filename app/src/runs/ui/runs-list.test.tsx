@@ -28,6 +28,7 @@ function run(overrides: Partial<RunRowView> = {}): RunRowView {
     prNumber: 7,
     prUrl: "https://github.com/acme/widgets/pull/7",
     command: "review",
+    reviewKind: "diff",
     triggerKind: "webhook",
     trigger: "Automatic",
     status: "succeeded",
@@ -77,6 +78,53 @@ const failure: RequestResult<RunsSnapshot> = {
 const answer = (data: RunsSnapshot): RequestResult<RunsSnapshot> => ({
   ok: true,
   data,
+});
+
+describe("the review kind in the list", () => {
+  // #200
+  it("marks a Dynamic Review run with a small badge and leaves the default Diff Review runs unmarked", () => {
+    render(
+      <RunsList
+        workspaceSlug="acme"
+        initial={snapshot([
+          run({ id: "diff-run" }),
+          run({ id: "dynamic-run", reviewKind: "dynamic" }),
+        ])}
+        filter={{}}
+        api={apiAnswering([])}
+      />,
+    );
+
+    const [diff, dynamic] = dataRows();
+    expect(
+      within(diff as HTMLElement).queryByText("Dynamic Review"),
+    ).toBeNull();
+    expect(
+      within(dynamic as HTMLElement).getByText("Dynamic Review"),
+    ).toBeTruthy();
+  });
+
+  // #200
+  it("shows the sentence of a Dynamic code in the row of a run that failed with it", () => {
+    render(
+      <RunsList
+        workspaceSlug="acme"
+        initial={snapshot([
+          run({
+            reviewKind: "dynamic",
+            status: "failed",
+            problem: "Dynamic Review is not switched on for this instance yet.",
+          }),
+        ])}
+        filter={{}}
+        api={apiAnswering([])}
+      />,
+    );
+
+    expect(
+      within(dataRows()[0] as HTMLElement).getByText(/not switched on/),
+    ).toBeTruthy();
+  });
 });
 
 describe("the rows of the list", () => {
