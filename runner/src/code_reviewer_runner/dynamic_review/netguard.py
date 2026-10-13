@@ -32,6 +32,8 @@ PROXY_HOST = "127.0.0.1"
 # A second loopback address: not the proxy's, so it stands in for "any other host" in the probe.
 _OTHER_HOST = "127.0.0.2"
 _TRUSTED_PATH = "/usr/local/bin:/usr/bin:/bin"
+# `nft` lives in /usr/sbin on Debian and Ubuntu.
+_NFT_PATH = f"/usr/sbin:/sbin:{_TRUSTED_PATH}"
 _NFT_TIMEOUT_SECONDS = 10.0
 _PROBE_TIMEOUT_SECONDS = 15.0
 _CONNECT_TIMEOUT_SECONDS = 2.0
@@ -110,7 +112,7 @@ def ruleset(uid: int, ports: Collection[int]) -> str:
 
 
 def _run_nft(script: str) -> None:
-    executable = shutil.which("nft", path=_TRUSTED_PATH)
+    executable = shutil.which("nft", path=_NFT_PATH)
     if executable is None:
         raise IsolationError("the network filter tool is not installed")
     try:
