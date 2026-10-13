@@ -1,0 +1,372 @@
+# SPDX-License-Identifier: Apache-2.0
+
+"""The runner-owned model proxy of one Dynamic Review (#197).
+
+The engine is pointed at this proxy and holds only a local dummy capability; the proxy holds the
+workspace credential and is the only thing that talks to the model provider. Everything the epic
+demands of the model boundary happens here, before a byte reaches the provider or the engine:
+
+- **Only the model protocol.** `POST {base}/chat/completions` is forwarded; `GET {base}/models`
+  answers from the trusted configuration. Everything else, every redirect and every query is
+  refused, so the engine cannot use the proxy as a general forwarder.
+- **Reservation before the call.** The serialized request is bounded in bytes and reserved in tokens
+  against the epic's budget before it is sent; an over-budget call is never forwarded.
+- **Model, auth and routing overrides are refused.** The request must name the one configured model;
+  the proxy replaces the dummy key with the workspace credential and never lets the caller pick a
+  destination.
+- **Usage is authoritative, and missing usage fails.** The provider's counters settle the
+  reservation; an answer without usage, or larger than reserved, stops the run instead of being
+  counted as zero.
+- **Required features are checked, never silently downgraded.** A destination that cannot serve the
+  tool choice and structured output the run needs fails with `dynamic_model_features_unsupported`;
+  there is no fallback model or provider.
+- **Bytes are bounded on both sides.** An oversized request is refused before forwarding, an
+  oversized answer before it reaches the engine.
+
+`steps`, SSE events and the engine's own accounting are observation only and are never trusted here.
+"""
+
+import json
+import threading
+from collections.abc import Callable
+from dataclasses import dataclass
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
+
+from code_reviewer_runner.dynamic_review.config import PROXY_PROVIDER_ID
+from code_reviewer_runner.dynamic_review.limits import BudgetLedger, LimitError
+from code_reviewer_runner.job_loop.jsonvalues import as_object
+from code_reviewer_runner.result import ErrorCode
+
+# The protocol the run requires. The pinned OpenCode uses tool calling for its StructuredOutput
+# return, so a destination that cannot force a tool choice is not usable.
+REQUIRED_TOOL_CHOICE = "required"
+STRUCTURED_OUTPUT_TOOL = "StructuredOutput"
+
+_REQUEST_TIMEOUT_SECONDS = 120.0
+
+
+# What a trusted capability descriptor says about one configured model/destination. The operator
+# supplies it with the credential; nothing at run time may invent it.
+@dataclass(frozen=True)
+class DynamicCapabilities:
+    """The features the selected destination must have. A missing one fails the run."""
+
+    tool_choice_required: bool
+    structured_output: bool
+    max_output_tokens: int
+
+    def check_required(self) -> None:
+        if not self.tool_choice_required:
+            raise LimitError(
+                ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED,
+                "the configured model does not support a required tool choice",
+            )
+        if not self.structured_output:
+            raise LimitError(
+                ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED,
+                "the configured model does not support structured output through tool calling",
+            )
+        if self.max_output_tokens < 1:
+            raise LimitError(
+                ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED,
+                "the configured model has no usable output bound",
+            )
+
+
+def capabilities_from_config(raw: str | None) -> DynamicCapabilities:
+    """The operator-supplied capability descriptor of the selected model/destination.
+
+    The descriptor is trusted runner configuration, never repository input. Anything missing or
+    unusable fails closed: the run must not assume a destination can serve the required tool choice
+    and structured output.
+    """
+    if not raw:
+        raise LimitError(
+            ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED,
+            "no trusted capability descriptor is configured for the model",
+        )
+    try:
+        value: Any = json.loads(raw)
+    except ValueError:
+        raise LimitError(
+            ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED,
+            "the capability descriptor is not valid JSON",
+        ) from None
+    document = as_object(value)
+    if document is None:
+        raise LimitError(
+            ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED,
+            "the capability descriptor is not an object",
+        )
+    output: Any = document.get("max_output_tokens")
+    if isinstance(output, bool) or not isinstance(output, int):
+        raise LimitError(
+            ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED,
+            "the capability descriptor has no output bound",
+        )
+    return DynamicCapabilities(
+        tool_choice_required=document.get("tool_choice_required") is True,
+        structured_output=document.get("structured_output") is True,
+        max_output_tokens=output,
+    )
+
+
+@dataclass(frozen=True)
+class ProxyResponse:
+    status: int
+    body: bytes
+
+
+# A transport is what actually sends the forwarded request upstream; a test replaces it so nothing
+# leaves loopback. `post` returns the status and the body bytes.
+UpstreamPost = Callable[[str, bytes, dict[str, str]], tuple[int, bytes]]
+
+
+def _http_post(url: str, body: bytes, headers: dict[str, str]) -> tuple[int, bytes]:
+    # A trusted destination is one URL, not a route: a redirect is refused rather than followed.
+    request = Request(url, data=body, headers=headers, method="POST")
+    try:
+        with urlopen(request, timeout=_REQUEST_TIMEOUT_SECONDS) as response:
+            if response.geturl() != url:
+                raise LimitError(
+                    ErrorCode.DYNAMIC_POLICY_VIOLATION, "the provider answered from another URL"
+                )
+            return response.status, response.read()
+    except HTTPError as error:
+        return error.code, error.read()
+
+
+def error_body(code: ErrorCode, detail: str) -> bytes:
+    """The stable error shape the engine sees: a code, never a message with data in it."""
+    return json.dumps({"error": {"code": code.value, "detail": detail}}).encode("utf-8")
+
+
+class ModelProxy:
+    """One proxy per job. `handle` is the whole policy; `serve` only puts it on loopback."""
+
+    def __init__(
+        self,
+        *,
+        ledger: BudgetLedger,
+        base_path: str,
+        model: str,
+        upstream_url: str,
+        upstream_api_key: str,
+        upstream_model: str,
+        capabilities: DynamicCapabilities,
+        post: UpstreamPost = _http_post,
+    ) -> None:
+        self.ledger = ledger
+        self.base_path = base_path.rstrip("/")
+        self.model = model
+        self.upstream_url = upstream_url
+        self.upstream_api_key = upstream_api_key
+        self.upstream_model = upstream_model
+        self.capabilities = capabilities
+        self._post = post
+        # The proxy starts only after the capability descriptor was proven: an unusable destination
+        # is a failure before the first request, not a downgrade at the first call.
+        self.capabilities.check_required()
+
+    # -- policy ---------------------------------------------------------------
+
+    def handle(self, method: str, path: str, body: bytes) -> ProxyResponse:
+        """The whole decision for one request. Never raises; every failure is a stable code."""
+        try:
+            return self._handle(method, path, body)
+        except LimitError as error:
+            return ProxyResponse(status=502, body=error_body(error.code, error.detail))
+
+    def _handle(self, method: str, path: str, body: bytes) -> ProxyResponse:
+        if path == f"{self.base_path}/models":
+            if method != "GET":
+                raise LimitError(
+                    ErrorCode.DYNAMIC_POLICY_VIOLATION, "only the model protocol is allowed"
+                )
+            return ProxyResponse(status=200, body=self._models_body())
+        if path != f"{self.base_path}/chat/completions" or method != "POST":
+            raise LimitError(
+                ErrorCode.DYNAMIC_POLICY_VIOLATION, "only the model protocol is allowed"
+            )
+        self.ledger.check_request_bytes(len(body))
+        request = self._decode(body)
+        self._check_model(request)
+        reservation = self.ledger.reserve_call(
+            body.decode("utf-8", errors="replace"), output_tokens=self._output_allowance(request)
+        )
+        forwarded = self._forward_body(request)
+        status, response_body = self._post(
+            self.upstream_url,
+            forwarded,
+            {
+                "Authorization": f"Bearer {self.upstream_api_key}",
+                "Content-Type": "application/json",
+            },
+        )
+        self.ledger.check_response_bytes(len(response_body))
+        if status != 200:
+            # The run ends with the provider's stable code; no partial success is claimed and no
+            # counter is invented for a refused call (the reservation stays spent).
+            return ProxyResponse(status=status, body=self._provider_error(status))
+        usage = self._usage(response_body)
+        if usage == (None, None):
+            raise LimitError(
+                ErrorCode.DYNAMIC_ACCOUNTING_FAILED, "the provider did not report usage"
+            )
+        # The provider is authoritative: its counters replace the reservation. A counter above the
+        # reservation is not added up, it fails the run.
+        self.ledger.settle_call(reservation, prompt_tokens=usage[0], completion_tokens=usage[1])
+        return ProxyResponse(status=status, body=response_body)
+
+    def _decode(self, body: bytes) -> dict[str, Any]:
+        try:
+            value: Any = json.loads(body)
+        except (ValueError, UnicodeDecodeError):
+            raise LimitError(
+                ErrorCode.DYNAMIC_POLICY_VIOLATION, "the request is not JSON"
+            ) from None
+        document = as_object(value)
+        if document is None:
+            raise LimitError(ErrorCode.DYNAMIC_POLICY_VIOLATION, "the request is not an object")
+        return document
+
+    def _check_model(self, request: dict[str, Any]) -> None:
+        requested = request.get("model")
+        # The engine names the model through the trusted provider (`<provider>/<model>` or the bare
+        # name); anything else is an override the run refuses rather than honours.
+        if requested not in (self.model, f"{PROXY_PROVIDER_ID}/{self.model}"):
+            raise LimitError(ErrorCode.DYNAMIC_POLICY_VIOLATION, "the request names another model")
+
+    def _output_allowance(self, request: dict[str, Any]) -> int:
+        raw = request.get("max_tokens", request.get("max_completion_tokens"))
+        if isinstance(raw, bool) or not isinstance(raw, int) or raw <= 0:
+            return self.capabilities.max_output_tokens
+        return min(raw, self.capabilities.max_output_tokens)
+
+    def _forward_body(self, request: dict[str, Any]) -> bytes:
+        """The request as the trusted destination takes it: the model is rewritten, nothing else is
+        added. The tool choice the engine asked for is kept — refusing it would be a silent
+        downgrade."""
+        forwarded = dict(request)
+        forwarded["model"] = self.upstream_model
+        if forwarded.get("stream") is True:
+            raise LimitError(
+                ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED,
+                "streaming responses are not accounted for yet",
+            )
+        forwarded.pop("stream", None)
+        return json.dumps(forwarded).encode("utf-8")
+
+    @staticmethod
+    def _usage(body: bytes) -> tuple[int | None, int | None]:
+        try:
+            value: Any = json.loads(body)
+        except (ValueError, UnicodeDecodeError):
+            return None, None
+        document = as_object(value)
+        if document is None:
+            return None, None
+        usage = as_object(document.get("usage"))
+        if usage is None:
+            return None, None
+        prompt: Any = usage.get("prompt_tokens")
+        completion: Any = usage.get("completion_tokens")
+        prompt_tokens = prompt if isinstance(prompt, int) and not isinstance(prompt, bool) else None
+        completion_tokens = (
+            completion if isinstance(completion, int) and not isinstance(completion, bool) else None
+        )
+        return prompt_tokens, completion_tokens
+
+    @staticmethod
+    def _provider_error(status: int) -> bytes:
+        code = {
+            401: ErrorCode.LLM_AUTH,
+            402: ErrorCode.LLM_QUOTA,
+            403: ErrorCode.LLM_AUTH,
+            429: ErrorCode.LLM_RATE_LIMIT,
+        }.get(status, ErrorCode.LLM_UNAVAILABLE if status >= 500 else ErrorCode.LLM_BAD_REQUEST)
+        return error_body(code, "the model provider refused the request")
+
+    def _models_body(self) -> bytes:
+        return json.dumps(
+            {"object": "list", "data": [{"id": self.model, "object": "model"}]}
+        ).encode("utf-8")
+
+    # -- transport ------------------------------------------------------------
+
+    def serve(self, host: str, port: int = 0) -> "ProxyServer":
+        """Put the policy on loopback. Only the engine of this job may reach it (127.0.0.1)."""
+        return ProxyServer(self, host, port)
+
+
+class _Handler(BaseHTTPRequestHandler):
+    server_version = "code-reviewer-proxy/1"
+    protocol_version = "HTTP/1.1"
+
+    @property
+    def proxy(self) -> ModelProxy:
+        return self.server.proxy  # type: ignore[attr-defined]
+
+    def _answer(self, response: ProxyResponse) -> None:
+        self.send_response(response.status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(response.body)))
+        self.end_headers()
+        self.wfile.write(response.body)
+
+    def do_GET(self) -> None:
+        self._answer(self.proxy.handle("GET", self.path, b""))
+
+    def do_POST(self) -> None:
+        length = self.headers.get("Content-Length", "")
+        if not length.isdigit():
+            self._answer(
+                ProxyResponse(411, error_body(ErrorCode.DYNAMIC_POLICY_VIOLATION, "no length"))
+            )
+            return
+        remaining = int(length)
+        # Read at most one byte more than the bound: a body that is too large is refused without
+        # buffering it.
+        cap = self.proxy.ledger.limits.max_request_bytes
+        if remaining > cap:
+            self._answer(
+                ProxyResponse(
+                    413,
+                    error_body(
+                        ErrorCode.DYNAMIC_BUDGET_EXCEEDED,
+                        "the request exceeds the protocol byte bound",
+                    ),
+                )
+            )
+            return
+        self._answer(self.proxy.handle("POST", self.path, self.rfile.read(remaining)))
+
+    def log_message(self, format: str, *args: Any) -> None:
+        return  # never write a request line (it could carry data) anywhere
+
+
+class ProxyServer:
+    """A running loopback proxy. `url` is what the engine's provider is pointed at."""
+
+    def __init__(self, proxy: ModelProxy, host: str, port: int) -> None:
+        self._server = ThreadingHTTPServer((host, port), _Handler)
+        self._server.daemon_threads = True
+        self._server.proxy = proxy  # type: ignore[attr-defined]
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+
+    @property
+    def url(self) -> str:
+        host, port = self._server.server_address[:2]
+        return f"http://{host}:{port}"
+
+    def start(self) -> "ProxyServer":
+        self._thread.start()
+        return self
+
+    def stop(self) -> None:
+        self._server.shutdown()
+        self._server.server_close()
+        self._thread.join(timeout=5.0)
