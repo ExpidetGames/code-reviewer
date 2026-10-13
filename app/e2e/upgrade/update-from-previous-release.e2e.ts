@@ -463,11 +463,12 @@ test.describe(
       ).toBeVisible();
       // The seeded `/ask` run (PR #4 of the widgets project) is in the list with its old command.
       const historical = page
-        .getByRole("listitem")
-        .filter({ hasText: `${UPGRADE_WIDGETS.fullName} #4` });
+        .locator("[data-run-id]")
+        .filter({ hasText: UPGRADE_WIDGETS.fullName })
+        .filter({ hasText: "#4" });
       await expect(historical).toContainText("/ask");
       await historical
-        .getByRole("link", { name: `${UPGRADE_WIDGETS.fullName} #4` })
+        .getByRole("link", { name: UPGRADE_WIDGETS.fullName, exact: true })
         .click();
       await expect(
         page.getByRole("heading", {
@@ -477,10 +478,12 @@ test.describe(
       ).toBeVisible();
       await expect(page.getByText("/ask", { exact: true })).toBeVisible();
       // The historical question is read-only text and escaped (never rendered as HTML).
-      await expect(page.locator(".run-question")).toContainText(
+      await expect(page.locator('[data-slot="run-question"]')).toContainText(
         "<img src=x onerror=alert(1)> a historical question",
       );
-      await expect(page.locator(".run-question img")).toHaveCount(0);
+      await expect(page.locator('[data-slot="run-question"] img')).toHaveCount(
+        0,
+      );
 
       // Review now works on the upgraded installation. The real runner is stood in for by the queue
       // helper here (its own tests cover the real path, and it would race the child after the app
@@ -530,13 +533,10 @@ test.describe(
         },
         upgradePaths.database,
       );
-      await expect(
-        page.locator(".run-facts").getByText("/review", { exact: true }),
-      ).toBeVisible();
-      await expect(page.locator(".run-facts .badge-run")).toContainText(
-        "Succeeded",
-        { timeout: 20_000 },
-      );
+      await expect(page.getByText("/review", { exact: true })).toBeVisible();
+      await expect(page.locator("[data-status]")).toContainText("Succeeded", {
+        timeout: 20_000,
+      });
 
       // The real runner comes back for the later steps of the update.
       runner = await startRunner({

@@ -121,9 +121,13 @@ test.describe("starting a review by hand", () => {
 
     await page.getByRole("link", { name: "Runs", exact: true }).click();
     const run = page
-      .getByRole("listitem")
-      .filter({ hasText: `${WIDGETS.fullName} #12` });
-    await expect(run.locator(".badge-run")).toContainText("Waiting", POLL_WAIT);
+      .locator("[data-run-id]")
+      .filter({ hasText: WIDGETS.fullName })
+      .filter({ hasText: "#12" });
+    await expect(run.locator("[data-status]")).toContainText(
+      "Waiting",
+      POLL_WAIT,
+    );
     await expect(run).toContainText("Started by manual-journey");
 
     const claim = await claimRun(runId);
@@ -138,7 +142,7 @@ test.describe("starting a review by hand", () => {
         logTruncated: false,
       },
     });
-    await expect(run.locator(".badge-run")).toContainText(
+    await expect(run.locator("[data-status]")).toContainText(
       "Succeeded",
       POLL_WAIT,
     );

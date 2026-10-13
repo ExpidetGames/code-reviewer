@@ -128,8 +128,9 @@ test.describe("a pull request on its way to a review comment", () => {
   /** The rows of the Runs page that belong to a pull request. */
   function runsOf(page: Page, repository: string, number: number) {
     return page
-      .getByRole("listitem")
-      .filter({ hasText: `${repository} #${String(number)}` });
+      .locator("[data-run-id]")
+      .filter({ hasText: repository })
+      .filter({ hasText: `#${String(number)}` });
   }
 
   async function openRuns(page: Page) {
@@ -166,7 +167,7 @@ test.describe("a pull request on its way to a review comment", () => {
     expect(answer).toEqual({ status: "accepted", outcome: "trigger_enqueued" });
 
     const run = runsOf(page, WIDGETS.fullName, number);
-    await expect(run.locator(".badge-run")).toContainText(
+    await expect(run.locator("[data-status]")).toContainText(
       "Succeeded",
       RUN_TIMEOUT,
     );
@@ -230,11 +231,11 @@ test.describe("a pull request on its way to a review comment", () => {
     // The push is a second run of the same pull request; both are done when the comment was edited.
     const runs = runsOf(page, WIDGETS.fullName, number);
     await expect(runs).toHaveCount(2, RUN_TIMEOUT);
-    await expect(runs.nth(0).locator(".badge-run")).toContainText(
+    await expect(runs.nth(0).locator("[data-status]")).toContainText(
       "Succeeded",
       RUN_TIMEOUT,
     );
-    await expect(runs.nth(1).locator(".badge-run")).toContainText(
+    await expect(runs.nth(1).locator("[data-status]")).toContainText(
       "Succeeded",
       RUN_TIMEOUT,
     );
@@ -314,12 +315,12 @@ test.describe("a pull request on its way to a review comment", () => {
     });
 
     const run = runsOf(page, WIDGETS.fullName, number);
-    await expect(run.locator(".badge-run")).toContainText(
+    await expect(run.locator("[data-status]")).toContainText(
       "Failed",
       RUN_TIMEOUT,
     );
     await run
-      .getByRole("link", { name: `${WIDGETS.fullName} #${String(number)}` })
+      .getByRole("link", { name: WIDGETS.fullName, exact: true })
       .click();
     await expect(
       page.getByText("llm_rate_limit").filter({ visible: true }),
@@ -394,7 +395,7 @@ test.describe("a pull request on its way to a review comment", () => {
         outcome: "trigger_enqueued",
       });
       const run = runsOf(page, WIDGETS.fullName, number);
-      await expect(run.locator(".badge-run")).toContainText(
+      await expect(run.locator("[data-status]")).toContainText(
         "Succeeded",
         RUN_TIMEOUT,
       );
