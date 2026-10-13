@@ -722,6 +722,63 @@ def test_the_reservation_is_made_on_the_text_that_is_forwarded() -> None:
     assert len(upstream.requests) == 1
 
 
+# #232-T08
+def test_the_forwarded_bytes_are_compact_utf_8_and_the_reservation_counts_exactly_those() -> None:
+    upstream = Upstream()
+    subject = proxy(upstream)
+    text = "héllo wörld ✓"
+    body = request_body(messages=[{"role": "user", "content": text}])
+
+    post(subject, body)
+
+    sent = upstream.requests[0][1]
+    expected = json.dumps(json.loads(sent), ensure_ascii=False, separators=(",", ":"))
+    assert sent == expected.encode("utf-8")
+    assert text.encode("utf-8") in sent
+    assert b"\\u" not in sent and b'", "' not in sent and b'": ' not in sent
+
+
+# #232-T08
+def test_non_ascii_text_is_reserved_at_its_utf_8_size_not_its_escaped_size() -> None:
+    upstream = Upstream()
+    ledger = BudgetLedger(DynamicLimits(), window_tokens=9000, output_tokens=100)
+    subject = proxy(upstream, ledger=ledger)
+
+    # 2,000 characters are about 4 KB as UTF-8 and about 12 KB as `\uXXXX` escapes; the output allowance is 4,096.
+    response = post(subject, request_body(messages=[{"role": "user", "content": "é" * 2000}]))
+
+    assert response.status == 200, response.body
+    assert len(upstream.requests) == 1
+
+
+# #232-T09
+@pytest.mark.parametrize("lone", ["\ud800", "\udfff"])
+def test_a_lone_surrogate_in_the_history_is_forwarded_escaped_and_never_raises(lone: str) -> None:
+    upstream = Upstream()
+    ledger = BudgetLedger(DynamicLimits())
+    reserved: list[str] = []
+    reserve_call = ledger.reserve_call
+
+    def recording(request_text: str, *, output_tokens: int | None = None) -> Any:
+        reserved.append(request_text)
+        return reserve_call(request_text, output_tokens=output_tokens)
+
+    ledger.reserve_call = recording  # type: ignore[method-assign]
+    subject = proxy(upstream, ledger=ledger)
+    # The JSON escape decodes to a lone surrogate, which UTF-8 cannot encode.
+    raw = json.dumps(request_body(messages=history_with_result(f"a {lone} b"))).encode("utf-8")
+    assert f"\\u{ord(lone):04x}".encode() in raw
+
+    response = subject.handle("POST", "/v1/chat/completions", raw, bearer())
+
+    assert response.status == 200, response.body
+    sent = upstream.requests[0][1]
+    assert sent.isascii()
+    assert json.loads(sent)["messages"][2]["content"] == f"a {lone} b"
+    # The reservation was made on the bytes that went out.
+    assert reserved == [sent.decode("ascii")]
+
+
 # #197-T06
 def test_the_first_cause_of_a_refusal_is_kept_for_the_run() -> None:
     subject = proxy(Upstream(), ledger=BudgetLedger(DynamicLimits(max_request_bytes=10)))

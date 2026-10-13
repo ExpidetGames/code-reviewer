@@ -389,8 +389,13 @@ class ModelProxy:
         forwarded["max_tokens"] = self._output_allowance(request)
         forwarded["stream"] = False
         # Compact UTF-8 like the engine's own serialisation: the reservation is made on these bytes,
-        # and `\uXXXX` escapes of non-ASCII text would inflate it.
-        return json.dumps(forwarded, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        # and `\uXXXX` escapes of non-ASCII text would inflate it. A lone surrogate (a JSON escape
+        # the engine or the provider can emit when a token splits an emoji) has no UTF-8 form: that
+        # one request is escaped as ASCII instead, and those bytes are the ones reserved and sent.
+        try:
+            return json.dumps(forwarded, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        except UnicodeEncodeError:
+            return json.dumps(forwarded, ensure_ascii=True, separators=(",", ":")).encode("ascii")
 
     @staticmethod
     def _completion(body: bytes) -> dict[str, Any]:
