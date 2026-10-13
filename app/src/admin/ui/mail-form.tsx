@@ -10,7 +10,13 @@
 // Redesigned (#184): the "how it works" essay is a HelpDisclosure, the fields are the cards Connection
 // and Sender with one Save, the removal lives in a DangerZone after the form, and only the warning of the
 // selected security mode is shown.
-import { useId, useState, type FormEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useId,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import { Button } from "../../components/button.tsx";
 import { DangerZone } from "../../components/danger-zone.tsx";
 import { HelpDisclosure } from "../../components/help-disclosure.tsx";
@@ -60,6 +66,42 @@ const SECURITY_OPTIONS: Array<{ value: Security; title: string }> = [
   { value: "none", title: "None (not encrypted)" },
 ];
 
+// The order the fields appear in the card, so "the first error" is the one a person sees first,
+// whatever order the server lists the issues in.
+const FIELD_ORDER = [
+  "host",
+  "port",
+  "security",
+  "allowPlainTextLogin",
+  "user",
+  "password",
+  "senderAddress",
+  "senderName",
+];
+
+function firstInvalidField(
+  issues: ReadonlyArray<{ field: string }>,
+): string | null {
+  let first: string | null = null;
+  let firstIndex = FIELD_ORDER.length;
+  for (const issue of issues) {
+    const index = FIELD_ORDER.indexOf(issue.field);
+    if (index === -1 || index >= firstIndex) continue;
+    first = issue.field;
+    firstIndex = index;
+  }
+  return first;
+}
+
+/** The id of the control an issue belongs to; the sender fields and the two checkboxes are not `ids-field`. */
+function fieldElementId(ids: string, field: string): string {
+  if (field === "allowPlainTextLogin") return `${ids}-plain-login`;
+  if (field === "security") return `${ids}-security-starttls`;
+  if (field === "senderAddress") return `${ids}-sender-address`;
+  if (field === "senderName") return `${ids}-sender-name`;
+  return `${ids}-${field}`;
+}
+
 export function MailForm({
   settings,
   children,
@@ -97,6 +139,16 @@ export function MailForm({
   const { pending, status, save } = useSave(api);
 
   const passwordState = settings.smtp.password;
+
+  // A failed save only sets state; the focus moves after the render that shows the errors is committed
+  // ("focus the first error", plan rule). The first error is the one that appears first in the card.
+  useEffect(() => {
+    if (status === null || status.kind !== "failed") return;
+    const field = firstInvalidField(status.issues);
+    if (field === null) return;
+    const element = document.getElementById(fieldElementId(ids, field));
+    if (element instanceof HTMLElement) element.focus();
+  }, [ids, status]);
 
   function chooseSecurity(next: Security) {
     // The port follows the choice as long as it is still the usual port of the old choice.
@@ -355,15 +407,14 @@ export function MailForm({
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 aria-invalid={invalid("password")}
-                aria-describedby={described(
-                  "password",
-                  passwordState === "unreadable"
-                    ? undefined
-                    : `${ids}-password-hint`,
-                )}
+                aria-describedby={described("password", `${ids}-password-hint`)}
               />
               {passwordState === "unreadable" ? (
-                <Alert variant="warning" role="note">
+                <Alert
+                  variant="warning"
+                  role="note"
+                  id={`${ids}-password-hint`}
+                >
                   <AlertDescription>
                     <strong>The saved password cannot be read.</strong>{" "}
                     {UNREADABLE_SECRET_CAUSE} Enter the password again and save.

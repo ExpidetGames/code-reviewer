@@ -189,6 +189,10 @@ describe("the mail form", () => {
     const note = screen.getByRole("note");
     expect(note.textContent).toContain("cannot be read");
     expect(note.textContent).toContain("Enter the password again");
+    // The field still points at the message, so a screen reader hears it (review fix).
+    expect(
+      screen.getByLabelText("Password").getAttribute("aria-describedby"),
+    ).toContain(note.id);
   });
 
   // #100-SM-03
@@ -416,17 +420,18 @@ describe("the mail form", () => {
     const user = userEvent.setup();
     render(<MailForm settings={configured()} api={mock} />);
 
-    const danger = screen
-      .getByText("Danger zone")
-      .closest('[data-slot="card"]');
-    expect(danger).not.toBeNull();
+    const danger = screen.getByRole("region", { name: "Danger zone" });
+    // The title is the card's h2 and gives the card its name.
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Danger zone" }),
+    ).toBeTruthy();
     // The destructive action is not next to the save action.
     expect(
-      within(danger as HTMLElement).queryByRole("button", {
+      within(danger).queryByRole("button", {
         name: "Save mail server",
       }),
     ).toBeNull();
-    const opener = within(danger as HTMLElement).getByRole("button", {
+    const opener = within(danger).getByRole("button", {
       name: "Remove the mail server",
     });
 
@@ -467,6 +472,29 @@ describe("the mail form", () => {
     expect(lines).toHaveLength(1);
     expect(lines[0]?.textContent).toContain("cannot be read");
     expect(screen.queryByText(/A password is saved/)).toBeNull();
+  });
+
+  // #184 review: focus the first invalid field after a failed save.
+  it("moves focus to the first invalid field, in the order of the page", async () => {
+    const { api: mock } = api({
+      ok: false,
+      status: 422,
+      code: "invalid_input",
+      issues: [
+        { field: "senderAddress", code: "sender_invalid" },
+        { field: "port", code: "port_not_allowed" },
+        { field: "host", code: "host_invalid" },
+      ],
+    });
+    const user = userEvent.setup();
+    render(<MailForm settings={view()} api={mock} />);
+
+    await user.click(screen.getByRole("button", { name: "Save mail server" }));
+
+    // Host comes first in the card, so it wins over the server's order.
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByLabelText("Host")),
+    );
   });
 });
 
