@@ -24,6 +24,7 @@ function view(overrides: Partial<AdminSettingsView> = {}): AdminSettingsView {
       ...never,
     },
     maxWorkspacesPerUser: { value: 10, ...never },
+    dynamicReview: { value: false, ...never },
     smtp: { value: null, password: "none", ...never },
     workspaceCount: 1,
     githubConfigured: false,

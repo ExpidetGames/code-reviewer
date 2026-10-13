@@ -155,6 +155,50 @@ describe("changing a setting", () => {
     });
   });
 
+  // #202-T11
+  it("switches Dynamic Review on and off for the instance and shows who did it", async () => {
+    const portal = await startPortal();
+    const before = await portal.visit("/api/admin/settings", {
+      cookies: portal.adminCookies,
+    });
+    expect(await before.json()).toMatchObject({
+      dynamicReview: { value: false, updatedBy: null },
+    });
+
+    const on = await put(portal, { dynamicReview: { enabled: true } });
+    expect(on.status).toBe(200);
+    expect(await on.json()).toMatchObject({
+      ok: true,
+      settings: {
+        dynamicReview: {
+          value: true,
+          updatedBy: { id: portal.adminId, email: "admin@example.com" },
+        },
+      },
+    });
+
+    const off = await put(portal, { dynamicReview: { enabled: false } });
+    expect(await off.json()).toMatchObject({
+      settings: { dynamicReview: { value: false } },
+    });
+  });
+
+  // #202-T11
+  it("refuses a gate change that is not an object with a boolean", async () => {
+    const portal = await startPortal();
+
+    const response = await put(portal, { dynamicReview: { enabled: "yes" } });
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({
+      error: "invalid_input",
+      issues: [{ field: "dynamicReview", code: "dynamic_review_invalid" }],
+    });
+    expect((await portal.service.readSettings()).dynamicReview.value).toBe(
+      false,
+    );
+  });
+
   // #106-IM-07
   it("hides the notice of the import for good, and refuses a request that is not a dismissal", async () => {
     const portal = await startPortal();

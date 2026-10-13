@@ -47,6 +47,7 @@ function view(overrides: Partial<AdminSettingsView> = {}): AdminSettingsView {
       ...never,
     },
     maxWorkspacesPerUser: { value: 10, ...never },
+    dynamicReview: { value: false, ...never },
     smtp: { value: null, password: "none", ...never },
     workspaceCount: 1,
     githubConfigured: false,
@@ -86,9 +87,117 @@ const refused = (
   issues: Array<{ field: string; code: string }> = [],
 ) => ({ ok: false, status: 409, code, issues }) as const;
 
-function card(name: "Tenancy" | "Limits"): HTMLElement {
+function card(name: "Tenancy" | "Limits" | "Dynamic Review"): HTMLElement {
   return screen.getByRole("group", { name });
 }
+
+describe("the Dynamic Review card of the instance form", () => {
+  // #202-T11
+  it("is off by default and says what turning it on does", () => {
+    const { api } = apiAnswering(SAVED);
+    render(<InstanceForm settings={view()} api={api} />);
+
+    const dynamic = card("Dynamic Review");
+    const allow = within(dynamic).getByRole("checkbox", {
+      name: /Allow Dynamic Review/,
+    });
+    expect(allow.getAttribute("aria-checked")).toBe("false");
+    expect(dynamic.textContent).toMatch(/runner that can run it/);
+    expect(dynamic.textContent).toMatch(/dynamic_review_disabled/);
+  });
+
+  // #202-T11
+  it("sends the gate only after the rollout order was confirmed, and nothing else", async () => {
+    const { api, change } = apiAnswering(SAVED);
+    const user = userEvent.setup();
+    render(<InstanceForm settings={view()} api={api} />);
+    const dynamic = card("Dynamic Review");
+
+    await user.click(
+      within(dynamic).getByRole("checkbox", { name: /Allow Dynamic Review/ }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Save instance settings" }),
+    );
+
+    // Not confirmed: the server is not asked, the card says why.
+    expect(change).not.toHaveBeenCalled();
+    expect(within(dynamic).getByRole("alert").textContent).toMatch(/Confirm/);
+
+    await user.click(
+      within(dynamic).getByRole("checkbox", { name: /every app instance/i }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Save instance settings" }),
+    );
+
+    await waitFor(() =>
+      expect(within(dynamic).getByRole("status").textContent).toBe("Saved."),
+    );
+    expect(change).toHaveBeenCalledTimes(1);
+    expect(change).toHaveBeenCalledWith({ dynamicReview: { enabled: true } });
+  });
+
+  // #202-T11
+  it("turns the gate off without a confirmation", async () => {
+    const { api, change } = apiAnswering(SAVED);
+    const user = userEvent.setup();
+    render(
+      <InstanceForm
+        settings={view({
+          dynamicReview: {
+            value: true,
+            updatedBy: null,
+            updatedAt: null,
+          },
+        })}
+        api={api}
+      />,
+    );
+    const dynamic = card("Dynamic Review");
+    const allow = within(dynamic).getByRole("checkbox", {
+      name: /Allow Dynamic Review/,
+    });
+    expect(allow.getAttribute("aria-checked")).toBe("true");
+
+    await user.click(allow);
+    await user.click(
+      screen.getByRole("button", { name: "Save instance settings" }),
+    );
+
+    await waitFor(() =>
+      expect(change).toHaveBeenCalledWith({
+        dynamicReview: { enabled: false },
+      }),
+    );
+  });
+
+  // #202-T11
+  it("shows the sentence for a refused change on its own card", async () => {
+    const { api } = apiAnswering(refused("unavailable"));
+    const user = userEvent.setup();
+    render(
+      <InstanceForm
+        settings={view({
+          dynamicReview: { value: true, updatedBy: null, updatedAt: null },
+        })}
+        api={api}
+      />,
+    );
+    const dynamic = card("Dynamic Review");
+
+    await user.click(
+      within(dynamic).getByRole("checkbox", { name: /Allow Dynamic Review/ }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Save instance settings" }),
+    );
+
+    await waitFor(() =>
+      expect(within(dynamic).getByRole("alert").textContent).not.toBe(""),
+    );
+  });
+});
 
 describe("the instance form", () => {
   // #98-AD-07
@@ -257,7 +366,7 @@ describe("the instance form", () => {
   it("says that a setting was never changed", () => {
     render(<InstanceForm settings={view()} />);
 
-    expect(screen.getAllByText(/Never changed/)).toHaveLength(2);
+    expect(screen.getAllByText(/Never changed/)).toHaveLength(3);
   });
 
   it("shows the server's reason for a number that is not allowed", async () => {

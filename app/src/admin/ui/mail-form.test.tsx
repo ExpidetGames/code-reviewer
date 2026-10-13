@@ -52,6 +52,7 @@ function view(
       ...never,
     },
     maxWorkspacesPerUser: { value: 10, ...never },
+    dynamicReview: { value: false, ...never },
     smtp: { value: null, password: "none", ...never, ...smtp },
     workspaceCount: 1,
     githubConfigured: false,

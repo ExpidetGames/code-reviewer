@@ -7,6 +7,8 @@
 import { sql } from "kysely";
 import { describe, expect, it } from "vitest";
 import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
+import { isDynamicReviewEnabled } from "../jobs/dynamic-review-gate.ts";
+import { createJobQueueFixture } from "../test-support/jobs.ts";
 import { createRateLimitsRepository } from "../db/repositories/rate-limits-repository.ts";
 import { createSmtpConfigStore } from "../mail/smtp-config.ts";
 import { createTestMailService } from "../mail/test-mail.ts";
@@ -410,6 +412,91 @@ describe("changing the limits", () => {
       expect(await settings.get("max_workspaces_per_user")).toBeUndefined();
     },
   );
+});
+
+describe("changing the Dynamic Review gate", () => {
+  // #202-T11
+  it("reads off while nothing was saved", async () => {
+    const { service } = await startService();
+
+    expect((await service.readSettings()).dynamicReview).toEqual({
+      value: false,
+      updatedBy: null,
+      updatedAt: null,
+    });
+  });
+
+  // #202-T11
+  it("switches the gate the enqueue reads on and off, with the admin and the time", async () => {
+    const { db, service, setTime } = await startService();
+    setTime("2026-10-13T12:00:00.000Z");
+
+    expect(
+      await service.changeDynamicReview("admin-1", { enabled: true }),
+    ).toEqual({ ok: true });
+
+    expect(await isDynamicReviewEnabled(db)).toBe(true);
+    expect((await service.readSettings()).dynamicReview).toEqual({
+      value: true,
+      updatedBy: { id: "admin-1", email: "admin-1@example.test" },
+      updatedAt: "2026-10-13T12:00:00.000Z",
+    });
+
+    setTime("2026-10-13T13:00:00.000Z");
+    await service.changeDynamicReview("admin-2", { enabled: false });
+    expect(await isDynamicReviewEnabled(db)).toBe(false);
+    expect((await service.readSettings()).dynamicReview).toMatchObject({
+      value: false,
+      updatedBy: { id: "admin-2" },
+    });
+  });
+
+  // #202-T11
+  it("goes through the repository setter: switching off cancels the waiting Dynamic jobs and keeps the running one", async () => {
+    const { db, service } = await startService();
+    const fixture = await createJobQueueFixture({
+      database: db,
+      dynamicReview: true,
+    });
+    const running = await fixture.enqueueNew({ reviewKind: "dynamic" });
+    const claim = await fixture.queue.claimNext("runner", ["opencode"]);
+    expect(claim?.job.id).toBe(running.id);
+    const waiting = await fixture.enqueueNew({
+      prNumber: 8,
+      reviewKind: "dynamic",
+    });
+
+    await service.changeDynamicReview("admin-1", { enabled: false });
+
+    expect(await fixture.queue.get(waiting.id)).toMatchObject({
+      status: "cancelled",
+      errorCode: "dynamic_review_disabled",
+    });
+    expect(await fixture.queue.get(running.id)).toEqual(claim?.job);
+  });
+
+  // #202-T11
+  it.each([
+    undefined,
+    null,
+    "true",
+    1,
+    {},
+    { enabled: "true" },
+    { enabled: 1 },
+    [],
+  ])("refuses %j and keeps the gate as it was", async (value) => {
+    const { service, settings } = await startService();
+
+    const result = await service.changeDynamicReview("admin-1", value);
+
+    expect(result).toEqual({
+      ok: false,
+      error: "invalid_input",
+      issues: [{ field: "dynamicReview", code: "dynamic_review_invalid" }],
+    });
+    expect(await settings.get("dynamic_review")).toBeUndefined();
+  });
 });
 
 describe("two admins saving the same setting at once", () => {
