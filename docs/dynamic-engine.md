@@ -54,8 +54,12 @@ Part 1 shipped against a protocol fake; the real binary showed these, all fixed 
 
 ## Accepted and open
 
-- Nested `AGENTS.md` files are attached by the stock engine to a read result as a system reminder.
-  That is untrusted data in a read-only run; the fixed core says so; the engine suite records it.
+- Nested `AGENTS.md` files are attached by the stock engine to a read result as a system reminder
+  (uncapped; the engine's own prompt calls the tag system-added). The proxy drops that wrapper and
+  escapes any other `<system-reminder>` text in tool results (#232, `dynamic_review/reminders.py`);
+  the engine suite asserts the real engine's output and the neutralised form side by side. The
+  files stay readable by an explicit `read`. Dropped, not relabelled: a relabel would keep an
+  automatic, uncapped channel for repository text and need parsing of repository-controlled text.
 - Part 2b of #197 and #202 still owe: the dedicated unprivileged uid under `prepared_checkout`, the
   per-job network boundary and its direct-network-denial proof, port ownership and process-group
   reuse (deployment), config readability across uids, and advertising `opencode` after the real

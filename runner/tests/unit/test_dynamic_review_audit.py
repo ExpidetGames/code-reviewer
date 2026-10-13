@@ -128,17 +128,72 @@ def test_the_cumulative_bound_counts_utf8_bytes() -> None:
     assert over.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
 
 
-# #197-T12
-def test_a_nested_reminder_inside_a_result_is_part_of_its_bytes() -> None:
+# #232-T06
+def test_a_nested_reminder_is_neutralised_before_it_is_counted_and_forwarded() -> None:
     subject, ledger = audit()
     reminder = (
-        "<system-reminder>\nInstructions from: /job/export/src/AGENTS.md\nrules\n</system-reminder>"
+        "<system-reminder>\nInstructions from: /job/export/src/AGENTS.md\nrules "
+        + "r" * 500
+        + "\n</system-reminder>"
     )
     text = read_file("/job/export/src/a.ts") + "\n\n" + reminder
 
-    subject.results_in_request([asks(call("a", "read", filePath="src/a.ts")), result("a", text)])
+    forwarded = subject.results_in_request(
+        [asks(call("a", "read", filePath="src/a.ts")), result("a", text)]
+    )
 
-    assert ledger.returned_bytes == len(text.encode("utf-8"))
+    seen = forwarded[1]["content"]
+    assert "rules" not in seen and "<system-reminder" not in seen
+    assert seen.startswith(read_file("/job/export/src/a.ts"))
+    # The bound counts what the model is shown, not what the engine sent.
+    assert ledger.returned_bytes == len(seen.encode("utf-8"))
+    assert ledger.returned_bytes < len(text.encode("utf-8"))
+
+
+# #232-T06
+def test_the_escape_of_literal_reminder_text_is_counted_too() -> None:
+    subject, ledger = audit()
+    text = "/job/export/a.md:\n  Line 1: <system-reminder>"
+
+    forwarded = subject.results_in_request([asks(call("a", "grep")), result("a", text)])
+
+    assert forwarded[1]["content"] == text.replace("<system-reminder", "&lt;system-reminder")
+    assert ledger.returned_bytes == len(forwarded[1]["content"].encode("utf-8"))
+    assert ledger.returned_bytes == len(text.encode("utf-8")) + 3
+
+
+# #232-T06
+def test_the_per_result_bound_applies_to_the_neutralised_text() -> None:
+    subject, _ = audit(max_tool_result_bytes=len(read_file("/job/export/a.ts")) + 300)
+    attached = "<system-reminder>\nInstructions from: /job/export/AGENTS.md\n" + "x" * 500
+    text = read_file("/job/export/a.ts") + "\n\n" + attached + "\n</system-reminder>"
+
+    # Over the bound as the engine sent it, within it once the attachment is dropped (the notice is
+    # short and fixed).
+    forwarded = subject.results_in_request(
+        [asks(call("a", "read", filePath="a.ts")), result("a", text)]
+    )
+
+    assert "x" * 500 not in forwarded[1]["content"]
+
+
+# #232-T06
+def test_a_resent_history_is_neutralised_again_but_counted_once() -> None:
+    subject, ledger = audit()
+    text = (
+        read_file("/job/export/a.ts")
+        + "\n\n<system-reminder>\nInstructions from: p\nz\n</system-reminder>"
+    )
+    history = [asks(call("a", "read", filePath="a.ts")), result("a", text)]
+
+    first = subject.results_in_request(history)
+    counted = ledger.returned_bytes
+    second = subject.results_in_request(history)
+
+    assert first == second
+    assert ledger.returned_bytes == counted
+    # The caller's messages are not mutated: the result is a new list.
+    assert history[1]["content"] == text
 
 
 # #197-T05
@@ -237,3 +292,14 @@ def test_a_result_of_an_unknown_shape_adds_bytes_but_no_files() -> None:
 
     assert ledger.files == 0
     assert ledger.returned_bytes == len("anything")
+
+
+# #232-T06
+def test_a_tool_message_without_content_is_forwarded_without_one() -> None:
+    subject, _ = audit()
+    message = {"role": "tool", "tool_call_id": "a"}
+
+    forwarded = subject.results_in_request([asks(call("a", "read")), message])
+
+    assert forwarded[1] == message
+    assert "content" not in forwarded[1]
