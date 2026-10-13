@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// #166-T01: every color of the app lives in `app/src/app/theme.css` (the UI redesign decision D2).
-// The scan reads the real source files, so a color literal added anywhere else fails here and in
-// `make verify`. `app/src/app/globals.css` is the one documented exception of the incremental
-// migration; the cleanup issue (#185) removes it. The rule itself is in rules.ts.
+// #166-T01, #185-T01: every color of the app lives in `app/src/app/theme.css` (the UI redesign
+// decision D2). The scan reads the real source files, so a color literal added anywhere else fails
+// here and in `make verify`. The migration is finished (#185): the legacy `globals.css` and its
+// exception are gone, so there is no exempt file left. The rule itself is in rules.ts.
 //
 // The fixtures below build every sample from parts, so this file carries no color itself (the guard
 // scans it too).
@@ -13,7 +13,6 @@ import { describe, expect, it } from "vitest";
 import { listSourceFiles } from "../spdx-headers/source-files.ts";
 import {
   COLOR_FILE,
-  COLOR_FILE_EXCEPTION,
   findColorLiterals,
   isColorException,
   scanColors,
@@ -33,8 +32,8 @@ const PALETTE_CLASS = "bg-" + "red-" + "500";
 const PALETTE_BLACK = "text-" + "black";
 
 describe("no color literal outside theme.css", () => {
-  // #166-T01
-  it("passes on the tree, with only theme.css and the legacy globals.css exempt", () => {
+  // #166-T01, #185-T01
+  it("passes on the tree, with only theme.css exempt", () => {
     const files = listSourceFiles(repoRoot).map((path) => ({
       path,
       content: readFileSync(`${repoRoot}${path}`, "utf8"),
@@ -42,7 +41,8 @@ describe("no color literal outside theme.css", () => {
 
     expect(scanColors(files), "color literals outside theme.css").toEqual([]);
     expect(isColorException(COLOR_FILE)).toBe(true);
-    expect(isColorException(COLOR_FILE_EXCEPTION)).toBe(true);
+    // The migration is finished: the legacy stylesheet is not an exception any more.
+    expect(isColorException("app/src/app/globals.css")).toBe(false);
   });
 
   // #166-T01

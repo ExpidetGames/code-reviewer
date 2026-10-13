@@ -64,7 +64,7 @@ export function SaveResult({ status }: { status: SaveStatus }) {
   if (status === null) return <span role="status" />;
   if (status.kind === "saved") return <span role="status">Saved.</span>;
   return (
-    <span role="alert" className="field-error">
+    <span role="alert" className="text-sm text-destructive">
       {status.text}
     </span>
   );

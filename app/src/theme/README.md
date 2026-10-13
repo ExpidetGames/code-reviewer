@@ -14,8 +14,9 @@ How it works: `initialThemeScript()` is an inline script in `<head>` (root layou
 `data-theme="light|dark"` on `<html>` while the HTML is parsed, so there is no flash of the other
 mode. The color tokens live in `src/app/theme.css` as plain custom properties per mode: a light
 block on `:root`, a `@media (prefers-color-scheme: dark)` block for the system state (no
-attribute), and a `:root[data-theme="dark"]` block for the pinned choice; `globals.css` only reads
-them. Without JavaScript the page simply follows the system.
+attribute), and a `:root[data-theme="dark"]` block for the pinned choice; that file also carries the
+`color-scheme` rules that follow the same choice. Without JavaScript the page simply follows the
+system.
 
 The browser baseline (Chrome and Edge 111, Firefox 128, Safari 16.4 — Tailwind CSS v4) is in the
 root `README.md`.

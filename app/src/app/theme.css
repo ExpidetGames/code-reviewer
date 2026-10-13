@@ -10,11 +10,10 @@
  * (`bg-primary`, `text-muted-foreground`, `border-input`, ...). A CI check
  * (`app/src/ci/colors`) fails on a color literal outside this file.
  *
- * Tailwind is imported here without its preflight reset on purpose. The legacy `globals.css` still
- * styles the whole application during the incremental migration (the component kit #167 and the
- * cleanup #185 move the screens over and bring the reset with them), so leaving the reset out keeps
- * the current appearance unchanged. `app/src/app/globals.css` is the one documented exception of
- * the color guard until the cleanup removes it.
+ * Tailwind's preflight reset is imported here now (the migration #185): the legacy `globals.css` is
+ * gone, so the app has its one reset. The few project rules that preflight does not carry (the
+ * color mode, the page surface and type, the link color, the focus ring) follow in `@layer base`,
+ * so a Tailwind utility on a component still wins over them.
  *
  * Start palette: the indigo accent and neutrals of the UI redesign plan, with contrast-checked
  * values (body text >= 4.5:1, non-text >= 3:1), checked by `app/src/ci/colors/tokens.test.ts`.
@@ -22,6 +21,7 @@
 @layer theme, base, components, utilities;
 
 @import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/preflight.css" layer(base);
 @import "tailwindcss/utilities.css" layer(utilities);
 @import "tw-animate-css";
 
@@ -251,4 +251,46 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+}
+
+/*
+ * The project's element-level base rules. Preflight (imported above) brings the reset — box-sizing,
+ * zeroed margins, the font stacks, unstyled lists and links, inherited form fonts. What is left here
+ * is what preflight does not decide: the color mode, the page surface and type, the link color and
+ * the focus ring. They sit in `@layer base`, so a Tailwind utility on a component wins over them
+ * (the rule the deleted `globals-layers.test.ts` guarded).
+ */
+@layer base {
+  :root {
+    color-scheme: light dark;
+  }
+
+  :root[data-theme="light"] {
+    color-scheme: light;
+  }
+
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+  }
+
+  body {
+    color: var(--foreground);
+    background: var(--background);
+    font-family: var(--font-sans);
+  }
+
+  h1,
+  h2,
+  h3 {
+    line-height: 1.25;
+  }
+
+  a {
+    color: var(--primary);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
 }

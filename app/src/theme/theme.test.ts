@@ -155,9 +155,9 @@ describe("the script that runs before the first paint", () => {
   });
 });
 
-describe("the stylesheet", () => {
+describe("the theme stylesheet", () => {
   const css = readFileSync(
-    join(import.meta.dirname, "..", "app", "globals.css"),
+    join(import.meta.dirname, "..", "app", "theme.css"),
     "utf8",
   );
 
@@ -172,10 +172,13 @@ describe("the stylesheet", () => {
     );
   });
 
-  it("writes colors only in the token block", () => {
-    const afterTokens = css.slice(css.indexOf(":root[data-theme"));
-
-    expect(afterTokens).not.toMatch(/#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(/);
+  // #185: the base element rules live in `@layer base`, so a Tailwind utility wins over them (the
+  // rule the deleted `globals-layers.test.ts` guarded while the legacy stylesheet still existed).
+  it("keeps the element-level rules in a layer so a utility wins over them", () => {
+    const base = css.slice(css.indexOf("@layer base {"));
+    expect(base).toMatch(/body\s*{/);
+    expect(base).toMatch(/:focus-visible\s*{/);
+    expect(base).not.toMatch(/\.(btn|card|page-header)\b/);
   });
 });
 

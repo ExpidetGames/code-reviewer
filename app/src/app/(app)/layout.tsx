@@ -8,6 +8,7 @@ import { Suspense } from "react";
 import { signOut } from "@/auth/actions";
 import { actorName } from "@/auth/access-policy";
 import { currentLookup, requireSignedIn } from "@/auth/session";
+import { Skeleton } from "@/components/ui/skeleton";
 import { AppShell } from "@/shell/app-shell";
 import { UserMenu } from "@/shell/user-menu";
 import { loadAccountView } from "@/workspaces/account-view";
@@ -17,7 +18,11 @@ export default function AppLayout({ children }: LayoutProps<"/">) {
   return (
     <AppShell
       userMenu={
-        <Suspense fallback={<span className="avatar" aria-hidden="true" />}>
+        <Suspense
+          fallback={
+            <Skeleton className="size-8 rounded-full" aria-hidden="true" />
+          }
+        >
           <CurrentUserMenu />
         </Suspense>
       }
@@ -27,7 +32,9 @@ export default function AppLayout({ children }: LayoutProps<"/">) {
         </Suspense>
       }
     >
-      <Suspense fallback={<div className="page-loading" aria-busy="true" />}>
+      <Suspense
+        fallback={<Skeleton className="h-40 w-full" aria-busy="true" />}
+      >
         {children}
       </Suspense>
     </AppShell>

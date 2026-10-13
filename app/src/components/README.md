@@ -58,16 +58,16 @@ The epic's rulebook asks for ≥44×44px touch targets (R66). The shell reads it
 ## Cascade layers
 
 Tailwind is imported by `app/src/app/theme.css`, which declares the layer order
-`@layer theme, base, components, utilities;`. `app/src/app/globals.css` (the legacy stylesheet of the
-migration) declares the same order and keeps its **element-level** rules — `*`, `html`, `body`,
-`a`, `button`, headings — in `@layer base`, so a Tailwind utility on a kit component wins over them.
-Its legacy **class** rules (`.btn`, `.card`, ...) stay unlayered on purpose: they must keep winning
-until their screens move. `app/src/app/globals-layers.test.ts` fails on a new unlayered element rule.
+`@layer theme, base, components, utilities;` and imports Tailwind's `theme`, `preflight` (the reset,
+`@layer base`) and `utilities` stylesheets. The project's element-level rules (`body`, headings, `a`,
+`:focus-visible`) live in `@layer base` too, so a Tailwind utility on a kit component wins over
+them. `src/theme/theme.test.ts` fails on a new unlayered element rule.
 
-## During the migration
+## The migration is finished
 
-- No screen has moved yet. The screens still render the legacy wrappers in `app/src/ui/*` (`.btn`,
-  `.page-header`, `.empty-state` and friends) and keep their current look.
-- Each screen issue (#168+, #170+...) migrates its call sites to the kit above and deletes a legacy
-  wrapper once its last usage is gone; the cleanup (#185) removes `globals.css` and the rest.
-- Do not add new uses of `app/src/ui/*`; treat that folder as frozen until it is deleted.
+The legacy hand-written kit is gone (#185): `app/src/app/globals.css` (tokens and classes) and the
+`app/src/ui/*` wrappers (`button`, `page-header`, `empty-state`) are deleted. Every screen already
+renders the kit above; there is no frozen folder left to avoid. Colours live only in
+`app/src/app/theme.css` (the colour guard in `src/ci/colors` scans every other source file with no
+exception), and `app/src/ci/legacy-classes/legacy-classes.test.ts` fails if a removed class name is
+used again.

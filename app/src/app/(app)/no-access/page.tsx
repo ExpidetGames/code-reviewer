@@ -19,6 +19,7 @@ import { Suspense } from "react";
 import { currentLookup } from "@/auth/session";
 import { loginPath } from "@/auth/session-user";
 import { PageHeader } from "@/components/page-header";
+import { Skeleton } from "@/components/ui/skeleton";
 import { loadAccountView } from "@/workspaces/account-view";
 import { workspaceHome } from "@/workspaces/paths";
 import { NoAccessContent } from "@/workspaces/ui/no-access-content";
@@ -29,7 +30,9 @@ export default function NoAccessPage() {
   return (
     <>
       <PageHeader title="No workspace yet" />
-      <Suspense fallback={<div className="page-loading" aria-busy="true" />}>
+      <Suspense
+        fallback={<Skeleton className="h-40 w-full" aria-busy="true" />}
+      >
         <WhatToDo />
       </Suspense>
     </>
