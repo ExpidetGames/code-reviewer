@@ -38,7 +38,9 @@ export function InviteForm({
 }) {
   const router = useRouter();
   const ids = useId();
-  const headingId = `${ids}-role`;
+  const roleId = `${ids}-role`;
+  const emailId = `${ids}-email`;
+  const errorId = `${ids}-error`;
   const emailRef = useRef<HTMLInputElement>(null);
   // Set in the submit handler, read after the render that shows the refusal, so the focus lands on the
   // address once the disabled fieldset is enabled again (R20, "focus the first error").
@@ -86,25 +88,26 @@ export function InviteForm({
     >
       <fieldset disabled={pending} className="flex flex-col gap-4">
         {problem !== null ? (
-          <Alert variant="destructive">
+          <Alert variant="destructive" id={errorId}>
             <AlertDescription>{problem}</AlertDescription>
           </Alert>
         ) : null}
         <Field>
-          <FieldLabel htmlFor={`${ids}-email`}>Email address</FieldLabel>
+          <FieldLabel htmlFor={emailId}>Email address</FieldLabel>
           <Input
             ref={emailRef}
-            id={`${ids}-email`}
+            id={emailId}
             type="email"
             autoComplete="off"
             required
             value={email}
+            aria-describedby={problem !== null ? errorId : undefined}
             onChange={(event) => setEmail(event.target.value)}
           />
         </Field>
         <Field>
           <div className="flex items-center gap-1">
-            <FieldLabel htmlFor={headingId}>Role</FieldLabel>
+            <FieldLabel htmlFor={roleId}>Role</FieldLabel>
             <InfoHint label="About the roles">
               <span className="flex flex-col gap-1">
                 {roles.map((candidate) => (
@@ -120,7 +123,7 @@ export function InviteForm({
             value={role}
             onValueChange={(value) => setRole(value as WorkspaceRole)}
           >
-            <SelectTrigger id={headingId} className="w-full">
+            <SelectTrigger id={roleId} className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

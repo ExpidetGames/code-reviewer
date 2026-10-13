@@ -43,7 +43,7 @@ export function InvitationLink({ shown }: { shown: ShownInvitation }) {
   }
 
   return (
-    <Alert variant="warning" role="status">
+    <Alert variant="warning" role="note">
       <AlertDescription className="flex flex-col gap-3">
         <span>
           {delivery.reason === "no_mail_server"
@@ -65,12 +65,15 @@ export function InvitationLink({ shown }: { shown: ShownInvitation }) {
           <Button variant="secondary" onClick={() => void copy()}>
             Copy the link
           </Button>
-          {copied === "yes" ? <StatusRegion>Copied.</StatusRegion> : null}
-          {copied === "failed" ? (
-            <StatusRegion>
-              Copying did not work: select the link and copy it.
-            </StatusRegion>
-          ) : null}
+          {/* The one polite region of the block: it stays in the DOM so the copy result is announced
+              when it changes (#177 review of #215). */}
+          <StatusRegion>
+            {copied === "yes"
+              ? "Copied."
+              : copied === "failed"
+                ? "Copying did not work: select the link and copy it."
+                : ""}
+          </StatusRegion>
         </span>
       </AlertDescription>
     </Alert>

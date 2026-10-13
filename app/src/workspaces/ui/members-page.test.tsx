@@ -378,6 +378,32 @@ describe("inviting from the page", () => {
     expect(document.activeElement).toBe(screen.getByLabelText("Email address"));
   });
 
+  // #177 (review of #215: the refusal describes the address it is about)
+  it("ties a refusal to the address with aria-describedby", async () => {
+    const user = userEvent.setup();
+    const api = fakeApi();
+    vi.mocked(api.invite).mockResolvedValue({
+      ok: false,
+      status: 422,
+      code: "email_not_allowed",
+      issues: [],
+    });
+    renderFor("owner", "owner-1", DATA, api);
+
+    expect(
+      screen.getByLabelText("Email address").getAttribute("aria-describedby"),
+    ).toBeNull();
+
+    await user.type(screen.getByLabelText("Email address"), "x@y.test");
+    await user.click(screen.getByRole("button", { name: "Send invitation" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.id).not.toBe("");
+    expect(
+      screen.getByLabelText("Email address").getAttribute("aria-describedby"),
+    ).toBe(alert.id);
+  });
+
   it("offers to send an invitation again only when the instance can send mail", () => {
     renderFor("owner", "owner-1");
     expect(screen.queryByRole("button", { name: /again$/ })).toBeNull();

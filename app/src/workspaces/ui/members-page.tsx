@@ -105,7 +105,7 @@ export function MembersPageContent({
               {...withApi}
             />
             {data.invitations.length === 0 ? (
-              <Empty className="border border-border">
+              <Empty className="border border-border bg-card">
                 <EmptyHeader>
                   <EmptyTitle>No invitations waiting.</EmptyTitle>
                   <EmptyDescription>
