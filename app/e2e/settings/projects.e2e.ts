@@ -176,7 +176,14 @@ test.describe("the project list and the settings pages", () => {
 
     await page.getByRole("link", { name: "Settings", exact: true }).click();
     await expect(
-      page.getByRole("heading", { level: 1, name: "Settings" }),
+      page.getByRole("heading", { level: 1, name: "General" }),
+    ).toBeVisible();
+    // The review defaults are their own sub-page (#178).
+    await page
+      .getByRole("link", { name: "Review defaults", exact: true })
+      .click();
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Review defaults" }),
     ).toBeVisible();
     await budget().fill("60000");
     await page.getByRole("button", { name: "Save defaults" }).click();
@@ -207,13 +214,18 @@ test.describe("the project list and the settings pages", () => {
     await page.getByRole("link", { name: "Settings", exact: true }).click();
     // The page left behind stays in the document, hidden, with its own copy of the hint.
     await expect(
-      page.getByRole("heading", { level: 1, name: "Settings" }),
+      page.getByRole("heading", { level: 1, name: "General" }),
     ).toBeVisible();
 
-    // The workspace has no key: the hint links to the form, which an Owner can fill.
+    // The workspace has no key: the hint links to the LLM sub-page, where an Owner fills the form.
     await expect(
       page.getByText("LLM not configured").filter({ visible: true }),
     ).toBeVisible();
+    await page
+      .getByRole("link", { name: "Add a key in the settings" })
+      .filter({ visible: true })
+      .click();
+    await expect(page).toHaveURL(/\/w\/default\/settings\/llm$/);
     await expect(page.getByRole("form", { name: "LLM key" })).toBeVisible();
     await expect(page.getByText(/LLM_API_KEY|GITHUB_APP/)).toHaveCount(0);
 
@@ -227,7 +239,7 @@ test.describe("the project list and the settings pages", () => {
     await expect(admin).toHaveURL(/\/w\/default\/projects$/);
     await admin.goto("/w/default/settings");
     await expect(
-      admin.getByRole("heading", { level: 1, name: "Settings" }),
+      admin.getByRole("heading", { level: 1, name: "General" }),
     ).toBeVisible();
     await expect(admin.getByText("LLM key missing")).toHaveCount(0);
     await context.close();

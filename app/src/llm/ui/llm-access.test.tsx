@@ -284,23 +284,8 @@ describe("the LLM access section for an Admin or an Owner", () => {
     ).toBe(true);
   });
 
-  // #104-LK-08
-  it("removes the key after a confirmation", async () => {
-    const user = userEvent.setup();
-    const api = fakeApi();
-    section({ keyStatus: CONFIGURED, summary: WORKS }, api);
-
-    await user.click(screen.getByRole("button", { name: "Remove key" }));
-    expect(api.remove).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "Yes, remove it" }));
-
-    await waitFor(() => expect(api.remove).toHaveBeenCalledTimes(1));
-    expect(await screen.findByText("The key is removed.")).toBeTruthy();
-    expect(navigation.refresh).toHaveBeenCalled();
-  });
-
-  it("offers no removal when there is no key", () => {
-    section();
+  it("offers no removal: removing the key is a destructive action of the Advanced sub-page", () => {
+    section({ keyStatus: CONFIGURED, summary: WORKS });
 
     expect(screen.queryByRole("button", { name: "Remove key" })).toBeNull();
   });
@@ -382,7 +367,7 @@ describe("the hint 'LLM not configured'", () => {
       screen
         .getByRole("link", { name: "Add a key in the settings" })
         .getAttribute("href"),
-    ).toBe("/w/acme/settings#llm-access");
+    ).toBe("/w/acme/settings/llm");
   });
 
   it("tells a Member to ask an Admin or an Owner, and still links to the section", () => {
@@ -397,7 +382,7 @@ describe("the hint 'LLM not configured'", () => {
     expect(container.textContent).toContain("Ask an Admin or an Owner");
     expect(
       screen.getByRole("link", { name: "settings" }).getAttribute("href"),
-    ).toBe("/w/acme/settings#llm-access");
+    ).toBe("/w/acme/settings/llm");
   });
 
   it("says when the saved key cannot be read", () => {

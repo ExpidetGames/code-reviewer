@@ -23,7 +23,6 @@ const PROVIDER_LABEL: Record<string, string> = { openrouter: "OpenRouter" };
 
 type Outcome =
   | { kind: "saved"; changed: boolean }
-  | { kind: "removed" }
   | { kind: "tested" }
   | { kind: "test_failed"; text: string; detail: string | null }
   | {
@@ -52,11 +51,8 @@ export function LlmAccessForm({
       : LLM_PROVIDERS[0],
   );
   const [apiKey, setApiKey] = useState("");
-  const [pending, setPending] = useState<"save" | "test" | "remove" | null>(
-    null,
-  );
+  const [pending, setPending] = useState<"save" | "test" | null>(null);
   const [outcome, setOutcome] = useState<Outcome>(null);
-  const [confirmRemove, setConfirmRemove] = useState(false);
 
   const issueFor = (field: string) =>
     outcome?.kind === "failed"
@@ -112,25 +108,6 @@ export function LlmAccessForm({
             detail: result.data.detail,
           },
     );
-  }
-
-  async function remove() {
-    setConfirmRemove(false);
-    setOutcome(null);
-    setPending("remove");
-    const result = await api.remove();
-    setPending(null);
-    if (!result.ok) {
-      setOutcome({
-        kind: "failed",
-        text: describeLlmKeyFailure(result.code),
-        issues: [],
-      });
-      return;
-    }
-    setApiKey("");
-    setOutcome({ kind: "removed" });
-    router.refresh();
   }
 
   return (
@@ -220,47 +197,12 @@ export function LlmAccessForm({
         >
           {pending === "test" ? "Testing..." : "Test key"}
         </Button>
-        {stored !== null ? (
-          confirmRemove ? (
-            <span
-              className="check-line"
-              role="group"
-              aria-label="Confirm removing the key"
-            >
-              <span>
-                Remove the key? Reviews of this workspace cannot run until a new
-                one is saved.
-              </span>
-              <Button
-                variant="destructive"
-                disabled={pending !== null}
-                onClick={() => void remove()}
-              >
-                Yes, remove it
-              </Button>
-              <Button variant="ghost" onClick={() => setConfirmRemove(false)}>
-                Keep it
-              </Button>
-            </span>
-          ) : (
-            <Button
-              variant="ghost"
-              disabled={pending !== null}
-              onClick={() => setConfirmRemove(true)}
-            >
-              Remove key
-            </Button>
-          )
-        ) : null}
       </div>
       <div role="status" aria-live="polite">
         {outcome?.kind === "saved" ? (
           <p className="alert alert-success">
             {outcome.changed ? "The key is saved." : "The saved key is kept."}
           </p>
-        ) : null}
-        {outcome?.kind === "removed" ? (
-          <p className="alert alert-success">The key is removed.</p>
         ) : null}
         {outcome?.kind === "tested" ? (
           <p className="alert alert-success">The provider accepted the key.</p>
