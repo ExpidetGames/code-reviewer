@@ -667,7 +667,39 @@ describe("a draft pull request", () => {
     const t = await startHarness();
     t.h.fake.setCollaboratorPermission("acme/widgets", "bob", "write");
     await t.send("pull_request.synchronize");
-    await t.send("issue_comment.created.ask");
+    // A person job on the same pull request: with only `/review` the queue would dedupe a second
+    // enqueue, so the row is inserted directly (a shape an earlier release left behind).
+    const personId = crypto.randomUUID();
+    await t.h.db
+      .insertInto("jobs")
+      .values({
+        id: personId,
+        workspace_id: t.h.workspaceId,
+        repository_id: t.repository.id,
+        pr_number: 7,
+        pr_url: "https://github.test/acme/widgets/pull/7",
+        head_sha: HEAD_1,
+        command: "review",
+        args: "",
+        trigger_kind: "comment",
+        actor_login: "bob",
+        delivery_id: null,
+        status: "queued",
+        run_after: START.toISOString(),
+        attempts: 0,
+        runner_id: null,
+        lease_token: null,
+        claimed_at: null,
+        heartbeat_at: null,
+        lease_expires_at: null,
+        result: null,
+        error_code: null,
+        superseded_by: null,
+        created_at: START.toISOString(),
+        updated_at: START.toISOString(),
+        finished_at: null,
+      })
+      .execute();
     expect(await t.jobs()).toHaveLength(2);
 
     const response = await t.send("pull_request.converted_to_draft");
@@ -677,13 +709,13 @@ describe("a draft pull request", () => {
       outcome: "waiting_jobs_discarded",
     });
     const jobs = await t.jobs();
-    expect(jobs.find((job) => job.command === "review")).toMatchObject({
+    expect(jobs.find((job) => job.triggerKind === "webhook")).toMatchObject({
       status: "cancelled",
       errorCode: "pull_request_draft",
     });
-    expect(jobs.find((job) => job.command === "ask")?.status).toBe("queued");
+    expect((await t.queue.get(personId))?.status).toBe("queued");
     t.advance(AUTOMATIC_REVIEW_DEBOUNCE_MS * 2);
-    expect((await t.queue.claimNext("runner-1"))?.job.command).toBe("ask");
+    expect((await t.queue.claimNext("runner-1"))?.job.id).toBe(personId);
     expect(await t.queue.claimNext("runner-1")).toBeNull();
   });
 

@@ -29,6 +29,7 @@ import type {
   GitPlatform,
   IntegrationType,
   RepoRef,
+  ReviewCommand,
 } from "../integrations/types.ts";
 import type { RunnerQueue } from "../jobs/runner-queue.ts";
 import type { ClaimResult, Job, JobErrorCode } from "../jobs/job-types.ts";
@@ -81,8 +82,6 @@ export const DEFAULT_RETRY_AFTER_SECONDS = 30;
 const MAX_RETRY_AFTER_SECONDS = 900;
 /** How many jobs one claim request may end at claim time before it answers 204 and lets the runner ask again. */
 const MAX_REFUSED_PER_REQUEST = 25;
-/** The question of an `ask` job: the runner refuses more (and none). */
-const MAX_QUESTION_CHARS = 4000;
 
 export type ClaimDeps = {
   queue: Pick<
@@ -176,12 +175,9 @@ function llmOptionsOf(
   return chosen;
 }
 
-/** The question of an `ask` job; other commands take no arguments. Null when it cannot be sent. */
-function argsOf(job: Job): { args?: [string] } | null {
-  if (job.command !== "ask") return {};
-  const question = job.args.trim();
-  if (question === "" || question.length > MAX_QUESTION_CHARS) return null;
-  return { args: [question] };
+/** `/review` takes no arguments; it is the only command a claim may hand out (#203). */
+function commandOf(job: Job): ReviewCommand | null {
+  return job.command === "review" ? "review" : null;
 }
 
 async function prepare(
@@ -211,8 +207,8 @@ async function prepare(
         : llm.reason,
     );
 
-  const args = argsOf(job);
-  if (args === null) return refuse("job_args_invalid");
+  const command = commandOf(job);
+  if (command === null) return refuse("job_args_invalid");
   const options = await deps.jobOptions.optionsFor(job);
   if (Object.keys(options.env).some((key) => !RUNNER_ENV_KEY_PATTERN.test(key)))
     return refuse("job_env_invalid");
@@ -299,8 +295,7 @@ async function prepare(
   const maxTokens = llmOptions.maxTokens ?? llmAccess.contextWindowTokens;
   const input: RunnerJobInput = {
     prUrl,
-    command: job.command,
-    ...args,
+    command,
     git: {
       provider: "github",
       baseUrl: git.baseUrl,

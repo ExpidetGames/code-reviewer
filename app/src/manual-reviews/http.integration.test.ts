@@ -65,7 +65,7 @@ describe("loading the pull requests over HTTP", () => {
     expect(await response.json()).toMatchObject({
       repositoryId: repository.id,
       fullName: "acme/widgets",
-      allowedCommands: ["review", "improve", "describe", "ask"],
+      allowedCommands: ["review"],
       pullRequests: [
         { number: 3, title: "Change number 3", author: "alice" },
         { number: 1, title: "Change number 1", author: "alice" },
@@ -225,9 +225,10 @@ describe("starting a command over HTTP", () => {
       { prNumber: 7, command: "deploy" },
       [{ field: "command", code: "invalid" }],
     ],
+    [{ prNumber: 7, command: "ask" }, [{ field: "command", code: "invalid" }]],
     [
-      { prNumber: 7, command: "ask", question: "  " },
-      [{ field: "question", code: "required" }],
+      { prNumber: 7, command: "review", question: "why?" },
+      [{ field: "question", code: "invalid" }],
     ],
   ])(
     "answers 400 with the field errors for %j, and creates no job",
@@ -274,7 +275,7 @@ describe("starting a command over HTTP", () => {
 
     const response = await post({
       prNumber: 7,
-      command: "ask",
+      command: "review",
       question: "x".repeat(20_000),
     });
 

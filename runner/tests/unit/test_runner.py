@@ -151,21 +151,6 @@ def test_the_settings_of_one_job_do_not_leak_into_the_global_settings(
     assert current_settings().config.publish_output_progress == before
 
 
-def test_ok_stays_true_without_a_comment_url_when_a_command_other_than_review_posted_nothing(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    async def double() -> bool:
-        return True
-
-    use_double(monkeypatch, double)
-
-    for command in ("improve", "describe"):
-        result, _ = run(make_job(command=command))
-
-        assert result.ok is True, command
-        assert result.comment_url is None
-
-
 def test_a_review_that_returned_normally_but_posted_no_review_is_not_published(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -181,21 +166,6 @@ def test_a_review_that_returned_normally_but_posted_no_review_is_not_published(
     assert result.exit_code == 1
     assert result.error_code is ErrorCode.REVIEW_NOT_PUBLISHED
     assert result.comment_url is None
-
-
-def test_ask_passes_the_encoded_question_and_returns_the_answer_comment(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    async def double() -> bool:
-        provider_with_pull().publish_comment("### **Ask** ❓\n\nthe answer")
-        return True
-
-    calls = use_double(monkeypatch, double)
-
-    result, _ = run(make_job(command="ask", args=["Why?"]))
-
-    assert calls[0][1] == ["ask", "__pr_agent_encoded_text__:Why%3F"]
-    assert result.comment_url == "https://github.com/octo/repo/pull/7#c1"
 
 
 # CR-10-T05
@@ -903,6 +873,7 @@ def test_without_a_recorded_comment_the_url_is_null_and_no_extra_github_call_is_
         raise AssertionError("the runner must not call GitHub itself")
 
     async def double() -> bool:
+        provider_with_pull().publish_comment("some unrelated comment")
         return True
 
     use_double(monkeypatch, double)
@@ -910,9 +881,9 @@ def test_without_a_recorded_comment_the_url_is_null_and_no_extra_github_call_is_
     monkeypatch.setattr(Requester, "requestJsonAndCheck", record_request)
     monkeypatch.setattr(Requester, "requestJson", record_request)
 
-    result, _ = run(make_job(command="improve"))
+    result, _ = run()
 
-    assert result.ok is True
+    assert result.ok is False
     assert result.comment_url is None
     assert requests == []
 
@@ -1221,21 +1192,6 @@ def test_a_failure_comment_wins_over_a_lost_record(monkeypatch: pytest.MonkeyPat
     assert result.error_code is ErrorCode.COMMAND_FAILED
 
 
-def test_a_long_comment_of_another_command_is_not_a_cut_review(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    async def double() -> bool:
-        provider_with_pull().publish_comment("### **Ask** ❓\n\n" + "x" * 70_000)
-        return True
-
-    use_double(monkeypatch, double)
-
-    result, _ = run(make_job(command="ask", args=["Why?"]))
-
-    assert result.ok is True
-    assert result.error_code is None
-
-
 def test_the_review_state_watch_is_removed_after_the_job(monkeypatch: pytest.MonkeyPatch) -> None:
     pr_reviewer = pr_agent_module("pr_agent.tools.pr_reviewer")
 
@@ -1266,25 +1222,6 @@ def test_a_review_tool_the_watch_cannot_observe_stops_the_job_before_handle_requ
     assert result.ok is False
     assert result.error_code is ErrorCode.RUNNER_ERROR
     assert calls == []
-
-
-def test_the_review_state_watch_is_installed_only_for_a_review(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    pr_reviewer = pr_agent_module("pr_agent.tools.pr_reviewer")
-    original = pr_reviewer.append_review_state
-    seen: dict[str, bool] = {}
-
-    async def double() -> bool:
-        seen["watched"] = pr_reviewer.append_review_state is not original
-        return True
-
-    use_double(monkeypatch, double)
-
-    run(make_job(command="improve"))
-    assert seen == {"watched": False}
-    run(make_job(command="review"))
-    assert seen == {"watched": True}
 
 
 def test_everything_patched_in_is_undone_when_a_later_install_fails(

@@ -1,6 +1,7 @@
 # Job queue
 
-A job is one requested run of a command (`review`, `improve`, `describe`, `ask`) on one pull request.
+A job is one requested run of a command (`review`; `/ask`, `/improve` and `/describe` were removed)
+on one pull request.
 The queue lives in SQLite (table `jobs`, migration `20261010191500_create_jobs`); runners take jobs
 from it through the runner API (CR-28), webhooks and the UI put jobs in. Everything goes through
 `createJobQueue` (`job-queue.ts`, scoped to one workspace) and `createRunnerQueue` (`runner-queue.ts`, the
@@ -58,7 +59,8 @@ reported).
    duplicate of a waiting or running job for the same pull request, command and arguments
    (`already_active`): the existing job is returned, and if it is waiting behind a `run_after` in the
    future (a debounced automatic job) it is made due now, because a person does not wait for a
-   debounce. Different arguments are different jobs (two questions to `/ask`).
+   debounce. Different arguments are different jobs (`/review` takes none; a historical person job
+   with arguments is still its own job).
 4. **Supersession.** A new automatic job replaces the waiting _automatic_ jobs of the same pull request,
    command and arguments (status `superseded`, `superseded_by` set). Waiting `comment` and `manual`
    jobs are never replaced, and a running job is never touched: the new job waits behind it, because
@@ -153,6 +155,6 @@ checked in code review.
   without an active project (`project-claim-guard.ts`, wired in CR-46). The runner (CR-29) reports its
   shutdown through `complete` with the error code `runner_shutdown`; the runner API turns that into
   `release`, so the job is requeued with the attempt cap (the runner never calls `release` itself).
-- **CR-32 (comments).** Done: the provider cuts a question to 2000 characters before the trigger
-  exists (`src/integrations/comment-command.ts`), the trigger carries the comment id, and the queue
+- **CR-32 (comments).** Done: the trigger carries the comment id, and the queue
   dedupes on it (`same_comment`). The queue's own limit of 10 000 characters stays as a safety net.
+  The removed command question truncation went away with the commands (#203).

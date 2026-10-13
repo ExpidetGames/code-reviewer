@@ -80,38 +80,37 @@ describe("the contract file", () => {
 });
 
 describe("what the app answers", () => {
-  // CR-28-T01
-  it("answers a claim with a document that is valid against the contract", async () => {
+  // CR-28-T01, #203-T13
+  it("answers a claim with a document that is valid against the contract, review only", async () => {
     const h = await startRunnerApiHarness();
     await h.enqueueNew({ prNumber: 7 });
     h.clock.advance(1000);
     await h.enqueueNew({
       prNumber: 8,
       headSha: "b".repeat(40),
-      command: "ask",
-      args: "Why?",
       triggerKind: "comment",
     });
 
-    const review = await h.claim();
-    const ask = await h.claim();
+    const first = await h.claim();
+    const second = await h.claim();
 
-    expect(review.status).toBe(200);
-    const reviewBody = await review.json();
-    expectValid("ClaimResponse", reviewBody);
-    expect(Object.keys(reviewBody.job.input.git).sort()).toStrictEqual([
+    expect(first.status).toBe(200);
+    const firstBody = await first.json();
+    expectValid("ClaimResponse", firstBody);
+    expect(Object.keys(firstBody.job.input.git).sort()).toStrictEqual([
       "baseUrl",
       "botLogin",
       "provider",
       "token",
     ]);
-    expect(reviewBody.job.input.git.token).toBe(h.issuedJobTokens()[0]);
-    expect(typeof reviewBody.job.input.prUrl).toBe("string");
-    expect(typeof reviewBody.job.leaseExpiresAt).toBe("string");
-    expect(reviewBody.job.input.command).toBe("review");
-    expect(reviewBody.job.input.env).toStrictEqual({});
-    expect(reviewBody.job.input.llm.model).toBe("vendor/test-model");
-    expectValid("ClaimResponse", await ask.json());
+    expect(firstBody.job.input.git.token).toBe(h.issuedJobTokens()[0]);
+    expect(typeof firstBody.job.input.prUrl).toBe("string");
+    expect(typeof firstBody.job.leaseExpiresAt).toBe("string");
+    expect(firstBody.job.input.command).toBe("review");
+    expect(firstBody.job.input).not.toHaveProperty("args");
+    expect(firstBody.job.input.env).toStrictEqual({});
+    expect(firstBody.job.input.llm.model).toBe("vendor/test-model");
+    expectValid("ClaimResponse", await second.json());
   });
 
   // CR-28-T02

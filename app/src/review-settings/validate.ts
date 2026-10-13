@@ -197,11 +197,34 @@ export function validateReviewSettingsPatch(input: unknown): ValidationResult {
  * Reads a stored layer. Storage may hold something this version would not accept (a limit was
  * tightened, a field was removed, the text was edited by hand): such a field is dropped, so the
  * layer below applies, instead of making every review of the project fail.
+ *
+ * `allowedCommands` is the one field that is normalized instead of dropped: a stored list is
+ * intersected with the commands that still exist (#203). An explicit empty list stays empty (an
+ * explicit "no commands" must never fall back to enabling `/review`), and a list whose removed
+ * entries leave nothing becomes `[]`. A missing field still inherits.
  */
 export function parseStoredOverrides(stored: unknown): ReviewSettingsOverrides {
   const value: ReviewSettingsOverrides = {};
   if (!isPlainObject(stored)) return value;
-  for (const field of REVIEW_SETTING_FIELDS)
-    if (Object.hasOwn(stored, field)) checkField(value, field, stored[field]);
+  for (const field of REVIEW_SETTING_FIELDS) {
+    if (!Object.hasOwn(stored, field)) continue;
+    if (field === "allowedCommands") {
+      const normalized = storedCommands(stored[field]);
+      if (normalized !== undefined) value.allowedCommands = normalized;
+      continue;
+    }
+    checkField(value, field, stored[field]);
+  }
   return value;
+}
+
+/** A stored `allowedCommands` list intersected with the commands that still exist; order canonical. */
+function storedCommands(value: unknown): ReviewCommand[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const seen = new Set<ReviewCommand>();
+  for (const entry of value) {
+    const command = REVIEW_COMMANDS.find((known) => known === entry);
+    if (command !== undefined) seen.add(command);
+  }
+  return REVIEW_COMMANDS.filter((command) => seen.has(command));
 }

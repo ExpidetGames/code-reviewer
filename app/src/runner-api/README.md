@@ -111,9 +111,9 @@ attempt like a lapsed lease (3 attempts, then it fails with the reason as its co
 otherwise 30 seconds, at most 15 minutes. An unexpected error also gives the job back and answers
 `500`.
 
-`ask` jobs carry their question as `args: [question]`; the other commands never carry `args`, whatever
-text followed the command. An `ask` job with an empty question, or one over 4000 characters, ends as
-`job_args_invalid` instead of being handed to a runner that would refuse it.
+`/review` takes no arguments: the claim never carries `args` (#203). The claim refuses a job whose
+command is not `review` as `job_args_invalid` instead of handing a runner a command it would refuse
+(in practice the claim selection already excludes removed commands).
 
 ## Complete
 
@@ -154,8 +154,9 @@ The body is `{ leaseToken, result }`. `result` is what `code-reviewer-run-job` p
   wired in `src/projects/shared.ts`: deactivating a project cancels its waiting jobs in the same
   transaction; running jobs finish.
 - **`JobOptionsSource`** (`job-options.ts`): `optionsFor(job)` returns the options of one job, so they
-  can differ per repository: `env` (the extra options of the four PR-Agent tools, `PR_REVIEWER__*`,
-  `PR_DESCRIPTION__*`, `PR_CODE_SUGGESTIONS__*`, `PR_QUESTIONS__*`) and optionally
+  can differ per repository: `env` (the extra options of the review PR-Agent tool, `PR_REVIEWER__*`;
+  a previous release also sent the removed tools' families, which the runner accepts and ignores) and
+  optionally
   `llm: { model, maxTokens, fallbackModels }`. The running server uses
   `createReviewSettingsJobOptionsSource` (`review-settings-job-options.ts`): the review settings of the
   job's repository (project over global defaults over built-in values, read at claim time) go through
@@ -163,7 +164,7 @@ The body is `{ leaseToken, result }`. `result` is what `code-reviewer-run-job` p
   that is off is left out. A `model` replaces the model of the LLM access, a `maxTokens` (a whole number
   from 1000 to 10 000 000) becomes `llm.maxTokens` and wins over `LLM_MAX_TOKENS`; a null or missing
   value is left out of the job. `fallbackModels` is accepted and **not handed on**: no fallback chain is
-  decided for the MVP. A key outside the four families ends the job as `job_env_invalid`, a model or
+  decided for the MVP. A key outside the review family ends the job as `job_env_invalid`, a model or
   size the runner would refuse as `job_llm_options_invalid`. The key pattern is
   `RUNNER_ENV_KEY_PATTERN` in `contract.ts` (one option name per key, no second `__`): the only
   definition in the app, equal to `JobEnv` in the contract file and to the runner's `_ENV_KEY`; the
