@@ -34,6 +34,7 @@ import {
   builtInProjectDynamicSettings,
   PROJECT_DYNAMIC_LIMITS,
   type ProjectDynamicOverrides,
+  type ProjectDynamicPatch,
   type ProjectDynamicSettingField,
   type ProjectDynamicSettings,
   type ProjectReviewKind,
@@ -202,8 +203,8 @@ function checkedProject(input: unknown): ProjectSettingsPatch {
  *   the Diff configuration. An empty request still replaces the Diff group with nothing (the
  *   "Use default" of every Diff field).
  * - The **project-only fields** are merged over the stored ones, so a save that does not know them
- *   (an older client) keeps them. A `reviewSkill` of `null` clears the override and resolves to the
- *   shipped default.
+ *   (an older client) keeps them. A `reviewSkill` or `dynamicModel` of `null` clears that override and
+ *   resolves to the built-in value again (#194, #200).
  */
 function mergeProjectSettings(
   current: ProjectSettings,
@@ -219,15 +220,18 @@ function mergeProjectSettings(
       : patch.review;
 
   const storedDynamic = parseStoredProjectDynamicOverrides(current);
-  const dynamic: ProjectDynamicOverrides = {
+  const dynamic: ProjectDynamicPatch = {
     ...storedDynamic,
     ...patch.dynamic,
   };
 
   const next: ProjectSettings = { ...review };
   if (dynamic.reviewKind !== undefined) next.reviewKind = dynamic.reviewKind;
-  if (dynamic.dynamicModel !== undefined)
-    next.dynamicModel = dynamic.dynamicModel;
+  if (dynamic.dynamicModel !== undefined) {
+    // A `null` model is an explicit "follow the built-in default again", not a value.
+    if (dynamic.dynamicModel === null) delete next.dynamicModel;
+    else next.dynamicModel = dynamic.dynamicModel;
+  }
   if (dynamic.reviewSkill !== undefined && dynamic.reviewSkill !== null)
     next.reviewSkill = dynamic.reviewSkill;
   return next;

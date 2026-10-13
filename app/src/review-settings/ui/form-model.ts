@@ -33,8 +33,8 @@ export type SettingsFormModel = {
   lastSaved: { at: string; by: string | null } | null;
   /**
    * The project-only review kind, Dynamic model and skill (#194); absent for the global defaults,
-   * which cannot hold them. The form does not edit them yet (#200) and does not send them: the server
-   * keeps the stored values a request does not mention, so a stale form cannot overwrite them, and a
+   * which cannot hold them. Since #200 the project form edits them: it sends a project-only field
+   * only when the person changed it, so a stale form cannot overwrite a newer value, and a
    * `reviewSkill` of `null` (or `""`) clears the skill override.
    */
   dynamic?: ProjectDynamicView;

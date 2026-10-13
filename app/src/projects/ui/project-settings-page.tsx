@@ -35,6 +35,8 @@ export type ProjectSettingsPageData =
       row: ProjectRowView;
       model: SettingsFormModel;
       config: ConfigStatus;
+      /** Whether the instance has turned Dynamic Review on (#195); the Review kind card tells the truth about it. */
+      dynamicReviewEnabled: boolean;
     };
 
 export async function loadProjectSettingsPage(
@@ -43,6 +45,8 @@ export async function loadProjectSettingsPage(
     projects: Pick<ProjectService, "findProject">;
     settings: Pick<ReviewSettingsService, "getProjectSettings">;
     config: () => ConfigStatus | Promise<ConfigStatus>;
+    /** The instance gate of Dynamic Review; not given means off. */
+    dynamicReviewEnabled?: () => boolean | Promise<boolean>;
   },
 ): Promise<ProjectSettingsPageData> {
   const row = await loadProjectRow(repositoryId, { projects: deps.projects });
@@ -50,7 +54,13 @@ export async function loadProjectSettingsPage(
   const config = await deps.config();
   try {
     const view = await deps.settings.getProjectSettings(repositoryId);
-    return { kind: "ready", row, model: modelFromProjectView(view), config };
+    return {
+      kind: "ready",
+      row,
+      model: modelFromProjectView(view),
+      config,
+      dynamicReviewEnabled: (await deps.dynamicReviewEnabled?.()) ?? false,
+    };
   } catch (error) {
     // The repository vanished between the two reads (it stopped being listed and had no project).
     if (
@@ -112,9 +122,10 @@ export function ProjectSettingsPageContent({
         {/* Keyed on the server data: with Cache Components a page that was left stays mounted, and
             when it is shown again with fresh data the form must start from that data. */}
         <SettingsForm
-          key={JSON.stringify(data.model)}
+          key={JSON.stringify([data.model, data.dynamicReviewEnabled])}
           workspaceSlug={workspaceSlug}
           initial={data.model}
+          dynamicReviewEnabled={data.dynamicReviewEnabled}
           repositoryId={data.row.repositoryId}
           {...(api === undefined ? {} : { api })}
         />

@@ -12,6 +12,7 @@ import {
   REVIEW_SETTING_FIELDS,
   REVIEW_SETTING_LIMITS,
   type ProjectDynamicOverrides,
+  type ProjectDynamicPatch,
   type ProjectDynamicSettingField,
   type ProjectReviewKind,
   type ReviewSettingField,
@@ -172,20 +173,26 @@ function reviewSkill(value: unknown): FieldResult<string | null> {
   return ok(value);
 }
 
+/** The Dynamic model of a project save: like the Diff model, or `null` to clear the override (#200). */
+function dynamicModelValue(value: unknown): FieldResult<string | null> {
+  if (value === null) return ok(null);
+  return modelName(value);
+}
+
 const DYNAMIC_FIELD_CHECKS: {
   [K in ProjectDynamicSettingField]: (
     value: unknown,
-  ) => FieldResult<ProjectDynamicOverrides[K]>;
+  ) => FieldResult<ProjectDynamicPatch[K]>;
 } = {
   reviewKind,
   // The same rule as the Diff model: the identifier is kept literally, no provider rewrite (#194-T08).
-  dynamicModel: modelName,
+  dynamicModel: dynamicModelValue,
   reviewSkill,
 };
 
 export type ProjectSettingsPatch = {
   review: ReviewSettingsOverrides;
-  dynamic: ProjectDynamicOverrides;
+  dynamic: ProjectDynamicPatch;
 };
 
 export type ProjectValidationResult =
@@ -199,13 +206,13 @@ function isProjectDynamicField(
 }
 
 function checkDynamicField<K extends ProjectDynamicSettingField>(
-  target: ProjectDynamicOverrides,
+  target: ProjectDynamicPatch,
   field: K,
   raw: unknown,
 ): ReviewSettingIssue | undefined {
   const result = DYNAMIC_FIELD_CHECKS[field](raw);
   if (!result.ok) return { field, code: result.code };
-  target[field] = result.value as ProjectDynamicOverrides[K];
+  target[field] = result.value as ProjectDynamicPatch[K];
   return undefined;
 }
 
@@ -220,7 +227,7 @@ export function validateProjectSettingsPatch(
   if (!isPlainObject(input))
     return { ok: false, issues: [{ field: "settings", code: "INVALID_TYPE" }] };
   const review: ReviewSettingsOverrides = {};
-  const dynamic: ProjectDynamicOverrides = {};
+  const dynamic: ProjectDynamicPatch = {};
   const issues: ReviewSettingIssue[] = [];
   for (const [name, raw] of Object.entries(input)) {
     if (isProjectDynamicField(name)) {
@@ -246,20 +253,25 @@ export function validateProjectSettingsPatch(
 /**
  * Reads the project-only fields of a stored layer. Like `parseStoredOverrides`, a field this version
  * would not accept is dropped (so the shipped default applies) instead of failing a review. An
- * explicit `null` (or blank) skill reads as "no override".
+ * explicit `null` (or blank) skill, or a `null` model, reads as "no override".
  */
 export function parseStoredProjectDynamicOverrides(
   stored: unknown,
 ): ProjectDynamicOverrides {
-  const value: ProjectDynamicOverrides = {};
-  if (!isPlainObject(stored)) return value;
+  const value: ProjectDynamicPatch = {};
+  if (!isPlainObject(stored)) return {};
   for (const field of PROJECT_DYNAMIC_SETTING_FIELDS) {
     if (!Object.hasOwn(stored, field)) continue;
     checkDynamicField(value, field, stored[field]);
   }
-  // A stored null (or blank) skill is "no override", not an override of `null`.
-  if (value.reviewSkill === null) delete value.reviewSkill;
-  return value;
+  // A stored null (or blank) skill or model is "no override", not an override of `null`.
+  const overrides: ProjectDynamicOverrides = {};
+  if (value.reviewKind !== undefined) overrides.reviewKind = value.reviewKind;
+  if (typeof value.dynamicModel === "string")
+    overrides.dynamicModel = value.dynamicModel;
+  if (typeof value.reviewSkill === "string")
+    overrides.reviewSkill = value.reviewSkill;
+  return overrides;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

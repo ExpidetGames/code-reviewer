@@ -37,6 +37,12 @@ of a repository is one lookup per repository on the index `jobs_repository_recen
 A run has no pull request title (the job stores the number, the address and the head commit), so none
 is shown. The "Started by" line is `Automatic`, `Comment by <login>` or `Started by <login>`.
 
+The **review kind** the run was queued for (#200, `Diff Review` or `Dynamic Review`, `review-settings/kind-names.ts`)
+is a "Review kind" fact in the detail summary; the list marks only a Dynamic Review run with a small
+badge, since Diff Review is the default. The codes a Dynamic project's run can end with
+(`dynamic_review_disabled`, `no_capable_runner` and the Dynamic failure codes) are translated in
+`error-copy.ts` like every other code; a test requires a sentence for each.
+
 ## Polling
 
 The server renders the first snapshot; the browser then asks for newer ones (`useLiveSnapshot` in

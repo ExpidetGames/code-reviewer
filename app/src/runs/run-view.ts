@@ -9,6 +9,7 @@
 import type { JsonValue, StoredReviewCommand } from "../integrations/types.ts";
 import type { JobStatus } from "../jobs/job-status.ts";
 import type { Job, JobTriggerKind } from "../jobs/job-types.ts";
+import type { ProjectReviewKind } from "../review-settings/settings.ts";
 import { describeErrorCode } from "./error-copy.ts";
 import { runDurationMs } from "./run-duration.ts";
 
@@ -24,6 +25,8 @@ export type RunRowView = {
   /** The link to the pull request when it is an `https://github.com/` address, otherwise null. */
   prUrl: string | null;
   command: StoredReviewCommand;
+  /** The review kind the run was queued for (#200): Diff Review or Dynamic Review. */
+  reviewKind: ProjectReviewKind;
   triggerKind: JobTriggerKind;
   /** "Automatic", "Comment by octocat" or "Started by octocat". */
   trigger: string;
@@ -156,6 +159,7 @@ export type RunRowSource = Pick<
   | "prNumber"
   | "prUrl"
   | "command"
+  | "reviewKind"
   | "triggerKind"
   | "actorLogin"
   | "status"
@@ -189,6 +193,7 @@ export function toRunRowView(
     prNumber: job.prNumber,
     prUrl: safeGithubUrl(job.prUrl),
     command: job.command,
+    reviewKind: job.reviewKind,
     triggerKind: job.triggerKind,
     trigger: describeTrigger(job.triggerKind, job.actorLogin),
     status: job.status,

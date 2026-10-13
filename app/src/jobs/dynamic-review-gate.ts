@@ -41,3 +41,16 @@ export function createInstanceDynamicReviewGate(): DynamicReviewGate {
 
 /** For tests and single-process setups: Dynamic Review is always allowed. */
 export const dynamicReviewEnabled: DynamicReviewGate = async () => true;
+
+/**
+ * Whether the instance has turned Dynamic Review on, for showing it (the project settings page). A plain
+ * read: it takes no lock and decides nothing; the enqueue transaction reads the gate again under its lock.
+ */
+export async function isDynamicReviewEnabled(
+  executor: Kysely<Database>,
+): Promise<boolean> {
+  const value = await createInstanceSettingsRepository(executor).get(
+    DYNAMIC_REVIEW_SETTING_KEY,
+  );
+  return value?.enabled === true;
+}

@@ -703,6 +703,33 @@ describe("the project-only settings of a project", () => {
     expect(view.effective.model).toBe("qwen/qwen3-coder");
   });
 
+  // #200 review: the model has the same `null` reset as the skill.
+  it("reset only the Dynamic model override and keep the kind, the skill and the Diff overrides", async () => {
+    const app = await setupReviewSettings();
+    await app.projects.activate(app.first.id);
+    await app.service.updateProjectSettings(app.first.id, {
+      model: "qwen/qwen3-coder",
+      reviewKind: "dynamic",
+      dynamicModel: "vendor/dynamic-model",
+      reviewSkill: "Review for the Dynamic kind.",
+    });
+    const saved = await app.service.getProjectSettings(app.first.id);
+    expect(saved.dynamic.overrides.dynamicModel).toBe("vendor/dynamic-model");
+
+    const view = await app.service.updateProjectSettings(app.first.id, {
+      dynamicModel: null,
+    });
+
+    expect(view.dynamic.sources.dynamicModel).toBe("built_in");
+    expect(view.dynamic.effective.dynamicModel).toBe(DEFAULT_DYNAMIC_MODEL);
+    expect(view.dynamic.overrides.dynamicModel).toBeUndefined();
+    expect(view.dynamic.overrides.reviewKind).toBe("dynamic");
+    expect(view.dynamic.overrides.reviewSkill).toBe(
+      "Review for the Dynamic kind.",
+    );
+    expect(view.effective.model).toBe("qwen/qwen3-coder");
+  });
+
   // #194-T06
   it("a full reset clears the project-only settings and returns to Diff Review", async () => {
     const app = await setupReviewSettings();
