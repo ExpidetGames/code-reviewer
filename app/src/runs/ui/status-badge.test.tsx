@@ -2,10 +2,12 @@
 
 // @vitest-environment jsdom
 // Pins down the status badge: every status has a label of its own and a symbol of its own, so no
-// status is told apart by color alone.
-import { cleanup, render } from "@testing-library/react";
+// status is told apart by color alone; the run detail can ask for the description behind the "?".
+import { cleanup, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
 import { JOB_STATUSES } from "../../jobs/job-status.ts";
+import { RUN_STATUS_PRESENTATION } from "../run-status.ts";
 import { RunStatusBadge } from "./status-badge.tsx";
 
 afterEach(cleanup);
@@ -19,7 +21,12 @@ describe("the status badge", () => {
       const symbol = badge?.querySelector("[aria-hidden='true']")?.textContent;
       const label = badge?.textContent?.replace(symbol ?? "", "");
       unmount();
-      return { status, label, symbol, className: badge?.className };
+      return {
+        status,
+        label,
+        symbol,
+        dataStatus: badge?.getAttribute("data-status"),
+      };
     });
 
     expect(new Set(shown.map((entry) => entry.label)).size).toBe(
@@ -30,7 +37,7 @@ describe("the status badge", () => {
     );
     for (const entry of shown) {
       expect(entry.label).toBeTruthy();
-      expect(entry.className).toContain(`badge-run-${entry.status}`);
+      expect(entry.dataStatus).toBe(entry.status);
     }
   });
 
@@ -42,5 +49,25 @@ describe("the status badge", () => {
       container.querySelector("[aria-hidden='true']")?.textContent,
     ).not.toBe("");
     expect(container.textContent).toContain("Failed");
+  });
+
+  // The description is available from the badge, not printed beside the label.
+  it("keeps the status description behind the badge's hint on request", async () => {
+    const user = userEvent.setup();
+    render(<RunStatusBadge status="failed" hint />);
+    expect(
+      screen.queryByText(RUN_STATUS_PRESENTATION.failed.description),
+    ).toBeNull();
+
+    await user.tab();
+
+    const trigger = screen.getByRole("button", {
+      name: "About the status Failed",
+    });
+    const describedBy = trigger.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    expect(document.getElementById(describedBy ?? "")?.textContent).toContain(
+      RUN_STATUS_PRESENTATION.failed.description,
+    );
   });
 });

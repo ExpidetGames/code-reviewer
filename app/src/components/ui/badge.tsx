@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Adapted from shadcn/ui (MIT), https://ui.shadcn.com
-// Local adaptation for Code Reviewer: the neutral/success/warning/info status variants.
+// Local adaptation for Code Reviewer: the neutral/success/warning/danger/info status variants.
 
 import * as React from "react";
 import { cva, type VariantProps } from "class-variance-authority";
@@ -24,6 +24,7 @@ const badgeVariants = cva(
         neutral: "border-border bg-muted text-muted-foreground",
         success: "border-success/30 bg-success-soft text-success",
         warning: "border-warning/30 bg-warning-soft text-warning",
+        danger: "border-danger/30 bg-danger-soft text-danger",
         info: "border-info/30 bg-info-soft text-info",
       },
     },

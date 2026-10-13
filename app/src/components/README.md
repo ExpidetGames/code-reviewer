@@ -27,7 +27,8 @@ destructive`, sizes `sm | default | icon`, the `loading`/`loadingLabel` conventi
     in the DOM and is hidden while closed, the trigger announces `aria-expanded`/`aria-controls` and
     has a 44px target. An optional `ariaLabel` gives a repeated disclosure a distinct accessible name
     (one per row, for example "Evidence for acme") while the visible label stays short.
-  - `@/components/status-region` — `role="status"`, `aria-live="polite"`.
+  - `@/components/status-region` — `role="status"`, `aria-live="polite"`, and an optional `label` so the
+    live regions of one page (an update result, a copy result) are told apart.
   - `@/components/needs-attention` — the one attention region of a screen: a labelled "Needs attention"
     section with up to `maxRows` (default 2) `Alert` rows and the rest behind a `HelpDisclosure`.
     Screens with notices (#173, #174, #178) use it instead of stacking separate notice regions.
