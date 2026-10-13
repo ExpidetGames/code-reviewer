@@ -25,7 +25,7 @@ import threading
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import IO, Any, Protocol
+from typing import IO, Protocol
 
 from code_reviewer_runner.process_group import end_group, has_exited
 
@@ -218,12 +218,11 @@ class SubprocessLauncher:
         # its working directory, so that directory must hold nothing the runner did not put there.
         workdir = Path(tempfile.mkdtemp(prefix=JOB_WORKDIR_PREFIX))
         process: subprocess.Popen[bytes] | None = None
-        options: dict[str, Any] = {}
+        # The unprivileged job user (a root loop only), with none of the loop's other groups.
+        uid, gid = spec.run_as if spec.run_as is not None else (None, None)
         try:
-            if spec.run_as is not None:
-                uid, gid = spec.run_as
+            if uid is not None and gid is not None:
                 os.chown(workdir, uid, gid)
-                options = {"user": uid, "group": gid, "extra_groups": []}
             process = subprocess.Popen(
                 spec.argv,
                 stdin=subprocess.PIPE,
@@ -232,7 +231,9 @@ class SubprocessLauncher:
                 env=dict(spec.env),
                 cwd=workdir,
                 start_new_session=True,
-                **options,
+                user=uid,
+                group=gid,
+                extra_groups=[] if uid is not None else None,
             )
             pipes = await _connect_pipes(process)
         except BaseException:
