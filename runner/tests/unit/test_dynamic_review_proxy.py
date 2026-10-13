@@ -8,6 +8,7 @@ from the provider, and a destination that must advertise the required features. 
 stable code; nothing falls back to another model, provider or engine.
 """
 
+import http.client
 import json
 from typing import Any
 from urllib.error import URLError
@@ -308,6 +309,8 @@ TRANSPORT_FAILURES = (
     (URLError(ConnectionRefusedError("refused")), ErrorCode.LLM_UNAVAILABLE, 502),
     (ConnectionResetError("reset by peer"), ErrorCode.LLM_UNAVAILABLE, 502),
     (OSError("network is unreachable"), ErrorCode.LLM_UNAVAILABLE, 502),
+    (http.client.RemoteDisconnected("closed without a response"), ErrorCode.LLM_UNAVAILABLE, 502),
+    (http.client.IncompleteRead(b"partial"), ErrorCode.LLM_UNAVAILABLE, 502),
 )
 
 
@@ -341,7 +344,7 @@ def test_a_transport_failure_keeps_its_reservation_spent() -> None:
 
 
 # #236-T03
-def test_engine_retries_after_a_transport_failure_do_not_replace_the_recorded_cause() -> None:
+def test_a_later_budget_refusal_does_not_replace_the_recorded_transport_cause() -> None:
     ledger = BudgetLedger(DynamicLimits(max_total_tokens=5000))
     subject = proxy(Broken(TimeoutError("timed out")), ledger=ledger)
 
@@ -349,8 +352,9 @@ def test_engine_retries_after_a_transport_failure_do_not_replace_the_recorded_ca
     retry = post(subject, request_body())
 
     assert error_code(first) == ErrorCode.LLM_TIMEOUT.value
-    # The retry is refused by the budget (the reservation stayed spent) but the run's recorded cause
-    # is still the transport failure, not a misleading budget refusal.
+    # The second request is refused by the budget (the reservation stayed spent) but the run's
+    # recorded cause is still the transport failure, not a misleading budget refusal. This does not
+    # model a successful engine retry: the run ends at the first recorded cause.
     assert error_code(retry) == ErrorCode.DYNAMIC_BUDGET_EXCEEDED.value
     failure = ledger.failure
     assert failure is not None

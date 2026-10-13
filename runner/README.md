@@ -206,6 +206,12 @@ input and the boundaries around it (the epic's binding decision). Modules:
   plus one byte, checks the protocol byte bounds both ways, validates the destination's required
   features and takes usage from the provider as authoritative. `steps` and events are never trusted
   for enforcement.
+  The upstream call honours the operator's `HTTP(S)_PROXY` / `NO_PROXY` (the https upstream goes
+  through a CONNECT tunnel, so a proxy sees the destination but not the key; an operator proxy that
+  terminates TLS with its own CA could read the key, which is the operator's trust decision, as for
+  the static PR-Agent path). A transient provider or transport failure ends the Dynamic run at the
+  first recorded cause even if the engine would have retried successfully (fail-closed, each retry
+  is a paid call), the same as a provider 429/5xx.
 - `dynamic_review/audit.py` enforces the tool, file and result-byte bounds **at the proxy**, from the
   model requests themselves: every request carries the whole history, so the tool calls of a provider
   answer are counted before the engine gets the answer (the call over the bound is never handed over,
