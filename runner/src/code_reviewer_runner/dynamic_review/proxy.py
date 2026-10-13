@@ -38,10 +38,11 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.error import HTTPError
-from urllib.request import Request, urlopen
+from urllib.request import Request
 
 from code_reviewer_runner.dynamic_review.config import PROXY_CAPABILITY_BYTES, PROXY_PROVIDER_ID
 from code_reviewer_runner.dynamic_review.limits import BudgetLedger, LimitError
+from code_reviewer_runner.dynamic_review.net import no_redirect_opener
 from code_reviewer_runner.job_loop.jsonvalues import as_object
 from code_reviewer_runner.result import ErrorCode
 
@@ -129,22 +130,25 @@ class ProxyResponse:
 
 
 # A transport is what actually sends the forwarded request upstream; a test replaces it so nothing
-# leaves loopback. `post` returns the status and the body bytes.
-UpstreamPost = Callable[[str, bytes, dict[str, str]], tuple[int, bytes]]
+# leaves loopback. `post(url, body, headers, limit)` returns the status and at most `limit` bytes of
+# the answer: the proxy asks for one byte more than the response bound, so an oversized answer is
+# detected without ever being buffered whole.
+UpstreamPost = Callable[[str, bytes, dict[str, str], int], tuple[int, bytes]]
 
 
-def _http_post(url: str, body: bytes, headers: dict[str, str]) -> tuple[int, bytes]:
-    # A trusted destination is one URL, not a route: a redirect is refused rather than followed.
+def _http_post(url: str, body: bytes, headers: dict[str, str], limit: int) -> tuple[int, bytes]:
+    # A trusted destination is one URL, not a route: the opener never follows a redirect, so the
+    # credential is sent to the configured URL once and nowhere else.
     request = Request(url, data=body, headers=headers, method="POST")
     try:
-        with urlopen(request, timeout=_REQUEST_TIMEOUT_SECONDS) as response:
-            if response.geturl() != url:
-                raise LimitError(
-                    ErrorCode.DYNAMIC_POLICY_VIOLATION, "the provider answered from another URL"
-                )
-            return response.status, response.read()
+        with no_redirect_opener().open(request, timeout=_REQUEST_TIMEOUT_SECONDS) as response:
+            return response.status, response.read(limit)
     except HTTPError as error:
-        return error.code, error.read()
+        if 300 <= error.code < 400:
+            raise LimitError(
+                ErrorCode.DYNAMIC_POLICY_VIOLATION, "the provider answered with a redirect"
+            ) from None
+        return error.code, error.read(limit)
 
 
 def error_body(code: ErrorCode, detail: str) -> bytes:
@@ -237,6 +241,7 @@ class ModelProxy:
                 "Authorization": f"Bearer {self.upstream_api_key}",
                 "Content-Type": "application/json",
             },
+            self.ledger.limits.max_response_bytes + 1,
         )
         self.ledger.check_response_bytes(len(response_body))
         if status != 200:

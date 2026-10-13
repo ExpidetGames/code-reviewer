@@ -37,8 +37,12 @@ class Upstream:
         self.status = status
         self.body = body if body is not None else answer_with_usage()
         self.requests: list[tuple[str, bytes, dict[str, str]]] = []
+        self.limits: list[int] = []
 
-    def __call__(self, url: str, body: bytes, headers: dict[str, str]) -> tuple[int, bytes]:
+    def __call__(
+        self, url: str, body: bytes, headers: dict[str, str], limit: int
+    ) -> tuple[int, bytes]:
+        self.limits.append(limit)
         self.requests.append((url, body, headers))
         return self.status, json.dumps(self.body).encode("utf-8")
 
@@ -338,3 +342,13 @@ def test_the_runner_generates_an_unguessable_capability_per_job() -> None:
     assert first != second
     # 32 random bytes in url-safe base64 are 43 characters: at least 256 bits.
     assert len(first) >= 43
+
+
+# #197-T12
+def test_the_transport_is_told_to_read_at_most_one_byte_past_the_response_bound() -> None:
+    upstream = Upstream()
+    subject = proxy(upstream, ledger=BudgetLedger(DynamicLimits(max_response_bytes=1234)))
+
+    post(subject, request_body())
+
+    assert upstream.limits == [1235]

@@ -17,7 +17,11 @@ from urllib.request import Request, urlopen
 
 from code_reviewer_runner.dynamic_review.config import new_proxy_capability
 from code_reviewer_runner.dynamic_review.limits import BudgetLedger, DynamicLimits
-from code_reviewer_runner.dynamic_review.proxy import ModelProxy, capabilities_from_config
+from code_reviewer_runner.dynamic_review.proxy import (
+    ModelProxy,
+    _http_post,  # pyright: ignore[reportPrivateUsage]
+    capabilities_from_config,
+)
 from code_reviewer_runner.result import ErrorCode
 
 UPSTREAM_KEY = "sk-or-v1-workspace-key-0123456789"
@@ -142,3 +146,64 @@ def test_the_served_proxy_answers_only_the_holder_of_the_job_capability() -> Non
     forwarded = upstream.requests[0][1]
     assert forwarded["Authorization"] == f"Bearer {UPSTREAM_KEY}"
     assert capability not in json.dumps(forwarded)
+
+
+def redirect_to(target: str, status: int) -> Callable[[BaseHTTPRequestHandler], None]:
+    def respond(handler: BaseHTTPRequestHandler) -> None:
+        handler.send_response(status)
+        handler.send_header("Location", f"{target}/stolen")
+        handler.send_header("Content-Length", "0")
+        handler.end_headers()
+
+    return respond
+
+
+# #197-T04
+def test_a_redirect_from_the_provider_is_never_followed_and_fails_closed() -> None:
+    capability = new_proxy_capability()
+    for status in (301, 302, 303, 307, 308):
+        with Listener(answer_ok) as elsewhere:
+            with Listener(redirect_to(elsewhere.url, status)) as upstream:
+                server = started_proxy(upstream.url, capability)
+                try:
+                    code, document = call(server.url, capability)
+                finally:
+                    server.stop()
+
+            # The workspace key was sent once, to the configured destination, and nowhere else.
+            assert len(upstream.requests) == 1
+            assert elsewhere.requests == []
+        assert code == 502
+        assert document["error"]["code"] == ErrorCode.DYNAMIC_POLICY_VIOLATION.value
+
+
+# #197-T12
+def test_the_upstream_answer_is_read_only_up_to_one_byte_past_the_bound() -> None:
+    huge = b"x" * (2 * 1024 * 1024)
+
+    def answer_huge(handler: BaseHTTPRequestHandler) -> None:
+        reply(handler, 200, huge)
+
+    with Listener(answer_huge) as upstream:
+        status, body = _http_post(f"{upstream.url}/v1/chat/completions", b"{}", {}, 101)
+
+    assert status == 200
+    assert len(body) == 101
+
+
+# #197-T12
+def test_a_provider_answer_over_the_response_bound_fails_closed_through_the_proxy() -> None:
+    capability = new_proxy_capability()
+
+    def answer_huge(handler: BaseHTTPRequestHandler) -> None:
+        reply(handler, 200, b"x" * (1024 * 1024))
+
+    with Listener(answer_huge) as upstream:
+        server = started_proxy(upstream.url, capability, max_response_bytes=1000)
+        try:
+            code, document = call(server.url, capability)
+        finally:
+            server.stop()
+
+    assert code == 502
+    assert document["error"]["code"] == ErrorCode.DYNAMIC_BUDGET_EXCEEDED.value
