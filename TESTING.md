@@ -267,15 +267,18 @@ deselected by default. Locally without root it fails with the way to run it (nev
 **CI-only for developers without root**. It proves, against the real kernel and the real `prepared_checkout`
 (#196) over real Git objects, with loopback sentinels standing in for "another job's proxy" and "an
 external host": the engine user reaches its proxy and nothing else (TCP, UDP, another loopback address,
-IPv6), other users are untouched and refused connections fail at once (`test_network_confinement.py`);
+IPv6), other users are untouched, refused connections end in an immediate error (a refusal errno, never
+a timeout; the time it takes is not asserted), a UDP flow another process opened and closed cannot be
+reused by the engine user, and the engine user cannot change its own rules (`test_network_confinement.py`);
 the engine process is the dedicated user with its own group only, no capability, cannot become root,
-read the supervisor's state or write the export, sees no credential, and its config is readable by
-that user only (`test_engine_launch.py`); a helper in a session of its own is confined and killed
+read the supervisor's state or write the export, has no capability in any set and `no_new_privs`, sees
+no credential, and its config is readable by that user only and cannot be rewritten by it (`test_engine_launch.py`); a helper in a session of its own is confined and killed
 with the engine, a port held by a stranger is not trusted, a tree of sticky and unreadable
 directories the engine user filled is removed with the job and the lease is free again;
 SIGTERM, which is how the job loop ends a job on lease loss, shutdown and timeout, ends the job, its
 engine, its helper, the rules and its files, and a job that was killed without cleanup leaves
-processes that the next job clears (`test_job_termination.py`); a root loop starts a Diff job as the
+processes that the loop's sweep and the next job's first step clear (`test_job_termination.py`,
+`test_engine_launch.py`; the loop's sweep itself in `tests/unit/test_job_loop_engine_sweep.py`); a root loop starts a Diff job as the
 job user and a Dynamic one as the supervisor (`test_job_users.py`); and the unmodified pinned engine
 reviews a hostile repository through the whole production path as that user behind those rules
 (`test_real_engine.py`). Not covered: the startup self-check that advertises `opencode` and the image

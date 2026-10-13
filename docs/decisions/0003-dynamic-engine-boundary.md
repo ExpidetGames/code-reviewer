@@ -31,10 +31,25 @@ the container is allowed to hold for that.
    for the engine user's uid: new connections only to this job's proxy port and the engine's own server
    port on `127.0.0.1`, everything else rejected. The probe that proves them runs as the engine user.
    The rules, not a namespace, are the boundary against other jobs' loopback services and any external
-   host.
+   host. Nothing is accepted by connection state alone: the only rule on tracked flows accepts the
+   replies of the engine's own server port (`tcp sport <engine port>`). A broader
+   `ct state established` rule would let the engine user send on a flow another process opened and
+   closed (the supervisor's DNS lookup keeps a tracked UDP flow for a while, and the same source port
+   is free again), which is an exfiltration channel; the review of #239 found it.
 4. **The dedicated user is the unit of cleanup.** After the group kill, a `kill(-1, SIGKILL)` run as
-   the engine user ends whatever that user still runs; the same runs when a job starts, for what a
-   killed predecessor left.
+   the engine user ends whatever that user still runs. The same sweep runs as the first step of every
+   job, right after the lease on the user is taken and before anything of the job exists (what a killed
+   predecessor left must not read the new export or config), and in the job loop (root, with `KILL`)
+   after every Dynamic job process has ended, however it ended. A sweep that cannot finish is never
+   ignored: the nft table then stays (no process of that user is left unconfined), and the next job
+   refuses to start (`dynamic_isolation_self_check_failed`).
+5. **`NET_ADMIN` is accepted for now.** The supervisor keeps it for the whole life of the container,
+   which gives root the nf_tables, tc and xfrm kernel attack surface that is otherwise only reachable
+   through unprivileged user namespaces. The alternatives are worse (a per-job network namespace needs
+   `SYS_ADMIN`; a user namespace or slirp is excluded by the lead decisions; a separate container
+   cannot tell the supervisor from the engine). The removal is tracked in #244: install static rules
+   for the single slot at container start and drop `NET_ADMIN` from the bounding set before the job
+   loop runs. **#244 blocks enabling `opencode` in #202.**
 
 ## 3. Alternatives considered
 
@@ -58,12 +73,16 @@ the container is allowed to hold for that.
   untrusted Git objects while preparing the export (#196) and the model proxy's HTTP; keeping that code
   small and free of repository-chosen commands is part of reviewing it.
 - Abstract Unix sockets of the shared network namespace are not filtered.
+- The engine config is owned by the supervisor (root) with the engine's group and mode 0440: the
+  engine reads it but can neither rewrite nor chmod it.
+- The engine user must differ from the Diff-job user (`RUNNER_DIFF_JOB_USER`) in uid and gid; the job
+  loop refuses to start otherwise.
 - One engine user per concurrent slot. The default is one slot.
 
 ## 5. Open questions
 
-- Whether the supervisor can drop `NET_ADMIN` after the rules are in place (they are replaced when a
-  start is retried on another engine port) or split the root part into a smaller process.
+- Dropping `NET_ADMIN` after the rules are in place (decision 5, #244), or splitting the root part
+  into a smaller process.
 - The Docker/Coolify targets whose kernel provides `nf_tables` for container root with `NET_ADMIN`.
 
 ## 6. Out of scope

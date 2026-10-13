@@ -72,7 +72,8 @@ namespaces, no host kernel setting beyond the `nf_tables` support every current 
 - **Network: one user, one proxy.** Per job the supervisor installs `nftables` output rules keyed on
   the socket owner. The engine user may open new connections only to this job's proxy port and its
   own server port on `127.0.0.1`; everything else it tries (another job's loopback service, any other
-  address, IPv6, UDP) is rejected at once. A per-job network namespace would need `SYS_ADMIN`, and a
+  address, IPv6, UDP, a flow that someone else opened and closed) is rejected at once. Only the
+  replies of the engine's own server pass as tracked traffic. A per-job network namespace would need `SYS_ADMIN`, and a
   container-level egress rule cannot tell the supervisor (GitHub, the model upstream) from the engine
   in the same container. The rules are proven before the engine starts, by a probe running as the
   engine user against sentinel listeners; any other result is `dynamic_isolation_self_check_failed`
@@ -82,8 +83,14 @@ namespaces, no host kernel setting beyond the `nf_tables` support every current 
   every process of the engine user, also helpers that left the group with `setsid()`, removes the
   user's rules and deletes the job directory (the lease on the user and its group is released with the
   process). A job that was killed without a chance to clean up (SIGKILL, an OOM kill) leaves its
-  engine user's processes running until the next job on this user starts: the first start of every job
-  clears them.
+  engine user's processes behind; the job loop (root) sweeps the user after every Dynamic job process
+  has ended, and every job sweeps it again as its first step after taking the lease. If a sweep cannot
+  finish, the rules stay in place and the next job does not start (`dynamic_isolation_self_check_failed`).
+  A second Dynamic job on the same user is refused by the lease with the same code: run one Dynamic
+  job at a time per engine user.
+- **`NET_ADMIN` stays for now.** Removing it (static rules at container start, then dropping it from
+  the bounding set) is #244 and blocks enabling `opencode` (#202). Do not run the container with
+  `seccomp=unconfined`.
 - **What it does not give.** The engine can still reach a service on `127.0.0.1` that belongs to the
   engine user itself, abstract Unix sockets of the container's network namespace and anything the
   supervisor deliberately exposes there. With a concurrency above one the users and groups are leased

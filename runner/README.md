@@ -39,11 +39,12 @@ its group exclusively), (2) installs nft rules that let that user open new conne
 job's model proxy and the engine's own server port, and proves them with a probe run as that user
 before the engine exists (`netguard.py`; a failure is `dynamic_isolation_self_check_failed` and no
 engine), (3) starts the engine with `setuid` in the child, no supplementary group and a closed
-environment, with its config file readable by that user only, and checks that the user, and nobody
+environment, with its config file readable (not writable) by that user only, and checks that the user, and nobody
 else, listens on the engine's port (`engine_user.py`), and (4) at the end, on SIGTERM (lease loss,
 shutdown, timeout) and in the watchdog, kills the engine's process group and then every process of
-that user, including helpers that left the group, removes the rules and the job's files. The first
-start of a job also clears whatever a previous, killed job left running as that user. Without root
+that user, including helpers that left the group, removes the rules and the job's files. The loop
+(root) sweeps that user after every Dynamic job process, and every job sweeps it right after taking
+the lease; a sweep that fails leaves the rules in place and the next job refuses to start. Without root
 (or without the user) the production preparation refuses with `dynamic_isolation_self_check_failed`:
 the engine never runs unconfined. The proofs need root and live in `tests/privileged` (below).
 
