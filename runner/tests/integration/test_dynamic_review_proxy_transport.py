@@ -15,6 +15,7 @@ from typing import Any
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+from code_reviewer_runner.dynamic_review.adapter import _http_request  # pyright: ignore[reportPrivateUsage]
 from code_reviewer_runner.dynamic_review.config import new_proxy_capability
 from code_reviewer_runner.dynamic_review.limits import BudgetLedger, DynamicLimits
 from code_reviewer_runner.dynamic_review.proxy import (
@@ -207,3 +208,12 @@ def test_a_provider_answer_over_the_response_bound_fails_closed_through_the_prox
 
     assert code == 502
     assert document["error"]["code"] == ErrorCode.DYNAMIC_BUDGET_EXCEEDED.value
+
+
+# #197-T04
+def test_the_engine_client_does_not_follow_a_redirect_either() -> None:
+    with Listener(answer_ok) as elsewhere, Listener(redirect_to(elsewhere.url, 307)) as engine:
+        status, _ = _http_request("POST", f"{engine.url}/session", b"{}", {})
+
+    assert status == 307
+    assert elsewhere.requests == []

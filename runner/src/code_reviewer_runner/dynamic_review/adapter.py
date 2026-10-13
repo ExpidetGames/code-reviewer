@@ -40,7 +40,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import Request
 
 from code_reviewer_runner.dynamic_findings import (
     DynamicFindings,
@@ -49,6 +49,7 @@ from code_reviewer_runner.dynamic_findings import (
 )
 from code_reviewer_runner.dynamic_review.config import build_engine_config, engine_environment
 from code_reviewer_runner.dynamic_review.limits import BudgetLedger, LimitError
+from code_reviewer_runner.dynamic_review.net import no_redirect_opener
 from code_reviewer_runner.dynamic_review.prompts import ReviewInputs, compose_user_prompt
 from code_reviewer_runner.job import Job
 from code_reviewer_runner.job_loop.jsonvalues import as_object
@@ -111,7 +112,9 @@ def _http_request(
 ) -> tuple[int, bytes]:
     request = Request(url, data=body, method=method, headers=dict(headers))
     try:
-        with urlopen(request, timeout=MESSAGE_TIMEOUT_SECONDS) as response:
+        # Loopback only: never through a proxy of the environment, never through a redirect.
+        opener = no_redirect_opener(direct=True)
+        with opener.open(request, timeout=MESSAGE_TIMEOUT_SECONDS) as response:
             return response.status, response.read(CLIENT_MAX_BYTES)
     except HTTPError as error:
         return error.code, error.read(CLIENT_MAX_BYTES)

@@ -18,9 +18,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from code_reviewer_runner.dynamic_review import findings_schema
 from code_reviewer_runner.dynamic_review.adapter import DynamicEngine, EngineAnswer
-from code_reviewer_runner.dynamic_review.config import new_proxy_capability
+from code_reviewer_runner.dynamic_review.config import engine_environment, new_proxy_capability
 from code_reviewer_runner.dynamic_review.limits import BudgetLedger, DynamicLimits
 from code_reviewer_runner.dynamic_review.prompts import compose_system_prompt
 from code_reviewer_runner.dynamic_review.proxy import ModelProxy, capabilities_from_config
@@ -165,6 +167,7 @@ class Fixture:
         self.script_path.write_text(json.dumps(script), encoding="utf-8")
         self.trace_path = self.directory / ".fake-opencode-trace.jsonl"
         self.ledger = BudgetLedger(DynamicLimits())
+        self.capability = ""
 
     def traces(self) -> list[dict[str, Any]]:
         if not self.trace_path.is_file():
@@ -177,6 +180,7 @@ class Fixture:
 
     def run(self, upstream: FakeUpstream) -> EngineAnswer:
         capability = new_proxy_capability()
+        self.capability = capability
         proxy = ModelProxy(
             ledger=self.ledger,
             base_path="/v1",
@@ -443,3 +447,41 @@ def test_the_engine_answers_over_its_own_loopback_port(tmp_path: Path) -> None:
 
     # The engine really was a separate HTTP server on loopback: it called the proxy.
     assert fixture.ledger.model_calls == 1
+
+
+# #197-T02
+def test_the_engine_process_receives_only_the_closed_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The runner's own environment is full of credentials; none of it may reach the engine child.
+    for name, value in {
+        "GITHUB_TOKEN": "ghs_runner_token_value",
+        "OPENROUTER_API_KEY": API_KEY,
+        "RUNNER_TOKEN": "runner-token-value",
+        "AWS_SECRET_ACCESS_KEY": "aws-secret-value",
+        "LEAKED_SENTINEL": "must-not-reach-the-engine",
+        "HTTP_PROXY": "http://proxy.invalid:3128",
+        "XDG_CONFIG_HOME": "/runner/config",
+        "HOME": "/runner/home",
+    }.items():
+        monkeypatch.setenv(name, value)
+    fixture = Fixture(tmp_path, {"answer": "structured", "findings": findings(), "proxy_calls": 1})
+
+    with FakeUpstream() as upstream:
+        answer = fixture.run(upstream)
+
+    assert answer.ok
+    environment: dict[str, str] = next(entry["env"] for entry in fixture.traces() if "env" in entry)
+    permitted = {
+        *engine_environment(proxy_url="", home="", scratch_dir=""),
+        "OPENCODE_CONFIG",
+        "OPENCODE_CONFIG_DIR",
+        # Set by the Python interpreter of the fake itself, not by the runner.
+        "LC_CTYPE",
+    }
+    assert set(environment) <= permitted
+    assert environment["HOME"] != "/runner/home"
+    assert environment["XDG_CONFIG_HOME"] != "/runner/config"
+    joined = "\n".join(environment.values())
+    for secret in ("ghs_runner_token_value", API_KEY, "aws-secret-value", fixture.capability):
+        assert secret not in joined

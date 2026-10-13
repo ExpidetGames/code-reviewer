@@ -22,8 +22,8 @@ engine's own working directory, the export the runner gives it. Every key of the
       "spawn_helper": false        # leave a sleeping child in the engine's process group
     }
 
-The trace records the pid, the helper pid, the proxy answers and the config the runner wrote, so a
-test can assert on the whole run.
+The trace records the pid, the process environment, the helper pid, the proxy answers and the
+config the runner wrote, so a test can assert on the whole run.
 """
 
 import argparse
@@ -203,7 +203,7 @@ def main(argv: list[str]) -> int:
     serve.add_argument("--print-logs", action="store_true")
     args = parser.parse_args(argv)
 
-    _trace({"pid": os.getpid()})
+    _trace({"pid": os.getpid(), "env": dict(os.environ)})
     server = ThreadingHTTPServer((args.hostname, args.port), Handler)
     server.daemon_threads = True
     thread = threading.Thread(target=server.serve_forever, daemon=True)
