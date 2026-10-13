@@ -50,7 +50,7 @@ test.describe("the settings of an inactive project", () => {
       page.getByRole("heading", { level: 1, name: REPOSITORY }),
     ).toBeVisible();
     await expect(
-      page.getByText(/no reviews run until the project is activated/),
+      page.getByText(/No reviews run until the project is activated/),
     ).toBeVisible();
     await page
       .getByLabel("Most findings per review", { exact: true })
