@@ -186,6 +186,16 @@ Runner (`runner/`, Python version pinned in `.python-version`, uv, `uv.lock` com
   Python under `fakes/` (the e2e wrapper `fakes/pr-agent/run_job_against_fake_llm.py`): ruff gets
   `. ../fakes` as paths, pyright has `../fakes` in its `include` in `runner/pyproject.toml`.
 
+Dynamic checkout (`runner/tests/integration/test_dynamic_checkout.py`, #196) uses reproducible
+tracked Git trees and real upload-pack in `fakes/dynamic_git/`, plus its loopback smart HTTP fake.
+The actual-uid isolation probe is root-supervised: as root it runs directly; a non-root Linux host
+needs passwordless `sudo -n` for that isolated helper (available on CI). Missing permission is a
+failure, never a skipped security test. The helper holds no real credential, starts only fixed
+trusted commands, creates private per-job directories and drops uid/gid/supplementary groups for
+its access attempts. It proves the permission mechanism here in the development container and
+on CI's host; #202 supplies final-image/network startup checks. No Docker or OpenCode executable
+is needed for this suite. All fake threads, helpers and owned job directories are joined/removed.
+
 Engine suite (`runner/tests/engine/`, `uv run pytest -m engine`, about 4 minutes, `make test-engine`):
 
 - Every test starts the console script `code-reviewer-run-job` as a real process with the job on stdin

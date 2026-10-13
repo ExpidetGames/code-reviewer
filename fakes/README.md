@@ -13,6 +13,11 @@ protocol, so the production client code runs unchanged against them.
 | `pr-agent/`                 | `run_job_against_fake_llm.py`, the real job entry point with the address of the fake LLM added to the job (`PR_AGENT_COMMAND` of the e2e runner). `fake_pr_agent.py`, a stand-in executable for PR-Agent used by runner tests and e2e, is planned                                                                                                                                                                                                       | `run_job_against_fake_llm.py` exists |
 | `fixtures/github-webhooks/` | Webhook payloads reduced to the fields the app reads (public data only)                                                                                                                                                                                                                                                                                                                                                                                 | exists                               |
 
+`dynamic_git/` supplies reproducible bare Git fixtures (including fork PR refs and orphan heads),
+a loopback-only smart HTTP upload-pack fake with dummy installation authentication/provider faults,
+and a blocked-preparation process fixture for runner supervision. Python is checked by the runner's
+ruff/strict pyright. It invokes only local fixed Git commands, never an external remote or model.
+
 Rules:
 
 - Dummy values only. No real tokens, keys or private repository data, ever.
