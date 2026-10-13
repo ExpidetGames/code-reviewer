@@ -49,6 +49,15 @@ class ErrorCode(StrEnum):
     # The review comment reached GitHub's size limit and part of the visible review was cut off,
     # the record of findings still fits.
     REVIEW_TEXT_TRUNCATED = "review_text_truncated"
+    # Dynamic Review (#195). Stable codes a caller branches on; there is never a fallback to Diff.
+    DYNAMIC_ENGINE_UNAVAILABLE = "dynamic_engine_unavailable"
+    DYNAMIC_ISOLATION_SELF_CHECK_FAILED = "dynamic_isolation_self_check_failed"
+    DYNAMIC_CONFIG_INVALID = "dynamic_config_invalid"
+    CHECKOUT_INCOMPLETE = "checkout_incomplete"
+    DYNAMIC_POLICY_VIOLATION = "dynamic_policy_violation"
+    DYNAMIC_BUDGET_EXCEEDED = "dynamic_budget_exceeded"
+    DYNAMIC_ACCOUNTING_FAILED = "dynamic_accounting_failed"
+    DYNAMIC_MODEL_FEATURES_UNSUPPORTED = "dynamic_model_features_unsupported"
     UNKNOWN = "unknown"
 
 

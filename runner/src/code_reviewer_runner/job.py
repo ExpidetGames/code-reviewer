@@ -44,9 +44,25 @@ from code_reviewer_runner.result import ErrorCode
 MAX_JOB_BYTES = 1024 * 1024
 MAX_SECRET_CHARS = 4096
 
-_TOP_LEVEL_FIELDS = {"prUrl", "command", "args", "git", "llm", "env"}
+_TOP_LEVEL_FIELDS = {
+    "prUrl",
+    "command",
+    "args",
+    "reviewKind",
+    "dynamic",
+    "base",
+    "git",
+    "llm",
+    "env",
+}
 _GIT_FIELDS = {"provider", "baseUrl", "token", "botLogin"}
 _LLM_FIELDS = {"provider", "model", "apiKey", "baseUrl", "maxTokens", "fallbackModels"}
+_DYNAMIC_FIELDS = {"model", "skill", "limits"}
+_DYNAMIC_LIMIT_FIELDS = {"maxFindings"}
+_BASE_FIELDS = {"repository", "baseRef", "headSha", "previousReviewedSha", "comparison"}
+_COMPARISONS = ("full", "incremental")
+MAX_DYNAMIC_SKILL_CHARS = 16 * 1024
+_LOWER_SHA = re.compile(r"[0-9a-f]{40}")
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 MIN_CONTEXT_TOKENS = 1000
 MAX_CONTEXT_TOKENS = 10_000_000
@@ -99,6 +115,44 @@ class Command(StrEnum):
     REVIEW = "review"
 
 
+class ReviewKind(StrEnum):
+    """The review kind a job was queued for (#195). Diff is the legacy shape (absent field)."""
+
+    DIFF = "diff"
+    DYNAMIC = "dynamic"
+
+
+@dataclass(frozen=True)
+class DynamicLimits:
+    max_findings: int
+
+
+@dataclass(frozen=True)
+class DynamicReview:
+    """The Dynamic options (#195): model, skill and the output limit.
+
+    Closed; the skill is literal.
+    """
+
+    model: str
+    skill: str
+    limits: DynamicLimits
+
+
+@dataclass(frozen=True)
+class ClaimBase:
+    """The checkout facts (#195).
+
+    Exact head, base identity, declared comparison mode, prior head.
+    """
+
+    repository: str
+    base_ref: str
+    head_sha: str
+    previous_reviewed_sha: str | None
+    comparison: str
+
+
 class JobError(Exception):
     """The job was refused. `detail` is safe to log: it names fields and never contains values."""
 
@@ -132,6 +186,9 @@ class Job:
     git: GitAccess
     llm: LlmAccess
     env: dict[str, str] = field(default_factory=lambda: {})
+    review_kind: ReviewKind = ReviewKind.DIFF
+    dynamic: DynamicReview | None = None
+    base: ClaimBase | None = None
 
     @property
     def secrets(self) -> tuple[str, ...]:
@@ -330,6 +387,72 @@ def _env(data: dict[str, Any]) -> dict[str, str]:
     return env
 
 
+def _review_kind(data: dict[str, Any]) -> ReviewKind:
+    """The pinned review kind (#195). Absent means Diff, the shape of a previous-release job."""
+    if "reviewKind" not in data:
+        return ReviewKind.DIFF
+    value = data["reviewKind"]
+    if not isinstance(value, str):
+        raise _invalid("reviewKind must be 'diff' or 'dynamic'")
+    try:
+        return ReviewKind(value)
+    except ValueError:
+        raise _invalid("reviewKind must be 'diff' or 'dynamic'") from None
+
+
+def _dynamic_review(data: dict[str, Any]) -> DynamicReview:
+    """The Dynamic options (#195). Closed: an executable, core override, endpoint or permission
+    field is an unknown field and is refused. The skill is literal data and is never interpreted."""
+    dynamic = _section(data, "dynamic")
+    _check_fields(dynamic, _DYNAMIC_FIELDS, "dynamic.")
+    model = _string(dynamic, "model", "dynamic.", max_chars=200)
+    if not _MODEL.fullmatch(model):
+        raise _invalid("dynamic.model contains characters that are not allowed in a model name")
+    skill = dynamic.get("skill")
+    if not isinstance(skill, str) or len(skill) > MAX_DYNAMIC_SKILL_CHARS:
+        raise _invalid(
+            f"dynamic.skill must be a string of at most {MAX_DYNAMIC_SKILL_CHARS} characters"
+        )
+    limits = _object(dynamic.get("limits"), "dynamic.limits")
+    _check_fields(limits, _DYNAMIC_LIMIT_FIELDS, "dynamic.limits.")
+    max_findings = limits.get("maxFindings")
+    if (
+        isinstance(max_findings, bool)
+        or not isinstance(max_findings, int)
+        or not 1 <= max_findings <= 30
+    ):
+        raise _invalid("dynamic.limits.maxFindings must be an integer between 1 and 30")
+    return DynamicReview(model=model, skill=skill, limits=DynamicLimits(max_findings=max_findings))
+
+
+def _claim_base(data: dict[str, Any]) -> ClaimBase:
+    """The checkout facts (#195). `comparison` is a declared mode, not proof of completeness."""
+    base = _section(data, "base")
+    _check_fields(base, _BASE_FIELDS, "base.")
+    repository = _string(base, "repository", "base.", max_chars=200)
+    base_ref = _string(base, "baseRef", "base.", max_chars=255)
+    head_sha = _string(base, "headSha", "base.")
+    if not _LOWER_SHA.fullmatch(head_sha):
+        raise _invalid("base.headSha must be a 40 character lower-case commit id")
+    previous = base.get("previousReviewedSha")
+    if previous is not None and (
+        not isinstance(previous, str) or not _LOWER_SHA.fullmatch(previous)
+    ):
+        raise _invalid(
+            "base.previousReviewedSha must be null or a 40 character lower-case commit id"
+        )
+    comparison = _string(base, "comparison", "base.")
+    if comparison not in _COMPARISONS:
+        raise _invalid("base.comparison must be 'full' or 'incremental'")
+    return ClaimBase(
+        repository=repository,
+        base_ref=base_ref,
+        head_sha=head_sha,
+        previous_reviewed_sha=previous,
+        comparison=comparison,
+    )
+
+
 def parse_job(raw: str) -> Job:
     """Parse and validate the stdin text. Raises JobError; never returns a half valid job."""
     if len(raw) > MAX_JOB_BYTES:
@@ -340,9 +463,18 @@ def parse_job(raw: str) -> Job:
         raise _invalid("stdin is not valid JSON") from None
     job = _object(data, "the job")
     command = _command(job)
+    review_kind = _review_kind(job)
     # `args` (the legacy question of the removed `/ask`) is an allowed field so a previous release's
     # payload still parses for a review; it is never read, so it never reaches PR-Agent.
     _check_fields(job, _TOP_LEVEL_FIELDS, "")
+    if review_kind is ReviewKind.DYNAMIC:
+        dynamic = _dynamic_review(job)
+        base = _claim_base(job)
+    else:
+        if "dynamic" in job or "base" in job:
+            raise _invalid("a diff job must not carry dynamic options")
+        dynamic = None
+        base = None
     git = _git_access(job)
     llm = _llm_access(job)
     return Job(
@@ -351,4 +483,7 @@ def parse_job(raw: str) -> Job:
         git=git,
         llm=llm,
         env=_env(job),
+        review_kind=review_kind,
+        dynamic=dynamic,
+        base=base,
     )

@@ -38,7 +38,14 @@ from code_reviewer_runner.identity_patch import (
     apply_identity_patch,
     check_pr_agent_version,
 )
-from code_reviewer_runner.job import MAX_JOB_BYTES, Command, Job, JobError, parse_job
+from code_reviewer_runner.job import (
+    MAX_JOB_BYTES,
+    Command,
+    Job,
+    JobError,
+    ReviewKind,
+    parse_job,
+)
 from code_reviewer_runner.log_capture import (
     MAX_TAIL_BYTES,
     LogCapture,
@@ -171,6 +178,21 @@ def run_job(
         log_tail=log_tail,
         log_truncated=log_truncated,
         usage=usage,
+    )
+
+
+def run_dynamic_job(job: Job, capture: LogCapture | None, started: float) -> JobResult:
+    """Run a Dynamic job with the read-only engine (#195).
+
+    #197 provides the engine. Until one is registered here, a Dynamic job is refused with the stable
+    code `dynamic_engine_unavailable` and **no** process is started: the job is never silently run
+    by PR-Agent. The self-check that would advertise the engine is `capabilities.py`.
+    """
+    return _failure(
+        ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE,
+        "no Dynamic engine is available",
+        started,
+        capture,
     )
 
 
@@ -309,6 +331,11 @@ def main(
         return _exit_code(
             channel.write(_failure(ErrorCode.RUNNER_ERROR, "cannot read the job", started, None))
         )
+
+    if job.review_kind is ReviewKind.DYNAMIC:
+        # #195: a Dynamic job is never run by PR-Agent. This refusal happens before the process
+        # environment is touched and before any process is started; the engine is #197's.
+        return _exit_code(channel.write(run_dynamic_job(job, None, started), job.secrets))
 
     redactor = Redactor(job.secrets)
     capture = LogCapture(redactor)
