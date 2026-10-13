@@ -14,7 +14,7 @@ import { describeWorkspaceFailure } from "./messages.ts";
 export function AcceptInvitation({
   which,
   workspaceName,
-  label = "Accept the invitation",
+  label = "Accept invitation",
   api = browserAccountApi,
   open = (path) => window.location.assign(path),
 }: {

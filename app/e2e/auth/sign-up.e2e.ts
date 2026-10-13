@@ -7,6 +7,7 @@
 // address is not verified either, still reaches the admin portal. The rules behind are proven as
 // integration tests (src/signup/, src/auth/access-gates.integration.test.ts).
 import { expect, test, type Page } from "@playwright/test";
+import { signOutThroughTheMenu } from "../helpers/github-fake";
 import { e2eEnv } from "../helpers/e2e-env";
 import { verificationLinkTo, verificationLinksTo } from "../helpers/mail";
 
@@ -89,7 +90,8 @@ test.describe("signing up", () => {
     expect(api.status()).toBe(403);
     expect(await api.json()).toEqual({ error: "no_workspace_access" });
 
-    await page.getByRole("button", { name: "Sign out" }).click();
+    // Signing out lives in the user menu of the header now that the page is inside the app frame.
+    await signOutThroughTheMenu(page, { name: ADDRESS.split("@")[0] ?? "" });
     await expect(page).toHaveURL(/\/login$/);
   });
 

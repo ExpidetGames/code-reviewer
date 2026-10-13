@@ -12,6 +12,7 @@ import {
   type Page,
 } from "@playwright/test";
 import { randomUUID } from "node:crypto";
+import { signOutThroughTheMenu } from "../helpers/github-fake";
 import { e2eEnv } from "../helpers/e2e-env";
 import { messageTo, readInbox, verificationLinkTo } from "../helpers/mail";
 
@@ -98,7 +99,7 @@ test.describe("resetting a password by mail", () => {
     await expect(page).toHaveURL(/\/no-access$/);
 
     // The link works once.
-    await page.getByRole("button", { name: "Sign out" }).click();
+    await signOutThroughTheMenu(page, { name: ADDRESS.split("@")[0] ?? "" });
     await page.goto(link);
     await page
       .getByLabel("New password")
