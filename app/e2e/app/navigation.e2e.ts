@@ -32,17 +32,24 @@ test.describe("the app frame", () => {
     await signInThroughTheForm(page, account);
     const nav = page.getByRole("navigation", { name: "Main" });
 
-    for (const place of ["Projects", "Runs", "Settings", "Members"]) {
-      await nav.getByRole("link", { name: place }).click();
+    // The Settings link opens the area root; its `h1` is the first sub-page, "General" (#178).
+    const places = [
+      { link: "Projects", heading: "Projects", title: "Projects" },
+      { link: "Runs", heading: "Runs", title: "Runs" },
+      { link: "Settings", heading: "General", title: "Settings · General" },
+      { link: "Members", heading: "Members", title: "Members" },
+    ];
+    for (const { link, heading, title } of places) {
+      await nav.getByRole("link", { name: link }).click();
 
       await expect(
-        page.getByRole("heading", { level: 1, name: place }),
+        page.getByRole("heading", { level: 1, name: heading }),
       ).toBeVisible();
-      await expect(nav.getByRole("link", { name: place })).toHaveAttribute(
+      await expect(nav.getByRole("link", { name: link })).toHaveAttribute(
         "aria-current",
         "page",
       );
-      await expect(page).toHaveTitle(`${place} · Code Reviewer`);
+      await expect(page).toHaveTitle(`${title} · Code Reviewer`);
       await expect(page.getByRole("banner")).toBeVisible();
     }
 

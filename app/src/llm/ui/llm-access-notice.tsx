@@ -11,7 +11,6 @@ import type { AttentionNotice } from "../../components/needs-attention.tsx";
 import { NeedsAttention } from "../../components/needs-attention.tsx";
 import type { WorkspaceLlmSummary } from "../assemble.ts";
 import { workspacePath } from "../../workspaces/paths.ts";
-import { LLM_ACCESS_SECTION_ID } from "./llm-access-section.tsx";
 
 export function llmAccessAttention({
   workspaceSlug,
@@ -24,7 +23,7 @@ export function llmAccessAttention({
 }): AttentionNotice | null {
   if (summary.configured) return null;
   const unreadable = summary.reason === "key_unreadable";
-  const settingsPath = `${workspacePath(workspaceSlug, "/settings")}#${LLM_ACCESS_SECTION_ID}`;
+  const settingsPath = workspacePath(workspaceSlug, "/settings/llm");
   return {
     id: "llm_access",
     severity: "error",

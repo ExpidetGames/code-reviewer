@@ -144,7 +144,7 @@ describe("the manual review page of a project", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
-  it("shows the workspace's LLM-key hint as one row of the attention strip, linking to the settings", () => {
+  it("shows the workspace's LLM-key hint as one row of the attention strip, linking to the LLM sub-page", () => {
     renderPage({
       llmNotice: llmAccessAttention({
         workspaceSlug: "acme",
@@ -155,11 +155,13 @@ describe("the manual review page of a project", () => {
 
     const strip = screen.getByRole("region", { name: "Needs attention" });
     expect(within(strip).getByText("LLM not configured")).toBeTruthy();
+    // The old `#llm-access` anchor is repointed (#178); an old bookmark of it is handled by
+    // `LegacyLlmHashRedirect` on the General page.
     expect(
       within(strip)
         .getByRole("link", { name: "Add a key in the settings" })
         .getAttribute("href"),
-    ).toBe("/w/acme/settings#llm-access");
+    ).toBe("/w/acme/settings/llm");
   });
 
   it("has no attention strip while the workspace has a working LLM key", () => {

@@ -371,6 +371,8 @@ test.describe("a pull request on its way to a review comment", () => {
     });
     await signInThroughTheForm(page, account);
     await page.getByRole("link", { name: "Settings", exact: true }).click();
+    await page.getByRole("link", { name: "LLM access", exact: true }).click();
+    await expect(page).toHaveURL(/\/w\/default\/settings\/llm$/);
     const form = page.getByRole("form", { name: "LLM key" });
     await form.getByLabel("API key").fill(WORKSPACE_KEY);
     await form.getByRole("button", { name: "Save key" }).click();
