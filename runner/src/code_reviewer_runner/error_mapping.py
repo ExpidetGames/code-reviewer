@@ -43,6 +43,20 @@ _LLM_CLASS_NAMES = {
     "UnprocessableEntityError": ErrorCode.LLM_BAD_REQUEST,
     "NotFoundError": ErrorCode.MODEL_UNKNOWN,
 }
+
+
+def llm_status_code(status: int) -> ErrorCode | None:
+    """The code for the HTTP status of an LLM provider answer, None for a status no rule knows.
+
+    The one table behind both engines: the static path reads the status off an exception, the
+    Dynamic proxy off the response, so the same provider answer cannot get two different codes.
+    """
+    code = _LLM_STATUS.get(status)
+    if code is not None:
+        return code
+    return ErrorCode.LLM_UNAVAILABLE if status >= 500 else None
+
+
 _GITHUB_STATUS = {
     401: ErrorCode.GIT_AUTH,
     429: ErrorCode.GIT_RATE_LIMIT,
@@ -106,10 +120,9 @@ def _from_type(error: BaseException) -> ErrorCode | None:
     if "requests" in modules and "RequestException" in names:
         return ErrorCode.GIT_UNAVAILABLE
     if modules & {"openai", "litellm"}:
-        if isinstance(status_code, int) and status_code in _LLM_STATUS:
-            return _LLM_STATUS[status_code]
-        if isinstance(status_code, int) and status_code >= 500:
-            return ErrorCode.LLM_UNAVAILABLE
+        status_known = llm_status_code(status_code) if isinstance(status_code, int) else None
+        if status_known is not None:
+            return status_known
         for module, name in classes:
             if module in ("openai", "litellm") and name in _LLM_CLASS_NAMES:
                 return _LLM_CLASS_NAMES[name]
