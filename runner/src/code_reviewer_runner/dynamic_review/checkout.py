@@ -243,7 +243,9 @@ def prepare_content(
         # sides is binary or oversized, so a third revision cannot hide a text change.
         base_skips = _pair_skips(head, base_tree, tree_skips[0], tree_skips[1])
         previous_skips = (
-            _pair_skips(head, previous, tree_skips[0], tree_skips[2]) if previous is not None else {}
+            _pair_skips(head, previous, tree_skips[0], tree_skips[2])
+            if previous is not None
+            else {}
         )
         diff = endpoint_diff(
             _diffable(base_tree, base_skips), _diffable(head, base_skips), cache, budget, redactor
