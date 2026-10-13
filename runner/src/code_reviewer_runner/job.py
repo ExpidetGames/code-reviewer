@@ -38,6 +38,7 @@ from enum import StrEnum
 from typing import Any, NoReturn
 from urllib.parse import SplitResult, urlsplit
 
+from code_reviewer_runner.dynamic_review.prompts import MAX_SKILL_BYTES as MAX_DYNAMIC_SKILL_BYTES
 from code_reviewer_runner.platforms import PLATFORMS
 from code_reviewer_runner.result import ErrorCode
 
@@ -61,7 +62,6 @@ _DYNAMIC_FIELDS = {"model", "skill", "limits"}
 _DYNAMIC_LIMIT_FIELDS = {"maxFindings"}
 _BASE_FIELDS = {"repository", "baseRef", "headSha", "previousReviewedSha", "comparison"}
 _COMPARISONS = ("full", "incremental")
-MAX_DYNAMIC_SKILL_CHARS = 16 * 1024
 _LOWER_SHA = re.compile(r"[0-9a-f]{40}")
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 MIN_CONTEXT_TOKENS = 1000
@@ -409,9 +409,16 @@ def _dynamic_review(data: dict[str, Any]) -> DynamicReview:
     if not _MODEL.fullmatch(model):
         raise _invalid("dynamic.model contains characters that are not allowed in a model name")
     skill = dynamic.get("skill")
-    if not isinstance(skill, str) or len(skill) > MAX_DYNAMIC_SKILL_CHARS:
+    if not isinstance(skill, str):
+        raise _invalid("dynamic.skill must be a string")
+    # The bound is in UTF-8 bytes, not characters (#198): a multibyte character counts as its bytes.
+    try:
+        skill_bytes = skill.encode("utf-8")
+    except UnicodeEncodeError:
+        raise _invalid("dynamic.skill must be valid UTF-8") from None
+    if len(skill_bytes) > MAX_DYNAMIC_SKILL_BYTES:
         raise _invalid(
-            f"dynamic.skill must be a string of at most {MAX_DYNAMIC_SKILL_CHARS} characters"
+            f"dynamic.skill must be a string of at most {MAX_DYNAMIC_SKILL_BYTES} UTF-8 bytes"
         )
     limits = _object(dynamic.get("limits"), "dynamic.limits")
     _check_fields(limits, _DYNAMIC_LIMIT_FIELDS, "dynamic.limits.")
