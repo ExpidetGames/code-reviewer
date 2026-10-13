@@ -8,7 +8,7 @@ import { Suspense } from "react";
 import { signOut } from "@/auth/actions";
 import { actorName } from "@/auth/access-policy";
 import { currentLookup, requireSignedIn } from "@/auth/session";
-import { Skeleton } from "@/components/ui/skeleton";
+import { PageLoading } from "@/components/page-loading";
 import { AppShell } from "@/shell/app-shell";
 import { UserMenu } from "@/shell/user-menu";
 import { loadAccountView } from "@/workspaces/account-view";
@@ -20,7 +20,10 @@ export default function AppLayout({ children }: LayoutProps<"/">) {
       userMenu={
         <Suspense
           fallback={
-            <Skeleton className="size-8 rounded-full" aria-hidden="true" />
+            <PageLoading
+              label="Loading the user menu"
+              className="size-8 rounded-full"
+            />
           }
         >
           <CurrentUserMenu />
@@ -32,9 +35,7 @@ export default function AppLayout({ children }: LayoutProps<"/">) {
         </Suspense>
       }
     >
-      <Suspense
-        fallback={<Skeleton className="h-40 w-full" aria-busy="true" />}
-      >
+      <Suspense fallback={<PageLoading label="Loading the page" />}>
         {children}
       </Suspense>
     </AppShell>

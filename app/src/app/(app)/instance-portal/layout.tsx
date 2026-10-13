@@ -10,7 +10,7 @@ import type { Metadata } from "next";
 import { Suspense, type ReactNode } from "react";
 import { requireAdmin } from "@/admin/session";
 import { AdminNav } from "@/admin/ui/admin-nav";
-import { Skeleton } from "@/components/ui/skeleton";
+import { PageLoading } from "@/components/page-loading";
 import {
   SidebarProvider,
   SidebarShortcut,
@@ -23,7 +23,7 @@ export default function AdminLayout({
   children,
 }: LayoutProps<"/instance-portal">) {
   return (
-    <Suspense fallback={<Skeleton className="h-40 w-full" aria-busy="true" />}>
+    <Suspense fallback={<PageLoading label="Loading the admin portal" />}>
       <AdminFrame>{children}</AdminFrame>
     </Suspense>
   );

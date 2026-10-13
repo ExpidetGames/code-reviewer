@@ -10,7 +10,7 @@ import { notFound } from "next/navigation";
 import { connection } from "next/server";
 import { Suspense } from "react";
 import { AuthCard } from "@/components/auth-card";
-import { Skeleton } from "@/components/ui/skeleton";
+import { PageLoading } from "@/components/page-loading";
 import { SETUP_SESSION_COOKIE } from "@/setup/setup-session";
 import { checkCurrentSetupSession, getSetupStateReader } from "@/setup/shared";
 import { CodeForm } from "@/setup/ui/code-form";
@@ -25,9 +25,7 @@ export default function SetupPage() {
   return (
     <AuthCard>
       {/* Everything here depends on the request (the cookie) and the database. */}
-      <Suspense
-        fallback={<Skeleton className="h-40 w-full" aria-busy="true" />}
-      >
+      <Suspense fallback={<PageLoading label="Loading the setup" />}>
         <SetupContent />
       </Suspense>
     </AuthCard>
