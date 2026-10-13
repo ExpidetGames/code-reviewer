@@ -470,20 +470,25 @@ test.describe(
       await historical
         .getByRole("link", { name: UPGRADE_WIDGETS.fullName, exact: true })
         .click();
+      // The Runs list stays mounted (hidden) behind the run page; its row carries the same command
+      // text, so every assertion of the page is scoped to the visible run detail.
+      const detail = page
+        .locator('[data-slot="run-detail"]')
+        .filter({ visible: true });
       await expect(
         page.getByRole("heading", {
           level: 1,
           name: `${UPGRADE_WIDGETS.fullName} #4`,
         }),
       ).toBeVisible();
-      await expect(page.getByText("/ask", { exact: true })).toBeVisible();
+      await expect(detail.getByText("/ask", { exact: true })).toBeVisible();
       // The historical question is read-only text and escaped (never rendered as HTML).
-      await expect(page.locator('[data-slot="run-question"]')).toContainText(
+      await expect(detail.locator('[data-slot="run-question"]')).toContainText(
         "<img src=x onerror=alert(1)> a historical question",
       );
-      await expect(page.locator('[data-slot="run-question"] img')).toHaveCount(
-        0,
-      );
+      await expect(
+        detail.locator('[data-slot="run-question"] img'),
+      ).toHaveCount(0);
 
       // Review now works on the upgraded installation. The real runner is stood in for by the queue
       // helper here (its own tests cover the real path, and it would race the child after the app
@@ -533,10 +538,17 @@ test.describe(
         },
         upgradePaths.database,
       );
-      await expect(page.getByText("/review", { exact: true })).toBeVisible();
-      await expect(page.locator("[data-status]")).toContainText("Succeeded", {
-        timeout: 20_000,
-      });
+      // The earlier run detail stays mounted (hidden); scope to the visible one.
+      const freshDetail = page
+        .locator('[data-slot="run-detail"]')
+        .filter({ visible: true });
+      await expect(
+        freshDetail.getByText("/review", { exact: true }),
+      ).toBeVisible();
+      await expect(freshDetail.locator("[data-status]")).toContainText(
+        "Succeeded",
+        { timeout: 20_000 },
+      );
 
       // The real runner comes back for the later steps of the update.
       runner = await startRunner({

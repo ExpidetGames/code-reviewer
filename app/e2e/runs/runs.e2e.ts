@@ -191,13 +191,18 @@ test.describe("the runs pages", () => {
     await expect(
       page.getByRole("heading", { level: 1, name: `${WIDGETS.fullName} #7` }),
     ).toBeVisible();
-    const comment = page.getByRole("link", {
+    // With Cache Components the Runs list stays mounted (hidden) behind the run page; its row carries
+    // the same command and trigger text, so every assertion of the page is scoped to the visible one.
+    const detail = page
+      .locator('[data-slot="run-detail"]')
+      .filter({ visible: true });
+    const comment = detail.getByRole("link", {
       name: "Open the comment on GitHub",
     });
     await expect(comment).toHaveAttribute("href", COMMENT_URL);
     await expect(comment).toHaveAttribute("rel", /noopener/);
-    await expect(page.getByText("posted the review")).toBeVisible();
-    await expect(page.getByText("Automatic", { exact: true })).toBeVisible();
+    await expect(detail.getByText("posted the review")).toBeVisible();
+    await expect(detail.getByText("Automatic", { exact: true })).toBeVisible();
 
     // The Projects page shows the status of the same run as the last run of the repository.
     await page.getByRole("link", { name: "Projects", exact: true }).click();
@@ -301,24 +306,25 @@ test.describe("the runs pages", () => {
       .filter({ hasText: "#21" })
       .getByRole("link", { name: GADGETS.fullName, exact: true })
       .click();
-    // Wait for the run page first. Right after the click the URL is already the run's, but the old
-    // list is still in the document, and its row carries the same sentence as the status banner, so
-    // wait until the list is gone before a text query for the sentence.
+    // The Runs list stays mounted (hidden) behind the run page; its row carries the same sentence as
+    // the status banner, so every assertion of the page is scoped to the visible run detail.
     await expect(
       page.getByRole("heading", { level: 1, name: `${GADGETS.fullName} #21` }),
     ).toBeVisible();
-    await expect(page.locator("[data-run-id]")).toHaveCount(0);
+    const detail = page
+      .locator('[data-slot="run-detail"]')
+      .filter({ visible: true });
     await expect(
-      page.getByText("The AI provider says the credit or quota is used up."),
+      detail.getByText("The AI provider says the credit or quota is used up."),
     ).toBeVisible();
-    await expect(page.getByText("llm_quota")).toBeVisible();
+    await expect(detail.getByText("llm_quota")).toBeVisible();
     await expect(
-      page.getByText("Started by runs-journey", { exact: true }),
+      detail.getByText("Started by runs-journey", { exact: true }),
     ).toBeVisible();
-    await expect(page.getByText("The log was shortened")).toBeVisible();
-    await expect(page.getByText("402 from the provider")).toBeVisible();
+    await expect(detail.getByText("The log was shortened")).toBeVisible();
+    await expect(detail.getByText("402 from the provider")).toBeVisible();
     await expect(
-      page.getByRole("link", { name: "Open the comment on GitHub" }),
+      detail.getByRole("link", { name: "Open the comment on GitHub" }),
     ).toHaveCount(0);
   });
 

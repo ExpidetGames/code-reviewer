@@ -322,21 +322,20 @@ test.describe("a pull request on its way to a review comment", () => {
     await run
       .getByRole("link", { name: WIDGETS.fullName, exact: true })
       .click();
+    // The Runs list stays mounted (hidden) behind the run page; its row carries the same failure
+    // sentence, so every assertion of the page is scoped to the visible run detail.
+    const detail = page
+      .locator('[data-slot="run-detail"]')
+      .filter({ visible: true });
+    await expect(detail.getByText("llm_rate_limit")).toBeVisible();
     await expect(
-      page.getByText("llm_rate_limit").filter({ visible: true }),
-    ).toBeVisible();
-    await expect(
-      page
-        .getByText("The AI provider is limiting requests right now.")
-        .filter({ visible: true }),
+      detail.getByText("The AI provider is limiting requests right now."),
     ).toBeVisible();
 
     // The log of the run shows the error text of the model with the key blanked out, so the check
     // for the key further down looks at text that really held it.
     await expect(
-      page
-        .getByText("Incorrect API key provided: [REDACTED]")
-        .filter({ visible: true }),
+      detail.getByText("Incorrect API key provided: [REDACTED]"),
     ).toBeVisible();
 
     // The model really was asked with the key (so the error text did quote it) ...

@@ -267,7 +267,7 @@ export function RunDetail({
     });
 
   return (
-    <div className="flex max-w-[64rem] flex-col gap-6">
+    <div data-slot="run-detail" className="flex max-w-[64rem] flex-col gap-6">
       {/* The one polite region of the page; it stays in the DOM so an update result is announced. */}
       <StatusRegion label="Updating the run" className="text-warning">
         {failed

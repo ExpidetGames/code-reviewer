@@ -119,7 +119,11 @@ test.describe("starting a review by hand", () => {
     const runId = new URL(page.url()).pathname.split("/").at(-1) ?? "";
     await expect(page.getByText("Started by manual-journey")).toBeVisible();
 
-    await page.getByRole("link", { name: "Runs", exact: true }).click();
+    // The run detail carries a "Runs" breadcrumb; take the sidebar link of the shell.
+    await page
+      .getByRole("navigation", { name: "Main" })
+      .getByRole("link", { name: "Runs", exact: true })
+      .click();
     const run = page
       .locator("[data-run-id]")
       .filter({ hasText: WIDGETS.fullName })
