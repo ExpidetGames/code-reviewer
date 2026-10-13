@@ -180,6 +180,12 @@ describe("the theme stylesheet", () => {
     expect(base).toMatch(/:focus-visible\s*{/);
     expect(base).not.toMatch(/\.(btn|card|page-header)\b/);
   });
+
+  // #185 (review): a link in running text is underlined by default, so colour is not the only cue.
+  it("underlines links in the base layer", () => {
+    const base = css.slice(css.indexOf("@layer base {"));
+    expect(base).toMatch(/a\s*{[^}]*text-decoration:\s*underline;/);
+  });
 });
 
 describe("the Tailwind theme", () => {

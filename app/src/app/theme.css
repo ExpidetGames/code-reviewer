@@ -287,6 +287,11 @@
 
   a {
     color: var(--primary);
+    /* A link in running text is underlined, so colour is never the only cue (WCAG 1.4.1). Kit
+       buttons, sidebar/menu/breadcrumb links and standalone table/card links opt out with
+       `no-underline`. */
+    text-decoration: underline;
+    text-underline-offset: 2px;
   }
 
   :focus-visible {

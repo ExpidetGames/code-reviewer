@@ -61,7 +61,10 @@ Tailwind is imported by `app/src/app/theme.css`, which declares the layer order
 `@layer theme, base, components, utilities;` and imports Tailwind's `theme`, `preflight` (the reset,
 `@layer base`) and `utilities` stylesheets. The project's element-level rules (`body`, headings, `a`,
 `:focus-visible`) live in `@layer base` too, so a Tailwind utility on a kit component wins over
-them. `src/theme/theme.test.ts` fails on a new unlayered element rule.
+them. The `a` rule underlines a link in running text, and the kit Button/Badge plus the standalone
+nav, menu, breadcrumb and table/card links opt out with `no-underline`. `src/theme/theme.test.ts`
+asserts that the `@layer base` block carries `body` and `:focus-visible` and no legacy class rule,
+and that the `a` rule underlines.
 
 ## The migration is finished
 

@@ -58,7 +58,7 @@ export function WorkspaceSwitcher({
               <Link
                 href={workspaceHome(entry.slug)}
                 aria-current={entry.slug === slug ? "true" : undefined}
-                className="text-foreground"
+                className="text-foreground no-underline"
               >
                 {entry.name}
               </Link>
@@ -68,14 +68,17 @@ export function WorkspaceSwitcher({
         {pendingInvitations > 0 || canCreate ? <DropdownMenuSeparator /> : null}
         {pendingInvitations > 0 ? (
           <DropdownMenuItem asChild>
-            <Link href="/invitations" className="text-foreground">
+            <Link href="/invitations" className="text-foreground no-underline">
               Invitations ({pendingInvitations})
             </Link>
           </DropdownMenuItem>
         ) : null}
         {canCreate ? (
           <DropdownMenuItem asChild>
-            <Link href="/workspaces/new" className="text-foreground">
+            <Link
+              href="/workspaces/new"
+              className="text-foreground no-underline"
+            >
               Create a workspace
             </Link>
           </DropdownMenuItem>

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Adapted from shadcn/ui (MIT), https://ui.shadcn.com
-// Local adaptation for Code Reviewer: the neutral/success/warning/danger/info status variants.
+// Local adaptation for Code Reviewer: the neutral/success/warning/danger/info status variants, and
+// `no-underline` so a badge rendered as a link does not take the base link underline (#185 review).
 
 import * as React from "react";
 import { cva, type VariantProps } from "class-variance-authority";
@@ -8,7 +9,7 @@ import { cn } from "@/lib/utils";
 import { Slot } from "radix-ui";
 
 const badgeVariants = cva(
-  "inline-flex w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-full border border-transparent px-2 py-0.5 text-xs font-medium whitespace-nowrap transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&>svg]:pointer-events-none [&>svg]:size-3",
+  "inline-flex w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-full border border-transparent px-2 py-0.5 text-xs font-medium whitespace-nowrap no-underline transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&>svg]:pointer-events-none [&>svg]:size-3",
   {
     variants: {
       variant: {

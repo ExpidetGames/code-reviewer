@@ -63,7 +63,7 @@ export function PullRequestList({
                   href={link}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="shrink-0 text-sm text-primary underline-offset-4 hover:underline"
+                  className="shrink-0 text-sm text-primary underline-offset-4 hover:underline no-underline"
                   aria-label={`Open pull request ${pr.number} on GitHub`}
                 >
                   GitHub
