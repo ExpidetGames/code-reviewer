@@ -55,6 +55,9 @@ describe("no removed class name in the tree", () => {
       "muted",
       "small",
     ]);
+    // #185 review: a removed class in a later argument of the helper is caught too.
+    const later = "c" + 'n("p-4", on && "c' + 'ard")';
+    expect(findRemovedClasses(later).map((f) => f.className)).toEqual(["card"]);
     const selector = ".page" + "-header { margin: 0 }";
     expect(findRemovedSelectors(selector).map((f) => f.className)).toEqual([
       "page-header",

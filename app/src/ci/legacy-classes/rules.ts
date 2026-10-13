@@ -136,33 +136,78 @@ export type LegacyClassFinding = {
   line: number;
 };
 
-// A class attribute with a plain string, or the first string argument of the class helpers. The
+// A class attribute with a plain string, or the string arguments of the class helpers. The
 // template-literal form of `className` is covered by the same group.
 const CLASS_ATTRIBUTE =
   /\b(?:className|class)\s*=\s*(?:"([^"]*)"|'([^']*)'|`([^`]*)`|\{\s*(?:"([^"]*)"|'([^']*)'|`([^`]*)`))/g;
-const CLASS_HELPER =
-  /\b(?:cn|clsx|cva)\s*\(\s*(?:"([^"]*)"|'([^']*)'|`([^`]*)`)/g;
+
+// A helper call `cn`/`clsx`/`cva`: only the opening parenthesis is matched here. The arguments are
+// read as a whole (`helperArguments`), because a removed class can sit in any of them, not only the
+// first.
+const CLASS_HELPER_START = /\b(?:cn|clsx|cva)\s*\(/g;
+const STRING_LITERAL = /"([^"]*)"|'([^']*)'|`([^`]*)`/g;
 
 function lineOf(content: string, index: number): number {
   return content.slice(0, index).split("\n").length;
 }
 
+/** The `[start, end)` of each class helper call's argument list, quotes respected so a `)` inside a string does not end it. */
+function helperArguments(content: string): [number, number][] {
+  const ranges: [number, number][] = [];
+  CLASS_HELPER_START.lastIndex = 0;
+  for (const match of content.matchAll(CLASS_HELPER_START)) {
+    const open = match.index + match[0].length - 1;
+    let depth = 0;
+    let quote: string | null = null;
+    for (let index = open; index < content.length; index += 1) {
+      const char = content[index]!;
+      if (quote !== null) {
+        if (char === "\\") index += 1;
+        else if (char === quote) quote = null;
+        continue;
+      }
+      if (char === '"' || char === "'" || char === "`") quote = char;
+      else if (char === "(") depth += 1;
+      else if (char === ")") {
+        depth -= 1;
+        if (depth === 0) {
+          ranges.push([open + 1, index]);
+          break;
+        }
+      }
+    }
+  }
+  return ranges;
+}
+
+function findingsIn(
+  classes: string,
+  at: number,
+  content: string,
+): LegacyClassFinding[] {
+  const findings: LegacyClassFinding[] = [];
+  for (const token of classes.split(/\s+/)) {
+    // A variant prefix (`md:card`) still carries the class after the colon.
+    const bare = token.slice(token.lastIndexOf(":") + 1);
+    if (REMOVED.has(bare))
+      findings.push({ className: bare, line: lineOf(content, at) });
+  }
+  return findings;
+}
+
 /** The removed class names of the file's class contexts, with their line. */
 export function findRemovedClasses(content: string): LegacyClassFinding[] {
   const findings: LegacyClassFinding[] = [];
-  for (const pattern of [CLASS_ATTRIBUTE, CLASS_HELPER]) {
-    pattern.lastIndex = 0;
-    for (const match of content.matchAll(pattern)) {
-      const classes = match.slice(1).find((value) => value !== undefined) ?? "";
-      for (const token of classes.split(/\s+/)) {
-        // A variant prefix (`md:card`) still carries the class after the colon.
-        const bare = token.slice(token.lastIndexOf(":") + 1);
-        if (REMOVED.has(bare))
-          findings.push({
-            className: bare,
-            line: lineOf(content, match.index),
-          });
-      }
+  for (const match of content.matchAll(CLASS_ATTRIBUTE)) {
+    const classes = match.slice(1).find((value) => value !== undefined) ?? "";
+    findings.push(...findingsIn(classes, match.index, content));
+  }
+  for (const [start, end] of helperArguments(content)) {
+    const body = content.slice(start, end);
+    STRING_LITERAL.lastIndex = 0;
+    for (const literal of body.matchAll(STRING_LITERAL)) {
+      const classes = literal[1] ?? literal[2] ?? literal[3] ?? "";
+      findings.push(...findingsIn(classes, start + literal.index, content));
     }
   }
   return findings.sort((a, b) => a.line - b.line);
