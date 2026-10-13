@@ -44,8 +44,7 @@ export function NoAccessContent({
             <CreateWorkspaceForm {...withApi} />
           ) : (
             <p className="text-sm text-muted-foreground text-pretty">
-              Your account exists, but it is not part of a workspace. Ask an
-              admin of this instance for an invitation.
+              Ask an admin of this instance for an invitation.
             </p>
           )}
         </CardContent>
