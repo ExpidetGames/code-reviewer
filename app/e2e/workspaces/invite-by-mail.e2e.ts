@@ -88,7 +88,7 @@ test.describe("invitations by mail", () => {
     await expect(owner).toHaveURL(/\/no-access$/);
     const create = owner.getByRole("form", { name: "Create a workspace" });
     await create.getByLabel("Name of the workspace").fill(WORKSPACE);
-    await create.getByRole("button", { name: "Create the workspace" }).click();
+    await create.getByRole("button", { name: "Create workspace" }).click();
     await expect(owner).toHaveURL(/\/w\/mail-team\/projects$/);
 
     await owner.goto("/w/mail-team/members");

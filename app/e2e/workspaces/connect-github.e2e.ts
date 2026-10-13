@@ -92,7 +92,7 @@ async function founder(
   await expect(page).toHaveURL(/\/no-access$/);
   const create = page.getByRole("form", { name: "Create a workspace" });
   await create.getByLabel("Name of the workspace").fill(workspace);
-  await create.getByRole("button", { name: "Create the workspace" }).click();
+  await create.getByRole("button", { name: "Create workspace" }).click();
   const slug = workspace.toLowerCase().replace(/[^a-z0-9]+/g, "-");
   await expect(page).toHaveURL(new RegExp(`/w/${slug}/projects$`));
   return { page, slug };
@@ -397,7 +397,7 @@ test.describe("connecting GitHub to a workspace", () => {
     await page.goto("/workspaces/new");
     const create = page.getByRole("form", { name: "Create a workspace" });
     await create.getByLabel("Name of the workspace").fill("Connect A2");
-    await create.getByRole("button", { name: "Create the workspace" }).click();
+    await create.getByRole("button", { name: "Create workspace" }).click();
     await expect(page).toHaveURL(/\/w\/connect-a2\/projects$/);
     await connectGithub(page, "connect-a2", {
       installOn: ORG_A.login,
