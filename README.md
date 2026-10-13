@@ -318,6 +318,12 @@ and several runners on an external Postgres, start from `compose.large.yml` and 
 (`postgres://` or `postgresql://`, or empty for SQLite). The app then schedules no backup — the
 operator backs up the database — and the job queue is safe for concurrent runners.
 
+**Dynamic Review runner (not yet activatable).** `compose.dynamic.yml` is an opt-in override that adds a
+separate runner for Dynamic Review (`docker compose -f compose.yml -f compose.dynamic.yml up -d`). The
+engine is not in the runner image yet, so that runner serves Diff jobs only and no Dynamic job is
+claimed. [docs/dynamic-review.md](docs/dynamic-review.md) has the status, the sizing, the activation
+order (including the instance admin's Dynamic Review switch) and the rollback.
+
 ## Deploy on Coolify
 
 [`docs/deployment-coolify.md`](docs/deployment-coolify.md) is the step by step guide for the team's
