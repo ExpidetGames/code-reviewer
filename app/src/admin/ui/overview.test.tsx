@@ -134,7 +134,9 @@ describe("the needs attention region", () => {
     expect(
       within(attention).getByText("This sign-up rule does not work yet."),
     ).toBeTruthy();
-    expect(within(attention).getByRole("link", { name: "Setup" })).toBeTruthy();
+    expect(
+      within(attention).getByRole("link", { name: "Sign-in" }),
+    ).toBeTruthy();
   });
 
   it("announces stored credentials that cannot be read, without naming a value", () => {
@@ -229,14 +231,16 @@ describe("the setup card", () => {
       "/admin/integrations",
     );
     expect(row("Tenancy").textContent).toContain("Single-tenant");
-    expect(configuredLink("Tenancy").getAttribute("href")).toBe("/admin/setup");
+    expect(configuredLink("Tenancy").getAttribute("href")).toBe(
+      "/admin/setup/instance",
+    );
     expect(row("Sign-up rule").textContent).toContain("Everyone");
     expect(configuredLink("Sign-up rule").getAttribute("href")).toBe(
-      "/admin/setup",
+      "/admin/setup/sign-up",
     );
     expect(row("Ways to sign in").textContent).toContain("Email");
     expect(configuredLink("Ways to sign in").getAttribute("href")).toBe(
-      "/admin/setup",
+      "/admin/setup/sign-in",
     );
 
     for (const title of [

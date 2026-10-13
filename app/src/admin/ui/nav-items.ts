@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // The sections of the admin portal, grouped the way the sidebar shows them. One list feeds the
-// links and the active state. The nested routes of the plan (Setup → Instance/Sign-up/Sign-in,
-// Integrations → GitHub App) arrive with the admin screen issues; here the groups hold the current
-// sections only.
+// links and the active state. The Setup group holds the three sub-pages of the split (#181); the
+// Integrations → GitHub App sub-page arrives with #182.
 
 export type AdminNavItem = { href: string; label: string; exact: boolean };
 export type AdminNavGroup = { label: string; items: AdminNavItem[] };
@@ -19,8 +18,9 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
   {
     label: "Setup",
     items: [
-      { href: "/admin/setup", label: "Setup", exact: false },
-      { href: "/admin/limits", label: "Limits", exact: false },
+      { href: "/admin/setup/instance", label: "Instance", exact: false },
+      { href: "/admin/setup/sign-up", label: "Sign-up", exact: false },
+      { href: "/admin/setup/sign-in", label: "Sign-in", exact: false },
     ],
   },
   {

@@ -1,20 +1,31 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // @vitest-environment jsdom
-// Pins down the forms of the admin pages: what each one sends, the sentences for what the server
-// refuses, and the notice for a sign-up rule that cannot work yet. The rules themselves are the server's
-// (src/admin/service.integration.test.ts); these tests only prove that the forms ask for the right thing
-// and say the reasons.
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+// Pins down the setup forms of the portal (#181): the instance form (tenancy and the limit as two
+// cards of one form, saving only what changed, running both changes and showing each card's own
+// result), the sign-up rule form, and the ways-to-sign-in form. What each one sends, the sentences for
+// what the server refuses, the focus the refused field gets (R20), and — #181-T02 — that each form is
+// exactly one form whose saved state is inline (no remount key). The rules themselves are the server's
+// (src/admin/service.integration.test.ts). The tenancy copy comes from one owner, shared with the
+// wizard (#181-T05).
+import {
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { TENANCY_OPTIONS } from "../../signup/ui/tenancy-copy.ts";
+import { Wizard } from "../../setup/ui/wizard.tsx";
 import type { RequestResult } from "../../ui/json-request.ts";
 import type { AdminSettingsView } from "../service.ts";
 import type { AdminApi, SettingChange } from "./api.ts";
-import { LimitsForm } from "./limits-form.tsx";
+import { InstanceForm } from "./instance-form.tsx";
 import { SignInMethodsForm } from "./sign-in-form.tsx";
+import { SignUpSection } from "./sign-up-section.tsx";
 import { SignUpRuleForm } from "./sign-up-form.tsx";
-import { TenancyForm } from "./tenancy-form.tsx";
 
 const navigation = vi.hoisted(() => ({ refresh: vi.fn() }));
 vi.mock("next/navigation", () => ({
@@ -22,6 +33,8 @@ vi.mock("next/navigation", () => ({
 }));
 
 afterEach(cleanup);
+
+type Answer = RequestResult<{ ok: true; settings: AdminSettingsView }>;
 
 function view(overrides: Partial<AdminSettingsView> = {}): AdminSettingsView {
   const never = { updatedBy: null, updatedAt: null };
@@ -46,12 +59,21 @@ function view(overrides: Partial<AdminSettingsView> = {}): AdminSettingsView {
   };
 }
 
-function apiAnswering(
-  result: RequestResult<{ ok: true; settings: AdminSettingsView }>,
-) {
-  const change = vi.fn<(change: SettingChange) => Promise<typeof result>>(() =>
+function apiAnswering(result: Answer) {
+  const change = vi.fn<(change: SettingChange) => Promise<Answer>>(() =>
     Promise.resolve(result),
   );
+  const testMail = vi.fn<AdminApi["testMail"]>(() =>
+    Promise.resolve({ ok: true, data: { ok: true } } as const),
+  );
+  return { api: { change, testMail } satisfies AdminApi, change };
+}
+
+/** An api whose `change` answers with `results` in order, then repeats the last one. */
+function apiSequencing(...results: Answer[]) {
+  const change = vi.fn<(change: SettingChange) => Promise<Answer>>();
+  for (const result of results) change.mockResolvedValueOnce(result);
+  change.mockResolvedValue(results.at(-1) ?? SAVED);
   const testMail = vi.fn<AdminApi["testMail"]>(() =>
     Promise.resolve({ ok: true, data: { ok: true } } as const),
   );
@@ -64,21 +86,54 @@ const refused = (
   issues: Array<{ field: string; code: string }> = [],
 ) => ({ ok: false, status: 409, code, issues }) as const;
 
-describe("the tenancy form", () => {
+function card(name: "Tenancy" | "Limits"): HTMLElement {
+  return screen.getByRole("group", { name });
+}
+
+describe("the instance form", () => {
   // #98-AD-07
-  it("sends the chosen tenancy and says it was saved", async () => {
+  it("sends the chosen tenancy and says on the card that it was saved", async () => {
     const { api, change } = apiAnswering(SAVED);
     const user = userEvent.setup();
-    render(<TenancyForm settings={view()} api={api} />);
+    render(<InstanceForm settings={view()} api={api} />);
 
     await user.click(screen.getByRole("radio", { name: /Multi-tenant/ }));
-    await user.click(screen.getByRole("button", { name: "Save tenancy" }));
+    await user.click(
+      screen.getByRole("button", { name: "Save instance settings" }),
+    );
 
     await waitFor(() =>
-      expect(screen.getByRole("status").textContent).toBe("Saved."),
+      expect(within(card("Tenancy")).getByRole("status").textContent).toBe(
+        "Saved.",
+      ),
     );
     expect(change).toHaveBeenCalledWith({ tenancy: "multi" });
     expect(navigation.refresh).toHaveBeenCalled();
+  });
+
+  it("sends only the limit when only the limit changed", async () => {
+    const { api, change } = apiAnswering(SAVED);
+    const user = userEvent.setup();
+    render(<InstanceForm settings={view()} api={api} />);
+    const field = screen.getByLabelText(/Maximum number of workspaces/);
+    expect((field as HTMLInputElement).value).toBe("10");
+
+    await user.clear(field);
+    await user.type(field, "3");
+    await user.click(
+      screen.getByRole("button", { name: "Save instance settings" }),
+    );
+
+    await waitFor(() => expect(change).toHaveBeenCalled());
+    expect(change).toHaveBeenCalledWith({
+      limits: { maxWorkspacesPerUser: 3 },
+    });
+    expect(change).toHaveBeenCalledTimes(1);
+    await waitFor(() =>
+      expect(within(card("Limits")).getByRole("status").textContent).toBe(
+        "Saved.",
+      ),
+    );
   });
 
   // #98-AD-06
@@ -86,7 +141,7 @@ describe("the tenancy form", () => {
     const { api } = apiAnswering(refused("too_many_workspaces"));
     const user = userEvent.setup();
     render(
-      <TenancyForm
+      <InstanceForm
         settings={view({
           tenancy: { value: "multi", updatedBy: null, updatedAt: null },
           workspaceCount: 3,
@@ -96,17 +151,92 @@ describe("the tenancy form", () => {
     );
 
     await user.click(screen.getByRole("radio", { name: /Single-tenant/ }));
-    await user.click(screen.getByRole("button", { name: "Save tenancy" }));
+    await user.click(
+      screen.getByRole("button", { name: "Save instance settings" }),
+    );
 
     await waitFor(() =>
-      expect(screen.getByRole("alert").textContent).toContain("3 workspaces"),
+      expect(within(card("Tenancy")).getByRole("alert").textContent).toContain(
+        "3 workspaces",
+      ),
     );
+  });
+
+  it("runs the second change and shows both results when the first is refused", async () => {
+    const { api, change } = apiSequencing(
+      refused("too_many_workspaces"),
+      SAVED,
+    );
+    const user = userEvent.setup();
+    render(
+      <InstanceForm
+        settings={view({
+          tenancy: { value: "multi", updatedBy: null, updatedAt: null },
+          workspaceCount: 3,
+        })}
+        api={api}
+      />,
+    );
+
+    await user.click(screen.getByRole("radio", { name: /Single-tenant/ }));
+    const field = screen.getByLabelText(/Maximum number of workspaces/);
+    await user.clear(field);
+    await user.type(field, "3");
+    await user.click(
+      screen.getByRole("button", { name: "Save instance settings" }),
+    );
+
+    // The independent limit change is not dropped because the tenancy was refused.
+    await waitFor(() => expect(change).toHaveBeenCalledTimes(2));
+    expect(change).toHaveBeenNthCalledWith(1, { tenancy: "single" });
+    expect(change).toHaveBeenNthCalledWith(2, {
+      limits: { maxWorkspacesPerUser: 3 },
+    });
+    await waitFor(() =>
+      expect(within(card("Tenancy")).getByRole("alert").textContent).toContain(
+        "3 workspaces",
+      ),
+    );
+    expect(within(card("Limits")).getByRole("status").textContent).toBe(
+      "Saved.",
+    );
+    // The limit was saved, so the page data (and "last changed") is refreshed.
+    expect(navigation.refresh).toHaveBeenCalled();
+  });
+
+  it("shows the saved card next to the refused one when the second is refused", async () => {
+    const { api } = apiSequencing(
+      SAVED,
+      refused("invalid_input", [
+        { field: "maxWorkspacesPerUser", code: "number_out_of_range" },
+      ]),
+    );
+    const user = userEvent.setup();
+    render(<InstanceForm settings={view()} api={api} />);
+
+    await user.click(screen.getByRole("radio", { name: /Multi-tenant/ }));
+    const field = screen.getByLabelText(/Maximum number of workspaces/);
+    await user.clear(field);
+    await user.type(field, "abc");
+    await user.click(
+      screen.getByRole("button", { name: "Save instance settings" }),
+    );
+
+    await waitFor(() =>
+      expect(within(card("Tenancy")).getByRole("status").textContent).toBe(
+        "Saved.",
+      ),
+    );
+    expect(
+      within(card("Limits")).getByText(/Enter a whole number/),
+    ).toBeTruthy();
+    expect(navigation.refresh).toHaveBeenCalled();
   });
 
   // #98-AD-14
   it("shows who changed the tenancy last and when", () => {
     render(
-      <TenancyForm
+      <InstanceForm
         settings={view({
           tenancy: {
             value: "multi",
@@ -125,9 +255,79 @@ describe("the tenancy form", () => {
   });
 
   it("says that a setting was never changed", () => {
-    render(<TenancyForm settings={view()} />);
+    render(<InstanceForm settings={view()} />);
 
-    expect(screen.getByText(/Never changed/)).toBeTruthy();
+    expect(screen.getAllByText(/Never changed/)).toHaveLength(2);
+  });
+
+  it("shows the server's reason for a number that is not allowed", async () => {
+    const { api } = apiAnswering({
+      ok: false,
+      status: 422,
+      code: "invalid_input",
+      issues: [{ field: "maxWorkspacesPerUser", code: "number_out_of_range" }],
+    });
+    const user = userEvent.setup();
+    render(<InstanceForm settings={view()} api={api} />);
+    const field = screen.getByLabelText(/Maximum number of workspaces/);
+
+    await user.clear(field);
+    await user.type(field, "abc");
+    await user.click(
+      screen.getByRole("button", { name: "Save instance settings" }),
+    );
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("Enter a whole number from 1 to 1000."),
+      ).toBeTruthy(),
+    );
+  });
+
+  // #181-T06 (rulebook R20)
+  it("moves focus to the limit field when the limit is refused", async () => {
+    const { api } = apiAnswering(
+      refused("invalid_input", [
+        { field: "maxWorkspacesPerUser", code: "number_out_of_range" },
+      ]),
+    );
+    const user = userEvent.setup();
+    render(<InstanceForm settings={view()} api={api} />);
+    const field = screen.getByLabelText(/Maximum number of workspaces/);
+
+    await user.clear(field);
+    await user.type(field, "abc");
+    await user.click(
+      screen.getByRole("button", { name: "Save instance settings" }),
+    );
+
+    await waitFor(() => expect(document.activeElement).toBe(field));
+  });
+
+  // #181-T06 (rulebook R20)
+  it("moves focus to the tenancy choice when the tenancy is refused", async () => {
+    const { api } = apiAnswering(refused("too_many_workspaces"));
+    const user = userEvent.setup();
+    render(
+      <InstanceForm
+        settings={view({
+          tenancy: { value: "multi", updatedBy: null, updatedAt: null },
+          workspaceCount: 3,
+        })}
+        api={api}
+      />,
+    );
+
+    await user.click(screen.getByRole("radio", { name: /Single-tenant/ }));
+    await user.click(
+      screen.getByRole("button", { name: "Save instance settings" }),
+    );
+
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("radio", { name: /Single-tenant/ }),
+      ),
+    );
   });
 });
 
@@ -202,35 +402,52 @@ describe("the sign-up rule form", () => {
     ).toBe("true");
   });
 
-  // #97-SU-19
-  // #99-SR-22
-  it("shows the notice while the rule cannot work yet, and not otherwise", () => {
-    const rule: AdminSettingsView["signUpRule"] = {
-      value: { kind: "domains", entries: ["example.com"] },
-      updatedBy: null,
-      updatedAt: null,
-    };
+  // #181-T06 (rulebook R20)
+  it("moves focus to the entries when the server refuses them", async () => {
+    const { api } = apiAnswering({
+      ok: false,
+      status: 422,
+      code: "invalid_input",
+      issues: [{ field: "signUp.entries", code: "entry_invalid" }],
+    });
+    const user = userEvent.setup();
+    render(<SignUpRuleForm settings={view()} api={api} />);
+
+    await user.click(
+      screen.getByRole("radio", { name: /A list of email addresses/ }),
+    );
+    const entries = screen.getByLabelText("Email addresses");
+    await user.type(entries, "not an email");
+    await user.click(screen.getByRole("button", { name: "Save sign-up rule" }));
+
+    await waitFor(() => expect(document.activeElement).toBe(entries));
+  });
+});
+
+describe("the sign-up page body", () => {
+  // #181: the negative case of the fail-closed notice (the old "and not otherwise").
+  it("shows the fail-closed notice only while the rule cannot work yet", () => {
     const closed = render(
-      <SignUpRuleForm
+      <SignUpSection
         settings={view({
-          signUpRule: rule,
+          signUpRule: {
+            value: { kind: "domains", entries: ["a.com"] },
+            updatedBy: null,
+            updatedAt: null,
+          },
           signUpRuleState: { failClosed: true },
         })}
       />,
     );
-    expect(screen.getByRole("note").textContent).toContain("does not work yet");
+    expect(
+      screen.getByRole("region", { name: "Needs attention" }).textContent,
+    ).toContain("does not work yet");
     closed.unmount();
 
-    render(
-      <SignUpRuleForm
-        settings={view({
-          signUpRule: rule,
-          signUpRuleState: { failClosed: false },
-        })}
-      />,
-    );
-
-    expect(screen.queryByRole("note")).toBeNull();
+    render(<SignUpSection settings={view()} />);
+    expect(
+      screen.queryByRole("region", { name: "Needs attention" }),
+    ).toBeNull();
   });
 });
 
@@ -239,9 +456,22 @@ describe("the form of the ways to sign in", () => {
   it("cannot switch GitHub on while it is not configured, and says why", () => {
     render(<SignInMethodsForm settings={view({ githubConfigured: false })} />);
 
-    const github = screen.getByRole("checkbox", { name: /GitHub/ });
-    expect((github as HTMLInputElement).disabled).toBe(true);
+    const github = screen.getByRole("switch", { name: /GitHub/ });
+    expect((github as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText(/set up the GitHub App/)).toBeTruthy();
+  });
+
+  // #181: the wrapper is a real 44px target, a `<label for>` like the project toggle.
+  it("wraps each switch in a label associated with it", () => {
+    render(<SignInMethodsForm settings={view({ githubConfigured: true })} />);
+
+    for (const name of [/Email with password/, /GitHub/]) {
+      const control = screen.getByRole("switch", { name });
+      const wrapper = control.closest("label");
+      expect(wrapper).not.toBeNull();
+      expect(wrapper?.getAttribute("for")).toBe(control.id);
+      expect(wrapper?.className).toContain("min-h-11");
+    }
   });
 
   // #98-SIGN-IN-METHODS
@@ -270,7 +500,7 @@ describe("the form of the ways to sign in", () => {
     );
 
     await user.click(
-      screen.getByRole("checkbox", { name: /Email with password/ }),
+      screen.getByRole("switch", { name: /Email with password/ }),
     );
     await user.click(
       screen.getByRole("button", { name: "Save ways to sign in" }),
@@ -303,45 +533,26 @@ describe("the form of the ways to sign in", () => {
       ),
     );
   });
-});
 
-describe("the limits form", () => {
-  it("sends the number and shows the default", async () => {
-    const { api, change } = apiAnswering(SAVED);
+  // #181-T06 (rulebook R20)
+  it("moves focus to the GitHub switch when that way is refused", async () => {
+    const { api } = apiAnswering(refused("admin_needs_github_identity"));
     const user = userEvent.setup();
-    render(<LimitsForm settings={view()} api={api} />);
-    const field = screen.getByLabelText(/Maximum number of workspaces/);
-    expect((field as HTMLInputElement).value).toBe("10");
+    render(
+      <SignInMethodsForm
+        settings={view({ githubConfigured: true })}
+        api={api}
+      />,
+    );
 
-    await user.clear(field);
-    await user.type(field, "3");
-    await user.click(screen.getByRole("button", { name: "Save limit" }));
-
-    await waitFor(() => expect(change).toHaveBeenCalled());
-    expect(change).toHaveBeenCalledWith({
-      limits: { maxWorkspacesPerUser: 3 },
-    });
-  });
-
-  it("shows the server's reason for a number that is not allowed", async () => {
-    const { api } = apiAnswering({
-      ok: false,
-      status: 422,
-      code: "invalid_input",
-      issues: [{ field: "maxWorkspacesPerUser", code: "number_out_of_range" }],
-    });
-    const user = userEvent.setup();
-    render(<LimitsForm settings={view()} api={api} />);
-    const field = screen.getByLabelText(/Maximum number of workspaces/);
-
-    await user.clear(field);
-    await user.type(field, "abc");
-    await user.click(screen.getByRole("button", { name: "Save limit" }));
+    await user.click(
+      screen.getByRole("button", { name: "Save ways to sign in" }),
+    );
 
     await waitFor(() =>
-      expect(
-        screen.getByText("Enter a whole number from 1 to 1000."),
-      ).toBeTruthy(),
+      expect(document.activeElement).toBe(
+        screen.getByRole("switch", { name: /GitHub/ }),
+      ),
     );
   });
 });
@@ -355,14 +566,82 @@ describe("a failure that is not about a field", () => {
       issues: [],
     });
     const user = userEvent.setup();
-    render(<TenancyForm settings={view()} api={api} />);
+    render(<InstanceForm settings={view()} api={api} />);
 
-    await user.click(screen.getByRole("button", { name: "Save tenancy" }));
+    await user.click(screen.getByRole("radio", { name: /Multi-tenant/ }));
+    await user.click(
+      screen.getByRole("button", { name: "Save instance settings" }),
+    );
 
     await waitFor(() =>
-      expect(screen.getByRole("alert").textContent).toContain(
+      expect(within(card("Tenancy")).getByRole("alert").textContent).toContain(
         "could not be reached",
       ),
     );
+  });
+});
+
+describe("the shape of the setup forms", () => {
+  // #181-T02
+  it("renders every setup form as exactly one form with the saved state inline, not via a remount key", async () => {
+    const user = userEvent.setup();
+    const renders = [
+      { key: "instance", element: <InstanceForm settings={view()} /> },
+      { key: "sign-up", element: <SignUpRuleForm settings={view()} /> },
+      {
+        key: "sign-in",
+        element: <SignInMethodsForm settings={view()} />,
+      },
+    ];
+    for (const { key, element } of renders) {
+      const { container, unmount } = render(<div key={key}>{element}</div>);
+      expect(container.querySelectorAll("form")).toHaveLength(1);
+      // Every form owns at least one inline live region; the instance form has one per card.
+      expect(
+        container.querySelectorAll("form [role='status']").length,
+      ).toBeGreaterThanOrEqual(1);
+      unmount();
+    }
+
+    // A save keeps what was chosen (the form is not remounted) and shows "Saved." inline.
+    const { api } = apiAnswering(SAVED);
+    render(<InstanceForm settings={view()} api={api} />);
+    await user.click(screen.getByRole("radio", { name: /Multi-tenant/ }));
+    await user.click(
+      screen.getByRole("button", { name: "Save instance settings" }),
+    );
+    await waitFor(() =>
+      expect(within(card("Tenancy")).getByRole("status").textContent).toBe(
+        "Saved.",
+      ),
+    );
+    expect(
+      (
+        screen.getByRole("radio", { name: /Multi-tenant/ }) as HTMLElement
+      ).getAttribute("aria-checked"),
+    ).toBe("true");
+  });
+});
+
+describe("the shared tenancy copy", () => {
+  // #181-T05
+  it("is rendered identically by the first-run wizard and the instance form, from one owner", () => {
+    const wizard = render(
+      <Wizard
+        api={{ submitCode: vi.fn(), complete: vi.fn() }}
+        onDone={vi.fn()}
+      />,
+    );
+    for (const option of TENANCY_OPTIONS) {
+      expect(screen.getByText(option.title)).toBeTruthy();
+      expect(screen.getByText(option.text)).toBeTruthy();
+    }
+    wizard.unmount();
+
+    render(<InstanceForm settings={view()} />);
+    for (const option of TENANCY_OPTIONS) {
+      expect(screen.getByText(option.title)).toBeTruthy();
+      expect(screen.getByText(option.text)).toBeTruthy();
+    }
   });
 });
