@@ -52,6 +52,7 @@ from code_reviewer_runner.dynamic_review.budget import BudgetLedger, LimitError
 from code_reviewer_runner.dynamic_review.completion_stream import completion_as_stream
 from code_reviewer_runner.dynamic_review.config import PROXY_CAPABILITY_BYTES, PROXY_PROVIDER_ID
 from code_reviewer_runner.dynamic_review.net import no_redirect_opener
+from code_reviewer_runner.error_mapping import llm_status_code
 from code_reviewer_runner.job_loop.jsonvalues import as_object
 from code_reviewer_runner.result import ErrorCode
 
@@ -427,12 +428,8 @@ class ModelProxy:
 
     @staticmethod
     def _provider_error(status: int) -> tuple[bytes, ErrorCode]:
-        code = {
-            401: ErrorCode.LLM_AUTH,
-            402: ErrorCode.LLM_QUOTA,
-            403: ErrorCode.LLM_AUTH,
-            429: ErrorCode.LLM_RATE_LIMIT,
-        }.get(status, ErrorCode.LLM_UNAVAILABLE if status >= 500 else ErrorCode.LLM_BAD_REQUEST)
+        # The static path's table (error_mapping.py); a status it has no rule for is a bad request.
+        code = llm_status_code(status) or ErrorCode.LLM_BAD_REQUEST
         return error_body(code, "the model provider refused the request"), code
 
     def _models_body(self) -> bytes:

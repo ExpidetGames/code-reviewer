@@ -378,7 +378,7 @@ and the enum agree. Callers branch on the code, never on the text.
 | `git_unavailable` | GitHub could not be reached, timed out or answered 5xx |
 | `git_unprocessable` | GitHub answered 422 |
 | `git_provider_init` | PR-Agent could not create its GitHub client and no cause is known |
-| `llm_auth` | The LLM provider rejected the key (401, 403). Called `llm_auth_failed` in some planning notes; this is the same thing |
+| `llm_auth` | The LLM provider rejected the key (401, 403). Called `llm_auth_failed` in some planning notes; this is the same thing. In a Dynamic Review the engine sees HTTP 403 both for this and for a budget refusal; the cause of the job is the code the ledger recorded, not the engine's HTTP status |
 | `llm_quota` | The LLM account has no credit left (402) |
 | `llm_rate_limit` | The LLM provider rate limit (429) |
 | `llm_timeout` | The LLM provider did not answer in time |

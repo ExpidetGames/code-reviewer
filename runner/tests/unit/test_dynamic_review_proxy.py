@@ -23,6 +23,7 @@ from code_reviewer_runner.dynamic_review.proxy import (
     UpstreamPost,
     capabilities_from_config,
 )
+from code_reviewer_runner.error_mapping import _LLM_STATUS, classify_failure  # pyright: ignore[reportPrivateUsage]
 from code_reviewer_runner.result import ErrorCode
 
 UPSTREAM_KEY = "sk-or-v1-workspace-key-0123456789"
@@ -242,6 +243,68 @@ def test_a_provider_refusal_becomes_a_stable_code_and_is_never_a_partial_success
         assert error_code(response) == code.value
         # The provider's own message never reaches the engine.
         assert b"provider message" not in response.body
+
+
+def static_path_code(status: int) -> ErrorCode | None:
+    """What the static path makes of a provider error with this HTTP status."""
+    # What the openai/litellm exceptions carry: a class from their module and a `status_code`.
+    api_error = type("APIStatusError", (Exception,), {"__module__": "openai"})
+    error = api_error("provider message with data in it")
+    error.status_code = status  # type: ignore[attr-defined]
+    return classify_failure([error], [])
+
+
+# Every status the shared table knows, so a new entry is covered here without touching the test,
+# plus a few 5xx for the rule that is not in the table.
+PROVIDER_STATUSES = (*sorted(_LLM_STATUS), 500, 502, 503, 504)
+
+
+# #240-T03
+@pytest.mark.parametrize("status", PROVIDER_STATUSES)
+def test_a_provider_status_gets_the_same_code_as_on_the_static_path(status: int) -> None:
+    expected = static_path_code(status)
+    assert expected is not None
+    upstream = Upstream(status=status, body={"error": "provider message with data in it"})
+    subject = proxy(upstream)
+
+    response = post(subject, request_body())
+
+    assert error_code(response) == expected.value
+    # The provider's own message never reaches the engine, and the ledger holds the same code.
+    assert b"provider message" not in response.body
+    recorded = subject.ledger.failure
+    assert recorded is not None
+    assert recorded.code is expected
+
+
+# #240-T01, #240-T02
+@pytest.mark.parametrize(
+    ("status", "code"), [(408, ErrorCode.LLM_TIMEOUT), (404, ErrorCode.MODEL_UNKNOWN)]
+)
+def test_a_provider_timeout_and_unknown_model_keep_their_own_codes(
+    status: int, code: ErrorCode
+) -> None:
+    subject = proxy(Upstream(status=status, body={"error": "x"}))
+
+    response = post(subject, request_body())
+
+    assert error_code(response) == code.value
+    assert subject.ledger.failure is not None
+    assert subject.ledger.failure.code is code
+
+
+# #240: a status no rule knows has no exception class to inspect, so the proxy answers bad request
+@pytest.mark.parametrize("status", [409, 413])
+def test_a_provider_status_with_no_rule_is_a_bad_request(status: int) -> None:
+    subject = proxy(Upstream(status=status, body={"error": "provider message with data in it"}))
+
+    response = post(subject, request_body())
+
+    assert response.status == status
+    assert error_code(response) == ErrorCode.LLM_BAD_REQUEST.value
+    assert b"provider message" not in response.body
+    assert subject.ledger.failure is not None
+    assert subject.ledger.failure.code is ErrorCode.LLM_BAD_REQUEST
 
 
 # #197-T05
