@@ -337,6 +337,19 @@ def test_when_the_active_findings_alone_exceed_the_budget_the_lowest_priority_go
     assert decode_state(encode_state(fitted)) == fitted
 
 
+# #199-T10
+def test_findings_dropped_by_the_cap_and_by_the_budget_in_one_write_are_all_counted() -> None:
+    big = {"body": "x" * 8000, "evidence": ("e" * 1000,) * 5}
+    findings = (*many(MAX_FINDINGS + 10, "low", priority="P3", **big),)
+    state = ReviewState(reviewed_sha=SHA, findings=findings, resolved=())
+
+    fitted = fit_state(state)
+
+    assert 0 < len(fitted.findings) < MAX_FINDINGS
+    assert fitted.omitted_findings == len(findings) - len(fitted.findings)
+    assert len(encode_state(fitted)) <= MAX_STATE_CHARS
+
+
 # #199-T09
 @pytest.mark.parametrize("value", [-1, True, "3", 1_000_001])
 def test_an_invalid_omitted_count_fails_closed(value: object) -> None:
