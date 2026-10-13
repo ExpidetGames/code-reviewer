@@ -1,20 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// The content of the Runs page: the filter, then the list. `loadRunsPage` gathers the data from the
-// services (passed in, so a test uses real ones against a test database), `RunsPageContent` renders
-// it. The page file only wires the real services. The filter is the address (`?repository=...&status=...`),
-// so it survives a reload and the back button, and a page that stays mounted behind another one
-// (Cache Components) shows the filter of its own address.
+// The content of the Runs page: the filter toolbar, then the list. `loadRunsPage` gathers the data
+// from the services (passed in, so a test uses real ones against a test database), `RunsPageContent`
+// renders it. The page file only wires the real services. The filter is the address
+// (`?repository=...&status=...`), so it survives a reload and the back button; the toolbar is
+// controlled from that filter, so neither the toolbar nor the list needs a remount key when the
+// address changes (a page that stays mounted behind another one, Cache Components).
 import Link from "next/link";
-import type { JobStatus } from "../../jobs/job-status.ts";
+import { Button } from "../../components/button.tsx";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "../../components/ui/empty.tsx";
 import type { ProjectService } from "../../projects/service.ts";
 import { noRunsYet, type LastRunSource } from "../../projects/ui/list-view.ts";
-import { EmptyState } from "../../ui/empty-state.tsx";
 import { workspacePath } from "../../workspaces/paths.ts";
-import { RUN_STATUS_ORDER, RUN_STATUS_PRESENTATION } from "../run-status.ts";
 import { parseRunsFilter, type RunsService } from "../runs-service.ts";
 import type { RunsSnapshot } from "../run-view.ts";
 import type { RunsApi, RunsFilter } from "./api.ts";
+import { RunsFilterToolbar } from "./runs-filter.tsx";
 import { RunsList } from "./runs-list.tsx";
 
 export type RunsPageData =
@@ -76,64 +83,6 @@ export async function loadRunsPage(
   };
 }
 
-function filterKey(filter: RunsFilter): string {
-  return `${filter.repositoryId ?? ""}|${filter.status ?? ""}`;
-}
-
-function RunsFilterForm({
-  workspaceSlug,
-  filter,
-  projects,
-}: {
-  workspaceSlug: string;
-  filter: RunsFilter;
-  projects: { id: string; name: string }[];
-}) {
-  const active =
-    filter.repositoryId !== undefined || filter.status !== undefined;
-  return (
-    <form
-      method="get"
-      action={workspacePath(workspaceSlug, "/runs")}
-      className="runs-filter"
-    >
-      <label>
-        Project
-        <select name="repository" defaultValue={filter.repositoryId ?? ""}>
-          <option value="">All projects</option>
-          {projects.map((project) => (
-            <option key={project.id} value={project.id}>
-              {project.name}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        Status
-        <select name="status" defaultValue={filter.status ?? ""}>
-          <option value="">All statuses</option>
-          {RUN_STATUS_ORDER.map((status: JobStatus) => (
-            <option key={status} value={status}>
-              {RUN_STATUS_PRESENTATION[status].label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <button type="submit" className="btn btn-secondary">
-        Apply filter
-      </button>
-      {active ? (
-        <Link
-          href={workspacePath(workspaceSlug, "/runs")}
-          className="btn btn-ghost"
-        >
-          Reset filter
-        </Link>
-      ) : null}
-    </form>
-  );
-}
-
 export function RunsPageContent({
   workspaceSlug,
   data,
@@ -147,34 +96,34 @@ export function RunsPageContent({
 }) {
   if (data.kind === "invalid_filter")
     return (
-      <EmptyState
-        title="This filter is not valid"
-        action={
-          <Link
-            href={workspacePath(workspaceSlug, "/runs")}
-            className="btn btn-secondary"
-          >
-            Reset filter
-          </Link>
-        }
-      >
-        The project or status in the address is not one Code Reviewer knows.
-      </EmptyState>
+      <Empty className="border border-border bg-card">
+        <EmptyHeader>
+          <EmptyTitle>
+            <h2>This filter is not valid</h2>
+          </EmptyTitle>
+          <EmptyDescription>
+            The project or status in the address is not one Code Reviewer knows.
+          </EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent>
+          <Button asChild variant="secondary">
+            <Link href={workspacePath(workspaceSlug, "/runs")}>
+              Reset filter
+            </Link>
+          </Button>
+        </EmptyContent>
+      </Empty>
     );
   return (
     <>
-      {/* Keyed on the filter too: the selects only know their `defaultValue` at the start, so after
-          "Reset filter" or Back and Forward they must start over with the filter of the address. */}
-      <RunsFilterForm
-        key={`filter:${filterKey(data.filter)}`}
+      <RunsFilterToolbar
         workspaceSlug={workspaceSlug}
         filter={data.filter}
         projects={data.projects}
       />
-      {/* Keyed on the filter: a page that stays mounted behind another one starts over when its
-          address, and so its data, changes. */}
+      {/* The list is not keyed: the filter is a prop and the snapshot is new server data, which
+          `useLiveSnapshot` starts from without the component being thrown away. */}
       <RunsList
-        key={`list:${filterKey(data.filter)}`}
         workspaceSlug={workspaceSlug}
         initial={data.snapshot}
         filter={data.filter}

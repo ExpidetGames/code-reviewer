@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 import { projectServiceFor } from "@/projects/shared";
 import { loadRunsPage, RunsPageContent } from "@/runs/ui/runs-page";
 import { lastRunSourceFor, runsServiceFor } from "@/runs/shared";
-import { PageHeader } from "@/ui/page-header";
+import { PageHeader } from "@/components/page-header";
 import { requireWorkspace } from "@/workspaces/access-runtime";
 
 export const metadata: Metadata = { title: "Runs" };
@@ -21,10 +21,7 @@ export default async function RunsPage({
   const { workspace } = await requireWorkspace(slug);
   return (
     <>
-      <PageHeader
-        title="Runs"
-        description="Every review Code Reviewer has started."
-      />
+      <PageHeader title="Runs" />
       <RunsContent
         workspaceId={workspace.id}
         workspaceSlug={workspace.slug}

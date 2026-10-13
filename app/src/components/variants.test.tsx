@@ -33,6 +33,7 @@ describe("the badge", () => {
     ["info", "Running"],
     ["success", "Passed"],
     ["warning", "Waiting"],
+    ["danger", "Failed"],
     ["destructive", "Failed"],
   ] as const)(
     "renders the %s status with its label, never colour alone",

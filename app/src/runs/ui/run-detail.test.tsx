@@ -4,9 +4,16 @@
 // Pins down the detail page of a run: the facts, the comment link rules, the error sentence with its
 // code, the log notices, text from outside rendered as text, and the polling that stops at the last
 // state or goes on after a failed update.
-import { act, cleanup, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RequestResult } from "../../ui/json-request.ts";
+import { RUN_STATUS_PRESENTATION } from "../run-status.ts";
 import type { RunDetailSnapshot, RunDetailView } from "../run-view.ts";
 import type { RunsApi } from "./api.ts";
 import { DETAIL_POLL_FAILED_TEXT } from "./poll-messages.ts";
@@ -99,6 +106,60 @@ describe("the detail page", () => {
     );
     expect(link.getAttribute("rel")).toContain("noopener");
     expect(link.getAttribute("target")).toBe("_blank");
+  });
+
+  // #175-T03
+  it("groups the facts and keeps the status description behind the badge", async () => {
+    render(
+      <RunDetail
+        workspaceSlug="acme"
+        initial={snap(detail())}
+        api={apiAnswering([])}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Summary" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Timings" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Diagnostics" })).toBeTruthy();
+    expect(
+      screen.queryByText(RUN_STATUS_PRESENTATION.succeeded.description),
+    ).toBeNull();
+
+    const hint = screen.getByRole("button", {
+      name: "About the status Succeeded",
+    });
+    fireEvent.focus(hint);
+
+    const describedBy = hint.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    expect(document.getElementById(describedBy ?? "")?.textContent).toContain(
+      RUN_STATUS_PRESENTATION.succeeded.description,
+    );
+  });
+
+  it("copies the log and announces the result", async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    render(
+      <RunDetail
+        workspaceSlug="acme"
+        initial={snap(
+          detail({ log: { text: "reviewed 3 files", truncated: false } }),
+        )}
+        api={apiAnswering([])}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy log" }));
+    await act(async () => {});
+
+    expect(
+      screen.getByRole("status", { name: "Copying the log" }).textContent,
+    ).toBe("Copied.");
+    expect(writeText).toHaveBeenCalledWith("reviewed 3 files");
   });
 
   // CR-35-T04
@@ -352,13 +413,15 @@ describe("polling the detail page", () => {
     );
 
     await pass(3000);
-    expect(screen.getByRole("status").textContent).toBe(
-      DETAIL_POLL_FAILED_TEXT,
-    );
+    expect(
+      screen.getByRole("status", { name: "Updating the run" }).textContent,
+    ).toBe(DETAIL_POLL_FAILED_TEXT);
     expect(screen.getByText("Running")).toBeTruthy();
 
     await pass(3000);
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(
+      screen.getByRole("status", { name: "Updating the run" }).textContent,
+    ).toBe("");
     expect(screen.getByText("Succeeded")).toBeTruthy();
   });
 
@@ -385,12 +448,11 @@ describe("polling the detail page", () => {
 
     await pass(3000);
 
-    expect(screen.getByRole("status").textContent).toContain(
+    const status = screen.getByRole("status", { name: "Updating the run" });
+    expect(status.textContent).toContain(
       "Your session has ended. Sign in again.",
     );
-    expect(screen.getByRole("status").textContent).toContain(
-      "no longer updates",
-    );
+    expect(status.textContent).toContain("no longer updates");
     await pass(600_000);
     expect(api.detail).toHaveBeenCalledTimes(1);
   });
@@ -406,9 +468,9 @@ describe("polling the detail page", () => {
 
     await pass(3000);
 
-    expect(screen.getByRole("status").textContent).toContain(
-      "This run no longer exists.",
-    );
+    expect(
+      screen.getByRole("status", { name: "Updating the run" }).textContent,
+    ).toContain("This run no longer exists.");
     await pass(600_000);
     expect(api.detail).toHaveBeenCalledTimes(1);
   });

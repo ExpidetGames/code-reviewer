@@ -8,7 +8,10 @@ to it, under `ui/`, and keep their MIT header (see `THIRD_PARTY_LICENSES.md` and
 
 - **Primitives**: `@/components/ui/<name>` (`button`, `card`, `badge`, `alert`, `field`, `empty`,
   `table`, `dialog`, `sheet`, `dropdown-menu`, `select`, `tabs`, ...). These are the copied shadcn
-  components; each file is adapted only where a short comment says so.
+  components; each file is adapted only where a short comment says so. The `badge` carries the
+  `neutral | info | success | warning | danger` tones; a status is never told by colour alone (the
+  label is always in the badge). `danger` is the soft tone for a failed state, next to the solid
+  `destructive` used for errors.
 - **App wrappers** (ours, in this folder): use these instead of hand-writing the pattern.
   - `@/components/button` — the Button for screens: variants `primary | secondary | ghost |
 destructive`, sizes `sm | default | icon`, the `loading`/`loadingLabel` convention and the
@@ -27,7 +30,8 @@ destructive`, sizes `sm | default | icon`, the `loading`/`loadingLabel` conventi
     in the DOM and is hidden while closed, the trigger announces `aria-expanded`/`aria-controls` and
     has a 44px target. An optional `ariaLabel` gives a repeated disclosure a distinct accessible name
     (one per row, for example "Evidence for acme") while the visible label stays short.
-  - `@/components/status-region` — `role="status"`, `aria-live="polite"`.
+  - `@/components/status-region` — `role="status"`, `aria-live="polite"`, and an optional `label` so the
+    live regions of one page (an update result, a copy result) are told apart.
   - `@/components/needs-attention` — the one attention region of a screen: a labelled "Needs attention"
     section with up to `maxRows` (default 2) `Alert` rows and the rest behind a `HelpDisclosure`.
     Screens with notices (#173, #174, #178) use it instead of stacking separate notice regions.
