@@ -152,10 +152,10 @@ test.describe("the GitHub integration of the admin portal", () => {
     await expect(page.getByText(`@${operator.login}`)).toBeVisible();
 
     // Now GitHub can be the only way to sign in.
-    await page.goto("/admin/setup");
-    await page.getByRole("checkbox", { name: /Email with password/ }).uncheck();
-    // ("Saved." only shows for an instant: the form starts again from the saved values as soon as the page has
-    // refreshed, which is quick. The lasting proof is the answer of the data route here and the login page below.)
+    await page.goto("/admin/setup/sign-in");
+    await page.getByRole("switch", { name: /Email with password/ }).click();
+    // ("Saved." stays next to the button (#181); the answer of the data route is the lasting proof, and
+    // the login page below proves what the saved setting means.)
     const saved = page.waitForResponse(
       (response) =>
         response.request().method() === "PUT" &&
@@ -166,7 +166,7 @@ test.describe("the GitHub integration of the admin portal", () => {
     // The saved setting is what the page says once it has the data again.
     await page.reload();
     await expect(
-      page.getByRole("checkbox", { name: /Email with password/ }),
+      page.getByRole("switch", { name: /Email with password/ }),
     ).not.toBeChecked();
 
     // The login page offers GitHub only, and the operator's GitHub account is the admin.
