@@ -139,6 +139,34 @@ describe("the Dynamic Review card of the instance form", () => {
   });
 
   // #202 (gate control)
+  it("asks for the rollout confirmation again after a successful save", async () => {
+    const { api } = apiAnswering(SAVED);
+    const user = userEvent.setup();
+    render(<InstanceForm settings={view()} api={api} />);
+    const dynamic = card("Dynamic Review");
+
+    await user.click(
+      within(dynamic).getByRole("checkbox", { name: /Allow Dynamic Review/ }),
+    );
+    await user.click(
+      within(dynamic).getByRole("checkbox", { name: /every app instance/i }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Save instance settings" }),
+    );
+    await waitFor(() =>
+      expect(within(dynamic).getByRole("status").textContent).toBe("Saved."),
+    );
+
+    // The confirmation belonged to that save: it must not carry over to the next one.
+    expect(
+      within(dynamic)
+        .getByRole("checkbox", { name: /every app instance/i })
+        .getAttribute("aria-checked"),
+    ).toBe("false");
+  });
+
+  // #202 (gate control)
   it("turns the gate off without a confirmation", async () => {
     const { api, change } = apiAnswering(SAVED);
     const user = userEvent.setup();

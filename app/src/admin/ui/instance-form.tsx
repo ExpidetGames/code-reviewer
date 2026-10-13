@@ -105,6 +105,10 @@ export function InstanceForm({
       next[key] = outcomes[index] ?? null;
     });
     setResults(next);
+    // The confirmation belongs to this save: the next time the gate is turned on it is asked again.
+    const dynamicIndex = wanted.indexOf("dynamic");
+    if (dynamicIndex !== -1 && outcomes[dynamicIndex]?.kind === "saved")
+      setRolloutConfirmed(false);
     const failed = outcomes.findIndex((outcome) => outcome.kind === "failed");
     if (failed !== -1)
       focusTargetRef.current =
