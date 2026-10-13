@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 "use client";
-// Renames the workspace (an Owner; the address, the slug, stays).
+// Renames the workspace (an Owner; the address, the slug, stays). One form with one explicit save and
+// the saved state inline next to it; a refused name is named under the field.
 import { useRouter } from "next/navigation";
 import { useId, useState, type FormEvent } from "react";
-import { Button } from "../../ui/button.tsx";
+import { Button } from "../../components/button.tsx";
+import { StatusRegion } from "../../components/status-region.tsx";
+import { Field, FieldError, FieldLabel } from "../../components/ui/field.tsx";
+import { Input } from "../../components/ui/input.tsx";
 import { browserWorkspaceApi, type WorkspaceApi } from "./api.ts";
 import { describeWorkspaceFailure } from "./messages.ts";
 
@@ -44,37 +48,32 @@ export function RenameForm({
   return (
     <form
       onSubmit={(event) => void submit(event)}
-      className="settings-form"
       aria-label="Workspace name"
+      noValidate
+      className="flex max-w-[44rem] flex-col gap-4"
     >
-      {problem !== null ? (
-        <p role="alert" className="alert alert-error">
-          {problem}
-        </p>
-      ) : null}
-      {saved ? (
-        <p role="status" className="alert alert-success">
-          The name is saved.
-        </p>
-      ) : null}
-      <div className="field">
-        <label htmlFor={id} className="field-label">
-          Name of the workspace
-        </label>
-        <input
+      <Field data-invalid={problem !== null || undefined}>
+        <FieldLabel htmlFor={id}>Name of the workspace</FieldLabel>
+        <Input
           id={id}
           type="text"
           autoComplete="off"
           required
           maxLength={80}
           value={name}
+          aria-invalid={problem !== null}
+          aria-describedby={problem !== null ? `${id}-error` : undefined}
           onChange={(event) => setName(event.target.value)}
         />
-      </div>
-      <div className="form-actions">
-        <Button type="submit" disabled={pending}>
-          {pending ? "Saving..." : "Save the name"}
+        {problem !== null ? (
+          <FieldError id={`${id}-error`}>{problem}</FieldError>
+        ) : null}
+      </Field>
+      <div className="flex items-center gap-3">
+        <Button type="submit" loading={pending} loadingLabel="Saving">
+          Save the name
         </Button>
+        {saved ? <StatusRegion>The name is saved.</StatusRegion> : null}
       </div>
     </form>
   );

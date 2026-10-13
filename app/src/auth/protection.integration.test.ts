@@ -87,6 +87,9 @@ const PROTECTED_ROUTES = [
   "/w/[workspace]/runs",
   "/w/[workspace]/runs/[id]",
   "/w/[workspace]/settings",
+  "/w/[workspace]/settings/advanced",
+  "/w/[workspace]/settings/llm",
+  "/w/[workspace]/settings/review-defaults",
 ] as const;
 // Data routes: a visitor without a session gets 401 instead of a redirect.
 const PROTECTED_DATA_ROUTES = [

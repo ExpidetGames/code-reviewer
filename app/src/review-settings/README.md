@@ -153,22 +153,87 @@ object), `403 REVIEW_SETTINGS_CROSS_SITE_REQUEST`, `413 REVIEW_SETTINGS_BODY_TOO
 `415 REVIEW_SETTINGS_CONTENT_TYPE_UNSUPPORTED`, `404 REVIEW_SETTINGS_PROJECT_NOT_FOUND` (there is no such
 repository, or the platform no longer lists it and it has no project). The settings pages (below) call these routes from the browser.
 
+## The project-only settings: review kind, Dynamic model and skill (#194)
+
+A project also selects the one review kind it runs (#193). These fields live in the same
+`projects.settings` JSON as the Diff overrides but are **project-only**: the global defaults and the
+built-in layer never hold them (`validateReviewSettingsPatch` reports them as `UNKNOWN_FIELD`), so a
+review kind can never become a workspace-wide default.
+
+| Field          | Meaning                                                                               | Default                   |
+| -------------- | ------------------------------------------------------------------------------------- | ------------------------- |
+| `reviewKind`   | `diff` (the existing PR-Agent review) or `dynamic` (the read-only agent of the epic)  | `diff`                    |
+| `dynamicModel` | The model a Dynamic review uses, as the configured provider spells it, kept literally | `deepseek-v4.1-flash`     |
+| `reviewSkill`  | The project's review-skill override, or absent for the shipped default skill          | the shipped default skill |
+
+`dynamicModel` is a **default, not an allow-list** (#194-T08): any identifier the provider serves is
+kept as-is, with no provider rewrite and no routing field. How a configured model is resolved and
+whether it can serve the engine's needs is #197's business, not a project setting. `reviewKind` is
+independent of the Diff `model`, so each kind keeps its own model and skill across a switch.
+
+**No SQL migration.** The fields are JSON inside `projects.settings`, and missing values read as Diff
+Review, `deepseek-v4.1-flash` and the shipped skill (`resolveProjectDynamicSettings`,
+`builtInProjectDynamicSettings`). An existing project therefore behaves exactly as before; a
+legacy-data integration fixture pins this (`service.integration.test.ts`, #194-T06).
+
+The skill is **untrusted data**: it is stored as text, bounded to `PROJECT_DYNAMIC_LIMITS.reviewSkillMaxBytes`
+(16 KiB of UTF-8, so multibyte characters count as their bytes), refused with a stable code on
+forbidden control characters or an unpaired surrogate, and never interpreted. An empty or null value is
+an explicit reset to the shipped default, never another project's skill. A `deepseek-v4.1-flash`-like
+provider/model slug, a URL, a permission or a credential is not part of these settings.
+
+`default-skill.ts` is the **reader seam** for the shipped default skill (id, version, hash and text);
+#198 replaces the provisional text with the attributed Codex-based asset and keeps the identity shape.
+The service, the route and the runner packaging share this one seam.
+
+A project save keeps the two groups apart. A request that carries **any** Diff field replaces the
+Diff override set as a whole (a field left out is inherited again); a request that carries **only**
+project-only fields keeps the stored Diff group, so switching kind, changing the Dynamic model or
+resetting the skill removes nothing of the Diff configuration, and an empty request still replaces the
+Diff group with nothing (every Diff field taken back to its default). The project-only fields are
+always merged over the stored ones, so a request that does not mention them keeps them and a
+`reviewSkill` of `""`/`null` clears only that override.
+
+The write goes through `projects.updateSettingsWith` in one transaction. The stored settings are read
+under a lock on the workspace-scoped repository row: SQLite already holds the single write lock
+(`begin immediate`), Postgres takes the row's `FOR UPDATE` lock before the read, so two instances
+cannot lose an update by reading the same settings and writing them back
+(`projects-repository.postgres.integration.test.ts`). The same transaction calls `hooks.ts`
+`onProjectSettingsChanged`, for a save **and** for a full reset, so #195 can cancel the project's
+waiting reviews on a kind change; a rejecting hook rolls the write or the reset back (`#194-T07`). A
+full reset (`DELETE`) clears every override, including the project-only fields, and reports the kind
+change back to Diff.
+
+`ui/form-state.ts` deliberately does **not** send the project-only settings: it only sends the Diff
+fields the person set (plus their preserved Diff overrides), and the server keeps the stored
+project-only fields a request does not mention. A form that was opened before another client changed
+the kind, model or skill therefore cannot overwrite the newer value with its stale one.
+
+`getProjectSettings` / `resolveForRepository` expose the `dynamic` view: the effective kind, model and
+skill, where each comes from, the shipped defaults, whether the skill is the default, the default
+skill's identity and the size limit.
+
 ## The pages
 
-`/settings` holds the instance state (GitHub App, LLM access) and the form for the global defaults;
-`/w/:workspace/projects/:repositoryId` holds the same form for one project. The form (`ui/settings-form.tsx`)
-shows the value in force and where it comes from (built-in, global, this project); changing a field sets it
-for the layer, "Reset to default" takes it back; a save sends only the fields that are set and replaces the
-layer. Since #174 it is three cards (Model, Review, When to review, from `ui/model-fieldset.tsx`,
-`ui/review-fieldset.tsx` and `ui/when-fieldset.tsx`) in one form with one footer; the estimated cost sits in
-the Model card and resetting the whole project is a separate card at the bottom whose confirmation is a
-dialog. `ui/form-state.ts` checks the values with `validateReviewSettingsPatch` before sending, so a
+The workspace settings are sub-pages with a sub-nav (#178). `/w/:workspace/settings` is **General** (the
+workspace name, the read-only instance, tenancy and member facts and the one "Needs attention" strip);
+`/w/:workspace/settings/review-defaults` holds the form for the global defaults;
+`/w/:workspace/settings/llm` holds the workspace key; `/w/:workspace/settings/advanced` holds the
+destructive actions (removing the key, resetting every default). A project has its own settings page
+(`/w/:workspace/projects/:repositoryId`) next to its "Review now" page (#174). The form
+(`ui/settings-form.tsx`) shows the value in force and where it comes from (built-in, global, this project);
+changing a field sets it for the layer, "Reset to default" takes it back; a save sends only the fields that
+are set and replaces the layer. Since #174 it is three cards (Model, Review, When to review, from
+`ui/model-fieldset.tsx`, `ui/review-fieldset.tsx` and `ui/when-fieldset.tsx`) in one form with one footer;
+the estimated cost sits in the Model card and resetting the whole project is a separate card at the bottom
+whose confirmation is a dialog. `ui/form-state.ts` checks the values with `validateReviewSettingsPatch`
+before sending, so a
 wrong value is named next to its field with a sentence from `ui/messages.ts` (a code is never shown);
 the answer of the server is shown the same way, including `EXCEEDS_MODEL_CONTEXT`, and the first marked
 field takes the focus. The estimated
 cost updates while typing (`estimateReviewCost`) and shows the `above_limit` and `cost_unknown`
 warnings and a token budget above the context window; warnings never block a save. The **fallback
-model** is stored but not sent to the runner in the MVP: the form says so next to the field and the cost summary lists it as "not used yet" without an estimate or a cost warning (a context window that is too small still blocks the save, so that warning stays). A form is keyed on the server data, so a page that Next keeps mounted after a navigation starts from fresh data when it is shown again; the reset asks for a confirmation first. A later issue (#200) adds a "Review kind" card between the last card and the footer.
+model** is stored but not sent to the runner in the MVP: the form says so next to the field and the cost summary lists it as "not used yet" without an estimate or a cost warning (a context window that is too small still blocks the save, so that warning stays). A form is keyed on the server data, so a page that Next keeps mounted after a navigation starts from fresh data when it is shown again. For a project, the reset asks for a confirmation first; the workspace-wide reset is a danger zone on `/settings/advanced` (an empty patch through the same global route, `ui/reset-defaults.tsx`). A later issue (#200) adds a "Review kind" card between the last card and the footer.
 
 The claim of the runner API and the webhook intake use `service.resolveForRepository(repositoryId)`
 (`shared.ts`: `getReviewSettingsService()`), then `toRunnerSettings` and the checks above.

@@ -572,7 +572,9 @@ describe("the settings form", () => {
       <SettingsForm workspaceSlug="acme" initial={model} api={{ save }} />,
     );
 
-    expect(screen.getByRole("button", { name: "Save defaults" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Save review defaults" }),
+    ).toBeTruthy();
     expect(
       screen.queryByRole("button", { name: /Reset everything/ }),
     ).toBeNull();
