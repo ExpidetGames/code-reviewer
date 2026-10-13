@@ -318,11 +318,22 @@ test.describe("connecting GitHub to a workspace", () => {
     // Signed in: the admin lands on a page of the app (they may have a workspace of their own by now).
     await expect(admin).toHaveURL(/\/(no-access|w\/[a-z0-9-]+\/projects)$/);
     await admin.goto("/admin/approvals");
+    // The screen header carries the one action; the three states are tabs (#183).
+    await expect(
+      admin.getByRole("heading", { level: 1, name: "Approvals" }),
+    ).toBeVisible();
+    await expect(
+      admin.getByRole("button", { name: "Sync from GitHub" }),
+    ).toBeVisible();
     const waiting = admin
       .getByRole("list", { name: "Requests waiting for a decision" })
       .getByRole("listitem")
       .filter({ hasText: ORG_OPAQUE.login });
     await expect(waiting).toBeVisible();
+    // The evidence is behind a disclosure, closed at first (#183).
+    await waiting
+      .getByRole("button", { name: `Evidence for ${ORG_OPAQUE.login}` })
+      .click();
     await expect(waiting).toContainText("connect-o@e2e.test");
     await expect(waiting).toContainText(`GitHub account ${opaque.login}`);
     await expect(waiting).toContainText("Connect O");
