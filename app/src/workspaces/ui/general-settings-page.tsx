@@ -23,6 +23,7 @@ import type {
 import type { WorkspaceLlmSummary } from "../../llm/assemble.ts";
 import { llmAccessAttention } from "../../llm/ui/llm-access-notice.tsx";
 import type { WorkspaceApi } from "./api.ts";
+import { LegacyLlmHashRedirect } from "./legacy-llm-hash-redirect.tsx";
 import { RenameForm } from "./rename-form.tsx";
 import { SettingsScreen } from "./settings-shell.tsx";
 
@@ -73,6 +74,7 @@ export function GeneralSettingsPageContent({
   ];
   return (
     <SettingsScreen workspaceSlug={workspaceSlug} current="">
+      <LegacyLlmHashRedirect workspaceSlug={workspaceSlug} />
       <NeedsAttention notices={notices} />
       <div className="flex max-w-[64rem] flex-col gap-6">
         <Card role="region" aria-labelledby="workspace-heading">

@@ -10,7 +10,7 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ refresh: () => undefined }),
+  useRouter: () => ({ refresh: () => undefined, replace: () => undefined }),
 }));
 
 import { estimateReviewCost } from "../../review-settings/cost.ts";

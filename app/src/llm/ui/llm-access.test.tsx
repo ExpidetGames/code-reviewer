@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // @vitest-environment jsdom
-// Pins down the "LLM access" section: an Admin or an Owner gets the form (provider, write-only key, save, test,
-// remove); a Member is only told whether reviews have a key; nothing on the page holds the key; changing the
-// provider asks for the key again; the hint "LLM not configured" links to the section and is gone while a key
-// works.
+// Pins down the "LLM access" section: an Admin or an Owner gets the form (provider, write-only key,
+// save, test); a Member is only told whether reviews have a key; nothing on the page holds the key;
+// changing the provider asks for the key again; the hint "LLM not configured" links to the section and
+// is gone while a key works. Removing the key is a destructive action of the "Advanced" sub-page
+// (`remove-workspace-key.tsx`).
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -290,7 +291,7 @@ describe("the LLM access section for an Admin or an Owner", () => {
     expect(screen.queryByRole("button", { name: "Remove key" })).toBeNull();
   });
 
-  it("says that a saved key cannot be read and asks for it again", () => {
+  it("says that a saved key cannot be read and asks for it again, not as an alert", () => {
     section({
       keyStatus: {
         state: "unreadable",
@@ -301,6 +302,8 @@ describe("the LLM access section for an Admin or an Owner", () => {
     });
 
     expect(screen.getByText("The saved key cannot be read.")).toBeTruthy();
+    // Server-determined and static: no `role="alert"` (#178 review N1).
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("says that the operator can decrypt the key", () => {

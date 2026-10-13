@@ -143,7 +143,9 @@ export function LlmAccessForm({
       className="flex max-w-[44rem] flex-col gap-4"
     >
       {keyStatus.state === "unreadable" ? (
-        <Alert variant="destructive">
+        // Server-determined and static: no `role="alert"` (the kit's default), which would interrupt a
+        // screen reader on load; a polite status is enough (#178 review N1).
+        <Alert variant="destructive" role="status">
           <AlertDescription>
             <strong>The saved key cannot be read.</strong>{" "}
             {UNREADABLE_SECRET_CAUSE} Enter the key again and save. Until then

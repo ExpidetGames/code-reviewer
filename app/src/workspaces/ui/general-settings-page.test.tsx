@@ -5,11 +5,21 @@
 // read-only name (everybody else), the read-only instance, tenancy and member facts, and the one
 // "Needs attention" strip that carries the configuration hints and the workspace's LLM hint. A member
 // reads no variable name and no value.
-import { cleanup, render, screen, within } from "@testing-library/react";
+import {
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const navigation = vi.hoisted(() => ({ refresh: vi.fn(), replace: vi.fn() }));
 vi.mock("next/navigation", () => ({
-  useRouter: () => ({ refresh: () => undefined }),
+  useRouter: () => ({
+    refresh: navigation.refresh,
+    replace: navigation.replace,
+  }),
 }));
 
 import {
@@ -23,7 +33,13 @@ import type { WorkspaceLlmSummary } from "../../llm/assemble.ts";
 import { testGithubAppStatus } from "../../test-support/github-app.ts";
 import { GeneralSettingsPageContent } from "./general-settings-page.tsx";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  navigation.refresh.mockClear();
+  navigation.replace.mockClear();
+  // The redirect test sets a hash; leave the next test a clean address.
+  window.history.replaceState(null, "", "/");
+});
 
 const LLM_KEY = "dummy-llm-key-0123456789";
 const MISSING_GITHUB: GithubAppStatus = {
@@ -127,5 +143,16 @@ describe("the General settings sub-page", () => {
       screen.queryByRole("region", { name: "Needs attention" }),
     ).toBeNull();
     expect(container.textContent).not.toContain(LLM_KEY);
+  });
+
+  // #178 review N3
+  it("sends an old `#llm-access` bookmark on to the LLM sub-page", async () => {
+    window.history.replaceState(null, "", "#llm-access");
+
+    general();
+
+    await waitFor(() =>
+      expect(navigation.replace).toHaveBeenCalledWith("/w/acme/settings/llm"),
+    );
   });
 });
