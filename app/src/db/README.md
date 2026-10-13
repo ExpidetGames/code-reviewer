@@ -41,6 +41,11 @@ The schema, the migrations, the codecs and the query builder are the same on bot
 test (`postgres.integration.test.ts`) compares the tables, columns, nullability and mapped types of
 the two. What differs, and why:
 
+- **Queue/gate transactions** take the instance gate advisory lock before repository/project and
+  job rows (multi-row transitions lock jobs by ascending id). Enqueue/settings share it; gate changes
+  and runner mutations take it exclusively. Disable cancels waiting Dynamic work while running
+  leases stay valid; release/expiry read the gate atomically and fail instead of requeueing Dynamic
+  work while off. Exact order and process-quiescence rollback boundary: `contracts/README.md`.
 - The **claim** of a job (`repositories/jobs-claim.ts`): SQLite relies on its single write lock and
   `begin immediate`, Postgres on `FOR UPDATE SKIP LOCKED` plus the partial unique index
   `jobs_one_running_per_pull_request_unique` (present on both) and a savepoint retry when a

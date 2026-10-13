@@ -47,6 +47,11 @@ export type RequestOptions = {
   authorization?: string | null;
   /** `X-Runner-Id`. Default `runner-a`. `null` leaves the header out. */
   runnerId?: string | null;
+  /**
+   * #195: the engines sent in the claim body. Left out, the request has no body at all, which is how
+   * a previous-release runner asks and means `pr-agent`. An empty array is an (invalid) explicit list.
+   */
+  engines?: string[];
 };
 
 export async function startRunnerApiHarness(
@@ -71,9 +76,12 @@ export async function startRunnerApiHarness(
     llmKey?: string | null;
   } = {},
 ) {
-  const fixture = await createJobQueueFixture(
-    options.limits === undefined ? {} : { limits: options.limits },
-  );
+  const fixture = await createJobQueueFixture({
+    // The runner API tests exercise routing by engines; the Dynamic Review rollout gate (#195) is
+    // covered by the queue tests, so the harness enables it.
+    dynamicReview: true,
+    ...(options.limits === undefined ? {} : { limits: options.limits }),
+  });
   const github = await startGithubAppHarness();
   github.fake.addInstallation({
     id: 4242,
@@ -245,12 +253,21 @@ export async function startRunnerApiHarness(
   const url = "https://app.test/api/runners/v1";
 
   function claim(request: RequestOptions = {}): Promise<Response> {
-    return api.claim(
-      new Request(`${url}/claim`, {
+    return api.claim(claimRequest(request));
+  }
+
+  /** The claim request of the runner: no body, or the engines it advertises (#195). */
+  function claimRequest(request: RequestOptions): Request {
+    if (request.engines === undefined)
+      return new Request(`${url}/claim`, {
         method: "POST",
         headers: headers(request),
-      }),
-    );
+      });
+    return new Request(`${url}/claim`, {
+      method: "POST",
+      headers: headers(request, { "content-type": "application/json" }),
+      body: JSON.stringify({ engines: request.engines }),
+    });
   }
 
   function postTo(
@@ -287,12 +304,7 @@ export async function startRunnerApiHarness(
     return {
       claimedKeys: other.claimedKeys,
       claim: (request: RequestOptions = {}) =>
-        other.api.claim(
-          new Request(`${url}/claim`, {
-            method: "POST",
-            headers: headers(request),
-          }),
-        ),
+        other.api.claim(claimRequest(request)),
       complete: (
         jobId: string,
         leaseToken: string,

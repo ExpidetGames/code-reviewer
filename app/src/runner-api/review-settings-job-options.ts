@@ -22,6 +22,26 @@ export function createReviewSettingsJobOptionsSource(deps: {
       // No project: the claim guard refuses such a job before it asks for options, so this is a job
       // that raced with a deletion. No options is the safe answer (the runner's defaults apply).
       if (resolved === undefined) return { env: {} };
+      // #195 (finding 2): the branch follows the **job's pinned kind**, never the project's current
+      // kind. A settings save can run after the atomic claim but before this call; whichever way the
+      // kind moved, the claimed job keeps the options of the kind it was queued for.
+      if (job.reviewKind === "dynamic")
+        return {
+          // A Dynamic job gets the project's model and skill, and **no** PR-Agent env: those options
+          // grant nothing to the read-only agent and must never be promoted into its permissions.
+          env: {},
+          llm: {
+            model: resolved.dynamic.dynamicModel,
+            maxTokens: resolved.settings.maxTokens,
+          },
+          dynamic: {
+            model: resolved.dynamic.dynamicModel,
+            skill: resolved.dynamic.reviewSkill,
+            maxFindings: resolved.settings.maxFindings,
+          },
+        };
+      // A Diff job keeps the PR-Agent options of the effective Diff settings, even if the project was
+      // switched to Dynamic after it was claimed. `toRunnerSettings` never depends on the kind.
       const { llm, env, fallbackModels } = toRunnerSettings(resolved.settings);
       return { env, llm: { ...llm, fallbackModels } };
     },

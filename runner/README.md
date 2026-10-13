@@ -30,6 +30,11 @@ Rules (the CR-29 decisions; tests in `tests/unit/test_job_loop*.py` and `tests/i
   timeout), so it does not see `RUNNER_TOKEN` or the job of another process, and its own working
   directory (empty, removed afterwards: PR-Agent reads a `pyproject.toml` there). It leads its own
   process group, so ending a job ends everything it started.
+- **The engines of a claim (#195).** The loop sends `{"engines": [...]}` with every claim: `pr-agent`
+  always, `opencode` only after the fail-closed startup self-check proved the dedicated unprivileged
+  engine user, a read-only export and proxy-only egress (`capabilities.py`; the concrete probes are
+  #202's). A runner that cannot run a kind is never handed such a job by the app; a Dynamic job that
+  arrives anyway is refused locally and never run by PR-Agent.
 - **Refused jobs start nothing.** The input is validated with the runner's own `parse_job` before a
   process is started: an unknown command (`invalid_command`) or platform and any other invalid input
   (`invalid_job`) are reported with `complete` at once. The platforms are the table in
@@ -84,6 +89,12 @@ The job is JSON on stdin (the shape is documented in `src/code_reviewer_runner/j
 | `git` | `provider` (`github`), `baseUrl`, `token` (installation token), `botLogin` (`<app slug>[bot]`) |
 | `llm` | `provider` (`openrouter`), `model`, `apiKey`; optional `baseUrl` (loopback only, for test fakes), `maxTokens` and `fallbackModels` (see below) |
 | `env` | optional options of the PR-Agent tools, as strings; one option per key (`PR_REVIEWER__NUM_MAX_FINDINGS`, never a second `__`). The app sends only `PR_REVIEWER__*`; the removed tools' families (`PR_DESCRIPTION__*`, `PR_CODE_SUGGESTIONS__*`, `PR_QUESTIONS__*`) are accepted for v1 compatibility and ignored. Nothing else is accepted. See "Settings policy" for how the values are read. |
+| `reviewKind`, `dynamic`, `base` | #195: a tagged **Dynamic** job. Absent means a Diff job (the legacy shape). `dynamic` is a closed object `{ model, skill, limits: { maxFindings } }` — model/skill/limits only, the skill is literal data and no field can add a command, a core override, a permission or an endpoint. `base` is `{ repository, baseRef, headSha, previousReviewedSha, comparison }`, the checkout facts; `comparison` is a declared mode, not proof of completeness. |
+
+A Dynamic job is never run by PR-Agent: this stage has no engine yet, so `main` refuses it with the
+stable code `dynamic_engine_unavailable` before any process starts (#197 adds the engine). A Diff job
+is unchanged. An unknown kind, a Dynamic job without its `dynamic`/`base` fields, or a Diff job that
+carries Dynamic options is an `invalid_job`.
 
 `llm.maxTokens` (integer, 1000 to 10,000,000) is the context window the runner gives PR-Agent. It
 sets `config.custom_model_max_tokens` (used for a model PR-Agent does not know) and
@@ -166,6 +177,14 @@ and the enum agree. Callers branch on the code, never on the text.
 | `llm_bad_request` | The LLM provider refused the request (400, 422, context too large) |
 | `llm_output_invalid` | The model answered, but its answer could not be turned into a review |
 | `model_unknown` | PR-Agent does not know the model (set `llm.maxTokens`) or the provider has no such model |
+| `dynamic_engine_unavailable` | A Dynamic Review job arrived but no engine is available to run it; the runner never falls back to PR-Agent |
+| `dynamic_isolation_self_check_failed` | The Dynamic engine's startup self-check did not prove the dedicated user, read-only export and proxy-only egress, so the engine is not advertised or launched |
+| `dynamic_config_invalid` | The Dynamic options of a job are missing or unusable (model, skill or limits) |
+| `checkout_incomplete` | The checkout for a Dynamic Review could not be prepared completely |
+| `dynamic_policy_violation` | The Dynamic Review would have broken a hard policy (a tool, a path or an output rule) and was stopped |
+| `dynamic_budget_exceeded` | The Dynamic Review used more than its allowed budget |
+| `dynamic_accounting_failed` | The Dynamic Review's model usage could not be established or accounted for |
+| `dynamic_model_features_unsupported` | The configured model does not support the tool calling or structured output Dynamic Review requires; there is no fallback model or provider |
 | `timeout` | The command did not finish within `RUNNER_JOB_TIMEOUT_SECONDS` (also reported by the job loop for a process it had to end) |
 | `unknown` | Something failed that no rule recognises |
 

@@ -32,12 +32,58 @@ by the code that enqueues (the trigger policy of the webhook handler, CR-31), no
 queued --claim--> running --complete--> succeeded | failed
 queued --newer automatic job--> superseded     running --lease lost or release--> queued (attempts + 1)
 queued --project off / PR closed--> cancelled  running --last attempt lost, or too long--> failed
+queued --review kind changed--> cancelled
 ```
 
 `succeeded`, `failed`, `superseded` and `cancelled` are final; nothing leads back from them. A
 superseded job keeps `superseded_by`; a cancelled or failed job keeps its `error_code`
-(`project_deactivated`, `pull_request_closed`, `lease_expired`, `timeout`, or the code a runner
-reported).
+(`project_deactivated`, `pull_request_closed`, `review_kind_changed`, `lease_expired`, `timeout`, or
+the code a runner reported).
+
+## The review kind of a job (#195)
+
+A job is queued for exactly one review kind, `diff` (PR-Agent) or `dynamic` (the read-only agent of
+the epic), stored in `jobs.review_kind`. It is resolved when the job is enqueued, from the project's
+stored settings, **inside the enqueue transaction** (`review-kind.ts`). Before resolving the kind,
+`jobs-repository.ts` locks the workspace-scoped repository row, the same row settings saves lock
+with `FOR UPDATE` on PostgreSQL (including before the first project row exists). SQLite uses its
+immediate transaction write lock. Both retain the lock through commit, so a concurrent kind change
+can never leave a stale-kind job waiting. A producer never passes a kind; a repository without a project row is Diff.
+
+The rollout gate: Dynamic Review is only **queued** when the instance setting `dynamic_review` says
+`{ enabled: true }` (`dynamic-review-gate.ts`), default off until #202 ships. With the gate off, a
+Dynamic project still gets a run, and that run is created `failed` with `dynamic_review_disabled` —
+visible in Runs, never a silent Diff review and never a Dynamic row a previous-release app could
+claim. PostgreSQL queue writers take the instance gate advisory lock before row locks: shared for
+enqueue/settings, exclusive for gate changes and runner transitions; multi-row operations then lock
+jobs by ascending id (full order: `contracts/README.md`). Disabling cancels queued Dynamic work and
+leaves running jobs, their leases/heartbeats and PR slots unchanged. A release or lease expiry with
+the gate off fails Dynamic work with `dynamic_review_disabled` instead of requeueing it. Use the
+instance settings repository setter; a raw SQL update bypasses this boundary. There is no UI or CLI
+for this stored instance setting; #202 owns those controls. See `contracts/README.md` for the
+upgrade/rollback order.
+
+The kind widens what the queue treats as "the same job": the automatic per-head uniqueness, the
+comment/manual duplicate check and supersession all include it, so a Diff job and a Dynamic job of one
+pull request are two jobs. Per-PR serialization (one running job per pull request) is **not** split by
+kind: two waiting kinds of one pull request still run one after the other.
+
+A runner only ever claims a kind one of its engines can run (`runner-capabilities.ts`,
+`runner-queue.ts`): the claim filters on `review_kind` in the atomic statement, so an ineligible job is
+never selected — it keeps waiting without an attempt being counted and without credentials being
+created. Because every production runner advertises only `pr-agent` until #202, such a job is
+**cancelled** after `noCapableRunnerMs` (default 30 minutes, `RUNNER_NO_CAPABLE_TIMEOUT_SECONDS`) with
+the stable code `no_capable_runner`. That is the one exception to "waiting forever": it is a bounded
+outcome, not a failed review, and no attempt is counted. This initial-claim deadline starts at the
+later of creation and `run_after`, so a scheduled delay does not consume the waiting budget. Jobs
+already claimed (`attempts > 0` after lease loss/release) follow the existing lease/attempt/backoff
+policy instead, independently of which runner polls first.
+
+When the project's review kind changes, #194's `ReviewSettingsHooks.onProjectSettingsChanged` calls
+`cancelWaitingForReviewKindChange` in the settings transaction: the project's waiting jobs become
+`cancelled` with `review_kind_changed`, a running job finishes, and a rejecting hook rolls the
+settings change (and the cancellation) back. The hook is `createJobReviewSettingsHooks`, wired in
+`review-settings/shared.ts`.
 
 ## Enqueueing
 

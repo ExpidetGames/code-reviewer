@@ -22,6 +22,7 @@ function job(overrides: Partial<Job> = {}): Job {
     prNumber: 7,
     prUrl: "https://github.com/acme/widgets/pull/7",
     headSha: "a".repeat(40),
+    reviewKind: "diff",
     command: "review",
     args: "",
     triggerKind: "webhook",

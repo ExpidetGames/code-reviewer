@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from code_reviewer_runner import __version__
+from code_reviewer_runner.capabilities import ENGINE_DIFF
 from code_reviewer_runner.job_loop.jsonvalues import as_object
 
 _JOB_ID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
@@ -131,11 +132,18 @@ class HttpRunnerApi:
     """The runner API over HTTP. Blocking calls run in a thread, so the loop stays responsive."""
 
     def __init__(
-        self, base_url: str, token: str, runner_id: str, *, request_timeout: float = 30.0
+        self,
+        base_url: str,
+        token: str,
+        runner_id: str,
+        *,
+        engines: tuple[str, ...] = (ENGINE_DIFF,),
+        request_timeout: float = 30.0,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._token = token
         self._runner_id = runner_id
+        self._engines = engines or (ENGINE_DIFF,)
         self._timeout = request_timeout
         # No proxy: the token must only go to the app, and the app is reached directly.
         self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirects)
@@ -143,7 +151,9 @@ class HttpRunnerApi:
     # -- the three calls ----------------------------------------------------------------------
 
     async def claim(self) -> ClaimedJob | None:
-        reply = await asyncio.to_thread(self._send, "/claim", None)
+        # #195: the engines this runner can run. A previous-release runner sends no body; this one
+        # advertises what its startup self-check proved.
+        reply = await asyncio.to_thread(self._send, "/claim", {"engines": list(self._engines)})
         if reply.status == 204:
             return None
         if reply.status != 200:

@@ -32,6 +32,7 @@ export type JobQueueIntakeDeps = {
 /**
  * How a trigger becomes a job. A pull request that was opened or updated is an automatic `webhook`
  * job for the default command; a command written in a comment is a `comment` job with its arguments.
+ * The review kind is resolved by the queue, inside the enqueue transaction (#195, finding 3).
  */
 export function jobInputForTrigger(
   trigger: ReviewTrigger,

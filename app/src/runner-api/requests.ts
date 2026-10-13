@@ -5,6 +5,8 @@
 // bodies through both and requires the same verdict. A refusal lists fields and reasons, never
 // values: the bodies of these requests hold a lease token and a log.
 import type {
+  ClaimEngine,
+  ClaimRequest,
   CompleteRequest,
   FieldError,
   FieldErrorCode,
@@ -12,6 +14,7 @@ import type {
   RunnerResult,
   RunnerUsage,
 } from "./contract.ts";
+import { CLAIM_ENGINES } from "./contract.ts";
 
 export type Parsed<T> =
   { ok: true; value: T } | { ok: false; fields: FieldError[] };
@@ -115,6 +118,50 @@ function leaseTokenOf(check: Checker, body: Record_): string | undefined {
     min: LEASE_TOKEN_LENGTH.min,
     max: LEASE_TOKEN_LENGTH.max,
   });
+}
+
+/**
+ * The optional claim body (#195): `{ engines: [...] }`. An absent or empty body is a previous-release
+ * runner and means `pr-agent` only; the caller fills that in. `engines` must hold known, unique
+ * engine names; unknown or duplicated ones are refused before anything is claimed, so a runner
+ * cannot talk itself into a job it cannot run.
+ */
+export function parseClaimRequest(body: unknown): Parsed<ClaimRequest> {
+  if (body === undefined) return { ok: true, value: {} };
+  if (!isRecord(body))
+    return { ok: false, fields: [{ field: "body", code: "invalid" }] };
+  const check = new Checker();
+  const raw = body.engines;
+  let engines: ClaimEngine[] | undefined;
+  if (raw === undefined) {
+    engines = undefined;
+  } else if (!Array.isArray(raw)) {
+    check.fail("engines", "invalid");
+  } else {
+    const seen = new Set<string>();
+    const accepted: ClaimEngine[] = [];
+    if (raw.length === 0) check.fail("engines", "invalid");
+    for (const entry of raw) {
+      if (
+        typeof entry !== "string" ||
+        !CLAIM_ENGINES.some((known) => known === entry)
+      ) {
+        check.fail("engines", "invalid");
+        continue;
+      }
+      if (seen.has(entry)) {
+        check.fail("engines", "invalid");
+        continue;
+      }
+      seen.add(entry);
+      accepted.push(entry as ClaimEngine);
+    }
+    if (check.fields.length === 0) engines = accepted;
+  }
+  if (check.fields.length > 0) return { ok: false, fields: check.fields };
+  return engines === undefined
+    ? { ok: true, value: {} }
+    : { ok: true, value: { engines } };
 }
 
 export function parseHeartbeatRequest(body: unknown): Parsed<HeartbeatRequest> {

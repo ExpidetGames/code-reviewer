@@ -13,6 +13,7 @@ import {
   RUNNER_ERROR_CODES,
 } from "../../src/runner-api/contract.ts";
 import {
+  parseClaimRequest,
   parseCompleteRequest,
   parseHeartbeatRequest,
 } from "../../src/runner-api/requests.ts";
@@ -400,5 +401,31 @@ describe("what the app accepts from a runner", () => {
       true,
     );
     expect(parseCompleteRequest(examples.get("CompleteRequest")).ok).toBe(true);
+  });
+
+  // #195-T06: the claim request is judged exactly like the contract. An absent body is the
+  // previous-release caller and means pr-agent only; an empty or unknown or duplicated engine list is
+  // refused before any job is claimed.
+  it("judges the claim request like the contract", () => {
+    const cases: Array<[string, unknown]> = [
+      ["no engines", {}],
+      ["both engines", { engines: ["pr-agent", "opencode"] }],
+      ["the dynamic engine alone", { engines: ["opencode"] }],
+      ["unknown fields next to engines", { engines: ["pr-agent"], extra: 1 }],
+      ["an empty list", { engines: [] }],
+      ["a duplicated engine", { engines: ["pr-agent", "pr-agent"] }],
+      ["an unknown engine", { engines: ["gitlab"] }],
+      ["engines as text", { engines: "pr-agent" }],
+      ["null", null],
+      ["an array", []],
+    ];
+
+    for (const [name, body] of cases)
+      expect({ name, ok: parseClaimRequest(body).ok }).toEqual({
+        name,
+        ok: contract.check("ClaimRequest", body).valid,
+      });
+    // The absent body never reaches parseClaimRequest from JSON; the API maps it to pr-agent only.
+    expect(parseClaimRequest(undefined)).toEqual({ ok: true, value: {} });
   });
 });

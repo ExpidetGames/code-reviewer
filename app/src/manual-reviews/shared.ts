@@ -20,11 +20,12 @@ export function manualReviewServiceFor(
   workspaceId: string,
 ): ManualReviewService {
   const db = getDatabase();
+  const settings = reviewSettingsServiceFor(workspaceId);
   return createManualReviewService({
     repositories: createRepositoriesRepository(db, workspaceId),
     integrations: createIntegrationsRepository(db, workspaceId),
     projects: projectServiceFor(workspaceId),
-    settings: reviewSettingsServiceFor(workspaceId),
+    settings,
     registry: integrationRegistry,
     queue: jobQueueFor(workspaceId),
   });

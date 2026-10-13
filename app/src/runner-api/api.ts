@@ -16,10 +16,11 @@
 // Every answer carries `Cache-Control: no-store` (responses.ts).
 import "server-only";
 import { readLimitedBody } from "../webhooks/limited-body.ts";
+import { DEFAULT_ENGINES } from "../jobs/runner-capabilities.ts";
 import { RUNNER_MAX_BODY_BYTES } from "./contract.ts";
 import { handleClaim, type ClaimDeps } from "./claim.ts";
 import { describeError } from "./logger.ts";
-import { parseJobId, parseRunnerId } from "./requests.ts";
+import { parseClaimRequest, parseJobId, parseRunnerId } from "./requests.ts";
 import { handleComplete, handleHeartbeat, type ReportDeps } from "./report.ts";
 import { errorResponse, unauthorized } from "./responses.ts";
 import { bearerTokenOf, tokensMatch } from "./token-auth.ts";
@@ -42,6 +43,29 @@ async function readJsonBody(request: Request): Promise<Body> {
   const body = await readLimitedBody(request, RUNNER_MAX_BODY_BYTES);
   if (!body.ok)
     return { ok: false, response: errorResponse(413, "RUNNER_BODY_TOO_LARGE") };
+  try {
+    return { ok: true, value: JSON.parse(body.text) as unknown };
+  } catch {
+    return {
+      ok: false,
+      response: errorResponse(400, "RUNNER_REQUEST_INVALID", {
+        fields: [{ field: "body", code: "invalid" }],
+      }),
+    };
+  }
+}
+
+/**
+ * The claim body is optional (#195): a previous-release runner sends none. An empty body is the same
+ * as no body; anything else must be JSON, and a body over the limit is refused before it is parsed.
+ */
+async function readOptionalJsonBody(
+  request: Request,
+): Promise<{ ok: true; value: unknown } | { ok: false; response: Response }> {
+  const body = await readLimitedBody(request, RUNNER_MAX_BODY_BYTES);
+  if (!body.ok)
+    return { ok: false, response: errorResponse(413, "RUNNER_BODY_TOO_LARGE") };
+  if (body.text.trim() === "") return { ok: true, value: undefined };
   try {
     return { ok: true, value: JSON.parse(body.text) as unknown };
   } catch {
@@ -82,7 +106,19 @@ export function createRunnerApi(deps: RunnerApiDeps): RunnerApi {
       try {
         const who = identify(request);
         if (!who.ok) return who.response;
-        return await handleClaim(deps, who.runnerId);
+        // The claim body is read after the token check and before any job is claimed (#195).
+        const body = await readOptionalJsonBody(request);
+        if (!body.ok) return body.response;
+        const parsed = parseClaimRequest(body.value);
+        if (!parsed.ok)
+          return errorResponse(400, "RUNNER_REQUEST_INVALID", {
+            fields: parsed.fields,
+          });
+        return await handleClaim(
+          deps,
+          who.runnerId,
+          parsed.value.engines ?? DEFAULT_ENGINES,
+        );
       } catch (error) {
         return unexpected("claim", error);
       }

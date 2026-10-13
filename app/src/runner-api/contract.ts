@@ -5,8 +5,20 @@
 // integration-tests/compatibility/runner-api-contract.integration.test.ts (the sets are compared
 // with the file, and real answers and the request checks are validated against it).
 import type { ReviewCommand } from "../integrations/types.ts";
+import type { ProjectReviewKind } from "../review-settings/settings.ts";
+import {
+  RUNNER_ENGINES,
+  type RunnerEngine,
+} from "../jobs/runner-capabilities.ts";
 
 export const RUNNER_API_VERSION = 1 as const;
+
+/** The engines a runner may advertise in a claim (`Engine` in the contract). */
+export const CLAIM_ENGINES = RUNNER_ENGINES;
+export type ClaimEngine = RunnerEngine;
+
+/** The request body of a claim: which engines the runner can run. Absent/empty means `pr-agent`. */
+export type ClaimRequest = { engines?: ClaimEngine[] };
 
 /** The path prefix of this version; the version is part of the URL. */
 export const RUNNER_API_PATH = "/api/runners/v1" as const;
@@ -56,6 +68,15 @@ export const RUNNER_ERROR_CODES = [
   "timeout",
   "runner_shutdown",
   "unknown",
+  // Dynamic Review (#195). Stable codes a caller may branch on; never a fallback to Diff.
+  "dynamic_engine_unavailable",
+  "dynamic_isolation_self_check_failed",
+  "dynamic_config_invalid",
+  "checkout_incomplete",
+  "dynamic_policy_violation",
+  "dynamic_budget_exceeded",
+  "dynamic_accounting_failed",
+  "dynamic_model_features_unsupported",
 ] as const;
 export type RunnerErrorCode = (typeof RUNNER_ERROR_CODES)[number];
 
@@ -85,10 +106,46 @@ export type ErrorResponse = {
   };
 };
 
+/** The review kind of a job (`ReviewKind` in the contract). Diff is the legacy shape. */
+export type ReviewKind = ProjectReviewKind;
+
+/**
+ * The Dynamic options of a tagged job (#195). Only model/skill/limits: the fixed core, the tools, the
+ * permissions, the endpoints and the executable command are runner-owned and never arrive here. The
+ * skill is literal data.
+ */
+export type DynamicReviewOptions = {
+  model: string;
+  skill: string;
+  limits: { maxFindings: number };
+};
+
+/**
+ * The checkout facts a Dynamic job carries (#195/#196), all pinned when the job was queued or claimed.
+ * `comparison` is the declared comparison mode; it is a hint for preparation, never proof that the
+ * comparison is complete — the runner's checkout verifies that before it trusts it.
+ */
+export type ClaimBase = {
+  repository: string;
+  baseRef: string;
+  headSha: string;
+  previousReviewedSha: string | null;
+  comparison: "full" | "incremental";
+};
+
 /** The job as the runner reads it on stdin. Contains secrets: only the claim response has it. */
 export type RunnerJobInput = {
   prUrl: string;
   command: ReviewCommand;
+  /**
+   * #195: absent means Diff, the legacy shape. `dynamic` is only sent to a runner that advertised
+   * `opencode`; a previous-release runner never receives it.
+   */
+  reviewKind?: ReviewKind;
+  /** Present exactly when `reviewKind` is `dynamic`. */
+  dynamic?: DynamicReviewOptions;
+  /** Checkout facts; present with `dynamic`. */
+  base?: ClaimBase;
   git: {
     provider: "github";
     baseUrl: string;

@@ -32,6 +32,7 @@ describe("validating a job to enqueue", () => {
         prNumber: 7,
         prUrl: "https://github.test/acme/widgets/pull/7",
         headSha: SHA,
+        reviewKind: undefined,
         command: "review",
         args: "",
         triggerKind: "webhook",
@@ -122,6 +123,22 @@ describe("validating a job to enqueue", () => {
     expect(validateEnqueueInput(input({ triggerKind: "cron" }))).toEqual({
       ok: false,
       fieldErrors: [{ field: "triggerKind", code: "invalid" }],
+    });
+  });
+
+  // #195: the review kind a job carries is decided at enqueue time; a producer that names an unknown
+  // one is refused, and leaving it out lets the queue resolve it inside the enqueue transaction.
+  it("accepts a known or absent review kind and refuses an unknown one", () => {
+    expect(
+      validateEnqueueInput(input({ reviewKind: "dynamic" })),
+    ).toMatchObject({ ok: true, value: { reviewKind: "dynamic" } });
+    expect(validateEnqueueInput(input())).toMatchObject({
+      ok: true,
+      value: { reviewKind: undefined },
+    });
+    expect(validateEnqueueInput(input({ reviewKind: "agentic" }))).toEqual({
+      ok: false,
+      fieldErrors: [{ field: "reviewKind", code: "invalid" }],
     });
   });
 
