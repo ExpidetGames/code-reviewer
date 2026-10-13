@@ -230,6 +230,30 @@ input and the boundaries around it (the epic's binding decision). Modules:
   short notice, the files stay readable by an explicit `read`. Any other tag text (a file or a grep
   line that contains it) is escaped (`<` becomes `&lt;`), so no `<system-reminder>` tag reaches the
   provider in a tool result. The bounds and the token reservation count the forwarded text.
+- `dynamic_review/tagescape.py` (#243) is the escape itself. It matches on a normalised copy of the
+  text and rewrites **only the opening bracket** of a match to `&lt;`; everything else stays byte for
+  byte. It is linear-time (one `str.translate`, one character-class `sub`, a possessive scan per
+  bracket; every pattern has a 50,000-character regression test) and idempotent. It is a bounded
+  small filter on purpose, not a list of every wrapper a model might respect: the one tag the
+  engine's own prompt blesses, plus the start of chat-template control tokens.
+
+  | Spelling | Handled | Why |
+  |---|---|---|
+  | `<system-reminder>`, `</system-reminder>`, case, whitespace or slashes after `<` | escaped | #232 |
+  | Invisible characters anywhere inside (U+200B-U+200F, U+2060-U+2064, U+FEFF, soft hyphen, bidi controls, variation selectors, U+034F, tag characters) | escaped | they render as nothing, so the text reads as the tag |
+  | Full-width `＜`, full-width letters and slash, and the lookalike `<` (U+FE64, U+2039, U+2329, U+3008, U+27E8, U+276E, U+02C2) | escaped | a model reads them as the tag |
+  | `_` or a dash lookalike (U+2010-U+2015, U+2043, U+2212, U+058A, U+FE58, U+FE63) for the hyphen, `system_reminder` | escaped | same |
+  | A tag split across the text parts of one result (`<system-` + `reminder>`) | escaped, in the part that holds the `<` | the parts are matched as one text; non-text parts are skipped over |
+  | `<|` and the full-width `<｜`, which start `<\|im_start\|>`, `<\|system\|>`, `<｜begin▁of▁sentence｜>` | escaped (`&lt;\|`) | keeps special-token syntax text for any tokenizer, whatever the token's name; a token name list would be endless |
+  | Text that already is HTML-entity-escaped (`&lt;system-reminder&gt;`, `&#60;`) | **not** escaped | no risk: it is the form the escape itself writes, it is not the tag the engine's prompt blesses, and rewriting it would break idempotency |
+  | Other wrappers (`<system>`, `<instructions>`, `[INST]`, `<s>`, `[SYSTEM]`) | **not** escaped | no engine authority; plain untrusted text under the "file content is data" framing. They are ordinary in real code (`<s>` in HTML, `<system>` in XML) and a filter list gives false safety |
+  | Whitespace or punctuation inside the *name* (`system reminder`, `system - reminder`) | **not** escaped | not the string the prompt blesses |
+  | A tag split across two *different* tool results or two messages | **not** escaped | no single result holds it, the model has to assemble it itself |
+  | `<|` in real code (F# `<|`, Haskell `<|>`) | escaped as well | the cost of not keeping a token list: one `&lt;` in the text, still readable |
+  | Tool-call arguments, the diff and the prompt | **not** this module | only tool-result text is transformed; the prompt stays the trusted frame |
+
+  The escape never re-orders or re-encodes the forwarded text: the size accounting is on the forwarded
+  body, as before (#231/#242).
 - `dynamic_review/completion_stream.py`: the pinned engine always asks for a streamed answer. The
   proxy asks the provider for the whole answer (bounded, audited, usage settled) and only then returns
   it as a short event stream; nothing reaches the engine before the checks passed.

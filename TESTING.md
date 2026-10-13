@@ -211,7 +211,8 @@ Engine suite (`runner/tests/engine/`, `uv run pytest -m engine`, about 5 minutes
   through the real #196 export and nothing is loaded or executed, with the same tree unsanitized as the
   control that does execute its plugins; the nearby AGENTS.md reminder the engine puts inside a read
   result reaches the model only as a short notice, and literal reminder tags in files and grep
-  lines only escaped (#232); every write, shell, network, task and unknown tool and every
+  lines only escaped (#232, and their invisible-character, full-width, `_` and split-part
+  lookalikes and `<|` template tokens at the unit level, #243); every write, shell, network, task and unknown tool and every
   read outside the export is denied and the checkout is unchanged; the per-result, tool-call and
   distinct-file bounds stop a run at the proxy before the content reaches the model; a finding outside
   the export is rejected; a provider refusal and a hung provider end the run with their stable code;

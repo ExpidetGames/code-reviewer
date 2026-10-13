@@ -128,6 +128,20 @@ def test_the_cumulative_bound_counts_utf8_bytes() -> None:
     assert over.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
 
 
+# #243-T03
+def test_the_escape_of_a_lookalike_tag_is_counted_on_the_forwarded_text() -> None:
+    subject, ledger = audit()
+    text = "/job/export/a.md:\n  Line 1: \uff1csystem\u200b-reminder> and <|im_start|>"
+
+    forwarded = subject.results_in_request([asks(call("a", "grep")), result("a", text)])
+
+    seen = forwarded[1]["content"]
+    assert seen == text.replace("\uff1c", "&lt;").replace("<|", "&lt;|")
+    # A full-width bracket is three bytes, `&lt;` four, and `<|` becomes `&lt;|`: three more.
+    assert ledger.returned_bytes == len(seen.encode("utf-8"))
+    assert ledger.returned_bytes == len(text.encode("utf-8")) + 1 + 3
+
+
 # #232-T06
 def test_a_nested_reminder_is_neutralised_before_it_is_counted_and_forwarded() -> None:
     subject, ledger = audit()
