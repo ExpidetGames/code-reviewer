@@ -15,7 +15,7 @@ last run. Jobs are made and changed only by the job queue (`src/jobs`); this mod
 | `runs-service.ts` | `createRunsService` (`list`, `get`), `parseRunsFilter`, `createLastRunSource` (the real `LastRunSource` of the project list)                                                                                       |
 | `http.ts`         | The handlers behind `GET /api/w/:workspace/runs` and `GET /api/w/:workspace/runs/:id`, the two polling routes (`src/app/api/w/[workspace]/runs/`)                                                                  |
 | `shared.ts`       | The wiring of the running server: `getRunsService()` (with the secrets of the app removed from a log) and `getLastRunSource()`, both for the workspace the signed-in user works in                                 |
-| `ui/`             | `RunsList`, `RunDetail`, `RunStatusBadge`, the page contents (`runs-page.tsx`, `run-detail-page.tsx`) and the browser side of the polling (`api.ts`)                                                               |
+| `ui/`             | `RunsFilterToolbar`, `RunsList`, `RunDetail`, `RunStatusBadge`, the page contents (`runs-page.tsx`, `run-detail-page.tsx`) and the browser side of the polling (`api.ts`)                                          |
 
 The read side of the table is `src/db/repositories/runs-repository.ts` (a join with the repository name,
 newest first, and the newest job of each repository); it only reads. The list is read without the
@@ -49,7 +49,8 @@ ask, and asks at once when it is shown again. A failed request keeps the last da
 a row (up to a minute). A failure that asking again cannot fix (the session ended, the person is not
 allowed, the run is gone) stops polling and says so. With Cache Components a page that was left stays
 mounted, so state is tied to server data: the polled snapshot is shown only while the server snapshot
-it was fetched next to is still the current one, and the list is keyed on its filter.
+it was fetched next to is still the current one. The filter is a prop from the address, so the toolbar
+and the list follow a new address without being remounted (no remount key).
 
 The duration of a running run is counted to the time of the answer (`generatedAt`), so a page renders
 the same on the server and in the browser.
@@ -81,10 +82,12 @@ an unknown id shows the not-found page with status 200; the data route answers a
 ## Tests
 
 Unit (`*.test.ts(x)` here): status, duration, error copy (every code has a sentence), the views (links,
-logs, what is left out), the list and the detail component (rows, empty states, polling with fake
-timers, text rendered as text). Integration: `runs-service.integration.test.ts` (real SQLite, runs made
-through the queue with `src/test-support/runs.ts`), `ui/runs-page.integration.test.tsx` (the pages with
-real data and the filter from the address), `integration-tests/http/runs-route*.integration.test.ts`
-(the proxy in front of the routes, 401 and 403, the route files). E2E: `e2e/runs/runs.e2e.ts`, where a
-pull request opened at the fake GitHub arrives as a signed delivery and the queue stands in for the
-runner (`e2e/helpers/job-queue.ts`, `src/test-support/e2e-queue-child.ts`).
+logs, what is left out), the filter toolbar (`runs-filter.test.tsx`: the query string and the controls
+following the filter), the list and the detail component (table rows, grouped facts, empty states,
+polling with fake timers, text rendered as text). Integration: `runs-service.integration.test.ts` (real
+SQLite, runs made through the queue with `src/test-support/runs.ts`), `ui/runs-page.integration.test.tsx`
+(the pages with real data and the filter from the address, without a remount key),
+`integration-tests/http/runs-route*.integration.test.ts` (the proxy in front of the routes, 401 and 403,
+the route files). E2E: `e2e/runs/runs.e2e.ts`, where a pull request opened at the fake GitHub arrives as a
+signed delivery and the queue stands in for the runner (`e2e/helpers/job-queue.ts`,
+`src/test-support/e2e-queue-child.ts`).

@@ -9,15 +9,19 @@ import { cn } from "@/lib/utils";
 export function StatusRegion({
   children,
   className,
+  label,
 }: {
   children: ReactNode;
   className?: string;
+  /** An accessible name that tells two live regions of one page apart (for example "Updating the run"). */
+  label?: string;
 }) {
   return (
     <div
       role="status"
       aria-live="polite"
       aria-atomic="true"
+      {...(label === undefined ? {} : { "aria-label": label })}
       className={cn("text-sm text-muted-foreground", className)}
     >
       {children}

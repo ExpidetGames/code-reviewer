@@ -1,16 +1,33 @@
 // SPDX-License-Identifier: Apache-2.0
 
 "use client";
-// The list of runs on the Runs page. The server renders the first snapshot; while a run waits or runs
-// the browser asks for newer ones (every few seconds), and it keeps asking slowly once everything is
-// settled so a run that starts later shows up too. Everything in a run that came from outside (the
-// project name, the login) is rendered as text.
+// The list of runs on the Runs page, as a dense table: project, pull request, command, status, time and
+// duration. The server renders the first snapshot; while a run waits or runs the browser asks for newer
+// ones (every few seconds), and it keeps asking slowly once everything is settled so a run that starts
+// later shows up too. Everything in a run that came from outside (the project name, the login) is
+// rendered as text and truncated instead of widening the page.
 import Link from "next/link";
 import { useMemo } from "react";
-import { workspacePath } from "../../workspaces/paths.ts";
-import { EmptyState } from "../../ui/empty-state.tsx";
+import { Button } from "../../components/button.tsx";
+import { StatusRegion } from "../../components/status-region.tsx";
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "../../components/ui/empty.tsx";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../../components/ui/table.tsx";
 import { formatUtc } from "../../ui/format-time.ts";
 import { useLiveSnapshot } from "../../ui/use-live-snapshot.ts";
+import { workspacePath } from "../../workspaces/paths.ts";
 import { formatDuration } from "../run-duration.ts";
 import { isSettled } from "../run-status.ts";
 import type { RunRowView, RunsSnapshot } from "../run-view.ts";
@@ -23,22 +40,37 @@ import {
 import { describePollFailure, POLL_FAILED_TEXT } from "./poll-messages.ts";
 import { RunStatusBadge } from "./status-badge.tsx";
 
+function runPath(workspaceSlug: string, runId: string): string {
+  return workspacePath(workspaceSlug, `/runs/${encodeURIComponent(runId)}`);
+}
+
 function TimeLine({ run }: { run: RunRowView }) {
   if (run.startedAt === null)
     return (
-      <span className="small">
+      <span className="text-xs text-muted-foreground">
         {run.status === "queued" ? "Waiting since " : "Created "}
         <time dateTime={run.createdAt}>{formatUtc(run.createdAt)}</time>
       </span>
     );
   return (
-    <span className="small">
+    <span className="text-xs text-muted-foreground">
       Started <time dateTime={run.startedAt}>{formatUtc(run.startedAt)}</time>
     </span>
   );
 }
 
-function RunRow({
+function DurationLine({ run }: { run: RunRowView }) {
+  if (run.durationMs === null)
+    return <span className="text-xs text-muted-foreground">—</span>;
+  return (
+    <span className="text-xs text-muted-foreground">
+      {run.status === "running" ? "Running for " : "Took "}
+      {formatDuration(run.durationMs)}
+    </span>
+  );
+}
+
+function RunTableRow({
   run,
   workspaceSlug,
 }: {
@@ -46,37 +78,56 @@ function RunRow({
   workspaceSlug: string;
 }) {
   return (
-    <li className="run-row" data-run-id={run.id}>
-      <div className="run-main">
+    <TableRow data-run-id={run.id}>
+      <TableCell className="min-w-0 align-top whitespace-normal">
         <Link
-          href={workspacePath(
-            workspaceSlug,
-            `/runs/${encodeURIComponent(run.id)}`,
-          )}
-          className="run-link"
+          href={runPath(workspaceSlug, run.id)}
+          // The project name alone repeats for every run of a repository; the PR number makes the
+          // link name of a row unique in a screen reader's link list.
+          aria-label={`${run.project} #${String(run.prNumber)}`}
+          className="block truncate font-medium text-foreground"
         >
-          {run.project} #{run.prNumber}
+          {run.project}
         </Link>
-        <span className="muted small">
-          /{run.command} &middot; {run.trigger}
+      </TableCell>
+      <TableCell className="align-top whitespace-normal">
+        {run.prUrl !== null ? (
+          <a
+            href={run.prUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary underline-offset-4 hover:underline"
+          >
+            #{run.prNumber}
+          </a>
+        ) : (
+          <span>#{run.prNumber}</span>
+        )}
+      </TableCell>
+      <TableCell className="align-top whitespace-normal">
+        <code className="font-mono text-xs">/{run.command}</code>
+        <span className="block text-xs text-muted-foreground">
+          {run.trigger}
         </span>
-      </div>
-      <div className="run-state">
+      </TableCell>
+      <TableCell className="align-top whitespace-normal">
         <RunStatusBadge status={run.status} />
         {run.problem !== null ? (
-          <span className="muted small">{run.problem}</span>
-        ) : null}
-      </div>
-      <div className="run-times">
-        <TimeLine run={run} />
-        {run.durationMs !== null ? (
-          <span className="muted small">
-            {run.status === "running" ? "Running for " : "Took "}
-            {formatDuration(run.durationMs)}
+          <span
+            className="mt-1 block truncate text-xs text-muted-foreground"
+            title={run.problem}
+          >
+            {run.problem}
           </span>
         ) : null}
-      </div>
-    </li>
+      </TableCell>
+      <TableCell className="align-top whitespace-normal">
+        <TimeLine run={run} />
+      </TableCell>
+      <TableCell className="align-top whitespace-normal">
+        <DurationLine run={run} />
+      </TableCell>
+    </TableRow>
   );
 }
 
@@ -89,26 +140,43 @@ export function RunsEmptyState({
 }) {
   if (filtered)
     return (
-      <EmptyState
-        title="No runs for this filter"
-        action={
-          <Link
-            href={workspacePath(workspaceSlug, "/runs")}
-            className="btn btn-secondary"
-          >
-            Reset filter
-          </Link>
-        }
-      >
-        No run matches the project and status you picked. Reset the filter to
-        see all runs.
-      </EmptyState>
+      <Empty className="border border-border bg-card">
+        <EmptyHeader>
+          <EmptyTitle>
+            <h2>No runs for this filter</h2>
+          </EmptyTitle>
+          <EmptyDescription>
+            No run matches the project and status you picked.
+          </EmptyDescription>
+        </EmptyHeader>
+        <EmptyContent>
+          <Button asChild variant="secondary">
+            <Link href={workspacePath(workspaceSlug, "/runs")}>
+              Reset filter
+            </Link>
+          </Button>
+        </EmptyContent>
+      </Empty>
     );
   return (
-    <EmptyState title="No runs yet">
-      Reviews of your pull requests will appear here. Switch a project on, then
-      open or update a pull request.
-    </EmptyState>
+    <Empty className="border border-border bg-card">
+      <EmptyHeader>
+        <EmptyTitle>
+          <h2>No runs yet</h2>
+        </EmptyTitle>
+        <EmptyDescription>
+          Reviews of your pull requests appear here once a project is on and a
+          pull request is opened or updated.
+        </EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent>
+        <Button asChild variant="primary">
+          <Link href={workspacePath(workspaceSlug, "/projects")}>
+            Open projects
+          </Link>
+        </Button>
+      </EmptyContent>
+    </Empty>
   );
 }
 
@@ -142,22 +210,40 @@ export function RunsList({
     filter.repositoryId !== undefined || filter.status !== undefined;
   return (
     <>
-      {failed ? (
-        <p role="status" className="alert alert-warning run-notice">
-          {describePollFailure(failureCode, stopped, POLL_FAILED_TEXT)}
-        </p>
-      ) : null}
+      {/* The one polite region of the list; it stays in the DOM so an update result is announced. */}
+      <StatusRegion label="Updating the list" className="text-warning">
+        {failed
+          ? describePollFailure(failureCode, stopped, POLL_FAILED_TEXT)
+          : ""}
+      </StatusRegion>
       {data.runs.length === 0 ? (
         <RunsEmptyState filtered={filtered} workspaceSlug={workspaceSlug} />
       ) : (
-        <ul className="run-list" aria-label="Runs">
-          {data.runs.map((run) => (
-            <RunRow key={run.id} run={run} workspaceSlug={workspaceSlug} />
-          ))}
-        </ul>
+        <Table aria-label="Runs" className="table-fixed">
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-[32%]">Project</TableHead>
+              <TableHead className="w-[8%]">PR</TableHead>
+              <TableHead className="w-[18%]">Command</TableHead>
+              <TableHead className="w-[18%]">Status</TableHead>
+              <TableHead className="w-[14%]">Time</TableHead>
+              <TableHead className="w-[10%]">Duration</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {data.runs.map((run) => (
+              <RunTableRow
+                key={run.id}
+                run={run}
+                workspaceSlug={workspaceSlug}
+              />
+            ))}
+          </TableBody>
+        </Table>
       )}
+      {/* A quiet footer line, not a row: the list is capped, not broken. */}
       {data.limited ? (
-        <p className="muted small">
+        <p className="text-xs text-muted-foreground">
           Only the newest {data.runs.length} runs are shown. Filter by project
           or status to narrow the list.
         </p>

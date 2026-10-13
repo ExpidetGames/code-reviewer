@@ -128,8 +128,9 @@ test.describe("a pull request on its way to a review comment", () => {
   /** The rows of the Runs page that belong to a pull request. */
   function runsOf(page: Page, repository: string, number: number) {
     return page
-      .getByRole("listitem")
-      .filter({ hasText: `${repository} #${String(number)}` });
+      .locator("[data-run-id]")
+      .filter({ hasText: repository })
+      .filter({ hasText: `#${String(number)}` });
   }
 
   async function openRuns(page: Page) {
@@ -166,7 +167,7 @@ test.describe("a pull request on its way to a review comment", () => {
     expect(answer).toEqual({ status: "accepted", outcome: "trigger_enqueued" });
 
     const run = runsOf(page, WIDGETS.fullName, number);
-    await expect(run.locator(".badge-run")).toContainText(
+    await expect(run.locator("[data-status]")).toContainText(
       "Succeeded",
       RUN_TIMEOUT,
     );
@@ -230,11 +231,11 @@ test.describe("a pull request on its way to a review comment", () => {
     // The push is a second run of the same pull request; both are done when the comment was edited.
     const runs = runsOf(page, WIDGETS.fullName, number);
     await expect(runs).toHaveCount(2, RUN_TIMEOUT);
-    await expect(runs.nth(0).locator(".badge-run")).toContainText(
+    await expect(runs.nth(0).locator("[data-status]")).toContainText(
       "Succeeded",
       RUN_TIMEOUT,
     );
-    await expect(runs.nth(1).locator(".badge-run")).toContainText(
+    await expect(runs.nth(1).locator("[data-status]")).toContainText(
       "Succeeded",
       RUN_TIMEOUT,
     );
@@ -314,28 +315,27 @@ test.describe("a pull request on its way to a review comment", () => {
     });
 
     const run = runsOf(page, WIDGETS.fullName, number);
-    await expect(run.locator(".badge-run")).toContainText(
+    await expect(run.locator("[data-status]")).toContainText(
       "Failed",
       RUN_TIMEOUT,
     );
     await run
       .getByRole("link", { name: `${WIDGETS.fullName} #${String(number)}` })
       .click();
+    // The Runs list stays mounted (hidden) behind the run page; its row carries the same failure
+    // sentence, so every assertion of the page is scoped to the visible run detail.
+    const detail = page
+      .locator('[data-slot="run-detail"]')
+      .filter({ visible: true });
+    await expect(detail.getByText("llm_rate_limit")).toBeVisible();
     await expect(
-      page.getByText("llm_rate_limit").filter({ visible: true }),
-    ).toBeVisible();
-    await expect(
-      page
-        .getByText("The AI provider is limiting requests right now.")
-        .filter({ visible: true }),
+      detail.getByText("The AI provider is limiting requests right now."),
     ).toBeVisible();
 
     // The log of the run shows the error text of the model with the key blanked out, so the check
     // for the key further down looks at text that really held it.
     await expect(
-      page
-        .getByText("Incorrect API key provided: [REDACTED]")
-        .filter({ visible: true }),
+      detail.getByText("Incorrect API key provided: [REDACTED]"),
     ).toBeVisible();
 
     // The model really was asked with the key (so the error text did quote it) ...
@@ -396,7 +396,7 @@ test.describe("a pull request on its way to a review comment", () => {
         outcome: "trigger_enqueued",
       });
       const run = runsOf(page, WIDGETS.fullName, number);
-      await expect(run.locator(".badge-run")).toContainText(
+      await expect(run.locator("[data-status]")).toContainText(
         "Succeeded",
         RUN_TIMEOUT,
       );
