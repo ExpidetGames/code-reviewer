@@ -108,9 +108,7 @@ Transport = Callable[[str, str, bytes | None, Mapping[str, str]], tuple[int, byt
 def _http_request(
     method: str, url: str, body: bytes | None, headers: Mapping[str, str]
 ) -> tuple[int, bytes]:
-    request = Request(
-        url, data=body, method=method, headers=dict(headers)
-    )
+    request = Request(url, data=body, method=method, headers=dict(headers))
     try:
         with urlopen(request, timeout=MESSAGE_TIMEOUT_SECONDS) as response:
             return response.status, response.read(CLIENT_MAX_BYTES)
