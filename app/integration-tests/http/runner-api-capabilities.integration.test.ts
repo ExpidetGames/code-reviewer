@@ -12,6 +12,7 @@ import {
   TEST_RUNNER_TOKEN,
 } from "../../src/test-support/runner-api-harness.ts";
 import { createContractValidator } from "../../src/test-support/runner-contract.ts";
+import { sha } from "../../src/test-support/jobs.ts";
 
 const contract = createContractValidator();
 
@@ -56,6 +57,50 @@ describe("routing a claimed job by the runner's engines", () => {
     expect(body.job.input).not.toHaveProperty("dynamic");
     expect(body.job.input).not.toHaveProperty("base");
     expectValid("ClaimResponse", body);
+
+    // #195 finding 8: byte-identical to the previous release's serialization — the same keys, in the
+    // same order (input, git and llm), for the same values.
+    const input = body.job.input;
+    expect(Object.keys(input)).toStrictEqual([
+      "prUrl",
+      "command",
+      "git",
+      "llm",
+      "env",
+    ]);
+    expect(Object.keys(input.git)).toStrictEqual([
+      "provider",
+      "baseUrl",
+      "token",
+      "botLogin",
+    ]);
+    expect(Object.keys(input.llm)).toStrictEqual([
+      "provider",
+      "model",
+      "apiKey",
+      ...(input.llm.maxTokens === undefined ? [] : ["maxTokens"]),
+    ]);
+    expect(JSON.stringify(input)).toBe(
+      JSON.stringify({
+        prUrl: input.prUrl,
+        command: "review",
+        git: {
+          provider: "github",
+          baseUrl: input.git.baseUrl,
+          token: input.git.token,
+          botLogin: input.git.botLogin,
+        },
+        llm: {
+          provider: "openrouter",
+          model: input.llm.model,
+          apiKey: input.llm.apiKey,
+          ...(input.llm.maxTokens === undefined
+            ? {}
+            : { maxTokens: input.llm.maxTokens }),
+        },
+        env: input.env,
+      }),
+    );
 
     // The Dynamic job keeps waiting, with no attempt counted and no credential created for it.
     expect(await h.queue.get(dynamic.id)).toMatchObject({
@@ -137,6 +182,79 @@ describe("routing a claimed job by the runner's engines", () => {
       status: "queued",
       attempts: 0,
     });
+  });
+
+  // #195-T02, #195 finding 9
+  it("routes two kinds in two projects to the right capabilities without a duplicate", async () => {
+    const h = await startDynamicHarness();
+    await h.projectService.activateProject(h.otherRepositoryId);
+    const dynamic = await h.enqueueNew({ prNumber: 7, reviewKind: "dynamic" });
+    h.clock.advance(1000);
+    const diff = await h.enqueueNew({
+      repositoryId: h.otherRepositoryId,
+      prNumber: 8,
+      prUrl: "https://github.test/acme/gadgets/pull/8",
+      headSha: sha("c"),
+      reviewKind: "diff",
+    });
+
+    const prAgent = await h.claim({
+      engines: ["pr-agent"],
+      runnerId: "runner-a",
+    });
+    const dual = await h.claim({
+      engines: ["pr-agent", "opencode"],
+      runnerId: "runner-b",
+    });
+    const prAgentBody = await prAgent.json();
+    const dualBody = await dual.json();
+
+    expect(prAgentBody.job.id).toBe(diff.id);
+    expect(dualBody.job.id).toBe(dynamic.id);
+    expect(prAgentBody.job.input).not.toHaveProperty("reviewKind");
+    expect(dualBody.job.input.reviewKind).toBe("dynamic");
+  });
+
+  // #195-T02, #195 finding 9
+  it("keeps one holder per pull request when two capabilities race over two kinds of one PR", async () => {
+    const h = await startDynamicHarness();
+    await h.projectService.activateProject(h.otherRepositoryId);
+    await h.enqueueNew({ prNumber: 7, reviewKind: "dynamic" });
+    h.clock.advance(1000);
+    await h.enqueueNew({
+      prNumber: 7,
+      headSha: sha("b"),
+      reviewKind: "diff",
+    });
+    h.clock.advance(1000);
+    await h.enqueueNew({
+      repositoryId: h.otherRepositoryId,
+      prNumber: 8,
+      prUrl: "https://github.test/acme/gadgets/pull/8",
+      headSha: sha("c"),
+      reviewKind: "diff",
+    });
+
+    const [a, b] = await Promise.all([
+      h.claim({ engines: ["pr-agent"], runnerId: "runner-a" }),
+      h.claim({ engines: ["pr-agent", "opencode"], runnerId: "runner-b" }),
+    ]);
+    const holders = [a, b].filter((response) => response.status === 200);
+    const ids = await Promise.all(
+      holders.map(async (response) => (await response.json()).job.id),
+    );
+    // No job was handed out twice.
+    expect(new Set(ids).size).toBe(ids.length);
+
+    // At most one job of pull request 7 runs, whatever the two capabilities did.
+    const runningForPr7 = await h.db
+      .selectFrom("jobs")
+      .select("id")
+      .where("repository_id", "=", h.repositoryId)
+      .where("pr_number", "=", 7)
+      .where("status", "=", "running")
+      .execute();
+    expect(runningForPr7.length).toBeLessThanOrEqual(1);
   });
 
   // #195-T05

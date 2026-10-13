@@ -23,6 +23,14 @@ import {
 } from "../../review-settings/settings.ts";
 import type { ValidEnqueueInput } from "../../jobs/job-input.ts";
 import {
+  createInstanceDynamicReviewGate,
+  type DynamicReviewGate,
+} from "../../jobs/dynamic-review-gate.ts";
+import {
+  createStoredReviewKindResolver,
+  type ReviewKindResolver,
+} from "../../jobs/review-kind.ts";
+import {
   SLOT_HOLDING_STATUSES,
   isJobStatus,
   statusesThatCanBecome,
@@ -52,6 +60,15 @@ export const JOB_LIST_MAX_LIMIT = 500;
 export type JobsRepositoryOptions = {
   now?: () => Date;
   newId?: () => string;
+  /**
+   * #195: resolves a job's review kind from the project's settings, inside the enqueue transaction so
+   * it cannot race a settings change. Defaults to the stored project settings.
+   */
+  reviewKind?: ReviewKindResolver;
+  /**
+   * #195 rollout gate: whether Dynamic Review may be queued. Default: the instance setting, off.
+   */
+  dynamicReviewEnabled?: DynamicReviewGate;
 };
 
 export type JobsRepository = {
@@ -153,6 +170,10 @@ export function createJobsRepository(
 ): JobsRepository {
   const now = options.now ?? (() => new Date());
   const newId = options.newId ?? (() => crypto.randomUUID());
+  const resolveReviewKind =
+    options.reviewKind ?? createStoredReviewKindResolver(workspaceId, now);
+  const dynamicReviewAllowed =
+    options.dynamicReviewEnabled ?? createInstanceDynamicReviewGate();
 
   // A transaction cannot start another one; inside one, just use it.
   function inTransaction<T>(
@@ -195,6 +216,18 @@ export function createJobsRepository(
       return inTransaction<EnqueueResult>(async (trx) => {
         const current = now();
         const timestamp = formatTimestamp(current);
+
+        // #195 (finding 3): resolve the kind here, in the same transaction as the insert, so a
+        // concurrent settings change cannot slip between the read and the write. A kind named by the
+        // caller (tests, a re-queue) wins.
+        const reviewKind =
+          input.reviewKind ??
+          (await resolveReviewKind(trx, input.repositoryId));
+        // #195 rollout gate: with Dynamic Review off, the job is created failed instead of queued, so
+        // a previous-release app can never claim a Dynamic row as Diff and no run is silently a Diff
+        // review.
+        const dynamicDisabled =
+          reviewKind === "dynamic" && !(await dynamicReviewAllowed(trx));
 
         // 1. The same delivery again (GitHub's "Redeliver", or a request that ran twice).
         if (input.deliveryId !== null) {
@@ -255,7 +288,7 @@ export function createJobsRepository(
             .where("command", "=", input.command)
             // #195: a Diff job and a Dynamic job are different jobs. Dedupe and supersession must
             // never treat one kind's job as a duplicate of the other's.
-            .where("review_kind", "=", input.reviewKind);
+            .where("review_kind", "=", reviewKind);
 
         if (input.triggerKind === "webhook") {
           // 2. One automatic job per head commit and command, whatever became of it, unless it was
@@ -303,7 +336,8 @@ export function createJobsRepository(
           }
         }
 
-        // 3. The new job.
+        // 3. The new job. With Dynamic Review gated off, it is created already failed so the run is
+        // visible (Runs) and no runner is ever handed a Dynamic row.
         const id = newId();
         const inserted = await trx
           .insertInto("jobs")
@@ -315,12 +349,12 @@ export function createJobsRepository(
             pr_url: input.prUrl,
             head_sha: input.headSha,
             command: input.command,
-            review_kind: input.reviewKind,
+            review_kind: reviewKind,
             args: input.args,
             trigger_kind: input.triggerKind,
             actor_login: input.actorLogin,
             delivery_id: input.deliveryId,
-            status: "queued",
+            status: dynamicDisabled ? "failed" : "queued",
             run_after: formatTimestamp(input.runAfter ?? current),
             attempts: 0,
             runner_id: null,
@@ -329,11 +363,11 @@ export function createJobsRepository(
             heartbeat_at: null,
             lease_expires_at: null,
             result: null,
-            error_code: null,
+            error_code: dynamicDisabled ? "dynamic_review_disabled" : null,
             superseded_by: null,
             created_at: timestamp,
             updated_at: timestamp,
-            finished_at: null,
+            finished_at: dynamicDisabled ? timestamp : null,
           })
           .returningAll()
           .executeTakeFirstOrThrow();

@@ -368,27 +368,27 @@ async function prepare(
   // replace them. The job never carries `fallbackModels`: the MVP has no fallback chain.
   const llmAccess = revealLlmAccess(llm.access);
   const maxTokens = llmOptions.maxTokens ?? llmAccess.contextWindowTokens;
-  const gitFields = {
-    provider: "github" as const,
-    baseUrl: git.baseUrl,
-    token: git.token,
-    botLogin: git.botLogin,
-  };
-  const llmFields = {
-    provider: llmAccess.provider,
-    apiKey: llmAccess.apiKey,
-    ...(maxTokens === null ? {} : { maxTokens }),
-  };
-  // The exact legacy Diff payload for every Diff job, whatever kind of runner asked: an old runner
-  // that sends no engine list gets a shape it already parses. A Dynamic job is only ever handed to a
-  // runner that advertised `opencode`, so the tagged fields never reach an old runner.
+  // The exact legacy Diff payload for every Diff job, whatever kind of runner asked: the keys are in
+  // the order the previous release wrote them, byte for byte (prUrl, command, git, llm, env;
+  // llm.provider, model, apiKey, maxTokens), so a golden serialization matches. A Dynamic job is only
+  // ever handed to a runner that advertised `opencode`, so its tagged fields never reach an old runner.
   const input: RunnerJobInput =
     dynamic === null
       ? {
           prUrl,
           command,
-          git: gitFields,
-          llm: { ...llmFields, model: llmOptions.model ?? llmAccess.model },
+          git: {
+            provider: "github",
+            baseUrl: git.baseUrl,
+            token: git.token,
+            botLogin: git.botLogin,
+          },
+          llm: {
+            provider: llmAccess.provider,
+            model: llmOptions.model ?? llmAccess.model,
+            apiKey: llmAccess.apiKey,
+            ...(maxTokens === null ? {} : { maxTokens }),
+          },
           env: options.env,
         }
       : {
@@ -397,8 +397,18 @@ async function prepare(
           reviewKind: "dynamic",
           dynamic,
           base: claimBaseOf(repo.fullName, baseRef, job.headSha),
-          git: gitFields,
-          llm: { ...llmFields, model: dynamic.model },
+          git: {
+            provider: "github",
+            baseUrl: git.baseUrl,
+            token: git.token,
+            botLogin: git.botLogin,
+          },
+          llm: {
+            provider: llmAccess.provider,
+            model: dynamic.model,
+            apiKey: llmAccess.apiKey,
+            ...(maxTokens === null ? {} : { maxTokens }),
+          },
           env: {},
         };
   return {

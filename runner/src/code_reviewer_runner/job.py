@@ -434,7 +434,10 @@ def _claim_base(data: dict[str, Any]) -> ClaimBase:
     head_sha = _string(base, "headSha", "base.")
     if not _LOWER_SHA.fullmatch(head_sha):
         raise _invalid("base.headSha must be a 40 character lower-case commit id")
-    previous = base.get("previousReviewedSha")
+    # Required, like the schema: a tagged Dynamic job always states the previous reviewed head.
+    if "previousReviewedSha" not in base:
+        raise _invalid("base.previousReviewedSha is required")
+    previous = base["previousReviewedSha"]
     if previous is not None and (
         not isinstance(previous, str) or not _LOWER_SHA.fullmatch(previous)
     ):

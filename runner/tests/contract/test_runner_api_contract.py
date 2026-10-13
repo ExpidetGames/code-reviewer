@@ -403,20 +403,100 @@ def test_the_runner_and_the_contract_both_require_the_tagged_dynamic_fields() ->
         runner_job.parse_job(json.dumps(job))
 
 
+def _claim_for(job: Document) -> Document:
+    claim = _example("ClaimResponse")
+    claim["job"]["input"] = job
+    return claim
+
+
+# #195 finding 7: the tagged union is bidirectional. A Diff job (no reviewKind, or "diff") must not
+# carry `dynamic`/`base`; a Dynamic job must carry both; every required field is required on both
+# sides; the model validation is the same.
+def test_the_tagged_union_is_bidirectional_and_both_sides_give_the_same_verdict() -> None:
+    dynamic: Document = _load(DYNAMIC_JOB)
+    base: Document = cast("dict[str, Any]", dynamic["base"])
+    options: Document = cast("dict[str, Any]", dynamic["dynamic"])
+
+    def without_key(key: str) -> Document:
+        return {name: value for name, value in dynamic.items() if name != key}
+
+    diff_shape: Document = {
+        "prUrl": dynamic["prUrl"],
+        "command": "review",
+        "git": dynamic["git"],
+        "llm": dynamic["llm"],
+        "env": {},
+    }
+    positives: list[Document] = [
+        dynamic,
+        {
+            **dynamic,
+            "base": {
+                **base,
+                "comparison": "incremental",
+                "previousReviewedSha": "a" * 40,
+            },
+        },
+    ]
+    negatives: list[Document] = [
+        without_key("dynamic"),
+        without_key("base"),
+        {
+            **dynamic,
+            "base": {name: value for name, value in base.items() if name != "previousReviewedSha"},
+        },
+        {**dynamic, "dynamic": {**options, "model": "bad model name"}},
+        {**diff_shape, "dynamic": options},
+        {**diff_shape, "base": base},
+        {**diff_shape, "reviewKind": "diff", "dynamic": options},
+    ]
+
+    for job in positives:
+        assert _accepts("ClaimResponse", _claim_for(job)) is True
+        runner_job.parse_job(json.dumps(job))
+
+    for job in negatives:
+        assert _accepts("ClaimResponse", _claim_for(job)) is False
+        with pytest.raises(runner_job.JobError):
+            runner_job.parse_job(json.dumps(job))
+
+
 DYNAMIC_REVIEW = CONTRACTS / "dynamic-review"
+
+
+def _findings_schema() -> Document:
+    return _load(DYNAMIC_REVIEW / "schema.v1.json")
+
+
+def _findings_validator() -> Draft202012Validator:
+    schema = _findings_schema()
+    return Draft202012Validator(
+        {
+            "$schema": schema["$schema"],
+            "$ref": "#/$defs/DynamicFindings",
+            "$defs": schema["$defs"],
+        }
+    )
+
+
+def _findings_document(findings: list[Document], **envelope: Any) -> Document:
+    example = _load(DYNAMIC_REVIEW / "example.v1.json")
+    return {**example, "findings": findings, **envelope}
+
+
+def _accepts_findings(document: Document) -> bool:
+    return bool(_findings_validator().is_valid(document))  # pyright: ignore[reportUnknownMemberType]
 
 
 # #195-T10: the frozen neutral findings schema, with no provider-routing field, is the same on both
 # sides and lists the stable model-feature failure.
 def test_the_dynamic_review_schema_is_version_one_and_has_no_provider_routing_fields() -> None:
-    schema: Document = _load(DYNAMIC_REVIEW / "schema.v1.json")
+    schema = _findings_schema()
     Draft202012Validator.check_schema(schema)
     assert schema["version"] == 1
 
     findings: Document = schema["$defs"]["DynamicFindings"]
     assert findings["properties"]["schemaVersion"] == {"const": 1}
-
-    fields = set(_load(DYNAMIC_REVIEW / "example.v1.json")["findings"][0])
 
     # No property anywhere in the schema may name a permission, routing or command field. The
     # descriptions may *mention* them (to say they are absent); the property names must not.
@@ -440,6 +520,8 @@ def test_the_dynamic_review_schema_is_version_one_and_has_no_provider_routing_fi
     forbidden = ("provider", "hostingProvider", "fallback", "endpoint", "command", "permission")
     for name in forbidden:
         assert name not in names, name
+
+    fields = set(_load(DYNAMIC_REVIEW / "example.v1.json")["findings"][0])
     assert {
         "id",
         "priority",
@@ -450,23 +532,49 @@ def test_the_dynamic_review_schema_is_version_one_and_has_no_provider_routing_fi
         "lineStart",
         "lineEnd",
         "evidence",
-        "resolvedIds",
         "reviewedSha",
     } <= fields
+    # #195 finding 5: resolutions live on the envelope, not on a current finding.
+    assert "resolvedIds" not in fields
+    assert "resolvedIds" in _load(DYNAMIC_REVIEW / "example.v1.json")
 
-    example = _load(DYNAMIC_REVIEW / "example.v1.json")
-    validator = Draft202012Validator(
-        {
-            "$schema": schema["$schema"],
-            "$ref": "#/$defs/DynamicFindings",
-            "$defs": schema["$defs"],
-        }
-    )
-    assert bool(validator.is_valid(example))  # pyright: ignore[reportUnknownMemberType]
+    assert _accepts_findings(_load(DYNAMIC_REVIEW / "example.v1.json"))
+    resolved_only = _load(DYNAMIC_REVIEW / "example-resolved.v1.json")
+    assert resolved_only["findings"] == []
+    assert resolved_only["resolvedIds"] == ["f-1a2b3c"]
+    assert _accepts_findings(resolved_only)
 
-    # A provider-routing or permission field would be refused.
-    example["findings"][0]["provider"] = "deepinfra"
-    assert not bool(validator.is_valid(example))  # pyright: ignore[reportUnknownMemberType]
+    bad = _load(DYNAMIC_REVIEW / "example.v1.json")
+    bad["findings"][0]["provider"] = "deepinfra"
+    assert not _accepts_findings(bad)
+
+
+# #195 findings 5 and 6: the schema refuses unsafe paths, resolutions only on the envelope, and
+# accepts a run that resolves every previous finding with no current one.
+def test_the_findings_schema_refuses_unsafe_locations_and_keeps_resolutions_on_the_envelope() -> (
+    None
+):
+    base_finding = _load(DYNAMIC_REVIEW / "example.v1.json")["findings"][0]
+
+    for path in (
+        "../../outside.txt",
+        "/etc/passwd",
+        "C:\\secret",
+        "src/../secret",
+        "..",
+        "a/..",
+        "\\\\host\\s",
+    ):
+        assert not _accepts_findings(_findings_document([{**base_finding, "path": path}])), path
+
+    assert not _accepts_findings(_findings_document([{**base_finding, "resolvedIds": ["old"]}]))
+    assert _accepts_findings(_findings_document([], resolvedIds=["old"]))
+    without_envelope = {
+        key: value
+        for key, value in _load(DYNAMIC_REVIEW / "example-resolved.v1.json").items()
+        if key != "resolvedIds"
+    }
+    assert not _accepts_findings(without_envelope)
 
 
 # #195-T10: the stable feature/isolation/accounting failure codes are in the contract.

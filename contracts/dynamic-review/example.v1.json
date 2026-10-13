@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "reviewedSha": "1f3a5c7e9b2d4f60a8c1e3b5d7f90a2c4e6b8d01",
+  "resolvedIds": [],
   "findings": [
     {
       "id": "f-1a2b3c",
@@ -12,7 +13,6 @@
       "lineStart": 42,
       "lineEnd": 47,
       "evidence": ["src/api/handler.ts:42", "docs/decisions/0001.md"],
-      "resolvedIds": [],
       "reviewedSha": "1f3a5c7e9b2d4f60a8c1e3b5d7f90a2c4e6b8d01"
     }
   ]

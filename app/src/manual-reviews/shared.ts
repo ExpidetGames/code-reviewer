@@ -8,7 +8,6 @@ import { createRepositoriesRepository } from "../db/repositories/repositories-re
 import { getDatabase } from "../db/startup.ts";
 import { integrationRegistry } from "../integrations/registry.ts";
 import { jobQueueFor } from "../jobs/shared.ts";
-import { createReviewKindResolver } from "../jobs/review-kind.ts";
 import { projectServiceFor } from "../projects/shared.ts";
 import { reviewSettingsServiceFor } from "../review-settings/shared.ts";
 import {
@@ -27,8 +26,6 @@ export function manualReviewServiceFor(
     integrations: createIntegrationsRepository(db, workspaceId),
     projects: projectServiceFor(workspaceId),
     settings,
-    // #195: Review now pins the project's kind through the one shared resolver.
-    reviewKind: createReviewKindResolver(settings),
     registry: integrationRegistry,
     queue: jobQueueFor(workspaceId),
   });

@@ -12,7 +12,6 @@ import type {
 } from "../integrations/types.ts";
 import { JobQueueError } from "../jobs/errors.ts";
 import type { JobQueue } from "../jobs/job-queue.ts";
-import type { ReviewKindResolver } from "../jobs/review-kind.ts";
 import type { EnqueueJobInput } from "../jobs/job-types.ts";
 import type { WebhookLogger } from "./logger.ts";
 import type {
@@ -28,23 +27,17 @@ export type JobQueueIntakeDeps = {
   >;
   repositories: Pick<RepositoriesRepository, "findByExternalId">;
   logger: WebhookLogger;
-  /**
-   * #195: the one shared resolver that pins the review kind of a new job from the project's settings.
-   * It is asked right before the enqueue, so the kind a job carries is the project's at that moment.
-   */
-  reviewKind: ReviewKindResolver;
 };
 
 /**
  * How a trigger becomes a job. A pull request that was opened or updated is an automatic `webhook`
  * job for the default command; a command written in a comment is a `comment` job with its arguments.
- * `reviewKind` (#195) is resolved from the project by the caller and pinned on the job.
+ * The review kind is resolved by the queue, inside the enqueue transaction (#195, finding 3).
  */
 export function jobInputForTrigger(
   trigger: ReviewTrigger,
   repositoryId: string,
   source: ReviewTriggerSource,
-  reviewKind: EnqueueJobInput["reviewKind"],
   options: EnqueueOptions = {},
 ): EnqueueJobInput {
   const common = {
@@ -52,7 +45,6 @@ export function jobInputForTrigger(
     prNumber: trigger.prNumber,
     prUrl: trigger.prUrl,
     headSha: trigger.headSha,
-    reviewKind,
     actorLogin: trigger.actor.login,
     deliveryId: source.deliveryId,
     ...(options.runAfter === undefined ? {} : { runAfter: options.runAfter }),
@@ -118,15 +110,8 @@ export function createJobQueueReviewTriggerIntake(
 
       let result;
       try {
-        const reviewKind = await deps.reviewKind(repository.id);
         result = await deps.queue.enqueue(
-          jobInputForTrigger(
-            trigger,
-            repository.id,
-            source,
-            reviewKind,
-            options,
-          ),
+          jobInputForTrigger(trigger, repository.id, source, options),
         );
       } catch (error) {
         // Input the queue refuses will be refused every time: rejecting would make the route answer

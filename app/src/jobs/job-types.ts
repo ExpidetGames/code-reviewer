@@ -134,6 +134,10 @@ export const JOB_ERROR_CODES = [
   "pull_request_draft",
   /** Cancelled because the project's review kind changed while the job was waiting (#195). */
   "review_kind_changed",
+  /** Cancelled because no runner that can run this job claimed it within the deadline (#195). */
+  "no_capable_runner",
+  /** Failed because Dynamic Review is not enabled on this instance yet (#195 rollout gate). */
+  "dynamic_review_disabled",
   /** Cancelled because the job's command was removed from the product (#203). */
   "command_removed",
 ] as const;

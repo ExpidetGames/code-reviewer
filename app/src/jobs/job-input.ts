@@ -23,7 +23,11 @@ export type ValidEnqueueInput = {
   prUrl: string;
   /** Lower case. */
   headSha: string;
-  reviewKind: ProjectReviewKind;
+  /**
+   * The review kind, when the caller names one. Left out by the producers: the queue resolves it from
+   * the project inside the enqueue transaction (`review-kind.ts`), so it cannot race a settings change.
+   */
+  reviewKind: ProjectReviewKind | undefined;
   command: ReviewCommand;
   args: string;
   triggerKind: JobTriggerKind;
@@ -77,10 +81,13 @@ export function validateEnqueueInput(
   if (typeof headSha !== "string" || !HEAD_SHA.test(headSha))
     refuse("headSha", "invalid");
 
-  // #195: the kind is pinned at enqueue time. A caller that leaves it out (an internal one, or a
-  // test of the queue's own rules) gets Diff, the kind of every job from before the column.
-  const reviewKind = fields.reviewKind ?? "diff";
-  if (!PROJECT_REVIEW_KINDS.some((kind) => kind === reviewKind))
+  // #195: the kind is pinned at enqueue time. When the caller names one it must be known; when it is
+  // left out the queue resolves it from the project inside the enqueue transaction.
+  const reviewKind = fields.reviewKind;
+  if (
+    reviewKind !== undefined &&
+    !PROJECT_REVIEW_KINDS.some((kind) => kind === reviewKind)
+  )
     refuse("reviewKind", "invalid");
 
   const command = fields.command;
@@ -125,7 +132,7 @@ export function validateEnqueueInput(
       prNumber: prNumber as number,
       prUrl: prUrl as string,
       headSha: (headSha as string).toLowerCase(),
-      reviewKind: reviewKind as ProjectReviewKind,
+      reviewKind: reviewKind as ProjectReviewKind | undefined,
       command: command as ReviewCommand,
       args: args as string,
       triggerKind: fields.triggerKind as JobTriggerKind,

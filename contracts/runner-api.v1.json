@@ -55,7 +55,12 @@
       "additionalProperties": false,
       "required": ["model", "skill", "limits"],
       "properties": {
-        "model": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,199}$"
+        },
         "skill": { "type": "string", "maxLength": 16384 },
         "limits": {
           "type": "object",
@@ -192,6 +197,20 @@
             "required": ["reviewKind"]
           },
           "then": { "required": ["dynamic", "base"] }
+        },
+        {
+          "description": "A Diff job (reviewKind absent or 'diff') must not carry the tagged Dynamic fields; the runner refuses that and the schema agrees.",
+          "if": {
+            "not": {
+              "properties": { "reviewKind": { "const": "dynamic" } },
+              "required": ["reviewKind"]
+            }
+          },
+          "then": {
+            "not": {
+              "anyOf": [{ "required": ["dynamic"] }, { "required": ["base"] }]
+            }
+          }
         }
       ]
     },

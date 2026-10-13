@@ -111,7 +111,6 @@ async function startHarness(
       info: (line) => intakeLog.push(line),
       error: (line) => intakeLog.push(line),
     },
-    reviewKind: async () => "diff",
   });
   const handler = createGithubAppWebhookHandler({
     registry: createIntegrationRegistry({ github_app: h.provider }),

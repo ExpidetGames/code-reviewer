@@ -63,14 +63,16 @@ describe("cancelling waiting reviews when the review kind changes", () => {
     });
   });
 
-  // #195-T04
-  it("keeps the stored kind and the waiting jobs when the save fails", async () => {
-    const fixture = await createJobQueueFixture();
-    await createProjectsRepository(
+  // #195-T04, #195 finding 9: the real cancellation runs first, then the save fails, so the rollback
+  // must undo the cancellation itself — not merely skip it. The preserved running job still finishes.
+  it("rolls back the cancellation when the save fails after it ran, and the running job still finishes", async () => {
+    const fixture = await createJobQueueFixture({ dynamicReview: true });
+    const projects = createProjectsRepository(
       fixture.db,
       fixture.workspaceId,
       fixture.clock.now,
-    ).activate(fixture.repositoryId);
+    );
+    await projects.activate(fixture.repositoryId);
     const working = serviceWith(
       fixture,
       createJobReviewSettingsHooks(fixture.workspaceId),
@@ -78,14 +80,23 @@ describe("cancelling waiting reviews when the review kind changes", () => {
     await working.updateProjectSettings(fixture.repositoryId, {
       reviewKind: "dynamic",
     });
+    const running = await fixture.enqueueNew({
+      prNumber: 7,
+      reviewKind: "dynamic",
+    });
+    const claimed = await fixture.queue.claimNext("runner-a", ["opencode"]);
+    expect(claimed?.job.id).toBe(running.id);
     const waiting = await fixture.enqueueNew({
       prNumber: 8,
       headSha: sha("b"),
       reviewKind: "dynamic",
     });
 
+    const real = createJobReviewSettingsHooks(fixture.workspaceId);
     const failing = serviceWith(fixture, {
-      async onProjectSettingsChanged() {
+      async onProjectSettingsChanged(event, executor) {
+        // Cancel the waiting jobs (the real work), then fail: both must roll back together.
+        await real.onProjectSettingsChanged(event, executor);
         throw new Error("the settings save failed");
       },
     });
@@ -95,15 +106,21 @@ describe("cancelling waiting reviews when the review kind changes", () => {
       }),
     ).rejects.toThrow("the settings save failed");
 
-    // The kind did not change and the waiting Dynamic job was not cancelled.
-    const stored = await createProjectsRepository(
-      fixture.db,
-      fixture.workspaceId,
-      fixture.clock.now,
-    ).get(fixture.repositoryId);
-    expect(stored?.settings).toMatchObject({ reviewKind: "dynamic" });
+    // Rolled back: the kind did not change, the waiting job was not cancelled, the running job stands.
+    expect((await projects.get(fixture.repositoryId))?.settings).toMatchObject({
+      reviewKind: "dynamic",
+    });
     expect(await fixture.queue.get(waiting.id)).toMatchObject({
       status: "queued",
     });
+    expect(await fixture.queue.get(running.id)).toMatchObject({
+      status: "running",
+    });
+
+    // The preserved running job can still be completed.
+    const token = await fixture.tokenOf(running.id);
+    expect(
+      await fixture.queue.complete(running.id, token, { ok: true, result: {} }),
+    ).toMatchObject({ status: "completed" });
   });
 });

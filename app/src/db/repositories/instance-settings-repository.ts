@@ -51,6 +51,13 @@ export type InstanceSettingValues = {
    * overview of the admin portal until the admin dismisses it. No row: nothing to tell.
    */
   import_notice: ImportNotice;
+  /**
+   * #195 rollout gate: whether Dynamic Review may be queued. No row (or `enabled: false`) means every
+   * Dynamic project gets a run that fails visibly with `dynamic_review_disabled` instead of being
+   * queued; turn it on only after every app instance runs the version that routes by `review_kind`,
+   * and turn it off before rolling back to an older app (contracts/README.md).
+   */
+  dynamic_review: { enabled: boolean };
 };
 export type InstanceSettingKey = keyof InstanceSettingValues;
 

@@ -78,7 +78,6 @@ async function start(
           info: (line) => logLines.push(line),
           error: (line) => logLines.push(line),
         },
-        reviewKind: async () => "diff",
       }),
     }),
     automatic: h.automatic,

@@ -48,6 +48,8 @@ export type ExpiryReport = {
   leaseExpired: number;
   /** Running jobs that ran longer than the hard limit. */
   timedOut: number;
+  /** Waiting Dynamic jobs no capable runner claimed within the deadline (#195). */
+  noCapableRunner: number;
 };
 
 export type RunnerJobsRepositoryOptions = {
@@ -266,6 +268,35 @@ export function createRunnerJobsRepository(
     return Number(result.numUpdatedRows);
   }
 
+  /**
+   * #195 (finding 1): a Dynamic job no capable runner claims within the deadline would wait forever,
+   * because eligibility excludes it and expiry only handles running jobs. It is cancelled (not failed
+   * for a review reason), with the stable code `no_capable_runner`, without an attempt and without a
+   * credential. The deadline is operator-owned (`noCapableRunnerMs`).
+   */
+  async function cancelStrandedDynamic(
+    executor: Kysely<Database>,
+    current: Date,
+  ): Promise<number> {
+    const timestamp = formatTimestamp(current);
+    const strandedBefore = formatTimestamp(
+      new Date(current.getTime() - limits.noCapableRunnerMs),
+    );
+    const result = await executor
+      .updateTable("jobs")
+      .set({
+        status: "cancelled",
+        error_code: "no_capable_runner" satisfies JobErrorCode,
+        finished_at: timestamp,
+        updated_at: timestamp,
+      })
+      .where("status", "=", "queued")
+      .where("review_kind", "=", "dynamic")
+      .where("created_at", "<=", strandedBefore)
+      .executeTakeFirst();
+    return Number(result.numUpdatedRows);
+  }
+
   async function expire(
     executor: Kysely<Database>,
     current: Date,
@@ -275,6 +306,8 @@ export function createRunnerJobsRepository(
     // migration (a race); a running one was claimed before the upgrade. They are cancelled here so
     // they can neither starve review jobs nor be requeued.
     await cancelRemovedCommands(executor, timestamp);
+    // A Dynamic job no runner can run must not wait forever (#195).
+    const noCapableRunner = await cancelStrandedDynamic(executor, current);
     const lost = await loseAttempt(
       executor,
       { leaseExpiredBefore: timestamp },
@@ -288,6 +321,7 @@ export function createRunnerJobsRepository(
       requeued: lost.requeued,
       leaseExpired: lost.failed,
       timedOut,
+      noCapableRunner,
     };
   }
 

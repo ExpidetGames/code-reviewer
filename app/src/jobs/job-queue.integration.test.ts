@@ -8,6 +8,12 @@ import { sql } from "kysely";
 import { describe, expect, it } from "vitest";
 import { SLOT_HOLDING_STATUSES } from "./job-status.ts";
 import { JobQueueError } from "./errors.ts";
+import { DEFAULT_NO_CAPABLE_RUNNER_MS } from "./job-limits.ts";
+import { createJobReviewSettingsHooks } from "./review-settings-hooks.ts";
+import { createAppSettingsRepository } from "../db/repositories/app-settings-repository.ts";
+import { createProjectsRepository } from "../db/repositories/projects-repository.ts";
+import { createReviewSettingsService } from "../review-settings/service.ts";
+import { builtInReviewSettings } from "../review-settings/settings.ts";
 import { createJobQueueFixture, sha, T0 } from "../test-support/jobs.ts";
 
 const SECOND = 1000;
@@ -558,7 +564,12 @@ describe("leases that run out", () => {
     }
     const report = await fixture.queue.expireStaleJobs();
 
-    expect(report).toEqual({ requeued: 0, leaseExpired: 1, timedOut: 0 });
+    expect(report).toEqual({
+      requeued: 0,
+      leaseExpired: 1,
+      timedOut: 0,
+      noCapableRunner: 0,
+    });
     expect(await fixture.queue.get(job.id)).toMatchObject({
       status: "failed",
       errorCode: "lease_expired",
@@ -1613,5 +1624,155 @@ describe("jobs of a command the product removed", () => {
       job: { status: "cancelled", errorCode: "command_removed" },
     });
     expect(await fixture.queue.list({ status: "queued" })).toEqual([]);
+  });
+});
+
+/** Enables Dynamic Review on the fixture and (optionally) switches the project's kind. */
+async function enableDynamicReview(
+  fixture: Awaited<ReturnType<typeof createJobQueueFixture>>,
+  kind: "diff" | "dynamic" = "dynamic",
+) {
+  const projects = createProjectsRepository(
+    fixture.db,
+    fixture.workspaceId,
+    fixture.clock.now,
+  );
+  await projects.activate(fixture.repositoryId);
+  if (kind === "dynamic") {
+    const service = createReviewSettingsService({
+      appSettings: createAppSettingsRepository(fixture.db, fixture.workspaceId),
+      projects,
+      builtIn: () => builtInReviewSettings("test/model"),
+    });
+    await service.updateProjectSettings(fixture.repositoryId, {
+      reviewKind: "dynamic",
+    });
+  }
+}
+
+describe("the Dynamic Review rollout gate (#195)", () => {
+  // #195 finding 4
+  it("fails a Dynamic project's run visibly when the gate is off, and leaves Diff alone", async () => {
+    const fixture = await createJobQueueFixture();
+
+    const dynamic = await fixture.enqueueNew({ reviewKind: "dynamic" });
+    expect(dynamic).toMatchObject({
+      reviewKind: "dynamic",
+      status: "failed",
+      errorCode: "dynamic_review_disabled",
+      attempts: 0,
+    });
+    expect(dynamic.finishedAt).not.toBeNull();
+
+    const diff = await fixture.enqueueNew({ prNumber: 8, headSha: sha("b") });
+    expect(diff).toMatchObject({
+      reviewKind: "diff",
+      status: "queued",
+      errorCode: null,
+    });
+  });
+
+  // #195 finding 4
+  it("queues the same job once the gate is on", async () => {
+    const fixture = await createJobQueueFixture({ dynamicReview: true });
+
+    const dynamic = await fixture.enqueueNew({ reviewKind: "dynamic" });
+
+    expect(dynamic).toMatchObject({
+      reviewKind: "dynamic",
+      status: "queued",
+      errorCode: null,
+    });
+  });
+
+  // #195 finding 4: a previous-release app's claim SQL ignores `review_kind`; with the gate off there
+  // is no queued Dynamic row it could hand out as Diff, whatever it asks for.
+  it("leaves no queued Dynamic row a previous-release claim could pick up", async () => {
+    const fixture = await createJobQueueFixture();
+    await fixture.enqueueNew({ reviewKind: "dynamic" });
+    await fixture.enqueueNew({ prNumber: 8, headSha: sha("b") });
+
+    const { rows } = await sql<{ count: number }>`
+      select count(*) as count from jobs
+      where status = 'queued' and review_kind = 'dynamic'`.execute(fixture.db);
+
+    expect(rows[0]?.count).toBe(0);
+  });
+});
+
+describe("a Dynamic job no capable runner can claim (#195)", () => {
+  // #195 finding 1
+  it("is cancelled with no_capable_runner after the deadline, without an attempt, and Diff is untouched", async () => {
+    const fixture = await createJobQueueFixture({ dynamicReview: true });
+    const dynamic = await fixture.enqueueNew({ reviewKind: "dynamic" });
+    const diff = await fixture.enqueueNew({
+      prNumber: 8,
+      headSha: sha("b"),
+      reviewKind: "diff",
+    });
+
+    fixture.clock.advance(DEFAULT_NO_CAPABLE_RUNNER_MS - 1);
+    await fixture.queue.expireStaleJobs();
+    expect(await fixture.queue.get(dynamic.id)).toMatchObject({
+      status: "queued",
+      attempts: 0,
+    });
+
+    fixture.clock.advance(1);
+    const report = await fixture.queue.expireStaleJobs();
+
+    expect(report.noCapableRunner).toBe(1);
+    expect(await fixture.queue.get(dynamic.id)).toMatchObject({
+      status: "cancelled",
+      errorCode: "no_capable_runner",
+      attempts: 0,
+    });
+    expect(await fixture.queue.get(diff.id)).toMatchObject({
+      status: "queued",
+    });
+  });
+});
+
+describe("resolving the review kind inside the enqueue transaction (#195)", () => {
+  // #195 finding 3
+  it("queues a Dynamic project's new job as Dynamic", async () => {
+    const fixture = await createJobQueueFixture({ dynamicReview: true });
+    await enableDynamicReview(fixture, "dynamic");
+
+    const job = await fixture.enqueueNew({ prNumber: 7 });
+
+    expect(job.reviewKind).toBe("dynamic");
+  });
+
+  // #195 finding 3
+  it("never leaves a waiting job of a kind the project has left when the change races the enqueue", async () => {
+    const fixture = await createJobQueueFixture({ dynamicReview: true });
+    await enableDynamicReview(fixture, "diff");
+    const service = createReviewSettingsService({
+      appSettings: createAppSettingsRepository(fixture.db, fixture.workspaceId),
+      projects: createProjectsRepository(
+        fixture.db,
+        fixture.workspaceId,
+        fixture.clock.now,
+      ),
+      builtIn: () => builtInReviewSettings("test/model"),
+      hooks: createJobReviewSettingsHooks(fixture.workspaceId),
+    });
+
+    const [created] = await Promise.all([
+      fixture.enqueue({ prNumber: 7 }),
+      service.updateProjectSettings(fixture.repositoryId, {
+        reviewKind: "dynamic",
+      }),
+    ]);
+    const stored = await fixture.queue.get(created.job.id);
+
+    // Either the settings change committed first (the job is Dynamic and waiting) or the enqueue did
+    // (a Diff job, cancelled by the change). Never a waiting Diff job after the project turned Dynamic.
+    expect(stored).toMatchObject(
+      stored?.status === "queued"
+        ? { status: "queued", reviewKind: "dynamic" }
+        : { status: "cancelled", errorCode: "review_kind_changed" },
+    );
   });
 });

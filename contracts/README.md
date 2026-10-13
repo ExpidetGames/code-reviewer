@@ -8,7 +8,7 @@ other way round, so a change to the format has to change the file and both sides
 | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `runner-api.v1.json`         | The wire format of the runner API v1 (JSON Schema, draft 2020-12): the claim request, the claim response, the heartbeat and complete requests and responses, and every error. The `$defs` are the named bodies. |
 | `examples/<Definition>.json` | One valid document per body. Both test suites validate them, so an example can never drift from the schema. They hold dummy values only.                                                     |
-| `dynamic-review/schema.v1.json` | The neutral findings of a Dynamic Review (#195), before the runner renders them: opaque id, P0–P3, confidence, bounded title/body, a safe repository-relative path and line range, evidence references, resolved ids and the reviewed SHA. No permission, provider, routing, endpoint or command field. `dynamic-review/example.v1.json` is validated by both suites. |
+| `dynamic-review/schema.v1.json` | The neutral findings of a Dynamic Review (#195), before the runner renders them: opaque id, P0–P3, confidence, bounded title/body, a lexically safe repository-relative path, a line range (ordering is the runner's semantic check), evidence references, and the reviewed SHA. Resolutions of earlier findings sit on the run envelope (`resolvedIds`), so a run that leaves no current finding can still report them. No permission, provider, routing, endpoint or command field. `dynamic-review/example.v1.json` and `example-resolved.v1.json` are validated by both suites. |
 
 ## Who checks what
 
@@ -39,7 +39,28 @@ other way round, so a change to the format has to change the file and both sides
   `reviewKind`/`dynamic`/`base` fields of `RunnerJobInput` for a tagged Dynamic job, and the new
   `Engine`, `ReviewKind`, `DynamicReview`, `ClaimBase` definitions and Dynamic failure codes. A
   previous-release app ignores the claim body; a previous-release runner sends none (pr-agent only) and
-  never receives the tagged fields, so its closed `RunnerJobInput` parsing is unchanged.
+  never receives the tagged fields, so its closed `RunnerJobInput` parsing is unchanged. The tagged
+  union is enforced on both sides: a Dynamic job must carry `dynamic` and `base`, a Diff job (no
+  `reviewKind`, or `"diff"`) must not, and a Dynamic `model` uses the same character pattern the runner
+  accepts.
+
+### Rolling out Dynamic Review (#195, finding 4)
+
+A previous-release **app** ignores `review_kind` in its claim SQL: on a shared, migrated database it
+could hand a Dynamic row to a runner as an untagged Diff payload — a silent fallback. It must never be
+able to see a Dynamic row, so Dynamic jobs are only enqueued when the instance setting
+`dynamic_review` is `{ enabled: true }` (default off; `dynamic-review-gate.ts`). With the gate off, a
+Dynamic project's run is created `failed` with `dynamic_review_disabled`, visible in Runs.
+
+Order:
+
+1. Deploy every app instance with the version that routes by `review_kind` (this change). New runners
+   are safe next to old apps.
+2. Only then set `dynamic_review` to `{ enabled: true }` (and after #202 ships the engine).
+3. To roll back the app, set `dynamic_review` to `{ enabled: false }` **first** and wait for the
+   waiting jobs to drain, so no Dynamic row exists when an older app instance starts serving claims.
+
+The gate is read inside the enqueue transaction, so enabling/disabling it and queueing serialize.
 
 The meaning of the calls (status codes, the lease, what happens on failure) is in
 `app/src/runner-api/README.md`.

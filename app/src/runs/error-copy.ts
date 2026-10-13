@@ -24,6 +24,10 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
     "This command was removed from the product, so the waiting run was cancelled.",
   review_kind_changed:
     "The project's review kind was changed before this run could start, so the waiting run was cancelled.",
+  no_capable_runner:
+    "No runner that can run this kind of review picked up the run within the time limit, so it was cancelled. It will run again on the next push or review request.",
+  dynamic_review_disabled:
+    "Dynamic Review is not switched on for this instance yet, so this run could not start.",
 
   // The claim of the runner API
   llm_not_configured:

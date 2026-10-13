@@ -76,9 +76,12 @@ export async function startRunnerApiHarness(
     llmKey?: string | null;
   } = {},
 ) {
-  const fixture = await createJobQueueFixture(
-    options.limits === undefined ? {} : { limits: options.limits },
-  );
+  const fixture = await createJobQueueFixture({
+    // The runner API tests exercise routing by engines; the Dynamic Review rollout gate (#195) is
+    // covered by the queue tests, so the harness enables it.
+    dynamicReview: true,
+    ...(options.limits === undefined ? {} : { limits: options.limits }),
+  });
   const github = await startGithubAppHarness();
   github.fake.addInstallation({
     id: 4242,

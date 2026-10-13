@@ -217,4 +217,77 @@ describePostgres("the job queue on Postgres", () => {
     await first.close();
     await second.close();
   });
+
+  // #195-T02, #195 finding 9: the capability predicate is inside the atomic claim on Postgres too.
+  it("hands each capability only the kinds it can run and keeps one holder per pull request", async () => {
+    const postgres = await createPostgresTestDatabase();
+    const fixture = await createJobQueueFixture({
+      database: postgres.db,
+      dynamicReview: true,
+    });
+    const dynamic = await fixture.enqueueNew({
+      prNumber: 7,
+      headSha: sha("a"),
+      reviewKind: "dynamic",
+    });
+    fixture.clock.advance(1000);
+    const diff = await fixture.enqueueNew({
+      prNumber: 8,
+      headSha: sha("b"),
+      reviewKind: "diff",
+    });
+
+    const prAgentOnly = await fixture.queue.claimNext("runner-a", ["pr-agent"]);
+    const dual = await fixture.queue.claimNext("runner-b", [
+      "pr-agent",
+      "opencode",
+    ]);
+
+    expect(prAgentOnly?.job.id).toBe(diff.id);
+    expect(dual?.job.id).toBe(dynamic.id);
+  });
+
+  // #195-T02, #195 finding 9
+  it("never gives two capabilities a job of one pull request across kinds", async () => {
+    const postgres = await createPostgresTestDatabase();
+    const fixture = await createJobQueueFixture({
+      database: postgres.db,
+      dynamicReview: true,
+    });
+    await fixture.enqueueNew({
+      prNumber: 7,
+      headSha: sha("a"),
+      reviewKind: "dynamic",
+    });
+    fixture.clock.advance(1000);
+    await fixture.enqueueNew({
+      prNumber: 7,
+      headSha: sha("b"),
+      reviewKind: "diff",
+    });
+    fixture.clock.advance(1000);
+    await fixture.enqueueNew({
+      prNumber: 8,
+      headSha: sha("c"),
+      reviewKind: "diff",
+    });
+
+    const [one, two] = await Promise.all([
+      fixture.queue.claimNext("runner-a", ["pr-agent"]),
+      fixture.queue.claimNext("runner-b", ["pr-agent", "opencode"]),
+    ]);
+    const ids = [one?.job.id, two?.job.id].filter(
+      (id): id is string => id !== undefined,
+    );
+    expect(new Set(ids).size).toBe(ids.length);
+
+    const running = await postgres.db
+      .selectFrom("jobs")
+      .select(["id"])
+      .where("repository_id", "=", fixture.repositoryId)
+      .where("pr_number", "=", 7)
+      .where("status", "=", "running")
+      .execute();
+    expect(running.length).toBeLessThanOrEqual(1);
+  });
 });

@@ -270,7 +270,6 @@ export async function createBindingHarness(
         queue: createJobQueue(db, workspaceId),
         repositories,
         logger: { info: () => undefined, error: () => undefined },
-        reviewKind: async () => "diff",
       }),
     };
   }

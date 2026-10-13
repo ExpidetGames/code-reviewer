@@ -10,6 +10,11 @@ import { createRepositoriesRepository } from "../db/repositories/repositories-re
 import type { Database } from "../db/schema.ts";
 import { createJobQueue, type JobQueue } from "../jobs/job-queue.ts";
 import { createRunnerQueue, type RunnerQueue } from "../jobs/runner-queue.ts";
+import {
+  dynamicReviewEnabled as allowDynamicReview,
+  type DynamicReviewGate,
+} from "../jobs/dynamic-review-gate.ts";
+import type { ReviewKindResolver } from "../jobs/review-kind.ts";
 import type {
   EnqueueJobInput,
   Job,
@@ -54,7 +59,14 @@ export type TestQueue = JobQueue & RunnerQueue;
 export function createTestQueue(
   db: Kysely<Database>,
   workspaceId: string,
-  options: { now?: () => Date; limits?: Partial<JobQueueLimits> } = {},
+  options: {
+    now?: () => Date;
+    limits?: Partial<JobQueueLimits>;
+    /** #195 rollout gate; default: the instance setting (off). */
+    dynamicReviewEnabled?: DynamicReviewGate;
+    /** #195: override the in-transaction kind resolver (tests). */
+    reviewKind?: ReviewKindResolver;
+  } = {},
 ): TestQueue {
   return {
     ...createJobQueue(db, workspaceId, options),
@@ -111,6 +123,8 @@ export async function createJobQueueFixture(
     limits?: Partial<JobQueueLimits>;
     /** A database to seed instead of a fresh SQLite one (for the Postgres tests). */
     database?: Kysely<Database>;
+    /** #195: enable the Dynamic Review rollout gate for this fixture (default off). */
+    dynamicReview?: boolean;
   } = {},
 ): Promise<JobQueueFixture> {
   const created = options.database
@@ -156,6 +170,8 @@ export async function createJobQueueFixture(
   const queue = createTestQueue(db, workspaceId, {
     now: clock.now,
     limits: options.limits,
+    dynamicReviewEnabled:
+      options.dynamicReview === true ? allowDynamicReview : undefined,
   });
   const defaults = (overrides: Partial<EnqueueJobInput>): EnqueueJobInput => ({
     repositoryId: first.id,
