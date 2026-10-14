@@ -5,7 +5,7 @@
 import pytest
 
 from code_reviewer_runner.dynamic_review.github import Comment, GitHubError
-from code_reviewer_runner.dynamic_review.publish import Publisher, PublishError
+from code_reviewer_runner.dynamic_review.publish import Published, Publisher, PublishError
 from code_reviewer_runner.result import ErrorCode
 
 BOT = "code-reviewer[bot]"
@@ -39,6 +39,12 @@ def _comment(*, author: str, author_type: str, body: str = BODY) -> Comment:
     )
 
 
+def _edit(comments: list[Comment]) -> Published:
+    # The re-read is private to the publisher and only reached through a lost edit; the unit test
+    # drives the edit step directly with a client that loses the answer.
+    return _publisher(comments)._edit("7", BODY)  # pyright: ignore[reportPrivateUsage]
+
+
 def _publisher(comments: list[Comment]) -> Publisher:
     return Publisher(
         client=LostEditClient(comments),
@@ -49,7 +55,7 @@ def _publisher(comments: list[Comment]) -> Publisher:
 
 
 def test_the_bot_comment_holding_exactly_the_sent_body_counts_as_landed() -> None:
-    found = _publisher([_comment(author=BOT, author_type="Bot")])._edit("7", BODY)
+    found = _edit([_comment(author=BOT, author_type="Bot")])
 
     assert found.created is False
 
@@ -66,6 +72,6 @@ def test_the_bot_comment_holding_exactly_the_sent_body_counts_as_landed() -> Non
 )
 def test_a_comment_that_is_not_the_bots_exact_write_is_a_failure(comment: Comment) -> None:
     with pytest.raises(PublishError) as refused:
-        _publisher([comment])._edit("7", BODY)
+        _edit([comment])
 
     assert refused.value.code is ErrorCode.GIT_UNAVAILABLE
