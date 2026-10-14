@@ -68,7 +68,8 @@ of a result are not in any view, list, detail or polling answer (`run-view.ts` c
 only; tests search the answers for them). Of the result's `usage` only the detail carries four values
 (#201): the model name (cleaned and redacted like the log), the summed tokens, the number of model calls
 and the cost, which stays `null` ("Not available") when the runner could not know it (a Dynamic Review
-never guesses a price). The prompt/completion split and the fallback flag stay on the server; the list
+reports the sum of the charges its provider reported for every call, or `null`; it never guesses a
+price). A positive cost below $0.0001 reads "Less than $0.0001", never "$0.0000". The prompt/completion split and the fallback flag stay on the server; the list
 carries no usage. The log is cleaned (terminal escapes and control
 characters out) and passed through the same redaction the runner API uses for results, with the secrets
 the app knows. Everything that came from outside (project name, login, a historical question of a removed `/ask` run, the log)
