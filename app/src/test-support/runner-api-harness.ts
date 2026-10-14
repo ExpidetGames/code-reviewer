@@ -197,6 +197,13 @@ export async function startRunnerApiHarness(
           reviewKind: job.reviewKind,
           excludeJobId: job.id,
         }),
+      attemptedShas: (job) =>
+        createJobsRepository(fixture.db, job.workspaceId).attemptedShas({
+          repositoryId: job.repositoryId,
+          prNumber: job.prNumber,
+          reviewKind: job.reviewKind,
+          excludeJobId: job.id,
+        }),
       registry,
       guard:
         options.guard ??

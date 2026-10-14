@@ -22,15 +22,17 @@ The publisher owns the whole write:
 The state only advances with a confirmed successful write: the comment GitHub returns is the new
 state. A write that was already accepted before a lost lease cannot be recalled. The next run
 reconciles from the state it finds **only if** that state is one it can account for: the head it
-reviews, or the head the app reports as the last successful review (`previousReviewedSha`). Any
-other head, including a predecessor that published and then lost its lease (so the app still
-reports the older head), is refused with `review_not_published` and the comment is left as it is.
-That is fail-closed by design - the safe choice, because a state of unknown origin could be a newer
-review that must not be overwritten - and a known limitation: such a re-review is retried only once
-the app has recorded the predecessor's head.
+reviews, the head the app reports as the last successful review (`previousReviewedSha`), or a head
+the app reports it attempted (`attemptedShas`, #255): an earlier job of this pull request that did
+not succeed, which may have written the summary before it failed, lost its lease or was replaced.
+Any other head is refused with `review_not_published` and the comment is left as it is. That is
+fail-closed by design - the safe choice, because a state of unknown origin could be a newer review
+that must not be overwritten: the app never names a job newer than the one it hands out, so a late
+result of an older run still finds a head it cannot account for.
 """
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 
 from code_reviewer_runner.dynamic_findings import DynamicFindings, Finding
@@ -92,6 +94,7 @@ class Publisher:
         *,
         head_sha: str,
         previous_reviewed_sha: str | None,
+        attempted_shas: Sequence[str] = (),
     ) -> Published:
         if run.reviewed_sha != head_sha:
             raise PublishError(
@@ -103,13 +106,18 @@ class Publisher:
         except GitHubError as error:
             raise PublishError(error.code, error.detail) from None
         existing = self._summary_comment(comments)
-        previous = self._previous_state(existing, head_sha, previous_reviewed_sha)
+        previous = self._previous_state(existing, head_sha, previous_reviewed_sha, attempted_shas)
         redacted = redact_findings(run, self.redactor)
         state = reconcile(previous, redacted)
         body = self._render(state)
         return self._write(existing, body, head_sha)
 
-    def read_previous_state(self, head_sha: str, previous_reviewed_sha: str | None) -> ReviewState:
+    def read_previous_state(
+        self,
+        head_sha: str,
+        previous_reviewed_sha: str | None,
+        attempted_shas: Sequence[str] = (),
+    ) -> ReviewState:
         """The state the next review starts from (#201): the bot-owned summary of this pull
         request, validated exactly as a write validates it, or an empty state when there is no
         summary yet. A state this job cannot account for fails closed, here as at the write."""
@@ -118,7 +126,7 @@ class Publisher:
         except GitHubError as error:
             raise PublishError(error.code, error.detail) from None
         return self._previous_state(
-            self._summary_comment(comments), head_sha, previous_reviewed_sha
+            self._summary_comment(comments), head_sha, previous_reviewed_sha, attempted_shas
         )
 
     # -- selection and state ---------------------------------------------------------------
@@ -141,6 +149,7 @@ class Publisher:
         existing: Comment | None,
         head_sha: str,
         previous_reviewed_sha: str | None,
+        attempted_shas: Sequence[str],
     ) -> ReviewState:
         if existing is None:
             return ReviewState(reviewed_sha="", findings=(), resolved=())
@@ -153,12 +162,12 @@ class Publisher:
                 ErrorCode.DYNAMIC_POLICY_VIOLATION,
                 "the bot-owned summary comment holds no review state",
             )
-        allowed = {head_sha}
+        allowed = {head_sha, *attempted_shas}
         if previous_reviewed_sha:
             allowed.add(previous_reviewed_sha)
         if state.reviewed_sha and state.reviewed_sha not in allowed:
             # A head this job cannot account for: a newer review (a result that arrived late) or a
-            # predecessor that published before losing its lease. Both are refused, never merged.
+            # state the app never produced. Both are refused, never merged.
             raise PublishError(
                 ErrorCode.REVIEW_NOT_PUBLISHED,
                 "a newer review is already published for this pull request",
@@ -192,8 +201,31 @@ class Publisher:
         try:
             edited = self.client.edit_comment(comment_id, body)
         except GitHubError as error:
-            raise PublishError(error.code, error.detail) from None
+            if error.code is not ErrorCode.GIT_UNAVAILABLE:
+                raise PublishError(error.code, error.detail) from None
+            # The edit may have been accepted before the answer was lost (#255): when our own
+            # comment now holds exactly the body we sent, the write landed and the run is done.
+            found = self._find_edited(comment_id, body)
+            if found is None:
+                raise PublishError(error.code, error.detail) from None
+            return Published(comment_url=found.url, created=False)
         return Published(comment_url=edited.url, created=False)
+
+    def _find_edited(self, comment_id: str, body: str) -> Comment | None:
+        """Re-read after an ambiguous edit. An edit keeps the head of a re-review, so the head
+        cannot tell it apart: the bot-owned comment must carry byte for byte the body we wrote."""
+        try:
+            comments = self.client.list_comments(self.pr_number)
+        except GitHubError:
+            return None
+        for comment in comments:
+            if (
+                comment.id == comment_id
+                and comment.is_written_by(self.bot_login)
+                and comment.body == body
+            ):
+                return comment
+        return None
 
     def _find_published(self, head_sha: str) -> Comment | None:
         """Re-read after an ambiguous create: the same reviewed head and bot identity means ours."""
@@ -290,5 +322,8 @@ def publish_run(job: Job, run: DynamicFindings) -> Published:
             ErrorCode.DYNAMIC_POLICY_VIOLATION, "a Dynamic job without checkout facts"
         )
     return publisher_for(job).publish(
-        run, head_sha=base.head_sha, previous_reviewed_sha=base.previous_reviewed_sha
+        run,
+        head_sha=base.head_sha,
+        previous_reviewed_sha=base.previous_reviewed_sha,
+        attempted_shas=base.attempted_shas,
     )

@@ -25,6 +25,7 @@ import { createRepositoriesRepository } from "./repositories-repository.ts";
 import { createRunsRepository } from "./runs-repository.ts";
 
 const SHA = "b".repeat(40);
+const FAILED_SHA = "c".repeat(40);
 
 function reposOf(db: Kysely<Database>, workspaceId: string) {
   return {
@@ -43,7 +44,12 @@ function reposOf(db: Kysely<Database>, workspaceId: string) {
 type Repos = ReturnType<typeof reposOf>;
 
 /** One workspace with an integration, a repository, a project, a job and a setting. */
-async function seed(db: Kysely<Database>, workspaceId: string, tag: string) {
+async function seed(
+  db: Kysely<Database>,
+  workspaceId: string,
+  tag: string,
+  options: { earlierFailedJob?: boolean } = {},
+) {
   const repos = reposOf(db, workspaceId);
   const integration = await repos.integrations.create({
     type: "github_app",
@@ -77,6 +83,29 @@ async function seed(db: Kysely<Database>, workspaceId: string, tag: string) {
     runAfter: null,
   });
   if (enqueued.status !== "created") throw new Error("seeding failed");
+  // An earlier job of the same pull request and kind that ran and failed (a head the summary comment
+  // may hold, #255): the lookup of the attempted heads of the other workspace has something to leak.
+  if (options.earlierFailedJob === true) {
+    const row = await db
+      .selectFrom("jobs")
+      .selectAll()
+      .where("id", "=", enqueued.job.id)
+      .executeTakeFirstOrThrow();
+    await db
+      .insertInto("jobs")
+      .values({
+        ...row,
+        id: `failed-${tag}`,
+        head_sha: FAILED_SHA,
+        delivery_id: null,
+        status: "failed",
+        error_code: "timeout",
+        created_at: "2026-10-11T00:00:00.000Z",
+        updated_at: "2026-10-11T00:00:00.000Z",
+        finished_at: "2026-10-11T00:00:00.000Z",
+      })
+      .execute();
+  }
   await repos.appSettings.set("review_defaults", { from: tag }, tag);
   // A member and an open invitation.
   await db
@@ -420,6 +449,18 @@ const CASES: Case[] = [
     expectAnswer: (answer) => expect(answer).toBeNull(),
   },
   {
+    name: "jobs.attemptedShas",
+    run: (a, b) =>
+      // The kind of B's seeded jobs, so only the workspace filter keeps its failed head out.
+      a.jobs.attemptedShas({
+        repositoryId: b.repository.id,
+        prNumber: 7,
+        reviewKind: "diff",
+        excludeJobId: b.job.id,
+      }),
+    expectAnswer: (answer) => expect(answer).toEqual([]),
+  },
+  {
     name: "jobs.enqueue",
     run: (a, b) =>
       settle(() =>
@@ -656,9 +697,25 @@ async function twoWorkspaces() {
   const idA = await defaultWorkspaceId(db);
   const idB = await addWorkspace(db, "other");
   const a = await seed(db, idA, "a");
-  const b = await seed(db, idB, "b");
+  const b = await seed(db, idB, "b", { earlierFailedJob: true });
   return { db, a, b, reposA: reposOf(db, idA), reposB: reposOf(db, idB) };
 }
+
+describe("the attempted heads inside the scope that owns them", () => {
+  // Positive control for the "jobs.attemptedShas" case: the same query answers in B's own scope.
+  it("names the failed head for the workspace that owns it", async () => {
+    const { b, reposB } = await twoWorkspaces();
+
+    const answer = await reposB.jobs.attemptedShas({
+      repositoryId: b.repository.id,
+      prNumber: 7,
+      reviewKind: "diff",
+      excludeJobId: b.job.id,
+    });
+
+    expect(answer).toEqual([FAILED_SHA]);
+  });
+});
 
 describe("enqueueing under the scope of A against what B already has", () => {
   /**
@@ -841,7 +898,9 @@ describe("two workspaces", () => {
     expect(await reposA.jobs.list()).toEqual([
       expect.objectContaining({ id: a.job.id, workspaceId: a.workspaceId }),
     ]);
+    // B also holds its earlier failed job (seeded for the attempted-heads case).
     expect(await reposB.jobs.list()).toEqual([
+      expect.objectContaining({ id: "failed-b", workspaceId: b.workspaceId }),
       expect.objectContaining({ id: b.job.id, workspaceId: b.workspaceId }),
     ]);
   });
