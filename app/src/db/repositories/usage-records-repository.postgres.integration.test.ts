@@ -152,8 +152,8 @@ describePostgres("the usage records on Postgres", () => {
     const fixture = await createJobQueueFixture({ database: postgres.db });
     const job = await fixture.enqueueNew();
     const insert = () =>
-      sql`insert into usage_records (workspace_id, job_id, review_kind, key_mode, state, reserved_at)
-        values (${fixture.workspaceId}, ${job.id}, 'diff', 'own', 'reserved', '2026-10-14T12:00:00.000Z')`.execute(
+      sql`insert into usage_records (id, workspace_id, job_id, review_kind, key_mode, state, reserved_at)
+        values (${crypto.randomUUID()}, ${fixture.workspaceId}, ${job.id}, 'diff', 'own', 'reserved', '2026-10-14T12:00:00.000Z')`.execute(
         postgres.db,
       );
     await insert();

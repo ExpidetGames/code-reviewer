@@ -18,7 +18,7 @@ export const migration: Migration = {
   async up(db) {
     await db.schema
       .createTable("usage_records")
-      .addColumn("id", "text", (column) => column.primaryKey())
+      .addColumn("id", "text", (column) => column.primaryKey().notNull())
       .addColumn("workspace_id", "text", (column) =>
         column.notNull().references("workspaces.id"),
       )
