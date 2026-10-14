@@ -76,9 +76,11 @@ class Usage:
     ai_calls: int
     fallback_used: bool
     cost_usd: float | None
+    # Why a Dynamic Review was wrapped up before it was done (`cost_limit`, `time_limit`, #293).
+    stopped_early: str | None = None
 
     def to_json(self) -> dict[str, Any]:
-        return {
+        document: dict[str, Any] = {
             "model": self.model,
             "promptTokens": self.prompt_tokens,
             "completionTokens": self.completion_tokens,
@@ -87,6 +89,9 @@ class Usage:
             "fallbackUsed": self.fallback_used,
             "costUsd": self.cost_usd,
         }
+        if self.stopped_early is not None:
+            document["stoppedEarly"] = self.stopped_early
+        return document
 
 
 @dataclass(frozen=True)

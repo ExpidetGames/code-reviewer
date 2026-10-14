@@ -7,6 +7,10 @@
 // that came from outside (the question of an `/ask`, a login, the log of the runner) is data and is
 // rendered as text; the one link made from stored data is checked here.
 import type { JsonValue, StoredReviewCommand } from "../integrations/types.ts";
+import {
+  STOPPED_EARLY_REASONS,
+  type StoppedEarly,
+} from "../runner-api/contract.ts";
 import type { JobStatus } from "../jobs/job-status.ts";
 import type { Job, JobTriggerKind } from "../jobs/job-types.ts";
 import type { ProjectReviewKind } from "../review-settings/settings.ts";
@@ -54,6 +58,8 @@ export type RunUsageView = {
   aiCalls: number;
   /** The cost in US dollars; null when it is not known (a Dynamic Review never guesses it). */
   costUsd: number | null;
+  /** Why a Dynamic Review was wrapped up early and may be incomplete (#293); null otherwise. */
+  stoppedEarly: StoppedEarly | null;
 };
 
 export type RunDetailView = RunRowView & {
@@ -185,6 +191,11 @@ export function readStoredUsage(result: JsonValue | null): RunUsageView | null {
     totalTokens,
     aiCalls,
     costUsd: costKnown ? costUsd : null,
+    stoppedEarly:
+      typeof usage.stoppedEarly === "string" &&
+      (STOPPED_EARLY_REASONS as readonly string[]).includes(usage.stoppedEarly)
+        ? (usage.stoppedEarly as StoppedEarly)
+        : null,
   };
 }
 

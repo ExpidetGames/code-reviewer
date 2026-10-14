@@ -86,6 +86,7 @@ describe("the usage of a run", () => {
     totalTokens: 12_900,
     aiCalls: 7,
     costUsd: 0.04,
+    stoppedEarly: null,
   };
 
   // #201-T27
@@ -103,6 +104,41 @@ describe("the usage of a run", () => {
     expect(content).toContain("vendor/dynamic-model");
     expect(content).toContain("12,900 tokens in 7 model calls");
     expect(content).toContain("$0.04");
+  });
+
+  // #293-T08
+  it.each([
+    ["cost_limit", /cost limit/],
+    ["time_limit", /time limit/],
+  ] as const)(
+    "says in neutral words that a review stopped early at its %s and may be incomplete",
+    (stoppedEarly, limit) => {
+      const { container } = render(
+        <RunDetail
+          workspaceSlug="acme"
+          initial={snap(detail({ usage: { ...usage, stoppedEarly } }))}
+          api={apiAnswering([])}
+        />,
+      );
+
+      const content = text(container);
+      expect(content).toContain("Stopped early");
+      expect(content).toMatch(limit);
+      expect(content).toContain("may be incomplete");
+    },
+  );
+
+  // #293-T08
+  it("shows nothing about stopping early for a complete run", () => {
+    const { container } = render(
+      <RunDetail
+        workspaceSlug="acme"
+        initial={snap(detail({ usage }))}
+        api={apiAnswering([])}
+      />,
+    );
+
+    expect(text(container)).not.toContain("Stopped early");
   });
 
   // #201-T28: a Dynamic Review never guesses a price.

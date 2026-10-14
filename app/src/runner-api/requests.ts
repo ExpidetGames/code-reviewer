@@ -5,6 +5,7 @@
 // bodies through both and requires the same verdict. A refusal lists fields and reasons, never
 // values: the bodies of these requests hold a lease token and a log.
 import type {
+  StoppedEarly,
   ClaimEngine,
   ClaimRequest,
   CompleteRequest,
@@ -14,7 +15,7 @@ import type {
   RunnerResult,
   RunnerUsage,
 } from "./contract.ts";
-import { CLAIM_ENGINES } from "./contract.ts";
+import { CLAIM_ENGINES, STOPPED_EARLY_REASONS } from "./contract.ts";
 
 export type Parsed<T> =
   { ok: true; value: T } | { ok: false; fields: FieldError[] };
@@ -212,6 +213,12 @@ function parseUsage(
     costUsd === null ||
     (typeof costUsd === "number" && costUsd >= 0 && Number.isFinite(costUsd));
   if (!costOk) check.fail(`${prefix}costUsd`, "invalid");
+  const stoppedEarly = value.stoppedEarly ?? null;
+  const stoppedOk =
+    stoppedEarly === null ||
+    (typeof stoppedEarly === "string" &&
+      (STOPPED_EARLY_REASONS as readonly string[]).includes(stoppedEarly));
+  if (!stoppedOk) check.fail(`${prefix}stoppedEarly`, "invalid");
   if (
     check.fields.length > before ||
     model === undefined ||
@@ -220,7 +227,8 @@ function parseUsage(
     totalTokens === undefined ||
     aiCalls === undefined ||
     typeof fallbackUsed !== "boolean" ||
-    !costOk
+    !costOk ||
+    !stoppedOk
   )
     return undefined;
   return {
@@ -231,6 +239,7 @@ function parseUsage(
     aiCalls,
     fallbackUsed,
     costUsd: costUsd as number | null,
+    stoppedEarly: stoppedEarly as StoppedEarly | null,
   };
 }
 

@@ -25,6 +25,16 @@ replaced by the `usage.cost` the provider reported. A call that reports no cost 
 money, so the run stops (`dynamic_accounting_failed`): it is never continued without a bound, and a
 missing cost is never read as zero.
 
+**Wrap-up (#293).** The run does not just stop when the limit is near. A call that can be rewritten
+into a final answer (`can_wrap_up`: the model proxy can reduce the request to the structured-output
+return tool) becomes the *final call* when a further normal call could not be followed by a final
+one inside the cost limit (what is spent, what is held, this call and a final call after it, with
+room for two more tool results in the history), or when less than a reserve of wall clock is left
+(one provider call: 150 s, a quarter of a shorter deadline). The decision is the ledger's alone,
+from its own cost and clock; nothing in the request can start or prevent it. The final call must
+itself fit the cost limit, and it is the last call granted: any other request after it is refused.
+The ledger remembers why the run stopped early (`stopped_early`) for the result and the summary.
+
 **Tokens.** The input estimate is bytes over a conservative 3 bytes per token (real text has
 about 3 to 4), tightened to what the provider settled on the previous call when that content was
 denser, and never below the last settled prompt. It is an estimate, not a bound: it prices the
@@ -71,6 +81,15 @@ DEFAULT_WINDOW_TOKENS = 128_000
 # about 3 to 4; 3 errs on the side of more tokens, and a denser previous call tightens it, down
 # to the proven 1.
 ASSUMED_DENSITY = 3.0
+# The wrap-up reserve of the wall clock: one provider call (the proxy waits 120 s for one) and a
+# margin. A shorter deadline gets a quarter of it, so a short test deadline still has a normal part.
+WRAP_UP_RESERVE_SECONDS = 150.0
+WRAP_UP_RESERVE_FRACTION = 0.25
+# What the history of the call after a normal call can have grown by, for the cost of a final call
+# that is reserved before the normal call is allowed: two tool results of the largest size.
+FINAL_CALL_GROWTH_BYTES = 2 * MAX_TOOL_RESULT_BYTES
+STOPPED_EARLY_COST = "cost_limit"
+STOPPED_EARLY_TIME = "time_limit"
 # The density of the window backstop: the bytes one token is assumed to hold when the ledger asks
 # whether a request can fit the model window at all. Natural text has 3 to 4.5, so 6 refuses only
 # what cannot fit at any realistic density (a long run of one repeated character is the only text
@@ -165,6 +184,8 @@ class Reservation:
     byte_bound: int = 0
     request_bytes: int = 0
     cost: Decimal = Decimal(0)
+    # True for the one call that the run is wrapped up with (#293): the proxy rewrites it.
+    final: bool = False
 
 
 @dataclass
@@ -241,6 +262,11 @@ class BudgetLedger:
         self.window_tokens = window_tokens
         self.output_tokens = min(max(output_tokens, 1), window_tokens)
         self._unit_costs = unit_costs
+        self._wrap_up_seconds = min(
+            WRAP_UP_RESERVE_SECONDS, WRAP_UP_RESERVE_FRACTION * limits.deadline_seconds
+        )
+        self._final_granted = False
+        self._stopped_early: str | None = None
         self._clock = clock
         self._started = clock()
         self._counters = _Counters()
@@ -250,6 +276,10 @@ class BudgetLedger:
     @property
     def started(self) -> float:
         return self._started
+
+    def elapsed_seconds(self) -> float:
+        """The time since the ledger started, on its own clock."""
+        return self._clock() - self._started
 
     def remaining_seconds(self) -> float:
         """The time left before the whole-job deadline. Never negative."""
@@ -282,7 +312,20 @@ class BudgetLedger:
                 ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the whole-job deadline was reached"
             )
 
-    def reserve_call(self, request_text: str, *, output_tokens: int | None = None) -> Reservation:
+    @property
+    def stopped_early(self) -> str | None:
+        """Why the run was wrapped up (`cost_limit`, `time_limit`), or None for a complete run."""
+        with self._lock:
+            return self._stopped_early
+
+    def reserve_call(
+        self,
+        request_text: str,
+        *,
+        output_tokens: int | None = None,
+        can_wrap_up: bool = False,
+        wrap_up_text: str = "",
+    ) -> Reservation:
         """Reserve one model call before its request is sent. Raises when it cannot fit.
 
         Every attempt reserves, including a retry, a compaction or a hidden call: they are all model
@@ -296,20 +339,36 @@ class BudgetLedger:
         allowance = self.output_tokens if output_tokens is None else output_tokens
         counters = self._counters
         with self._lock:
+            if self._final_granted:
+                raise LimitError(
+                    ErrorCode.DYNAMIC_BUDGET_EXCEEDED,
+                    "the run asked for a call after its final call",
+                )
             # The estimate prices the reservation. The last settled prompt is a heuristic floor:
             # it usually predicts the next prompt in a tool loop, and after a compaction or a
             # hidden call with another prompt it can over-reserve, which only costs headroom.
             # The byte count stays the proven bound on what the provider may report.
-            estimate = max(math.ceil(size / counters.density), counters.last_prompt_tokens)
+            estimate = self._estimate(size)
             bound = max(size, counters.last_prompt_tokens)
             if math.ceil(size / WINDOW_CHECK_DENSITY) + allowance > self.window_tokens:
                 raise LimitError(
                     ErrorCode.DYNAMIC_BUDGET_EXCEEDED,
                     "the request plus its output allowance exceeds the model window",
                 )
+            held = counters.cost + counters.reserved_cost
             cost = self._call_cost(estimate, allowance)
-            if counters.cost + counters.reserved_cost + cost > self.limits.max_cost_usd:
+            reason = self._wrap_up_reason(held, cost, estimate, allowance) if can_wrap_up else None
+            if reason is not None:
+                # The last call of the run: it carries the instruction and nothing else grows.
+                size += len(wrap_up_text.encode("utf-8", errors="replace"))
+                estimate = self._estimate(size)
+                bound += size - len(request_text.encode("utf-8", errors="replace"))
+                cost = self._call_cost(estimate, allowance)
+            if held + cost > self.limits.max_cost_usd:
                 raise LimitError(ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the cost limit is used up")
+            if reason is not None:
+                self._final_granted = True
+                self._stopped_early = reason
             counters.model_calls += 1
             counters.reserved_cost = _SUM.add(counters.reserved_cost, cost)
         return Reservation(
@@ -318,7 +377,23 @@ class BudgetLedger:
             byte_bound=bound,
             request_bytes=size,
             cost=cost,
+            final=reason is not None,
         )
+
+    def _estimate(self, size: int) -> int:
+        return max(math.ceil(size / self._counters.density), self._counters.last_prompt_tokens)
+
+    def _wrap_up_reason(
+        self, held: Decimal, cost: Decimal, estimate: int, allowance: int
+    ) -> str | None:
+        """Why this call has to be the final one: the clock first, then what the next would cost."""
+        if self.remaining_seconds() <= self._wrap_up_seconds:
+            return STOPPED_EARLY_TIME
+        growth = math.ceil(FINAL_CALL_GROWTH_BYTES / self._counters.density)
+        after = self._call_cost(estimate + growth, allowance)
+        if held + cost + after > self.limits.max_cost_usd:
+            return STOPPED_EARLY_COST
+        return None
 
     def _call_cost(self, input_tokens: int, output_tokens: int) -> Decimal:
         """What one call could cost, to reserve: estimate and allowance at the unit costs."""
@@ -471,4 +546,5 @@ class BudgetLedger:
                 ai_calls=counters.model_calls,
                 fallback_used=False,
                 cost_usd=total if exact and math.isfinite(total) else None,
+                stopped_early=self._stopped_early,
             )
