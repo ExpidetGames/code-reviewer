@@ -254,6 +254,9 @@ export default defineConfig({
         ...appEnv,
         DATABASE_PATH: e2eEnv.databasePath,
         BETTER_AUTH_URL: e2eEnv.appUrl,
+        // Saving a Dynamic model asks the provider's model metadata: the fake LLM answers (#269).
+        LLM_API_BASE_URL: e2eEnv.modelLlmFakeApiUrl,
+        ALLOW_TEST_LLM_ENDPOINTS: "true",
       },
       url: e2eEnv.appUrl,
       reuseExistingServer: false,

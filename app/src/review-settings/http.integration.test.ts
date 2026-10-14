@@ -7,6 +7,12 @@
 // tested in integration-tests/http/review-settings-route.integration.test.ts.
 import { describe, expect, it, vi } from "vitest";
 import type { SessionUser } from "../auth/access-policy.ts";
+import { startLlmFake } from "../../../fakes/llm/server.ts";
+import {
+  createModelCapabilityChecker,
+  type ModelCapabilityChecker,
+} from "../llm/model-capabilities.ts";
+import { cleanUpAfterTest } from "../test-support/test-database.ts";
 import { setupReviewSettings } from "../test-support/review-settings-harness.ts";
 import {
   REVIEW_SETTINGS_REQUEST_MAX_BYTES,
@@ -18,8 +24,12 @@ const URL_BASE = "https://app.test";
 
 async function setup(
   requireUser: () => Promise<SessionUser> = async () => USER,
+  modelCapabilities?: ModelCapabilityChecker,
 ) {
-  const app = await setupReviewSettings();
+  const app = await setupReviewSettings(
+    undefined,
+    modelCapabilities === undefined ? {} : { modelCapabilities },
+  );
   await app.projects.activate(app.first.id);
   const handlers = createReviewSettingsRouteHandlers({
     requireUser,
@@ -440,5 +450,50 @@ describe("the user check", () => {
       ),
     ])
       await expect(call).rejects.toBe(stop);
+  });
+});
+
+// #269-T05 #269-T07
+describe("the check of the Dynamic model over HTTP", () => {
+  async function setupChecked(baseUrl?: string) {
+    const llm = await startLlmFake();
+    cleanUpAfterTest(() => llm.close());
+    const checker = createModelCapabilityChecker({
+      baseUrl: () => baseUrl ?? llm.baseUrl,
+      log: () => undefined,
+      timeoutMs: 1000,
+    });
+    return { llm, app: await setup(async () => USER, checker) };
+  }
+
+  it("refuses a model without tool support with 400 and the code on the field", async () => {
+    const { llm, app } = await setupChecked();
+    llm.setModel("vendor/no-tools", [{ supported_parameters: ["tools"] }]);
+
+    const response = await app.putProject({
+      settings: { dynamicModel: "vendor/no-tools" },
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "REVIEW_SETTINGS_INVALID",
+      issues: [
+        { field: "dynamicModel", code: "DYNAMIC_MODEL_TOOLS_UNSUPPORTED" },
+      ],
+    });
+  });
+
+  it("answers a save that could not be checked with 200 and the warning", async () => {
+    const { app } = await setupChecked("http://127.0.0.1:1/api/v1");
+
+    const response = await app.putProject({
+      settings: { dynamicModel: "vendor/any" },
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      dynamic: { effective: { dynamicModel: "vendor/any" } },
+      warnings: [{ field: "dynamicModel", code: "DYNAMIC_MODEL_UNVERIFIED" }],
+    });
   });
 });
