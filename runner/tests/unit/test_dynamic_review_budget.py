@@ -364,7 +364,7 @@ def test_concurrent_reservations_cannot_together_exceed_the_cost_limit() -> None
     assert shared.model_calls == 3
 
 
-# -- wrap-up (#293) ---------------------------------------------------------------------------------
+# -- wrap-up (#293) ----------------------------------------------------------------------------
 # A call of 3,000 bytes is 1,000 estimated tokens: with 100 output tokens it costs 0.0014 USD at the
 # round unit costs above. The call that would follow it can hold two more tool results of history.
 
