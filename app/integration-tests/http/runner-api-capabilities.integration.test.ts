@@ -510,7 +510,7 @@ describe("the heads the app attempted for a Dynamic job", () => {
     const body = await h.claimed({ engines });
 
     expect(body.job.id).toBe(claimed.id);
-    expect(body.job.input.base).toMatchObject({ attemptedShas: [] });
+    expect(body.job.input.base).not.toHaveProperty("attemptedShas");
   });
 
   // #255-T01 (app side)
@@ -537,8 +537,8 @@ describe("the heads the app attempted for a Dynamic job", () => {
 
     expect(body.job.input.base).toMatchObject({
       previousReviewedSha: "2".repeat(40),
-      attemptedShas: [],
     });
+    expect(body.job.input.base).not.toHaveProperty("attemptedShas");
   });
 
   // #255-T02 (app side)
@@ -558,7 +558,19 @@ describe("the heads the app attempted for a Dynamic job", () => {
     const body = await h.claimed({ engines });
 
     expect(body.job.id).toBe(claimed.id);
-    expect(body.job.input.base).toMatchObject({ attemptedShas: [] });
+    expect(body.job.input.base).not.toHaveProperty("attemptedShas");
+    expectValid("ClaimResponse", body);
+  });
+
+  // #255-T03 (app side)
+  it("leaves the key out of the claim when no head was attempted, so an older runner still accepts it", async () => {
+    const h = await startDynamicHarness();
+
+    const body = await claimNew(h);
+
+    // The runner's job contract is closed: a runner from before #255 rejects an unknown field.
+    expect(body.job.input.base).not.toHaveProperty("attemptedShas");
+    expectValid("ClaimResponse", body);
   });
 
   // #255-T01 (app side)

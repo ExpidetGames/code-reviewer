@@ -238,7 +238,7 @@ function dynamicOptionsOf(options: JobOptions): DynamicReviewOptions | null {
  * identity the provider reported. `comparison` is a declared mode, not proof: the checkout verifies
  * completeness before it trusts it, and `previousReviewedSha` is the head of the last successful
  * review of the same kind (#199), or null; `attemptedShas` are the heads of the earlier jobs that did
- * not succeed (#255). Nothing here is a permission or an endpoint.
+ * not succeed (#255, left out when there are none). Nothing here is a permission or an endpoint.
  */
 function claimBaseOf(
   repositoryFullName: string,
@@ -252,7 +252,8 @@ function claimBaseOf(
     baseRef,
     headSha,
     previousReviewedSha,
-    attemptedShas,
+    // Left out when empty: a runner from before #255 has a closed job contract and rejects the key.
+    ...(attemptedShas.length === 0 ? {} : { attemptedShas }),
     comparison: "full",
   };
 }
