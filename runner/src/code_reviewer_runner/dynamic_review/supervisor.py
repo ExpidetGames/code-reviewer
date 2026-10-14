@@ -21,6 +21,7 @@ from collections.abc import Callable, Generator, Mapping
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from code_reviewer_runner.job import Job
 from code_reviewer_runner.result import ErrorCode
@@ -30,6 +31,7 @@ from .engine_user import EngineLaunch, sweep_user
 from .export_isolation import AgentIdentity, prepared_checkout
 from .limits import CheckoutError
 from .netguard import IsolationError
+from .pr_context import PreparationContext, load_context
 from .static_isolation import slot_ports
 
 ENGINE_UID_VARIABLE = "RUNNER_DYNAMIC_ENGINE_UID"
@@ -93,12 +95,24 @@ def production_preparer(
     *,
     cancelled: Callable[[], bool] = lambda: False,
     content_for: Callable[..., PreparedContent] = prepare_job_content,
+    context_for: Callable[..., PreparationContext] = load_context,
 ) -> ContentPreparer:
     """The preparer `run_dynamic_job` uses when none is injected.
 
     `content_for` is the trusted preparation of the Git content (#196); the tests of the
     privileged suite replace it with one that reads local Git objects instead of GitHub.
+    `context_for` reads the pull request's title and body and the prior review state (#201); it
+    runs inside the preparation, after the isolation checks and the lease, and those tests replace
+    it too.
     """
+
+    def content_with_context(job: Job, directory: Path, **options: Any) -> PreparedContent:
+        context = context_for(job, cancelled=cancelled)
+        return content_for(
+            job,
+            directory,
+            **{**options, "metadata": context.metadata, "prior_state": context.prior_state},
+        )
 
     @contextmanager
     def prepare(job: Job) -> Generator[Prepared]:
@@ -113,7 +127,7 @@ def production_preparer(
             parent,
             identity,
             cancelled=cancelled,
-            content_for=content_for,
+            content_for=content_with_context,
             on_lease=_sweep_first(identity),
         ) as (content, lifetime):
             yield Prepared(

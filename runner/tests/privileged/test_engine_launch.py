@@ -89,7 +89,9 @@ def started_engine(
     job = dynamic_job(repo.head)
     with (
         slot_proxy() as proxy_port,
-        production_preparer(environment, content_for=repo.content_for)(job) as prepared,
+        production_preparer(
+            environment, content_for=repo.content_for, context_for=repo.context_for
+        )(job) as prepared,
     ):
         assert isinstance(prepared, Prepared) and prepared.launch is not None
         if targets is not None:
@@ -287,9 +289,9 @@ def test_what_a_killed_job_left_is_ended_before_anything_of_the_next_job_exists(
     try:
         assert stray.pid in user_pids(ENGINE_UID)
         parent = job_dir / "dynamic"
-        with production_preparer(environment, content_for=repo.content_for)(
-            dynamic_job(repo.head)
-        ) as prepared:
+        with production_preparer(
+            environment, content_for=repo.content_for, context_for=repo.context_for
+        )(dynamic_job(repo.head)) as prepared:
             assert isinstance(prepared, Prepared)
             # The survivor is gone by the time the job's directories and its export exist.
             assert stray.pid not in user_pids(ENGINE_UID)
