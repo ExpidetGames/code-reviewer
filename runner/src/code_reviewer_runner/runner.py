@@ -584,7 +584,7 @@ def main(
                     saved_env,
                     dynamic_timeout,
                     engines=engines_from_environment(saved_env),
-                    lease_check=lease_check_from_environment(saved_env),
+                    lease_check=lease_check_from_environment(saved_env, required=True),
                 )
         except KeyboardInterrupt:
             raise
