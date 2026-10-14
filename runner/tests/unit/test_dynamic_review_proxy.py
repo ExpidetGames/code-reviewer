@@ -968,3 +968,101 @@ def test_a_blank_descriptor_is_an_empty_one() -> None:
     with pytest.raises(LimitError) as refused:
         capabilities_from_config(" ", model="anthropic/claude-haiku-5.5")
     assert refused.value.code is ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED
+
+
+def answer_with_cost(cost: Any, prompt: int = 10, completion: int = 5) -> dict[str, Any]:
+    answer = answer_with_usage(prompt, completion)
+    answer["usage"]["cost"] = cost
+    return answer
+
+
+# #267-T01
+def test_the_cost_the_provider_reports_for_a_call_is_recorded() -> None:
+    subject = proxy(Upstream(body=answer_with_cost(0.000431)))
+
+    response = post(subject, request_body())
+
+    assert response.status == 200
+    usage = subject.ledger.usage("deepseek/deepseek-v4.1-flash")
+    assert usage.cost_usd == 0.000431
+    assert usage.total_tokens == 15
+    # The engine still gets the provider's answer untouched, cost included.
+    assert json.loads(response.body)["usage"]["cost"] == 0.000431
+
+
+# #267-T01
+def test_the_costs_of_several_calls_add_up() -> None:
+    subject = proxy(Upstream(body=answer_with_cost(0.1)))
+
+    for _ in range(3):
+        assert post(subject, request_body()).status == 200
+
+    assert subject.ledger.usage(None).cost_usd == 0.3
+    assert subject.ledger.usage(None).ai_calls == 3
+
+
+# #267-T03
+def test_a_streamed_request_records_the_cost_and_the_engine_still_sees_the_usage() -> None:
+    answer = message_answer({"role": "assistant", "content": "{}"})
+    answer["usage"]["cost"] = 0.0007
+    subject = proxy(Upstream(body=answer))
+
+    response = post(subject, request_body(stream=True, stream_options={"include_usage": True}))
+
+    assert response.content_type == "text/event-stream"
+    assert stream_events(response.body)[1]["usage"]["cost"] == 0.0007
+    assert subject.ledger.usage(None).cost_usd == 0.0007
+
+
+# #267-T04
+# #267-T05
+def test_a_call_without_a_usable_cost_makes_the_cost_unknown_and_changes_nothing_else() -> None:
+    answers: list[dict[str, Any]] = [answer_with_usage()]  # no cost field at all
+    answers += [
+        answer_with_cost(unusable)
+        for unusable in (None, "0.01", True, [], {}, -0.5, 1e999, float("nan"))
+    ]
+    for answer in answers:
+        subject = proxy(Upstream(body=answer))
+
+        response = post(subject, request_body())
+
+        assert response.status == 200, answer
+        usage = subject.ledger.usage(None)
+        assert usage.cost_usd is None, answer
+        assert (usage.prompt_tokens, usage.completion_tokens, usage.ai_calls) == (10, 5, 1)
+
+
+# #267-T04
+def test_one_call_without_a_cost_makes_the_whole_run_unknown_not_a_partial_sum() -> None:
+    priced = answer_with_cost(0.2)
+    unpriced = answer_with_usage()
+    answers = iter([priced, unpriced, priced])
+
+    def upstream(url: str, body: bytes, headers: dict[str, str], limit: int) -> tuple[int, bytes]:
+        return 200, json.dumps(next(answers)).encode("utf-8")
+
+    subject = proxy(upstream)
+    for _ in range(3):
+        assert post(subject, request_body()).status == 200
+
+    assert subject.ledger.usage(None).cost_usd is None
+
+
+# #267-T05
+def test_a_call_the_provider_refused_leaves_the_cost_unknown() -> None:
+    answers = iter(
+        [(200, answer_with_cost(0.2)), (503, {"error": "busy"}), (200, answer_with_cost(0.2))]
+    )
+
+    def upstream(url: str, body: bytes, headers: dict[str, str], limit: int) -> tuple[int, bytes]:
+        status, answer = next(answers)
+        return status, json.dumps(answer).encode("utf-8")
+
+    subject = proxy(upstream)
+    statuses = [post(subject, request_body()).status for _ in range(3)]
+
+    # The retry after the refusal succeeded and the run goes on, but one reserved call has no
+    # reported charge, so the run cannot claim an exact total.
+    assert statuses == [200, 503, 200]
+    assert subject.ledger.usage(None).cost_usd is None

@@ -8,8 +8,11 @@ from what the engine reports, and a missing or oversized answer fails closed ins
 counted as zero or ignored.
 """
 
+import ast
 import threading
 import time
+from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -20,6 +23,7 @@ from code_reviewer_runner.dynamic_review.budget import (
     BudgetLedger,
     DynamicLimits,
     LimitError,
+    exact_cost,
     reserved_tokens,
 )
 from code_reviewer_runner.result import ErrorCode
@@ -373,3 +377,99 @@ def test_the_untrusted_input_over_the_input_bound_is_refused() -> None:
         subject.check_input_bytes(101)
 
     assert refused.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
+
+
+def settled(subject: BudgetLedger, cost: Decimal | None, *, prompt: int = 3) -> None:
+    reservation = subject.reserve_call("x" * prompt, output_tokens=1)
+    subject.settle_call(reservation, prompt_tokens=prompt, completion_tokens=1, cost=cost)
+
+
+# #267-T02
+def test_the_costs_of_all_calls_are_summed_exactly() -> None:
+    subject = ledger()
+    for _ in range(10):
+        settled(subject, Decimal("0.1"))
+
+    # Ten times 0.1 is exactly 1.0 here; a float sum would be 0.9999999999999999.
+    assert subject.usage("vendor/model").cost_usd == 1.0
+
+    small = ledger()
+    for cost in ("0.000123", "0.000456", "0.0000001"):
+        settled(small, Decimal(cost))
+    assert small.usage("vendor/model").cost_usd == 0.0005791
+
+
+# #267-T04
+def test_the_cost_is_unknown_when_any_call_reported_none() -> None:
+    subject = ledger()
+    settled(subject, Decimal("0.25"))
+    settled(subject, None)
+    settled(subject, Decimal("0.5"))
+
+    # Not 0.75: a partial sum would look exact and under-report.
+    assert subject.usage("vendor/model").cost_usd is None
+
+
+# #267-T04
+def test_the_cost_is_unknown_when_a_reserved_call_never_settled() -> None:
+    subject = ledger()
+    settled(subject, Decimal("0.25"))
+    subject.reserve_call("a call that got no answer", output_tokens=1)
+
+    assert subject.usage("vendor/model").cost_usd is None
+
+
+# #267-T04
+def test_a_run_without_any_call_has_no_cost() -> None:
+    assert ledger().usage("vendor/model").cost_usd is None
+
+
+# #267-T04
+def test_a_free_call_costs_zero_and_is_known() -> None:
+    subject = ledger()
+    settled(subject, Decimal("0"))
+
+    assert subject.usage("vendor/model").cost_usd == 0.0
+
+
+# #267-T04
+def test_only_a_finite_non_negative_number_is_an_exact_cost() -> None:
+    assert exact_cost(0.0123) == Decimal("0.0123")
+    assert exact_cost(0) == Decimal("0")
+    assert exact_cost(2) == Decimal("2")
+    for unusable in (None, True, False, "0.5", [], {}, -0.01, float("nan"), float("inf")):
+        assert exact_cost(unusable) is None
+
+
+# #267-T10
+def test_the_cost_changes_nothing_about_the_token_accounting_or_the_bounds() -> None:
+    with_cost = ledger(max_total_tokens=100, max_model_calls=2)
+    without_cost = ledger(max_total_tokens=100, max_model_calls=2)
+    for subject, cost in ((with_cost, Decimal("0.01")), (without_cost, None)):
+        settled(subject, cost, prompt=30)
+        settled(subject, cost, prompt=40)
+
+    assert with_cost.usage("m").total_tokens == without_cost.usage("m").total_tokens == 72
+    assert with_cost.model_calls == without_cost.model_calls == 2
+    for subject in (with_cost, without_cost):
+        with pytest.raises(LimitError) as refused:
+            subject.reserve_call("a", output_tokens=1)
+        assert refused.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
+
+
+# #267-T09
+def test_no_dynamic_review_module_can_price_a_call_from_a_table() -> None:
+    # The runner's only price tables live in PR-Agent and its model library. Dynamic Review reports
+    # what the provider charged or nothing, so it must not even import them.
+    package = Path(__file__).parents[2] / "src" / "code_reviewer_runner" / "dynamic_review"
+    forbidden = {"litellm", "pr_agent"}
+    for module in sorted(package.glob("*.py")):
+        for node in ast.walk(ast.parse(module.read_text(encoding="utf-8"))):
+            names = (
+                [alias.name for alias in node.names]
+                if isinstance(node, ast.Import)
+                else [node.module or ""]
+                if isinstance(node, ast.ImportFrom)
+                else []
+            )
+            assert not {name.split(".")[0] for name in names} & forbidden, module.name
