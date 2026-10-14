@@ -173,11 +173,18 @@ DEFAULT_DYNAMIC_MODEL = "deepseek/deepseek-v4.1-flash"
 # (https://openrouter.ai/api/v1/models, read on 2026-10-14: context_length 1048576, pricing prompt
 # 0.00000002016 and completion 0.000000891 USD per token). They only size a reservation: a window
 # the provider does not really give ends in its own context error, and the cost of a call is
-# always the `usage.cost` it reports.
+# always the `usage.cost` it reports. The output allowance is 32768 (#309): a review of up to 30
+# findings plus the reasoning tokens, which count against `max_tokens`, does not fit 8192, and a
+# turn cut off there ends without an answer. OpenRouter states `max_completion_tokens` 943718 for
+# the model's top provider and 131072 or more for each of its endpoints
+# (https://openrouter.ai/api/v1/models/deepseek/deepseek-v4.1-flash/endpoints, read on 2026-10-14),
+# so the value is below every limit. Every call reserves it at the output price against the cost
+# limit, so it is bounded by money, not by this number. The app sends the same value in a job's
+# descriptor (`app/src/llm/dynamic-capabilities.ts`), which is what a run is normally held to.
 DEFAULT_MODEL_CAPABILITIES = DynamicCapabilities(
     tool_choice_required=True,
     structured_output=True,
-    max_output_tokens=8192,
+    max_output_tokens=32_768,
     context_window_tokens=1_048_576,
     unit_costs=UnitCosts(
         input_usd_per_mtok=Decimal("0.02016"), output_usd_per_mtok=Decimal("0.891")

@@ -38,11 +38,12 @@ The ledger remembers why the run stopped early (`stopped_early`) for the result 
 **Recovery (#309).** A turn can end with no structured answer although nothing was used up (the
 model answered in prose, was cut off, or the provider ended a step the engine took for the last).
 The adapter then asks `begin_recovery()` once. It says yes only while no final call was granted,
-a model call was made, the clock has more than a twentieth of the deadline left and the estimate of
-one more call fits the cost limit; the next call that can be rewritten is then granted as a final
-call with the recovery instruction. It is the same last call as the wrap-up's (nothing is granted
-after it), so a run has at most one of the two, and it does not count as stopping early: the review
-is not cut short by a limit. If it fails, the run fails as it did before.
+a model call was made, the clock has more than the wrap-up's reserve left (one provider call: the
+recovery call writes a whole review) and the estimate of one more call fits the cost limit; the
+next call that can be rewritten is then granted as a final call with the recovery instruction. It is
+the same last call as the wrap-up's (nothing is granted after it), so a run has at most one of the
+two, and it does not count as stopping early: the review is not cut short by a limit. If it fails,
+the run fails as it did before.
 
 **Tokens.** The input estimate is bytes over a conservative 3 bytes per token (real text has
 about 3 to 4), tightened to what the provider settled on the previous call when that content was
@@ -99,9 +100,6 @@ WRAP_UP_RESERVE_FRACTION = 0.25
 FINAL_CALL_GROWTH_BYTES = 2 * MAX_TOOL_RESULT_BYTES
 STOPPED_EARLY_COST = "cost_limit"
 STOPPED_EARLY_TIME = "time_limit"
-# The clock a recovery needs at least, as a part of the deadline (30 s of 600 s): about the time a
-# model needs to write its answer once it has all the facts. Below it the call could not finish.
-RECOVERY_RESERVE_FRACTION = 0.05
 # What the recovery call's request is larger than the last call's by, besides the model's own last
 # answer (one output allowance): the engine's recovery message and the runner's instruction.
 RECOVERY_REQUEST_SLACK_BYTES = 4096
@@ -285,7 +283,6 @@ class BudgetLedger:
         )
         self._final_granted = False
         self._final_unanswered = False
-        self._recovery_seconds = RECOVERY_RESERVE_FRACTION * limits.deadline_seconds
         self._recovery_armed = False
         self._recovered = False
         self._stopped_early: str | None = None
@@ -351,15 +348,15 @@ class BudgetLedger:
 
         Not possible: a final call was granted already (its answer was the last chance, whatever
         it was), the recovery was armed before, no model call was made (nothing ended a turn),
-        less than the recovery reserve of the clock is left, or one more call, priced as the last
-        call's prompt plus the model's last answer plus a slack, does not fit the cost limit. The
-        call itself is still reserved like any other when it arrives.
+        less than the wrap-up reserve of the clock is left (the call writes a whole review), or one
+        more call, priced as the last call's prompt plus the model's last answer plus a slack, does
+        not fit the cost limit. The call itself is still reserved like any other when it arrives.
         """
         with self._lock:
             counters = self._counters
             if self._final_granted or self._recovery_armed or self._recovered:
                 return False
-            if counters.model_calls == 0 or self.remaining_seconds() <= self._recovery_seconds:
+            if counters.model_calls == 0 or self.remaining_seconds() <= self._wrap_up_seconds:
                 return False
             slack = math.ceil(RECOVERY_REQUEST_SLACK_BYTES / counters.density)
             input_tokens = counters.last_prompt_tokens + self.output_tokens + slack

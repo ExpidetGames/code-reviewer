@@ -84,6 +84,14 @@ def test_the_recovery_instruction_is_runner_text_in_the_tag_the_escape_already_c
     assert "Do not call any more tools" in RECOVERY_INSTRUCTION
     assert "StructuredOutput" in RECOVERY_INSTRUCTION
     assert RECOVERY_INSTRUCTION != WRAP_UP_INSTRUCTION
+    # #309 review F1: the engine does not replay the answer that ended the turn, so the model is
+    # not told that it can see its findings; it is told to rely on what it examined.
+    assert "so far" not in RECOVERY_INSTRUCTION
+    assert "based on what you have examined" in RECOVERY_INSTRUCTION
+    # A cut-off answer should not repeat: the recovery asks for a short review.
+    assert "Be concise" in RECOVERY_INSTRUCTION
+    assert "at most 10 findings" in RECOVERY_INSTRUCTION
+    assert "short description" in RECOVERY_INSTRUCTION
     # The message the engine sends to start the recovery turn carries no tag at all.
     assert "<" not in RECOVERY_PROMPT
 

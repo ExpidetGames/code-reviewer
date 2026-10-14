@@ -371,6 +371,33 @@ def _identifier(value: object) -> str:
     return value if isinstance(value, str) and _IDENTIFIER.fullmatch(value) else "other"
 
 
+# The name the pinned server gives the error of a turn that ended without the structured answer
+# (`SessionV1.StructuredOutputError`, v1.19.0; the real-engine tests would go red if it changed).
+MISSING_ANSWER_ERROR = "StructuredOutputError"
+
+
+def missing_answer(message: bytes) -> bool:
+    """True when a turn with no structured answer ended for exactly that reason (#309).
+
+    The engine names its own errors (`APIError`, `UnknownError`, an abort, a content filter...);
+    only its missing-answer error, or a turn that ended with no error at all, is worth another
+    turn. Anything unreadable is not.
+    """
+    try:
+        value: Any = json.loads(message)
+    except ValueError:
+        return False
+    document = as_object(value)
+    info = as_object(document.get("info")) if document else None
+    if info is None:
+        return False
+    error: Any = info.get("error")
+    if error is None:
+        return True
+    named = as_object(error)
+    return named is not None and named.get("name") == MISSING_ANSWER_ERROR
+
+
 def structured_answer(message: bytes) -> Any:
     """The structured result out of a message POST answer, or None.
 
@@ -673,21 +700,36 @@ class DynamicEngine:
         tool step `stop`) leaves nothing to publish while the limits are not used up. If the ledger
         allows it, one more turn asks for the answer: its first call is the run's final call, which
         the proxy reduces to the return tool alone (`wrap_up.py`). One recovery at most, whatever
-        it returns; a limit or provider refusal the proxy recorded always wins.
+        it returns; a limit or provider refusal the proxy recorded always wins. Only the engine's
+        missing-answer error is recovered (`missing_answer`): another error of the engine is its
+        own failure. Whatever fails once the recovery has started says so.
         """
         self._send(client, session_id)
         self._raise_recorded_failure()
         if structured_answer(client.last_message) is not None:
             return self._validate(client)
         ended = turn_end_note(client.last_message)
+        if not missing_answer(client.last_message):
+            return self._no_answer(
+                f"the first turn: {ended}; the engine's own error, not recovered"
+            )
         if not self.ledger.begin_recovery():
             return self._no_answer(f"the first turn: {ended}; no recovery was possible")
         self.recovery = ended
-        self._send(client, session_id, prompt=RECOVERY_PROMPT)
-        self._raise_recorded_failure()
+        try:
+            self._send(client, session_id, prompt=RECOVERY_PROMPT)
+            self._raise_recorded_failure()
+        except LimitError as error:
+            raise LimitError(error.code, self._during_recovery(error.detail, ended)) from None
+        except EngineError as error:
+            raise EngineError(error.code, self._during_recovery(error.detail, ended)) from None
         if structured_answer(client.last_message) is None:
             return self._no_answer(f"after one recovery; the first turn: {ended}")
         return self._validate(client)
+
+    @staticmethod
+    def _during_recovery(detail: str, ended: str) -> str:
+        return f"{detail} (during the recovery; the first turn: {ended})"
 
     @staticmethod
     def _no_answer(note: str) -> EngineAnswer:

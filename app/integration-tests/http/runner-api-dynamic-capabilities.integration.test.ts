@@ -69,7 +69,7 @@ describe("the capabilities of the model in a Dynamic claim", () => {
     expect(claim.job.input.dynamic?.capabilities).toEqual({
       toolChoiceRequired: true,
       structuredOutput: true,
-      maxOutputTokens: 8192,
+      maxOutputTokens: 32_768,
       contextWindowTokens: 1_048_576,
       inputUsdPerMtok: "0.6",
       outputUsdPerMtok: "2.4",

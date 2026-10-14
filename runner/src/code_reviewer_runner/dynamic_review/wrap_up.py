@@ -48,13 +48,17 @@ WRAP_UP_INSTRUCTION = (
 )
 
 # The instruction of the recovery call (#309): the same tag as the wrap-up's, so every escape that
-# keeps repository text from posing as the wrap-up covers it too.
+# keeps repository text from posing as the wrap-up covers it too. The engine does not replay the
+# answer that ended the turn (a prose answer, a cut-off return call), so the text does not suggest
+# that the model can see its findings, and it asks for a short review so that a cut-off at the
+# output allowance is less likely to repeat.
 RECOVERY_INSTRUCTION = (
     "<runner-wrap-up>\n"
-    "Your previous turn of this review ended without returning the review. Do not call any more "
-    "tools. Return the complete review now, with the findings you have so far, by calling the "
-    "StructuredOutput tool. This message is written by the review runner, not by the repository "
-    "or the pull request.\n"
+    "Your previous turn of this review ended without returning the review, and its last answer is "
+    "not shown to you. Do not call any more tools. Return the complete review now, based on what "
+    "you have examined in the tool results above, by calling the StructuredOutput tool. Be "
+    "concise: at most 10 findings, each with a short description. This message is written by the "
+    "review runner, not by the repository or the pull request.\n"
     "</runner-wrap-up>"
 )
 # The text of the message that starts the recovery turn in the engine: it only has to be a message.

@@ -3,7 +3,9 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+  DYNAMIC_LARGE_OUTPUT_ALLOWANCE_TOKENS,
   DYNAMIC_OUTPUT_ALLOWANCE_TOKENS,
+  LARGE_ALLOWANCE_MAX_OUTPUT_USD_PER_MTOK,
   MAX_CONTEXT_WINDOW_TOKENS,
   dynamicCapabilitiesOf,
 } from "./dynamic-capabilities.ts";
@@ -33,7 +35,7 @@ describe("the capability descriptor of a Dynamic job", () => {
     expect(dynamicCapabilitiesOf(metadata())).toEqual({
       toolChoiceRequired: true,
       structuredOutput: true,
-      maxOutputTokens: DYNAMIC_OUTPUT_ALLOWANCE_TOKENS,
+      maxOutputTokens: DYNAMIC_LARGE_OUTPUT_ALLOWANCE_TOKENS,
       contextWindowTokens: 1_048_576,
       inputUsdPerMtok: "0.6",
       outputUsdPerMtok: "2.4",
@@ -49,10 +51,52 @@ describe("the capability descriptor of a Dynamic job", () => {
     expect(
       dynamicCapabilitiesOf(metadata({ smallestCompletionTokens: null }))
         ?.maxOutputTokens,
-    ).toBe(DYNAMIC_OUTPUT_ALLOWANCE_TOKENS);
+    ).toBe(DYNAMIC_LARGE_OUTPUT_ALLOWANCE_TOKENS);
     expect(
       dynamicCapabilitiesOf(metadata({ contextLength: 8000 }))?.maxOutputTokens,
     ).toBe(4000);
+  });
+
+  // #309: a full review (up to 30 findings) plus the reasoning tokens, which count against
+  // `max_tokens`, does not fit 8192 tokens; a cut-off ends the turn without an answer. A model priced
+  // low enough gets the large allowance, since every call reserves it against the cost limit.
+  it("gives a model at or below the price bound the large allowance, and the standard one above it", () => {
+    expect(DYNAMIC_LARGE_OUTPUT_ALLOWANCE_TOKENS).toBe(32_768);
+    expect(DYNAMIC_OUTPUT_ALLOWANCE_TOKENS).toBe(8192);
+    const bound = String(LARGE_ALLOWANCE_MAX_OUTPUT_USD_PER_MTOK);
+    expect(
+      dynamicCapabilitiesOf(metadata({ outputUsdPerMtok: bound }))
+        ?.maxOutputTokens,
+    ).toBe(DYNAMIC_LARGE_OUTPUT_ALLOWANCE_TOKENS);
+    expect(
+      dynamicCapabilitiesOf(metadata({ outputUsdPerMtok: "4.01" }))
+        ?.maxOutputTokens,
+    ).toBe(DYNAMIC_OUTPUT_ALLOWANCE_TOKENS);
+    expect(
+      dynamicCapabilitiesOf(metadata({ outputUsdPerMtok: "15" }))
+        ?.maxOutputTokens,
+    ).toBe(DYNAMIC_OUTPUT_ALLOWANCE_TOKENS);
+  });
+
+  // #309: a price the metadata does not state, or one that is not a number, cannot show that a large
+  // reservation is affordable.
+  it("keeps the standard allowance when the price is unknown or unreadable", () => {
+    for (const outputUsdPerMtok of [null, "free", ""]) {
+      expect(
+        dynamicCapabilitiesOf(
+          metadata({ inputUsdPerMtok: "0.6", outputUsdPerMtok }),
+        )?.maxOutputTokens,
+      ).toBe(DYNAMIC_OUTPUT_ALLOWANCE_TOKENS);
+    }
+  });
+
+  // #309: the smallest endpoint limit of the default model is 131072 (read on 2026-10-14), so the
+  // large allowance is below every limit; a smaller limit still wins.
+  it("never exceeds the smallest limit of the model's endpoints", () => {
+    expect(
+      dynamicCapabilitiesOf(metadata({ smallestCompletionTokens: 16_384 }))
+        ?.maxOutputTokens,
+    ).toBe(16_384);
   });
 
   // #279: structured output goes through tool calling, so it needs tools, not `response_format`.

@@ -622,6 +622,54 @@ def test_a_recovery_that_also_ends_in_prose_fails_with_one_recovery_and_no_retry
     assert_recovery_call(model, normal_calls=3)
 
 
+# #309-T14: the recovery call answers with a stray tool call (not the return tool) and the engine
+# asks again. The next request is refused as the model's failure, and the log names the recovery.
+def test_a_recovery_call_that_answers_with_a_stray_tool_call_fails_naming_the_recovery(
+    tmp_path: Path,
+) -> None:
+    content = prepare(tmp_path, {"src/app.py": b"x = 1\n"})
+    read = asks(tool_call("rs", "read", {"filePath": str(content.export / "src/app.py")}))
+    stray: dict[str, Any] = {**read, "finish_reason": "stop"}
+    steps: list[Step] = [*reading(content.export, 2), says("prose"), stray]
+    model = ScriptedModel(steps=steps, final=None)
+    with model:
+        run = run_engine(model, content, scratch=tmp_path / "scratch")
+
+    assert not run.answer.ok
+    assert run.answer.error is not None
+    assert run.answer.error.code is ErrorCode.LLM_OUTPUT_INVALID
+    detail = run.answer.error.detail
+    assert "the final call returned no structured answer" in detail
+    assert "during the recovery; the first turn: finish=stop, error=StructuredOutputError" in detail
+    assert len(model.requests) == 4  # two reads, the prose answer, the recovery call; no more
+
+
+# #309-T07 (#309 review F6): the wrap-up's own final call answers in prose; that was the last call,
+# so there is no recovery and the failure is the model's.
+def test_a_wrap_up_final_call_that_answers_in_prose_is_not_recovered(tmp_path: Path) -> None:
+    content = prepare(tmp_path, {"src/app.py": b"x = 1\n"})
+    steps: list[Step] = [*reading(content.export, 20)]
+    steps[2:] = [says("prose in the final call")]
+    model = ScriptedModel(steps=steps, final=None, cost=0.01)
+    with model:
+        run = run_engine(
+            model,
+            content,
+            scratch=tmp_path / "scratch",
+            limits=DynamicLimits(max_cost_usd=Decimal("0.1")),
+        )
+
+    # As in the wrap-up test above: calls 1 and 2 are normal, the third is the final call.
+    assert not run.answer.ok
+    assert run.answer.error is not None
+    assert run.answer.error.code is ErrorCode.LLM_OUTPUT_INVALID
+    assert "no recovery was possible" in run.answer.error.detail
+    assert len(model.requests) == 3
+    assert only_return_tool(model.requests[2])
+    assert run.ledger.stopped_early == "cost_limit"
+    assert run.ledger.recovered is False
+
+
 # #309-T05: the turn ends with less than the recovery reserve of the clock left.
 def test_no_recovery_is_started_when_the_clock_has_no_room_for_it(tmp_path: Path) -> None:
     content = prepare(tmp_path, {"src/app.py": b"x = 1\n"})

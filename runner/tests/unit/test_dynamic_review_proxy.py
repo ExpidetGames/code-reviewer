@@ -1145,7 +1145,9 @@ def test_the_default_model_has_a_built_in_descriptor_and_no_other_model_has() ->
 
     built_in = capabilities_from_config(None, model=DEFAULT_DYNAMIC_MODEL)
     assert (built_in.tool_choice_required, built_in.structured_output) == (True, True)
-    assert built_in.max_output_tokens == 8192
+    # #309: a full review plus reasoning tokens does not fit 8192; 32768 is below the smallest
+    # completion limit of any endpoint of the model (131072, OpenRouter, read on 2026-10-14).
+    assert built_in.max_output_tokens == 32_768
     built_in.check_required()
     assert capabilities_from_config("", model=DEFAULT_DYNAMIC_MODEL) == built_in
 

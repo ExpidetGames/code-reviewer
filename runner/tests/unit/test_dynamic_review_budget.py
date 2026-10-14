@@ -544,40 +544,79 @@ def test_there_is_at_most_one_recovery() -> None:
     assert subject.begin_recovery() is False  # used
 
 
-# #309-T05
+# #309-T05: the cost guard alone. The first call is a normal call (a final call would have fit after
+# it), so only the cost of one more call can refuse the recovery. One more call is priced at the
+# last prompt (900 tokens) + the output allowance (100) + a 4 KiB slack at 1 / 4 USD per million:
+# about 0.0027 USD.
 def test_there_is_no_recovery_when_the_cost_for_it_does_not_fit() -> None:
-    subject = ledger(max_cost_usd=Decimal("0.01"))
-    after_one_call(subject, cost="0.0099")
-
-    assert subject.begin_recovery() is False
-    assert subject.recovered is False
-
-
-# #309-T05
-def test_there_is_no_recovery_inside_the_recovery_reserve_of_the_clock() -> None:
-    clock = Clock()
     subject = BudgetLedger(
-        DynamicLimits(max_cost_usd=Decimal(100)), clock=clock, unit_costs=UNIT_COSTS
+        DynamicLimits(max_cost_usd=Decimal("0.05")), output_tokens=100, unit_costs=UNIT_COSTS
     )
-    after_one_call(subject)
-    clock.advance(571.0)  # 29 s left, the reserve is 30 s (a twentieth of 600 s)
-    assert subject.begin_recovery() is False
+    first = subject.reserve_call("x" * 3000, output_tokens=100, can_wrap_up=True)
+    assert first.final is False
+    subject.settle_call(first, prompt_tokens=900, completion_tokens=50, cost=Decimal("0.0480"))
 
-    clock = Clock()
+    assert subject.begin_recovery() is False  # 0.0480 + about 0.0027 is over 0.05
+    # Nothing was armed: the next call is a plain one.
+    nothing = subject.reserve_call("a", output_tokens=1, can_wrap_up=True, recovery_text="r")
+    assert nothing.recovery is False and subject.recovered is False
+
+
+# #309-T05: the same ledger a little cheaper may recover, so the test above is about the cost.
+def test_the_recovery_is_allowed_when_the_cost_for_it_just_fits() -> None:
     subject = BudgetLedger(
-        DynamicLimits(max_cost_usd=Decimal(100)), clock=clock, unit_costs=UNIT_COSTS
+        DynamicLimits(max_cost_usd=Decimal("0.05")), output_tokens=100, unit_costs=UNIT_COSTS
     )
-    after_one_call(subject)
-    clock.advance(569.0)  # 31 s left
+    first = subject.reserve_call("x" * 3000, output_tokens=100, can_wrap_up=True)
+    subject.settle_call(first, prompt_tokens=900, completion_tokens=50, cost=Decimal("0.0460"))
+
     assert subject.begin_recovery() is True
 
 
-# #309-T05, #309-T07
-def test_there_is_no_recovery_after_the_final_call_of_the_wrap_up() -> None:
-    subject = ledger(max_cost_usd=Decimal("0.0015"))
+# #309-T05: the recovery call writes a whole review, so it needs the wrap-up's clock reserve (one
+# provider call, 150 s of 600 s), not less.
+@pytest.mark.parametrize(("elapsed", "allowed"), [(449.0, True), (451.0, False)])
+def test_there_is_no_recovery_inside_the_clock_reserve_of_the_wrap_up(
+    elapsed: float, allowed: bool
+) -> None:
+    clock = Clock()
+    subject = BudgetLedger(
+        DynamicLimits(max_cost_usd=Decimal(100)), clock=clock, unit_costs=UNIT_COSTS
+    )
+    after_one_call(subject)
+    clock.advance(elapsed)  # 151 s or 149 s left
+
+    assert subject.begin_recovery() is allowed
+
+
+# #309-T05
+@pytest.mark.parametrize(("elapsed", "allowed"), [(74.0, True), (76.0, False)])
+def test_a_short_deadline_scales_the_clock_reserve_of_the_recovery_like_the_wrap_ups(
+    elapsed: float, allowed: bool
+) -> None:
+    clock = Clock()
+    subject = BudgetLedger(
+        DynamicLimits(deadline_seconds=100.0, max_cost_usd=Decimal(100)),
+        clock=clock,
+        unit_costs=UNIT_COSTS,
+    )
+    after_one_call(subject)
+    clock.advance(elapsed)  # 26 s or 24 s left; a quarter of 100 s is 25 s
+
+    assert subject.begin_recovery() is allowed
+
+
+# #309-T05: the final-call guard alone. The wrap-up's final call is over and cheap, there is time
+# and money for one more call, so only "a final call was granted" can refuse the recovery.
+def test_there_is_no_recovery_after_a_final_call_even_if_cost_and_time_would_allow_it() -> None:
+    subject = BudgetLedger(
+        DynamicLimits(max_cost_usd=Decimal("0.01")), output_tokens=100, unit_costs=UNIT_COSTS
+    )
     final = subject.reserve_call("x" * 3000, output_tokens=100, can_wrap_up=True)
+    assert final.final is True and subject.stopped_early == "cost_limit"
     subject.settle_call(final, prompt_tokens=900, completion_tokens=50, cost=Decimal("0.0001"))
-    assert final.final is True
+    # One more call (about 0.0027 USD) fits the 0.01 USD limit and the clock has not moved.
+    assert Decimal("0.0001") + UNIT_COSTS.of_call(900 + 100 + 1366, 100) < Decimal("0.01")
 
     assert subject.begin_recovery() is False
 
