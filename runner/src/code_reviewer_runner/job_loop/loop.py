@@ -68,6 +68,11 @@ from code_reviewer_runner.pr_agent_config import PASSTHROUGH_VARIABLES
 from code_reviewer_runner.result import ErrorCode
 
 TIMEOUT_VARIABLE = "RUNNER_JOB_TIMEOUT_SECONDS"
+# #260: the lease check right before a Dynamic run publishes. Up to three tries, a second and two
+# seconds apart, within less than the 45 seconds the job process waits for the answer.
+LEASE_CHECK_ATTEMPTS = 3
+LEASE_CHECK_PAUSE_SECONDS = 1.0
+LEASE_CHECK_BUDGET_SECONDS = 40.0
 # The operator's non-secret Dynamic configuration, read by the Dynamic job process: the model
 # description and the engine user and ports of the slot (the names of `supervisor.py` and
 # `static_isolation.py`).
@@ -497,17 +502,37 @@ class RunnerLoop:
                 self._log.warning("job %s: heartbeat failed (%s)", claimed.id, detail)
 
     async def _confirm_lease(self, claimed: ClaimedJob) -> LeaseState:
-        """Beat the heart once, now. A lost lease and a cancelled job are both answered with 409."""
+        """Beat the heart now. A lost lease and a cancelled job are both answered with 409.
+
+        An answer that only says the app could not be reached (5xx, a reset, a timeout) is asked
+        again after a short pause, so one hiccup does not cost a finished review. The whole question
+        stays inside what the process waits for. 409 and 404 are final, and so is a refusal.
+        """
         try:
-            await self._api.heartbeat(claimed.id, claimed.lease_token)
-        except LeaseLost:
-            self._log.warning("job %s: the lease check before publishing: lost", claimed.id)
-            return LeaseState.LOST
-        except Exception as error:
-            detail = str(error) if isinstance(error, ApiError) else type(error).__name__
-            self._log.warning("job %s: the lease check could not be made (%s)", claimed.id, detail)
+            async with asyncio.timeout(LEASE_CHECK_BUDGET_SECONDS):
+                return await self._ask_app(claimed)
+        except TimeoutError:
+            self._log.warning("job %s: the lease check ran out of time", claimed.id)
             return LeaseState.UNCONFIRMED
-        return LeaseState.HELD
+
+    async def _ask_app(self, claimed: ClaimedJob) -> LeaseState:
+        for attempt in range(1, LEASE_CHECK_ATTEMPTS + 1):
+            try:
+                await self._api.heartbeat(claimed.id, claimed.lease_token)
+            except LeaseLost:
+                self._log.warning("job %s: the lease check before publishing: lost", claimed.id)
+                return LeaseState.LOST
+            except Exception as error:
+                detail = str(error) if isinstance(error, ApiError) else type(error).__name__
+                self._log.warning(
+                    "job %s: the lease check could not be made (%s)", claimed.id, detail
+                )
+                if isinstance(error, ApiUnavailable) and attempt < LEASE_CHECK_ATTEMPTS:
+                    await self._clock.sleep(LEASE_CHECK_PAUSE_SECONDS * 2 ** (attempt - 1))
+                    continue
+                return LeaseState.UNCONFIRMED
+            return LeaseState.HELD
+        return LeaseState.UNCONFIRMED  # pragma: no cover  (the last attempt returns above)
 
     def _log_outcome(self, claimed: ClaimedJob, result: Result, outcome: ProcessOutcome) -> None:
         if result["ok"]:
