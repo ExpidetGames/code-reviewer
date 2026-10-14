@@ -5,6 +5,7 @@
 // source of job options are used (see README.md for what replaces them when the projects land).
 import "server-only";
 import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
+import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import { createJobsRepository } from "../db/repositories/jobs-repository.ts";
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
 import { getDatabase } from "../db/startup.ts";
@@ -75,6 +76,12 @@ export function getRunnerApi(): RunnerApi {
     }),
     // The LLM access of the workspace of the claimed job: its own key, never another workspace's (src/llm).
     loadLlm: (workspaceId) => llm.accessFor(workspaceId),
+    // Whose key the job runs on, in its usage record; scoped to the job's own workspace.
+    recordKeyMode: (job, keyMode) =>
+      createUsageRecordsRepository(db, job.workspaceId).setKeyMode(
+        job.id,
+        keyMode,
+      ),
     claimedKeys: getClaimedKeys(),
     now: () => new Date(),
     logger: consoleRunnerApiLogger,

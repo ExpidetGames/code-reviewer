@@ -5,11 +5,13 @@
 // the real GitHub App provider, and the API itself wired to all of them. `claim`, `heartbeat` and
 // `complete` build requests like the runner does. The clock of the queue is the one in `clock`.
 import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
+import { createUsageRecordsRepository } from "../db/repositories/usage-records-repository.ts";
 import { createJobsRepository } from "../db/repositories/jobs-repository.ts";
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
 import { createDefaultIntegrationRegistry } from "../integrations/registry.ts";
 import { loadGithubAppConfig } from "../integrations/registry.ts";
 import type { JobQueueLimits } from "../jobs/job-limits.ts";
+import type { LlmAccessResult } from "../llm/access.ts";
 import { createWorkspaceLlm } from "../llm/assemble.ts";
 import { createRunnerApi } from "../runner-api/api.ts";
 import {
@@ -75,6 +77,8 @@ export async function startRunnerApiHarness(
      * the workspace). Default: `TEST_LLM_API_KEY`. `null`: the workspace has none.
      */
     llmKey?: string | null;
+    /** Replaces how the claim resolves the LLM access of a workspace (for example to answer with the operator's key). */
+    loadLlm?: (workspaceId: string) => Promise<LlmAccessResult>;
   } = {},
 ) {
   const fixture = await createJobQueueFixture({
@@ -217,7 +221,13 @@ export async function startRunnerApiHarness(
               settings: () => reviewSettings,
             })
           : emptyJobOptionsSource),
-      loadLlm: (workspaceId) => llm.accessFor(workspaceId),
+      loadLlm: options.loadLlm ?? ((workspaceId) => llm.accessFor(workspaceId)),
+      recordKeyMode: (job, keyMode) =>
+        createUsageRecordsRepository(
+          fixture.db,
+          job.workspaceId,
+          fixture.clock.now,
+        ).setKeyMode(job.id, keyMode),
       claimedKeys,
       now: fixture.clock.now,
       logger,

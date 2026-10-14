@@ -40,6 +40,10 @@ import {
   MIN_LLM_CONTEXT_TOKENS,
   MODEL_NAME_PATTERN,
 } from "../llm/config.ts";
+import {
+  keyModeOfAccessSource,
+  type UsageKeyMode,
+} from "../usage/usage-records.ts";
 import type { ClaimedKeys } from "./claimed-keys.ts";
 import type { ClaimGuard } from "./claim-guard.ts";
 import {
@@ -123,6 +127,11 @@ export type ClaimDeps = {
    * (src/llm/resolve.ts, docs/decisions/0001-editions-setup-and-accounts.md, section 2.8).
    */
   loadLlm: (workspaceId: string) => Promise<LlmAccessResult>;
+  /**
+   * Notes whose key the claimed job runs on in its usage record (src/usage/README.md). The claim reserved the
+   * record already, as `own`; this corrects it once the access is resolved. A failure gives the job back.
+   */
+  recordKeyMode: (job: Job, keyMode: UsageKeyMode) => Promise<void>;
   /** Where the key handed out with a claim is noted (encrypted, in the database), so a rotated key can still be masked. */
   claimedKeys: Pick<ClaimedKeys, "remember">;
   now: () => Date;
@@ -290,6 +299,8 @@ async function prepare(
             .join(", ")
         : llm.reason,
     );
+
+  await deps.recordKeyMode(job, keyModeOfAccessSource(llm.source));
 
   const command = commandOf(job);
   if (command === null) return refuse("job_args_invalid");

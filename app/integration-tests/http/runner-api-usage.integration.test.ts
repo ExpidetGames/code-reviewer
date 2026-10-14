@@ -1,0 +1,371 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// The usage record of a job from the claim to the end (src/usage/README.md), through the real runner API over
+// a real SQLite file: the claim reserves it in its own transaction, the completion settles it from the result,
+// and a job that ends without a model call voids it. The record is a bookkeeping side effect: what a runner
+// is handed and what a job does are pinned by the other runner API tests.
+import { describe, expect, it } from "vitest";
+import { createUsageRecordsRepository } from "../../src/db/repositories/usage-records-repository.ts";
+import { createLlmAccess } from "../../src/llm/access.ts";
+import {
+  goodResult,
+  startRunnerApiHarness,
+  TEST_LLM_API_KEY,
+  TEST_LLM_MODEL,
+  type RunnerApiHarness,
+} from "../../src/test-support/runner-api-harness.ts";
+
+const MINUTE = 60 * 1000;
+const ENGINES = ["opencode"];
+
+const recordsOf = (h: RunnerApiHarness) =>
+  createUsageRecordsRepository(h.db, h.workspaceId, h.clock.now);
+
+async function allRecords(h: RunnerApiHarness) {
+  return h.db.selectFrom("usage_records").selectAll().orderBy("id").execute();
+}
+
+/** A job claimed through the API: its id and the lease token of the claim. */
+async function claimedJob(
+  h: RunnerApiHarness,
+  options: { runnerId?: string; prNumber?: number } = {},
+) {
+  const job = await h.enqueueNew(
+    options.prNumber === undefined ? {} : { prNumber: options.prNumber },
+  );
+  const body = await h.claimed({ runnerId: options.runnerId ?? "runner-a" });
+  return { id: job.id, leaseToken: body.job.leaseToken };
+}
+
+/** A harness whose first repository runs Dynamic Review. */
+async function startDynamic() {
+  const h = await startRunnerApiHarness({ projects: true });
+  await h.projectService.activateProject(h.repositoryId);
+  await h.reviewSettings.updateProjectSettings(h.repositoryId, {
+    reviewKind: "dynamic",
+    dynamicModel: "vendor/dynamic-model",
+  });
+  return h;
+}
+
+describe("the claim of a job", () => {
+  // #272-T01
+  it("reserves one record with the kind of the job and the key it runs on", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await claimedJob(h);
+
+    expect(await allRecords(h)).toEqual([
+      expect.objectContaining({
+        workspace_id: h.workspaceId,
+        job_id: job.id,
+        review_kind: "diff",
+        key_mode: "own",
+        model_tier: null,
+        state: "reserved",
+        reserved_at: h.clock.now().toISOString(),
+        settled_at: null,
+      }),
+    ]);
+  });
+
+  // #272-T01
+  it("records a Dynamic job as dynamic", async () => {
+    const h = await startDynamic();
+    const job = await h.enqueueNew();
+
+    await h.claimed({ engines: ENGINES });
+
+    expect(await recordsOf(h).get(job.id)).toMatchObject({
+      reviewKind: "dynamic",
+      state: "reserved",
+    });
+  });
+
+  // #272-T01
+  it("records the operator's key as managed", async () => {
+    const h = await startRunnerApiHarness({
+      loadLlm: async () => ({
+        ok: true,
+        source: "operator",
+        access: createLlmAccess({
+          provider: "openrouter",
+          model: TEST_LLM_MODEL,
+          apiKey: TEST_LLM_API_KEY,
+          contextWindowTokens: null,
+        }),
+      }),
+    });
+    const job = await claimedJob(h);
+
+    expect(await recordsOf(h).get(job.id)).toMatchObject({
+      keyMode: "managed",
+      state: "reserved",
+    });
+  });
+
+  // #272-T08
+  it("runs a workspace without entitlements exactly as before and still records it", async () => {
+    const h = await startRunnerApiHarness();
+    expect(
+      await h.db.selectFrom("workspace_entitlements").selectAll().execute(),
+    ).toEqual([]);
+    await h.enqueueNew();
+
+    const body = await h.claimed();
+
+    expect(body.job.input.llm).toStrictEqual({
+      provider: "openrouter",
+      model: TEST_LLM_MODEL,
+      apiKey: TEST_LLM_API_KEY,
+    });
+    expect(await allRecords(h)).toHaveLength(1);
+    const done = await h.complete(body.job.id, body.job.leaseToken);
+    expect(done.status).toBe(200);
+    expect(await recordsOf(h).get(body.job.id)).toMatchObject({
+      state: "settled",
+    });
+  });
+
+  // #272-T05
+  it("reuses the record when the lease is lost and the job is claimed again", async () => {
+    const h = await startRunnerApiHarness();
+    const first = await claimedJob(h, { runnerId: "runner-a" });
+    const reserved = await recordsOf(h).get(first.id);
+    h.clock.advance(3 * MINUTE);
+
+    const second = await h.claimed({ runnerId: "runner-b" });
+
+    expect(second.job.id).toBe(first.id);
+    expect(await allRecords(h)).toHaveLength(1);
+    expect(await recordsOf(h).get(first.id)).toEqual(reserved);
+
+    // The old holder can no longer settle it; the new one does.
+    const late = await h.complete(
+      first.id,
+      first.leaseToken,
+      {},
+      { runnerId: "runner-a" },
+    );
+    expect(late.status).toBe(409);
+    expect((await recordsOf(h).get(first.id))?.state).toBe("reserved");
+    await h.complete(
+      second.job.id,
+      second.job.leaseToken,
+      {},
+      { runnerId: "runner-b" },
+    );
+    expect(await allRecords(h)).toHaveLength(1);
+    expect((await recordsOf(h).get(first.id))?.state).toBe("settled");
+  });
+});
+
+describe("the completion of a job", () => {
+  // #272-T02
+  it("settles the record with the cost in micro-USD, rounded half up, and the tokens", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await claimedJob(h);
+    h.clock.advance(41 * 1000);
+
+    await h.complete(job.id, job.leaseToken, {
+      usage: {
+        model: TEST_LLM_MODEL,
+        promptTokens: 12000,
+        completionTokens: 900,
+        totalTokens: 12900,
+        aiCalls: 2,
+        fallbackUsed: false,
+        costUsd: 0.0123456,
+      },
+    });
+
+    expect(await recordsOf(h).get(job.id)).toMatchObject({
+      state: "settled",
+      costMicroUsd: 12346,
+      promptTokens: 12000,
+      completionTokens: 900,
+      settledAt: h.clock.now().toISOString(),
+    });
+  });
+
+  // #272-T03
+  it("settles, and does not void, a result whose cost is unknown", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await claimedJob(h);
+
+    await h.complete(job.id, job.leaseToken, {
+      usage: { ...goodResult().usage!, costUsd: null },
+    });
+
+    expect(await recordsOf(h).get(job.id)).toMatchObject({
+      state: "settled",
+      costMicroUsd: null,
+      promptTokens: 12000,
+    });
+  });
+
+  // #272-T04
+  it("voids the record of a job that failed before any model call", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await claimedJob(h);
+
+    await h.complete(job.id, job.leaseToken, {
+      ok: false,
+      errorCode: "checkout_failed",
+      errorMessage: "could not read the repository",
+      commentUrl: null,
+      usage: null,
+    });
+
+    expect(await recordsOf(h).get(job.id)).toMatchObject({
+      state: "void",
+      settledAt: null,
+      costMicroUsd: null,
+    });
+  });
+
+  // #272-T07
+  it("does not change the record again when the same result is reported twice", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await claimedJob(h);
+    await h.complete(job.id, job.leaseToken);
+    const settled = await recordsOf(h).get(job.id);
+    h.clock.advance(5 * MINUTE);
+
+    const again = await h.complete(job.id, job.leaseToken);
+
+    expect((await again.json()).alreadyCompleted).toBe(true);
+    expect(await recordsOf(h).get(job.id)).toEqual(settled);
+  });
+
+  it("leaves the record settled when a different result is reported afterwards", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await claimedJob(h);
+    await h.complete(job.id, job.leaseToken);
+    const settled = await recordsOf(h).get(job.id);
+
+    const conflict = await h.complete(job.id, job.leaseToken, {
+      ok: false,
+      errorCode: "checkout_failed",
+      errorMessage: "late",
+      commentUrl: null,
+      usage: null,
+    });
+
+    expect(conflict.status).toBe(409);
+    expect(await recordsOf(h).get(job.id)).toEqual(settled);
+  });
+
+  it("settles nothing when the runner is shut down and gives the job back, which stays reserved", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await claimedJob(h);
+
+    await h.complete(job.id, job.leaseToken, {
+      ok: false,
+      errorCode: "runner_shutdown",
+      errorMessage: "stopping",
+      commentUrl: null,
+      usage: null,
+    });
+
+    expect((await h.queue.get(job.id))?.status).toBe("queued");
+    expect((await recordsOf(h).get(job.id))?.state).toBe("reserved");
+  });
+});
+
+describe("a job that ends without reporting", () => {
+  // #272-T04
+  it("voids the record when the last attempt loses its lease", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await h.enqueueNew();
+    await h.db
+      .updateTable("jobs")
+      .set({ attempts: 2 })
+      .where("id", "=", job.id)
+      .execute();
+    await h.claimed();
+    h.clock.advance(3 * MINUTE);
+
+    await h.queue.expireStaleJobs();
+
+    expect(await h.queue.get(job.id)).toMatchObject({
+      status: "failed",
+      errorCode: "lease_expired",
+    });
+    expect((await recordsOf(h).get(job.id))?.state).toBe("void");
+  });
+
+  // #272-T04
+  it("voids the record when the runner API ends the job at claim time", async () => {
+    const h = await startRunnerApiHarness({ llmKey: null });
+    const job = await h.enqueueNew();
+
+    const response = await h.claim();
+
+    expect(response.status).toBe(204);
+    expect(await h.queue.get(job.id)).toMatchObject({
+      status: "failed",
+      errorCode: "llm_not_configured",
+    });
+    expect(await recordsOf(h).get(job.id)).toMatchObject({
+      state: "void",
+      keyMode: "own",
+    });
+  });
+
+  // #272-T04
+  it("voids the record of a job cancelled at claim time", async () => {
+    const h = await startRunnerApiHarness({ projects: true });
+    const job = await h.enqueueNew();
+
+    await h.claim();
+
+    expect((await h.queue.get(job.id))?.status).toBe("cancelled");
+    expect((await recordsOf(h).get(job.id))?.state).toBe("void");
+  });
+
+  // #272-T04
+  it("voids the record of a job that is given back on its last attempt", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await h.enqueueNew();
+    await h.db
+      .updateTable("jobs")
+      .set({ attempts: 2 })
+      .where("id", "=", job.id)
+      .execute();
+    const claimed = await h.claimed();
+
+    await h.queue.release(job.id, claimed.job.leaseToken, "claim_failed");
+
+    expect((await h.queue.get(job.id))?.status).toBe("failed");
+    expect((await recordsOf(h).get(job.id))?.state).toBe("void");
+  });
+
+  // #272-T04
+  it("voids the record when the job runs past the hard limit", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await claimedJob(h);
+    for (let minute = 0; minute < 40; minute += 1) {
+      h.clock.advance(MINUTE);
+      await h.heartbeat(job.id, job.leaseToken);
+    }
+
+    expect((await h.queue.get(job.id))?.status).toBe("failed");
+    expect((await recordsOf(h).get(job.id))?.state).toBe("void");
+  });
+
+  // #272-T04
+  it("voids the reserved record of a job that went back to the queue and was cancelled there", async () => {
+    const h = await startRunnerApiHarness();
+    const job = await claimedJob(h);
+    h.clock.advance(3 * MINUTE);
+    await h.queue.expireStaleJobs();
+    expect((await h.queue.get(job.id))?.status).toBe("queued");
+    expect((await recordsOf(h).get(job.id))?.state).toBe("reserved");
+
+    await h.queue.cancelWaitingForRepository(h.repositoryId);
+    await h.queue.expireStaleJobs();
+
+    expect((await h.queue.get(job.id))?.status).toBe("cancelled");
+    expect((await recordsOf(h).get(job.id))?.state).toBe("void");
+  });
+});
