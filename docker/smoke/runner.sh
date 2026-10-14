@@ -436,7 +436,7 @@ $problems"
 # read-only layout: a library or git that writes where nothing is writable fails here, not on the first
 # real Diff job. The fake GitHub and LLM are the engine suite's, on the loopback of the host.
 step "a Diff job through the real PR-Agent runs in the read-only layout, against the fake GitHub and LLM"
-python3 -B "$here/diff_job_fakes.py" "$image" --read-only --tmpfs "/home/runner:rw,noexec,nosuid,nodev,size=64m,uid=10001,gid=10001,mode=0700" ||
+python3 -B "$here/diff_job_fakes.py" "$image" "${dynamic_rootfs[@]}" ||
   fail "a Diff job does not run in the read-only layout"
 
 # #249-T01: the engine user (and the Diff job user) gain no write path from the layout. The paths a
