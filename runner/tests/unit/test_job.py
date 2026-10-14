@@ -343,7 +343,9 @@ def test_the_llm_endpoint_can_only_be_overridden_with_a_loopback_address() -> No
 
 
 # #270-T04
-def test_only_the_default_openrouter_destination_requires_parameters_unless_a_test_double_asks() -> None:
+def test_only_the_default_openrouter_destination_requires_parameters_unless_a_test_double_asks() -> (
+    None
+):
     llm = valid_job()["llm"]
     loopback = "http://127.0.0.1:4011/api/v1"
 
@@ -359,7 +361,9 @@ def test_only_the_default_openrouter_destination_requires_parameters_unless_a_te
 
 
 # #270-T04
-def test_the_field_that_asks_for_required_parameters_is_only_accepted_with_a_loopback_address() -> None:
+def test_the_field_that_asks_for_required_parameters_is_only_accepted_with_a_loopback_address() -> (
+    None
+):
     llm = valid_job()["llm"]
 
     # The default destination always requires them: no switch to turn that off (or on) from a job.
@@ -367,7 +371,9 @@ def test_the_field_that_asks_for_required_parameters_is_only_accepted_with_a_loo
         job = valid_job(llm={**llm, "requireParameters": value})
         assert refusal(json.dumps(job)).code is ErrorCode.INVALID_JOB, value
     for value in ("true", 1, None):
-        job = valid_job(llm={**llm, "baseUrl": "http://127.0.0.1:4011/api/v1", "requireParameters": value})
+        job = valid_job(
+            llm={**llm, "baseUrl": "http://127.0.0.1:4011/api/v1", "requireParameters": value}
+        )
         assert refusal(json.dumps(job)).code is ErrorCode.INVALID_JOB, value
 
 

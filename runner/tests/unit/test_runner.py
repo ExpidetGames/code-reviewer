@@ -417,6 +417,52 @@ def test_the_identity_patch_is_active_while_the_command_runs(
     assert seen == ["code-reviewer[bot]"]
 
 
+def openrouter_extra_body() -> dict[str, Any]:
+    """The `extra_body` PR-Agent's OpenRouter request controls build for a call, as seen now."""
+    from pr_agent.algo.ai_handlers.litellm_ai_handler import LiteLLMAIHandler
+
+    handler: Any = object.__new__(LiteLLMAIHandler)
+    handler._openrouter_controls = {}
+    kwargs: dict[str, Any] = handler._apply_openrouter_request_controls("openrouter/v/m", {}, None)
+    return kwargs.get("extra_body", {})
+
+
+def extra_body_while_running(monkeypatch: pytest.MonkeyPatch, job: Job) -> list[dict[str, Any]]:
+    seen: list[dict[str, Any]] = []
+
+    async def double() -> bool:
+        seen.append(openrouter_extra_body())
+        return True
+
+    use_double(monkeypatch, double)
+    run(job)
+    return seen
+
+
+# #270-T03
+def test_the_requests_of_a_diff_job_for_openrouter_require_parameters_while_the_command_runs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = extra_body_while_running(monkeypatch, make_job())
+
+    assert seen == [{"provider": {"require_parameters": True}}]
+    # ... and only while it runs: the next job in this process starts from PR-Agent's own method.
+    assert openrouter_extra_body() == {}
+
+
+# #270-T04
+def test_the_requests_of_a_diff_job_for_another_destination_are_left_as_pr_agent_builds_them(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    llm = {**job_json()["llm"], "baseUrl": "http://127.0.0.1:4011/api/v1"}
+
+    assert extra_body_while_running(monkeypatch, make_job(llm=llm)) == [{}]
+    asking = {**llm, "requireParameters": True}
+    assert extra_body_while_running(monkeypatch, make_job(llm=asking)) == [
+        {"provider": {"require_parameters": True}}
+    ]
+
+
 # CR-10-T04
 @pytest.mark.parametrize("raw", ["", "not json", "{}", '{"command": "review"}'])
 def test_an_invalid_job_gets_one_result_line_and_never_reaches_pr_agent(
