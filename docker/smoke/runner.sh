@@ -434,7 +434,8 @@ $problems"
 # #249 (review of #259, minor 1): a Dynamic runner serves Diff jobs as well. One job through the real
 # PR-Agent, the way the loop runs it (user 10001, HOME in the tmpfs, working directory in /tmp), in the
 # read-only layout: a library or git that writes where nothing is writable fails here, not on the first
-# real Diff job. The fake GitHub and LLM are the engine suite's, on the loopback of the host.
+# real Diff job. The fake GitHub and LLM are the engine suite's, on the loopback of the host. The job
+# writes nothing today (see the script); the step is the guard for a future dependency that does.
 step "a Diff job through the real PR-Agent runs in the read-only layout, against the fake GitHub and LLM"
 python3 -B "$here/diff_job_fakes.py" "$image" "${dynamic_rootfs[@]}" ||
   fail "a Diff job does not run in the read-only layout"

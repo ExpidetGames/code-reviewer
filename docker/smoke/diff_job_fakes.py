@@ -10,7 +10,10 @@ and nothing else. The job is the real `code-reviewer-run-job` as the Diff job us
 home and working directory the runner loop gives it, in the container the extra arguments describe
 (the smoke test passes the read-only root filesystem and the three tmpfs of compose.dynamic.yml).
 A write to a path the layout does not allow fails the job with `Read-only file system` and fails
-this script, instead of the first real Diff job on a Dynamic runner.
+this script, instead of the first real Diff job on a Dynamic runner. Today the job writes nothing at
+all (it also passes without any tmpfs, checked with temporary mutations in CI and locally with an
+unwritable HOME, TMPDIR and working directory), so this is a guard for the day a dependency starts
+to write, not proof of a path the tmpfs provide.
 """
 
 import json
