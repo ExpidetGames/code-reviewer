@@ -328,6 +328,70 @@ def test_a_preparation_that_fails_is_its_stable_code_and_no_engine_starts(
     assert upstream.requests == []
 
 
+# #296-T09 #296-T12
+def test_a_failed_preparation_reports_its_reason_and_metrics_without_any_content(
+    tmp_path: Path,
+) -> None:
+    @contextmanager
+    def refusing(job: Any) -> Generator[PreparedContent]:
+        error = CheckoutError(CheckoutReason.BUDGET_PREPARATION)
+        error.metrics = CheckoutMetrics(10, 20, 30, 4, {"binary": 1}, {"too_large": 2})
+        raise error
+        yield content_at(tmp_path)  # pragma: no cover
+
+    with FakeUpstream() as upstream:
+        result = runner.run_dynamic_job(
+            job_for(f"{upstream.url}/v1"),
+            None,
+            0.0,
+            environment(),
+            engines=ALL_ENGINES,
+            prepare=refusing,
+        )
+
+    assert result.error_reason == "budget_preparation"
+    assert json.loads(result.to_line())["errorReason"] == "budget_preparation"
+    lines = result.log_tail.splitlines()
+    assert lines[0] == (
+        "checkout_incomplete [budget_preparation]: the pull request could not be prepared"
+    )
+    assert (
+        "checkout: transfer=10 preparation=20 exposed=30 entries=4 "
+        "omitted=binary:1 skipped=too_large:2"
+    ) in lines
+
+
+# #296-T12
+def test_a_good_run_logs_the_checkout_metrics(tmp_path: Path) -> None:
+    script = {
+        "proxy_calls": 2,
+        "answer": "structured",
+        "findings": findings(),
+        "results": {"c1": read_result("src/api/handler.ts")},
+    }
+    with FakeUpstream(
+        [
+            asks(tool_call("c1", "read", {"filePath": "src/api/handler.ts"})),
+            asks(tool_call("c2", "StructuredOutput", findings())),
+        ]
+    ) as upstream:
+        result = runner.run_dynamic_job(
+            job_for(f"{upstream.url}/v1"),
+            None,
+            0.0,
+            environment(),
+            engines=ALL_ENGINES,
+            prepare=Preparer(tmp_path / "export", script),
+            publish=RecordingPublisher(),
+        )
+
+    assert result.ok, result.log_tail
+    assert result.error_reason is None
+    assert "checkout: transfer=0 preparation=0 exposed=0 entries=1 omitted=none skipped=none" in (
+        result.log_tail
+    )
+
+
 # Two different, compatible model and provider configurations. Nothing in them is known to the
 # code: different logical and upstream model names, different destination paths and keys, and
 # different usage shapes (one with detail counters that are already part of the totals).

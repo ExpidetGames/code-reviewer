@@ -122,10 +122,22 @@ def _elapsed_ms(started: float) -> int:
     return int((time.monotonic() - started) * 1000)
 
 
-def _failure(code: ErrorCode, detail: str, started: float, capture: LogCapture | None) -> JobResult:
+def _failure(
+    code: ErrorCode,
+    detail: str,
+    started: float,
+    capture: LogCapture | None,
+    *,
+    reason: str | None = None,
+    facts: Sequence[str] = (),
+) -> JobResult:
+    """A failed result. `reason` is the stable finer name of the failure; `facts` are extra lines
+    that belong with the verdict (counts and stable names only, never repository content)."""
     tail, truncated = capture.snapshot() if capture is not None else ("", False)
-    # The code and the detail are the most important part: they stay, the old log lines make room.
-    header = f"{code.value}: {detail}"
+    # The code, the reason and the detail are the most important part: they stay, the old log
+    # lines make room.
+    header = f"{code.value}{f' [{reason}]' if reason else ''}: {detail}"
+    header = "\n".join([header, *facts])
     room = max(MAX_TAIL_BYTES - len(header.encode("utf-8")) - 1, 0)
     fitted = fit_to_bytes(tail, room)
     return JobResult(
@@ -135,6 +147,7 @@ def _failure(code: ErrorCode, detail: str, started: float, capture: LogCapture |
         error_code=code,
         log_tail=fit_to_bytes(header + (f"\n{fitted}" if fitted else ""), MAX_TAIL_BYTES),
         log_truncated=truncated or fitted != tail,
+        error_reason=reason,
     )
 
 
@@ -409,7 +422,14 @@ def run_dynamic_job(
             finally:
                 server.stop()
     except CheckoutError as error:
-        return _failure(error.code, "the pull request could not be prepared", started, capture)
+        return _failure(
+            error.code,
+            "the pull request could not be prepared",
+            started,
+            capture,
+            reason=error.reason.value,
+            facts=[f"checkout: {error.metrics.describe()}"] if error.metrics else [],
+        )
 
     if answer.error is not None:
         return _failure(answer.error.code, answer.error.detail, started, capture)
@@ -440,6 +460,7 @@ def run_dynamic_job(
         )
     if published.reset:
         summary += f"; {STATE_RESET_CODE}"
+    summary += f"\ncheckout: {content.metrics.describe()}"
     return JobResult(
         ok=True,
         duration_ms=_elapsed_ms(started),

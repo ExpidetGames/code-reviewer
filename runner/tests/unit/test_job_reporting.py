@@ -146,6 +146,57 @@ def test_the_bare_verdict_keeps_ok_and_code_and_drops_the_log() -> None:
     assert bare["logTail"] == ""
 
 
+def _checkout_failure(**overrides: Any) -> bytes:
+    fields: dict[str, Any] = {
+        "ok": False,
+        "errorCode": "checkout_incomplete",
+        "errorReason": "budget_preparation",
+        "commentUrl": None,
+        "logTail": "checkout_incomplete [budget_preparation]: the pull request was not prepared",
+    }
+    fields.update(overrides)
+    return result_line(**fields)
+
+
+# #296-T10
+def test_the_stable_reason_of_a_failure_is_passed_on() -> None:
+    result = reported(outcome(exit_code=1, stdout=_checkout_failure()))
+
+    assert result["errorCode"] == "checkout_incomplete"
+    assert result["errorReason"] == "budget_preparation"
+
+
+# #296-T10
+@pytest.mark.parametrize("reason", ["Budget Prep", "x" * 65, 5, "", "has space", "../etc", None])
+def test_a_reason_that_is_not_a_stable_name_is_dropped(reason: Any) -> None:
+    result = reported(outcome(exit_code=1, stdout=_checkout_failure(errorReason=reason)))
+
+    assert "errorReason" not in result
+
+
+# #296-T10
+def test_a_good_run_never_carries_a_reason() -> None:
+    result = reported(outcome(stdout=result_line(errorReason="budget_preparation")))
+
+    assert "errorReason" not in result
+
+
+# #296-T10
+def test_the_bare_verdict_keeps_the_reason_and_says_it_in_one_line() -> None:
+    bare = minimal(reported(outcome(exit_code=1, stdout=_checkout_failure())))
+
+    assert bare["errorReason"] == "budget_preparation"
+    assert bare["logTail"] == "checkout_incomplete [budget_preparation]"
+
+
+# #296-T10
+def test_a_shrunk_result_keeps_the_reason() -> None:
+    big = reported(outcome(exit_code=1, stdout=_checkout_failure()))
+    big["logTail"] = "é" * 40_000
+
+    assert fit_request(big)["errorReason"] == "budget_preparation"
+
+
 # #267-T07
 def test_the_exact_cost_of_a_dynamic_run_reaches_the_reported_result_unchanged() -> None:
     ledger = BudgetLedger(DynamicLimits(), unit_costs=UNIT_COSTS)
