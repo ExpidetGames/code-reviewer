@@ -4,6 +4,8 @@
 
 What it finds, after folding (see `README.md`, "Dynamic Review", for what is and is not covered):
 
+- the `<runner-wrap-up>` tag of the runner's own wrap-up instruction (#293), in the same spellings,
+  so that no repository text can pose as the instruction;
 - the `<system-reminder>` tag the pinned engine's prompt blesses, in any spelling a reader or model
   would take for it: case, whitespace and slashes after the bracket, `_` or a dash lookalike for the
   hyphen, full-width and other `<` lookalikes, and invisible characters anywhere inside;
@@ -62,7 +64,9 @@ _IGNORABLE = re.compile(
 _ANY_BRACKET = re.compile("[<\uff1c" + _BRACKETS + "]")
 # On the folded text: the tag, or a closed chat-template token (a name without brackets, pipes and
 # whitespace, at most 64 characters).
-_MATCH = re.compile(r"<(?:[\s/]*+system-reminder|\|[^<>|\s]{1,64}\|>)", re.IGNORECASE)
+_MATCH = re.compile(
+    r"<(?:[\s/]*+(?:system-reminder|runner-wrap-up)|\|[^<>|\s]{1,64}\|>)", re.IGNORECASE
+)
 
 
 def escape_text(text: str) -> str:

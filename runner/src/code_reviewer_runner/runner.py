@@ -277,6 +277,13 @@ def dynamic_ledger(
     )
 
 
+def _turn_note(turn_seconds: Sequence[float]) -> str:
+    """How long each engine message call took: numbers only, never text from the repository."""
+    if not turn_seconds:
+        return ""
+    return "engine message call: " + ", ".join(f"{seconds:.1f} s" for seconds in turn_seconds)
+
+
 def run_dynamic_job(
     job: Job,
     capture: LogCapture | None,
@@ -406,13 +413,15 @@ def run_dynamic_job(
                     ripgrep=ripgrep,
                 )
                 answer = engine.run()
+                turn_note = _turn_note(engine.turn_seconds)
             finally:
                 server.stop()
     except CheckoutError as error:
         return _failure(error.code, "the pull request could not be prepared", started, capture)
 
     if answer.error is not None:
-        return _failure(answer.error.code, answer.error.detail, started, capture)
+        detail = answer.error.detail + (f" [{turn_note}]" if turn_note else "")
+        return _failure(answer.error.code, detail, started, capture)
     assert answer.findings is not None
     # The summary is written by this supervisor, never by the engine, and only for a run whose
     # findings passed every check above: any earlier failure leaves the previous comment untouched.
@@ -426,7 +435,10 @@ def run_dynamic_job(
         )
         return _failure(ErrorCode.LEASE_LOST, detail, started, capture)
     try:
-        published = (publish or publish_run)(job, answer.findings)
+        # A review that was wrapped up at its limit says so in the summary; the reason is the
+        # ledger's, never the model's.
+        findings = replace(answer.findings, stopped_early=ledger.stopped_early)
+        published = (publish or publish_run)(job, findings)
     except PublishError as error:
         return _failure(error.code, error.detail, started, capture)
     summary = (
@@ -435,6 +447,10 @@ def run_dynamic_job(
     )
     if published.reset:
         summary += f"; {STATE_RESET_CODE}"
+    if findings.stopped_early is not None:
+        summary += f"; stopped early ({findings.stopped_early})"
+    if turn_note:
+        summary += f"; {turn_note}"
     return JobResult(
         ok=True,
         duration_ms=_elapsed_ms(started),

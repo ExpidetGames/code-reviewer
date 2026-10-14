@@ -127,7 +127,7 @@ class Publisher:
         )
         redacted = redact_findings(run, self.redactor)
         state = reconcile(previous, redacted)
-        body = self._render(state, reset=reset)
+        body = self._render(state, reset=reset, stopped_early=run.stopped_early)
         published = self._write(existing, body, head_sha)
         return replace(published, reset=reset)
 
@@ -208,10 +208,16 @@ class Publisher:
 
     # -- rendering and writing -------------------------------------------------------------
 
-    def _render(self, state: ReviewState, *, reset: bool = False) -> str:
+    def _render(
+        self, state: ReviewState, *, reset: bool = False, stopped_early: str | None = None
+    ) -> str:
         try:
             return render_comment(
-                state, repository=self.repository, web_base=self.web_base, reset=reset
+                state,
+                repository=self.repository,
+                web_base=self.web_base,
+                reset=reset,
+                stopped_early=stopped_early,
             )
         except RenderError as error:
             raise PublishError(error.code, error.detail) from None
@@ -290,6 +296,7 @@ def redact_findings(run: DynamicFindings, redactor: Redactor | None) -> DynamicF
         reviewed_sha=run.reviewed_sha,
         findings=tuple(_redact_finding(finding, redactor) for finding in run.findings),
         resolved_ids=tuple(redactor.redact(finding_id) for finding_id in run.resolved_ids),
+        stopped_early=run.stopped_early,
     )
 
 

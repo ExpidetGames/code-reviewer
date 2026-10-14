@@ -87,6 +87,9 @@ class DynamicFindings:
     reviewed_sha: str
     findings: tuple[Finding, ...]
     resolved_ids: tuple[str, ...]
+    # Why the run was wrapped up before it was done (`cost_limit`, `time_limit`, #293). It is set
+    # by the runner from its ledger after the answer was validated, never by the model.
+    stopped_early: str | None = None
 
 
 def _object(value: Any, path: str) -> dict[str, Any]:

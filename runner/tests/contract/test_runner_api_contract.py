@@ -197,6 +197,39 @@ def test_a_failed_result_needs_an_error_code_and_a_good_one_must_not_have_it() -
     assert not _accepts("CompleteRequest", complete)
 
 
+# #293-T08: what the runner prints as the usage of a stopped-early review is a valid result.
+def test_the_usage_of_a_stopped_early_review_is_valid_and_a_complete_one_has_no_such_field() -> (
+    None
+):
+    from code_reviewer_runner.dynamic_review.budget import (
+        STOPPED_EARLY_COST,
+        STOPPED_EARLY_TIME,
+    )
+    from code_reviewer_runner.result import Usage
+
+    def usage(stopped_early: str | None) -> dict[str, Any]:
+        return Usage(
+            model="vendor/model",
+            prompt_tokens=1,
+            completion_tokens=1,
+            total_tokens=2,
+            ai_calls=1,
+            fallback_used=False,
+            cost_usd=0.01,
+            stopped_early=stopped_early,
+        ).to_json()
+
+    complete = _example("CompleteRequest")
+    for reason in (STOPPED_EARLY_COST, STOPPED_EARLY_TIME):
+        complete["result"]["usage"] = usage(reason)
+        assert _accepts("CompleteRequest", complete), reason
+    complete["result"]["usage"] = usage(None)
+    assert "stoppedEarly" not in complete["result"]["usage"]
+    assert _accepts("CompleteRequest", complete)
+    complete["result"]["usage"] = {**usage(None), "stoppedEarly": "budget"}
+    assert not _accepts("CompleteRequest", complete)
+
+
 def test_every_error_of_the_api_has_a_stable_code_and_a_message() -> None:
     error = _example("ErrorResponse")
     assert _accepts("ErrorResponse", error)
