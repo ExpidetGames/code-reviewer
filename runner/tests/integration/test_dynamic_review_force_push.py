@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
-"""A force-push the previous review cannot be compared with (#201-T10).
+"""A force-push the previous review cannot be compared with (#201-T10, partial).
 
 The head the earlier review looked at is no longer available from the server, so the runner declares
 a full review. The declaration must reach the prompt, the prior findings must reach the prompt as
@@ -8,6 +8,9 @@ active, and a model that does not name them cannot make them disappear: an omitt
 active in the published summary. Only a finding the model names in `resolvedIds` is resolved. Real
 local Git, the real preparation, the real context read and publisher against a loopback GitHub, a
 scripted engine and a fake provider: no real model or network.
+
+Only the case of an unavailable previous head is covered; the variant of an incomplete comparison
+(a declared incremental comparison the checkout cannot honour) is not.
 """
 
 import sys
@@ -104,8 +107,9 @@ def test_only_a_finding_the_model_names_is_resolved_after_a_force_push(
 def test_a_summary_the_job_cannot_account_for_is_a_stable_failure_not_a_silent_full_review(
     server: FakeGithubComments,
 ) -> None:
-    # The app knows no earlier head for the pull request, but the bot's summary exists: the prior
-    # state cannot be placed, so the job fails closed instead of reviewing from scratch beside it.
+    # This is the case of #251-T11, not of T10. The app knows no earlier head, but the bot's summary
+    # exists: the prior state cannot be placed, so the job fails closed instead of reviewing from
+    # scratch beside it.
     publish_review(server, finding("f-1", HEAD, title="Null deref"))
 
     with pytest.raises(CheckoutError) as caught:

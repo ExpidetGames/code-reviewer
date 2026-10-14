@@ -6,7 +6,13 @@ import { describe, expect, it } from "vitest";
 import { sql } from "kysely";
 import { sha } from "../test-support/jobs.ts";
 import { createRunsFixture } from "../test-support/runs.ts";
-import { createLastRunSource, parseRunsFilter } from "./runs-service.ts";
+import { addWorkspace } from "../test-support/workspaces.ts";
+import { createRunsRepository } from "../db/repositories/runs-repository.ts";
+import {
+  createLastRunSource,
+  createRunsService,
+  parseRunsFilter,
+} from "./runs-service.ts";
 
 describe("the runs list", () => {
   // CR-35-T01
@@ -232,7 +238,7 @@ describe("what leaves the server", () => {
 });
 
 describe("the usage of a run", () => {
-  // #201-T01
+  // #201-T31
   it("is in the detail of a finished run with the model, summed tokens, calls and cost, and never in the list", async () => {
     const f = await createRunsFixture({ dynamicReview: true });
     const finished = await f.finished(
@@ -272,6 +278,16 @@ describe("the usage of a run", () => {
       /promptTokens|completionTokens|fallbackUsed/,
     );
     expect(JSON.stringify(list)).not.toContain("vendor/dynamic-model");
+
+    // A member of another workspace reads neither the run nor its usage.
+    const otherRuns = createRunsService({
+      runs: createRunsRepository(f.db, await addWorkspace(f.db, "bravo")),
+      now: f.clock.now,
+    });
+    expect(await otherRuns.get(finished.id)).toBeUndefined();
+    expect(JSON.stringify(await otherRuns.list({}))).not.toContain(
+      "vendor/dynamic-model",
+    );
   });
 });
 

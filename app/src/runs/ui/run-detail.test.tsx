@@ -88,7 +88,7 @@ describe("the usage of a run", () => {
     costUsd: 0.04,
   };
 
-  // #201-T01
+  // #201-T27
   it("names the review kind with the model that answered, and the tokens, calls and cost", () => {
     const { container } = render(
       <RunDetail
@@ -105,7 +105,7 @@ describe("the usage of a run", () => {
     expect(content).toContain("$0.04");
   });
 
-  // #201-T01: a Dynamic Review never guesses a price.
+  // #201-T28: a Dynamic Review never guesses a price.
   it("says the cost is unknown instead of showing zero", () => {
     const { container } = render(
       <RunDetail
@@ -119,7 +119,7 @@ describe("the usage of a run", () => {
     expect(text(container)).not.toContain("$0");
   });
 
-  // #201-T01
+  // #201-T29
   it("shows no model and no usage for a run that never reached a model", () => {
     const { container } = render(
       <RunDetail
@@ -133,7 +133,7 @@ describe("the usage of a run", () => {
     expect(screen.queryByText("Model")).toBeNull();
   });
 
-  // #201-T01
+  // #201-T30
   it("renders a model name from outside as text", () => {
     const { container } = render(
       <RunDetail

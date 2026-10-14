@@ -106,6 +106,39 @@ describe("the key of a Dynamic claim", () => {
       errorCode: "llm_not_configured",
     });
   });
+
+  // #201-T06
+  it("fails closed with llm_not_configured, creates no credential and borrows no other key when the workspace's key cannot be read", async () => {
+    const { h, runs } = await startDynamic();
+    const other = await addWorkspace(h.db, "bravo");
+    const saved = await h.llm
+      .keyServiceFor(other)
+      .save({ provider: "openrouter", apiKey: OTHER_WORKSPACE_KEY }, null);
+    expect(saved.ok).toBe(true);
+    await h.db
+      .updateTable("workspace_secrets")
+      .set({ nonce: "AAAA" })
+      .where("workspace_id", "=", h.workspaceId)
+      .execute();
+    const job = await h.enqueueNew();
+
+    const response = await h.claim({ engines: ENGINES });
+
+    expect(response.status).toBe(204);
+    expect(await response.text()).not.toContain(OTHER_WORKSPACE_KEY);
+    expect(h.issuedJobTokens()).toEqual([]);
+    expect(await h.queue.get(job.id)).toMatchObject({
+      status: "failed",
+      errorCode: "llm_not_configured",
+    });
+    expect((await runs.get(job.id))?.run).toMatchObject({
+      status: "failed",
+      errorCode: "llm_not_configured",
+    });
+    const kept = await everythingKept(h);
+    expect(kept).not.toContain(OTHER_WORKSPACE_KEY);
+    expect(kept).not.toContain(KEY);
+  });
 });
 
 describe("a failed Dynamic review", () => {
