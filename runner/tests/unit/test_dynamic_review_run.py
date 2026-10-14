@@ -11,6 +11,7 @@ import io
 import json
 from collections.abc import Generator
 from contextlib import contextmanager
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -18,7 +19,8 @@ import pytest
 from code_reviewer_runner import runner
 from code_reviewer_runner.capabilities import ALL_ENGINES, ENGINE_DIFF
 from code_reviewer_runner.dynamic_review.checkout import PreparedContent
-from code_reviewer_runner.job import Job, parse_job
+from code_reviewer_runner.dynamic_review.proxy import capabilities_from_config
+from code_reviewer_runner.job import Job, JobError, parse_job
 from code_reviewer_runner.result import ErrorCode
 
 TOKEN = "dummy-installation-token-0123456789"
@@ -97,6 +99,87 @@ def test_a_dynamic_job_without_an_injected_preparer_needs_the_root_supervisor() 
 
     assert result.ok is False
     assert result.error_code is ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED
+
+
+# #290-T02: the Diff "Token budget" of the project is not the model's window.
+@pytest.mark.parametrize("project_token_budget", [None, 1_000, 100_000, 5_000_000])
+def test_the_window_of_a_dynamic_run_is_the_models_and_never_the_projects_token_budget(
+    project_token_budget: int | None,
+) -> None:
+    extra = {} if project_token_budget is None else {"maxTokens": project_token_budget}
+    job = dynamic_job(**extra)
+    capabilities = capabilities_from_config(None, model=job.llm.model)
+
+    ledger = runner.dynamic_ledger(capabilities, {}, 600.0)
+
+    assert ledger.window_tokens == capabilities.context_window_tokens == 1_048_576
+    # About 92 KB of request is far inside it (it was refused at 100,000 "tokens").
+    ledger.reserve_call("x" * 92_000)
+
+
+# #290-T02
+def test_an_operator_descriptor_window_is_the_windows_of_the_run() -> None:
+    capabilities = capabilities_from_config(
+        json.dumps(
+            {
+                "tool_choice_required": True,
+                "structured_output": True,
+                "max_output_tokens": 4096,
+                "context_window_tokens": 200_000,
+            }
+        )
+    )
+
+    ledger = runner.dynamic_ledger(capabilities, {}, 600.0)
+
+    assert ledger.window_tokens == 200_000
+    assert ledger.output_tokens == 4096
+
+
+# #290-T10
+def test_the_cost_limit_of_a_run_is_the_default_or_the_operators() -> None:
+    capabilities = capabilities_from_config(None, model="deepseek/deepseek-v4.1-flash")
+
+    default = runner.dynamic_ledger(capabilities, {}, 600.0)
+    blank = runner.dynamic_ledger(capabilities, {runner.DYNAMIC_MAX_COST_VARIABLE: " "}, 600.0)
+    raised = runner.dynamic_ledger(capabilities, {runner.DYNAMIC_MAX_COST_VARIABLE: "5"}, 600.0)
+
+    assert default.limits.max_cost_usd == blank.limits.max_cost_usd == Decimal("1.00")
+    assert raised.limits.max_cost_usd == Decimal("5")
+    assert raised.limits.deadline_seconds == 600.0
+
+
+# #290-T10
+@pytest.mark.parametrize("value", ["0", "-1", "abc", "nan", "21", "1e9"])
+def test_an_unusable_operator_cost_limit_fails_the_job_before_anything_is_prepared(
+    value: str,
+) -> None:
+    result = runner.run_dynamic_job(
+        dynamic_job(),
+        None,
+        0.0,
+        {
+            runner.OPENCODE_COMMAND_VARIABLE: "opencode",
+            runner.DYNAMIC_MAX_COST_VARIABLE: value,
+        },
+        engines=ALL_ENGINES,
+        prepare=never_prepared,
+    )
+
+    assert result.ok is False
+    assert result.error_code is ErrorCode.DYNAMIC_CONFIG_INVALID
+
+
+# #290-T10: the claim has no field for the cost limit, so nothing a pull request says can set it.
+def test_nothing_in_the_job_can_set_the_cost_limit() -> None:
+    document = dynamic_document()
+    document["dynamic"]["limits"]["maxCostUsd"] = 1000
+    with pytest.raises(JobError):
+        parse_job(json.dumps(document))
+    extra = dynamic_document()
+    extra["llm"]["maxCostUsd"] = 1000
+    with pytest.raises(JobError):
+        parse_job(json.dumps(extra))
 
 
 OTHER_MODEL = "anthropic/claude-haiku-5.5"

@@ -16,7 +16,13 @@ from urllib.error import URLError
 
 import pytest
 
-from code_reviewer_runner.dynamic_review.budget import BudgetLedger, DynamicLimits, LimitError
+from code_reviewer_runner.dynamic_review.budget import (
+    DEFAULT_WINDOW_TOKENS,
+    BudgetLedger,
+    DynamicLimits,
+    LimitError,
+    UnitCosts,
+)
 from code_reviewer_runner.dynamic_review.config import new_proxy_capability
 from code_reviewer_runner.dynamic_review.proxy import (
     DEFAULT_DYNAMIC_MODEL,
@@ -136,6 +142,124 @@ def test_a_destination_that_cannot_serve_the_required_features_is_refused() -> N
         with pytest.raises(LimitError) as refused:
             proxy(Upstream(), capabilities=capabilities_from_config(document))
         assert refused.value.code is ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED
+
+
+# #290-T01
+def test_the_default_model_has_a_built_in_window_and_unit_costs() -> None:
+    capabilities = capabilities_from_config(None, model=DEFAULT_DYNAMIC_MODEL)
+
+    # The window OpenRouter's public model list gives for the default model (checked 2026-10-14).
+    assert capabilities.context_window_tokens == 1_048_576
+    assert capabilities.unit_costs is not None
+    assert capabilities.unit_costs.input_usd_per_mtok > 0
+    assert capabilities.unit_costs.output_usd_per_mtok > 0
+    capabilities.check_required()
+
+
+# #290-T01
+def test_an_operator_descriptor_sets_the_window_and_the_unit_costs() -> None:
+    capabilities = capabilities_from_config(
+        json.dumps(
+            {
+                "tool_choice_required": True,
+                "structured_output": True,
+                "max_output_tokens": 4096,
+                "context_window_tokens": 200_000,
+                "input_usd_per_mtok": 0.5,
+                "output_usd_per_mtok": 2,
+            }
+        ),
+        model="acme/large",
+    )
+
+    assert capabilities.context_window_tokens == 200_000
+    assert capabilities.unit_costs == UnitCosts(Decimal("0.5"), Decimal("2"))
+
+
+# #290-T01
+def test_a_descriptor_without_a_window_or_unit_costs_gets_the_conservative_defaults() -> None:
+    capabilities = capabilities_from_config(CAPABILITIES, model="acme/large")
+
+    assert capabilities.context_window_tokens == DEFAULT_WINDOW_TOKENS
+    assert capabilities.unit_costs is None
+
+
+def descriptor(**extra: Any) -> str:
+    return json.dumps(
+        {"tool_choice_required": True, "structured_output": True, "max_output_tokens": 4096} | extra
+    )
+
+
+# #290-T01
+@pytest.mark.parametrize("window", [True, 0, -5, "200000", 1.5, None, [], 4096])
+def test_an_unusable_window_is_refused_not_defaulted(window: Any) -> None:
+    # 4096 is not larger than the output allowance: no room for a request.
+    with pytest.raises(LimitError) as refused:
+        capabilities_from_config(descriptor(context_window_tokens=window)).check_required()
+    assert refused.value.code is ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED
+
+
+# #290-T01
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"input_usd_per_mtok": 1},
+        {"output_usd_per_mtok": 1},
+        {"input_usd_per_mtok": -1, "output_usd_per_mtok": 1},
+        {"input_usd_per_mtok": "1", "output_usd_per_mtok": 1},
+        {"input_usd_per_mtok": True, "output_usd_per_mtok": 1},
+        {"input_usd_per_mtok": None, "output_usd_per_mtok": 1},
+        {"input_usd_per_mtok": float("nan"), "output_usd_per_mtok": 1},
+        {"input_usd_per_mtok": float("inf"), "output_usd_per_mtok": 1},
+    ],
+)
+def test_unit_costs_must_be_both_present_and_non_negative_numbers(extra: dict[str, Any]) -> None:
+    with pytest.raises(LimitError) as refused:
+        capabilities_from_config(descriptor(**extra))
+    assert refused.value.code is ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED
+
+
+# #290-T06
+CONTEXT_LENGTH_BODIES: list[Any] = [
+    {"error": {"code": "context_length_exceeded", "message": "x"}},
+    {
+        "error": {
+            "code": 400,
+            "message": "This endpoint's maximum context length is 1048576 tokens.",
+        }
+    },
+    {"error": {"message": "prompt is too long: 250000 tokens > 200000 maximum"}},
+    {"error": {"message": "Input exceeds the context window of this model"}},
+    {"error": "This model's maximum context length is 8192 tokens"},
+]
+
+
+# #290-T06
+@pytest.mark.parametrize("body", CONTEXT_LENGTH_BODIES)
+def test_a_provider_context_overflow_has_its_own_stable_code(body: Any) -> None:
+    subject = proxy(Upstream(status=400, body=body))
+
+    response = post(subject, request_body())
+
+    assert response.status == 400
+    assert error_code(response) == ErrorCode.LLM_CONTEXT_LENGTH_EXCEEDED.value
+    # The provider's own message never reaches the engine.
+    assert b"maximum" not in response.body and b"250000" not in response.body
+    assert subject.ledger.failure is not None
+    assert subject.ledger.failure.code is ErrorCode.LLM_CONTEXT_LENGTH_EXCEEDED
+
+
+# #290-T06
+def test_another_bad_request_and_other_statuses_keep_their_codes() -> None:
+    other = {"error": {"message": "Invalid value for tool_choice"}}
+    assert error_code(post(proxy(Upstream(status=400, body=other)), request_body())) == (
+        ErrorCode.LLM_BAD_REQUEST.value
+    )
+    # The phrase alone is no reason on a status that is not a bad request.
+    overflow = CONTEXT_LENGTH_BODIES[1]
+    assert error_code(post(proxy(Upstream(status=503, body=overflow)), request_body())) == (
+        ErrorCode.LLM_UNAVAILABLE.value
+    )
 
 
 # #197-T11

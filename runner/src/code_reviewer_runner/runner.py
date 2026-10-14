@@ -45,17 +45,21 @@ from code_reviewer_runner.dynamic_findings import DynamicFindings
 from code_reviewer_runner.dynamic_review import findings_schema
 from code_reviewer_runner.dynamic_review.adapter import DynamicEngine, shutdown_engines
 from code_reviewer_runner.dynamic_review.budget import (
-    DEFAULT_WINDOW_TOKENS,
     TOTAL_DEADLINE_SECONDS,
     BudgetLedger,
     DynamicLimits,
     LimitError,
+    max_cost_from_environment,
 )
 from code_reviewer_runner.dynamic_review.config import new_proxy_capability
 from code_reviewer_runner.dynamic_review.inputs import review_inputs
 from code_reviewer_runner.dynamic_review.limits import CheckoutError
 from code_reviewer_runner.dynamic_review.prompts import compose_system_prompt
-from code_reviewer_runner.dynamic_review.proxy import ModelProxy, capabilities_from_config
+from code_reviewer_runner.dynamic_review.proxy import (
+    DynamicCapabilities,
+    ModelProxy,
+    capabilities_from_config,
+)
 from code_reviewer_runner.dynamic_review.publish import (
     STATE_RESET_CODE,
     Published,
@@ -237,7 +241,30 @@ def run_job(
 
 
 DYNAMIC_CAPABILITIES_VARIABLE = "RUNNER_DYNAMIC_CAPABILITIES"
+DYNAMIC_MAX_COST_VARIABLE = "RUNNER_DYNAMIC_MAX_COST_USD"
 DYNAMIC_NODE_BIN_VARIABLE = "RUNNER_DYNAMIC_NODE_BIN"
+
+
+def dynamic_ledger(
+    capabilities: DynamicCapabilities, environment: Mapping[str, str], deadline: float
+) -> BudgetLedger:
+    """The ledger of one Dynamic run, from trusted runner configuration only (#290).
+
+    The window and the unit costs are the model's (its descriptor); the cost limit is the
+    operator's (`RUNNER_DYNAMIC_MAX_COST_USD`, up to a ceiling in code). Nothing of the job takes
+    part: the project's Diff "Token budget" (`llm.maxTokens`) is not the window of a Dynamic run,
+    and neither the claim nor the repository can name a limit.
+    """
+    limits = DynamicLimits(
+        deadline_seconds=deadline,
+        max_cost_usd=max_cost_from_environment(environment.get(DYNAMIC_MAX_COST_VARIABLE)),
+    )
+    return BudgetLedger(
+        limits,
+        window_tokens=capabilities.context_window_tokens,
+        output_tokens=capabilities.max_output_tokens,
+        unit_costs=capabilities.unit_costs,
+    )
 
 
 def run_dynamic_job(
@@ -303,11 +330,10 @@ def run_dynamic_job(
     deadline = TOTAL_DEADLINE_SECONDS
     if timeout_seconds is not None:
         deadline = min(deadline, timeout_seconds)
-    ledger = BudgetLedger(
-        DynamicLimits(deadline_seconds=deadline),
-        window_tokens=job.llm.max_tokens or DEFAULT_WINDOW_TOKENS,
-        output_tokens=capabilities.max_output_tokens,
-    )
+    try:
+        ledger = dynamic_ledger(capabilities, environment, deadline)
+    except LimitError as error:
+        return _failure(error.code, error.detail, started, capture)
     upstream = job.llm.base_url or "https://openrouter.ai/api/v1"
     # One unguessable capability per job: the proxy demands it, the engine config carries it.
     capability = new_proxy_capability()

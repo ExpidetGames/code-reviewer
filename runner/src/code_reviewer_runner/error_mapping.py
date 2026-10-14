@@ -57,6 +57,24 @@ def llm_status_code(status: int) -> ErrorCode | None:
     return ErrorCode.LLM_UNAVAILABLE if status >= 500 else None
 
 
+# The ways providers say that a request does not fit the model's context: OpenAI's error code, and
+# the texts of OpenRouter and of the providers behind it ("maximum context length is N tokens",
+# "prompt is too long", "exceeds the context window"). Only the shape of the answer is read.
+_CONTEXT_LENGTH = re.compile(
+    r"context[_ ]length|context window|prompt is too long|input is too long", re.IGNORECASE
+)
+_CONTEXT_LENGTH_STATUSES = frozenset({400, 413})
+
+
+def is_context_length_exceeded(status: int, text: str) -> bool:
+    """True for a provider answer that says the request is larger than the model's context.
+
+    Only for a status a provider uses for it (400, 413): the same words on a 5xx are the provider's
+    own trouble. A `bad request` that is about something else keeps `llm_bad_request`.
+    """
+    return status in _CONTEXT_LENGTH_STATUSES and _CONTEXT_LENGTH.search(text) is not None
+
+
 _GITHUB_STATUS = {
     401: ErrorCode.GIT_AUTH,
     429: ErrorCode.GIT_RATE_LIMIT,
