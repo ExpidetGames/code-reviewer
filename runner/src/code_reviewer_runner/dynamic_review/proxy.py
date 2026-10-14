@@ -42,13 +42,14 @@ import json
 import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request
 
 from code_reviewer_runner.dynamic_review.audit import ToolAudit
-from code_reviewer_runner.dynamic_review.budget import BudgetLedger, LimitError
+from code_reviewer_runner.dynamic_review.budget import BudgetLedger, LimitError, exact_cost
 from code_reviewer_runner.dynamic_review.completion_stream import completion_as_stream
 from code_reviewer_runner.dynamic_review.config import PROXY_CAPABILITY_BYTES, PROXY_PROVIDER_ID
 from code_reviewer_runner.dynamic_review.net import no_redirect_opener
@@ -340,7 +341,12 @@ class ModelProxy:
             )
         # The provider is authoritative: its counters replace the reservation. A counter above the
         # reservation is not added up, it fails the run.
-        self.ledger.settle_call(reservation, prompt_tokens=usage[0], completion_tokens=usage[1])
+        self.ledger.settle_call(
+            reservation,
+            prompt_tokens=usage[0],
+            completion_tokens=usage[1],
+            cost=self._cost(completion),
+        )
         # The tool calls the model asked for are counted before the engine can run any of them.
         self.audit.calls_in_answer(completion)
         if not wants_stream:
@@ -442,6 +448,16 @@ class ModelProxy:
             completion if isinstance(completion, int) and not isinstance(completion, bool) else None
         )
         return prompt_tokens, completion_tokens
+
+    @staticmethod
+    def _cost(document: dict[str, Any]) -> Decimal | None:
+        """The charge the provider reports for this call (`usage.cost`), or None when it has none.
+
+        OpenRouter always returns it with the usage; there is no request flag to set. It is read,
+        never computed: a call without it simply has no known cost.
+        """
+        usage = as_object(document.get("usage"))
+        return None if usage is None else exact_cost(usage.get("cost"))
 
     @staticmethod
     def _provider_error(status: int) -> tuple[bytes, ErrorCode]:
