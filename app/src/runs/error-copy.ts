@@ -85,6 +85,8 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
   llm_unavailable: "The AI provider could not be reached or is having trouble.",
   llm_bad_request:
     "The AI provider rejected the request, for example because the pull request is too large for the model.",
+  llm_context_length_exceeded:
+    "The request was larger than the model's context window, so the AI provider refused it. Choose a model with a larger window, or review a smaller pull request.",
   llm_output_invalid:
     "The AI model answered in a form the review engine could not use.",
   model_unknown: "The configured model is not known to the AI provider.",

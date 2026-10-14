@@ -18,6 +18,11 @@ demands of the model boundary happens here, before a byte reaches the provider o
 - **Model, auth and routing overrides are refused.** The request must name the one configured model;
   the proxy replaces the dummy key with the workspace credential and never lets the caller pick a
   destination.
+- **OpenRouter must support every parameter (#270).** For an OpenRouter destination the proxy adds
+  `provider.require_parameters: true` to the body it forwards, so a provider that would silently
+  ignore `tools` or `tool_choice` is never used. It is a capability requirement, not routing: the
+  engine still cannot send `provider` or any other routing field, and OpenRouter finding no provider
+  for the parameters (404) ends the run with `dynamic_model_features_unsupported`.
 - **Usage is authoritative, and missing usage fails.** The provider's counters settle the
   reservation; an answer without usage, or larger than reserved, stops the run instead of being
   counted as zero.
@@ -42,18 +47,29 @@ import json
 import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request
 
 from code_reviewer_runner.dynamic_review.audit import ToolAudit
-from code_reviewer_runner.dynamic_review.budget import BudgetLedger, LimitError
+from code_reviewer_runner.dynamic_review.budget import (
+    DEFAULT_WINDOW_TOKENS,
+    BudgetLedger,
+    LimitError,
+    UnitCosts,
+    exact_cost,
+)
 from code_reviewer_runner.dynamic_review.completion_stream import completion_as_stream
 from code_reviewer_runner.dynamic_review.config import PROXY_CAPABILITY_BYTES, PROXY_PROVIDER_ID
 from code_reviewer_runner.dynamic_review.net import no_redirect_opener
-from code_reviewer_runner.error_mapping import llm_status_code
+from code_reviewer_runner.error_mapping import is_context_length_exceeded, llm_status_code
 from code_reviewer_runner.job_loop.jsonvalues import as_object
+from code_reviewer_runner.openrouter_parameters import (
+    REQUIRE_PARAMETERS,
+    is_no_provider_for_parameters,
+)
 from code_reviewer_runner.result import ErrorCode
 
 # The protocol the run requires. The pinned OpenCode uses tool calling for its StructuredOutput
@@ -110,6 +126,12 @@ class DynamicCapabilities:
     tool_choice_required: bool
     structured_output: bool
     max_output_tokens: int
+    # The model's context window in tokens: what a request and its output allowance must fit. It
+    # belongs to the model, not to the project (the Diff "Token budget" is a different thing and
+    # plays no part here). A descriptor that omits it gets the conservative default.
+    context_window_tokens: int = DEFAULT_WINDOW_TOKENS
+    # What a call reserves before it is sent. Optional: without it a call reserves a floor.
+    unit_costs: UnitCosts | None = None
 
     def check_required(self) -> None:
         if not self.tool_choice_required:
@@ -127,6 +149,11 @@ class DynamicCapabilities:
                 ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED,
                 "the configured model has no usable output bound",
             )
+        if self.context_window_tokens <= self.max_output_tokens:
+            raise LimitError(
+                ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED,
+                "the configured model has no usable context window",
+            )
 
 
 # The model id the app ships as the default Dynamic model (`DEFAULT_DYNAMIC_MODEL` in
@@ -135,8 +162,19 @@ class DynamicCapabilities:
 # structured outputs are supported. It ships with the image, so a fix reaches every deployment with
 # the next build, whatever a platform stored as a variable.
 DEFAULT_DYNAMIC_MODEL = "deepseek/deepseek-v4.1-flash"
+# The window and the unit costs are the ones OpenRouter's public model list gives for it
+# (https://openrouter.ai/api/v1/models, read on 2026-10-14: context_length 1048576, pricing prompt
+# 0.00000002016 and completion 0.000000891 USD per token). They only size a reservation: a window
+# the provider does not really give ends in its own context error, and the cost of a call is
+# always the `usage.cost` it reports.
 DEFAULT_MODEL_CAPABILITIES = DynamicCapabilities(
-    tool_choice_required=True, structured_output=True, max_output_tokens=8192
+    tool_choice_required=True,
+    structured_output=True,
+    max_output_tokens=8192,
+    context_window_tokens=1_048_576,
+    unit_costs=UnitCosts(
+        input_usd_per_mtok=Decimal("0.02016"), output_usd_per_mtok=Decimal("0.891")
+    ),
 )
 
 
@@ -181,7 +219,37 @@ def capabilities_from_config(raw: str | None, model: str | None = None) -> Dynam
         tool_choice_required=document.get("tool_choice_required") is True,
         structured_output=document.get("structured_output") is True,
         max_output_tokens=output,
+        context_window_tokens=_window(document),
+        unit_costs=_unit_costs(document),
     )
+
+
+def _unusable(detail: str) -> LimitError:
+    return LimitError(ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED, detail)
+
+
+def _window(document: dict[str, Any]) -> int:
+    if "context_window_tokens" not in document:
+        return DEFAULT_WINDOW_TOKENS
+    window: Any = document["context_window_tokens"]
+    if isinstance(window, bool) or not isinstance(window, int) or window < 1:
+        raise _unusable("the capability descriptor has no usable context window")
+    return window
+
+
+def _unit_costs(document: dict[str, Any]) -> UnitCosts | None:
+    present = {"input_usd_per_mtok", "output_usd_per_mtok"} & document.keys()
+    if not present:
+        return None
+    if len(present) == 1:
+        raise _unusable("the capability descriptor names only one of the two unit costs")
+    costs: list[Decimal] = []
+    for key in ("input_usd_per_mtok", "output_usd_per_mtok"):
+        value = exact_cost(document[key])
+        if value is None:
+            raise _unusable("the capability descriptor has an unusable unit cost")
+        costs.append(value)
+    return UnitCosts(input_usd_per_mtok=costs[0], output_usd_per_mtok=costs[1])
 
 
 @dataclass(frozen=True)
@@ -239,6 +307,7 @@ class ModelProxy:
         capabilities: DynamicCapabilities,
         capability: str,
         post: UpstreamPost = _http_post,
+        require_parameters: bool = False,
     ) -> None:
         if len(capability) < _MIN_CAPABILITY_CHARS:
             raise LimitError(
@@ -254,6 +323,8 @@ class ModelProxy:
         self.capabilities = capabilities
         self.audit = ToolAudit(ledger)
         self._post = post
+        # True when the destination is OpenRouter (the runner decides, never the engine).
+        self._require_parameters = require_parameters
         # The proxy starts only after the capability descriptor was proven: an unusable destination
         # is a failure before the first request, not a downgrade at the first call.
         self.capabilities.check_required()
@@ -329,7 +400,7 @@ class ModelProxy:
         if status != 200:
             # The run ends with the provider's stable code; no partial success is claimed and no
             # counter is invented for a refused call (the reservation stays spent).
-            refusal, code = self._provider_error(status)
+            refusal, code = self._provider_error(status, response_body)
             self.ledger.record_failure(LimitError(code, "the model provider refused the request"))
             return ProxyResponse(status=status, body=refusal)
         completion = self._completion(response_body)
@@ -340,7 +411,12 @@ class ModelProxy:
             )
         # The provider is authoritative: its counters replace the reservation. A counter above the
         # reservation is not added up, it fails the run.
-        self.ledger.settle_call(reservation, prompt_tokens=usage[0], completion_tokens=usage[1])
+        self.ledger.settle_call(
+            reservation,
+            prompt_tokens=usage[0],
+            completion_tokens=usage[1],
+            cost=self._cost(completion),
+        )
         # The tool calls the model asked for are counted before the engine can run any of them.
         self.audit.calls_in_answer(completion)
         if not wants_stream:
@@ -406,6 +482,8 @@ class ModelProxy:
         forwarded["model"] = self.upstream_model
         forwarded["max_tokens"] = self._output_allowance(request)
         forwarded["stream"] = False
+        if self._require_parameters:
+            forwarded["provider"] = dict(REQUIRE_PARAMETERS)
         # Compact UTF-8 like the engine's own serialisation: the reservation is made on these bytes,
         # and `\uXXXX` escapes of non-ASCII text would inflate it. A lone surrogate (a JSON escape
         # the engine or the provider can emit when a token splits an emoji) has no UTF-8 form: that
@@ -444,7 +522,30 @@ class ModelProxy:
         return prompt_tokens, completion_tokens
 
     @staticmethod
-    def _provider_error(status: int) -> tuple[bytes, ErrorCode]:
+    def _cost(document: dict[str, Any]) -> Decimal | None:
+        """The charge the provider reports for this call (`usage.cost`), or None when it has none.
+
+        OpenRouter always returns it with the usage; there is no request flag to set. It is read,
+        never computed: a call without it simply has no known cost.
+        """
+        usage = as_object(document.get("usage"))
+        return None if usage is None else exact_cost(usage.get("cost"))
+
+    def _provider_error(self, status: int, body: bytes) -> tuple[bytes, ErrorCode]:
+        # OpenRouter has no provider that supports every parameter of the request (#270): the
+        # model cannot serve the run, which is no unknown model.
+        if (
+            status == 404
+            and self._require_parameters
+            and is_no_provider_for_parameters(body.decode("utf-8", errors="replace"))
+        ):
+            code = ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED
+            return error_body(code, "no provider supports every parameter of the request"), code
+        # The request does not fit the model's context: the real limit of the provider, behind the
+        # estimate and the window check of the ledger. A code of its own, not a bad request.
+        if is_context_length_exceeded(status, body.decode("utf-8", errors="replace")):
+            code = ErrorCode.LLM_CONTEXT_LENGTH_EXCEEDED
+            return error_body(code, "the request is larger than the model's context"), code
         # The static path's table (error_mapping.py); a status it has no rule for is a bad request.
         code = llm_status_code(status) or ErrorCode.LLM_BAD_REQUEST
         return error_body(code, "the model provider refused the request"), code

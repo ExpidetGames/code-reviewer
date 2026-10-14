@@ -289,6 +289,35 @@ describe("the usage of a run", () => {
       "vendor/dynamic-model",
     );
   });
+
+  // #267-T07
+  it("stores and shows a small exact cost as the runner reported it", async () => {
+    const f = await createRunsFixture({ dynamicReview: true });
+    const finished = await f.finished(
+      {
+        ok: true,
+        result: {
+          ok: true,
+          commentUrl: "https://github.com/acme/widgets/pull/1#c",
+          logTail: "ok",
+          usage: {
+            model: "vendor/dynamic-model",
+            promptTokens: 100,
+            completionTokens: 20,
+            totalTokens: 120,
+            aiCalls: 2,
+            fallbackUsed: false,
+            costUsd: 5.79e-5,
+          },
+        },
+      },
+      { reviewKind: "dynamic" },
+    );
+
+    const detail = await f.runs.get(finished.id);
+
+    expect(detail?.run.usage?.costUsd).toBe(5.79e-5);
+  });
 });
 
 describe("the filter of a request", () => {
