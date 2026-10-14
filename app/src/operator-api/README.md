@@ -16,14 +16,15 @@ method) ends in Next.js's `notFound()`: the answer of a path that does not exist
 without opening the database. A self-hoster who never sets it has no extra surface.
 
 The token follows the rules of `RUNNER_TOKEN`: at least 32 characters, no white space or control characters
-(`token.ts`). It must differ from `RUNNER_TOKEN` and `APP_SECRET`.
+(`token.ts`). It must differ from `RUNNER_TOKEN`, `APP_SECRET` and `BETTER_AUTH_SECRET` (the deprecated name of the master key; it
+stays a credential of the instance while both are set, so it is refused in that case too).
 
-| Token                                   | API       | Start                                                                                                 |
-| --------------------------------------- | --------- | ----------------------------------------------------------------------------------------------------- |
-| unset or blank                          | off (404) | `[operator-api] off: OPERATOR_API_TOKEN is not set.`                                                  |
-| weak (short, white space)               | off (404) | `[operator-api] off: OPERATOR_API_TOKEN must be at least 32 characters long.`                         |
-| equal to `RUNNER_TOKEN` or `APP_SECRET` | off (404) | the production start ends with `DEPLOY_CONFIG_INVALID` naming the variables (`src/deploy/startup.ts`) |
-| usable                                  | on        | `[operator-api] on.`                                                                                  |
+| Token                                                         | API       | Start                                                                                                 |
+| ------------------------------------------------------------- | --------- | ----------------------------------------------------------------------------------------------------- |
+| unset or blank                                                | off (404) | `[operator-api] off: OPERATOR_API_TOKEN is not set.`                                                  |
+| weak (short, white space)                                     | off (404) | `[operator-api] off: OPERATOR_API_TOKEN must be at least 32 characters long.`                         |
+| equal to `RUNNER_TOKEN`, `APP_SECRET` or `BETTER_AUTH_SECRET` | off (404) | the production start ends with `DEPLOY_CONFIG_INVALID` naming the variables (`src/deploy/startup.ts`) |
+| usable                                                        | on        | `[operator-api] on.`                                                                                  |
 
 No line contains a token value.
 
