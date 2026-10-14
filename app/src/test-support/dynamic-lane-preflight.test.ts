@@ -164,15 +164,17 @@ describe("the preflight of the privileged Dynamic e2e lane", () => {
 
   // #253-P08
   it("fails the command loudly: a non-zero exit and one line per missing item on stderr", () => {
+    const environment: Record<string, string> = {
+      NODE_OPTIONS: "--disable-warning=MODULE_TYPELESS_PACKAGE_JSON",
+      PATH: "/nonexistent",
+      LANE_OPENCODE_PATH: "/nonexistent/opencode",
+      LANE_RIPGREP_PATH: "/nonexistent/rg",
+      LANE_ENGINE_UID: "4242",
+    };
     const done = spawnSync(process.execPath, [PREFLIGHT], {
       encoding: "utf8",
-      env: {
-        NODE_OPTIONS: "--disable-warning=MODULE_TYPELESS_PACKAGE_JSON",
-        PATH: "/nonexistent",
-        LANE_OPENCODE_PATH: "/nonexistent/opencode",
-        LANE_RIPGREP_PATH: "/nonexistent/rg",
-        LANE_ENGINE_UID: "4242",
-      },
+      // Next's types make NODE_ENV a required variable; the command does not read it.
+      env: environment as NodeJS.ProcessEnv,
     });
 
     expect(done.status).not.toBe(0);

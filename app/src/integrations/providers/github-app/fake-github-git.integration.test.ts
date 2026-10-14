@@ -40,7 +40,10 @@ async function setup() {
   fake.addInstallation({ id: 4242, account: OWNER });
   fake.setRepositories(4242, [WIDGETS, OTHER]);
   const directory = mkdtempSync(join(tmpdir(), "cr-fake-git-"));
-  cleanUpAfterTest(() => rmSync(directory, { recursive: true, force: true }));
+  cleanUpAfterTest(async () => {
+    await Promise.resolve();
+    rmSync(directory, { recursive: true, force: true });
+  });
   const repository = createGitRepository(join(directory, "widgets"));
   const base = repository.commit(
     { "README.md": "base\n", "src/lookup.py": "def lookup():\n    return 1\n" },
@@ -92,18 +95,20 @@ async function git(
   token: string,
   ...args: string[]
 ): Promise<string> {
+  const environment: Record<string, string> = {
+    PATH: process.env.PATH ?? "",
+    HOME: directory,
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_TERMINAL_PROMPT: "0",
+  };
   const done = await run(
     "git",
     ["-c", `http.extraHeader=Authorization: ${basic(token)}`, ...args],
     {
       cwd: directory,
       encoding: "utf8",
-      env: {
-        PATH: process.env.PATH ?? "",
-        HOME: directory,
-        GIT_CONFIG_NOSYSTEM: "1",
-        GIT_TERMINAL_PROMPT: "0",
-      },
+      // Next's types make NODE_ENV a required variable; Git does not read it.
+      env: environment as NodeJS.ProcessEnv,
     },
   );
   return done.stdout;
@@ -230,7 +235,8 @@ describe("the Git endpoint of the fake GitHub", () => {
   it("keeps the fixture reproducible: the same files and message give the same commit", () => {
     const first = mkdtempSync(join(tmpdir(), "cr-fixture-a-"));
     const second = mkdtempSync(join(tmpdir(), "cr-fixture-b-"));
-    cleanUpAfterTest(() => {
+    cleanUpAfterTest(async () => {
+      await Promise.resolve();
       rmSync(first, { recursive: true, force: true });
       rmSync(second, { recursive: true, force: true });
     });

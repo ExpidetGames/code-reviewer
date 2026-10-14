@@ -257,6 +257,8 @@ export type GithubPullRequest = {
   /** The head commit. Derived from the number when omitted, so every pull request has its own. */
   headSha?: string;
   author?: { login: string; id: number };
+  /** The description. Empty when omitted. */
+  body?: string;
 };
 
 /**
@@ -283,6 +285,22 @@ export async function addGithubPullRequest(
         },
       },
     },
+  );
+  expect(response.status()).toBe(201);
+}
+
+/**
+ * Has the fake GitHub serve a Git repository (a `.git` directory made with `fakes/github/git-fixture.ts`) over
+ * smart HTTP as `<fake>/<owner>/<name>.git`, the way the runner's checkout reads a pull request.
+ */
+export async function addGithubGitRepository(
+  request: APIRequestContext,
+  repositoryFullName: string,
+  path: string,
+): Promise<void> {
+  const response = await request.post(
+    `${e2eEnv.githubUrl}/__fake/git-repositories`,
+    { data: { repository: repositoryFullName, path } },
   );
   expect(response.status()).toBe(201);
 }

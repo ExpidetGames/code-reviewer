@@ -129,7 +129,9 @@ describe("the network guard of the privileged Dynamic e2e lane", () => {
 
   // #253-G03
   it("refuses to read a ruleset that lacks a counter, because a guard that cannot see is not a guard", () => {
-    const { "violation-engine": _removed, ...incomplete } = QUIET;
+    const incomplete = Object.fromEntries(
+      Object.entries(QUIET).filter(([name]) => name !== "violation-engine"),
+    );
 
     expect(() => parseGuard(listing(incomplete))).toThrow(/violation-engine/);
     expect(() => parseGuard({ nftables: [] })).toThrow(/violation-engine/);

@@ -49,13 +49,15 @@ function uploadPack(
     repositoryPath,
   ];
   return new Promise((resolve, reject) => {
+    const environment: Record<string, string> = {
+      PATH: process.env.PATH ?? "",
+      HOME: "/nonexistent",
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_CONFIG_GLOBAL: "/dev/null",
+    };
     const child = spawn("git", args, {
-      env: {
-        PATH: process.env.PATH ?? "",
-        HOME: "/nonexistent",
-        GIT_CONFIG_NOSYSTEM: "1",
-        GIT_CONFIG_GLOBAL: "/dev/null",
-      },
+      // Next's types make NODE_ENV a required variable; Git does not read it.
+      env: environment as NodeJS.ProcessEnv,
       stdio: ["pipe", "pipe", "ignore"],
     });
     const out: Buffer[] = [];

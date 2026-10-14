@@ -234,6 +234,69 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
+  # The privileged Dynamic lane (#253, #201-T01): the journey of a pull request through the real app,
+  # the real Dynamic runner (root, the capabilities of compose.dynamic.yml, its own startup self-check)
+  # and the real pinned OpenCode as the engine user, against the loopback fakes only. It needs root, so
+  # it has a job of its own: the GitHub runner has passwordless sudo and the nf_tables module.
+  # runner/scripts/run_dynamic_e2e.sh fetches the pinned OpenCode and ripgrep (the pin files accept
+  # only the pinned bytes), makes the one production build and runs the journeys in a network
+  # namespace of their own; nothing is skipped, and what is missing is named by the preflight.
+  e2e-dynamic:
+    name: "E2E: Dynamic Review with the real OpenCode (privileged)"
+    needs: changes
+    if: ${{ github.event_name == 'push' || github.base_ref == 'main' || needs.changes.outputs.app == 'true' || needs.changes.outputs.runner == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: app/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - name: Install dependencies
+        working-directory: app
+        run: pnpm install --frozen-lockfile
+      - name: Install the browser and its system libraries
+        working-directory: app
+        run: pnpm exec playwright install --with-deps chromium
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.0"
+          enable-cache: true
+          cache-dependency-glob: runner/uv.lock
+      - name: Install the runner
+        working-directory: runner
+        run: uv sync --locked
+      # nft installs the engine user's network rules and the lane's network guard. ripgrep is not installed
+      # here: the lane uses the pinned one (the runner's self-check compares it with runner/ripgrep-pin.json).
+      - name: Install nftables
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends nftables
+      # The pinned OpenCode (runner/opencode-pin.json); the cache just saves the download.
+      - name: Restore the pinned OpenCode
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/code-reviewer/opencode
+          key: opencode-${{ hashFiles('runner/opencode-pin.json') }}
+      - name: Run the Dynamic Review journey and the network guard
+        working-directory: runner
+        run: scripts/run_dynamic_e2e.sh
+      - name: Upload the Playwright report and the logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-dynamic-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            app/playwright-report
+            app/test-results
+          retention-days: 14
+          if-no-files-found: ignore
+
   # The dependency license check (license-policy.json, app/src/ci/license-check): fails when a
   # package of pnpm-lock.yaml or uv.lock has a license outside the allow list. It reads the license
   # metadata that pnpm and uv installed, so it needs both parts installed from the lockfiles and no
@@ -412,7 +475,7 @@ jobs:
   # fails on any failed or cancelled job and accepts skipped jobs (path filter).
   ci-passed:
     name: All checks passed?
-    needs: [changes, app-fast, runner-fast, engine, e2e, licenses, image-app, image-runner, image-runner-dynamic, compose, actionlint]
+    needs: [changes, app-fast, runner-fast, engine, e2e, e2e-dynamic, licenses, image-app, image-runner, image-runner-dynamic, compose, actionlint]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5

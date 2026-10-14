@@ -119,9 +119,9 @@ export const machineProbes: LaneProbes = {
 
 /** The overrides the command accepts (for tests of the command; the lane sets none). */
 export type LaneEnvironment = {
-  LANE_OPENCODE_PATH?: string;
-  LANE_RIPGREP_PATH?: string;
-  LANE_ENGINE_UID?: string;
+  LANE_OPENCODE_PATH?: string | undefined;
+  LANE_RIPGREP_PATH?: string | undefined;
+  LANE_ENGINE_UID?: string | undefined;
 };
 
 export function collectFacts(

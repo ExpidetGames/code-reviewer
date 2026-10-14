@@ -32,16 +32,18 @@ export type GitRepository = {
 
 export function createGitRepository(directory: string): GitRepository {
   mkdirSync(directory, { recursive: true });
+  const environment: Record<string, string> = {
+    PATH: process.env.PATH ?? "",
+    HOME: directory,
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    ...IDENTITY,
+  };
   const git = (...args: string[]): string =>
     execFileSync("git", ["-C", directory, ...args], {
       encoding: "utf8",
-      env: {
-        PATH: process.env.PATH ?? "",
-        HOME: directory,
-        GIT_CONFIG_NOSYSTEM: "1",
-        GIT_CONFIG_GLOBAL: "/dev/null",
-        ...IDENTITY,
-      },
+      // Next's types make NODE_ENV a required variable; Git does not read it.
+      env: environment as NodeJS.ProcessEnv,
     }).trim();
   git("init", "--quiet", "--initial-branch=main");
   git("config", "commit.gpgsign", "false");
