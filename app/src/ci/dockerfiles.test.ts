@@ -25,6 +25,26 @@ function instructions(dockerfile: string): string[] {
     .map((line) => line.replace(/\s+/g, " "));
 }
 
+/**
+ * The instructions that make up the image of the final stage: those of the stage itself and of the
+ * stages it extends (`FROM runtime-base AS runtime`), as one "FROM ..." block per stage. The runner
+ * Dockerfile ends on a thin default stage built on a shared base (#202).
+ */
+function finalImage(dockerfile: string): string {
+  const blocks = instructions(dockerfile)
+    .join("\n")
+    .split(/^FROM /m)
+    .slice(1);
+  let image = blocks.at(-1) ?? "";
+  let base = image.split(" ")[0] ?? "";
+  for (;;) {
+    const parent = blocks.find((block) => block.includes(` AS ${base}\n`));
+    if (!parent) return image;
+    image = `${parent}\n${image}`;
+    base = parent.split(" ")[0] ?? "";
+  }
+}
+
 function argDefault(dockerfile: string, name: string): string {
   const line = instructions(dockerfile).find((entry) =>
     entry.startsWith(`ARG ${name}=`),
@@ -104,9 +124,9 @@ describe("Dockerfile security", () => {
   it.each(dockerfiles)(
     "ends the $name image on a numeric non-root user",
     ({ source }) => {
-      const users = instructions(source).filter((line) =>
-        line.startsWith("USER "),
-      );
+      const users = finalImage(source)
+        .split("\n")
+        .filter((line) => line.startsWith("USER "));
       const last = users.at(-1)?.slice("USER ".length) ?? "";
 
       expect(last).toMatch(/^[1-9][0-9]*(:[1-9][0-9]*)?$/);
@@ -133,11 +153,7 @@ describe("Dockerfile security", () => {
   it.each(dockerfiles)(
     "copies the build context into the $name image only through a stage, never a whole host directory into the final stage",
     ({ source }) => {
-      const finalStage =
-        instructions(source)
-          .join("\n")
-          .split(/^FROM /m)
-          .at(-1) ?? "";
+      const finalStage = finalImage(source);
       const copies = finalStage
         .split("\n")
         .filter((line) => line.startsWith("COPY ") || line.startsWith("ADD "));
@@ -245,11 +261,7 @@ describe("license files in the images", () => {
     "copies LICENSE, NOTICE and THIRD_PARTY_LICENSES.md of the repository root into the $name image under /licenses",
     ({ source }) => {
       const lines = instructions(source);
-      const finalStage =
-        lines
-          .join("\n")
-          .split(/^FROM /m)
-          .at(-1) ?? "";
+      const finalStage = finalImage(source);
 
       expect(lines).toContain("FROM scratch AS licenses");
       expect(lines).toContain(`COPY ${LICENSE_FILES} /`);
@@ -277,7 +289,8 @@ describe("license files in the images", () => {
       for (const copy of copies) {
         expect(copy, copy).toMatch(
           new RegExp(
-            `^COPY (${name}/|${LICENSE_FILES.replace(/\./g, "\\.")} )`,
+            // Flags (--chown, --chmod) come before the sources.
+            `^COPY (--\\S+ )*(${name}/|${LICENSE_FILES.replace(/\./g, "\\.")} )`,
           ),
         );
       }

@@ -35,8 +35,8 @@ from loguru import logger
 from code_reviewer_runner import __version__
 from code_reviewer_runner.capabilities import (
     ENGINE_DYNAMIC,
-    advertised_engines,
-    fail_closed_self_check,
+    OPENCODE_COMMAND_VARIABLE,
+    engines_from_environment,
 )
 from code_reviewer_runner.comment_recorder import CommentRecorder, install_comment_recorder
 from code_reviewer_runner.dynamic_review import findings_schema
@@ -207,7 +207,6 @@ def run_job(
     )
 
 
-OPENCODE_COMMAND_VARIABLE = "RUNNER_OPENCODE_COMMAND"
 DYNAMIC_CAPABILITIES_VARIABLE = "RUNNER_DYNAMIC_CAPABILITIES"
 DYNAMIC_NODE_BIN_VARIABLE = "RUNNER_DYNAMIC_NODE_BIN"
 
@@ -545,7 +544,7 @@ def main(
                     started,
                     saved_env,
                     dynamic_timeout,
-                    engines=advertised_engines(fail_closed_self_check()),
+                    engines=engines_from_environment(saved_env),
                 )
         except KeyboardInterrupt:
             raise

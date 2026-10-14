@@ -8,12 +8,11 @@ dedicated unprivileged user, the export mechanism must be read-only for it, and 
 proxy-only. A failure never falls back to a host setting, a fork or a weaker mode: the engine is
 simply not advertised, and the job loop logs the stable isolation code.
 
-The concrete probes against the container belong to #202; this module owns the policy and the
-result. The configured check is deliberately fail-closed until #202 supplies the probes, so this
-stage never advertises `opencode`.
+The concrete probes against the container are `dynamic_review/self_check.py` (#202); this module
+owns the policy and the result: any failure, expected or not, leaves `opencode` unadvertised.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 from code_reviewer_runner.result import ErrorCode
@@ -72,26 +71,41 @@ def verify_isolation(facts: IsolationFacts) -> None:
         )
 
 
-def advertised_engines(verify: Callable[[], None]) -> tuple[str, ...]:
-    """The engines this runner advertises: both only after `verify` proved the isolation.
+def self_check_outcome(
+    verify: Callable[[], None],
+) -> tuple[tuple[str, ...], IsolationSelfCheckError | None]:
+    """The engines this runner advertises, and why `opencode` is missing when it is.
 
-    A failed check drops `opencode` and keeps `pr-agent`; `pr-agent` runs in the same process
-    boundary as before and needs none of this.
+    Both engines only after `verify` proved the isolation. A failed check, and any unexpected error
+    inside it, drops `opencode` and keeps `pr-agent`; `pr-agent` runs in the same process boundary
+    as before and needs none of this.
     """
     try:
         verify()
-    except IsolationSelfCheckError:
-        return (ENGINE_DIFF,)
-    return ALL_ENGINES
-
-
-def fail_closed_self_check() -> Callable[[], None]:
-    """The configured check until #202 supplies the real probes: it never advertises `opencode`."""
-
-    def check() -> None:
-        raise IsolationSelfCheckError(
-            ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED,
-            "the isolation self-check is not configured yet",
+    except IsolationSelfCheckError as error:
+        return (ENGINE_DIFF,), error
+    except Exception:
+        return (ENGINE_DIFF,), IsolationSelfCheckError(
+            ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED, "the self-check could not be completed"
         )
+    return ALL_ENGINES, None
 
-    return check
+
+def advertised_engines(verify: Callable[[], None]) -> tuple[str, ...]:
+    """The engines this runner advertises: both only after `verify` proved the isolation."""
+    return self_check_outcome(verify)[0]
+
+
+# The engines a runner advertised, handed by the job loop to the Dynamic job process it starts.
+# The job process refuses a Dynamic job unless `opencode` is in it (`runner.run_dynamic_job`); it is
+# set by the loop alone, never read from operator configuration.
+ENGINES_VARIABLE = "RUNNER_ADVERTISED_ENGINES"
+# The engine command the same way: the loop sets it for a Dynamic job process, from the executable
+# the self-check verified. The operator's own environment is never passed on under this name.
+OPENCODE_COMMAND_VARIABLE = "RUNNER_OPENCODE_COMMAND"
+
+
+def engines_from_environment(environment: Mapping[str, str]) -> tuple[str, ...]:
+    """The known engines named in `ENGINES_VARIABLE`; nothing when it is unset."""
+    named = environment.get(ENGINES_VARIABLE, "").split(",")
+    return tuple(engine for engine in ALL_ENGINES if engine in named)

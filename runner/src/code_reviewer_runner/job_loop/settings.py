@@ -24,11 +24,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
-from code_reviewer_runner.capabilities import (
-    ALL_ENGINES,
-    advertised_engines,
-    fail_closed_self_check,
-)
+from code_reviewer_runner.capabilities import ENGINE_DIFF
 from code_reviewer_runner.dynamic_review.netguard import IsolationError
 from code_reviewer_runner.dynamic_review.static_isolation import SlotPorts, slot_ports
 from code_reviewer_runner.dynamic_review.supervisor import (
@@ -75,8 +71,10 @@ class LoopSettings:
     # How long a finished job's result is retried when the app cannot be reached.
     complete_retry_window: float = 600.0
     # #195: the engines this runner may claim for. Default is Diff only; `opencode` is added only
-    # after the fail-closed startup self-check proved the isolation (capabilities.py).
-    engines: tuple[str, ...] = (ALL_ENGINES[0],)
+    # by the startup self-check once it proved the isolation (`service.advertise_engines`, #202),
+    # together with the verified engine command that the Dynamic job process is handed.
+    engines: tuple[str, ...] = (ENGINE_DIFF,)
+    dynamic_command: tuple[str, ...] | None = None
     job_command: tuple[str, ...] = field(default_factory=default_job_command)
     # (uid, gid) of the user every non-Dynamic job process drops to. Set only for a loop that runs
     # as root (the Dynamic runner, #197); unset, jobs run as the loop's own user.
@@ -211,7 +209,6 @@ def settings_from_environment(environment: Mapping[str, str]) -> LoopSettings:
         diff_job_user=diff_job_user,
         dynamic_engine_user=_dynamic_engine_user(environment, diff_job_user),
         dynamic_ports=_dynamic_ports(environment, diff_job_user),
-        engines=advertised_engines(fail_closed_self_check()),
         api_url=_api_url(api_url),
         token=token,
         runner_id=_runner_id(environment),
