@@ -349,7 +349,7 @@ def run_dynamic_job(
     # The summary is written by this supervisor, never by the engine, and only for a run whose
     # findings passed every check above: any earlier failure leaves the previous comment untouched.
     try:
-        published = Published(comment_url=None, created=False)  # TEMP: red proof, the summary is not written
+        published = (publish or publish_run)(job, answer.findings)
     except PublishError as error:
         return _failure(error.code, error.detail, started, capture)
     summary = (
