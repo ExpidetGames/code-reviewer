@@ -3,7 +3,10 @@
 // Pins down that every stable code a settings field or a save can fail with has copy that says what
 // to do, never shows the raw code, and names the limit where there is one.
 import { describe, expect, it } from "vitest";
-import { REVIEW_SETTING_ISSUE_CODES } from "../validate.ts";
+import {
+  REVIEW_SETTING_ISSUE_CODES,
+  REVIEW_SETTING_WARNING_CODES,
+} from "../validate.ts";
 import { REVIEW_SETTINGS_ERROR_CODES } from "../errors.ts";
 import {
   PROJECT_DYNAMIC_LIMITS,
@@ -12,7 +15,11 @@ import {
   REVIEW_SETTING_LIMITS,
 } from "../settings.ts";
 import { TRANSPORT_ERROR_CODES } from "../../ui/json-request.ts";
-import { describeIssue, describeSaveFailure } from "./messages.ts";
+import {
+  describeIssue,
+  describeSaveFailure,
+  describeWarning,
+} from "./messages.ts";
 
 describe("the copy for a problem with one setting", () => {
   // CR-34-T06
@@ -137,5 +144,31 @@ describe("the copy for a save that failed as a whole", () => {
     expect(describeSaveFailure("REVIEW_SETTINGS_PROJECT_NOT_FOUND")).toMatch(
       /not found/i,
     );
+  });
+});
+
+// #269-T05 #269-T06 #269-T07
+describe("the copy for the check of the Dynamic model", () => {
+  it("says in plain words what each outcome means", () => {
+    expect(
+      describeIssue("dynamicModel", "DYNAMIC_MODEL_TOOLS_UNSUPPORTED"),
+    ).toMatch(/does not support tool calling/);
+    expect(describeIssue("dynamicModel", "DYNAMIC_MODEL_UNKNOWN")).toMatch(
+      /no model with this name/,
+    );
+  });
+
+  it.each(REVIEW_SETTING_WARNING_CODES)(
+    "has a sentence for the warning %s that is not the code itself",
+    (code) => {
+      const text = describeWarning("dynamicModel", code);
+
+      expect(text).not.toBe("");
+      expect(text).not.toContain(code);
+    },
+  );
+
+  it("does not invent a sentence for a warning it does not know", () => {
+    expect(describeWarning("dynamicModel", "SOMETHING_NEW")).toBeNull();
   });
 });

@@ -94,3 +94,23 @@ export function modelFromAnswer(
   if (!has("inherited")) return null;
   return modelFromProjectView(answer as ProjectSettingsView);
 }
+
+/**
+ * The notes of a save that went through (a Dynamic model that could not be checked, #269), as the
+ * `{ field, code }` pairs of the answer. Anything that is not shaped like one is dropped.
+ */
+export function warningsFromAnswer(
+  answer: unknown,
+): Array<{ field: string; code: string }> {
+  if (typeof answer !== "object" || answer === null) return [];
+  const list = (answer as { warnings?: unknown }).warnings;
+  if (!Array.isArray(list)) return [];
+  const warnings: Array<{ field: string; code: string }> = [];
+  for (const entry of list as unknown[]) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const { field, code } = entry as { field?: unknown; code?: unknown };
+    if (typeof field === "string" && typeof code === "string")
+      warnings.push({ field, code });
+  }
+  return warnings;
+}
