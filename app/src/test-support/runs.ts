@@ -27,8 +27,14 @@ export type RunsFixture = JobQueueFixture & {
 
 let nextPr = 100;
 
-export async function createRunsFixture(): Promise<RunsFixture> {
-  const base = await createJobQueueFixture();
+export async function createRunsFixture(
+  options: { dynamicReview?: boolean } = {},
+): Promise<RunsFixture> {
+  const base = await createJobQueueFixture({
+    ...(options.dynamicReview === undefined
+      ? {}
+      : { dynamicReview: options.dynamicReview }),
+  });
   const runsRepository = createRunsRepository(base.db, base.workspaceId);
   const runs = createRunsService({
     runs: runsRepository,
@@ -46,7 +52,10 @@ export async function createRunsFixture(): Promise<RunsFixture> {
     });
     // The queue hands out the oldest due job: claim until it is this one.
     for (;;) {
-      const claim = await base.queue.claimNext("runner-1");
+      const claim = await base.queue.claimNext("runner-1", [
+        "pr-agent",
+        "opencode",
+      ]);
       if (claim === null) throw new Error("The job was never handed out.");
       if (claim.job.id === job.id) return claim;
     }

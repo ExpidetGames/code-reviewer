@@ -38,7 +38,12 @@ publishes as one persistent summary comment. The decisions are in epic
 
 1. A project set to Dynamic Review enqueues a job tagged `review_kind: dynamic`, **only while the
    instance gate is on**. With the gate off the run is created `failed` with
-   `dynamic_review_disabled`; it is never reviewed as a Diff.
+   `dynamic_review_disabled`; it is never reviewed as a Diff. The kind comes from the project's
+   stored settings, resolved by the queue inside the enqueue transaction, so it is the same for an
+   automatic review, an authorized `/review` and a manual Review now. Nothing a pull request or a
+   comment says (title, body, `/review` text) can select or change the kind, model, budget or skill.
+   The Run's detail page shows the actual kind, model, tokens, model calls and cost (unknown for
+   Dynamic, which never guesses a price).
 2. A runner claims a Dynamic job only if it advertises `opencode` in the claim. The runner
    advertises it only after its startup self-check proved the dedicated engine user, the read-only
    export and proxy-only egress (`runner/src/code_reviewer_runner/dynamic_review/self_check.py`, see

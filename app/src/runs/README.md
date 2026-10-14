@@ -63,9 +63,13 @@ the same on the server and in the browser.
 
 ## What never leaves the server
 
-The lease token, the runner id, the delivery id, the heartbeat and lease times, the `usage` of a result
-and its `errorMessage` are not in any view, list, detail or polling answer (`run-view.ts` copies listed
-fields only; tests search the answers for them). The log is cleaned (terminal escapes and control
+The lease token, the runner id, the delivery id, the heartbeat and lease times and the `errorMessage`
+of a result are not in any view, list, detail or polling answer (`run-view.ts` copies listed fields
+only; tests search the answers for them). Of the result's `usage` only the detail carries four values
+(#201): the model name (cleaned and redacted like the log), the summed tokens, the number of model calls
+and the cost, which stays `null` ("Not available") when the runner could not know it (a Dynamic Review
+never guesses a price). The prompt/completion split and the fallback flag stay on the server; the list
+carries no usage. The log is cleaned (terminal escapes and control
 characters out) and passed through the same redaction the runner API uses for results, with the secrets
 the app knows. Everything that came from outside (project name, login, a historical question of a removed `/ask` run, the log)
 is rendered as text. The links made from stored data are the comment link and the pull request link, and only when they are `https://github.com/` addresses

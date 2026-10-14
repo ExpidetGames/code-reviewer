@@ -42,6 +42,51 @@ function Time({ value }: { value: string | null }) {
   return <time dateTime={value}>{formatUtc(value)}</time>;
 }
 
+const COST = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 4,
+});
+const COUNT = new Intl.NumberFormat("en-US");
+
+/** The model, tokens, calls and cost the runner reported; a text from outside is rendered as text. */
+function usageItems(run: RunDetailView) {
+  const usage = run.usage;
+  if (usage === null) return { model: [], consumption: [] };
+  const calls = usage.aiCalls === 1 ? "model call" : "model calls";
+  return {
+    model:
+      usage.model === null
+        ? []
+        : [
+            {
+              term: "Model",
+              description: (
+                <span data-slot="run-model" className="break-words">
+                  {usage.model}
+                </span>
+              ),
+            },
+          ],
+    consumption: [
+      {
+        term: "Usage",
+        description: `${COUNT.format(usage.totalTokens)} tokens in ${COUNT.format(usage.aiCalls)} ${calls}`,
+      },
+      {
+        term: "Cost",
+        description:
+          usage.costUsd === null ? (
+            <span className="text-muted-foreground">Not available</span>
+          ) : (
+            COST.format(usage.costUsd)
+          ),
+      },
+    ],
+  };
+}
+
 function DurationText({ run }: { run: RunDetailView }) {
   if (run.durationMs === null)
     return <span className="text-muted-foreground">Not available</span>;
@@ -196,6 +241,8 @@ export function RunDetail({
       description: KIND_NAMES[run.reviewKind],
     },
   ];
+  const usage = usageItems(run);
+  summaryItems.push(...usage.model);
   if (run.args !== "")
     summaryItems.push({
       term: "Question",
@@ -237,7 +284,9 @@ export function RunDetail({
       ),
     });
 
-  const diagnosticItems: { term: ReactNode; description: ReactNode }[] = [];
+  const diagnosticItems: { term: ReactNode; description: ReactNode }[] = [
+    ...usage.consumption,
+  ];
   if (run.commentUrl !== null)
     diagnosticItems.push({
       term: "Review comment",

@@ -6,7 +6,13 @@ import { describe, expect, it } from "vitest";
 import { sql } from "kysely";
 import { sha } from "../test-support/jobs.ts";
 import { createRunsFixture } from "../test-support/runs.ts";
-import { createLastRunSource, parseRunsFilter } from "./runs-service.ts";
+import { addWorkspace } from "../test-support/workspaces.ts";
+import { createRunsRepository } from "../db/repositories/runs-repository.ts";
+import {
+  createLastRunSource,
+  createRunsService,
+  parseRunsFilter,
+} from "./runs-service.ts";
 
 describe("the runs list", () => {
   // CR-35-T01
@@ -228,6 +234,60 @@ describe("what leaves the server", () => {
       expect(text).not.toMatch(/lease|heartbeat|deliveryId|runnerId/i);
       expect(text).not.toContain("some/model");
     }
+  });
+});
+
+describe("the usage of a run", () => {
+  // #201-T31
+  it("is in the detail of a finished run with the model, summed tokens, calls and cost, and never in the list", async () => {
+    const f = await createRunsFixture({ dynamicReview: true });
+    const finished = await f.finished(
+      {
+        ok: true,
+        result: {
+          ok: true,
+          commentUrl: "https://github.com/acme/widgets/pull/1#c",
+          logTail: "ok",
+          usage: {
+            model: "vendor/dynamic-model",
+            promptTokens: 12_000,
+            completionTokens: 900,
+            totalTokens: 12_900,
+            aiCalls: 7,
+            fallbackUsed: false,
+            costUsd: null,
+          },
+        },
+      },
+      { reviewKind: "dynamic" },
+    );
+
+    const detail = await f.runs.get(finished.id);
+    const list = await f.runs.list({});
+
+    expect(detail?.run).toMatchObject({
+      reviewKind: "dynamic",
+      usage: {
+        model: "vendor/dynamic-model",
+        totalTokens: 12_900,
+        aiCalls: 7,
+        costUsd: null,
+      },
+    });
+    expect(JSON.stringify(detail)).not.toMatch(
+      /promptTokens|completionTokens|fallbackUsed/,
+    );
+    expect(JSON.stringify(list)).not.toContain("vendor/dynamic-model");
+
+    // A member of another workspace reads neither the run nor its usage.
+    const otherRuns = createRunsService({
+      runs: createRunsRepository(f.db, await addWorkspace(f.db, "bravo")),
+      now: f.clock.now,
+    });
+    expect(await otherRuns.get(finished.id)).toBeUndefined();
+    expect(JSON.stringify(await otherRuns.list({}))).not.toContain(
+      "vendor/dynamic-model",
+    );
   });
 });
 
