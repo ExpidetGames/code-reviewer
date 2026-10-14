@@ -142,7 +142,12 @@ function completion(model: string, content: string) {
         finish_reason: "stop",
       },
     ],
-    usage: { prompt_tokens: 100, completion_tokens: 50, total_tokens: 150 },
+    usage: {
+      prompt_tokens: 100,
+      completion_tokens: 50,
+      total_tokens: 150,
+      cost: 0.0001,
+    },
   };
 }
 

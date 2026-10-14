@@ -405,6 +405,21 @@ def test_a_run_with_more_model_calls_than_the_old_limits_completes_inside_the_co
     assert usage.cost_usd is not None and 0 < usage.cost_usd < 1
 
 
+# #290-T09: what a provider (or a fake) that reports no `usage.cost` does to a real run.
+def test_a_provider_that_reports_no_cost_ends_the_real_run_with_the_accounting_code(
+    tmp_path: Path,
+) -> None:
+    content = prepare(tmp_path, {"src/app.py": b"x = 1\n"})
+    model = ScriptedModel(steps=[], final=findings_for(content.head_sha), cost=None)
+    with model:
+        run = run_engine(model, content, scratch=tmp_path / "scratch")
+
+    assert not run.answer.ok
+    assert run.answer.error is not None
+    assert run.answer.error.code is ErrorCode.DYNAMIC_ACCOUNTING_FAILED
+    assert len(model.requests) == 1
+
+
 # #197-T05
 def test_a_multi_file_grep_counts_every_file_it_returns(tmp_path: Path) -> None:
     files = {f"src/f{index}.py": b"def needle():\n    pass\n" for index in range(3)}

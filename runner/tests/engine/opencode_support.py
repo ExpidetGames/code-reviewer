@@ -111,6 +111,8 @@ class ScriptedModel:
     hold: float = 0.0
     requests: list[dict[str, Any]] = field(default_factory=lambda: [])
     on_request: Callable[[int], None] | None = None
+    # The charge every answer reports in `usage.cost`, like OpenRouter; None leaves it out.
+    cost: float | None = 0.0001
 
     def __post_init__(self) -> None:
         self._released = threading.Event()
@@ -154,10 +156,13 @@ class ScriptedModel:
                 assert self.final is not None, "the script ran out of steps and has no final answer"
                 message = asks(tool_call(f"call_final_{index}", "StructuredOutput", self.final))
         finish = "tool_calls" if message.get("tool_calls") else "stop"
+        usage: dict[str, Any] = {"prompt_tokens": 50, "completion_tokens": 10}
+        if self.cost is not None:
+            usage["cost"] = self.cost
         return {
             "id": "chatcmpl-test",
             "choices": [{"message": message, "finish_reason": finish}],
-            "usage": {"prompt_tokens": 50, "completion_tokens": 10, "cost": 0.0001},
+            "usage": usage,
         }
 
     @property
