@@ -58,7 +58,7 @@ from code_reviewer_runner.dynamic_review.prompts import compose_system_prompt
 from code_reviewer_runner.dynamic_review.proxy import (
     DynamicCapabilities,
     ModelProxy,
-    capabilities_from_config,
+    capabilities_for_job,
 )
 from code_reviewer_runner.dynamic_review.publish import (
     STATE_RESET_CODE,
@@ -350,9 +350,11 @@ def run_dynamic_job(
     # The descriptor describes the destination the request really goes to, so it is chosen by the
     # upstream model (`llm.model`); `dynamic.model` is the logical name the engine sees, and the app
     # sends the same name in both.
+    # The app's reading of the provider's metadata (#279) is narrowed by the operator's variable
+    # and never widens it; without one this is the operator's descriptor alone, as before.
     try:
-        capabilities = capabilities_from_config(
-            environment.get(DYNAMIC_CAPABILITIES_VARIABLE), model=job.llm.model
+        capabilities = capabilities_for_job(
+            environment.get(DYNAMIC_CAPABILITIES_VARIABLE), job.llm.model, dynamic.capabilities
         )
     except LimitError as error:
         return _failure(error.code, error.detail, started, capture)

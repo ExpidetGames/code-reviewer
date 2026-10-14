@@ -13,6 +13,9 @@ const BASE = "https://llm.example.test/api/v1";
 type Endpoint = {
   supported_parameters: string[];
   max_completion_tokens?: number | null;
+  context_length?: number | null;
+  pricing?: { prompt?: unknown; completion?: unknown };
+  supports_tool_choice?: { required?: boolean };
 };
 
 function endpointsAnswer(endpoints: Endpoint[], status = 200): Response {
@@ -73,9 +76,14 @@ describe("reading the tool support of a model from the provider's metadata", () 
       capabilities: {
         tools: true,
         toolChoice: true,
+        toolChoiceRequired: true,
         responseFormat: true,
         structuredOutputs: true,
         maxCompletionTokens: 32_768,
+        smallestCompletionTokens: 32_768,
+        contextLength: null,
+        inputUsdPerMtok: null,
+        outputUsdPerMtok: null,
       },
     });
     expect(calls).toHaveLength(1);
@@ -109,9 +117,14 @@ describe("reading the tool support of a model from the provider's metadata", () 
       capabilities: {
         tools: true,
         toolChoice: false,
+        toolChoiceRequired: false,
         responseFormat: true,
         structuredOutputs: false,
         maxCompletionTokens: null,
+        smallestCompletionTokens: null,
+        contextLength: null,
+        inputUsdPerMtok: null,
+        outputUsdPerMtok: null,
       },
     });
   });
@@ -192,6 +205,174 @@ describe("reading the tool support of a model from the provider's metadata", () 
     );
 
     expect(calls[0]?.url).toBe(`${BASE}/models/ven%2Bdor/mo.del_1/endpoints`);
+  });
+});
+
+const TOOLS = ["tools", "tool_choice"];
+
+// What the descriptor of a job is built from (#279): the endpoints a run could be routed to are the
+// ones that list tool calling, so the window, the output limit and the prices are read from them and
+// from nothing else, and always at the bound a reservation needs (the smallest window and limit, the
+// highest price).
+describe("reading window, output limit and prices for a job (#279)", () => {
+  // #279-T01
+  it("reads the context window, the output limit and the unit prices per million tokens", async () => {
+    const { result } = await check(() =>
+      endpointsAnswer([
+        {
+          supported_parameters: TOOLS,
+          context_length: 1_048_576,
+          max_completion_tokens: 393_216,
+          pricing: { prompt: "0.00000002016", completion: "0.000000891" },
+        },
+      ]),
+    );
+
+    expect(result).toMatchObject({
+      outcome: "supported",
+      capabilities: {
+        contextLength: 1_048_576,
+        smallestCompletionTokens: 393_216,
+        inputUsdPerMtok: "0.02016",
+        outputUsdPerMtok: "0.891",
+      },
+    });
+  });
+
+  // #279-T01
+  it("takes the smallest window and limit and the highest prices of the endpoints that can serve the run", async () => {
+    const { result } = await check(() =>
+      endpointsAnswer([
+        {
+          supported_parameters: TOOLS,
+          context_length: 1_048_576,
+          max_completion_tokens: 943_718,
+          pricing: { prompt: "0.0000001", completion: "0.0000024" },
+        },
+        {
+          supported_parameters: TOOLS,
+          context_length: 131_072,
+          max_completion_tokens: 8_192,
+          pricing: { prompt: "0.0000006", completion: "0.0000004" },
+        },
+        {
+          // Not an endpoint a run can use: it has no tool calling, so it sets no bound.
+          supported_parameters: ["temperature"],
+          context_length: 1_000,
+          max_completion_tokens: 10,
+          pricing: { prompt: "0.001", completion: "0.001" },
+        },
+      ]),
+    );
+
+    expect(result).toMatchObject({
+      outcome: "supported",
+      capabilities: {
+        contextLength: 131_072,
+        smallestCompletionTokens: 8_192,
+        maxCompletionTokens: 943_718,
+        inputUsdPerMtok: "0.6",
+        outputUsdPerMtok: "2.4",
+      },
+    });
+  });
+
+  // #279-T01
+  it("does not count an endpoint that says it cannot force a tool choice", async () => {
+    const { result } = await check(() =>
+      endpointsAnswer([
+        {
+          supported_parameters: TOOLS,
+          supports_tool_choice: { required: false },
+          pricing: { prompt: "0.001", completion: "0.001" },
+        },
+        {
+          supported_parameters: TOOLS,
+          supports_tool_choice: { required: true },
+          pricing: { prompt: "0.0000001", completion: "0.0000002" },
+        },
+      ]),
+    );
+
+    expect(result).toMatchObject({
+      outcome: "supported",
+      capabilities: {
+        toolChoiceRequired: true,
+        inputUsdPerMtok: "0.1",
+        outputUsdPerMtok: "0.2",
+      },
+    });
+  });
+
+  // #279-T06
+  it("is unsupported when no endpoint can force a tool choice", async () => {
+    const { result } = await check(() =>
+      endpointsAnswer([
+        {
+          supported_parameters: TOOLS,
+          supports_tool_choice: { required: false },
+        },
+      ]),
+    );
+
+    expect(result).toMatchObject({
+      outcome: "unsupported",
+      capabilities: { toolChoiceRequired: false },
+    });
+  });
+
+  // #279: a price that cannot be read exactly is no price; the runner then refuses to run the model.
+  it.each([
+    ["a missing price", undefined],
+    ["a negative price (a router)", "-1"],
+    ["a price in exponent form", "1e-7"],
+    ["a price that is not text", 0.0000001],
+    ["a price too large to be a unit price", "9999999"],
+    ["an empty price", ""],
+  ])("reads no unit prices when one is %s", async (_name, bad) => {
+    const { result } = await check(() =>
+      endpointsAnswer([
+        {
+          supported_parameters: TOOLS,
+          pricing: { prompt: "0.0000001", completion: "0.0000002" },
+        },
+        {
+          supported_parameters: TOOLS,
+          pricing: { prompt: bad, completion: "0.0000002" },
+        },
+      ]),
+    );
+
+    expect(result).toMatchObject({
+      outcome: "supported",
+      capabilities: { inputUsdPerMtok: null, outputUsdPerMtok: null },
+    });
+  });
+
+  it("keeps a free model's zero price", async () => {
+    const { result } = await check(() =>
+      endpointsAnswer([
+        {
+          supported_parameters: TOOLS,
+          pricing: { prompt: "0", completion: "0.0" },
+        },
+      ]),
+    );
+
+    expect(result).toMatchObject({
+      capabilities: { inputUsdPerMtok: "0", outputUsdPerMtok: "0" },
+    });
+  });
+
+  it("reads no window when an endpoint states none", async () => {
+    const { result } = await check(() =>
+      endpointsAnswer([
+        { supported_parameters: TOOLS, context_length: 100_000 },
+        { supported_parameters: TOOLS, context_length: null },
+      ]),
+    );
+
+    expect(result).toMatchObject({ capabilities: { contextLength: null } });
   });
 });
 

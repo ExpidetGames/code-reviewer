@@ -52,6 +52,13 @@ export type WorkspaceEntitlementsRepository = {
     entitlements: EntitlementsData,
     updatedBy: string | null,
   ): Promise<StoredEntitlements>;
+  /**
+   * Deletes the row, so the instance default applies to the workspace again; false when there was none.
+   * Removing ends the "period start never goes backwards" guard of this workspace: the stored start was what
+   * it compared with. The operator API (#275) offers it and documents the consequence (a `put` without a start
+   * begins now); the guard does not outlive the row.
+   */
+  remove(): Promise<boolean>;
 };
 
 function toStored(row: WorkspaceEntitlementsTable): StoredEntitlements {
@@ -130,6 +137,14 @@ export function createWorkspaceEntitlementsRepository(
       if (stored === undefined)
         throw new EntitlementsError("period_start_backwards");
       return toStored(stored);
+    },
+
+    async remove() {
+      const result = await db
+        .deleteFrom("workspace_entitlements")
+        .where("workspace_id", "=", workspaceId)
+        .executeTakeFirst();
+      return Number(result.numDeletedRows) > 0;
     },
   };
 }

@@ -2,7 +2,7 @@
 
 // What the production server checks about the deployment when it starts, besides sign in (see
 // src/auth/startup.ts, which requires the master key and the public address): the shared token of the
-// runner. A missing value would otherwise show up later as a failing runner with a less helpful
+// runner and, when set, that the operator API token is not a copy of another credential. A missing value would otherwise show up later as a failing runner with a less helpful
 // message. Called from `src/instrumentation.ts`.
 //
 // The GitHub App is not an environment setting any more: it is entered in the admin portal, and the variables of
@@ -10,6 +10,7 @@
 // could not be used. An instance starts without any `GITHUB_*` variable; GitHub is then "not configured" (the
 // pages say so) until the integration is set up.
 
+import { operatorTokenReuseProblem } from "../operator-api/token.ts";
 import { runnerTokenProblem } from "../runner-api/token-auth.ts";
 
 export const DEPLOY_ERROR_CODES = ["DEPLOY_CONFIG_INVALID"] as const;
@@ -30,6 +31,12 @@ export function findDeploymentConfigProblems(env: Env): string[] {
   // The token is judged by the runner API's own rule, the one that also logs the start-up warning.
   const tokenProblem = runnerTokenProblem(env);
   if (tokenProblem !== null) problems.push(`RUNNER_TOKEN ${tokenProblem}`);
+
+  // The operator API is optional (#275). Only a token that is the same as another credential stops the start; a
+  // weak one keeps the API off and is reported by operator-api/startup.ts.
+  const reuseProblem = operatorTokenReuseProblem(env);
+  if (reuseProblem !== null)
+    problems.push(`OPERATOR_API_TOKEN ${reuseProblem}`);
 
   return problems;
 }

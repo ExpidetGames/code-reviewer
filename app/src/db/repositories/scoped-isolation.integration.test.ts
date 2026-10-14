@@ -709,6 +709,11 @@ const CASES: Case[] = [
     expectAnswer: (answer) =>
       expect(answer).toMatchObject({ planLabel: "changed" }),
   },
+  {
+    name: "entitlements.remove",
+    run: (a) => a.entitlements.remove(),
+    expectAnswer: (answer) => expect(answer).toBe(true),
+  },
   // runs
   {
     name: "runs.list",
