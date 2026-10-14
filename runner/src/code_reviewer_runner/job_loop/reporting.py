@@ -29,6 +29,8 @@ MAX_DURATION_MS = 604_800_000
 MAX_REQUEST_BYTES = 48 * 1024
 RUNNER_SHUTDOWN = "runner_shutdown"
 _ERROR_CODE = re.compile(r"[a-z][a-z0-9_]{0,63}")
+# The finer name of a failure (a checkout reason): the same shape as a code, never free text.
+_ERROR_REASON = _ERROR_CODE
 _COMMENT_URL = re.compile(r"https?://\S+")
 _ESCAPE_SEQUENCE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
 _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
@@ -151,7 +153,7 @@ def _sanitize(line: Mapping[str, Any], redactor: TextRedactor, measured_ms: int)
     ):
         comment_url = url
     tail: Any = line.get("logTail")
-    return {
+    result: Result = {
         "ok": ok,
         "durationMs": _duration(line.get("durationMs", measured_ms)),
         "commentUrl": comment_url,
@@ -160,6 +162,10 @@ def _sanitize(line: Mapping[str, Any], redactor: TextRedactor, measured_ms: int)
         "logTruncated": line.get("logTruncated") is True,
         "usage": _usage(line.get("usage")),
     }
+    reason: Any = line.get("errorReason")
+    if not ok and isinstance(reason, str) and _ERROR_REASON.fullmatch(reason):
+        result["errorReason"] = reason
+    return result
 
 
 def result_from_outcome(
@@ -202,8 +208,13 @@ def fit_request(result: Result) -> Result:
 
 
 def minimal(result: Mapping[str, Any]) -> Result:
-    """Only the verdict: the fallback when the app refuses the full result (400 or 413)."""
-    return {
+    """Only the verdict: the fallback when the app refuses the full result (400 or 413).
+
+    A failure keeps its stable code and reason, and says them in one line of log, so the Runs view
+    still shows why the run failed.
+    """
+    reason = result.get("errorReason")
+    verdict: Result = {
         "ok": result["ok"],
         "durationMs": result["durationMs"],
         "commentUrl": result.get("commentUrl"),
@@ -212,3 +223,9 @@ def minimal(result: Mapping[str, Any]) -> Result:
         "logTruncated": True,
         "usage": None,
     }
+    if result["ok"]:
+        return verdict
+    verdict["logTail"] = f"{result['errorCode']}" + (f" [{reason}]" if reason else "")
+    if reason:
+        verdict["errorReason"] = reason
+    return verdict

@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from code_reviewer_runner.redaction import Redactor
 
 from .content_policy import redact_text
-from .limits import Budget, CheckoutError
+from .limits import Budget, CheckoutError, CheckoutReason
 from .objects import ObjectStore
 from .paths import validate_path
 from .protocol import fetch_pack
@@ -35,7 +35,7 @@ def tracked_tree(store: ObjectStore, commit: str) -> dict[str, Entry]:
     raw = store.read(commit, "commit")
     first = raw.split(b"\n", 1)[0]
     if not first.startswith(b"tree ") or not _SHA.fullmatch(first[5:].decode("ascii")):
-        raise CheckoutError()
+        raise CheckoutError(CheckoutReason.TREE_INVALID)
     entries: dict[str, Entry] = {}
     count = 0
 
@@ -48,15 +48,15 @@ def tracked_tree(store: ObjectStore, commit: str) -> dict[str, Entry]:
             store.budget.check()
             count += 1
             if count > store.budget.limits.entries:
-                raise CheckoutError()
+                raise CheckoutError(CheckoutReason.ENTRIES)
             space = raw.find(b" ", position)
             end = raw.find(b"\0", space + 1)
             if space < position or end < 0 or end + 21 > len(raw):
-                raise CheckoutError()
+                raise CheckoutError(CheckoutReason.TREE_INVALID)
             mode = raw[position:space].decode("ascii")
             name = raw[space + 1 : end].decode("utf-8")
             if "/" in name or name in names:
-                raise CheckoutError()
+                raise CheckoutError(CheckoutReason.TREE_INVALID)
             names.add(name)
             path = prefix + name
             validate_path(path, store.budget.limits)
@@ -160,14 +160,14 @@ def endpoint_diff(
         budget.check()
         size += len(line.encode())
         if size > budget.limits.diff_bytes:
-            raise CheckoutError()
+            raise CheckoutError(CheckoutReason.DIFF_TOO_LARGE)
         result.append(line)
 
     for path in sorted(changed_paths(left, right)):
         before = cache.get(left[path].oid) if path in left else ""
         after = cache.get(right[path].oid) if path in right else ""
         if before is None or after is None:
-            raise CheckoutError()
+            raise CheckoutError(CheckoutReason.OBJECT_MISSING)
         a, b = before.splitlines(keepends=True), after.splitlines(keepends=True)
         name = json.dumps(redact_text(path, redactor), ensure_ascii=True)
         add(f"diff --git {name} {name}\n")

@@ -269,6 +269,29 @@ def test_a_failed_result_may_carry_the_link_of_a_review_that_was_posted_but_shor
     assert _accepts("RunnerResult", result)
 
 
+# #296-T10
+def test_every_checkout_reason_of_the_runner_is_in_the_contract_once() -> None:
+    from code_reviewer_runner.dynamic_review.limits import CheckoutReason
+
+    schema: Document = _load(SCHEMA_PATH)
+    listed: list[str] = schema["$defs"]["KnownCheckoutReason"]["enum"]
+
+    assert len(listed) == len(set(listed))
+    assert {reason.value for reason in CheckoutReason} == set(listed)
+
+
+# #296-T10
+def test_a_failed_result_may_carry_the_stable_reason_of_the_failure() -> None:
+    result = _example("CompleteRequest")["result"]
+    result.update(ok=False, errorCode="checkout_incomplete", errorReason="budget_preparation")
+    result["commentUrl"] = None
+
+    assert _accepts("RunnerResult", result)
+    for bad in ("Budget Prep", "", "x" * 65, 5):
+        result["errorReason"] = bad
+        assert not _accepts("RunnerResult", result)
+
+
 def test_a_complete_response_may_say_the_job_was_given_back_after_a_shutdown() -> None:
     response = _example("CompleteResponse")
     response["job"]["status"] = "queued"
