@@ -65,8 +65,10 @@ from code_reviewer_runner.dynamic_review.completion_stream import completion_as_
 from code_reviewer_runner.dynamic_review.config import PROXY_CAPABILITY_BYTES, PROXY_PROVIDER_ID
 from code_reviewer_runner.dynamic_review.net import no_redirect_opener
 from code_reviewer_runner.dynamic_review.wrap_up import (
+    RECOVERY_INSTRUCTION,
     WRAP_UP_INSTRUCTION,
     offers_structured_output,
+    returns_structured_output,
     wrap_up_request,
 )
 from code_reviewer_runner.error_mapping import is_context_length_exceeded, llm_status_code
@@ -385,11 +387,14 @@ class ModelProxy:
             output_tokens=self._output_allowance(request),
             can_wrap_up=offers_structured_output(request),
             wrap_up_text=WRAP_UP_INSTRUCTION,
+            recovery_text=RECOVERY_INSTRUCTION,
         )
         if reservation.final:
-            # The ledger decided, from its own cost and clock, that this is the last call of the
-            # run (#293): it can only return the answer, whatever the request asked for.
-            forwarded = self._forward_body(wrap_up_request(request))
+            # The ledger decided, from its own cost and clock (#293), or from the recovery the
+            # adapter armed after a turn without an answer (#309), that this is the last call of
+            # the run: it can only return the answer, whatever the request asked for.
+            instruction = RECOVERY_INSTRUCTION if reservation.recovery else WRAP_UP_INSTRUCTION
+            forwarded = self._forward_body(wrap_up_request(request, instruction))
         try:
             status, response_body = self._post(
                 self.upstream_url,
@@ -429,6 +434,10 @@ class ModelProxy:
         )
         # The tool calls the model asked for are counted before the engine can run any of them.
         self.audit.calls_in_answer(completion)
+        if reservation.final and not returns_structured_output(completion):
+            # The last call did not return the answer (#301 F3): whatever the engine does next, the
+            # failure is the model's, and a further request says so instead of blaming the limit.
+            self.ledger.note_final_unanswered()
         if not wants_stream:
             return ProxyResponse(status=status, body=response_body)
         stream = completion_as_stream(completion)

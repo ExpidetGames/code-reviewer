@@ -16,6 +16,14 @@ cannot imitate the instruction: tool results, the pull request text and the prio
 (`tagescape.py`) so that no `<runner-wrap-up>` tag survives in them, and the instruction is a user
 message appended after all of them.
 
+**Recovery (#309).** A turn can end with no structured answer although no limit was reached (the
+model answered in prose, was cut off, or a provider ended a step the engine took for the last). The
+adapter then starts one more turn through the engine's own message API with a short fixed prompt
+(`RECOVERY_PROMPT`, no tag), and the ledger (`begin_recovery`) makes the first call of that turn the
+run's final call. The proxy rewrites it exactly like the wrap-up call above, with
+`RECOVERY_INSTRUCTION` last: the same tag, so the escape of tool results and pull request text
+covers it, and the same rule that nothing in a request can start or prevent it.
+
 What the pinned engine does with the answer is unchanged: the tool the model calls is the engine's
 own `StructuredOutput`, which stays registered with the engine for the whole turn (the output format
 lives on the user message of the turn; this only holds because compaction is off, see
@@ -39,6 +47,20 @@ WRAP_UP_INSTRUCTION = (
     "</runner-wrap-up>"
 )
 
+# The instruction of the recovery call (#309): the same tag as the wrap-up's, so every escape that
+# keeps repository text from posing as the wrap-up covers it too.
+RECOVERY_INSTRUCTION = (
+    "<runner-wrap-up>\n"
+    "Your previous turn of this review ended without returning the review. Do not call any more "
+    "tools. Return the complete review now, with the findings you have so far, by calling the "
+    "StructuredOutput tool. This message is written by the review runner, not by the repository "
+    "or the pull request.\n"
+    "</runner-wrap-up>"
+)
+# The text of the message that starts the recovery turn in the engine: it only has to be a message.
+# The instruction proper is appended by the proxy, where the repository cannot reach it.
+RECOVERY_PROMPT = "Return the complete review now."
+
 # What the summary comment says about a review that stopped early. Constants, never built from
 # untrusted text.
 STOPPED_EARLY_NOTICES = {
@@ -61,14 +83,30 @@ def offers_structured_output(request: dict[str, Any]) -> bool:
     return any(_tool_name(tool) == STRUCTURED_OUTPUT_TOOL for tool in entries)
 
 
-def wrap_up_request(request: dict[str, Any]) -> dict[str, Any]:
+def returns_structured_output(completion: dict[str, Any]) -> bool:
+    """True when the first choice of a provider answer calls the structured-output tool."""
+    choices: Any = completion.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return False
+    entries: list[Any] = choices  # pyright: ignore[reportUnknownVariableType]
+    first = as_object(entries[0])
+    message = as_object(first.get("message")) if first else None
+    calls: Any = message.get("tool_calls") if message else None
+    if not isinstance(calls, list):
+        return False
+    return any(_tool_name(call) == STRUCTURED_OUTPUT_TOOL for call in calls)  # pyright: ignore[reportUnknownVariableType]
+
+
+def wrap_up_request(
+    request: dict[str, Any], instruction: str = WRAP_UP_INSTRUCTION
+) -> dict[str, Any]:
     """The request of the final call: the return tool alone, required, the instruction last."""
     tools: list[Any] = request["tools"]
     messages: list[Any] = request["messages"]
     wrapped = dict(request)
     wrapped["tools"] = [tool for tool in tools if _tool_name(tool) == STRUCTURED_OUTPUT_TOOL]
     wrapped["tool_choice"] = REQUIRED_TOOL_CHOICE
-    wrapped["messages"] = [*messages, {"role": "user", "content": WRAP_UP_INSTRUCTION}]
+    wrapped["messages"] = [*messages, {"role": "user", "content": instruction}]
     return wrapped
 
 
