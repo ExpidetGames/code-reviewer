@@ -118,6 +118,7 @@ export function createRunnerApi(deps: RunnerApiDeps): RunnerApi {
           deps,
           who.runnerId,
           parsed.value.engines ?? DEFAULT_ENGINES,
+          parsed.value.features ?? [],
         );
       } catch (error) {
         return unexpected("claim", error);

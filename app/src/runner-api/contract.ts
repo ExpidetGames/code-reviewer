@@ -17,8 +17,22 @@ export const RUNNER_API_VERSION = 1 as const;
 export const CLAIM_ENGINES = RUNNER_ENGINES;
 export type ClaimEngine = RunnerEngine;
 
-/** The request body of a claim: which engines the runner can run. Absent/empty means `pr-agent`. */
-export type ClaimRequest = { engines?: ClaimEngine[] };
+/**
+ * What else a runner may say it understands in a claim (`features` in `ClaimRequest`, #279).
+ * `dynamic_capabilities`: it reads `dynamic.capabilities` of a Dynamic job. A job field a previous-release
+ * runner would refuse (its job input is closed) is only sent to a runner that names the feature.
+ */
+export const CLAIM_FEATURES = ["dynamic_capabilities"] as const;
+export type ClaimFeature = (typeof CLAIM_FEATURES)[number];
+
+/**
+ * The request body of a claim: which engines the runner can run (absent/empty means `pr-agent`) and which
+ * features it understands (absent means none).
+ */
+export type ClaimRequest = {
+  engines?: ClaimEngine[];
+  features?: ClaimFeature[];
+};
 
 /** The path prefix of this version; the version is part of the URL. */
 export const RUNNER_API_PATH = "/api/runners/v1" as const;
@@ -148,6 +162,22 @@ export type DynamicReviewOptions = {
   model: string;
   skill: string;
   limits: { maxFindings: number };
+  /**
+   * #279: what the provider's model metadata says the model can do. Optional and sent only to a runner
+   * that advertised the `dynamic_capabilities` feature; a previous-release runner has a closed job
+   * contract and would refuse the key.
+   */
+  capabilities?: DynamicModelCapabilities;
+};
+
+/** `DynamicModelCapabilities` in the contract. Prices are exact decimal text, US dollars per million tokens. */
+export type DynamicModelCapabilities = {
+  toolChoiceRequired: boolean;
+  structuredOutput: boolean;
+  maxOutputTokens: number;
+  contextWindowTokens: number;
+  inputUsdPerMtok?: string;
+  outputUsdPerMtok?: string;
 };
 
 /**

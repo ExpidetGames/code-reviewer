@@ -11,7 +11,7 @@ import { getDatabase } from "../db/startup.ts";
 import { integrationRegistry } from "../integrations/registry.ts";
 import { getRunnerQueue } from "../jobs/shared.ts";
 import { resolveAppSecret } from "../crypto/app-secret.ts";
-import { getWorkspaceLlm } from "../llm/shared.ts";
+import { getWorkspaceLlm, modelCapabilities } from "../llm/shared.ts";
 import { projectServiceFor } from "../projects/shared.ts";
 import { reviewSettingsServiceFor } from "../review-settings/shared.ts";
 import { createRunnerApi, type RunnerApi } from "./api.ts";
@@ -75,6 +75,8 @@ export function getRunnerApi(): RunnerApi {
     }),
     // The LLM access of the workspace of the claimed job: its own key, never another workspace's (src/llm).
     loadLlm: (workspaceId) => llm.accessFor(workspaceId),
+    // #279: the metadata of a Dynamic job's model, read when its claim is built.
+    modelCapabilities,
     claimedKeys: getClaimedKeys(),
     now: () => new Date(),
     logger: consoleRunnerApiLogger,
