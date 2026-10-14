@@ -241,6 +241,10 @@ jobs:
   # runner/scripts/run_dynamic_e2e.sh fetches the pinned OpenCode and ripgrep (the pin files accept
   # only the pinned bytes), makes the one production build and runs the journeys in a network
   # namespace of their own; nothing is skipped, and what is missing is named by the preflight.
+  # The job runs the code of the pull request as root. Its safety is the GitHub-hosted, ephemeral VM,
+  # the read-only token, the absence of any secret and the `pull_request` trigger: it must never move
+  # to a self-hosted runner, to `pull_request_target` or to a job with secrets or write permissions
+  # (pinned by app/src/ci/dynamic-lane.test.ts, #253-C06), and its checkout keeps no credentials.
   e2e-dynamic:
     name: "E2E: Dynamic Review with the real OpenCode (privileged)"
     needs: changes
@@ -251,6 +255,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           package_json_file: app/package.json

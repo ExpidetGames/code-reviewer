@@ -34,9 +34,13 @@ type Job = {
   permissions?: Record<string, string>;
   steps?: Step[];
 } & Record<string, unknown>;
-type Workflow = { jobs: Record<string, Job> };
+type Workflow = {
+  permissions?: Record<string, string>;
+  jobs: Record<string, Job>;
+};
 
 const ci = parse(read(".github/workflows/ci.yml")) as Workflow;
+const ciRaw = ci as Workflow & Record<string, unknown>;
 const engineWorkflow = parse(read(".github/workflows/engine.yml")) as Workflow;
 const wrapper = read("runner/scripts/run_dynamic_e2e.sh");
 const namespace = read("runner/scripts/dynamic_e2e_namespace.sh");
@@ -129,6 +133,46 @@ describe("the CI job of the privileged Dynamic e2e lane", () => {
         expect(step.uses, step.uses).toMatch(/@[0-9a-f]{40}/);
   });
 
+  // #253-C06
+  it("never runs on a self-hosted runner, on pull_request_target, with a secret or with a write permission", () => {
+    // The lane runs the code of the pull request as root (sudo, the namespace script, the Python runner),
+    // so what makes that safe is the GitHub-hosted, ephemeral VM, a fork token without write access and no
+    // secret. Moving the job to a self-hosted runner, to a privileged trigger or giving it a secret or a
+    // write permission would take that away; this test makes it fail.
+    const runsOn = JSON.stringify(lane()["runs-on"] ?? "");
+    expect(runsOn).not.toMatch(/self-hosted/i);
+    expect(lane()["runs-on"]).toMatch(/^(ubuntu|windows|macos)-[\w.-]+$/);
+
+    const triggers = JSON.stringify((ciRaw as { on?: unknown }).on ?? {});
+    expect(triggers).not.toContain("pull_request_target");
+    expect(triggers).not.toContain("workflow_run");
+
+    expect(JSON.stringify(lane())).not.toMatch(/secrets\.|secrets:/);
+    expect(JSON.stringify(ciRaw)).not.toMatch(/secrets\.|secrets:/);
+
+    // The job's own permissions (or, without any, the workflow's) are read only.
+    const effective = lane().permissions ?? ciRaw.permissions ?? {};
+    expect(Object.keys(effective).length).toBeGreaterThan(0);
+    for (const [scope, level] of Object.entries(effective))
+      expect(level, `permission ${scope}`).toMatch(/^(read|none)$/);
+    expect(ciRaw.permissions).toEqual({ contents: "read" });
+  });
+
+  // #253-C07
+  it("checks out without keeping the git credentials in the workspace, like the other jobs that run repository code as root", () => {
+    for (const [name, job] of [
+      ["e2e-dynamic", lane()],
+      ["engine", engineWorkflow.jobs.engine],
+    ] as const) {
+      const checkouts = (job?.steps ?? []).filter((step) =>
+        step.uses?.startsWith("actions/checkout@"),
+      );
+      expect(checkouts.length, name).toBeGreaterThan(0);
+      for (const checkout of checkouts)
+        expect(checkout.with?.["persist-credentials"], name).toBe(false);
+    }
+  });
+
   // #253-C05
   it("keeps the reports of a failing lane, with the log of the runner and of the app", () => {
     const upload = steps().find((step) =>
@@ -151,6 +195,32 @@ describe("the scripts of the lane", () => {
     expect(wrapper).toContain("sudo --preserve-env");
     expect(wrapper).toContain("scripts/dynamic_e2e_namespace.sh");
     expect(namespace).toContain("set -euo pipefail");
+  });
+
+  // #253-N05
+  it("install the fetched tools from a copy that only root can change, never straight from the user's cache", () => {
+    // The fetch scripts leave the files in a directory of the invoking user. Root copies them into the lane's
+    // own tmpfs (root owned, mode 0700, mounted in this mount namespace only) and installs from the copy, so
+    // nothing can swap a file between the check and the install. The pin check (self-check, preflight) stays.
+    const copy = at(namespace, 'cp "$LANE_OPENCODE_BIN"');
+    expect(namespace).toContain('cp "$LANE_RIPGREP_BIN"');
+    expect(namespace).not.toMatch(
+      /install\b[^\n]*"\$LANE_(OPENCODE|RIPGREP)_BIN"/,
+    );
+    expect(namespace).toMatch(
+      /install -d -m 0700 -o root -g root "\$STAGE\/tools"/,
+    );
+    expect(copy).toBeLessThan(at(namespace, "/usr/local/bin/opencode"));
+  });
+
+  // #253-N06
+  it("give the files that root created in the user's tree back to the invoking user, however the lane ends", () => {
+    expect(wrapper).toMatch(/trap [^\n]*give_back[^\n]* EXIT/);
+    expect(wrapper).toMatch(
+      /give_back\(\) \{[\s\S]*sudo[^\n]*find[^\n]*-user root[^\n]*chown -h/,
+    );
+    // Both trees the lane writes to: the app (test-results, playwright-report, .next/cache) and the runner.
+    expect(wrapper).toMatch(/find "\$APP_DIR" "\$RUNNER_DIR"/);
   });
 
   // #253-N02
