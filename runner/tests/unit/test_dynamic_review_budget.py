@@ -8,8 +8,13 @@ from what the engine reports, and a missing or oversized answer fails closed ins
 counted as zero or ignored.
 """
 
+import ast
+import math
+import re
 import threading
 import time
+from decimal import Decimal, localcontext
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -20,6 +25,7 @@ from code_reviewer_runner.dynamic_review.budget import (
     BudgetLedger,
     DynamicLimits,
     LimitError,
+    exact_cost,
     reserved_tokens,
 )
 from code_reviewer_runner.result import ErrorCode
@@ -373,3 +379,177 @@ def test_the_untrusted_input_over_the_input_bound_is_refused() -> None:
         subject.check_input_bytes(101)
 
     assert refused.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
+
+
+def settled(subject: BudgetLedger, cost: Decimal | None, *, prompt: int = 3) -> None:
+    reservation = subject.reserve_call("x" * prompt, output_tokens=1)
+    subject.settle_call(reservation, prompt_tokens=prompt, completion_tokens=1, cost=cost)
+
+
+# #267-T02
+def test_the_costs_of_all_calls_are_summed_exactly() -> None:
+    subject = ledger()
+    for _ in range(10):
+        settled(subject, Decimal("0.1"))
+
+    # Ten times 0.1 is exactly 1.0 here; a float sum would be 0.9999999999999999.
+    assert subject.usage("vendor/model").cost_usd == 1.0
+
+    small = ledger()
+    for cost in ("0.000123", "0.000456", "0.0000001"):
+        settled(small, Decimal(cost))
+    assert small.usage("vendor/model").cost_usd == 0.0005791
+
+
+# #267-T04
+def test_the_cost_is_unknown_when_any_call_reported_none() -> None:
+    subject = ledger()
+    settled(subject, Decimal("0.25"))
+    settled(subject, None)
+    settled(subject, Decimal("0.5"))
+
+    # Not 0.75: a partial sum would look exact and under-report.
+    assert subject.usage("vendor/model").cost_usd is None
+
+
+# #267-T04
+def test_the_cost_is_unknown_when_a_reserved_call_never_settled() -> None:
+    subject = ledger()
+    settled(subject, Decimal("0.25"))
+    subject.reserve_call("a call that got no answer", output_tokens=1)
+
+    assert subject.usage("vendor/model").cost_usd is None
+
+
+# #267-T04
+def test_a_run_without_any_call_has_no_cost() -> None:
+    assert ledger().usage("vendor/model").cost_usd is None
+
+
+# #267-T04
+def test_a_free_call_costs_zero_and_is_known() -> None:
+    subject = ledger()
+    settled(subject, Decimal("0"))
+
+    assert subject.usage("vendor/model").cost_usd == 0.0
+
+
+# #267-T04
+def test_only_a_finite_non_negative_number_is_an_exact_cost() -> None:
+    assert exact_cost(0.0123) == Decimal("0.0123")
+    assert exact_cost(0) == Decimal("0")
+    assert exact_cost(2) == Decimal("2")
+    unusable_values: list[Any] = [None, True, False, "0.5", [], {}, -0.01, math.nan, math.inf]
+    for unusable in unusable_values:
+        assert exact_cost(unusable) is None
+
+
+# #267-T04
+def test_a_sum_that_does_not_fit_a_float_leaves_the_cost_unknown() -> None:
+    # 2 x 1e308 is finite as a decimal and `inf` as a float; `inf` cannot be sent as a result.
+    subject = ledger()
+    for _ in range(2):
+        settled(subject, exact_cost(1e308))
+
+    assert subject.usage("vendor/model").cost_usd is None
+
+    huge = ledger()
+    settled(huge, exact_cost(10**400))
+    assert huge.usage("vendor/model").cost_usd is None
+
+
+# #267-T02
+def test_the_sum_is_exact_whatever_precision_the_caller_has_set() -> None:
+    # Python rounds decimal sums to 28 significant digits by default; the ledger must not, and it
+    # must not depend on the ambient context of the thread that settles the call.
+    with localcontext() as ambient:
+        ambient.prec = 5
+        subject = ledger()
+        for cost in ("1.00001", "0.000004", "0.0000000007"):
+            settled(subject, Decimal(cost))
+
+        assert subject.usage("vendor/model").cost_usd == 1.0000140007
+
+    mixed = ledger()
+    settled(mixed, Decimal("100000"))
+    settled(mixed, Decimal("1e-30"))
+    assert mixed.usage("vendor/model").cost_usd == 100000.0
+
+
+# #267-T04
+def test_a_negative_zero_is_a_cost_of_plain_zero() -> None:
+    cost = exact_cost(-0.0)
+
+    assert cost == 0 and cost is not None and not cost.is_signed()
+
+    subject = ledger()
+    settled(subject, cost)
+    reported = subject.usage("vendor/model").cost_usd
+    assert reported is not None
+    assert reported == 0.0 and math.copysign(1.0, reported) == 1.0
+
+
+# #267-T10
+def test_the_cost_changes_nothing_about_the_token_accounting_or_the_bounds() -> None:
+    with_cost = ledger(max_total_tokens=100, max_model_calls=2)
+    without_cost = ledger(max_total_tokens=100, max_model_calls=2)
+    for subject, cost in ((with_cost, Decimal("0.01")), (without_cost, None)):
+        settled(subject, cost, prompt=30)
+        settled(subject, cost, prompt=40)
+
+    assert with_cost.usage("m").total_tokens == without_cost.usage("m").total_tokens == 72
+    assert with_cost.model_calls == without_cost.model_calls == 2
+    for subject in (with_cost, without_cost):
+        with pytest.raises(LimitError) as refused:
+            subject.reserve_call("a", output_tokens=1)
+        assert refused.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
+
+
+# #267-T09
+def test_the_cost_is_what_the_provider_reported_whatever_the_token_counts_are() -> None:
+    reported = [Decimal("0.0003"), Decimal("0.0002")]
+    for prompt in (1, 50, 90):
+        subject = ledger()
+        for cost in reported:
+            settled(subject, cost, prompt=prompt)
+
+        assert subject.usage("vendor/model").cost_usd == 0.0005
+
+    # Tokens without a reported cost give no cost; there is nothing to derive one from.
+    unpriced = ledger()
+    settled(unpriced, None, prompt=90)
+    settled(unpriced, None, prompt=90)
+    assert unpriced.usage("vendor/model").total_tokens == 182
+    assert unpriced.usage("vendor/model").cost_usd is None
+
+
+# #267-T09
+def test_no_module_that_reports_a_dynamic_cost_imports_or_names_a_price_table() -> None:
+    # The runner's price tables live in PR-Agent and its model library, so the modules that settle
+    # and report a Dynamic Review must not import them. They must not name a table, price or rate
+    # of their own either: the only source of the cost is `usage.cost` of the provider's answer.
+    # `runner.py` also serves the static path, which uses PR-Agent, so only its names are checked.
+    source = Path(__file__).parents[2] / "src" / "code_reviewer_runner"
+    modules = [*sorted((source / "dynamic_review").glob("*.py")), source / "runner.py"]
+    forbidden_imports = {"litellm", "pr_agent"}
+    price_name = re.compile(
+        r"(^|_)(price|prices|pricing|tariff)(_|$)|per_token|token_rate|rate_per"
+    )
+    for module in modules:
+        for node in ast.walk(ast.parse(module.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Import):
+                imported = {alias.name.split(".")[0] for alias in node.names}
+            elif isinstance(node, ast.ImportFrom):
+                imported = {(node.module or "").split(".")[0]}
+            else:
+                imported = set[str]()
+            if module.name != "runner.py":
+                assert not imported & forbidden_imports, module.name
+            if isinstance(node, ast.Name):
+                assert not price_name.search(node.id.lower()), (module.name, node.id)
+            elif isinstance(node, ast.Attribute):
+                assert not price_name.search(node.attr.lower()), (module.name, node.attr)
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                assert not price_name.search(node.name.lower()), (module.name, node.name)
+            elif isinstance(node, ast.arg):
+                assert not price_name.search(node.arg.lower()), (module.name, node.arg)

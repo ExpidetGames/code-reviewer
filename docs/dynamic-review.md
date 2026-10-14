@@ -43,8 +43,13 @@ publishes as one persistent summary comment. The decisions are in epic
    stored settings, resolved by the queue inside the enqueue transaction, so it is the same for an
    automatic review, an authorized `/review` and a manual Review now. Nothing a pull request or a
    comment says (title, body, `/review` text) can select or change the kind, model, budget or skill.
-   The Run's detail page shows the actual kind, model, tokens, model calls and cost (unknown for
-   Dynamic, which never guesses a price).
+   The Run's detail page shows the actual kind, model, tokens, model calls and cost. For Dynamic
+   the cost is the `usage.cost` that OpenRouter reports with each answer, i.e. the credits it charged
+   the account for that call, and the run sums them. With OpenRouter's bring-your-own-key
+   (BYOK) routing, the charge of the upstream provider can differ from `usage.cost` (OpenRouter
+   reports it separately); `costUsd` is always the `usage.cost` figure, not the upstream charge. If
+   any call has no reported cost, the run's cost is unknown ("Not available") rather than a partial
+   sum. It is never computed from a price table or from token counts.
 2. A runner claims a Dynamic job only if it advertises `opencode` in the claim. The runner
    advertises it only after its startup self-check proved the dedicated engine user, the read-only
    export and proxy-only egress (`runner/src/code_reviewer_runner/dynamic_review/self_check.py`, see
