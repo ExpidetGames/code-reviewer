@@ -414,6 +414,48 @@ a JSON-schema format is stored (the defect of #85, pinned by an engine test), or
 `/event` stream, which needs an event reader of its own. That is a follow-up if turns ever need to
 outlive one connection.
 
+## Recovery: a turn that ends without an answer gets one more chance (#309)
+
+The pinned OpenCode ends a turn, and fails it with "Model did not produce structured output", as
+soon as a model step finishes with any reason but `tool-calls` while no `StructuredOutput` call was
+captured (`session/prompt.ts` of v1.19.0). That happens when the model answers in prose although
+the tool choice is `required`, when its output is cut off at the allowance (`length`, mid tool call),
+and when a provider says `stop` for a step that asked for tools. A production run died this way after
+a 257 s turn with `llm_output_invalid: the engine returned no structured answer`, far from the cost
+limit and the clock, so the wrap-up above never acted. The engine config has no step limit
+(`agent.steps` is unset, so the engine's own maximum is infinite), and `tool_choice: required` is
+sent on every request and forwarded by the proxy (both checked against the real binary).
+
+- **Tool steps are tool steps.** The proxy reports a step with tool calls to the engine as
+  `tool_calls` even if the provider called it `stop`, so that case no longer ends the turn.
+- **One recovery.** When a turn ends without a structured answer, the adapter asks the ledger
+  (`begin_recovery`). The ledger says yes only if no final call was granted yet, a model call was
+  made, more than a twentieth of the deadline is left (30 s of 600 s) and the estimate of one more
+  call (the last prompt, one output allowance for the model's last answer, a 4 KiB slack) fits the
+  cost limit. The adapter then sends a second message to the same session with the runner's fixed
+  prompt (`Return the complete review now.`, no tag) and the same structured format. The first model
+  call of that turn is granted as the run's final call: reserved like any call, rewritten by the
+  proxy exactly like the wrap-up call (return tool alone, `tool_choice: required`, the instruction
+  last), and after it every other request is refused. The instruction says that the previous turn
+  ended without the review; it uses the `<runner-wrap-up>` tag, so every escape that protects the
+  wrap-up instruction covers it.
+- **No retry loop.** A run has at most one final call: the recovery or the wrap-up, not both. If the
+  recovery also yields nothing the run fails with `llm_output_invalid` as before; if the wrap-up's
+  final call came back without the answer there is no recovery either.
+- **F3 of #301.** A final call (wrap-up or recovery) that answered without the return tool makes
+  every later request fail with `llm_output_invalid`, not `dynamic_budget_exceeded`.
+- **What is recorded.** A recovered review is complete as far as the model is concerned, so it is
+  published without a notice and `usage.stoppedEarly` stays empty. The result log says
+  `recovered after a turn without an answer (finish=stop, error=StructuredOutputError)` and names the
+  duration of both message calls (`engine message call: 257.3 s, 12.1 s`). A failure says
+  `the engine returned no structured answer (after one recovery; the first turn: finish=length)` or
+  `(the first turn: ...; no recovery was possible)`. The note holds only a finish reason and an error
+  name that are plain identifiers; engine text is never copied.
+- **Not covered (#301 F4).** The final call's history names tools that the call no longer offers. The
+  pinned engine and the fakes accept that; if a provider behind OpenRouter rejects it (400, shown as
+  `llm_bad_request`), the fallback is to keep the original tool definitions in that call and rely on
+  `tool_choice`.
+
 ## Context window and compaction
 
 OpenCode can compact a long session itself (`compaction.auto`, with the model's `limit.context` and
@@ -454,6 +496,7 @@ run is bounded by the cost limit and the model's window.
 | `lease_lost` | Right before the summary would have been written the job was no longer held by this runner (lease lost, job cancelled), or the app could not be asked; nothing was written | Normal after a requeue or a cancel. Often: the app was unreachable at that moment; the next push reviews again |
 | `dynamic_config_invalid` | Model, skill or limits of the job are unusable; or the model's description has no unit costs; or `RUNNER_DYNAMIC_MAX_COST_USD` is not a number up to the ceiling | The project's settings page; `RUNNER_DYNAMIC_CAPABILITIES` (`input_usd_per_mtok`, `output_usd_per_mtok`) |
 | `dynamic_budget_exceeded`, `dynamic_accounting_failed`, `dynamic_policy_violation` | A hard limit or rule stopped the run. Accounting also fails when a call reports no cost | The Runs page; `RUNNER_DYNAMIC_MAX_COST_USD` |
+| `llm_output_invalid` | The engine finished without a structured answer, and so did its one recovery (or none was possible); the detail says how the first turn ended (`finish=stop`: prose, `finish=length`: cut off at the output allowance) | The model (does it follow a required tool choice?), the output allowance in `RUNNER_DYNAMIC_CAPABILITIES` |
 | `llm_context_length_exceeded` | The provider said the request is larger than the model's context | The model's `context_window_tokens` in `RUNNER_DYNAMIC_CAPABILITIES`; a smaller pull request |
 
 Switching a project from Dynamic to Diff (or back) starts a fresh summary comment; findings are not

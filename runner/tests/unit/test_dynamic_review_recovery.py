@@ -199,7 +199,7 @@ def test_a_step_with_tool_calls_is_never_reported_to_the_engine_as_a_plain_stop(
     stream = completion_as_stream(answer)
 
     assert stream is not None
-    assert b'"finish_reason":"tool_calls"' in stream.replace(b' ', b'')
+    assert b'"finish_reason":"tool_calls"' in stream.replace(b" ", b"")
 
 
 def test_a_step_without_tool_calls_keeps_its_finish_reason() -> None:

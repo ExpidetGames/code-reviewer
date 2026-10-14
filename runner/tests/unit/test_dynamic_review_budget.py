@@ -589,7 +589,11 @@ def test_the_recovery_call_is_the_final_call_with_its_own_instruction_and_no_ear
     assert subject.begin_recovery()
 
     call = subject.reserve_call(
-        "x" * 3000, output_tokens=100, can_wrap_up=True, wrap_up_text="w" * 90, recovery_text="r" * 300
+        "x" * 3000,
+        output_tokens=100,
+        can_wrap_up=True,
+        wrap_up_text="w" * 90,
+        recovery_text="r" * 300,
     )
 
     assert call.final is True and call.recovery is True
@@ -638,9 +642,7 @@ def test_the_recovery_call_is_reserved_like_any_call_and_refused_over_the_cost_l
 
 
 # #309-T07
-def test_a_call_after_a_final_call_that_returned_no_answer_is_the_models_failure_not_a_budget_one() -> (
-    None
-):
+def test_a_call_after_an_unanswered_final_call_is_the_models_failure_not_a_budget_one() -> None:
     subject = ledger(max_cost_usd=Decimal("0.0015"))
     subject.reserve_call("x" * 3000, output_tokens=100, can_wrap_up=True)
     subject.note_final_unanswered()

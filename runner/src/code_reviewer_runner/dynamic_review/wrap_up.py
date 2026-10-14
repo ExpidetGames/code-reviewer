@@ -94,7 +94,8 @@ def returns_structured_output(completion: dict[str, Any]) -> bool:
     calls: Any = message.get("tool_calls") if message else None
     if not isinstance(calls, list):
         return False
-    return any(_tool_name(call) == STRUCTURED_OUTPUT_TOOL for call in calls)  # pyright: ignore[reportUnknownVariableType]
+    called: list[Any] = calls  # pyright: ignore[reportUnknownVariableType]
+    return any(_tool_name(call) == STRUCTURED_OUTPUT_TOOL for call in called)
 
 
 def wrap_up_request(

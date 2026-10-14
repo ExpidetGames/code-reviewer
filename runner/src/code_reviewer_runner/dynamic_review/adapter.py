@@ -33,6 +33,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import shutil
 import signal
 import socket
@@ -67,6 +68,7 @@ from code_reviewer_runner.dynamic_review.net import no_redirect_opener
 from code_reviewer_runner.dynamic_review.netguard import IsolationError
 from code_reviewer_runner.dynamic_review.prompts import ReviewInputs, compose_user_prompt
 from code_reviewer_runner.dynamic_review.schema import engine_schema
+from code_reviewer_runner.dynamic_review.wrap_up import RECOVERY_PROMPT
 from code_reviewer_runner.job import Job
 from code_reviewer_runner.job_loop.jsonvalues import as_object
 from code_reviewer_runner.process_group import end_group, has_exited
@@ -335,6 +337,40 @@ class EngineClient:
             return  # the process group is ended anyway
 
 
+# What a finish reason or an error name of the engine's answer may look like to be named in a log:
+# a short identifier. Anything else is "other"; the engine's text is never copied.
+_IDENTIFIER = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,39}")
+
+
+def turn_end_note(message: bytes) -> str:
+    """How a turn ended, in words that only come from this function (#309): the finish reason of
+    the engine's last step and the name of its error, each only when it is a plain identifier.
+
+    This is what tells an operator whether a model answered in prose (`finish=stop`), was cut off
+    (`finish=length`) or the engine raised its own error, without copying any model text.
+    """
+    try:
+        value: Any = json.loads(message)
+    except ValueError:
+        return "unknown"
+    document = as_object(value)
+    info = as_object(document.get("info")) if document else None
+    if info is None:
+        return "unknown"
+    notes: list[str] = []
+    finish: Any = info.get("finish")
+    if finish is not None:
+        notes.append(f"finish={_identifier(finish)}")
+    error = as_object(info.get("error"))
+    if error is not None:
+        notes.append(f"error={_identifier(error.get('name'))}")
+    return ", ".join(notes) or "unknown"
+
+
+def _identifier(value: object) -> str:
+    return value if isinstance(value, str) and _IDENTIFIER.fullmatch(value) else "other"
+
+
 def structured_answer(message: bytes) -> Any:
     """The structured result out of a message POST answer, or None.
 
@@ -438,6 +474,9 @@ class DynamicEngine:
         self._worker: threading.Thread | None = None
         # How long each message call of the run took, in seconds on the ledger's clock (#293).
         self.turn_seconds: list[float] = []
+        # Set when a turn ended without a structured answer and one more turn was started (#309):
+        # how the first turn ended, for the result and the log.
+        self.recovery: str | None = None
 
     # -- process --------------------------------------------------------------
 
@@ -606,9 +645,7 @@ class DynamicEngine:
             client = self.start()
             session_id = client.create_session()
             try:
-                self._send(client, session_id)
-                self._raise_recorded_failure()
-                return self._validate(client)
+                return self._run_turns(client, session_id)
             finally:
                 client.abort(session_id)
         except LimitError as error:
@@ -629,19 +666,53 @@ class DynamicEngine:
             if self._worker is not None:
                 self._worker.join(timeout=5.0)
 
+    def _run_turns(self, client: EngineClient, session_id: str) -> EngineAnswer:
+        """The review turn and, when it ended without an answer, the one recovery turn (#309).
+
+        A turn the engine ended itself (a prose answer, an output cut off, a provider that called a
+        tool step `stop`) leaves nothing to publish while the limits are not used up. If the ledger
+        allows it, one more turn asks for the answer: its first call is the run's final call, which
+        the proxy reduces to the return tool alone (`wrap_up.py`). One recovery at most, whatever
+        it returns; a limit or provider refusal the proxy recorded always wins.
+        """
+        self._send(client, session_id)
+        self._raise_recorded_failure()
+        if structured_answer(client.last_message) is not None:
+            return self._validate(client)
+        ended = turn_end_note(client.last_message)
+        if not self.ledger.begin_recovery():
+            return self._no_answer(f"the first turn: {ended}; no recovery was possible")
+        self.recovery = ended
+        self._send(client, session_id, prompt=RECOVERY_PROMPT)
+        self._raise_recorded_failure()
+        if structured_answer(client.last_message) is None:
+            return self._no_answer(f"after one recovery; the first turn: {ended}")
+        return self._validate(client)
+
+    @staticmethod
+    def _no_answer(note: str) -> EngineAnswer:
+        return EngineAnswer(
+            findings=None,
+            error=EngineError(
+                ErrorCode.LLM_OUTPUT_INVALID, f"the engine returned no structured answer ({note})"
+            ),
+        )
+
     def _raise_recorded_failure(self) -> None:
         """A limit or provider refusal the proxy recorded is the run's result."""
         failure = self.ledger.failure
         if failure is not None:
             raise failure
 
-    def _send(self, client: EngineClient, session_id: str) -> None:
+    def _send(self, client: EngineClient, session_id: str, *, prompt: str | None = None) -> None:
         dynamic = self.job.dynamic
         assert dynamic is not None
         # The fixed core, the verified head and the skill are the agent's prompt in the trusted
-        # config; only the delimited untrusted input travels as a message part.
-        prompt = compose_user_prompt(self.inputs)
-        self.ledger.check_input_bytes(len(prompt.encode("utf-8")))
+        # config; only the delimited untrusted input travels as a message part. The recovery turn
+        # (#309) sends the runner's own short prompt instead and no input at all.
+        if prompt is None:
+            prompt = compose_user_prompt(self.inputs)
+            self.ledger.check_input_bytes(len(prompt.encode("utf-8")))
         schema = engine_schema(self.model_schema, dynamic.limits.max_findings)
         outcome: list[Exception] = []
         finished = threading.Event()

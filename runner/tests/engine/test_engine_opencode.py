@@ -30,6 +30,7 @@ from opencode_support import (
     opencode_binary,
     ripgrep_binary,
     run_engine,
+    says,
     tool_call,
 )
 
@@ -40,7 +41,11 @@ from code_reviewer_runner.dynamic_review.budget import DynamicLimits
 from code_reviewer_runner.dynamic_review.checkout import PreparedContent, prepare_content
 from code_reviewer_runner.dynamic_review.prompt_core import CORE_TEXT
 from code_reviewer_runner.dynamic_review.transport import LocalTransport
-from code_reviewer_runner.dynamic_review.wrap_up import WRAP_UP_INSTRUCTION
+from code_reviewer_runner.dynamic_review.wrap_up import (
+    RECOVERY_INSTRUCTION,
+    RECOVERY_PROMPT,
+    WRAP_UP_INSTRUCTION,
+)
 from code_reviewer_runner.job import ClaimBase
 from code_reviewer_runner.redaction import Redactor
 from code_reviewer_runner.result import ErrorCode
@@ -512,6 +517,133 @@ def test_a_run_that_stays_inside_its_limits_is_never_wrapped_up(tmp_path: Path) 
     assert run.answer.ok, run.answer.error
     assert all(not only_return_tool(request) for request in model.requests)
     assert run.ledger.stopped_early is None
+
+
+def reading(export: Path, count: int) -> list[Step]:
+    return [
+        asks(tool_call(f"r{index}", "read", {"filePath": str(export / "src/app.py")}))
+        for index in range(count)
+    ]
+
+
+def truncated_return() -> dict[str, Any]:
+    """The return tool call of a model that was cut off at its output allowance."""
+    cut = '{"schemaVersion": 1, "reviewedSha": "abc", "findings": [{"id": "f-1", "tit'
+    message = asks(
+        {
+            "id": "cut",
+            "type": "function",
+            "function": {"name": "StructuredOutput", "arguments": cut},
+        }
+    )
+    return {**message, "finish_reason": "length"}
+
+
+def assert_recovery_call(model: ScriptedModel, normal_calls: int) -> None:
+    """The recovery is the one call after the normal ones: the return tool alone, forced, with the
+    runner's instruction last, and the engine's own recovery message before it."""
+    assert len(model.requests) == normal_calls + 1
+    for request in model.requests[:normal_calls]:
+        assert not only_return_tool(request)
+        assert RECOVERY_INSTRUCTION not in json.dumps(request["messages"])
+    recovery = model.requests[normal_calls]
+    assert only_return_tool(recovery)
+    assert recovery["tool_choice"] == "required"
+    assert recovery["messages"][-1] == {"role": "user", "content": RECOVERY_INSTRUCTION}
+    assert recovery["messages"][-2] == {"role": "user", "content": RECOVERY_PROMPT}
+
+
+# #309-T01: the model answers in prose after some tool calls (the production failure).
+def test_a_turn_that_ends_in_prose_is_recovered_by_the_real_engine(tmp_path: Path) -> None:
+    content = prepare(tmp_path, {"src/app.py": b"x = 1\n"})
+    steps: list[Step] = [*reading(content.export, 3), says("Here is my review, in prose.")]
+    model = ScriptedModel(steps=steps, final=findings_for(content.head_sha))
+    with model:
+        run = run_engine(model, content, scratch=tmp_path / "scratch")
+
+    assert run.answer.ok, run.answer.error
+    assert_recovery_call(model, normal_calls=4)
+    assert run.ledger.recovered is True
+    assert run.ledger.stopped_early is None
+    assert run.ledger.model_calls == 5
+
+
+# #309-T03: the answer is cut off at the output allowance (`length`), mid tool call.
+def test_a_turn_that_is_cut_off_at_its_output_allowance_is_recovered(tmp_path: Path) -> None:
+    content = prepare(tmp_path, {"src/app.py": b"x = 1\n"})
+    steps: list[Step] = [*reading(content.export, 2), truncated_return()]
+    model = ScriptedModel(steps=steps, final=findings_for(content.head_sha))
+    with model:
+        run = run_engine(model, content, scratch=tmp_path / "scratch")
+
+    assert run.answer.ok, run.answer.error
+    assert_recovery_call(model, normal_calls=3)
+    assert run.ledger.recovered is True
+
+
+# #309-T02: a provider that says `stop` for a step that asked for tools. The engine takes that for
+# the end of the turn; the proxy reports a tool step as one, so the turn goes on, no recovery.
+def test_a_tool_step_a_provider_calls_stop_does_not_end_the_turn(tmp_path: Path) -> None:
+    content = prepare(tmp_path, {"src/app.py": b"x = 1\n"})
+    read = asks(tool_call("rs", "read", {"filePath": str(content.export / "src/app.py")}))
+    stop_step: dict[str, Any] = {**read, "finish_reason": "stop"}
+    steps: list[Step] = [*reading(content.export, 2), stop_step, *reading(content.export, 1)]
+    model = ScriptedModel(steps=steps, final=findings_for(content.head_sha))
+    with model:
+        run = run_engine(model, content, scratch=tmp_path / "scratch")
+
+    assert run.answer.ok, run.answer.error
+    assert len(model.requests) == 5  # four tool steps, then the return tool
+    assert all(not only_return_tool(request) for request in model.requests)
+    assert run.ledger.recovered is False
+
+
+# #309-T04
+def test_a_recovery_that_also_ends_in_prose_fails_with_one_recovery_and_no_retry(
+    tmp_path: Path,
+) -> None:
+    content = prepare(tmp_path, {"src/app.py": b"x = 1\n"})
+
+    def prose_when_only_the_return_tool_is_left(request: dict[str, Any]) -> dict[str, Any]:
+        return says("prose again")
+
+    steps: list[Step] = [*reading(content.export, 2), says("prose")]
+    # No `final`: the recovery call finds the script out of steps and answers in prose as well.
+    model = ScriptedModel(steps=steps, final=None)
+    model.steps.append(prose_when_only_the_return_tool_is_left)
+    with model:
+        run = run_engine(model, content, scratch=tmp_path / "scratch")
+
+    assert not run.answer.ok
+    assert run.answer.error is not None
+    assert run.answer.error.code is ErrorCode.LLM_OUTPUT_INVALID
+    assert "after one recovery" in run.answer.error.detail
+    assert "finish=stop, error=StructuredOutputError" in run.answer.error.detail
+    assert_recovery_call(model, normal_calls=3)
+
+
+# #309-T05: the turn ends with less than the recovery reserve of the clock left.
+def test_no_recovery_is_started_when_the_clock_has_no_room_for_it(tmp_path: Path) -> None:
+    content = prepare(tmp_path, {"src/app.py": b"x = 1\n"})
+    seconds = [0.0]
+
+    def prose_call_takes_long(count: int) -> None:
+        if count == 3:
+            seconds[0] += 575.0  # 25 s left: inside the wrap-up reserve of 150 s, too late
+
+    steps: list[Step] = [*reading(content.export, 2), says("prose")]
+    model = ScriptedModel(
+        steps=steps, final=findings_for(content.head_sha), on_request=prose_call_takes_long
+    )
+    with model:
+        run = run_engine(model, content, scratch=tmp_path / "scratch", clock=lambda: seconds[0])
+
+    assert not run.answer.ok
+    assert run.answer.error is not None
+    assert run.answer.error.code is ErrorCode.LLM_OUTPUT_INVALID
+    assert "no recovery was possible" in run.answer.error.detail
+    assert len(model.requests) == 3
+    assert run.ledger.recovered is False
 
 
 # #197-T05
