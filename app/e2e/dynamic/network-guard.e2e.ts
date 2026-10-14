@@ -59,19 +59,29 @@ async function asUser(
         "NO_COLOR=1",
         "GIT_TERMINAL_PROMPT=0",
         "CI=1",
+        // What the runner gives the engine (dynamic_review/config.py): no downloads, no catalog fetch.
+        "OPENCODE_DISABLE_MODELS_FETCH=true",
+        "OPENCODE_DISABLE_AUTOUPDATE=true",
+        "OPENCODE_DISABLE_LSP_DOWNLOAD=true",
+        "OPENCODE_DISABLE_DEFAULT_PLUGINS=true",
+        "OPENCODE_DISABLE_TELEMETRY=true",
+        `XDG_CONFIG_HOME=${home}/.config`,
+        `XDG_DATA_HOME=${home}/.local/share`,
+        `XDG_CACHE_HOME=${home}/.cache`,
+        `XDG_STATE_HOME=${home}/.local/state`,
         command,
         ...args,
       ],
       // The home is the one directory every user of the lane can enter: the working directory of the
       // test process is the checkout of the CI user.
-      { cwd: home, timeout: 60_000, killSignal: "SIGKILL" },
+      { cwd: home, timeout: 30_000, killSignal: "SIGKILL" },
     );
     return { status: 0, stderr: "" };
   } catch (error) {
     const failure = error as { code?: number | string; stderr?: string };
     return {
       status: failure.code ?? "failed",
-      stderr: String(failure.stderr ?? "").slice(-600),
+      stderr: String(failure.stderr ?? "").slice(-1500),
     };
   }
 }
@@ -104,10 +114,24 @@ test.describe("the network guard of the Dynamic lane", () => {
   }
 
   // #253-G05
+  test("counts a helper of the engine user when it reaches for an address that is not a fake", async () => {
+    const done = await countedFor("engine", () =>
+      asUser(ENGINE, home, "bash", [
+        "-c",
+        `exec 3<>/dev/tcp/${CONTROL_PREFIX.host}/80`,
+      ]),
+    );
+
+    expect(done.status).not.toBe(0);
+  });
+
+  // #253-G05
   test("counts the pinned OpenCode, run as the engine user, when it reaches for an address that is not a fake", async () => {
     const done = await countedFor("engine", () =>
       asUser(ENGINE, home, OPENCODE_PATH, [
         "run",
+        "--pure",
+        "--print-logs",
         "--attach",
         `http://${CONTROL_PREFIX.host}:9`,
         "--dir",

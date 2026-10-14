@@ -62,7 +62,8 @@ export default defineConfig({
       use: browser,
       testMatch: /prepare-app\.e2e\.ts$/,
     },
-    // The guard first proves its own counters move; then the journey, which also reads it.
+    // The guard proves its own counters move; the journey reads them at its end. They do not wait for
+    // each other, so one failing does not hide the other.
     {
       name: "guard",
       use: browser,
@@ -73,7 +74,7 @@ export default defineConfig({
       name: "journey",
       use: browser,
       testMatch: /dynamic-review\.e2e\.ts$/,
-      dependencies: ["guard"],
+      dependencies: ["prepare"],
     },
   ],
   webServer: [
