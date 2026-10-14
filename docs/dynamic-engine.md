@@ -48,7 +48,9 @@ Part 1 shipped against a protocol fake; the real binary showed these, all fixed 
   that directory; only `OPENCODE_CONFIG` (the file) is set.
 - Without a `rg` on its `PATH` the engine downloads ripgrep from GitHub on the first grep. The adapter
   refuses to start without one; the Dynamic image carries a pinned one at `/usr/local/bin/rg`
-  (`runner/ripgrep-pin.json`, #202).
+  (`runner/ripgrep-pin.json`, #202). That is the file the startup self-check verified, and the
+  adapter makes it the one that runs: its directory leads the engine's `PATH` and a different `rg`
+  further along (the optional Node directory, say) is never used.
 - A health request before the listening marker can hang; polls use short timeouts.
 - The contract schema has only `$defs`; the engine's `StructuredOutput` tool needs an object root, so
   the engine gets a self-contained object schema (`dynamic_review/schema.py`).

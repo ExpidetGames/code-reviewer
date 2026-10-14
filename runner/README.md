@@ -302,7 +302,7 @@ input and the boundaries around it (the epic's binding decision). Modules:
   diff, the incremental diff when the preparation really ended in incremental mode, the prior state
   and the list of skipped and omitted paths.
 - `dynamic_review/adapter.py` starts the engine in its own process group on a private loopback port
-  (no ripgrep on the engine `PATH` is a refusal, because the pinned release would download one),
+  (no verified ripgrep file, leading the engine `PATH`, is a refusal, because the pinned release would download one),
   waits for a healthy pinned server (short per-request timeouts: before its listening marker the server
   can accept a connection and never answer), opens one session, sends the untrusted input as one
   structured turn (bounded by the input byte limit) and validates the answer with the typed findings
