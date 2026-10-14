@@ -66,8 +66,18 @@ RUN mkdir -p "$DATA_GYM_CACHE_DIR" \
 FROM ${PYTHON_IMAGE} AS engine-tools
 COPY runner/scripts/fetch_opencode.py runner/scripts/fetch_ripgrep.py /fetch/scripts/
 COPY runner/opencode-pin.json runner/ripgrep-pin.json /fetch/
+# The skip is only for platforms without a pin: on x86_64 (uname -m; amd64 is the same machine under
+# its Docker name) a missing engine or ripgrep is a build error, so a wrong platform detection cannot
+# silently produce an engine-less image there.
 RUN python /fetch/scripts/fetch_opencode.py --dest /engine-tools --allow-unpinned-platform \
-    && python /fetch/scripts/fetch_ripgrep.py --dest /engine-tools --allow-unpinned-platform
+    && python /fetch/scripts/fetch_ripgrep.py --dest /engine-tools --allow-unpinned-platform \
+    && case "$(uname -m)" in \
+        x86_64|amd64) \
+            if [ ! -x /engine-tools/opencode ] || [ ! -x /engine-tools/rg ]; then \
+                echo "the pinned engine or ripgrep was not installed on an x86_64 build" >&2; \
+                exit 1; \
+            fi ;; \
+    esac
 
 # ---- runtime-base: Python, the venv and nothing else (no uv, no compiler, no sources) ----
 FROM ${PYTHON_IMAGE} AS runtime-base

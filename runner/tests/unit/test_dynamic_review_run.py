@@ -334,3 +334,57 @@ def test_a_dynamic_job_with_opencode_advertised_gets_past_the_engine_check(
 
     assert code == 1
     assert json.loads(out.getvalue())["errorCode"] == "dynamic_model_features_unsupported"
+
+
+# #264-T12: the descriptor is chosen by `dynamic.model` and the request goes upstream with
+# `llm.model`; a job that names two different models is refused before any model call.
+def test_a_dynamic_job_whose_two_model_names_differ_is_refused_before_any_model_call() -> None:
+    document = dynamic_document()
+    document["llm"]["model"] = OTHER_MODEL
+    environment = {
+        runner.OPENCODE_COMMAND_VARIABLE: "opencode",
+        runner.DYNAMIC_CAPABILITIES_VARIABLE: CAPABILITIES,
+    }
+
+    result = runner.run_dynamic_job(
+        parse_job(json.dumps(document)),
+        None,
+        0.0,
+        environment,
+        engines=ALL_ENGINES,
+        prepare=never_prepared,
+    )
+
+    assert result.ok is False
+    assert result.error_code is ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED
+
+
+# #264-T13: a variable that holds only whitespace is as empty as an empty one (a platform may store
+# a blank field as a space); for the default model the built-in descriptor then applies.
+@pytest.mark.parametrize("blank", [" ", "  ", "\n", "\t \n"])
+def test_a_whitespace_only_descriptor_variable_is_empty(blank: str) -> None:
+    with pytest.raises(Reached):
+        runner.run_dynamic_job(
+            dynamic_job(),
+            None,
+            0.0,
+            {
+                runner.OPENCODE_COMMAND_VARIABLE: "opencode",
+                runner.DYNAMIC_CAPABILITIES_VARIABLE: blank,
+            },
+            engines=ALL_ENGINES,
+            prepare=reaching_the_checkout,
+        )
+
+    result = runner.run_dynamic_job(
+        other_model_job(),
+        None,
+        0.0,
+        {
+            runner.OPENCODE_COMMAND_VARIABLE: "opencode",
+            runner.DYNAMIC_CAPABILITIES_VARIABLE: blank,
+        },
+        engines=ALL_ENGINES,
+        prepare=never_prepared,
+    )
+    assert result.error_code is ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED

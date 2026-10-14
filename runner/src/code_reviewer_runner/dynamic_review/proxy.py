@@ -149,6 +149,8 @@ def capabilities_from_config(raw: str | None, model: str | None = None) -> Dynam
     default model, whose built-in descriptor applies; any descriptor the operator sets, usable or
     not, takes precedence, and every other model needs one.
     """
+    # A blank value (a platform may store an empty field as a space) is as empty as an empty one.
+    raw = raw.strip() if raw else raw
     if not raw and model == DEFAULT_DYNAMIC_MODEL:
         return DEFAULT_MODEL_CAPABILITIES
     if not raw:

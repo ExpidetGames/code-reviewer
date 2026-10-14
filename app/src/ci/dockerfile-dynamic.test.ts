@@ -100,6 +100,21 @@ describe("the dynamic runner image", () => {
   });
 
   // #264-T10
+  it("fails the build when the platform is x86_64 and the engine or ripgrep was not installed: the skip is only for platforms without a pin", () => {
+    const fetching = stage("engine-tools").lines.join("\n");
+
+    // The guard runs in the same stage, after both fetches, on the machine the pins are for.
+    expect(fetching).toMatch(/uname -m/);
+    expect(fetching).toMatch(/x86_64\|amd64\)/);
+    expect(fetching).toMatch(/! -x \/engine-tools\/opencode/);
+    expect(fetching).toMatch(/! -x \/engine-tools\/rg/);
+    expect(fetching).toMatch(/exit 1/);
+    expect(fetching.indexOf("uname -m")).toBeGreaterThan(
+      fetching.indexOf("fetch_ripgrep.py"),
+    );
+  });
+
+  // #264-T10
   it("builds on a platform without a pin: the fetch stage installs nothing there and succeeds", () => {
     const fetching = stage("engine-tools").lines.join("\n");
 

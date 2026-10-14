@@ -275,6 +275,16 @@ def run_dynamic_job(
     ripgrep = (
         Path(named_ripgrep) if (named_ripgrep := environment.get(RIPGREP_PATH_VARIABLE)) else None
     )
+    # The descriptor is chosen by `dynamic.model` and the request goes upstream with `llm.model`;
+    # the app always sends the same name in both. A job that does not is refused, so that the
+    # descriptor of one model is never applied to a request for another.
+    if dynamic.model != job.llm.model:
+        return _failure(
+            ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED,
+            "the job names two different models",
+            started,
+            capture,
+        )
     try:
         capabilities = capabilities_from_config(
             environment.get(DYNAMIC_CAPABILITIES_VARIABLE), model=dynamic.model

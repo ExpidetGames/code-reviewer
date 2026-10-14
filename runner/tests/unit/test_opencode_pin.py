@@ -267,3 +267,17 @@ def test_the_flag_does_not_excuse_an_artifact_that_is_not_the_pinned_one(
     monkeypatch.setattr(script, "install", tampered)
 
     assert script.main(["--dest", str(tmp_path), "--allow-unpinned-platform"]) == 1
+
+
+# #264-T10: an x86_64 host must find its pin. If the platform key were wrong there, the flagged
+# image build would skip the engine with one log line instead of failing.
+@pytest.mark.parametrize("machine", ["x86_64", "amd64", "AMD64"])
+def test_an_x86_64_host_is_the_pinned_linux_x64_platform(
+    monkeypatch: pytest.MonkeyPatch, machine: str
+) -> None:
+    script = load_script()
+    monkeypatch.setattr(platform, "machine", lambda: machine)
+    monkeypatch.setattr(sys, "platform", "linux")
+
+    assert script.platform_key() == "linux-x64"
+    assert script.artifact(json.loads(PIN.read_text(encoding="utf-8")), script.platform_key())

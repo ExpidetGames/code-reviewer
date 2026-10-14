@@ -958,3 +958,13 @@ def test_a_configured_descriptor_wins_over_the_built_in_one() -> None:
     with pytest.raises(LimitError) as refused:
         capabilities_from_config("not json", model=DEFAULT_DYNAMIC_MODEL)
     assert refused.value.code is ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED
+
+
+# #264-T13
+def test_a_blank_descriptor_is_an_empty_one() -> None:
+    assert capabilities_from_config(
+        "  \n", model=DEFAULT_DYNAMIC_MODEL
+    ) == capabilities_from_config(None, model=DEFAULT_DYNAMIC_MODEL)
+    with pytest.raises(LimitError) as refused:
+        capabilities_from_config(" ", model="anthropic/claude-haiku-5.5")
+    assert refused.value.code is ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED

@@ -444,7 +444,8 @@ need about 1 GB, Docker's build cache more.
 no swap, 1.5 GiB reserved) and is built on the same server. It also takes **Diff jobs** like the runner
 above (it keeps `pr-agent` among its engines, as every runner does), with one slot
 (`RUNNER_DYNAMIC_CONCURRENCY=1`): from the first deployment the Diff capacity is 3 + 1 slots, and
-the 2 GiB are partly in use whenever a Diff job runs there, not only while a Dynamic job runs; a Diff
+the 2 GiB are in use whenever a Diff job runs there, not only while a Dynamic job runs (before the gate
+is on it claims no Dynamic job, but it takes Diff jobs from the first deployment); a Diff
 job (up to 20 minutes) can also occupy the one Dynamic slot once the gate is on, so a Dynamic run
 may wait for it. That is why the recommended server for an installation that will use Dynamic Review
 is **8 GB RAM or more**; the 4 GB minimum above is for the Diff runner alone,

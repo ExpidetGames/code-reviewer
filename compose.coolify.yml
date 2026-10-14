@@ -24,10 +24,11 @@
 # takes ONE Compose file per resource, so it lives here: the resource that deploys this file builds
 # and starts it with the rest after a release, with no second resource and no new variable. It is the
 # runner-dynamic service of compose.dynamic.yml (app/src/ci/compose-dynamic.test.ts fails when they
-# drift apart) except for the image name. It does nothing until the instance admin turns the Dynamic
+# drift apart) except for the image name. It runs no Dynamic review until the instance admin turns the Dynamic
 # Review gate on (default off, a switch of the app); until then it claims no Dynamic job, so no
-# project's review kind changes. It does take Diff jobs, like the runner above, and once the gate is on a
-# Diff job can occupy its single slot. If the host cannot give it
+# project's review kind changes. It does take Diff jobs from the first deployment, like the runner
+# above (so its 2 GiB are in use whenever one runs there), and once the gate is on a Diff job can
+# occupy its single slot. If the host cannot give it
 # what it needs (no nf_tables, a capability that Coolify drops) it logs why and serves Diff jobs
 # only; the app and the runner above do not depend on it. The engine is pinned for x86_64 only: on an
 # arm64 server the image still builds, without an engine, and the runner serves Diff jobs only. It has NOT been tested on a real Coolify
