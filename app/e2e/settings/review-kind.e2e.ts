@@ -6,6 +6,7 @@
 // and switches back to Diff Review. The details (what is sent, the copy, the errors) are proven as
 // component and integration tests.
 import { expect, test, type Page } from "@playwright/test";
+import { startLlmFake, type FakeLlm } from "../../../fakes/llm/server.ts";
 import { syncFromGithubAsAdmin } from "../helpers/admin-api";
 import { e2eEnv } from "../helpers/e2e-env";
 import {
@@ -36,7 +37,14 @@ async function openProject(page: Page) {
 }
 
 test.describe("the review kind of a project", () => {
+  let llm: FakeLlm | undefined;
+
   test.beforeAll(async ({ request }) => {
+    // The model is checked for tool support when it is saved (#269); the app asks this fake.
+    llm = await startLlmFake({ port: e2eEnv.modelLlmFakePort });
+    llm.setModel("vendor/agent-e2e", [
+      { supported_parameters: ["tools", "tool_choice"] },
+    ]);
     await addGithubAccount(request, account);
     await addGithubInstallation(
       request,
@@ -44,6 +52,10 @@ test.describe("the review kind of a project", () => {
       [{ id: 9200020, fullName: REPOSITORY }],
     );
     await syncFromGithubAsAdmin(e2eEnv.appUrl);
+  });
+
+  test.afterAll(async () => {
+    await llm?.close();
   });
 
   // #200-T07

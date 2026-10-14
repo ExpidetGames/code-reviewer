@@ -16,7 +16,10 @@
 //   (`ScriptedModel` in runner/tests/engine/opencode_support.py);
 // - `GET <api base>/key`, the cheap call that tells whether a key is accepted (the app's "test key"
 //   button): 200 for an accepted key, 401 for any other once `acceptKeys` names the accepted ones. The
-//   keys that arrived are recorded apart (`keyChecks`), so a test can see which key a check carried.
+//   keys that arrived are recorded apart (`keyChecks`), so a test can see which key a check carried;
+// - `GET <api base>/models/{author}/{slug}/endpoints`, the public model metadata behind the app's check of a
+//   Dynamic model (#269): the endpoints of the models a test registered with `setModel` (the request
+//   parameters each lists), 404 for any other model. The requests are recorded apart (`modelRequests`).
 //
 // The replies are canned (`canned.ts`). They satisfy the output contract of the review tool and
 // say nothing about review quality. The engine suite of the runner has its own Python twin of this
@@ -38,6 +41,8 @@ export type FakeLlmRequest = {
   tools: string[];
   /** The result of every tool call the request carries, by the id of the call. */
   toolResults: Record<string, string>;
+  /** The `provider` object of the body (OpenRouter's routing options, #270); null when absent. */
+  provider: Record<string, unknown> | null;
 };
 
 /** One request's tool calls of the agent script. */
@@ -51,6 +56,12 @@ export type AgentScript = {
   steps: AgentToolCall[][];
   /** The structured answer (Dynamic findings, schema version 1) given through `StructuredOutput`. */
   final: Record<string, unknown>;
+};
+
+/** One endpoint (provider) of a model in the metadata answer. */
+export type FakeModelEndpoint = {
+  supported_parameters: string[];
+  max_completion_tokens?: number | null;
 };
 
 export type FakeLlmError = { status: number; message: string };
@@ -72,6 +83,10 @@ export type FakeLlm = {
   keyChecks(): string[];
   /** Answers like the model of a Dynamic Review (see `AgentScript`); null is the canned reply again. */
   scriptAgent(script: AgentScript | null): void;
+  /** Registers a model for the metadata endpoint; its endpoints list what the test says they support. */
+  setModel(id: string, endpoints: FakeModelEndpoint[]): void;
+  /** Every metadata request received (path and `Authorization` header, empty when none), in order. */
+  modelRequests(): Array<{ path: string; authorization: string }>;
   /** Normal replies, no error, no recorded requests. */
   reset(): void;
   close(): Promise<void>;
@@ -88,6 +103,12 @@ function toolNames(tools: unknown): string[] {
   return (tools as Array<{ function?: { name?: unknown } }>).flatMap((tool) =>
     typeof tool.function?.name === "string" ? [tool.function.name] : [],
   );
+}
+
+function providerOf(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 function toolResultsOf(messages: ChatMessage[]): Record<string, string> {
@@ -134,11 +155,19 @@ function completion(model: string, content: string) {
         finish_reason: "stop",
       },
     ],
-    usage: { prompt_tokens: 100, completion_tokens: 50, total_tokens: 150 },
+    usage: {
+      prompt_tokens: 100,
+      completion_tokens: 50,
+      total_tokens: 150,
+      cost: 0.0001,
+    },
   };
 }
 
-/** A completion that asks for tool calls, with the fixed token counts a journey can check. */
+/**
+ * A completion that asks for tool calls, with the fixed token counts a journey can check and the
+ * `usage.cost` OpenRouter reports with every answer (a Dynamic run without it stops, #290).
+ */
 function toolCompletion(model: string, id: string, calls: AgentToolCall[]) {
   return {
     id: "chatcmpl-fake-agent",
@@ -163,7 +192,12 @@ function toolCompletion(model: string, id: string, calls: AgentToolCall[]) {
         finish_reason: "tool_calls",
       },
     ],
-    usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 },
+    usage: {
+      prompt_tokens: 100,
+      completion_tokens: 20,
+      total_tokens: 120,
+      cost: 0.0001,
+    },
   };
 }
 
@@ -179,6 +213,8 @@ export async function startLlmFake(
   let keyChecks: string[] = [];
   let agent: AgentScript | null = null;
   let agentRequests = 0;
+  let models = new Map<string, FakeModelEndpoint[]>();
+  let modelLog: Array<{ path: string; authorization: string }> = [];
 
   const server: Server = createServer((request, response) => {
     const chunks: Buffer[] = [];
@@ -213,6 +249,29 @@ export async function startLlmFake(
           });
         return send(200, { data: { label: "fake-key", limit: null } });
       }
+      const metadata = /\/models\/([^/]+)\/([^/]+)\/endpoints$/.exec(
+        (request.url ?? "").split("?")[0] ?? "",
+      );
+      if (request.method === "GET" && metadata !== null) {
+        modelLog.push({
+          path: request.url ?? "",
+          authorization: request.headers.authorization ?? "",
+        });
+        const id = `${decodeURIComponent(metadata[1] ?? "")}/${decodeURIComponent(metadata[2] ?? "")}`;
+        const endpoints = models.get(id);
+        if (endpoints === undefined)
+          return send(404, { error: { message: "Not Found", code: 404 } });
+        return send(200, {
+          data: {
+            id,
+            name: id,
+            endpoints: endpoints.map((endpoint) => ({
+              name: "fake-provider",
+              ...endpoint,
+            })),
+          },
+        });
+      }
       if (
         request.method !== "POST" ||
         !(request.url ?? "").split("?")[0]?.endsWith("/chat/completions")
@@ -242,6 +301,7 @@ export async function startLlmFake(
         prompt: `${system}\n${textOf(messages, "user")}`,
         tools: toolNames((body as { tools?: unknown }).tools),
         toolResults: toolResultsOf(messages),
+        provider: providerOf((body as { provider?: unknown }).provider),
       });
 
       if (error !== null) {
@@ -286,6 +346,10 @@ export async function startLlmFake(
       accepted = keys;
     },
     keyChecks: () => [...keyChecks],
+    setModel(id, endpoints) {
+      models.set(id, endpoints);
+    },
+    modelRequests: () => [...modelLog],
     scriptAgent(script) {
       agent = script;
       agentRequests = 0;
@@ -299,6 +363,8 @@ export async function startLlmFake(
       quoteKey = false;
       accepted = null;
       keyChecks = [];
+      models = new Map();
+      modelLog = [];
     },
     async close() {
       await new Promise<void>((resolve, reject) => {

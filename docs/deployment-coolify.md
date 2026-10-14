@@ -217,7 +217,8 @@ value), set Literal.
 | `RUNNER_ID` | optional | A name | Shown in the app's logs as the name of this runner (letters, digits and `._:@-`). Empty: `runner-<container host name>`. |
 | `RUNNER_DYNAMIC_CONCURRENCY` | optional | A whole number from 1 to 32 | Dynamic jobs at once on `runner-dynamic`. Empty: 1. Do not raise it before the measurements of `docs/dynamic-review.md` exist ([Dynamic Review runner](#dynamic-review-runner)). |
 | `RUNNER_DYNAMIC_MEMORY_LIMIT`, `RUNNER_DYNAMIC_MEMORY_RESERVATION` | optional | A Docker memory size such as `2g` or `1536m` | The memory limit (also the swap limit: there is no swap) and the soft reservation of `runner-dynamic`. Empty: `2g` and `1536m`. |
-| `RUNNER_DYNAMIC_CAPABILITIES` | optional | JSON, for example `{"tool_choice_required":true,"structured_output":true,"max_output_tokens":8192}` | What the model of the Dynamic runner supports. Empty: nothing to enter for the default model `deepseek/deepseek-v4.1-flash`, whose description is built into the runner. Set it when **any project on this instance uses another model**: it is one value for the whole runner, and without it a job of another model fails with `dynamic_model_features_unsupported`. A value you set always wins. |
+| `RUNNER_DYNAMIC_MAX_COST_USD` | optional | A plain decimal number such as `2.5` | The most one Dynamic Review run may cost, in USD. Empty: 1.00. The runner refuses a value that is not above 0 or is above 20 (`dynamic_config_invalid`). A run is stopped before a call that could take it over the limit. |
+| `RUNNER_DYNAMIC_CAPABILITIES` | optional | JSON, for example `{"tool_choice_required":true,"structured_output":true,"max_output_tokens":8192,"input_usd_per_mtok":0.5,"output_usd_per_mtok":2}` | What the model of the Dynamic runner supports, with the unit costs of its price list (required: without them the job ends with `dynamic_config_invalid`). Empty: nothing to enter for the default model `deepseek/deepseek-v4.1-flash`, whose description is built into the runner. Set it when **any project on this instance uses another model**: it is one value for the whole runner, and without it a job of another model fails with `dynamic_model_features_unsupported`. A value you set always wins. |
 
 Variables that exist in `.env.example` but that you **do not set on Coolify**:
 
@@ -495,6 +496,11 @@ by whoever runs it (neither is part of the shipped files nor tested):
 
 After either, run a review (`/review` on a test pull request) and check the runner log for
 `no answer from the app` or model and GitHub errors (`git_unavailable`, `llm_unavailable`).
+
+The **app** also makes one outbound request to `openrouter.ai` (HTTPS port 443, no key) whenever a Dynamic
+model is saved in a project's settings, to read whether the model supports tool calling. If the app cannot
+reach that host, the save still works after a wait of at most 5 seconds and shows a warning that the model
+could not be checked (`src/llm/README.md`, "Model capabilities").
 
 ### Dynamic Review runner
 

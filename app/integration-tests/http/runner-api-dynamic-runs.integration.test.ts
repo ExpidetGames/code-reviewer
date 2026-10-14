@@ -150,6 +150,7 @@ describe("a failed Dynamic review", () => {
     "dynamic_isolation_self_check_failed",
     "dynamic_policy_violation",
     "dynamic_config_invalid",
+    "llm_context_length_exceeded",
     "review_not_published",
   ] as const;
 

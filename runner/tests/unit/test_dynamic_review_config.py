@@ -108,6 +108,20 @@ def test_discovery_and_runtime_services_are_switched_off_in_the_config() -> None
     assert document["compaction"] == {"auto": False, "prune": False}
 
 
+# #290-T13: OpenCode's own compaction stays off. After a compaction the engine's next requests
+# offer no `StructuredOutput` tool and no forced tool choice (the real v1.19.0 binary, see
+# docs/dynamic-review.md, "Context window and compaction"), so the run could not return its answer.
+def test_compaction_and_pruning_stay_off_in_the_config_and_the_environment() -> None:
+    document = config()
+    environment = engine_environment(
+        proxy_url="http://127.0.0.1:41234", home="/job/home", scratch_dir="/job/scratch"
+    )
+
+    assert document["compaction"] == {"auto": False, "prune": False}
+    assert environment["OPENCODE_DISABLE_AUTOCOMPACT"] == "true"
+    assert environment["OPENCODE_DISABLE_PRUNE"] == "true"
+
+
 # #197-T02
 def test_the_engine_environment_is_closed() -> None:
     environment = engine_environment(

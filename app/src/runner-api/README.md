@@ -89,8 +89,9 @@ for that job, in this order:
    (`claimed-keys.ts`); if that fails the job is given back and the runner gets a 500 without a key.
    **Options** of the job come next (`JobOptionsSource`, below): the model and token budget of the
    review settings replace the instance's model and context window (`llm.model`, `llm.maxTokens`), and
-   the other options go into `env`. `llm.baseUrl` and `llm.fallbackModels` are never sent (the LLM
-   configuration has no base URL, and the MVP has no fallback chain).
+   the other options go into `env`. `llm.baseUrl`, `llm.requireParameters` and `llm.fallbackModels` are never
+   sent (the LLM configuration has no base URL, and the MVP has no fallback chain); the runner adds
+   OpenRouter's `provider.require_parameters` to every request for OpenRouter by itself (#270).
 3. **The pull request** is read through the provider's `getPullRequest`. A pull request that does not
    exist ends the job with `pr_not_found`, one that is closed or merged with `pull_request_closed`;
    `prUrl` in the response is the URL the provider reports.

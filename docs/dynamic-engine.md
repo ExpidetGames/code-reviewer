@@ -26,10 +26,9 @@ anything.
 | Bound | Where | How |
 |---|---|---|
 | 600 s whole job | adapter watch + proxy | the watch ends the run at the deadline; the proxy refuses calls after it |
-| 30 model calls, 120,000 tokens | proxy | reserve before forwarding, settle from the provider's usage, retries count |
+| cost limit (default 1.00 USD, operator-set, ceiling 20) | proxy | reserve a priced estimate before forwarding, settle from the provider's `usage.cost`; no cost means stop; retries count |
 | request/response bytes | proxy | refused before forwarding / before the engine gets the answer |
-| 200 tool calls | proxy | counted in the provider's answer; the call over the bound is not handed to the engine |
-| 64 KiB per result, 4 MiB cumulative, 100 distinct files | proxy | audited in the next request's history, before it is forwarded |
+| 64 KiB per result, 4 MiB cumulative | proxy | audited in the next request's history, before it is forwarded |
 | what a read can reach | engine config + export | default-deny permissions, read-only export; reads outside the export are denied |
 
 The audit reads the model requests, not the engine's session: the pinned server answers its own

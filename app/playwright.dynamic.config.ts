@@ -113,6 +113,9 @@ export default defineConfig({
         ALLOW_TEST_GITHUB_ENDPOINTS: "true",
         DATABASE_PATH: e2eEnv.pipelineDatabasePath,
         BETTER_AUTH_URL: e2eEnv.pipelineAppUrl,
+        // Saving the Dynamic model asks the provider's model metadata: the fake LLM of the journey answers (#269).
+        LLM_API_BASE_URL: e2eEnv.modelLlmFakeApiUrl,
+        ALLOW_TEST_LLM_ENDPOINTS: "true",
         LLM_MODEL: llmEnv.model,
         LLM_MAX_TOKENS: llmEnv.maxTokens,
         // A push is reviewed after a second instead of after 90.

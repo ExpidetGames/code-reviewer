@@ -52,7 +52,11 @@ import {
   setReviewKind,
   setSkillText,
 } from "./dynamic-form-state.ts";
-import { modelFromAnswer, type SettingsFormModel } from "./form-model.ts";
+import {
+  modelFromAnswer,
+  warningsFromAnswer,
+  type SettingsFormModel,
+} from "./form-model.ts";
 import {
   buildPatch,
   initialFormState,
@@ -76,7 +80,11 @@ import {
 import { ReviewFieldset } from "./review-fieldset.tsx";
 import { WhenFieldset } from "./when-fieldset.tsx";
 import type { SettingsFieldHandlers } from "./settings-fields.tsx";
-import { describeIssue, describeSaveFailure } from "./messages.ts";
+import {
+  describeIssue,
+  describeSaveFailure,
+  describeWarning,
+} from "./messages.ts";
 import type { RequestIssue } from "../../ui/json-request.ts";
 
 type Errors = Partial<Record<string, string>>;
@@ -192,6 +200,8 @@ export function SettingsForm({
   // The message of a request of the Review kind card that failed after another one was saved.
   const [kindError, setKindError] = useState<string | null>(null);
   const [status, setStatus] = useState<"saved" | "unchanged" | null>(null);
+  // The notes of the save that was just shown as saved (#269); only shown with that status.
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   // A save that waits for the person to confirm the switch of the review kind.
   const [confirming, setConfirming] = useState<{
@@ -270,6 +280,7 @@ export function SettingsForm({
     try {
       let currentModel = model;
       let currentState = state;
+      const notes: string[] = [];
       for (const [index, step] of steps.entries()) {
         const result = await api.save(step.body);
         if (!result.ok) {
@@ -294,12 +305,17 @@ export function SettingsForm({
           refuse({}, describeSaveFailure("UNEXPECTED_RESPONSE"));
           return;
         }
+        for (const warning of warningsFromAnswer(result.data)) {
+          const text = describeWarning(warning.field, warning.code);
+          if (text !== null && !notes.includes(text)) notes.push(text);
+        }
         currentModel = next;
         currentState = adoptCards(currentState, next, step.cards);
         setModel(currentModel);
         setState(currentState);
       }
       setErrors({});
+      setWarnings(notes);
       setStatus("saved");
     } finally {
       savingRef.current = false;
@@ -361,7 +377,10 @@ export function SettingsForm({
     }
     if (!adopt(result.data))
       setFormError(describeSaveFailure("UNEXPECTED_RESPONSE"));
-    else setStatus("saved");
+    else {
+      setWarnings([]);
+      setStatus("saved");
+    }
   }
 
   async function resetAll() {
@@ -378,7 +397,10 @@ export function SettingsForm({
     }
     if (!adopt(result.data))
       setFormError(describeSaveFailure("UNEXPECTED_RESPONSE"));
-    else setStatus("saved");
+    else {
+      setWarnings([]);
+      setStatus("saved");
+    }
   }
 
   // Takes every unsaved change back to what was loaded; nothing is sent.
@@ -479,6 +501,13 @@ export function SettingsForm({
             {SAVED_TEXT}
           </Alert>
         ) : null}
+        {status === "saved"
+          ? warnings.map((text) => (
+              <Alert key={text} variant="warning" role="status">
+                {text}
+              </Alert>
+            ))
+          : null}
         {status === "unchanged" ? (
           <Alert variant="info" role="status">
             {UNCHANGED_TEXT}

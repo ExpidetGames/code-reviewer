@@ -63,6 +63,7 @@ export const RUNNER_ERROR_CODES = [
   "llm_timeout",
   "llm_unavailable",
   "llm_bad_request",
+  "llm_context_length_exceeded",
   "llm_output_invalid",
   "model_unknown",
   "timeout",
