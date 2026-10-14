@@ -44,6 +44,10 @@ reader ignores fields it does not know. It identifies workspaces by id and slug 
 - Callers branch on error codes, never on messages. The codes the runner reports are listed in
   `KnownRunnerErrorCode`; the app accepts any code of the right form and stores one it does not know as
   `unknown` (the original stays in the stored result).
+- A failed Dynamic Review checkout reports a stable `errorReason` next to the code `checkout_incomplete`
+  (#296). The reasons are listed in `KnownCheckoutReason`; the app accepts any name of the right form
+  and shows an unknown one with a general sentence. The reason is optional, so a runner and an app of
+  different versions keep working.
 - Secrets (`git.token`, `llm.apiKey`, `leaseToken`) appear in the claim response and in requests that
   prove a claim, and nowhere else.
 - #195 grows v1 without breaking a reader: the optional `ClaimRequest` body (`engines`), the optional

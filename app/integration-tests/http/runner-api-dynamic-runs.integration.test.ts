@@ -236,6 +236,7 @@ describe("a secret in the result of a Dynamic review", () => {
         aiCalls: 1,
         fallbackUsed: false,
         costUsd: null,
+        stoppedEarly: null,
       },
     });
 

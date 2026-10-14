@@ -29,7 +29,7 @@ from code_reviewer_runner.result import ErrorCode
 from .checkout import PreparedContent, prepare_job_content
 from .engine_user import EngineLaunch, sweep_user
 from .export_isolation import AgentIdentity, prepared_checkout
-from .limits import CheckoutError
+from .limits import CheckoutError, CheckoutReason
 from .netguard import IsolationError
 from .pr_context import PreparationContext, load_context
 from .static_isolation import slot_ports
@@ -60,7 +60,7 @@ def _identifier(environment: Mapping[str, str], name: str) -> int:
     if not raw:
         return DEFAULT_ENGINE_ID
     if not raw.isascii() or not raw.isdigit() or int(raw) <= 0:
-        raise CheckoutError(ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED)
+        raise CheckoutError(CheckoutReason.ISOLATION, ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED)
     return int(raw)
 
 
@@ -70,7 +70,7 @@ def engine_identity(environment: Mapping[str, str]) -> AgentIdentity:
     gid = _identifier(environment, ENGINE_GID_VARIABLE)
     # The job process is not the engine user, and the engine user is not the runner's own.
     if uid in (0, os.getuid(), os.geteuid()) or gid in (0, os.getgid(), os.getegid()):
-        raise CheckoutError(ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED)
+        raise CheckoutError(CheckoutReason.ISOLATION, ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED)
     return AgentIdentity(uid, gid)
 
 
@@ -85,7 +85,9 @@ def _sweep_first(identity: AgentIdentity) -> Callable[[], None]:
 
     def sweep() -> None:
         if not sweep_user(identity.uid, identity.gid):
-            raise CheckoutError(ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED)
+            raise CheckoutError(
+                CheckoutReason.ISOLATION, ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED
+            )
 
     return sweep
 
@@ -120,7 +122,9 @@ def production_preparer(
         try:
             ports = slot_ports(environment)
         except IsolationError:
-            raise CheckoutError(ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED) from None
+            raise CheckoutError(
+                CheckoutReason.ISOLATION, ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED
+            ) from None
         parent = Path.cwd().resolve() / PARENT_NAME
         with prepared_checkout(
             job,

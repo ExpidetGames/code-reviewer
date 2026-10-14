@@ -23,7 +23,7 @@ from code_reviewer_runner.job_loop.process import JOB_WORKDIR_PREFIX
 from code_reviewer_runner.result import ErrorCode
 
 from .checkout import PreparedContent, prepare_job_content
-from .limits import DEFAULT_LIMITS, Budget, CheckoutError, Limits
+from .limits import DEFAULT_LIMITS, Budget, CheckoutError, CheckoutReason, Limits
 
 _DISCOVERY = (
     ".opencode",
@@ -42,7 +42,7 @@ _LEASES = Path("/run/code-reviewer-checkout-users")
 
 
 def _refuse() -> CheckoutError:
-    return CheckoutError(ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED)
+    return CheckoutError(CheckoutReason.ISOLATION, ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED)
 
 
 @dataclass(frozen=True)
@@ -124,7 +124,7 @@ for path in (private, parent):
 def _verify_effective_access(job: PreparedJob, deadline: float) -> None:
     remaining = min(5, deadline - time.monotonic())
     if remaining <= 0:
-        raise CheckoutError(ErrorCode.TIMEOUT)
+        raise CheckoutError(CheckoutReason.TIMEOUT, ErrorCode.TIMEOUT)
     executable = shutil.which("python3", path="/usr/local/bin:/usr/bin:/bin")
     if executable is None:
         raise _refuse()
@@ -157,7 +157,7 @@ def _verify_effective_access(job: PreparedJob, deadline: float) -> None:
             raise _refuse()
     except (OSError, subprocess.TimeoutExpired):
         if time.monotonic() >= deadline:
-            raise CheckoutError(ErrorCode.TIMEOUT) from None
+            raise CheckoutError(CheckoutReason.TIMEOUT, ErrorCode.TIMEOUT) from None
         raise _refuse() from None
     finally:
         private.unlink()
