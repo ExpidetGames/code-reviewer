@@ -7,9 +7,10 @@ What it finds, after folding (see `README.md`, "Dynamic Review", for what is and
 - the `<system-reminder>` tag the pinned engine's prompt blesses, in any spelling a reader or model
   would take for it: case, whitespace and slashes after the bracket, `_` or a dash lookalike for the
   hyphen, full-width and other `<` lookalikes, and invisible characters anywhere inside;
-- `<|` and its full-width form, the start of chat-template control tokens (`<|im_start|>`,
-  `<|system|>`, DeepSeek's full-width `<U+FF5C begin U+2581 of U+2581 sentence U+FF5C>`), which
-  must stay text.
+- a chat-template control token, `<|name|>` and its full-width form (`<|im_start|>`, `<|system|>`,
+  DeepSeek's `<U+FF5C begin U+2581 of U+2581 sentence U+FF5C>`), which must stay text. Only the
+  closed form is matched, so `<|` in code (a regex alternation `/<|>/g`, F#'s `<|`, Haskell's `<|>`)
+  is left alone.
 
 The text is **normalised for matching only**. A match rewrites its opening bracket to `&lt;` and
 nothing else, so the rest of the text, including every other character that happens to be
@@ -17,8 +18,11 @@ non-ASCII or invisible, is returned as it was. `&lt;` is also what the output lo
 file already held it, so the transformation is idempotent and entity text is left alone.
 
 Linear time: the folding is one `str.translate`, the invisible characters are removed with a single
-`+` run per match of one character class, and the match has no nested quantifier (a possessive run
-of whitespace and slashes). The offsets of removed characters are tracked by one sweep.
+`+` run per match of one character class, and the offsets of removed characters are tracked by one
+sweep. The match itself is linear because a bracket scans only its own run: whitespace and slashes
+after it are one `[\\s/]` run (the earlier form with two adjacent `\\s*` was quadratic), and a
+template token name is capped at 64 characters. The run is written possessive to rule out
+backtracking over it; the pattern would be linear without it.
 
 A tag split across the text parts of one result is found by matching over the parts joined, and
 the bracket is rewritten in the part that holds it.
@@ -27,11 +31,17 @@ the bracket is rewritten in the part that holds it.
 import re
 from collections.abc import Sequence
 
+from code_reviewer_runner.dynamic_review.ignorable import (
+    CONTROL_RANGES,
+    DEFAULT_IGNORABLE_RANGES,
+    character_class,
+)
+
 _ESCAPED = "&lt;"
 
 _FULL_WIDTH = range(0xFF01, 0xFF5F)
-# Small, single-angle-quote, CJK, math, heavy and modifier forms of `<`.
-_BRACKETS = "\ufe64\u2039\u2329\u3008\u27e8\u276e\u02c2"
+# Small, single-angle-quote, CJK, math, heavy, ornament, double and Canadian syllabics forms of `<`.
+_BRACKETS = "\ufe64\u2039\u2329\u3008\u27e8\u276e\u02c2\u300a\u27ea\u276c\u1438"
 _DASHES = "\u2010\u2011\u2012\u2013\u2014\u2015\u2043\u2212\ufe58\ufe63\u058a_"
 _SLASHES = "\u2044\u2215"
 
@@ -43,15 +53,16 @@ _FOLD = {
     **{ord(char): "/" for char in _SLASHES},
 }
 
-# Characters that render as nothing (format characters, joiners, variation selectors, bidi
-# controls, tag characters). Ignored for matching, never removed from the text.
+# Characters that render as nothing (`ignorable.py`). Ignored for matching, never removed from the
+# text.
 _IGNORABLE = re.compile(
-    "[\u00ad\u034f\u061c\u180b-\u180e\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufe00-\ufe0f\ufeff\ufff9-\ufffb\U000e0001\U000e0020-\U000e007f\U000e0100-\U000e01ef]+"
+    "[" + character_class(DEFAULT_IGNORABLE_RANGES) + character_class(CONTROL_RANGES) + "]+"
 )
 # A bracket in any form: the quick exit for text that cannot hold a match.
 _ANY_BRACKET = re.compile("[<\uff1c" + _BRACKETS + "]")
-# On the folded text. The run of whitespace and slashes is possessive: one scan per bracket.
-_MATCH = re.compile(r"<(?:[\s/]*+system-reminder|\|)", re.IGNORECASE)
+# On the folded text: the tag, or a closed chat-template token (a name without brackets, pipes and
+# whitespace, at most 64 characters).
+_MATCH = re.compile(r"<(?:[\s/]*+system-reminder|\|[^<>|\s]{1,64}\|>)", re.IGNORECASE)
 
 
 def escape_text(text: str) -> str:

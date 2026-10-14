@@ -785,14 +785,15 @@ def test_ordinary_code_with_pipes_and_full_width_brackets_is_counted_as_forwarde
     subject = proxy(upstream)
     file = (
         "<path>/e/a.hs</path>\n<type>file</type>\n<content>\n"
-        "1: main = f <$> a <|> b  -- \u300c\uff1ca\uff1e\u300d\n</content>"
+        "1: main = f <$> a <|> b  -- \u300c\uff1ca\uff1e\u300d <|im_start|>\n</content>"
     )
 
     post(subject, request_body(messages=history_with_result(file)))
 
     sent_bytes = upstream.requests[0][1]
     sent = json.loads(sent_bytes)["messages"][2]["content"]
-    assert "<$> a &lt;|> b" in sent
+    assert "<$> a <|> b" in sent
+    assert "&lt;|im_start|>" in sent
     assert "\u300c\uff1ca\uff1e\u300d" in sent
     assert subject.ledger.returned_bytes == len(sent.encode("utf-8"))
 
