@@ -59,7 +59,7 @@ def answer_with_usage(prompt: int = 10, completion: int = 5) -> dict[str, Any]:
     }
 
 
-def request_body(*, model: str = "deepseek-v4.1-flash", **extra: Any) -> dict[str, Any]:
+def request_body(*, model: str = "deepseek/deepseek-v4.1-flash", **extra: Any) -> dict[str, Any]:
     body: dict[str, Any] = {
         "model": model,
         "messages": [{"role": "user", "content": "hello"}],
@@ -74,7 +74,7 @@ def proxy(upstream: UpstreamPost, **overrides: Any) -> ModelProxy:
     configured: dict[str, Any] = {
         "ledger": BudgetLedger(DynamicLimits()),
         "base_path": "/v1",
-        "model": "deepseek-v4.1-flash",
+        "model": "deepseek/deepseek-v4.1-flash",
         "upstream_url": "https://openrouter.ai/api/v1/chat/completions",
         "upstream_api_key": UPSTREAM_KEY,
         "upstream_model": "deepseek/deepseek-v4.1-flash",
@@ -153,7 +153,17 @@ def test_only_the_model_protocol_paths_are_served() -> None:
     assert upstream.requests == []
     listed = subject.handle("GET", "/v1/models", b"", bearer())
     assert listed.status == 200
-    assert json.loads(listed.body)["data"][0]["id"] == "deepseek-v4.1-flash"
+    assert json.loads(listed.body)["data"][0]["id"] == "deepseek/deepseek-v4.1-flash"
+
+
+# #262-T05
+def test_a_slashed_model_in_either_spelling_is_forwarded_as_the_one_upstream_id() -> None:
+    for spelled in ("deepseek/deepseek-v4.1-flash", "review-proxy/deepseek/deepseek-v4.1-flash"):
+        upstream = Upstream()
+        response = post(proxy(upstream), request_body(model=spelled))
+
+        assert response.status == 200
+        assert json.loads(upstream.requests[0][1])["model"] == "deepseek/deepseek-v4.1-flash"
 
 
 # #197-T04

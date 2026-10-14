@@ -49,7 +49,7 @@ from code_reviewer_runner.result import ErrorCode
 def job_document(
     upstream_url: str,
     *,
-    model: str = "deepseek-v4.1-flash",
+    model: str = "deepseek/deepseek-v4.1-flash",
     upstream_model: str = "deepseek/deepseek-v4.1-flash",
     api_key: str = "dummy-openrouter-key-0123456789",
     pr_url: str = "https://github.com/octo/repo/pull/7",
@@ -282,7 +282,7 @@ def test_a_preparation_that_fails_is_its_stable_code_and_no_engine_starts(
 # different usage shapes (one with detail counters that are already part of the totals).
 MODEL_FIXTURES = {
     "default": {
-        "model": "deepseek-v4.1-flash",
+        "model": "deepseek/deepseek-v4.1-flash",
         "upstream_model": "deepseek/deepseek-v4.1-flash",
         "api_key": "dummy-key-for-the-first-provider-0123",
         "prefix": "/api/v1",

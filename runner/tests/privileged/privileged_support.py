@@ -286,7 +286,7 @@ def dynamic_job(head: str, base_url: str = "http://127.0.0.1:9") -> Job:
                 "command": "review",
                 "reviewKind": "dynamic",
                 "dynamic": {
-                    "model": "deepseek-v4.1-flash",
+                    "model": "deepseek/deepseek-v4.1-flash",
                     "skill": "Look for real bugs.",
                     "limits": {"maxFindings": 5},
                 },

@@ -140,6 +140,8 @@ def test_the_real_engine_reviews_as_the_dedicated_user_and_leaves_nothing_behind
     assert list(sentinels.iterdir()) == []
     # The file it read reached the model through the proxy.
     assert "def handler(user)" in "\n".join(model.tool_results().values())
+    # #262-T05: the default OpenRouter id, slash included, went through the real engine unchanged.
+    assert {request["model"] for request in model.requests} == {"deepseek/deepseek-v4.1-flash"}
     # Nothing is left: no process of the user and no job files; the static rules stay.
     assert user_pids(ENGINE_UID) == []
     with listener() as elsewhere:
