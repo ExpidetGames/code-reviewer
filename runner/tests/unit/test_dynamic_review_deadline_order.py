@@ -12,6 +12,7 @@ the transport is scripted, so nothing here waits or races.
 import json
 import threading
 from collections.abc import Callable, Mapping
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -22,7 +23,12 @@ from code_reviewer_runner.dynamic_review.adapter import (
     EngineClient,
     EngineError,
 )
-from code_reviewer_runner.dynamic_review.budget import BudgetLedger, DynamicLimits, LimitError
+from code_reviewer_runner.dynamic_review.budget import (
+    BudgetLedger,
+    DynamicLimits,
+    LimitError,
+    UnitCosts,
+)
 from code_reviewer_runner.dynamic_review.prompts import ReviewInputs
 from code_reviewer_runner.job import Job, parse_job
 from code_reviewer_runner.result import ErrorCode
@@ -30,6 +36,10 @@ from code_reviewer_runner.result import ErrorCode
 HEAD = "1f3a5c7e9b2d4f60a8c1e3b5d7f90a2c4e6b8d01"
 DEADLINE = 4.0
 UNREACHABLE = EngineError(ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE, "the engine is not reachable")
+
+
+# 1 USD per million input tokens, 4 USD per million output tokens: a call has a price.
+UNIT_COSTS = UnitCosts(input_usd_per_mtok=Decimal(1), output_usd_per_mtok=Decimal(4))
 
 
 class Clock:
@@ -83,7 +93,9 @@ def engine_with(
     job = dynamic_job()
     engine = DynamicEngine(
         job,
-        ledger=BudgetLedger(DynamicLimits(deadline_seconds=DEADLINE), clock=clock),
+        ledger=BudgetLedger(
+            DynamicLimits(deadline_seconds=DEADLINE), clock=clock, unit_costs=UNIT_COSTS
+        ),
         command=["unused"],
         directory=str(tmp_path / "export"),
         proxy_url="http://127.0.0.1:9",

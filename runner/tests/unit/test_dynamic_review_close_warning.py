@@ -10,6 +10,7 @@ process that could not be killed was the next job's refusal. Each now logs one w
 
 import logging
 import os
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -17,9 +18,12 @@ from test_dynamic_review_deadline_order import dynamic_job
 
 from code_reviewer_runner.dynamic_review import adapter, findings_schema
 from code_reviewer_runner.dynamic_review.adapter import DynamicEngine, shutdown_engines
-from code_reviewer_runner.dynamic_review.budget import BudgetLedger, DynamicLimits
+from code_reviewer_runner.dynamic_review.budget import BudgetLedger, DynamicLimits, UnitCosts
 from code_reviewer_runner.dynamic_review.engine_user import EngineLaunch
 from code_reviewer_runner.dynamic_review.prompts import ReviewInputs
+
+# 1 USD per million input tokens, 4 USD per million output tokens: a call has a price.
+UNIT_COSTS = UnitCosts(input_usd_per_mtok=Decimal(1), output_usd_per_mtok=Decimal(4))
 
 
 def launch(tmp_path: Path) -> EngineLaunch:
@@ -39,7 +43,7 @@ def engine_with(tmp_path: Path, mine: EngineLaunch) -> DynamicEngine:
     job = dynamic_job()
     return DynamicEngine(
         job,
-        ledger=BudgetLedger(DynamicLimits(deadline_seconds=4.0)),
+        ledger=BudgetLedger(DynamicLimits(deadline_seconds=4.0), unit_costs=UNIT_COSTS),
         command=["unused"],
         directory=str(tmp_path / "export"),
         proxy_url="http://127.0.0.1:9",

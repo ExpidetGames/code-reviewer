@@ -382,26 +382,42 @@ def test_a_result_over_the_per_result_bound_stops_the_run_before_the_model_sees_
     assert "BIGLINE_" not in json.dumps(model.requests)
 
 
-# #197-T05
-def test_the_tool_call_over_the_bound_is_never_handed_to_the_engine(tmp_path: Path) -> None:
+# #290-T12
+def test_a_run_with_more_model_calls_than_the_old_limits_completes_inside_the_cost_limit(
+    tmp_path: Path,
+) -> None:
     content = prepare(tmp_path, {"src/app.py": b"x = 1\n", "src/sub/mod.py": b"y = 2\n"})
     export = content.export
     steps: list[Step] = [
         asks(tool_call(f"r{index}", "read", {"filePath": str(export / "src/app.py")}))
-        for index in range(5)
+        for index in range(40)
     ]
     model = ScriptedModel(steps=steps, final=findings_for(content.head_sha))
     with model:
-        run = run_engine(
-            model, content, scratch=tmp_path / "scratch", limits=DynamicLimits(max_tool_calls=3)
-        )
+        run = run_engine(model, content, scratch=tmp_path / "scratch")
+
+    # 41 model calls and 41 tool calls: far over the old 30-call limit, still inside the cost limit.
+    assert run.answer.ok, run.answer.error
+    assert len(model.requests) == 41
+    assert run.ledger.model_calls == 41
+    assert run.ledger.tool_calls == 41
+    usage = run.ledger.usage(None)
+    assert usage.cost_usd is not None and 0 < usage.cost_usd < 1
+
+
+# #290-T09: what a provider (or a fake) that reports no `usage.cost` does to a real run.
+def test_a_provider_that_reports_no_cost_ends_the_real_run_with_the_accounting_code(
+    tmp_path: Path,
+) -> None:
+    content = prepare(tmp_path, {"src/app.py": b"x = 1\n"})
+    model = ScriptedModel(steps=[], final=findings_for(content.head_sha), cost=None)
+    with model:
+        run = run_engine(model, content, scratch=tmp_path / "scratch")
 
     assert not run.answer.ok
     assert run.answer.error is not None
-    assert run.answer.error.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
-    # Three calls ran; the fourth was refused in the provider answer: there is no fifth request.
-    assert len(model.requests) == 4
-    assert run.ledger.tool_calls == 3
+    assert run.answer.error.code is ErrorCode.DYNAMIC_ACCOUNTING_FAILED
+    assert len(model.requests) == 1
 
 
 # #197-T05
@@ -414,15 +430,6 @@ def test_a_multi_file_grep_counts_every_file_it_returns(tmp_path: Path) -> None:
         counted = run_engine(ok, content, scratch=tmp_path / "scratch-ok")
     assert counted.answer.ok, counted.answer.error
     assert counted.ledger.files == 3
-
-    over = ScriptedModel(steps=list(steps), final=findings_for(content.head_sha, "src/f0.py"))
-    with over:
-        refused = run_engine(
-            over, content, scratch=tmp_path / "scratch-over", limits=DynamicLimits(max_files=2)
-        )
-    assert refused.answer.error is not None
-    assert refused.answer.error.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
-    assert len(over.requests) == 1
 
 
 # #232-T09

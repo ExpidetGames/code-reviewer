@@ -134,6 +134,11 @@ describe("the Dynamic Review findings schema", () => {
     );
   });
 
+  // #290-T06
+  it("lists the stable context-length failure code", () => {
+    expect([...RUNNER_ERROR_CODES]).toContain("llm_context_length_exceeded");
+  });
+
   // #195-T10
   it("lists the stable model-feature failure code", () => {
     expect([...RUNNER_ERROR_CODES]).toContain(

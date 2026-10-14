@@ -27,6 +27,7 @@ class ErrorCode(StrEnum):
     LLM_UNAVAILABLE = "llm_unavailable"
     LLM_BAD_REQUEST = "llm_bad_request"
     LLM_QUOTA = "llm_quota"
+    LLM_CONTEXT_LENGTH_EXCEEDED = "llm_context_length_exceeded"
     MODEL_UNKNOWN = "model_unknown"
     GIT_AUTH = "git_auth"
     GIT_FORBIDDEN = "git_forbidden"

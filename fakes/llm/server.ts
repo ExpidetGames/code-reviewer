@@ -38,6 +38,8 @@ export type FakeLlmRequest = {
   tools: string[];
   /** The result of every tool call the request carries, by the id of the call. */
   toolResults: Record<string, string>;
+  /** The `provider` object of the body (OpenRouter's routing options, #270); null when absent. */
+  provider: Record<string, unknown> | null;
 };
 
 /** One request's tool calls of the agent script. */
@@ -90,6 +92,12 @@ function toolNames(tools: unknown): string[] {
   );
 }
 
+function providerOf(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
 function toolResultsOf(messages: ChatMessage[]): Record<string, string> {
   const results: Record<string, string> = {};
   for (const message of messages)
@@ -134,11 +142,19 @@ function completion(model: string, content: string) {
         finish_reason: "stop",
       },
     ],
-    usage: { prompt_tokens: 100, completion_tokens: 50, total_tokens: 150 },
+    usage: {
+      prompt_tokens: 100,
+      completion_tokens: 50,
+      total_tokens: 150,
+      cost: 0.0001,
+    },
   };
 }
 
-/** A completion that asks for tool calls, with the fixed token counts a journey can check. */
+/**
+ * A completion that asks for tool calls, with the fixed token counts a journey can check and the
+ * `usage.cost` OpenRouter reports with every answer (a Dynamic run without it stops, #290).
+ */
 function toolCompletion(model: string, id: string, calls: AgentToolCall[]) {
   return {
     id: "chatcmpl-fake-agent",
@@ -163,7 +179,12 @@ function toolCompletion(model: string, id: string, calls: AgentToolCall[]) {
         finish_reason: "tool_calls",
       },
     ],
-    usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 },
+    usage: {
+      prompt_tokens: 100,
+      completion_tokens: 20,
+      total_tokens: 120,
+      cost: 0.0001,
+    },
   };
 }
 
@@ -242,6 +263,7 @@ export async function startLlmFake(
         prompt: `${system}\n${textOf(messages, "user")}`,
         tools: toolNames((body as { tools?: unknown }).tools),
         toolResults: toolResultsOf(messages),
+        provider: providerOf((body as { provider?: unknown }).provider),
       });
 
       if (error !== null) {

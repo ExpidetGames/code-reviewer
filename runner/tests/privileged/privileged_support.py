@@ -51,7 +51,13 @@ TRUSTED_PATH = "/usr/local/bin:/usr/bin:/bin"
 API_KEY = "dummy-openrouter-key-0123456789"
 TOKEN = "dummy-installation-token-0123456789"
 CAPABILITIES = json.dumps(
-    {"tool_choice_required": True, "structured_output": True, "max_output_tokens": 4096}
+    {
+        "tool_choice_required": True,
+        "structured_output": True,
+        "max_output_tokens": 4096,
+        "input_usd_per_mtok": 1,
+        "output_usd_per_mtok": 4,
+    }
 )
 
 # What the Dynamic runner's container is created with (`compose.dynamic.yml` cap_add), by Linux
