@@ -378,7 +378,10 @@ def test_a_stranger_on_the_slots_engine_port_means_no_engine_and_is_never_truste
             python3(),
             "-I",
             "-c",
+            # SO_REUSEADDR like every real server: the port was just used by the engines of the
+            # tests before, and a bind without it fails on their connections in TIME_WAIT.
             "import socket, sys, time; s = socket.socket(); "
+            "s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); "
             "s.bind(('127.0.0.1', int(sys.argv[1]))); s.listen(1); time.sleep(600)",
             str(ENGINE_PORT),
         ],
@@ -394,6 +397,7 @@ def test_a_stranger_on_the_slots_engine_port_means_no_engine_and_is_never_truste
                 if probe.connect_ex(("127.0.0.1", ENGINE_PORT)) == 0:
                     break
             time.sleep(0.05)
+        assert occupant.poll() is None, "the stranger could not take the port"
         with pytest.raises(EngineError) as caught, started_engine(repo, environment, tools):
             raise AssertionError("an engine must not be started on a stranger's port")
         assert caught.value.code is ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE
