@@ -13,6 +13,7 @@ import socket
 import sys
 from collections.abc import Generator
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,7 @@ from code_reviewer_runner.capabilities import ALL_ENGINES
 from code_reviewer_runner.dynamic_review.checkout import PreparedContent
 from code_reviewer_runner.dynamic_review.engine_user import EngineLaunch
 from code_reviewer_runner.dynamic_review.limits import CheckoutError
+from code_reviewer_runner.dynamic_review.self_check import DEFAULT_TOOLS
 from code_reviewer_runner.dynamic_review.supervisor import Prepared
 from code_reviewer_runner.job import parse_job
 from code_reviewer_runner.result import ErrorCode
@@ -131,13 +133,15 @@ def environment() -> dict[str, str]:
 
 
 @pytest.fixture(autouse=True)
-def fake_engine_needs_no_ripgrep(monkeypatch: pytest.MonkeyPatch) -> None:
-    # `run_dynamic_job` builds the engine with the production default (ripgrep required); the fake
-    # engine in these tests has no search tool, so the preflight is satisfied by the test host.
-    def ripgrep_found(*args: object, **kwargs: object) -> str:
-        return "/usr/bin/rg"
-
-    monkeypatch.setattr("code_reviewer_runner.dynamic_review.adapter.shutil.which", ripgrep_found)
+def fake_engine_needs_no_ripgrep(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # `run_dynamic_job` hands the engine the verified ripgrep of the image (`DEFAULT_TOOLS`) and the
+    # adapter requires it to be an executable file named `rg`; the fake engine has no search tool,
+    # so an empty executable stands in for it.
+    ripgrep = tmp_path / "tools" / "rg"
+    ripgrep.parent.mkdir()
+    ripgrep.write_text("#!/bin/sh\n", encoding="utf-8")
+    ripgrep.chmod(0o755)
+    monkeypatch.setattr(runner, "DEFAULT_TOOLS", replace(DEFAULT_TOOLS, ripgrep=ripgrep))
 
 
 # #197-T01
@@ -376,4 +380,28 @@ def test_a_slot_whose_proxy_port_is_held_by_somebody_else_fails_closed_before_an
     assert result.error_code is ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED
     assert upstream.requests == []
     assert preparer.events == ["prepared", "released"]
+    assert not (tmp_path / "export" / ".fake-opencode-trace.jsonl").exists()
+
+
+# #202-T04
+def test_a_job_without_the_verified_ripgrep_file_does_not_start_the_engine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        runner, "DEFAULT_TOOLS", replace(DEFAULT_TOOLS, ripgrep=tmp_path / "missing" / "rg")
+    )
+    preparer = Preparer(tmp_path / "export", {"proxy_calls": 0, "answer": "structured"})
+
+    with FakeUpstream() as upstream:
+        result = runner.run_dynamic_job(
+            job_for(f"{upstream.url}/v1"),
+            None,
+            0.0,
+            environment(),
+            engines=ALL_ENGINES,
+            prepare=preparer,
+        )
+
+    assert not result.ok
+    assert result.error_code is ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE
     assert not (tmp_path / "export" / ".fake-opencode-trace.jsonl").exists()

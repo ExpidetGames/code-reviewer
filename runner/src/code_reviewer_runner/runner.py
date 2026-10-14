@@ -53,6 +53,7 @@ from code_reviewer_runner.dynamic_review.inputs import review_inputs
 from code_reviewer_runner.dynamic_review.limits import CheckoutError
 from code_reviewer_runner.dynamic_review.prompts import compose_system_prompt
 from code_reviewer_runner.dynamic_review.proxy import ModelProxy, capabilities_from_config
+from code_reviewer_runner.dynamic_review.self_check import DEFAULT_TOOLS
 from code_reviewer_runner.dynamic_review.supervisor import (
     ContentPreparer,
     Prepared,
@@ -325,6 +326,8 @@ def run_dynamic_job(
                     exported_paths=frozenset(content.files),
                     launch=prepared.launch,
                     node_bin=environment.get(DYNAMIC_NODE_BIN_VARIABLE) or None,
+                    # The file the startup self-check verified, not a lookup along the PATH.
+                    ripgrep=DEFAULT_TOOLS.ripgrep,
                 )
                 answer = engine.run()
             finally:

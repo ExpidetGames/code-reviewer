@@ -25,9 +25,9 @@ from opencode_support import (
     ScriptedModel,
     Step,
     asks,
-    extra_path,
     findings_for,
     opencode_binary,
+    ripgrep_binary,
     run_engine,
     tool_call,
 )
@@ -537,6 +537,4 @@ def test_the_pinned_server_still_cannot_list_a_session_with_a_stored_schema(
 def test_ripgrep_is_a_trusted_tool_on_the_engines_path() -> None:
     # Without a ripgrep on its PATH the pinned release downloads one from GitHub on the first grep,
     # and the adapter refuses to start the engine instead. The suite needs the same tool.
-    import shutil
-
-    assert shutil.which("rg", path=f"{extra_path() or ''}:/usr/local/bin:/usr/bin:/bin") is not None
+    assert ripgrep_binary() is not None

@@ -904,14 +904,10 @@ def test_an_engine_that_never_gets_a_port_is_a_stable_error(tmp_path: Path) -> N
 
 # #197-T07
 def test_an_engine_without_ripgrep_on_its_path_is_not_started(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
     # The pinned release downloads ripgrep from GitHub on the first grep when none is on its PATH:
     # a runtime download the runner refuses. The check happens before any process exists.
-    def no_ripgrep(*args: object, **kwargs: object) -> None:
-        return None
-
-    monkeypatch.setattr("code_reviewer_runner.dynamic_review.adapter.shutil.which", no_ripgrep)
     fixture = Fixture(tmp_path, {"answer": "structured", "findings": findings()})
     job = dynamic_job()
     dynamic = job.dynamic
@@ -927,6 +923,7 @@ def test_an_engine_without_ripgrep_on_its_path_is_not_started(
         model_schema=findings_schema(),
         inputs=ReviewInputs(pr_url=job.pr_url, pr_title="t", pr_body="b", diff=""),
         exported_paths=frozenset(),
+        ripgrep=tmp_path / "missing" / "rg",
     )
 
     answer = engine.run()
