@@ -55,8 +55,9 @@ def job_document(
     pr_url: str = "https://github.com/octo/repo/pull/7",
     git_base_url: str = "https://api.github.com",
     git_token: str = "dummy-installation-token-0123456789",
+    require_parameters: bool | None = None,
 ) -> dict[str, Any]:
-    return {
+    document: dict[str, Any] = {
         "prUrl": pr_url,
         "command": "review",
         "reviewKind": "dynamic",
@@ -85,6 +86,10 @@ def job_document(
             "baseUrl": upstream_url,
         },
     }
+    if require_parameters is not None:
+        # What a test double that stands in for OpenRouter adds next to its address (#270).
+        document["llm"]["requireParameters"] = require_parameters
+    return document
 
 
 def job_for(upstream_url: str, **options: Any) -> Any:
@@ -156,6 +161,41 @@ def fake_engine_needs_no_ripgrep(tmp_path: Path) -> None:
     ripgrep.write_text("#!/bin/sh\n", encoding="utf-8")
     ripgrep.chmod(0o755)
     FAKE_RIPGREP["path"] = ripgrep
+
+
+# #270-T07
+@pytest.mark.parametrize("fake_asks", [True, False])
+def test_a_dynamic_run_against_a_fake_llm_sends_required_parameters_only_when_the_fake_asks(
+    tmp_path: Path, fake_asks: bool
+) -> None:
+    script = {
+        "proxy_calls": 2,
+        "answer": "structured",
+        "findings": findings(),
+        "results": {"c1": read_result("src/api/handler.ts")},
+    }
+    preparer = Preparer(tmp_path / "export", script)
+
+    with FakeUpstream(
+        [
+            asks(tool_call("c1", "read", {"filePath": "src/api/handler.ts"})),
+            asks(tool_call("c2", "StructuredOutput", findings())),
+        ]
+    ) as upstream:
+        result = runner.run_dynamic_job(
+            job_for(f"{upstream.url}/v1", require_parameters=fake_asks),
+            None,
+            0.0,
+            environment(),
+            engines=ALL_ENGINES,
+            prepare=preparer,
+            publish=RecordingPublisher(),
+        )
+
+    assert result.ok, result.log_tail
+    assert len(upstream.requests) == 2
+    for _headers, body in upstream.requests:
+        assert body.get("provider") == ({"require_parameters": True} if fake_asks else None)
 
 
 # #197-T01

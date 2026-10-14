@@ -306,6 +306,7 @@ def run_dynamic_job(
             upstream_model=job.llm.model,
             capabilities=capabilities,
             capability=capability,
+            require_parameters=job.llm.require_parameters,
         )
     except LimitError as error:
         # The destination cannot serve the run: fail before the engine starts, with no fallback.
