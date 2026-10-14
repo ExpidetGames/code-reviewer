@@ -234,7 +234,7 @@ test.describe("a pull request on its way to a Dynamic Review summary", () => {
 
     // The model: reads the file the pull request does not touch, then reports the finding in it.
     fakeLlm().scriptAgent({
-      steps: [[{ name: "read", arguments: { filePath: "src/lookup.py" } }]],
+      steps: [], // TEMP: red proof, the model never reads beyond the diff
       final: {
         schemaVersion: 1,
         reviewedSha: head,

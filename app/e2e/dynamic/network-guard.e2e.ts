@@ -216,4 +216,11 @@ test.describe("the network guard of the Dynamic lane", () => {
     expect(readGuard()).toEqual(before);
     assertNoExternalAttempts(readGuard());
   });
+
+  // TEMP: red proof, a process reaches for an address that is not a control one
+  test("TEMP a violation fails the test", async () => {
+    await asUser(ROOT, home, "bash", ["-c", "exec 3<>/dev/tcp/198.51.100.7/80"]);
+
+    assertNoExternalAttempts(readGuard());
+  });
 });
