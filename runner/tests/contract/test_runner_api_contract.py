@@ -616,3 +616,69 @@ def test_the_dynamic_failure_codes_are_listed_once_and_reachable() -> None:
     from code_reviewer_runner.result import ErrorCode
 
     assert expected <= {code.value for code in ErrorCode}
+
+
+DYNAMIC_JOB_WITH_CAPABILITIES = DYNAMIC_JOB.parent / "dynamic-review-job-capabilities.json"
+CAPABILITIES_ADVERTISEMENT = "dynamic_capabilities"
+
+
+# #279-T07
+def test_a_dynamic_job_is_valid_with_and_without_the_model_capabilities() -> None:
+    plain = _load(DYNAMIC_JOB)
+    assert "capabilities" not in plain["dynamic"]
+    with_capabilities = _load(DYNAMIC_JOB_WITH_CAPABILITIES)
+    assert with_capabilities["dynamic"]["capabilities"]["maxOutputTokens"] == 8192
+
+    for job in (plain, with_capabilities):
+        assert _accepts("ClaimResponse", _claim_for(job))
+        assert runner_job.parse_job(json.dumps(job)).dynamic is not None
+
+    parsed = runner_job.parse_job(json.dumps(with_capabilities)).dynamic
+    assert parsed is not None and parsed.capabilities is not None
+    assert parsed.capabilities.max_output_tokens == 8192
+    assert parsed.capabilities.context_window_tokens == 1_048_576
+    assert str(parsed.capabilities.input_usd_per_mtok) == "0.6"
+    assert str(parsed.capabilities.output_usd_per_mtok) == "2.4"
+
+
+def _capability_mutations() -> list[Callable[[Document], None]]:
+    return [
+        lambda caps: caps.update(command="x"),
+        lambda caps: caps.pop("toolChoiceRequired"),
+        lambda caps: caps.pop("contextWindowTokens"),
+        lambda caps: caps.update(toolChoiceRequired="yes"),
+        lambda caps: caps.update(maxOutputTokens=0),
+        lambda caps: caps.update(maxOutputTokens=True),
+        lambda caps: caps.update(contextWindowTokens=1.5),
+        lambda caps: caps.update(inputUsdPerMtok=0.6),
+        lambda caps: caps.update(inputUsdPerMtok="-1"),
+        lambda caps: caps.update(inputUsdPerMtok="1e3"),
+        lambda caps: caps.update(outputUsdPerMtok="NaN"),
+        lambda caps: caps.pop("outputUsdPerMtok"),
+        lambda caps: caps.pop("inputUsdPerMtok"),
+    ]
+
+
+# #279-T07: the capability object is closed and typed the same way on both sides.
+@pytest.mark.parametrize("mutate", _capability_mutations())
+def test_the_runner_and_the_contract_refuse_the_same_bad_model_capabilities(
+    mutate: Callable[[Document], None],
+) -> None:
+    job = _load(DYNAMIC_JOB_WITH_CAPABILITIES)
+    mutate(job["dynamic"]["capabilities"])
+    assert not _accepts("ClaimResponse", _claim_for(job))
+    with pytest.raises(runner_job.JobError):
+        runner_job.parse_job(json.dumps(job))
+
+
+# #279-T07: a runner says it understands the descriptor; an older runner sends nothing, an older app
+# ignores the field.
+def test_the_claim_request_may_advertise_that_the_runner_reads_model_capabilities() -> None:
+    advertised = {"engines": ["opencode"], "features": [CAPABILITIES_ADVERTISEMENT]}
+    assert _accepts("ClaimRequest", advertised)
+    assert _accepts("ClaimRequest", {"features": []})
+    assert _accepts("ClaimRequest", {"features": ["a_future_feature"]})
+    assert not _accepts("ClaimRequest", {"features": "dynamic_capabilities"})
+    assert not _accepts("ClaimRequest", {"features": [1]})
+    assert not _accepts("ClaimRequest", {"features": ["Bad Name"]})
+    assert "features" in _example("ClaimRequest")
