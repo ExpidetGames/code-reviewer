@@ -40,6 +40,8 @@ describe("the measured cost of a run in micro-USD", () => {
 
   it("is unknown for a cost no record can hold", () => {
     expect(costUsdToMicroUsd(Number.MAX_VALUE)).toBeNull();
+    expect(costUsdToMicroUsd(2147.483648)).toBeNull();
+    expect(costUsdToMicroUsd(2147.483647)).toBe(2_147_483_647);
     expect(costUsdToMicroUsd(Number.NaN)).toBeNull();
     expect(costUsdToMicroUsd(-1)).toBeNull();
   });
@@ -118,16 +120,19 @@ describe("how a completed job settles its usage record", () => {
     ).toMatchObject({ state: "settled", costMicroUsd: 12346 });
   });
 
-  it("does not trust a usage that is not what the runner API promises", () => {
-    const damaged = { ...USAGE, promptTokens: -1 };
-    expect(
-      settlementOfOutcome({
-        ok: false,
-        errorCode: "review_failed",
-        result: { ok: false, usage: damaged },
-      }),
-    ).toStrictEqual({ state: "void" });
-  });
+  it.each([-1, 2_147_483_648, 1.5])(
+    "does not trust a usage with %s tokens",
+    (promptTokens) => {
+      const damaged = { ...USAGE, promptTokens };
+      expect(
+        settlementOfOutcome({
+          ok: false,
+          errorCode: "review_failed",
+          result: { ok: false, usage: damaged },
+        }),
+      ).toStrictEqual({ state: "void" });
+    },
+  );
 });
 
 describe("the key mode of a run", () => {

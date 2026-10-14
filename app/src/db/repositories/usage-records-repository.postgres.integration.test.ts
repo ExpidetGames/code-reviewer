@@ -87,17 +87,17 @@ describePostgres("the usage records on Postgres", () => {
     await records.reserve(job.id, "managed");
     await records.settle(job.id, {
       state: "settled",
-      costMicroUsd: 3_000_000_000,
-      promptTokens: 3_000_000_000,
+      costMicroUsd: 2_000_000_000,
+      promptTokens: 2_000_000_000,
       completionTokens: 1,
     });
 
     expect(
       await records.sumSettledManagedCostMicroUsd("2000-01-01T00:00:00.000Z"),
-    ).toBe(3_000_000_000);
+    ).toBe(2_000_000_000);
     expect(await records.get(job.id)).toMatchObject({
-      costMicroUsd: 3_000_000_000,
-      promptTokens: 3_000_000_000,
+      costMicroUsd: 2_000_000_000,
+      promptTokens: 2_000_000_000,
     });
   });
 

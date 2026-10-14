@@ -50,7 +50,7 @@ describe("reserving a record", () => {
     await t.records.reserve(job.id, "managed");
 
     expect(await t.records.get(job.id)).toMatchObject({
-      id: expect.any(Number),
+      id: expect.any(String),
       workspaceId: t.workspaceId,
       jobId: job.id,
       reviewKind: "dynamic",
@@ -291,7 +291,11 @@ describe("the page of settled records", () => {
     const waiting = await t.newJob();
     for (const job of [a, b, c, voided, waiting])
       await t.records.reserve(job.id, "own");
-    // b and c settle at the same moment, a a minute later: the id (the order of reservation) breaks the tie.
+    const ids = new Map<string, string>();
+    for (const job of [b, c])
+      ids.set(job.id, (await t.records.get(job.id))?.id ?? "");
+    const idOf = (jobId: string) => ids.get(jobId) ?? "";
+    // b and c settle at the same moment, a a minute later: the record id breaks the tie.
     t.setNow("2026-10-14T12:01:00.000Z");
     await t.records.settle(c.id, SETTLED(3));
     await t.records.settle(b.id, SETTLED(2));
@@ -300,7 +304,10 @@ describe("the page of settled records", () => {
     await t.records.settle(a.id, SETTLED(1));
 
     const first = await t.records.pageSettled({ limit: 2 });
-    expect(first.records.map((record) => record.jobId)).toEqual([b.id, c.id]);
+    const tied = [b, c]
+      .map((job) => job.id)
+      .sort((x, y) => (idOf(x) < idOf(y) ? -1 : 1));
+    expect(first.records.map((record) => record.jobId)).toEqual(tied);
     const second = await t.records.pageSettled({
       after: first.next,
       limit: 2,

@@ -4,25 +4,21 @@
 // claims the job (`reserved`) and settled or voided when the job ends; limits, the usage page and the operator API
 // read it. The table is new and empty, and no existing row is touched.
 //
-// `id` is a sequence, on purpose: it is the one table whose rows are read page by page by an outside reader (the
-// cursor is `(settled_at, id)`), and the sequence is the stable tie-break. Every other identifier is text. A
-// record is kept; there is no retention. The sequence is the one statement written for a dialect (SQLite
-// `integer primary key autoincrement`, Postgres `serial`), because Kysely renders `autoIncrement()` for SQLite only. The checks restate what the repository already keeps true, so a direct
+// `id` is a text identifier like every other (the portable conventions of src/db/README.md allow no sequence); the
+// page of settled records is ordered by `(settled_at, id)`, which only needs it unique. A record is kept; there is
+// no retention. Cost and tokens are `integer` (32 bit on Postgres), so the code treats a larger value as unknown
+// (`MAX_STORED_AMOUNT` in src/usage/usage-records.ts). The checks restate what the repository already keeps true, so a direct
 // write cannot store an unknown state, key mode or kind, a settled record without its time, or a cost on a
 // record that is not settled. Written out because a check cannot take bound values; the lists are the same as
 // USAGE_STATES, KEY_MODES and PROJECT_REVIEW_KINDS in the code.
 import { sql } from "kysely";
 import type { Migration } from "kysely/migration";
-import { databaseDriver } from "../driver.ts";
 
 export const migration: Migration = {
   async up(db) {
-    const postgres = databaseDriver(db) === "postgres";
     await db.schema
       .createTable("usage_records")
-      .addColumn("id", postgres ? "serial" : "integer", (column) =>
-        postgres ? column.primaryKey() : column.primaryKey().autoIncrement(),
-      )
+      .addColumn("id", "text", (column) => column.primaryKey())
       .addColumn("workspace_id", "text", (column) =>
         column.notNull().references("workspaces.id"),
       )
@@ -33,9 +29,9 @@ export const migration: Migration = {
       .addColumn("key_mode", "text", (column) => column.notNull())
       .addColumn("model_tier", "text")
       .addColumn("state", "text", (column) => column.notNull())
-      .addColumn("cost_micro_usd", "bigint")
-      .addColumn("prompt_tokens", "bigint")
-      .addColumn("completion_tokens", "bigint")
+      .addColumn("cost_micro_usd", "integer")
+      .addColumn("prompt_tokens", "integer")
+      .addColumn("completion_tokens", "integer")
       .addColumn("reserved_at", "text", (column) => column.notNull())
       .addColumn("settled_at", "text")
       .addCheckConstraint(

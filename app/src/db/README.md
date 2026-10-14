@@ -255,6 +255,19 @@ existing row:
 - No row and no default means unlimited, as before. Only `resolveEntitlements` (`src/workspaces/entitlements.ts`)
   interprets the data; see `src/workspaces/README.md`, "Entitlements".
 
+### Usage records
+
+Migration `20261014150000_create_usage_records` (#272; epic #268). It adds an empty table and touches no existing row:
+
+- `usage_records` (`id`, `workspace_id`, `job_id` unique, `review_kind`, `key_mode`, `model_tier`, `state`
+  `reserved`/`settled`/`void`, `cost_micro_usd`, `prompt_tokens`, `completion_tokens`, `reserved_at`, `settled_at`):
+  what each run consumed (`usage-records-repository.ts`, scoped; the claim and the completion in
+  `runner-jobs-repository.ts` write it through that repository with the job's own workspace). Checks refuse an
+  unknown state, kind or key mode, a settled record without its time (or any other with one), a measurement on a
+  record that is not settled, and a negative amount. Cost and tokens are `integer` (32 bit on Postgres; the code stores a
+  larger number as unknown). The id is text; readers page through the settled records by `(settled_at, id)`. Rows are
+  never deleted. See `src/usage/README.md`.
+
 ## Workspace scoping
 
 Every repository that reads or writes customer data is created for one workspace:

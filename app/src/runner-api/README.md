@@ -92,6 +92,10 @@ for that job, in this order:
    the other options go into `env`. `llm.baseUrl`, `llm.requireParameters` and `llm.fallbackModels` are never
    sent (the LLM configuration has no base URL, and the MVP has no fallback chain); the runner adds
    OpenRouter's `provider.require_parameters` to every request for OpenRouter by itself (#270).
+   Once the access is resolved, the claim notes whose key the job runs on in its usage record
+   (`recordKeyMode`: `own` for the workspace's key, `managed` for the operator's). The record itself was
+   reserved by `claimNext`, in the transaction of the claim (`src/usage/README.md`); a failure of this call
+   gives the job back.
 3. **The pull request** is read through the provider's `getPullRequest`. A pull request that does not
    exist ends the job with `pr_not_found`, one that is closed or merged with `pull_request_closed`;
    `prUrl` in the response is the URL the provider reports.
@@ -170,6 +174,9 @@ The body is `{ leaseToken, result }`. `result` is what `code-reviewer-run-job` p
   lease; on the last allowed attempt it fails with `runner_shutdown`) and the answer says
   `status: "queued"` (or `failed`). Nothing is stored. Reporting it again, or after the lease was lost,
   is `409`.
+- **Usage record.** In the transaction that ends the job, its usage record is settled from the result: a
+  reported usage settles it with `usage.costUsd` in micro-USD (rounded half up, null when unknown) and the
+  tokens; a failed result without usage voids it (`src/usage/README.md`). A repeated completion changes nothing.
 - Repeating the same completion answers `200` with `alreadyCompleted: true`; another result for a
   completed job is `409`. "Same" is compared on the stored form, so leaving out an optional field is
   not a different result.
@@ -221,6 +228,7 @@ jobs the policy let through.
 
 ## Tests
 
+- `integration-tests/http/runner-api-usage.integration.test.ts`: the usage record from claim to completion.
 - `integration-tests/http/runner-api-claim.integration.test.ts`, `-report`, `-security` and
   `-route-files`: the real handlers with a real SQLite file and the fake GitHub; the route files with
   the wiring of the running server and a delivery that goes through the webhook route first.

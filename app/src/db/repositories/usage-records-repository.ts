@@ -20,7 +20,7 @@ import type {
 
 /** A usage record as the rest of the app sees it. Timestamps are ISO 8601 text in UTC. */
 export type UsageRecord = {
-  id: number;
+  id: string;
   workspaceId: string;
   jobId: string;
   reviewKind: ProjectReviewKind;
@@ -38,7 +38,7 @@ export type UsageRecord = {
 };
 
 /** Where a reader stopped in the settled records: the next page starts after this `(settledAt, id)`. */
-export type UsageCursor = { settledAt: string; id: number };
+export type UsageCursor = { settledAt: string; id: string };
 
 export type UsageRecordsPage = {
   records: UsageRecord[];
@@ -73,11 +73,6 @@ export type UsageRecordsRepository = {
   }): Promise<UsageRecordsPage>;
 };
 
-/** A bigint column comes back as a number from SQLite and as text from Postgres. */
-function toNumber(value: number | string | null): number | null {
-  return value === null ? null : Number(value);
-}
-
 function toRecord(row: Selectable<UsageRecordsTable>): UsageRecord {
   return {
     id: row.id,
@@ -87,9 +82,9 @@ function toRecord(row: Selectable<UsageRecordsTable>): UsageRecord {
     keyMode: row.key_mode as UsageKeyMode,
     modelTier: row.model_tier,
     state: row.state as UsageState,
-    costMicroUsd: toNumber(row.cost_micro_usd),
-    promptTokens: toNumber(row.prompt_tokens),
-    completionTokens: toNumber(row.completion_tokens),
+    costMicroUsd: row.cost_micro_usd,
+    promptTokens: row.prompt_tokens,
+    completionTokens: row.completion_tokens,
     reservedAt: row.reserved_at,
     settledAt: row.settled_at,
   };
@@ -99,6 +94,7 @@ export function createUsageRecordsRepository(
   db: Kysely<Database>,
   workspaceId: WorkspaceId,
   now: () => Date = () => new Date(),
+  newId: () => string = () => crypto.randomUUID(),
 ): UsageRecordsRepository {
   /** The job of this workspace, or undefined. */
   function jobOf(jobId: string) {
@@ -117,6 +113,7 @@ export function createUsageRecordsRepository(
       await db
         .insertInto("usage_records")
         .values({
+          id: newId(),
           workspace_id: workspaceId,
           job_id: job.id,
           review_kind: job.review_kind,
@@ -162,6 +159,7 @@ export function createUsageRecordsRepository(
       await db
         .insertInto("usage_records")
         .values({
+          id: newId(),
           workspace_id: workspaceId,
           job_id: job.id,
           review_kind: job.review_kind,

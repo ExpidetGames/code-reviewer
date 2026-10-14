@@ -22,8 +22,14 @@ export type UsageKeyMode = KeyMode;
 const MICRO_USD_PER_USD = 1_000_000;
 
 /**
+ * The largest cost or token count a record stores: the columns are 32 bit integers on Postgres. A larger number
+ * is not a plausible measurement of one run; it is stored as unknown instead of failing the completion.
+ */
+export const MAX_STORED_AMOUNT = 2_147_483_647;
+
+/**
  * `costUsd` times one million, rounded half up; null for a value no record can hold (not a finite
- * non-negative number, or beyond what a whole number can carry exactly). The product is cut to 15
+ * non-negative number, or more than a record stores). The product is cut to 15
  * significant digits first, so a binary value that sits just below a half (0.0000005 * 1e6) still
  * rounds up, as it would on paper.
  */
@@ -32,7 +38,7 @@ export function costUsdToMicroUsd(costUsd: number): number | null {
   const micro = Math.floor(
     Number((costUsd * MICRO_USD_PER_USD).toPrecision(15)) + 0.5,
   );
-  return Number.isSafeInteger(micro) ? micro : null;
+  return micro <= MAX_STORED_AMOUNT ? micro : null;
 }
 
 /** `own` for the workspace's key, `managed` for the operator's (the source of the resolved LLM access). */
@@ -58,7 +64,12 @@ type ReportedUsage = {
 };
 
 function isCount(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+  return (
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= 0 &&
+    value <= MAX_STORED_AMOUNT
+  );
 }
 
 /** The usage inside a stored result, or null when there is none or it is not what the runner API promises. */

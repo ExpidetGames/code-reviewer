@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ColumnType, Generated } from "kysely";
+import type { ColumnType } from "kysely";
 
 // Row types of every table, the single place Kysely learns the schema from. Add a table here in the
 // same change as the migration that creates it. Column conventions: see README.md in this folder.
@@ -337,8 +337,8 @@ export interface WorkspaceEntitlementsTable {
  * written at the claim and settled or voided when the job ends.
  */
 export interface UsageRecordsTable {
-  /** A sequence: the tie-break of the page of settled records. */
-  id: Generated<number>;
+  /** The tie-break of the page of settled records, after `settled_at`. */
+  id: string;
   workspace_id: string;
   /** Unique: a job has one record, however often it is claimed. */
   job_id: string;
@@ -351,21 +351,9 @@ export interface UsageRecordsTable {
   /** `reserved`, `settled` or `void` (USAGE_STATES). */
   state: string;
   /** The measured cost in millionths of a US dollar; null when unknown. Only on a settled record. */
-  cost_micro_usd: ColumnType<
-    number | string | null,
-    number | null | undefined,
-    number | null
-  >;
-  prompt_tokens: ColumnType<
-    number | string | null,
-    number | null | undefined,
-    number | null
-  >;
-  completion_tokens: ColumnType<
-    number | string | null,
-    number | null | undefined,
-    number | null
-  >;
+  cost_micro_usd: number | null;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
   /** ISO 8601 text in UTC. */
   reserved_at: string;
   /** ISO 8601 text in UTC; only a settled record has it. */
