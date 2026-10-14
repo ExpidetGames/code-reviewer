@@ -275,13 +275,16 @@ def test_a_state_reset_is_named_in_the_result_log_and_only_then(
     assert (STATE_RESET_CODE in result.log_tail) is reset
 
 
-# #197-T13
-def test_a_finding_outside_the_prepared_export_fails_the_job(tmp_path: Path) -> None:
+# #296-T13
+def test_a_finding_outside_the_prepared_export_is_dropped_and_counted_not_failed(
+    tmp_path: Path,
+) -> None:
     document = findings()
-    document["findings"][0]["path"] = "src/not-in-the-export.ts"
+    document["findings"].append({**document["findings"][0], "id": "f-2", "path": "outside.ts"})
     preparer = Preparer(
         tmp_path / "export", {"proxy_calls": 1, "answer": "structured", "findings": document}
     )
+    publisher = RecordingPublisher(preparer)
 
     with FakeUpstream() as upstream:
         result = runner.run_dynamic_job(
@@ -291,11 +294,14 @@ def test_a_finding_outside_the_prepared_export_fails_the_job(tmp_path: Path) -> 
             environment(),
             engines=ALL_ENGINES,
             prepare=preparer,
+            publish=publisher,
         )
 
-    assert not result.ok
-    assert result.error_code is ErrorCode.CHECKOUT_INCOMPLETE
-    assert preparer.events == ["prepared", "released"]
+    assert result.ok, result.log_tail
+    assert len(publisher.calls[0][1].findings) == len(document["findings"]) - 1
+    assert "outside.ts" not in result.log_tail
+    assert "dropped 1 finding(s): finding_path_not_exported" in result.log_tail
+    assert preparer.events == ["prepared", "released", "published"]
 
 
 # #197-T06
@@ -618,8 +624,11 @@ def test_a_publication_that_fails_fails_the_job_with_its_own_code_and_links_no_c
 
 # #253-R03
 def test_a_job_whose_engine_fails_writes_nothing_to_the_pull_request(tmp_path: Path) -> None:
+    # An answer about another head is an engine failure (a finding outside the export is not).
     document = findings()
-    document["findings"][0]["path"] = "src/not-in-the-export.ts"
+    other = "0" * 40
+    document["reviewedSha"] = other
+    document["findings"][0]["reviewedSha"] = other
     preparer = Preparer(
         tmp_path / "export", {"proxy_calls": 1, "answer": "structured", "findings": document}
     )

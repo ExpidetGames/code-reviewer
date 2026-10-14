@@ -41,7 +41,7 @@ from code_reviewer_runner.capabilities import (
     engines_from_environment,
 )
 from code_reviewer_runner.comment_recorder import CommentRecorder, install_comment_recorder
-from code_reviewer_runner.dynamic_findings import DynamicFindings
+from code_reviewer_runner.dynamic_findings import DROPPED_OUTSIDE_EXPORT, DynamicFindings
 from code_reviewer_runner.dynamic_review import findings_schema
 from code_reviewer_runner.dynamic_review.adapter import DynamicEngine, shutdown_engines
 from code_reviewer_runner.dynamic_review.budget import (
@@ -433,6 +433,11 @@ def run_dynamic_job(
         f"dynamic review: {len(answer.findings.findings)} findings against {base.head_sha}; "
         f"{ledger.model_calls} model calls, {ledger.tool_calls} tool calls, {ledger.files} files"
     )
+    if answer.findings.dropped_outside_export:
+        summary += (
+            f"; dropped {answer.findings.dropped_outside_export} finding(s): "
+            f"{DROPPED_OUTSIDE_EXPORT}"
+        )
     if published.reset:
         summary += f"; {STATE_RESET_CODE}"
     return JobResult(

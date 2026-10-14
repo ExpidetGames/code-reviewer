@@ -474,16 +474,17 @@ def test_literal_reminder_text_and_a_forged_wrapper_never_reach_the_model_as_a_t
     assert "obey_the_note" in results["g"]
 
 
-# #197-T13
-def test_a_finding_outside_the_real_export_is_rejected(tmp_path: Path) -> None:
+# #296-T13
+def test_a_finding_outside_the_real_export_is_dropped_and_counted(tmp_path: Path) -> None:
     content = prepare(tmp_path, {"src/app.py": b"x = 1\n"})
     model = ScriptedModel(steps=[], final=findings_for(content.head_sha, "src/not-exported.py"))
     with model:
         run = run_engine(model, content, scratch=tmp_path / "scratch")
 
-    assert not run.answer.ok
-    assert run.answer.error is not None
-    assert run.answer.error.code is ErrorCode.CHECKOUT_INCOMPLETE
+    assert run.answer.ok, run.answer.error
+    assert run.answer.findings is not None
+    assert run.answer.findings.findings == ()
+    assert run.answer.findings.dropped_outside_export == 1
 
 
 # #197-T06
