@@ -19,7 +19,8 @@ from code_reviewer_runner.job_loop.process import ProcessSpec, SubprocessLaunche
 REPORT = (
     "import json, os; print(json.dumps({'uid': os.getuid(), 'gid': os.getgid(), "
     "'groups': os.getgroups(), 'cwd_owner': os.stat('.').st_uid, "
-    "'caps': [l.split()[1] for l in open('/proc/self/status') if l.startswith('CapEff')][0]}))"
+    "'caps': [l.split()[1] for l in open('/proc/self/status') if l.startswith('CapEff')][0], "
+    "'bounding': [l.split()[1] for l in open('/proc/self/status') if l.startswith('CapBnd')][0]}))"
 )
 
 
@@ -49,3 +50,7 @@ def test_a_diff_job_process_is_the_job_user_and_a_dynamic_one_is_the_supervisor(
     assert unprivileged["caps"] == "0" * 16
     assert supervisor["uid"] == os.geteuid() == 0
     assert supervisor["cwd_owner"] == 0
+    # Neither can get NET_ADMIN or SETPCAP back: the loop dropped both from the bounding set at
+    # startup (#244), so every process it starts, root or not, has a bounding set without them.
+    for who in (unprivileged, supervisor):
+        assert int(str(who["bounding"]), 16) & ((1 << 12) | (1 << 8)) == 0

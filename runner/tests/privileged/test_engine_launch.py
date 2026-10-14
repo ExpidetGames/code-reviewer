@@ -18,35 +18,37 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
+import pytest
 from privileged_support import (
     API_KEY,
     ENGINE_GID,
+    ENGINE_PORT,
     ENGINE_UID,
     STRANGER_GID,
     STRANGER_UID,
     TOKEN,
     Repo,
+    connect_as,
     dynamic_job,
-    free_port,
     listener,
-    nft_tables,
     pids_gone,
     python3,
     run_as,
+    slot_proxy,
     wait_for,
 )
 
 from code_reviewer_runner.dynamic_review import findings_schema
-from code_reviewer_runner.dynamic_review.adapter import DynamicEngine
+from code_reviewer_runner.dynamic_review.adapter import DynamicEngine, EngineError
 from code_reviewer_runner.dynamic_review.budget import BudgetLedger, DynamicLimits
 from code_reviewer_runner.dynamic_review.config import new_proxy_capability
 from code_reviewer_runner.dynamic_review.engine_user import EngineLaunch, user_pids
 from code_reviewer_runner.dynamic_review.export_isolation import AgentIdentity, prepared_job
-from code_reviewer_runner.dynamic_review.netguard import table_name
 from code_reviewer_runner.dynamic_review.prompts import ReviewInputs
 from code_reviewer_runner.dynamic_review.supervisor import Prepared, production_preparer
+from code_reviewer_runner.result import ErrorCode
 
 
 @dataclass
@@ -79,12 +81,14 @@ def started_engine(
     tools: Path,
     *flags: str,
     targets: dict[str, Any] | None = None,
-    ports: list[int] | None = None,
 ) -> Generator[Started]:
-    """A sealed export, the user's launch and an engine stand-in that has started."""
+    """A sealed export, the user's launch and an engine stand-in that has started.
+
+    The proxy listens on the slot's fixed port, which the runner's static rules allow.
+    """
     job = dynamic_job(repo.head)
     with (
-        listener() as proxy_port,
+        slot_proxy() as proxy_port,
         production_preparer(environment, content_for=repo.content_for)(job) as prepared,
     ):
         assert isinstance(prepared, Prepared) and prepared.launch is not None
@@ -106,7 +110,6 @@ def started_engine(
             require_ripgrep=False,
             startup_seconds=30.0,
             launch=prepared.launch,
-            port_source=iter(ports).__next__ if ports else (lambda: free_port()),
         )
         engine.start()
         try:
@@ -141,6 +144,9 @@ def test_the_engine_runs_as_the_dedicated_user_and_can_do_nothing_else(
             assert isinstance(status, dict)
             for name in ("CapEff", "CapPrm", "CapAmb"):
                 assert status[name] == "0" * 16, name
+            # The bounding set it inherited from the loop holds no NET_ADMIN or SETPCAP either.
+            bounding = int(cast("dict[str, str]", status)["CapBnd"], 16)
+            assert bounding & ((1 << 12) | (1 << 8)) == 0
             assert status["NoNewPrivs"] == "1"
             assert facts["can_become_root"] is False
             # What it can read: its own config; not the job directory, not the supervisor.
@@ -157,10 +163,11 @@ def test_the_engine_runs_as_the_dedicated_user_and_can_do_nothing_else(
             assert started.capability in str(facts["config_text"])  # the file is its own
             # Where it can connect: another job's service and another address are refused.
             assert facts["reached"] == {"other job": False, "other address": False}
-            assert table_name(ENGINE_UID) in nft_tables()
-        # The engine stopped: nothing of the user runs and its rules are gone.
+        # The engine stopped: nothing of the user runs. Its rules are static and stay: they are
+        # not the job's to remove (and the supervisor holds no NET_ADMIN that could).
         assert user_pids(ENGINE_UID) == []
-        assert table_name(ENGINE_UID) not in nft_tables()
+        after = connect_as(ENGINE_UID, ENGINE_GID, [("other job", "127.0.0.1", other_job)])
+        assert after["other job"]["connected"] is False
 
 
 # #202-config-readability #197-T04
@@ -254,8 +261,8 @@ def test_the_first_start_ends_processes_a_killed_job_left_behind(
             tmpdir=str(tmp_path),
             config_dir=tmp_path,
         )
-        with listener() as proxy:
-            launch.confine(proxy, free_port())
+        with slot_proxy():
+            launch.confine(launch.proxy_port, launch.engine_port)
         launch.close()
 
         assert pids_gone([stray.pid])
@@ -360,11 +367,12 @@ def test_leaving_the_lifetime_removes_what_the_engine_user_filled_and_frees_its_
         assert again.root.exists()
 
 
-# #197-T07 #202-port-ownership
-def test_a_port_a_stranger_holds_is_not_the_engines_and_the_start_moves_on(
+# #197-T07 #202-port-ownership #244-T04
+def test_a_stranger_on_the_slots_engine_port_means_no_engine_and_is_never_trusted(
     repo: Repo, environment: dict[str, str], tools: Path, job_dir: Path
 ) -> None:
-    taken = free_port()
+    # With static rules the engine port is the slot's fixed one: a stranger holding it cannot be
+    # worked around by picking another, so the start fails (and says so) instead of talking to it.
     occupant = subprocess.Popen(
         [
             python3(),
@@ -372,7 +380,7 @@ def test_a_port_a_stranger_holds_is_not_the_engines_and_the_start_moves_on(
             "-c",
             "import socket, sys, time; s = socket.socket(); "
             "s.bind(('127.0.0.1', int(sys.argv[1]))); s.listen(1); time.sleep(600)",
-            str(taken),
+            str(ENGINE_PORT),
         ],
         user=STRANGER_UID,
         group=STRANGER_GID,
@@ -383,14 +391,13 @@ def test_a_port_a_stranger_holds_is_not_the_engines_and_the_start_moves_on(
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
             with socket.socket() as probe:
-                if probe.connect_ex(("127.0.0.1", taken)) == 0:
+                if probe.connect_ex(("127.0.0.1", ENGINE_PORT)) == 0:
                     break
             time.sleep(0.05)
-        second = free_port()
-        with started_engine(repo, environment, tools, ports=[taken, second]) as started:
-            # The engine could not bind the stranger's port, exited, and was started again.
-            assert started.launch.owns_listener(second)
-            assert not started.launch.owns_listener(taken)
+        with pytest.raises(EngineError) as caught, started_engine(repo, environment, tools):
+            raise AssertionError("an engine must not be started on a stranger's port")
+        assert caught.value.code is ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE
+        assert user_pids(ENGINE_UID) == []
     finally:
         occupant.kill()
         occupant.wait()

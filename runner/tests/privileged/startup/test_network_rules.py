@@ -1,10 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 
-"""The engine user's network, against the real kernel (#197-T04, #197-T09).
+"""The engine user's nft rules as such, against the real kernel (#197-T04, #197-T09).
 
-The rules are the production ones (`netguard.py`, nft). The proxy, "another job's proxy" and "an
-external host" are loopback listeners the test owns, so each of them accepts a connection unless
-the rules refuse it; the namespace has no route out, so a refusal can only be the rules at work.
+This is the startup phase (it needs `NET_ADMIN`, which the job phase no longer holds): the rules are
+installed and taken out here the way `static_isolation` installs them once at container start. That
+they still hold for a supervisor without `NET_ADMIN` is proven in the job phase
+(`test_static_rules.py`). The rules are the production ones (`netguard.py`, nft). The proxy,
+"another job's proxy" and "an external host" are loopback listeners the test owns, so each of them
+accepts a connection unless the rules refuse it; the namespace has no route out, so a refusal can
+only be the rules at work.
 """
 
 import errno
@@ -21,6 +25,7 @@ from privileged_support import (
     STRANGER_UID,
     connect_as,
     free_port,
+    installed_rules,
     listener,
     nft_tables,
     run_as,
@@ -61,13 +66,9 @@ def test_the_engine_user_reaches_its_proxy_and_nothing_else_and_other_users_are_
         ]
         if ipv6 is not None:  # a kernel without IPv6 loopback has nothing to refuse
             targets.append(("ipv6 loopback", "::1", ipv6))
-        confinement = NetworkConfinement(ENGINE_UID)
-        confinement.apply(proxy, free_port())
-        try:
+        with installed_rules(proxy, free_port()):
             engine = connect_as(ENGINE_UID, ENGINE_GID, targets)
             stranger = connect_as(STRANGER_UID, STRANGER_GID, targets)
-        finally:
-            confinement.remove()
         after = connect_as(ENGINE_UID, ENGINE_GID, targets)
 
     assert engine["proxy"]["connected"] is True
@@ -115,25 +116,20 @@ def test_datagrams_of_the_engine_user_to_any_address_are_refused_and_flow_again_
         ("127.0.0.2", socket.AF_INET),
         ("::1", socket.AF_INET6),
     ]
-    with listener() as proxy:
-        confinement = NetworkConfinement(ENGINE_UID)
-        confinement.apply(proxy, free_port())
+    with listener() as proxy, installed_rules(proxy, free_port()):
         arrived: dict[str, bool] = {}
-        try:
-            for address, family in cases:
-                sentinel = socket.socket(family, socket.SOCK_DGRAM)
-                try:
-                    sentinel.bind((address, 0))
-                except OSError:
-                    sentinel.close()
-                    continue  # a kernel without that loopback address has nothing to refuse
-                with sentinel:
-                    sentinel.settimeout(1.0)
-                    port = int(sentinel.getsockname()[1])
-                    send_datagram_as_engine(family, address, 0, address, port)
-                    arrived[address] = arrives(sentinel)
-        finally:
-            confinement.remove()
+        for address, family in cases:
+            sentinel = socket.socket(family, socket.SOCK_DGRAM)
+            try:
+                sentinel.bind((address, 0))
+            except OSError:
+                sentinel.close()
+                continue  # a kernel without that loopback address has nothing to refuse
+            with sentinel:
+                sentinel.settimeout(1.0)
+                port = int(sentinel.getsockname()[1])
+                send_datagram_as_engine(family, address, 0, address, port)
+                arrived[address] = arrives(sentinel)
     assert arrived and not any(arrived.values()), arrived
 
     # The same send arrives once the rules are gone, so the refusal above was the rules.
@@ -156,9 +152,8 @@ def test_the_engine_user_cannot_send_on_a_udp_flow_somebody_else_opened_and_clos
         sentinel.bind(("127.0.0.1", 0))
         sentinel.settimeout(1.0)
         sentinel_port = int(sentinel.getsockname()[1])
-        confinement = NetworkConfinement(ENGINE_UID)
-        confinement.apply(proxy, free_port())  # first: only flows seen from now on are tracked
-        try:
+        # First the rules: only flows seen from now on are tracked.
+        with installed_rules(proxy, free_port()):
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as root_side:
                 root_side.bind(("127.0.0.1", 0))
                 root_side.settimeout(1.0)
@@ -172,8 +167,6 @@ def test_the_engine_user_cannot_send_on_a_udp_flow_somebody_else_opened_and_clos
                 socket.AF_INET, "127.0.0.1", source_port, "127.0.0.1", sentinel_port
             )
             reused = arrives(sentinel)
-        finally:
-            confinement.remove()
 
     assert reused is False
 
@@ -192,28 +185,19 @@ def test_the_production_proof_passes_with_the_rules_and_fails_closed_without_the
         assert "other than its model proxy" in unconfined
         assert time.monotonic() - started < 30
 
-        confinement = NetworkConfinement(ENGINE_UID)
-        confinement.apply(proxy, free_port())
-        try:
+        with installed_rules(proxy, free_port()):
             verify_confinement(ENGINE_UID, ENGINE_GID, proxy)
-        finally:
-            confinement.remove()
 
 
 # #197-T09
 def test_applying_again_replaces_the_rules_of_the_user_and_does_not_stack_them() -> None:
-    with listener() as proxy, listener() as second:
-        confinement = NetworkConfinement(ENGINE_UID)
-        confinement.apply(proxy, free_port())
-        confinement.apply(second, free_port())
-        try:
-            reached = connect_as(
-                ENGINE_UID,
-                ENGINE_GID,
-                [("first", "127.0.0.1", proxy), ("second", "127.0.0.1", second)],
-            )
-        finally:
-            confinement.remove()
+    with listener() as proxy, listener() as second, installed_rules(proxy, free_port()):
+        NetworkConfinement(ENGINE_UID).apply(second, free_port())
+        reached = connect_as(
+            ENGINE_UID,
+            ENGINE_GID,
+            [("first", "127.0.0.1", proxy), ("second", "127.0.0.1", second)],
+        )
 
     assert reached["first"]["connected"] is False  # the first port was replaced, not added to
     assert reached["second"]["connected"] is True
@@ -223,28 +207,22 @@ def test_applying_again_replaces_the_rules_of_the_user_and_does_not_stack_them()
 def test_the_engine_user_cannot_change_the_rules_that_confine_it() -> None:
     nft = shutil.which("nft", path="/usr/sbin:/sbin:/usr/bin:/bin")
     assert nft is not None
-    with listener() as proxy:
-        confinement = NetworkConfinement(ENGINE_UID)
-        confinement.apply(proxy, free_port())
-        try:
-            listing = run_as(
-                ENGINE_UID,
-                ENGINE_GID,
-                "import subprocess, sys; "
-                "sys.exit(subprocess.call([sys.argv[1], 'list', 'tables']))",
-                nft,
-            )
-            flushing = run_as(
-                ENGINE_UID,
-                ENGINE_GID,
-                "import subprocess, sys; "
-                "sys.exit(subprocess.call([sys.argv[1], 'delete', 'table', 'inet', sys.argv[2]]))",
-                nft,
-                table_name(ENGINE_UID),
-            )
-            still_there = table_name(ENGINE_UID) in nft_tables()
-        finally:
-            confinement.remove()
+    with listener() as proxy, installed_rules(proxy, free_port()):
+        listing = run_as(
+            ENGINE_UID,
+            ENGINE_GID,
+            "import subprocess, sys; sys.exit(subprocess.call([sys.argv[1], 'list', 'tables']))",
+            nft,
+        )
+        flushing = run_as(
+            ENGINE_UID,
+            ENGINE_GID,
+            "import subprocess, sys; "
+            "sys.exit(subprocess.call([sys.argv[1], 'delete', 'table', 'inet', sys.argv[2]]))",
+            nft,
+            table_name(ENGINE_UID),
+        )
+        still_there = table_name(ENGINE_UID) in nft_tables()
 
     assert listing.returncode != 0
     assert flushing.returncode != 0

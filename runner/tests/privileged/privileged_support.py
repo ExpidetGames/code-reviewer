@@ -13,7 +13,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Generator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +22,11 @@ from fakes.dynamic_git.fixtures import GitFixture, git
 
 from code_reviewer_runner.dynamic_review.checkout import PreparedContent, prepare_content
 from code_reviewer_runner.dynamic_review.limits import Budget, Limits
+from code_reviewer_runner.dynamic_review.netguard import NetworkConfinement, table_name
+from code_reviewer_runner.dynamic_review.static_isolation import (
+    DEFAULT_ENGINE_PORT,
+    DEFAULT_PROXY_PORT,
+)
 from code_reviewer_runner.dynamic_review.transport import LocalTransport
 from code_reviewer_runner.job import Job, parse_job
 from code_reviewer_runner.redaction import Redactor
@@ -42,15 +47,34 @@ CAPABILITIES = json.dumps(
     {"tool_choice_required": True, "structured_output": True, "max_output_tokens": 4096}
 )
 
-# The capability set of `compose.dynamic.yml` (cap_add), by Linux capability number.
-PRODUCTION_CAPABILITIES = {
+# What the Dynamic runner's container is created with (`compose.dynamic.yml` cap_add), by Linux
+# capability number, in two parts (#244). The job part is all that the loop, the job process and
+# the supervisor hold once startup is over; the startup part exists only until the engine user's
+# static nft rules are installed, and is then dropped from the bounding set for good.
+JOB_CAPABILITIES = {
     "CHOWN": 0,
     "DAC_OVERRIDE": 1,
     "FOWNER": 3,
     "KILL": 5,
     "SETGID": 6,
     "SETUID": 7,
-    "NET_ADMIN": 12,
+}
+STARTUP_CAPABILITIES = {"SETPCAP": 8, "NET_ADMIN": 12}
+PRODUCTION_CAPABILITIES = {**JOB_CAPABILITIES, **STARTUP_CAPABILITIES}
+
+# The two ports of the single Dynamic slot (the defaults of `static_isolation`): the static rules
+# of the job phase name them, and a job's model proxy and engine use them.
+PROXY_PORT = DEFAULT_PROXY_PORT
+ENGINE_PORT = DEFAULT_ENGINE_PORT
+
+
+# The environment of the Dynamic runner's loop (compose.dynamic.yml) as far as startup reads it.
+RUNNER_ENVIRONMENT = {
+    "RUNNER_API_URL": "http://app.invalid:3000",
+    "RUNNER_TOKEN": "dummy-runner-token-0123456789-abcdef-0123456789",
+    "RUNNER_DIFF_JOB_USER": f"{JOB_UID}:{JOB_GID}",
+    "RUNNER_DYNAMIC_ENGINE_UID": str(ENGINE_UID),
+    "RUNNER_DYNAMIC_ENGINE_GID": str(ENGINE_GID),
 }
 
 
@@ -103,12 +127,42 @@ def connect_as(uid: int, gid: int, targets: list[tuple[str, str, int]]) -> dict[
 
 
 @contextmanager
-def listener(host: str = "127.0.0.1", family: int = socket.AF_INET) -> Generator[int]:
+def listener(
+    host: str = "127.0.0.1", family: int = socket.AF_INET, port: int = 0
+) -> Generator[int]:
     """A TCP listener the test owns (a stand-in for a service the engine must not reach)."""
     with socket.socket(family, socket.SOCK_STREAM) as server:
-        server.bind((host, 0))
+        # The slot's fixed port is bound again and again, test after test.
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind((host, port))
         server.listen(8)
         yield int(server.getsockname()[1])
+
+
+def slot_proxy() -> AbstractContextManager[int]:
+    """A listener on the slot's fixed proxy port: what the engine user is allowed to reach."""
+    return listener(port=PROXY_PORT)
+
+
+@contextmanager
+def installed_rules(proxy_port: int, engine_port: int) -> Generator[None]:
+    """The engine user's rules for these ports, installed like the startup does, removed after.
+
+    Needs NET_ADMIN, so only the startup phase of the suite can use it. The job phase has the
+    runner's own static rules and no way to touch them.
+    """
+    NetworkConfinement(ENGINE_UID).apply(proxy_port, engine_port)
+    try:
+        yield
+    finally:
+        nft = shutil.which("nft", path="/usr/sbin:/sbin:" + TRUSTED_PATH)
+        assert nft is not None
+        subprocess.run(
+            [nft, "delete", "table", "inet", table_name(ENGINE_UID)],
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
 
 
 def free_port() -> int:

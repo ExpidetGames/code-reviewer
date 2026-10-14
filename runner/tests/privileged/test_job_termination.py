@@ -17,14 +17,13 @@ from privileged_support import (
     ENGINE_GID,
     ENGINE_UID,
     Repo,
-    free_port,
+    connect_as,
     listener,
-    nft_tables,
     pids_gone,
+    slot_proxy,
 )
 
 from code_reviewer_runner.dynamic_review.engine_user import EngineLaunch, user_pids
-from code_reviewer_runner.dynamic_review.netguard import table_name
 
 JOB_PROCESS = Path(__file__).with_name("job_process.py")
 
@@ -64,7 +63,6 @@ def test_sigterm_ends_the_job_its_engine_its_helpers_its_rules_and_its_files(
     try:
         wait_for_helper(job_dir, job)
         assert user_pids(ENGINE_UID), "the engine user runs the engine and its helper"
-        assert table_name(ENGINE_UID) in nft_tables()
 
         job.send_signal(signal.SIGTERM)
         job.wait(timeout=20)
@@ -74,10 +72,13 @@ def test_sigterm_ends_the_job_its_engine_its_helpers_its_rules_and_its_files(
             job.wait()
         job.communicate()
 
-    # Nothing of the user runs, its rules are gone and the job's files were removed by the unwind.
+    # Nothing of the user runs and the job's files were removed by the unwind. The rules are the
+    # runner's static ones: they outlive the job and still confine the user.
     assert pids_gone(list(user_pids(ENGINE_UID)))
     assert user_pids(ENGINE_UID) == []
-    assert table_name(ENGINE_UID) not in nft_tables()
+    with listener() as elsewhere:
+        reached = connect_as(ENGINE_UID, ENGINE_GID, [("elsewhere", "127.0.0.1", elsewhere)])
+    assert reached["elsewhere"]["connected"] is False
     assert not list((job_dir / "dynamic").glob("job-*"))
 
 
@@ -103,7 +104,7 @@ def test_a_job_killed_without_a_chance_to_clean_up_leaves_processes_the_next_job
         tmpdir=str(job_dir),
         config_dir=job_dir,
     )
-    with listener() as proxy:
-        launch.confine(proxy, free_port())
+    with slot_proxy():
+        launch.confine(launch.proxy_port, launch.engine_port)
     launch.close()
     assert pids_gone(leftover)
