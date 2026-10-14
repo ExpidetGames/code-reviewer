@@ -119,7 +119,7 @@ They come from the endpoints that support tools when there are any, otherwise fr
 
 The request goes to the provider's fixed address (`endpoint.ts`; the test stack points it at the fake LLM with
 the existing switch), sends no credential, follows no redirect, has a timeout and the size limit, and the fetch is
-a parameter. The log line holds the model id and the outcome class only (`MODEL_CAPABILITY_CHECK`).
+a parameter. **Outbound call:** the app asks `openrouter.ai` (HTTPS 443, no key) on every save of a Dynamic model that is not in the cache; a host that cannot reach it waits at most 5 seconds and gets the `DYNAMIC_MODEL_UNVERIFIED` warning (`docs/deployment-coolify.md`). The log line holds the model id and the outcome class only (`MODEL_CAPABILITY_CHECK`).
 `createModelCapabilityChecker` remembers a `supported` answer in memory for five minutes (at most 200 models), so
 saving the same model repeatedly asks once; no other outcome is remembered. The settings save is its first user
 (`src/review-settings/README.md`, "Saving a Dynamic model checks it"); the run-time enforcement is the runner

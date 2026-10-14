@@ -12,13 +12,15 @@
 // - **Never throws.** A network error, a timeout, a status other than 200 and 404, an answer that is not
 //   JSON, too large or of another shape is `unverifiable`: the caller decides what that means (the settings
 //   save accepts it with a warning, the run-time check of the runner proxy still applies).
-// - **Logs the model id and the outcome class only.** The model id is validated by the settings (letters,
-//   digits and . _ : / + -), the error text of a failed fetch is never logged (it can name the address).
+// - **Logs the model id and the outcome class only.** A name the settings would refuse
+//   (`MODEL_NAME_PATTERN`) is checked here too: it makes no request and is logged as `(invalid)`. The error text of a failed fetch is never logged (it can name the address).
 // - **A positive answer is remembered for a short time** (`createModelCapabilityChecker`), so saving the
 //   same model repeatedly asks once. No other outcome is remembered: a model that gained tool support, or a
 //   provider that was down, must be seen at the next try.
 //
 // The fetch is a parameter. #279 (per-job capabilities) and #280 (managed tiers) reuse the module.
+import "server-only";
+import { MODEL_NAME_PATTERN } from "./config.ts";
 
 export const MODEL_CAPABILITY_OUTCOMES = [
   /** At least one endpoint lists both `tools` and `tool_choice`. */
@@ -63,6 +65,8 @@ type Endpoint = {
 
 /** The metadata path of a model, or null for a name that cannot be an `author/slug` model. */
 function metadataPath(modelId: string): string | null {
+  // The module is safe on its own: a name the settings would refuse never becomes a request or a log line.
+  if (!MODEL_NAME_PATTERN.test(modelId)) return null;
   // A variant (`:free`, `:nitro`, ...) is a way of routing the same model, not another model.
   const base = modelId.split(":")[0] ?? "";
   const parts = base.split("/");
@@ -208,8 +212,9 @@ export async function checkModelCapabilities({
     path === null
       ? UNKNOWN_MODEL
       : await ask(baseUrl, path, fetchImpl, timeoutMs);
+  const printable = MODEL_NAME_PATTERN.test(modelId) ? modelId : "(invalid)";
   log(
-    `[llm] MODEL_CAPABILITY_CHECK: model=${modelId} outcome=${result.outcome}`,
+    `[llm] MODEL_CAPABILITY_CHECK: model=${printable} outcome=${result.outcome}`,
   );
   return result;
 }

@@ -134,11 +134,44 @@ describe("reading the tool support of a model from the provider's metadata", () 
 
   // #269-T03
   it("is an unknown model without a request when the name has no author and slug", async () => {
-    for (const modelId of ["just-a-name", "a/b/c", "/slug", "author/"]) {
+    for (const modelId of [
+      "just-a-name",
+      "a/b/c",
+      "/slug",
+      "author/",
+      // Path traversal: `fetch` would turn these into another route of the provider.
+      "vendor/.",
+      "vendor/..",
+      "vendor/..:free",
+      "./model",
+      "../model",
+      "..",
+    ]) {
       const { result, calls } = await check(() => endpointsAnswer([]), modelId);
       expect(result, modelId).toEqual({ outcome: "unknown_model" });
       expect(calls, modelId).toHaveLength(0);
     }
+  });
+
+  // #269-T03
+  // #269-T03
+  it("makes no request and logs no raw text for a name the settings would refuse", async () => {
+    const lines: string[] = [];
+    const { fetchImpl, calls } = recordingFetch(() => endpointsAnswer([]));
+    const hostile = "vendor/model\n[llm] FORGED: outcome=supported";
+
+    const result = await checkModelCapabilities({
+      baseUrl: BASE,
+      modelId: hostile,
+      fetchImpl,
+      log: (line) => lines.push(line),
+    });
+
+    expect(result).toEqual({ outcome: "unknown_model" });
+    expect(calls).toHaveLength(0);
+    expect(lines).toEqual([
+      "[llm] MODEL_CAPABILITY_CHECK: model=(invalid) outcome=unknown_model",
+    ]);
   });
 
   // #269-T03

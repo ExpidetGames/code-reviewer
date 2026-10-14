@@ -38,7 +38,7 @@ const smtpPort = Number(process.env.E2E_SMTP_PORT);
 process.env.E2E_LLM_PORT ||= String(61000 + Math.floor(Math.random() * 4000));
 const llmFakePort = Number(process.env.E2E_LLM_PORT);
 // The fake LLM of the journeys that save a Dynamic model (#269): the app checks the model's tool support at
-// this address, so the port has to be known when the app starts. A range of its own, above the others.
+// this address, so the port has to be known when the app starts. A range of its own, above the others: 65000-65499 (the fake GitHub takes 20000-39999, the fake SMTP server 40500-60501, the fake LLM of the LLM key journey 61000-64999).
 process.env.E2E_MODEL_LLM_PORT ||= String(
   65000 + Math.floor(Math.random() * 500),
 );
