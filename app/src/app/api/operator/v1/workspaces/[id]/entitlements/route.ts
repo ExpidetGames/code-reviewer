@@ -1,0 +1,28 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// GET, PUT and DELETE /api/operator/v1/workspaces/{id}/entitlements: read, replace or remove the entitlements of a
+// workspace. Bearer token; absent (404) until `OPERATOR_API_TOKEN` is set. See src/operator-api/README.md.
+import { connection } from "next/server";
+import { withOperatorApi } from "../../../../../../../operator-api/shared.ts";
+
+async function handle(
+  request: Request,
+  context: { params: Promise<{ id: string }> },
+): Promise<Response> {
+  await connection();
+  const { id } = await context.params;
+  return withOperatorApi(request, {
+    kind: "workspace-entitlements",
+    workspaceId: id,
+  });
+}
+
+export {
+  handle as DELETE,
+  handle as GET,
+  handle as HEAD,
+  handle as OPTIONS,
+  handle as PATCH,
+  handle as POST,
+  handle as PUT,
+};
