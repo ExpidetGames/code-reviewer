@@ -109,6 +109,18 @@ class Publisher:
         body = self._render(state)
         return self._write(existing, body, head_sha)
 
+    def read_previous_state(self, head_sha: str, previous_reviewed_sha: str | None) -> ReviewState:
+        """The state the next review starts from (#201): the bot-owned summary of this pull
+        request, validated exactly as a write validates it, or an empty state when there is no
+        summary yet. A state this job cannot account for fails closed, here as at the write."""
+        try:
+            comments = self.client.list_comments(self.pr_number)
+        except GitHubError as error:
+            raise PublishError(error.code, error.detail) from None
+        return self._previous_state(
+            self._summary_comment(comments), head_sha, previous_reviewed_sha
+        )
+
     # -- selection and state ---------------------------------------------------------------
 
     def _summary_comment(self, comments: list[Comment]) -> Comment | None:
@@ -243,10 +255,11 @@ def _redact_finding(finding: Finding, redactor: Redactor) -> Finding:
     )
 
 
-def publisher_for(job: Job) -> Publisher:
+def publisher_for(job: Job, client: CommentsClient | None = None) -> Publisher:
     """The publisher one Dynamic job writes through: its narrowed installation token, its bot
     login and the workspace-less comment routes of its repository. The engine (#197) calls this
-    once it has validated the run's findings."""
+    once it has validated the run's findings. `client` replaces the HTTP client (the preparation
+    of #201 reads through the same publisher and passes its own)."""
     if job.base is None:
         raise PublishError(
             ErrorCode.DYNAMIC_POLICY_VIOLATION, "a Dynamic job without checkout facts"
@@ -255,7 +268,7 @@ def publisher_for(job: Job) -> Publisher:
     if match is None:
         raise PublishError(ErrorCode.DYNAMIC_POLICY_VIOLATION, "the pull request url has no number")
     return Publisher(
-        client=HttpCommentsClient(job.git.base_url, job.base.repository, job.git.token),
+        client=client or HttpCommentsClient(job.git.base_url, job.base.repository, job.git.token),
         bot_login=job.git.bot_login,
         repository=job.base.repository,
         pr_number=int(match.group(1)),

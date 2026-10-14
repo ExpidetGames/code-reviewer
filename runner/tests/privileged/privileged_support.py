@@ -23,6 +23,7 @@ from fakes.dynamic_git.fixtures import GitFixture, git
 from code_reviewer_runner.dynamic_review.checkout import PreparedContent, prepare_content
 from code_reviewer_runner.dynamic_review.limits import Budget, Limits
 from code_reviewer_runner.dynamic_review.netguard import NetworkConfinement, table_name
+from code_reviewer_runner.dynamic_review.pr_context import PreparationContext, metadata_text
 from code_reviewer_runner.dynamic_review.static_isolation import (
     DEFAULT_ENGINE_PORT,
     DEFAULT_PROXY_PORT,
@@ -224,6 +225,10 @@ class Repo:
     @property
     def head(self) -> str:
         return self.git.head
+
+    def context_for(self, job: Job, **options: Any) -> PreparationContext:
+        """The `context_for` of the production preparer: no GitHub to read the pull request from."""
+        return PreparationContext(metadata=metadata_text("Privileged fixture", ""), prior_state="")
 
     def content_for(self, job: Job, directory: Path, **options: Any) -> PreparedContent:
         """The `content_for` of the production preparer, reading this repository, not GitHub."""

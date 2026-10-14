@@ -2,10 +2,11 @@
 
 """The narrow GitHub client the Dynamic publisher writes through (#199).
 
-Only three calls exist, all on issue comments of one pull request: page through them, create one and
-edit one. Nothing else — no reviews, no labels, no inline comments, no pull-request edits. The
-client holds the job's narrowed installation token, refuses redirects (a redirect would carry the
-token elsewhere) and bounds every response.
+Four calls exist: on the issue comments of one pull request, page through them, create one and edit
+one (#199), and read the title and body of the pull request itself (#201, the one read-only call the
+review context needs). Nothing else — no reviews, no labels, no inline comments, no pull-request
+edits. The client holds the job's narrowed installation token, refuses redirects (a redirect would
+carry the token elsewhere) and bounds every response.
 
 A failure is turned into a stable error code the caller branches on; the error text never carries a
 value from the request or the response, because they hold the token.
@@ -68,6 +69,14 @@ class Comment:
         return self.app_slug.casefold() == bot_login.removesuffix("[bot]").casefold()
 
 
+@dataclass(frozen=True)
+class PullRequestText:
+    """The title and body of a pull request, exactly as GitHub returned them. Untrusted text."""
+
+    title: str
+    body: str
+
+
 class CommentsClient(Protocol):
     """The three calls the publisher needs, so a test can replace them with a double."""
 
@@ -124,6 +133,13 @@ class HttpCommentsClient:
             if len(batch) < PER_PAGE:
                 return comments
         raise GitHubError(ErrorCode.GIT_UNAVAILABLE, "the pull request has too many comments")
+
+    def get_pull_request(self, pr_number: int) -> PullRequestText:
+        reply = self._send("GET", f"/repos/{self._repository}/pulls/{pr_number}")
+        text = _pull_request_text(_json(reply))
+        if text is None:
+            raise GitHubError(ErrorCode.GIT_UNAVAILABLE, "the pull request answer is malformed")
+        return text
 
     def create_comment(self, pr_number: int, body: str) -> Comment:
         _check_body(body)
@@ -248,6 +264,18 @@ def _comment(value: Any) -> Comment | None:
         author_type=author_type if isinstance(author_type, str) else "",
         app_slug=app_slug if isinstance(app_slug, str) else None,
     )
+
+
+def _pull_request_text(value: Any) -> PullRequestText | None:
+    if not isinstance(value, dict):
+        return None
+    data = cast("dict[str, Any]", value)
+    title = data.get("title")
+    body = data.get("body")
+    # GitHub answers a pull request without a description with `null`.
+    if not isinstance(title, str) or not (body is None or isinstance(body, str)):
+        return None
+    return PullRequestText(title=title, body=body or "")
 
 
 def _comments(value: Any) -> list[Comment]:
