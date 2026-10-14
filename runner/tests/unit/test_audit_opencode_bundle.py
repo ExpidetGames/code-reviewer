@@ -5,8 +5,9 @@
 The OpenCode release is a Bun-compiled executable: its bundled JavaScript dependencies are not
 visible to the npm or uv collectors of the license check. `scripts/audit_opencode_bundle.py` reads
 the upstream `bun.lock` at the pinned commit, computes the production dependency closure of the
-`packages/opencode` workspace and writes the reviewed snapshot `runner/opencode-bundled-licenses.json`
-that `make check-licenses` judges offline. Nothing here touches the network: the fetcher is injected.
+`packages/opencode` workspace and writes the reviewed snapshot
+`runner/opencode-bundled-licenses.json` that `make check-licenses` judges offline. Nothing here
+touches the network: the fetcher is injected.
 """
 
 import hashlib
@@ -66,7 +67,11 @@ LOCK = """{
   },
   "packages": {
     "root-only": ["root-only@1.0.0", "", {}, "sha512-root"],
-    "alpha": ["alpha@1.0.0", "", { "dependencies": { "beta": "^1.0.0", "semver": "^6.0.0", }, "optionalDependencies": { "opt": "1.0.0", "opt-absent": "1.0.0", }, "peerDependencies": { "peer": "*", "peer-absent": "*", } }, "sha512-alpha"],
+    "alpha": ["alpha@1.0.0", "", {
+      "dependencies": { "beta": "^1.0.0", "semver": "^6.0.0", },
+      "optionalDependencies": { "opt": "1.0.0", "opt-absent": "1.0.0", },
+      "peerDependencies": { "peer": "*", "peer-absent": "*", },
+    }, "sha512-alpha"],
     "beta": ["beta@1.2.0", "", { "dependencies": { "alpha": "^1.0.0", } }, "sha512-beta"],
     "opt": ["opt@1.0.0", "", {}, "sha512-opt"],
     "peer": ["peer@3.0.0", "", {}, "sha512-peer"],
@@ -75,7 +80,9 @@ LOCK = """{
     "alpha/semver": ["semver@6.9.9", "", {}, "sha512-alpha-semver"],
     "dev-tool": ["dev-tool@1.0.0", "", {}, "sha512-dev"],
     "@scope/core": ["@scope/core@workspace:packages/core"],
-    "core-dep": ["core-dep@2.0.0", "", { "dependencies": { "@scope/deep": "1.0.0", } }, "sha512-core-dep"],
+    "core-dep": ["core-dep@2.0.0", "", {
+      "dependencies": { "@scope/deep": "1.0.0", },
+    }, "sha512-core-dep"],
     "@scope/deep": ["@scope/deep@1.0.0", "", {}, "sha512-deep"],
     "core-dev": ["core-dev@1.0.0", "", {}, "sha512-core-dev"],
     "unrelated-dep": ["unrelated-dep@1.0.0", "", {}, "sha512-unrelated"],
@@ -85,6 +92,10 @@ LOCK = """{
 """
 
 REGISTRY = "https://registry.npmjs.org/"
+
+
+def no_sleep(_seconds: float) -> None:
+    """The retries of the script wait; the tests do not."""
 
 
 def registry_document(license_value: Any = "MIT") -> bytes:
@@ -137,11 +148,23 @@ def test_a_nested_override_wins_over_the_hoisted_version() -> None:
     closure = audit.compute_closure(audit.parse_lock(LOCK), "packages/opencode")
 
     versions = {(p.name, p.version) for p in closure.packages}
-    # opencode asks for semver: opencode/semver (7.7.4); alpha asks for semver: alpha/semver (6.9.9);
-    # the hoisted 6.3.1 is nobody's choice here and must not appear.
+    # opencode asks for semver: opencode/semver (7.7.4); alpha asks for semver: alpha/semver
+    # (6.9.9); the hoisted 6.3.1 is nobody's choice here and must not appear.
     assert ("semver", "7.7.4") in versions
     assert ("semver", "6.9.9") in versions
     assert ("semver", "6.3.1") not in versions
+
+
+def test_one_version_that_the_lock_holds_under_several_keys_is_listed_once() -> None:
+    lock = LOCK.replace(
+        '"beta": ["beta@1.2.0", "", { "dependencies": { "alpha": "^1.0.0", } }, "sha512-beta"],',
+        '"beta": ["beta@1.2.0", "", { "dependencies": { "alpha": "^1.0.0", "semver": "^6.0.0", } },'
+        ' "sha512-beta"],\n    "beta/semver": ["semver@6.9.9", "", {}, "sha512-alpha-semver"],',
+    )
+
+    closure = audit.compute_closure(audit.parse_lock(lock), "packages/opencode")
+
+    assert [p.version for p in closure.packages if p.name == "semver"] == ["6.9.9", "7.7.4"]
 
 
 def test_workspace_dependencies_are_followed_into_the_other_workspace() -> None:
@@ -168,7 +191,7 @@ def test_optional_and_peer_dependencies_that_the_lock_resolves_are_included_and_
 def test_a_missing_hard_dependency_stops_the_audit() -> None:
     lock = LOCK.replace('"gone-optional": ["gone-optional@1.0.0", "", {}, "sha512-gone"],', "")
 
-    with pytest.raises(audit.AuditError, match="AUDIT_DEPENDENCY_NOT_IN_LOCK.*gone-optional"):
+    with pytest.raises(audit.AuditError, match=r"AUDIT_DEPENDENCY_NOT_IN_LOCK.*gone-optional"):
         audit.compute_closure(audit.parse_lock(lock), "packages/opencode")
 
 
@@ -211,7 +234,7 @@ def test_the_license_of_registry_metadata_becomes_one_spdx_expression(
     assert audit.license_of(metadata) == expected
 
 
-def snapshot_for(network: FakeNetwork, *, sleep: Any = lambda _s: None) -> dict[str, Any]:
+def snapshot_for(network: FakeNetwork, *, sleep: Any = no_sleep) -> dict[str, Any]:
     return audit.build_snapshot(
         commit=COMMIT,
         repository="https://github.com/anomalyco/opencode",
@@ -335,7 +358,7 @@ def test_a_failing_registry_is_retried_and_then_stops_the_audit() -> None:
             version="1",
             fetch=down,
             generated_on=date(2026, 10, 14),
-            sleep=lambda _s: None,
+            sleep=no_sleep,
         )
 
 
@@ -373,7 +396,7 @@ def test_the_script_writes_the_snapshot_for_the_pinned_commit_when_asked_to_fetc
         ["--fetch", "--pin", str(pin), "--output", str(output)],
         fetch=network,
         today=date(2026, 10, 14),
-        sleep=lambda _s: None,
+        sleep=no_sleep,
     )
 
     assert code == 0

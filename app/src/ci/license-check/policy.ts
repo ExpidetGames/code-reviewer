@@ -5,11 +5,41 @@
 // THIRD_PARTY_LICENSES.md (which a test compares with this file) read the same facts.
 import { z } from "zod";
 
-export const ECOSYSTEMS = ["npm", "python"] as const;
+/**
+ * `bun` names the npm packages that are bundled inside the Bun-compiled OpenCode executable. They
+ * come from a reviewed snapshot (binaries.ts), not from an installed tree, but are judged by the
+ * same rules and can carry exceptions like any other package.
+ */
+export const ECOSYSTEMS = ["npm", "python", "bun"] as const;
 export type Ecosystem = (typeof ECOSYSTEMS)[number];
 
 const ecosystem = z.enum(ECOSYSTEMS);
 const nonEmpty = z.string().min(1);
+
+/**
+ * A prebuilt binary that the Dynamic runner image ships. Its pin file (see binaries.ts) is what the
+ * image build installs; this entry is the decision that the license check holds the pin to.
+ */
+const binary = z.strictObject({
+  /** The name that THIRD_PARTY_LICENSES.md and NOTICE use, compared without regard to case. */
+  name: nonEmpty,
+  /** The pin file, relative to the repository root. */
+  pin: nonEmpty,
+  version: nonEmpty,
+  /** The source commit of the release, when the pin has one; the documents must name it. */
+  commit: z
+    .string()
+    .regex(/^[0-9a-f]{40}$/)
+    .optional(),
+  /** The SPDX license that the policy expects; it must also be allowed. */
+  license: nonEmpty,
+  /**
+   * The reviewed snapshot of the third-party packages inside the binary (a Bun executable hides
+   * them from the npm collector), relative to the repository root.
+   */
+  bundledLicenses: nonEmpty.optional(),
+  reason: nonEmpty,
+});
 
 export const policySchema = z.strictObject({
   /** SPDX ids that may appear in any dependency, compared without regard to case. */
@@ -40,7 +70,11 @@ export const policySchema = z.strictObject({
       reason: nonEmpty,
     }),
   ),
+  /** Prebuilt binaries of the runner image, audited from their pin files (binaries.ts). */
+  binaries: z.array(binary),
 });
+
+export type BinaryEntry = z.infer<typeof binary>;
 
 export type Policy = z.infer<typeof policySchema>;
 

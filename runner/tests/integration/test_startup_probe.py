@@ -64,7 +64,10 @@ def test_a_stranger_on_the_proxy_port_fails_the_probe(monkeypatch: pytest.Monkey
 def test_a_port_with_a_connection_in_time_wait_is_still_free(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(self_check, "verify_confinement", lambda uid, gid, port: None)
+    def confinement(uid: int, gid: int, allowed_port: int) -> None:
+        return None
+
+    monkeypatch.setattr(self_check, "verify_confinement", confinement)
     with socket.socket() as old_server:
         old_server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         old_server.bind((PROXY_HOST, 0))
