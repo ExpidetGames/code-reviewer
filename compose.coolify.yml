@@ -70,6 +70,9 @@ services:
       GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
       # The runner presents the same token; both services read the one variable.
       RUNNER_TOKEN: ${RUNNER_TOKEN:?}
+      # Optional. The bearer token of the operator API (/api/operator/v1, src/operator-api/README.md). Empty or
+      # unset: the API does not exist (404). At least 32 characters, different from RUNNER_TOKEN and APP_SECRET.
+      OPERATOR_API_TOKEN: ${OPERATOR_API_TOKEN:-}
       # Legacy: the shared LLM key of an installation from before accounts. The update imports it once
       # into the default workspace and ignores it afterwards; every workspace enters its own key in the
       # UI. Not needed for the stack to start: without a key a workspace's review jobs fail with the

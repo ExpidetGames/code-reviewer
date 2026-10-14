@@ -7,6 +7,7 @@ other way round, so a change to the format has to change the file and both sides
 | File                         | What                                                                                                                                                                                         |
 | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `runner-api.v1.json`         | The wire format of the runner API v1 (JSON Schema, draft 2020-12): the claim request, the claim response, the heartbeat and complete requests and responses, and every error. The `$defs` are the named bodies. |
+| `operator-api.v1.json`       | The wire format of the operator API (#275, `app/src/operator-api/README.md`): the workspace list, the entitlements of a workspace and of the instance default, the write body and every error. For an external service that sets limits; it exists only while the app has an `OPERATOR_API_TOKEN`. `examples/operator-api/<Definition>.json` holds one valid example per body. |
 | `examples/<Definition>.json` | One valid document per body. Both test suites validate them, so an example can never drift from the schema. They hold dummy values only.                                                     |
 | `dynamic-review/schema.v1.json` | The neutral findings of a Dynamic Review (#195), before the runner renders them: opaque id, P0–P3, confidence, bounded title/body, a lexically safe repository-relative path, a line range (ordering is the runner's semantic check), evidence references, and the reviewed SHA. Resolutions of earlier findings sit on the run envelope (`resolvedIds`), so a run that leaves no current finding can still report them. No permission, provider, routing, endpoint or command field. `dynamic-review/example.v1.json` and `example-resolved.v1.json` are validated by both suites. |
 
@@ -20,6 +21,16 @@ other way round, so a change to the format has to change the file and both sides
   valid, and the rules the runner relies on hold (the job input is closed, because the runner refuses
   unknown fields; the only command is `review`; a previous release's review payload — the legacy `args`
   and the removed tools' env families — is still accepted; the error code rules of a result).
+
+## The operator API contract
+
+`operator-api.v1.json` is checked by the app only (`app/integration-tests/compatibility/operator-api-contract.integration.test.ts`, with
+Ajv): the examples are valid, the real answers of the API (success and every kind of error) are valid, the
+bodies the app accepts and refuses agree with `EntitlementsWrite` for the cases the schema can express (the
+rest, such as a start in the future or backwards, is the app's rule and documented in the definition), and the
+error codes, key modes, limit names and id pattern equal the app's lists. The version is in the path
+(`/api/operator/v1`) and in every body (`"version": 1`); the file only grows in ways readers may ignore, and a
+reader ignores fields it does not know. It identifies workspaces by id and slug only. No runner reads it.
 
 ## Rules of version 1
 
