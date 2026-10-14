@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ColumnType } from "kysely";
+import type { ColumnType, Generated } from "kysely";
 
 // Row types of every table, the single place Kysely learns the schema from. Add a table here in the
 // same change as the migration that creates it. Column conventions: see README.md in this folder.
@@ -332,6 +332,46 @@ export interface WorkspaceEntitlementsTable {
   updated_by: string | null;
 }
 
+/**
+ * What one run consumed (src/db/repositories/usage-records-repository.ts, src/usage/README.md). One row per job,
+ * written at the claim and settled or voided when the job ends.
+ */
+export interface UsageRecordsTable {
+  /** A sequence: the tie-break of the page of settled records. */
+  id: Generated<number>;
+  workspace_id: string;
+  /** Unique: a job has one record, however often it is claimed. */
+  job_id: string;
+  /** A ProjectReviewKind, copied from the job. */
+  review_kind: string;
+  /** `own` or `managed` (KEY_MODES): whose key the run used. */
+  key_mode: string;
+  /** The managed model tier; null until the tiers exist. */
+  model_tier: string | null;
+  /** `reserved`, `settled` or `void` (USAGE_STATES). */
+  state: string;
+  /** The measured cost in millionths of a US dollar; null when unknown. Only on a settled record. */
+  cost_micro_usd: ColumnType<
+    number | string | null,
+    number | null | undefined,
+    number | null
+  >;
+  prompt_tokens: ColumnType<
+    number | string | null,
+    number | null | undefined,
+    number | null
+  >;
+  completion_tokens: ColumnType<
+    number | string | null,
+    number | null | undefined,
+    number | null
+  >;
+  /** ISO 8601 text in UTC. */
+  reserved_at: string;
+  /** ISO 8601 text in UTC; only a settled record has it. */
+  settled_at: string | null;
+}
+
 /** The LLM key handed to a runner with the claim of a job, encrypted (src/runner-api/claimed-keys.ts). */
 export interface JobClaimedKeysTable {
   job_id: string;
@@ -496,6 +536,7 @@ export interface Database {
   secrets: SecretsTable;
   workspace_secrets: WorkspaceSecretsTable;
   workspace_entitlements: WorkspaceEntitlementsTable;
+  usage_records: UsageRecordsTable;
   job_claimed_keys: JobClaimedKeysTable;
   password_reset_tokens: PasswordResetTokensTable;
   email_verification_tokens: EmailVerificationTokensTable;

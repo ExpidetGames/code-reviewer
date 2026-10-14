@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
+import type { JsonValue } from "../integrations/types.ts";
 import {
   costUsdToMicroUsd,
   keyModeOfAccessSource,
@@ -73,7 +74,12 @@ describe("how a completed job settles its usage record", () => {
   });
 
   it("settles a run that succeeded without a usage with everything unknown", () => {
-    for (const result of [{ ok: true, usage: null }, { ok: true }, null])
+    const results: JsonValue[] = [
+      { ok: true, usage: null },
+      { ok: true },
+      null,
+    ];
+    for (const result of results)
       expect(settlementOfOutcome({ ok: true, result })).toStrictEqual({
         state: "settled",
         costMicroUsd: null,
@@ -84,9 +90,18 @@ describe("how a completed job settles its usage record", () => {
 
   // #272-T04
   it("voids a failed job that reported no usage", () => {
-    for (const result of [{ ok: false, usage: null }, { ok: false }, null])
+    const results: JsonValue[] = [
+      { ok: false, usage: null },
+      { ok: false },
+      null,
+    ];
+    for (const result of results)
       expect(
-        settlementOfOutcome({ ok: false, errorCode: "checkout_failed", result }),
+        settlementOfOutcome({
+          ok: false,
+          errorCode: "checkout_failed",
+          result,
+        }),
       ).toStrictEqual({ state: "void" });
     expect(
       settlementOfOutcome({ ok: false, errorCode: "checkout_failed" }),
