@@ -247,9 +247,16 @@ the context window, the output allowance, and the unit prices per million tokens
 OpenRouter model runs without the operator describing it**. The values are read at the bound a
 reservation needs, over the endpoints that can serve the run (those that list `tools` and
 `tool_choice` and do not say they cannot force a tool choice): the smallest window and output limit, the
-highest prices. The output allowance is at most 8,192 tokens (the allowance of the built-in default
-model; a larger limit of the model is not an invitation, since it is reserved against the cost limit on
-every call). The descriptor comes from the app, never from the repository, the pull request or the
+highest prices. The output allowance is at most 32,768 tokens for a model whose highest output price is
+4 USD per million tokens or less (the app's `DYNAMIC_LARGE_OUTPUT_ALLOWANCE_TOKENS`, and the allowance
+of the built-in default model), and 8,192 for a dearer or unpriced one; a larger limit of the model is
+not an invitation, since the allowance is reserved against the cost limit on every call (about 0.13
+USD at the price bound). Why (#309): a review of up to 30 findings plus the reasoning tokens, which
+count against `max_tokens`, does not fit 8,192, and a turn cut off there ends without an answer. The
+source for the default model: OpenRouter's `/api/v1/models/deepseek/deepseek-v4.1-flash/endpoints`,
+read on 2026-10-14, where the model's top provider states `max_completion_tokens` 943718 and the
+smallest endpoint limit is 131072, so 32,768 is below every limit; the smallest limit of the endpoints
+still wins when it is lower. The descriptor comes from the app, never from the repository, the pull request or the
 model, and it only goes to a runner that said it reads it (`features: ["dynamic_capabilities"]` in its
 claim; an older runner never receives the field, see `contracts/README.md`).
 
@@ -288,7 +295,7 @@ parameters on every request (#270), which ends the run with `dynamic_model_featu
 override** for the operator who wants one, in JSON:
 
 ```json
-{"tool_choice_required": true, "structured_output": true, "max_output_tokens": 8192,
+{"tool_choice_required": true, "structured_output": true, "max_output_tokens": 32768,
  "context_window_tokens": 1048576, "input_usd_per_mtok": 0.5, "output_usd_per_mtok": 2}
 ```
 
@@ -452,6 +459,59 @@ a JSON-schema format is stored (the defect of #85, pinned by an engine test), or
 `/event` stream, which needs an event reader of its own. That is a follow-up if turns ever need to
 outlive one connection.
 
+## Recovery: a turn that ends without an answer gets one more chance (#309)
+
+The pinned OpenCode ends a turn, and fails it with "Model did not produce structured output", as
+soon as a model step finishes with any reason but `tool-calls` while no `StructuredOutput` call was
+captured (`session/prompt.ts` of v1.19.0). That happens when the model answers in prose although
+the tool choice is `required`, when its output is cut off at the allowance (`length`, mid tool call),
+and when a provider says `stop` for a step that asked for tools. A production run died this way after
+a 257 s turn with `llm_output_invalid: the engine returned no structured answer`, far from the cost
+limit and the clock, so the wrap-up above never acted. The engine config has no step limit
+(`agent.steps` is unset, so the engine's own maximum is infinite), and `tool_choice: required` is
+sent on every request and forwarded by the proxy (both checked against the real binary).
+
+- **Tool steps are tool steps.** The proxy reports a step with tool calls to the engine as
+  `tool_calls` even if the provider called it `stop`, so that case no longer ends the turn.
+- **One recovery.** When a turn ends without a structured answer, the adapter asks the ledger
+  (`begin_recovery`). The ledger says yes only if no final call was granted yet, a model call was
+  made, more than the wrap-up's clock reserve is left (150 s of 600 s, a quarter of a shorter
+  deadline: the recovery call writes a whole review) and the estimate of one more call (the last
+  prompt, one output allowance for the model's last answer, a 4 KiB slack) fits the cost limit. Only
+  the engine's own missing-answer error (`StructuredOutputError`, or a turn that ended with no error
+  at all) is recovered; another error of the engine (`APIError`, an abort, a content filter, ...) is
+  its own failure and ends the run as before, with the error name in the detail. The adapter then sends a second message to the same session with the runner's fixed
+  prompt (`Return the complete review now.`, no tag) and the same structured format. The first model
+  call of that turn is granted as the run's final call: reserved like any call, rewritten by the
+  proxy exactly like the wrap-up call (return tool alone, `tool_choice: required`, the instruction
+  last), and after it every other request is refused. The instruction says that the previous turn
+  ended without the review and that its last answer is not shown, and asks for the review based on
+  what the model examined, concise (at most 10 findings, short descriptions), so a cut-off at the
+  output allowance is less likely to repeat. The pinned engine does not replay the message that
+  ended the turn (a prose answer, a cut-off return call): the history of the recovery call holds the
+  task and the tool steps with their results, but not that answer, so the model rewrites the review
+  from the tool results. The instruction uses the `<runner-wrap-up>` tag, so every escape that
+  protects the wrap-up instruction covers it.
+- **No retry loop.** A run has at most one final call: the recovery or the wrap-up, not both. If the
+  recovery also yields nothing the run fails with `llm_output_invalid` as before; if the wrap-up's
+  final call came back without the answer there is no recovery either.
+- **F3 of #301.** A final call (wrap-up or recovery) that answered without the return tool makes
+  every later request fail with `llm_output_invalid`, not `dynamic_budget_exceeded`.
+- **What is recorded.** A recovered review is complete as far as the model is concerned, so it is
+  published without a notice and `usage.stoppedEarly` stays empty. The result log says
+  `recovered after a turn without an answer (finish=stop, error=StructuredOutputError)` and names the
+  duration of both message calls (`engine message call: 257.3 s, 12.1 s`). A failure says
+  `the engine returned no structured answer (after one recovery; the first turn: finish=length)` or
+  `(the first turn: ...; no recovery was possible)` or `(the first turn: ...; the engine's own
+  error, not recovered)`. A failure of the recovery call itself (the provider refused it, the final
+  call answered with a stray tool call, the deadline) keeps its own code and ends with
+  `(during the recovery; the first turn: finish=..., error=...)`. The note holds only a finish reason and an error
+  name that are plain identifiers; engine text is never copied.
+- **Not covered (#301 F4).** The final call's history names tools that the call no longer offers. The
+  pinned engine and the fakes accept that; if a provider behind OpenRouter rejects it (400, shown as
+  `llm_bad_request`), the fallback is to keep the original tool definitions in that call and rely on
+  `tool_choice`.
+
 ## Context window and compaction
 
 OpenCode can compact a long session itself (`compaction.auto`, with the model's `limit.context` and
@@ -492,6 +552,7 @@ run is bounded by the cost limit and the model's window.
 | `lease_lost` | Right before the summary would have been written the job was no longer held by this runner (lease lost, job cancelled), or the app could not be asked; nothing was written | Normal after a requeue or a cancel. Often: the app was unreachable at that moment; the next push reviews again |
 | `dynamic_config_invalid` | Model, skill or limits of the job are unusable; or no description of the model has unit costs (the provider's metadata stated none and the operator named none); or `RUNNER_DYNAMIC_MAX_COST_USD` is not a number up to the ceiling | The project's settings page; `RUNNER_DYNAMIC_CAPABILITIES` (`input_usd_per_mtok`, `output_usd_per_mtok`) |
 | `dynamic_budget_exceeded`, `dynamic_accounting_failed`, `dynamic_policy_violation` | A hard limit or rule stopped the run. Accounting also fails when a call reports no cost | The Runs page; `RUNNER_DYNAMIC_MAX_COST_USD` |
+| `llm_output_invalid` | The engine finished without a structured answer, and so did its one recovery (or none was possible); the detail says how the first turn ended (`finish=stop`: prose, `finish=length`: cut off at the output allowance) | The model (does it follow a required tool choice?), the output allowance in `RUNNER_DYNAMIC_CAPABILITIES` |
 | `llm_context_length_exceeded` | The provider said the request is larger than the model's context | The model's context window (its metadata, or `context_window_tokens` in `RUNNER_DYNAMIC_CAPABILITIES`); a smaller pull request |
 
 Switching a project from Dynamic to Diff (or back) starts a fresh summary comment; findings are not
@@ -551,7 +612,7 @@ model you choose, the knowledge of what it supports (tool choice "required" and 
    are upgraded.
 2. **Describe the model** only if you want to narrow what the app reads from the provider's metadata
    ("The model"): `RUNNER_DYNAMIC_CAPABILITIES={"tool_choice_required": true, "structured_output": true,
-   "max_output_tokens": 8192, "input_usd_per_mtok": 0.5, "output_usd_per_mtok": 2}` is a ceiling for every
+   "max_output_tokens": 32768, "input_usd_per_mtok": 0.5, "output_usd_per_mtok": 2}` is a ceiling for every
    Dynamic job of this runner. Nothing is needed for the default model or for any tool-capable OpenRouter
    model whose metadata states its window and prices. Review the memory settings of the table above.
 3. **Deploy the Dynamic runner:**

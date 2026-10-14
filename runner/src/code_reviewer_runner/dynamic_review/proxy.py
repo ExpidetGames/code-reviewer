@@ -65,8 +65,10 @@ from code_reviewer_runner.dynamic_review.completion_stream import completion_as_
 from code_reviewer_runner.dynamic_review.config import PROXY_CAPABILITY_BYTES, PROXY_PROVIDER_ID
 from code_reviewer_runner.dynamic_review.net import no_redirect_opener
 from code_reviewer_runner.dynamic_review.wrap_up import (
+    RECOVERY_INSTRUCTION,
     WRAP_UP_INSTRUCTION,
     offers_structured_output,
+    returns_structured_output,
     wrap_up_request,
 )
 from code_reviewer_runner.error_mapping import is_context_length_exceeded, llm_status_code
@@ -171,11 +173,18 @@ DEFAULT_DYNAMIC_MODEL = "deepseek/deepseek-v4.1-flash"
 # (https://openrouter.ai/api/v1/models, read on 2026-10-14: context_length 1048576, pricing prompt
 # 0.00000002016 and completion 0.000000891 USD per token). They only size a reservation: a window
 # the provider does not really give ends in its own context error, and the cost of a call is
-# always the `usage.cost` it reports.
+# always the `usage.cost` it reports. The output allowance is 32768 (#309): a review of up to 30
+# findings plus the reasoning tokens, which count against `max_tokens`, does not fit 8192, and a
+# turn cut off there ends without an answer. OpenRouter states `max_completion_tokens` 943718 for
+# the model's top provider and 131072 or more for each of its endpoints
+# (https://openrouter.ai/api/v1/models/deepseek/deepseek-v4.1-flash/endpoints, read on 2026-10-14),
+# so the value is below every limit. Every call reserves it at the output price against the cost
+# limit, so it is bounded by money, not by this number. The app sends the same value in a job's
+# descriptor (`app/src/llm/dynamic-capabilities.ts`), which is what a run is normally held to.
 DEFAULT_MODEL_CAPABILITIES = DynamicCapabilities(
     tool_choice_required=True,
     structured_output=True,
-    max_output_tokens=8192,
+    max_output_tokens=32_768,
     context_window_tokens=1_048_576,
     unit_costs=UnitCosts(
         input_usd_per_mtok=Decimal("0.02016"), output_usd_per_mtok=Decimal("0.891")
@@ -463,11 +472,14 @@ class ModelProxy:
             output_tokens=self._output_allowance(request),
             can_wrap_up=offers_structured_output(request),
             wrap_up_text=WRAP_UP_INSTRUCTION,
+            recovery_text=RECOVERY_INSTRUCTION,
         )
         if reservation.final:
-            # The ledger decided, from its own cost and clock, that this is the last call of the
-            # run (#293): it can only return the answer, whatever the request asked for.
-            forwarded = self._forward_body(wrap_up_request(request))
+            # The ledger decided, from its own cost and clock (#293), or from the recovery the
+            # adapter armed after a turn without an answer (#309), that this is the last call of
+            # the run: it can only return the answer, whatever the request asked for.
+            instruction = RECOVERY_INSTRUCTION if reservation.recovery else WRAP_UP_INSTRUCTION
+            forwarded = self._forward_body(wrap_up_request(request, instruction))
         try:
             status, response_body = self._post(
                 self.upstream_url,
@@ -507,6 +519,10 @@ class ModelProxy:
         )
         # The tool calls the model asked for are counted before the engine can run any of them.
         self.audit.calls_in_answer(completion)
+        if reservation.final and not returns_structured_output(completion):
+            # The last call did not return the answer (#301 F3): whatever the engine does next, the
+            # failure is the model's, and a further request says so instead of blaming the limit.
+            self.ledger.note_final_unanswered()
         if not wants_stream:
             return ProxyResponse(status=status, body=response_body)
         stream = completion_as_stream(completion)
