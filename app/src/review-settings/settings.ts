@@ -50,7 +50,7 @@ export type ProjectReviewKind = (typeof PROJECT_REVIEW_KINDS)[number];
  * model the configured provider serves (#194-T08), and the operator's model/provider resolution is
  * #197's business, not a project setting. No hosting-provider or routing field exists.
  */
-export const DEFAULT_DYNAMIC_MODEL = "deepseek-v4.1-flash";
+export const DEFAULT_DYNAMIC_MODEL = "deepseek/deepseek-v4.1-flash";
 
 /**
  * The settings that only a project has (#194): one review kind, the Dynamic model and an optional

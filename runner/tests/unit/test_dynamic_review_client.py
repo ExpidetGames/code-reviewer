@@ -57,7 +57,7 @@ def test_every_session_request_is_scoped_to_the_prepared_export() -> None:
     client = EngineClient("http://127.0.0.1:4000", "/export", transport=transport)
 
     client.create_session()
-    client.send_message("ses-1", model="deepseek-v4.1-flash", parts=[], schema={})
+    client.send_message("ses-1", model="deepseek/deepseek-v4.1-flash", parts=[], schema={})
 
     assert len(transport.requests) == 2
     for _, _, _, headers in transport.requests:
@@ -69,11 +69,14 @@ def test_the_message_names_the_runner_provider_and_agent() -> None:
     transport = Recorder(body={"id": "msg-1"})
     client = EngineClient("http://127.0.0.1:4000", "/export", transport=transport)
 
-    client.send_message("ses-1", model="deepseek-v4.1-flash", parts=[], schema={})
+    client.send_message("ses-1", model="deepseek/deepseek-v4.1-flash", parts=[], schema={})
 
     body = json.loads(transport.requests[0][2] or b"")
     assert body["agent"] == "review"
-    assert body["model"] == {"providerID": PROXY_PROVIDER_ID, "modelID": "deepseek-v4.1-flash"}
+    assert body["model"] == {
+        "providerID": PROXY_PROVIDER_ID,
+        "modelID": "deepseek/deepseek-v4.1-flash",
+    }
 
 
 # #197-T06
@@ -89,7 +92,7 @@ def test_a_health_poll_gives_up_quickly_instead_of_waiting_for_a_stalled_server(
 
     assert transport.timeouts[0] <= 5.0
     assert transport.timeouts[1] <= 60.0
-    client.send_message("ses-1", model="deepseek-v4.1-flash", parts=[], schema={})
+    client.send_message("ses-1", model="deepseek/deepseek-v4.1-flash", parts=[], schema={})
     assert transport.timeouts[2] > 60.0
 
 

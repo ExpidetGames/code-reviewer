@@ -81,7 +81,11 @@ def _model() -> str:
     providers = as_object(config.get("provider")) if config else None
     entry = as_object(providers.get("review-proxy")) if providers else None
     models = as_object(entry.get("models")) if entry else None
-    return next(iter(models), "deepseek-v4.1-flash") if models else "deepseek-v4.1-flash"
+    return (
+        next(iter(models), "deepseek/deepseek-v4.1-flash")
+        if models
+        else "deepseek/deepseek-v4.1-flash"
+    )
 
 
 def _workdir() -> Path:

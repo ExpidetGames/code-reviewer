@@ -35,7 +35,7 @@ def dynamic_document(**llm: Any) -> dict[str, Any]:
         "command": "review",
         "reviewKind": "dynamic",
         "dynamic": {
-            "model": "deepseek-v4.1-flash",
+            "model": "deepseek/deepseek-v4.1-flash",
             "skill": "Look for real bugs.",
             "limits": {"maxFindings": 5},
         },

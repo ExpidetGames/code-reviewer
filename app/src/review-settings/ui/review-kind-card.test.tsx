@@ -708,7 +708,9 @@ describe("problems with the Dynamic settings", () => {
     expect(document.activeElement).toBe(model);
     const modelField = model.closest("[data-field]") as HTMLElement;
     expect(
-      within(modelField).getByText(/for example deepseek-v4\.1-flash/),
+      within(modelField).getByText(
+        /for example deepseek\/deepseek-v4\.1-flash/,
+      ),
     ).toBeTruthy();
     expect(
       within(skill.closest("[data-field]") as HTMLElement).getByText(
