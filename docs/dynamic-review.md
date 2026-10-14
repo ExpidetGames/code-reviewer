@@ -31,7 +31,8 @@ publishes as one persistent summary comment. The decisions are in epic
 | Opt-in deployment: `compose.dynamic.yml` (Docker Compose) and `compose.coolify.dynamic.yml` (Coolify, **untested on a real Coolify**) | Shipped (#202) |
 | Provenance audit of the engine binary and `rg` in `make check-licenses` (source commit, licence, the Bun-lock runtime closure of the pinned commit), notices in `NOTICE` and `THIRD_PARTY_LICENSES.md` | Shipped (#202) |
 | Worst-case memory and OOM measurements, the decision to run more than one Dynamic job at a time | **Manual step, not done** (needs a real deployment target, see "Capacity") |
-| Full path from a signed webhook to the Run, including the pull request title, body and previous-review state in the prompt | Open (#201), see "Known limitations" |
+| Full path from a signed webhook to the Run: the pull request title, body and previous-review state in the prompt (#251), the review kind proved for every entry point and the model and usage in Runs (#252), and the privileged `e2e-dynamic` journey with the real pinned OpenCode that publishes the summary (#253) | Shipped (#251, #252, #253) |
+| Recovery when a run wrote the summary and then ended failed | **Open (#255), a blocker for switching Dynamic Review on**, see "Known limitations" |
 | Hosted activation | Needs the hosted egress gate (#82) |
 
 ## How a Dynamic job reaches an engine
@@ -53,8 +54,13 @@ publishes as one persistent summary comment. The decisions are in epic
    **cancelled with `no_capable_runner`** after `RUNNER_NO_CAPABLE_TIMEOUT_SECONDS` (app setting,
    default 30 minutes). It is visible in Runs; it never waits forever and never falls back to Diff.
 4. The runner prepares the export (#196), starts one engine per job behind its own model proxy (the
-   workspace key never reaches the engine), enforces the hard limits below, publishes (#199) and
-   removes the job's temporary files and process group.
+   workspace key never reaches the engine), enforces the hard limits below and removes the job's
+   temporary files and process group. Only after the engine has ended successfully, its findings
+   passed validation and the export is released, the supervisor publishes (#199, wired in #253): the
+   one persistent summary comment of the pull request, created on the first run and **edited in
+   place** by every later run (a person's comment that merely quotes the marker is never edited). It
+   writes with the job's own installation token; the engine never sees it. A failed run writes
+   nothing, a failed write fails the run with its own stable code, and the Run links the comment.
 
 PR-Agent-only runners keep processing Diff jobs unchanged. A Dynamic-capable runner also serves Diff
 jobs.
@@ -382,12 +388,13 @@ write-up and needs a separately authorised run.
 These are known and accepted for the switch-on decision, or tracked in an issue. They are not hidden
 by the defaults.
 
-- **The prompt lacks the pull request title, body and previous-review state on the production Dynamic
-  path (#201).** The supervisor's preparation (`dynamic_review/supervisor.py`) does not pass them to the
-  checkout, so the model sees the diff and the files but an empty title, an empty description and no
-  prior findings in the prompt. The publisher still reads the existing comment's state itself and
-  reconciles the findings, so the summary stays one persistent comment, but review quality and
-  re-review behaviour are degraded until #201 wires the full path.
+- **A run that wrote the summary and then ended failed blocks the later pushes of that pull request
+  (#255, a blocker for switching Dynamic Review on).** The publisher refuses a comment whose recorded
+  head is neither the current head nor the last *succeeded* head, with `review_not_published`
+  (fail-closed on purpose, #199). If run A edits the comment and then fails (the response of the edit
+  is lost, the watchdog or `SIGTERM` fires after the write, the lease is lost), a push to a new head B
+  finds head A in the comment, and so does every later push, until A is re-reviewed. Recovery needs a
+  design (#255); until then the only repair is to re-review the failed head.
 - **Hidden Unicode tag characters in repository files reach the model untouched (#247).** An attacker
   who controls repository text can hide instructions in tag characters.
 - **A restarted container runs with `NET_ADMIN` again (#249).** The capability is dropped per container

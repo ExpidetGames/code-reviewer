@@ -25,6 +25,7 @@ from privileged_support import (
     connect_as,
     dynamic_job,
     listener,
+    no_publication,
     ripgrep,
 )
 
@@ -128,6 +129,7 @@ def test_the_real_engine_reviews_as_the_dedicated_user_and_leaves_nothing_behind
             prepare=production_preparer(
                 environment, content_for=repo.content_for, context_for=repo.context_for
             ),
+            publish=no_publication,
         )
 
     assert result.ok, (result.error_code, result.log_tail)

@@ -25,7 +25,7 @@ import signal
 import sys
 import threading
 import time
-from collections.abc import Generator, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import ExitStack, contextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -41,6 +41,7 @@ from code_reviewer_runner.capabilities import (
     engines_from_environment,
 )
 from code_reviewer_runner.comment_recorder import CommentRecorder, install_comment_recorder
+from code_reviewer_runner.dynamic_findings import DynamicFindings
 from code_reviewer_runner.dynamic_review import findings_schema
 from code_reviewer_runner.dynamic_review.adapter import DynamicEngine, shutdown_engines
 from code_reviewer_runner.dynamic_review.budget import (
@@ -55,6 +56,7 @@ from code_reviewer_runner.dynamic_review.inputs import review_inputs
 from code_reviewer_runner.dynamic_review.limits import CheckoutError
 from code_reviewer_runner.dynamic_review.prompts import compose_system_prompt
 from code_reviewer_runner.dynamic_review.proxy import ModelProxy, capabilities_from_config
+from code_reviewer_runner.dynamic_review.publish import Published, PublishError, publish_run
 from code_reviewer_runner.dynamic_review.supervisor import (
     ContentPreparer,
     Prepared,
@@ -222,8 +224,9 @@ def run_dynamic_job(
     *,
     engines: Sequence[str] = (),
     prepare: ContentPreparer | None = None,
+    publish: Callable[[Job, DynamicFindings], Published] | None = None,
 ) -> JobResult:
-    """Run a Dynamic job with the read-only stock engine (#197).
+    """Run a Dynamic job with the read-only stock engine (#197) and publish its summary (#201).
 
     Everything that decides what the run may do comes from trusted runner configuration here: the
     engine command, the prepared checkout, the model capability descriptor and the model endpoint
@@ -343,6 +346,12 @@ def run_dynamic_job(
     if answer.error is not None:
         return _failure(answer.error.code, answer.error.detail, started, capture)
     assert answer.findings is not None
+    # The summary is written by this supervisor, never by the engine, and only for a run whose
+    # findings passed every check above: any earlier failure leaves the previous comment untouched.
+    try:
+        published = (publish or publish_run)(job, answer.findings)
+    except PublishError as error:
+        return _failure(error.code, error.detail, started, capture)
     summary = (
         f"dynamic review: {len(answer.findings.findings)} findings against {base.head_sha}; "
         f"{ledger.model_calls} model calls, {ledger.tool_calls} tool calls, {ledger.files} files"
@@ -350,7 +359,7 @@ def run_dynamic_job(
     return JobResult(
         ok=True,
         duration_ms=_elapsed_ms(started),
-        comment_url=None,
+        comment_url=published.comment_url,
         error_code=None,
         log_tail=summary,
         usage=ledger.usage(job.llm.model),

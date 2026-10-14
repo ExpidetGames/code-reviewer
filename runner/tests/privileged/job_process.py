@@ -20,6 +20,7 @@ from privileged_support import (
     ENGINE_UID,
     Repo,
     dynamic_job,
+    no_publication,
     python3,
     ripgrep,
 )
@@ -54,6 +55,7 @@ def main(argv: list[str]) -> int:
             prepare=production_preparer(
                 environment, content_for=repo.content_for, context_for=repo.context_for
             ),
+            publish=no_publication,
         )
     print(result.to_line())
     return 0

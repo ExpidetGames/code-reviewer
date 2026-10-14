@@ -106,6 +106,11 @@ export type ReviewApiOptions = {
   webBase: () => string;
   /** The address of the REST API (`url`), no trailing slash. */
   apiBase: () => string;
+  /**
+   * The address the `html_url` of comments points to; `webBase` when omitted. A real GitHub answers with
+   * github.com whatever API address is used, and the Runs page shows a comment link only for github.com.
+   */
+  commentWebBase?: () => string;
   /** The login the app's comments are written as. */
   botLogin: string;
 };
@@ -172,7 +177,7 @@ export function createReviewApi(options: ReviewApiOptions): ReviewApi {
       pullRequestNumber: number,
       body,
       login,
-      htmlUrl: `${options.webBase()}/${repoFullName}/pull/${String(number)}#issuecomment-${String(nextCommentId)}`,
+      htmlUrl: `${(options.commentWebBase ?? options.webBase)()}/${repoFullName}/pull/${String(number)}#issuecomment-${String(nextCommentId)}`,
       revision: 1,
     };
     store.set(keyOf(repoFullName, number), [

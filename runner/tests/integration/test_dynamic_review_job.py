@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from fake_github_comments import FakeGithubComments
 from test_dynamic_review_engine import (
     CAPABILITIES,
     FAKE_ENGINE,
@@ -30,9 +31,11 @@ from test_dynamic_review_engine import (
 
 from code_reviewer_runner import runner
 from code_reviewer_runner.capabilities import ALL_ENGINES
+from code_reviewer_runner.dynamic_findings import DynamicFindings
 from code_reviewer_runner.dynamic_review.checkout import PreparedContent
 from code_reviewer_runner.dynamic_review.engine_user import EngineLaunch
 from code_reviewer_runner.dynamic_review.limits import CheckoutError
+from code_reviewer_runner.dynamic_review.publish import IDENTITY_MARKER, Published, PublishError
 from code_reviewer_runner.dynamic_review.supervisor import Prepared
 from code_reviewer_runner.job import parse_job
 from code_reviewer_runner.result import ErrorCode
@@ -44,11 +47,14 @@ def job_for(
     model: str = "deepseek-v4.1-flash",
     upstream_model: str = "deepseek/deepseek-v4.1-flash",
     api_key: str = "dummy-openrouter-key-0123456789",
+    pr_url: str = "https://github.com/octo/repo/pull/7",
+    git_base_url: str = "https://api.github.com",
+    git_token: str = "dummy-installation-token-0123456789",
 ) -> Any:
     return parse_job(
         json.dumps(
             {
-                "prUrl": "https://github.com/octo/repo/pull/7",
+                "prUrl": pr_url,
                 "command": "review",
                 "reviewKind": "dynamic",
                 "dynamic": {
@@ -65,8 +71,8 @@ def job_for(
                 },
                 "git": {
                     "provider": "github",
-                    "baseUrl": "https://api.github.com",
-                    "token": "dummy-installation-token-0123456789",
+                    "baseUrl": git_base_url,
+                    "token": git_token,
                     "botLogin": "code-reviewer[bot]",
                 },
                 "llm": {
@@ -172,6 +178,7 @@ def test_a_dynamic_job_runs_on_the_prepared_export_and_releases_it_afterwards(
             environment(),
             engines=ALL_ENGINES,
             prepare=preparer,
+            publish=RecordingPublisher(),
         )
 
     assert result.ok, result.log_tail
@@ -298,6 +305,7 @@ def test_a_configured_model_and_provider_run_through_the_same_protocol_without_s
             environment(),
             engines=ALL_ENGINES,
             prepare=preparer,
+            publish=RecordingPublisher(),
         )
 
     assert result.ok, result.log_tail
@@ -411,3 +419,208 @@ def test_a_job_without_the_verified_ripgrep_file_does_not_start_the_engine(
     assert not result.ok
     assert result.error_code is ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE
     assert not (tmp_path / "export" / ".fake-opencode-trace.jsonl").exists()
+
+
+class RecordingPublisher:
+    """The `publish` seam: records what the job published, and when relative to the export."""
+
+    URL = "https://github.com/octo/repo/pull/7#issuecomment-4001"
+
+    def __init__(
+        self, preparer: Preparer | None = None, *, fail: PublishError | None = None
+    ) -> None:
+        self.calls: list[tuple[Any, DynamicFindings]] = []
+        self.preparer = preparer
+        self.fail = fail
+
+    def __call__(self, job: Any, found: DynamicFindings) -> Published:
+        self.calls.append((job, found))
+        if self.preparer is not None:
+            self.preparer.events.append("published")
+        if self.fail is not None:
+            raise self.fail
+        return Published(comment_url=self.URL, created=True)
+
+
+def query_findings() -> dict[str, Any]:
+    """The findings of the runs below. (The redaction of the summary also blanks a phrase such as
+    "authorization check", so the title of the shared `findings()` would not read back.)"""
+    document = findings()
+    document["findings"][0]["title"] = "Query text built from the request"
+    return document
+
+
+def structured_script() -> dict[str, Any]:
+    return {
+        "proxy_calls": 2,
+        "answer": "structured",
+        "findings": query_findings(),
+        "results": {"c1": read_result("src/api/handler.ts")},
+    }
+
+
+def reading_upstream() -> FakeUpstream:
+    return FakeUpstream(
+        [
+            asks(tool_call("c1", "read", {"filePath": "src/api/handler.ts"})),
+            asks(tool_call("c2", "StructuredOutput", query_findings())),
+        ]
+    )
+
+
+# #253-R01
+def test_a_successful_dynamic_job_publishes_its_findings_once_after_the_export_is_released(
+    tmp_path: Path,
+) -> None:
+    preparer = Preparer(tmp_path / "export", structured_script())
+    publisher = RecordingPublisher(preparer)
+
+    with reading_upstream() as upstream:
+        result = runner.run_dynamic_job(
+            job_for(f"{upstream.url}/v1"),
+            None,
+            0.0,
+            environment(),
+            engines=ALL_ENGINES,
+            prepare=preparer,
+            publish=publisher,
+        )
+
+    assert result.ok, result.log_tail
+    # The summary is written by the supervisor, once, after the engine and its export are gone.
+    assert preparer.events == ["prepared", "released", "published"]
+    assert len(publisher.calls) == 1
+    published_job, published = publisher.calls[0]
+    assert published_job.base.head_sha == HEAD
+    assert published.reviewed_sha == HEAD
+    assert [item.id for item in published.findings] == ["f-1"]
+    # The Runs page links to the comment the run wrote.
+    assert result.comment_url == RecordingPublisher.URL
+
+
+# #253-R02
+@pytest.mark.parametrize(
+    "code",
+    [ErrorCode.GIT_RATE_LIMIT, ErrorCode.REVIEW_TEXT_TRUNCATED, ErrorCode.DYNAMIC_POLICY_VIOLATION],
+)
+def test_a_publication_that_fails_fails_the_job_with_its_own_code_and_links_no_comment(
+    tmp_path: Path, code: ErrorCode
+) -> None:
+    preparer = Preparer(tmp_path / "export", structured_script())
+    publisher = RecordingPublisher(
+        preparer, fail=PublishError(code, "the comment could not be written")
+    )
+
+    with reading_upstream() as upstream:
+        result = runner.run_dynamic_job(
+            job_for(f"{upstream.url}/v1"),
+            None,
+            0.0,
+            environment(),
+            engines=ALL_ENGINES,
+            prepare=preparer,
+            publish=publisher,
+        )
+
+    assert not result.ok
+    assert result.error_code is code
+    assert result.comment_url is None
+    assert len(publisher.calls) == 1
+
+
+# #253-R03
+def test_a_job_whose_engine_fails_writes_nothing_to_the_pull_request(tmp_path: Path) -> None:
+    document = findings()
+    document["findings"][0]["path"] = "src/not-in-the-export.ts"
+    preparer = Preparer(
+        tmp_path / "export", {"proxy_calls": 1, "answer": "structured", "findings": document}
+    )
+    publisher = RecordingPublisher(preparer)
+
+    with FakeUpstream() as upstream:
+        result = runner.run_dynamic_job(
+            job_for(f"{upstream.url}/v1"),
+            None,
+            0.0,
+            environment(),
+            engines=ALL_ENGINES,
+            prepare=preparer,
+            publish=publisher,
+        )
+
+    assert not result.ok
+    assert publisher.calls == []
+
+
+# #253-R04
+def test_by_default_the_job_writes_one_summary_comment_through_the_github_api_of_its_own_job(
+    tmp_path: Path,
+) -> None:
+    token = "ghs_dummy-installation-token-0123456789"
+    github = FakeGithubComments(token=token)
+    preparer = Preparer(tmp_path / "export", structured_script())
+    try:
+        with reading_upstream() as upstream:
+            result = runner.run_dynamic_job(
+                job_for(
+                    f"{upstream.url}/v1",
+                    pr_url=f"{github.url}/octo/repo/pull/7",
+                    git_base_url=github.url,
+                    git_token=token,
+                ),
+                None,
+                0.0,
+                environment(),
+                engines=ALL_ENGINES,
+                prepare=preparer,
+            )
+
+        assert result.ok, result.log_tail
+        assert len(github.comments) == 1
+        body = str(github.comments[0]["body"])
+        assert IDENTITY_MARKER in body
+        assert "Query text built from the request" in body
+        assert result.comment_url == github.comments[0]["html_url"]
+        # Only the job's own pull request was touched, and only through its comments.
+        assert all("/issues/" in path for _, path in github.requests)
+    finally:
+        github.stop()
+
+
+# #253-R05
+def test_a_second_job_for_the_same_pull_request_edits_the_summary_comment_and_adds_none(
+    tmp_path: Path,
+) -> None:
+    token = "ghs_dummy-installation-token-0123456789"
+    github = FakeGithubComments(token=token)
+    # Somebody else quotes the identity marker; it is not the bot's summary and must stay as it is.
+    quote = github.seed(f"{IDENTITY_MARKER}\nquoted by a person", author="octocat")
+    try:
+        links: list[str | None] = []
+        for name in ("first", "second"):
+            with reading_upstream() as upstream:
+                result = runner.run_dynamic_job(
+                    job_for(
+                        f"{upstream.url}/v1",
+                        pr_url=f"{github.url}/octo/repo/pull/7",
+                        git_base_url=github.url,
+                        git_token=token,
+                    ),
+                    None,
+                    0.0,
+                    environment(),
+                    engines=ALL_ENGINES,
+                    prepare=Preparer(tmp_path / name, structured_script()),
+                )
+            assert result.ok, result.log_tail
+            links.append(result.comment_url)
+
+        summaries = [c for c in github.comments if c["user"]["login"] == "code-reviewer[bot]"]
+        assert len(summaries) == 1
+        assert len(github.comments) == 2
+        assert links == [summaries[0]["html_url"]] * 2
+        assert github.comments[0]["body"] == quote["body"]
+        assert [m for m, _ in github.requests if m == "POST"] == ["POST"]
+        assert "PATCH" in [m for m, _ in github.requests]
+    finally:
+        github.stop()

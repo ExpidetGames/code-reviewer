@@ -16,6 +16,7 @@
 // log, the base URL and the failure injection; the sign in part (`oauth.ts`) sits next to it.
 import { createPublicKey, randomBytes, verify } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { basicToken, serveUploadPack } from "./git-http.ts";
 import { readBody } from "./http.ts";
 import {
   DEFAULT_ACCOUNT_PERMISSIONS,
@@ -129,6 +130,8 @@ export type FakeAppOptions = {
   webBase?: () => string;
   /** The address of the REST API in `url` fields. Default the same as `webBase`. */
   apiBase?: () => string;
+  /** The address the links of comments point to (`html_url`), no trailing slash. Default `webBase`. */
+  commentWebBase?: string;
 };
 
 export type FakeTokenRequest = {
@@ -164,6 +167,11 @@ export type FakeGithubAppControls = {
   removeRepository(installationId: number, repositoryId: number): void;
   /** Adds a pull request; one with the same number in the same repository is replaced. */
   addPullRequest(repoFullName: string, pullRequest: FakePullRequest): void;
+  /**
+   * Serves the Git repository in this directory (a `.git` directory, see `git-fixture.ts`) over smart HTTP as
+   * `<base url>/<owner>/<name>.git`, to an installation token that reaches the repository. Replaces an earlier one.
+   */
+  addGitRepository(repoFullName: string, path: string): void;
   /** Changes fields of an added pull request, like a push (`headSha`) or a close (`state`). */
   updatePullRequest(
     repoFullName: string,
@@ -289,15 +297,20 @@ export function createAppPart(
   const now = options.now ?? Date.now;
   const webBase = options.webBase ?? (() => DEFAULT_WEB_BASE);
   const apiBase = options.apiBase ?? webBase;
+  const { commentWebBase } = options;
   const review = createReviewApi({
     webBase,
     apiBase,
+    ...(commentWebBase === undefined
+      ? {}
+      : { commentWebBase: () => commentWebBase }),
     botLogin: `${options.appSlug ?? "fake-app"}[bot]`,
   });
 
   const installations = new Map<number, FakeInstallation>();
   const repositories = new Map<number, FakeRepository[]>();
   const pullRequests = new Map<string, FakePullRequest[]>();
+  const gitRepositories = new Map<string, string>();
   const permissions = new Map<string, FakeCollaboratorPermission>();
   const tokens = new Map<string, IssuedToken>();
   const issuedTokens: string[] = [];
@@ -427,6 +440,44 @@ export function createAppPart(
       if (body === null) return send(400, { message: "Invalid body" });
       controls.addPullRequest(body.repository, body.pullRequest);
       return send(201, { ok: true });
+    }
+
+    // Control endpoint for a test that runs the fake as its own process (Playwright): serves a Git
+    // repository (`addGitRepository`). The body is `{ repository: "owner/name", path }`, the path of a `.git`
+    // directory on this machine.
+    if (path === "/__fake/git-repositories" && method === "POST") {
+      const body = JSON.parse(await readBody(request)) as {
+        repository?: unknown;
+        path?: unknown;
+      };
+      if (typeof body.repository !== "string" || typeof body.path !== "string")
+        return send(400, { message: "Invalid body" });
+      controls.addGitRepository(body.repository, body.path);
+      return send(201, { ok: true });
+    }
+
+    // Git over HTTP, the way the runner's checkout reads a pull request: the token is the Basic password.
+    const gitMatch =
+      /^\/([^/]+)\/([^/]+)\.git\/(info\/refs|git-upload-pack)$/.exec(path);
+    if (gitMatch) {
+      const gitToken = basicToken(request.headers.authorization);
+      const gitIssued =
+        gitToken === undefined ? undefined : installationToken(gitToken);
+      if (gitIssued === undefined) return unauthorized();
+      const gitName = `${gitMatch[1]}/${gitMatch[2]}`;
+      const visible = reposVisibleTo(gitIssued).find(
+        (repo) => repo.fullName === gitName,
+      );
+      const directory = gitRepositories.get(gitName);
+      if (visible === undefined || directory === undefined) return notFound();
+      if (!mayDo(gitIssued, "contents", "read"))
+        return send(403, { message: "Resource not accessible by integration" });
+      const advertise = gitMatch[3] === "info/refs";
+      if (advertise !== (method === "GET")) return notFound();
+      if (advertise && url.searchParams.get("service") !== "git-upload-pack")
+        return notFound();
+      await serveUploadPack(request, response, directory, advertise);
+      return;
     }
 
     // Control endpoint for a test that runs the fake as its own process (Playwright): the comments
@@ -774,6 +825,9 @@ export function createAppPart(
         pullRequest,
       ]);
     },
+    addGitRepository(repoFullName, path) {
+      gitRepositories.set(repoFullName, path);
+    },
     updatePullRequest(repoFullName, number, changes) {
       const existing = pullRequests.get(repoFullName) ?? [];
       if (!existing.some((pr) => pr.number === number))
@@ -817,6 +871,7 @@ export function createAppPart(
       installations.clear();
       repositories.clear();
       pullRequests.clear();
+      gitRepositories.clear();
       permissions.clear();
       review.reset();
       omitted.clear();
