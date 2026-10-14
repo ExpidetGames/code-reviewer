@@ -295,7 +295,11 @@
         "totalTokens": { "type": "integer", "minimum": 0 },
         "aiCalls": { "type": "integer", "minimum": 0 },
         "fallbackUsed": { "type": "boolean" },
-        "costUsd": { "type": ["number", "null"], "minimum": 0 }
+        "costUsd": {
+          "description": "The cost in US dollars, or null when it is not known. A Dynamic Review reports the exact sum of the charges its model provider reported for every call, and null when any call has no reported charge; it never estimates one.",
+          "type": ["number", "null"],
+          "minimum": 0
+        }
       }
     },
     "RunnerResult": {

@@ -49,6 +49,14 @@ const COST = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 4,
 });
 const COUNT = new Intl.NumberFormat("en-US");
+/** The smallest cost the display can tell from zero; a real cost below it must not read as $0. */
+const COST_PRECISION = 0.0001;
+
+function costText(costUsd: number): string {
+  return costUsd > 0 && costUsd < COST_PRECISION
+    ? `Less than ${COST.format(COST_PRECISION)}`
+    : COST.format(costUsd);
+}
 
 /** The model, tokens, calls and cost the runner reported; a text from outside is rendered as text. */
 function usageItems(run: RunDetailView) {
@@ -80,7 +88,7 @@ function usageItems(run: RunDetailView) {
           usage.costUsd === null ? (
             <span className="text-muted-foreground">Not available</span>
           ) : (
-            COST.format(usage.costUsd)
+            costText(usage.costUsd)
           ),
       },
     ],
