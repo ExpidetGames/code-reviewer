@@ -325,6 +325,10 @@
           "description": "The cost in US dollars, or null when it is not known. A Dynamic Review reports the exact sum of the charges its model provider reported for every call, and null when any call has no reported charge; it never estimates one.",
           "type": ["number", "null"],
           "minimum": 0
+        },
+        "stoppedEarly": {
+          "description": "Why a Dynamic Review was wrapped up before it was done: the model was asked for its answer right away because the run reached its cost limit or its time limit. Absent or null for a complete run; the review it produced is published and says it may be incomplete.",
+          "enum": ["cost_limit", "time_limit", null]
         }
       }
     },

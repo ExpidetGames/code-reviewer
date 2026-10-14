@@ -130,6 +130,7 @@ describe("the complete body", () => {
     expect(parsed.ok && parsed.value.result).toStrictEqual({
       ...GOOD_RESULT,
       errorMessage: null,
+      usage: { ...GOOD_RESULT.usage, stoppedEarly: null },
     });
   });
 
@@ -263,6 +264,48 @@ describe("the complete body", () => {
     expect(parsed.value.result.usage?.costUsd).toBe(
       JSON.parse('{"costUsd":5.79e-05}').costUsd,
     );
+  });
+
+  // #293-T08
+  it("keeps the reason a Dynamic Review stopped early, and null when it did not", () => {
+    for (const stoppedEarly of ["cost_limit", "time_limit"] as const) {
+      const parsed = parseCompleteRequest({
+        leaseToken: TOKEN,
+        result: {
+          ...GOOD_RESULT,
+          usage: { ...GOOD_RESULT.usage, stoppedEarly },
+        },
+      });
+
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) return;
+      expect(parsed.value.result.usage?.stoppedEarly).toBe(stoppedEarly);
+    }
+    const complete = parseCompleteRequest({
+      leaseToken: TOKEN,
+      result: GOOD_RESULT,
+    });
+    expect(complete.ok).toBe(true);
+    if (!complete.ok) return;
+    expect(complete.value.result.usage?.stoppedEarly).toBeNull();
+  });
+
+  // #293-T08
+  it("refuses a reason for stopping early that the contract does not name", () => {
+    for (const stoppedEarly of ["budget", "", 1, true, ["cost_limit"]]) {
+      const parsed = parseCompleteRequest({
+        leaseToken: TOKEN,
+        result: {
+          ...GOOD_RESULT,
+          usage: { ...GOOD_RESULT.usage, stoppedEarly },
+        },
+      });
+
+      expect(fieldsOf(parsed)).toContainEqual({
+        field: "result.usage.stoppedEarly",
+        code: "invalid",
+      });
+    }
   });
 
   // #267-T07

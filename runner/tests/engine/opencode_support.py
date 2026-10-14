@@ -15,6 +15,7 @@ import os
 import shutil
 import sys
 import threading
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -155,9 +156,13 @@ class ScriptedModel:
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
 
     def answer(self, body: dict[str, Any]) -> dict[str, Any]:
-        offered = body.get("tools")
+        offered: list[dict[str, Any]] = body.get("tools") or []
+        names = {tool["function"]["name"] for tool in offered}
         if not offered:
             message: dict[str, Any] = {"role": "assistant", "content": "ok"}
+        elif names == {"StructuredOutput"} and self.final is not None:
+            # The only tool left is the return tool (the runner's wrap-up): a model answers with it.
+            message = asks(tool_call("call_wrap_up", "StructuredOutput", self.final))
         else:
             index = sum(1 for earlier in self.requests[:-1] if earlier.get("tools"))
             if index < len(self.steps):
@@ -306,12 +311,15 @@ def run_engine(
     limits: DynamicLimits | None = None,
     export: Path | None = None,
     files: frozenset[str] | None = None,
+    clock: Callable[[], float] | None = None,
 ) -> Run:
     """Run the real engine over a prepared export against the scripted model, through the proxy.
 
     `export` overrides the directory the engine is pointed at (the control run uses a raw tree).
     """
-    ledger = BudgetLedger(limits or DynamicLimits(), unit_costs=UNIT_COSTS)
+    ledger = BudgetLedger(
+        limits or DynamicLimits(), unit_costs=UNIT_COSTS, clock=clock or time.monotonic
+    )
     capability = new_proxy_capability()
     proxy = ModelProxy(
         ledger=ledger,

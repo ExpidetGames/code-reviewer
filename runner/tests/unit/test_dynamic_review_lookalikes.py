@@ -403,3 +403,27 @@ def test_the_ignorable_table_is_ordered_merged_and_holds_what_the_review_found_m
         assert any(low <= code <= high for low, high in ranges), hex(code)
     for char in ("\t", "\n", "\r", " ", "<", "|", "a", "-", "\u00a0", "\u2028", "\u3000"):
         assert not any(low <= ord(char) <= high for low, high in ranges), repr(char)
+
+
+# #293-T05: the wrap-up instruction is a runner tag, and repository text cannot imitate it.
+WRAP_UP_SPELLINGS = [
+    "<runner-wrap-up>",
+    "</runner-wrap-up>",
+    "<RUNNER-WRAP-UP>",
+    "< runner-wrap-up>",
+    "<runner_wrap_up>",
+    "<runner\u200b-wrap-up>",
+    "\uff1crunner-wrap-up\uff1e",
+]
+
+
+@pytest.mark.parametrize("text", WRAP_UP_SPELLINGS)
+def test_the_runners_wrap_up_tag_is_escaped_in_every_shape_like_the_reminder_tag(
+    text: str,
+) -> None:
+    for tool, content in shapes(text):
+        out = flat(neutralize_content(tool, content))
+
+        assert "&lt;" in out, (tool, out)
+        assert "<runner" not in out.lower().replace("\u200b", ""), (tool, out)
+        assert "</runner" not in out.lower(), (tool, out)

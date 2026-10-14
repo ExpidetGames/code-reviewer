@@ -367,6 +367,23 @@ describe("what the app accepts from a runner", () => {
         },
       },
     ],
+    // #293-T08: the reason a Dynamic Review was wrapped up, in the schema and in the parser.
+    ...["cost_limit", "time_limit", null].map(
+      (stoppedEarly): [string, unknown] => [
+        `usage that stopped early with ${String(stoppedEarly)}`,
+        {
+          leaseToken: TOKEN,
+          result: { ...result, usage: { ...result.usage, stoppedEarly } },
+        },
+      ],
+    ),
+    ...["budget", "", 1, true].map((stoppedEarly): [string, unknown] => [
+      `usage that stopped early with ${JSON.stringify(stoppedEarly)}`,
+      {
+        leaseToken: TOKEN,
+        result: { ...result, usage: { ...result.usage, stoppedEarly } },
+      },
+    ]),
     [
       "usage with a negative token count",
       {

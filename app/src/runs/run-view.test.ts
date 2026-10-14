@@ -134,8 +134,25 @@ describe("the usage of a run", () => {
       totalTokens: 12900,
       aiCalls: 7,
       costUsd: 0.04,
+      stoppedEarly: null,
     });
   });
+
+  // #293-T08
+  it.each(["cost_limit", "time_limit"])(
+    "reads that a run stopped early (%s), and takes any other value as a complete run",
+    (stoppedEarly) => {
+      expect(
+        readStoredUsage({ ok: true, usage: { ...usage, stoppedEarly } }),
+      ).toMatchObject({ stoppedEarly });
+      expect(
+        readStoredUsage({ ok: true, usage: { ...usage, stoppedEarly: "x" } }),
+      ).toMatchObject({ stoppedEarly: null });
+      expect(
+        readStoredUsage({ ok: true, usage: { ...usage, stoppedEarly: 1 } }),
+      ).toMatchObject({ stoppedEarly: null });
+    },
+  );
 
   // #201-T23
   it("keeps a cost the runner could not know as unknown instead of zero", () => {
@@ -229,6 +246,7 @@ describe("the usage of a run", () => {
       totalTokens: 12900,
       aiCalls: 7,
       costUsd: 0.04,
+      stoppedEarly: null,
     });
     expect(toRunRowView(stored, "acme/widgets", NOW)).not.toHaveProperty(
       "usage",

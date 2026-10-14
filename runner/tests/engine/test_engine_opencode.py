@@ -16,6 +16,7 @@ import hashlib
 import json
 import sys
 import time
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +40,7 @@ from code_reviewer_runner.dynamic_review.budget import DynamicLimits
 from code_reviewer_runner.dynamic_review.checkout import PreparedContent, prepare_content
 from code_reviewer_runner.dynamic_review.prompt_core import CORE_TEXT
 from code_reviewer_runner.dynamic_review.transport import LocalTransport
+from code_reviewer_runner.dynamic_review.wrap_up import WRAP_UP_INSTRUCTION
 from code_reviewer_runner.job import ClaimBase
 from code_reviewer_runner.redaction import Redactor
 from code_reviewer_runner.result import ErrorCode
@@ -418,6 +420,98 @@ def test_a_provider_that_reports_no_cost_ends_the_real_run_with_the_accounting_c
     assert run.answer.error is not None
     assert run.answer.error.code is ErrorCode.DYNAMIC_ACCOUNTING_FAILED
     assert len(model.requests) == 1
+
+
+def only_return_tool(request: dict[str, Any]) -> bool:
+    return {tool["function"]["name"] for tool in request.get("tools", [])} == {"StructuredOutput"}
+
+
+# #293-T09
+def test_a_run_that_reaches_its_cost_limit_is_wrapped_up_by_the_real_engine(
+    tmp_path: Path,
+) -> None:
+    content = prepare(tmp_path, {"src/app.py": b"x = 1\n", "src/sub/mod.py": b"y = 2\n"})
+    export = content.export
+    steps: list[Step] = [
+        asks(tool_call(f"r{index}", "read", {"filePath": str(export / "src/app.py")}))
+        for index in range(20)
+    ]
+    # Every call reports 0.01 USD. A call is reserved at about 0.02 USD (its 4,096 output tokens
+    # and a request of about 12 KB) and a final call after it at about 0.06 USD. With a limit of
+    # 0.1 USD the third call, after 0.02 USD are spent, is the one after which no final call would
+    # fit, so it is the final call (calls 1 and 2 are normal).
+    model = ScriptedModel(steps=steps, final=findings_for(content.head_sha), cost=0.01)
+    with model:
+        run = run_engine(
+            model,
+            content,
+            scratch=tmp_path / "scratch",
+            limits=DynamicLimits(max_cost_usd=Decimal("0.1")),
+        )
+
+    assert run.answer.ok, run.answer.error
+    assert run.answer.findings is not None
+    assert len(model.requests) == 3
+    # Calls 1 and 2: every tool. The third: the engine's return tool alone, required, and the
+    # runner's instruction as the last message, after the history the engine sent.
+    for request in model.requests[:2]:
+        assert not only_return_tool(request)
+        assert WRAP_UP_INSTRUCTION not in json.dumps(request["messages"])
+    final = model.requests[2]
+    assert only_return_tool(final)
+    assert final["tool_choice"] == "required"
+    assert final["messages"][-1] == {"role": "user", "content": WRAP_UP_INSTRUCTION}
+    assert final["messages"][-2]["role"] == "tool"
+    assert run.ledger.stopped_early == "cost_limit"
+    assert run.ledger.usage(None).stopped_early == "cost_limit"
+    assert run.ledger.model_calls == 3
+
+
+# #293-T10
+def test_a_run_that_reaches_the_clock_reserve_is_wrapped_up_by_the_real_engine(
+    tmp_path: Path,
+) -> None:
+    content = prepare(tmp_path, {"src/app.py": b"x = 1\n"})
+    export = content.export
+    steps: list[Step] = [
+        asks(tool_call(f"r{index}", "read", {"filePath": str(export / "src/app.py")}))
+        for index in range(20)
+    ]
+    seconds = [0.0]  # the ledger's clock, which a test moves by hand
+
+    def second_request_takes_long(count: int) -> None:
+        if count == 2:
+            seconds[0] += 460.0  # 140 s of 600 s are left, the reserve is 150 s
+
+    model = ScriptedModel(
+        steps=steps, final=findings_for(content.head_sha), on_request=second_request_takes_long
+    )
+    with model:
+        run = run_engine(model, content, scratch=tmp_path / "scratch", clock=lambda: seconds[0])
+
+    assert run.answer.ok, run.answer.error
+    assert len(model.requests) == 3
+    assert not only_return_tool(model.requests[1])
+    assert only_return_tool(model.requests[2])
+    assert model.requests[2]["messages"][-1]["content"] == WRAP_UP_INSTRUCTION
+    assert run.ledger.stopped_early == "time_limit"
+
+
+# #293-T09
+def test_a_run_that_stays_inside_its_limits_is_never_wrapped_up(tmp_path: Path) -> None:
+    content = prepare(tmp_path, {"src/app.py": b"x = 1\n"})
+    export = content.export
+    steps: list[Step] = [
+        asks(tool_call(f"r{index}", "read", {"filePath": str(export / "src/app.py")}))
+        for index in range(3)
+    ]
+    model = ScriptedModel(steps=steps, final=findings_for(content.head_sha))
+    with model:
+        run = run_engine(model, content, scratch=tmp_path / "scratch")
+
+    assert run.answer.ok, run.answer.error
+    assert all(not only_return_tool(request) for request in model.requests)
+    assert run.ledger.stopped_early is None
 
 
 # #197-T05
