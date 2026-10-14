@@ -106,7 +106,10 @@ LABEL org.opencontainers.image.title="Code Reviewer runner (Dynamic Review)" \
       org.opencontainers.image.description="Worker that runs PR-Agent and, when its self-check passes, the stock OpenCode engine for Dynamic Review"
 USER 0:0
 # nft installs the engine user's network rules once, at container start (ADR 0003). Debian's signed
-# package; its version follows the base image, like tini.
+# package, NOT version-pinned (like tini): apt takes the version the Debian repository has when the
+# image is built, so two builds on different days can differ even on the same base image digest. A
+# `nftables=<version>` pin would not make it reproducible: the Debian mirrors drop superseded
+# versions, so the build would break at the next point release instead.
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends nftables \
     && rm -rf /var/lib/apt/lists/*

@@ -30,8 +30,10 @@ Docker Compose or Coolify gets the runner.
    `fetch_ripgrep.py`), because the engine's grep and glob need one and the stock engine downloads one
    when none is on its path. Both are accepted by size and SHA-256 at build time. The pins travel
    inside the image (`/opt/code-reviewer/pins/`), and the runner hashes the installed files against
-   them again at start. `nft` is Debian's signed package, not digest-pinned: a distribution tool of the
-   kind `tini` is, and replacing it would be an unpinned dependency either way.
+   them again at start. `nft` is Debian's signed package and is not pinned: `apt` takes the version the
+   repository has at build time (it does not follow the base image digest), like `tini`. Pinning
+   `nftables=<version>` was considered and rejected: Debian mirrors drop superseded versions, so the
+   pin would break the build at the next point release without making it more reproducible.
 3. **A startup self-check decides the advertisement.** After the one-time network setup (0003,
    decision 5) and before the first claim the runner checks, in this order: an engine user and slot
    ports are configured, the process is root, the engine user exists with its own group, the rules were

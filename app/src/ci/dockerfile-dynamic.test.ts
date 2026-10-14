@@ -151,3 +151,46 @@ describe("the dynamic runner image", () => {
     expect(users[0]).toBe("USER 0:0");
   });
 });
+
+describe("what the Dynamic image documentation claims about its build", () => {
+  const documents = {
+    "runner/Dockerfile": dockerfile,
+    "docs/dynamic-review.md": readFileSync(
+      `${repoRoot}docs/dynamic-review.md`,
+      "utf8",
+    ),
+    "docs/decisions/0004-dynamic-runner-image-and-self-check.md": readFileSync(
+      `${repoRoot}docs/decisions/0004-dynamic-runner-image-and-self-check.md`,
+      "utf8",
+    ),
+  };
+
+  // #202-T01: apt resolves nftables when the image is built; the base image digest does not decide it.
+  it.each(Object.entries(documents))(
+    "does not say the nft version follows the base image (%s)",
+    (_name, text) => {
+      expect(text.replace(/\s+/g, " ")).not.toMatch(
+        /version follows the base image/i,
+      );
+    },
+  );
+
+  // #202-T01: the nftables package is installed unpinned, and the Dockerfile says so.
+  it("installs nftables without a version pin and says so next to the install", () => {
+    const install = /apt-get install[^\n]*nftables[^\n]*/.exec(
+      dockerfile.replace(/\\\n\s*/g, " "),
+    );
+
+    expect(install?.[0]).toBeDefined();
+    expect(install?.[0]).not.toMatch(/nftables=/);
+    expect(dockerfile).toMatch(/NOT version-pinned/);
+  });
+
+  // #202-T01: a failed `up --build` stops the new service only; running containers stay up.
+  it("does not claim that a failed build leaves nothing running", () => {
+    const guide = documents["docs/dynamic-review.md"].replace(/\s+/g, " ");
+
+    expect(guide).not.toMatch(/leaves nothing running/i);
+    expect(guide).toMatch(/already run[^.]*stay up/i);
+  });
+});

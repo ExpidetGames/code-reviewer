@@ -137,7 +137,7 @@ it. The `dynamic` target adds:
 |---|---|---|
 | Stock OpenCode v1.19.0 (about 186 MB, 60 MB compressed), unmodified | `/usr/local/bin/opencode`, owned by root, mode 0755 | `runner/opencode-pin.json`: release asset, source commit, size and SHA-256 of the archive and of the executable. The build downloads through `runner/scripts/fetch_opencode.py`, which accepts only the pinned bytes and checks that the executable reports the pinned version |
 | ripgrep 14.1.1 (static musl release) | `/usr/local/bin/rg`, owned by root, mode 0755 | `runner/ripgrep-pin.json`, same checks (`runner/scripts/fetch_ripgrep.py`). The engine's grep and glob need it; without one the stock engine would download it at run time, which the runner never allows |
-| `nft` | Debian's signed `nftables` package | Not digest-pinned: its version follows the base image (like `tini`). It installs the engine user's network rules once, at container start |
+| `nft` | Debian's signed `nftables` package | Not pinned, by decision: `apt` installs the version Debian's repository has at build time (like `tini`), so it does not follow the base image digest and two builds on different days can differ. An exact `nftables=<version>` would not be reproducible either, because the Debian mirrors drop superseded versions and the build would break at the next point release. The package is signed, root-owned and has no setuid file (the smoke test measures that). It installs the engine user's network rules once, at container start |
 | The engine user `engine` (uid and gid 10101, no home, no login shell, no other group) | `/etc/passwd` of the image | Fixed numeric ids, distinct from the Diff job user 10001 |
 | Both pin files | `/opt/code-reviewer/pins/`, owned by root | The runner's self-check compares the installed files with them |
 
@@ -296,8 +296,9 @@ model you choose, the knowledge of what it supports (tool choice "required" and 
    support). Review the memory settings of the table above.
 3. **Deploy the Dynamic runner:**
    `docker compose -f compose.yml -f compose.dynamic.yml up -d --build --wait`.
-   The first build downloads the pinned engine (about 60 MB) and verifies it; it fails, and leaves
-   nothing running, if the bytes are not the pinned ones.
+   The first build downloads the pinned engine (about 60 MB) and verifies it; if the bytes are not the
+   pinned ones the build fails and the Dynamic runner is not started. Containers that already run
+   (the app, the Diff runner) stay up: only the new service is missing.
 4. **Verify the self-check.** `docker compose logs runner-dynamic | grep "Dynamic Review"` must show
    `Dynamic Review: opencode is advertised, the startup self-check passed`. If it shows `opencode is
    not advertised` the reason is in the same line: see the table in "The startup self-check". Fix it
