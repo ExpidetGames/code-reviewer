@@ -18,6 +18,7 @@ import pytest
 
 from code_reviewer_runner import runner
 from code_reviewer_runner.capabilities import ALL_ENGINES, ENGINE_DIFF
+from code_reviewer_runner.dynamic_review.budget import LimitError
 from code_reviewer_runner.dynamic_review.checkout import PreparedContent
 from code_reviewer_runner.dynamic_review.proxy import capabilities_from_config
 from code_reviewer_runner.job import Job, JobError, parse_job
@@ -26,7 +27,17 @@ from code_reviewer_runner.result import ErrorCode
 TOKEN = "dummy-installation-token-0123456789"
 API_KEY = "dummy-openrouter-key-0123456789"
 HEAD = "1f3a5c7e9b2d4f60a8c1e3b5d7f90a2c4e6b8d01"
+# What an operator sets for the model: the features, the output bound and the unit costs.
 CAPABILITIES = json.dumps(
+    {
+        "tool_choice_required": True,
+        "structured_output": True,
+        "max_output_tokens": 4096,
+        "input_usd_per_mtok": 0.5,
+        "output_usd_per_mtok": 2,
+    }
+)
+UNPRICED_CAPABILITIES = json.dumps(
     {"tool_choice_required": True, "structured_output": True, "max_output_tokens": 4096}
 )
 
@@ -126,6 +137,8 @@ def test_an_operator_descriptor_window_is_the_windows_of_the_run() -> None:
                 "structured_output": True,
                 "max_output_tokens": 4096,
                 "context_window_tokens": 200_000,
+                "input_usd_per_mtok": 0.5,
+                "output_usd_per_mtok": 2,
             }
         )
     )
@@ -134,6 +147,48 @@ def test_an_operator_descriptor_window_is_the_windows_of_the_run() -> None:
 
     assert ledger.window_tokens == 200_000
     assert ledger.output_tokens == 4096
+
+
+# #290-T08: a cost that cannot be priced cannot be bounded before it is spent, so a model without
+# unit costs in its descriptor does not run at all (the built-in default model has them built in).
+def test_a_model_without_unit_costs_in_its_descriptor_fails_closed_with_a_clear_detail() -> None:
+    for extra in ({}, {"context_window_tokens": 200_000}):
+        capabilities = capabilities_from_config(
+            json.dumps(
+                {
+                    "tool_choice_required": True,
+                    "structured_output": True,
+                    "max_output_tokens": 4096,
+                    **extra,
+                }
+            ),
+            model=OTHER_MODEL,
+        )
+
+        with pytest.raises(LimitError) as refused:
+            runner.dynamic_ledger(capabilities, {}, 600.0)
+
+        assert refused.value.code is ErrorCode.DYNAMIC_CONFIG_INVALID
+        assert "input_usd_per_mtok" in refused.value.detail
+        assert "output_usd_per_mtok" in refused.value.detail
+
+
+# #290-T08
+def test_a_dynamic_job_of_an_unpriced_model_ends_before_anything_is_prepared() -> None:
+    result = runner.run_dynamic_job(
+        other_model_job(),
+        None,
+        0.0,
+        {
+            runner.OPENCODE_COMMAND_VARIABLE: "opencode",
+            runner.DYNAMIC_CAPABILITIES_VARIABLE: UNPRICED_CAPABILITIES,
+        },
+        engines=ALL_ENGINES,
+        prepare=never_prepared,
+    )
+
+    assert result.ok is False
+    assert result.error_code is ErrorCode.DYNAMIC_CONFIG_INVALID
 
 
 # #290-T10

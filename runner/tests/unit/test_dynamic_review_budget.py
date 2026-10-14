@@ -48,22 +48,20 @@ class Clock:
         self.now += seconds
 
 
+# One million input tokens cost 1 USD, one million output tokens 4 USD: round numbers a reservation
+# can be checked against by hand.
+UNIT_COSTS = UnitCosts(input_usd_per_mtok=Decimal(1), output_usd_per_mtok=Decimal(4))
+
+
 def ledger(**overrides: Any) -> BudgetLedger:
     limits = DynamicLimits(**overrides)
-    return BudgetLedger(limits, clock=Clock())
+    return BudgetLedger(limits, clock=Clock(), unit_costs=UNIT_COSTS)
 
 
 def test_bytes_are_the_proven_upper_bound_on_tokens() -> None:
     # A BPE token is never fewer than one byte, so the byte count bounds what a provider can report.
     assert reserved_tokens("abcd") == 4
     assert reserved_tokens("ä") == 2
-
-
-def cheap(**overrides: Any) -> BudgetLedger:
-    """A ledger with known unit costs, so a reservation has a price."""
-    unit_costs = UnitCosts(input_usd_per_mtok=Decimal(1), output_usd_per_mtok=Decimal(4))
-    limits = DynamicLimits(**overrides)
-    return BudgetLedger(limits, clock=Clock(), unit_costs=unit_costs)
 
 
 # #290-T03
@@ -93,11 +91,11 @@ def test_a_call_is_settled_with_the_provider_usage_and_cost() -> None:
 
 # #197-T05
 def test_a_retry_is_a_call_like_any_other() -> None:
-    subject = ledger(max_cost_usd=Decimal("0.05"))
-    subject.reserve_call("a", output_tokens=1)  # the first attempt, never answered
+    subject = ledger(max_cost_usd=Decimal("0.005"))
+    subject.reserve_call("a", output_tokens=1_000)  # the first attempt, never answered
 
     with pytest.raises(LimitError) as refused:
-        subject.reserve_call("a", output_tokens=1)  # the retry has its own reservation
+        subject.reserve_call("a", output_tokens=1_000)  # the retry has its own reservation
     assert refused.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
 
 
@@ -195,20 +193,41 @@ def test_an_answer_larger_than_its_output_allowance_fails_the_run() -> None:
     assert refused.value.code is ErrorCode.DYNAMIC_ACCOUNTING_FAILED
 
 
-# #290-T05
-def test_a_request_that_does_not_fit_the_window_is_refused_with_a_value_free_detail() -> None:
-    subject = BudgetLedger(DynamicLimits(), window_tokens=100, output_tokens=50)
+# #290-T05: the window check is a backstop. It refuses only a request that cannot fit even if the
+# text were as sparse as text gets (6 bytes per token), so it never refuses what the provider would
+# accept; the provider's own context error decides every other case.
+def test_a_request_that_cannot_fit_the_window_at_any_realistic_density_is_refused() -> None:
+    subject = BudgetLedger(
+        DynamicLimits(), window_tokens=1_000, output_tokens=100, unit_costs=UNIT_COSTS
+    )
 
     with pytest.raises(LimitError) as refused:
-        subject.reserve_call("x" * 160, output_tokens=50)  # 54 estimated + 50 > 100
+        subject.reserve_call("x" * 5_500, output_tokens=100)  # 917 tokens at 6 bytes + 100 > 1000
     assert refused.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
     assert refused.value.detail == "the request plus its output allowance exceeds the model window"
+    assert subject.model_calls == 0
 
 
 # #290-T05
-def test_a_request_that_fits_the_window_by_the_realistic_estimate_is_not_refused() -> None:
+def test_a_request_the_provider_could_still_accept_is_not_refused_by_the_backstop() -> None:
+    subject = BudgetLedger(
+        DynamicLimits(), window_tokens=1_000, output_tokens=100, unit_costs=UNIT_COSTS
+    )
+
+    # 4,500 bytes are 1,500 tokens at the conservative density of the cost reservation, more than
+    # the window; at 4 to 6 bytes per token they fit. Whether they do is the provider's answer.
+    reservation = subject.reserve_call("x" * 4_500, output_tokens=100)
+
+    assert reservation.input_tokens == 1_500
+    assert subject.model_calls == 1
+
+
+# #290-T05
+def test_a_request_of_92_kb_against_a_100k_window_is_not_refused() -> None:
     # About 92 KB was already "more than 100k tokens" at one token per byte (the production bug).
-    subject = BudgetLedger(DynamicLimits(), window_tokens=100_000, output_tokens=8_192)
+    subject = BudgetLedger(
+        DynamicLimits(), window_tokens=100_000, output_tokens=8_192, unit_costs=UNIT_COSTS
+    )
 
     subject.reserve_call("x" * 92_000, output_tokens=8_192)
 
@@ -219,7 +238,7 @@ def test_the_old_cumulative_limits_are_gone() -> None:
     assert not fields & {"max_total_tokens", "max_model_calls", "max_tool_calls", "max_files"}
 
     # A long run is bounded by money alone: far more calls than the old 30 fit the cost limit.
-    subject = cheap()
+    subject = ledger()
     for _ in range(100):
         reservation = subject.reserve_call("x" * 3000, output_tokens=100)
         subject.settle_call(
@@ -231,7 +250,7 @@ def test_the_old_cumulative_limits_are_gone() -> None:
 # #290-T08
 def test_with_known_unit_costs_a_call_reserves_its_input_and_output_at_those_costs() -> None:
     # 3000 bytes -> 1000 input tokens at 1 USD per million, 100 output tokens at 4 USD per million.
-    subject = cheap(max_cost_usd=Decimal("0.0014"))
+    subject = ledger(max_cost_usd=Decimal("0.0014"))
     reservation = subject.reserve_call("x" * 3000, output_tokens=100)
     assert reservation.cost == Decimal("0.0014")
 
@@ -243,7 +262,7 @@ def test_with_known_unit_costs_a_call_reserves_its_input_and_output_at_those_cos
 
 # #290-T08
 def test_spent_cost_reserved_cost_and_the_new_reservation_are_summed() -> None:
-    subject = cheap(max_cost_usd=Decimal("0.004"))
+    subject = ledger(max_cost_usd=Decimal("0.004"))
     first = subject.reserve_call("x" * 3000, output_tokens=100)  # reserves 0.0014
     subject.settle_call(first, prompt_tokens=900, completion_tokens=100, cost=Decimal("0.0030"))
     # 0.0030 spent + 0.0014 for the next call = 0.0044 > 0.004: refused before sending.
@@ -252,7 +271,7 @@ def test_spent_cost_reserved_cost_and_the_new_reservation_are_summed() -> None:
     assert refused.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
     assert subject.model_calls == 1
 
-    exact = cheap(max_cost_usd=Decimal("0.0044"))
+    exact = ledger(max_cost_usd=Decimal("0.0044"))
     first = exact.reserve_call("x" * 3000, output_tokens=100)
     exact.settle_call(first, prompt_tokens=900, completion_tokens=100, cost=Decimal("0.0030"))
     exact.reserve_call("x" * 3000, output_tokens=100)  # lands exactly on the limit: allowed
@@ -260,43 +279,17 @@ def test_spent_cost_reserved_cost_and_the_new_reservation_are_summed() -> None:
 
 
 # #290-T08
-def test_without_unit_costs_a_call_reserves_a_floor() -> None:
-    subject = ledger(max_cost_usd=Decimal("0.05"))
-    subject.reserve_call("a", output_tokens=1)  # the floor is exactly the limit
-    with pytest.raises(LimitError):
-        subject.reserve_call("a", output_tokens=1)
-
-    too_small = ledger(max_cost_usd=Decimal("0.04"))
-    with pytest.raises(LimitError) as refused:
-        too_small.reserve_call("a", output_tokens=1)
-    assert refused.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
-
-
-# #290-T08
-def test_without_unit_costs_a_call_reserves_twice_the_dearest_settled_call() -> None:
-    subject = ledger(max_cost_usd=Decimal("1"))
-    first = subject.reserve_call("a", output_tokens=1)
-    subject.settle_call(first, prompt_tokens=1, completion_tokens=1, cost=Decimal("0.2"))
-    second = subject.reserve_call("a", output_tokens=1)
-    assert second.cost == Decimal("0.4")
-    subject.settle_call(second, prompt_tokens=1, completion_tokens=1, cost=Decimal("0.1"))
-
-    third = subject.reserve_call("a", output_tokens=1)
-
-    assert third.cost == Decimal("0.4")  # the dearest call so far was 0.2
-
-
-# #290-T08
 def test_in_flight_reservations_and_settled_cost_are_summed() -> None:
-    subject = ledger(max_cost_usd=Decimal("0.12"))
-    a = subject.reserve_call("a", output_tokens=1)  # 0.05
-    b = subject.reserve_call("a", output_tokens=1)  # 0.05
+    # Each call below reserves 1 input and 1,000 output tokens: 0.004001 USD.
+    subject = ledger(max_cost_usd=Decimal("0.009"))
+    a = subject.reserve_call("a", output_tokens=1_000)
+    b = subject.reserve_call("a", output_tokens=1_000)
     with pytest.raises(LimitError):
-        subject.reserve_call("a", output_tokens=1)  # 0.15 > 0.12
+        subject.reserve_call("a", output_tokens=1_000)  # 0.012003 > 0.009
 
     subject.settle_call(a, prompt_tokens=1, completion_tokens=1, cost=Decimal("0.001"))
     subject.settle_call(b, prompt_tokens=1, completion_tokens=1, cost=Decimal("0.001"))
-    subject.reserve_call("a", output_tokens=1)  # fits again
+    subject.reserve_call("a", output_tokens=1_000)  # fits again
 
 
 # #290-T08
@@ -344,15 +337,16 @@ class SlowCostLimit(DynamicLimits):
 
 # #290-T08
 def test_concurrent_reservations_cannot_together_exceed_the_cost_limit() -> None:
-    # Each reservation is the 0.05 floor, so a limit of 0.17 fits three and not a fourth.
-    shared = BudgetLedger(SlowCostLimit(max_cost_usd=Decimal("0.17")))
+    # Each reservation is 34 input and 50,000 output tokens: 0.200034 USD, so a limit of 0.7 fits
+    # three and not a fourth.
+    shared = BudgetLedger(SlowCostLimit(max_cost_usd=Decimal("0.7")), unit_costs=UNIT_COSTS)
     outcomes: list[bool] = []
     gate = threading.Barrier(16)
 
     def worker() -> None:
         gate.wait()
         try:
-            shared.reserve_call("x" * 100, output_tokens=50)
+            shared.reserve_call("x" * 100, output_tokens=50_000)
         except LimitError as refused:
             assert refused.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
             outcomes.append(False)
@@ -423,7 +417,7 @@ class TestToolsAndBytes:
 # #197-T05
 def test_the_whole_job_deadline_is_enforced_by_the_ledger() -> None:
     clock = Clock()
-    subject = BudgetLedger(DynamicLimits(deadline_seconds=10.0), clock=clock)
+    subject = BudgetLedger(DynamicLimits(deadline_seconds=10.0), clock=clock, unit_costs=UNIT_COSTS)
     assert subject.remaining_seconds() == 10.0
 
     clock.advance(10.0)
@@ -596,7 +590,7 @@ def test_the_cost_is_what_the_provider_reported_whatever_the_token_counts_or_uni
 ):
     reported = [Decimal("0.0003"), Decimal("0.0002")]
     for prompt in (1, 50, 90):
-        for subject in (rich(), cheap(max_cost_usd=Decimal(10**500))):
+        for subject in (rich(), ledger(max_cost_usd=Decimal(10**500))):
             for cost in reported:
                 settled(subject, cost, prompt=prompt)
 

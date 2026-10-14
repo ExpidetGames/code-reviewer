@@ -10,7 +10,12 @@ import pytest
 from loop_support import outcome, result_line
 from support import API_KEY, TOKEN
 
-from code_reviewer_runner.dynamic_review.budget import BudgetLedger, DynamicLimits, LimitError
+from code_reviewer_runner.dynamic_review.budget import (
+    BudgetLedger,
+    DynamicLimits,
+    LimitError,
+    UnitCosts,
+)
 from code_reviewer_runner.job_loop.process import ProcessOutcome
 from code_reviewer_runner.job_loop.reporting import (
     MAX_LOG_TAIL_CHARS,
@@ -23,6 +28,10 @@ from code_reviewer_runner.job_loop.reporting import (
 from code_reviewer_runner.redaction import Redactor
 
 REDACTOR = Redactor([TOKEN, API_KEY])
+
+
+# 1 USD per million input tokens, 4 USD per million output tokens: a call has a price.
+UNIT_COSTS = UnitCosts(input_usd_per_mtok=Decimal(1), output_usd_per_mtok=Decimal(4))
 
 
 def reported(process: ProcessOutcome) -> dict[str, Any]:
@@ -139,7 +148,7 @@ def test_the_bare_verdict_keeps_ok_and_code_and_drops_the_log() -> None:
 
 # #267-T07
 def test_the_exact_cost_of_a_dynamic_run_reaches_the_reported_result_unchanged() -> None:
-    ledger = BudgetLedger(DynamicLimits())
+    ledger = BudgetLedger(DynamicLimits(), unit_costs=UNIT_COSTS)
     for cost in ("0.000123", "0.000456"):
         reservation = ledger.reserve_call("a request", output_tokens=1)
         ledger.settle_call(reservation, prompt_tokens=9, completion_tokens=1, cost=Decimal(cost))
@@ -154,7 +163,7 @@ def test_the_exact_cost_of_a_dynamic_run_reaches_the_reported_result_unchanged()
 
 # #267-T07
 def test_an_unknown_cost_of_a_dynamic_run_stays_unknown_in_the_reported_result() -> None:
-    ledger = BudgetLedger(DynamicLimits())
+    ledger = BudgetLedger(DynamicLimits(), unit_costs=UNIT_COSTS)
     reservation = ledger.reserve_call("a request", output_tokens=1)
     # A call without a cost stops the run (#290), and the result still reports its tokens.
     with pytest.raises(LimitError):

@@ -16,19 +16,22 @@ is only asked for in the prompt or only observed after the fact is not enforced.
 is reserved before the request is sent, every tool part the engine reports is counted, and a
 missing or oversized answer fails closed. Nothing here is advisory.
 
-**Cost.** Before a call the ledger reserves what the call could cost: with the unit costs of the
-model's descriptor, the input estimate and the output allowance at those costs; without them, a
-fixed floor or twice the dearest settled call. The call is refused when what is spent, what is
-reserved for calls in flight and this reservation would together pass the limit. After the call the
-reservation is replaced by the `usage.cost` the provider reported. A call that reports no cost
-cannot be bounded by money, so the run stops (`dynamic_accounting_failed`): it is never continued
-without a bound, and a missing cost is never read as zero.
+**Cost.** Before a call the ledger reserves what the call could cost: the input estimate and the
+output allowance at the unit costs of the model's descriptor. A model without unit costs does not
+run (`dynamic_config_invalid`, see `runner.dynamic_ledger`): a cost that cannot be priced cannot be
+bounded before it is spent. The call is refused when what is spent, what is reserved for calls in
+flight and this reservation would together pass the limit. After the call the reservation is
+replaced by the `usage.cost` the provider reported. A call that reports no cost cannot be bounded by
+money, so the run stops (`dynamic_accounting_failed`): it is never continued without a bound, and a
+missing cost is never read as zero.
 
 **Tokens.** The input estimate is bytes over a conservative 3 bytes per token (real text has
 about 3 to 4), tightened to what the provider settled on the previous call when that content was
 denser, and never below the last settled prompt. It is an estimate, not a bound: it prices the
-reservation and checks the model window, which is only a backstop in front of the provider's own
-limit. The proven bound stays the byte count (a BPE token is never fewer than one byte): usage the
+reservation. The model window is only a backstop in front of the provider's own limit and is
+checked with a much more lenient density (`WINDOW_CHECK_DENSITY`), so the ledger refuses only what
+cannot fit at any realistic density and leaves every other case to the provider's context error.
+The proven bound stays the byte count (a BPE token is never fewer than one byte): usage the
 provider reports above it is an accounting failure. The margin of the estimate is that every call
 also reserves its whole output allowance at the output cost although a call rarely uses it.
 """
@@ -68,11 +71,12 @@ DEFAULT_WINDOW_TOKENS = 128_000
 # about 3 to 4; 3 errs on the side of more tokens, and a denser previous call tightens it, down
 # to the proven 1.
 ASSUMED_DENSITY = 3.0
-# What a call reserves when the descriptor has no unit costs: the floor, or twice the dearest call
-# settled so far when that is more. A call's cost grows with its history, and a tool result adds
-# at most 64 KiB to it, so the next call rarely costs more than twice the dearest one so far.
-FALLBACK_CALL_RESERVE_USD = Decimal("0.05")
-FALLBACK_GROWTH_FACTOR = 2
+# The density of the window backstop: the bytes one token is assumed to hold when the ledger asks
+# whether a request can fit the model window at all. Natural text has 3 to 4.5, so 6 refuses only
+# what cannot fit at any realistic density (a long run of one repeated character is the only text
+# that packs tighter), and a request the provider could still take is never refused here: the
+# provider's own context error ends the run with a code of its own instead.
+WINDOW_CHECK_DENSITY = 6.0
 # A request smaller than this says nothing about the content's density: the provider's own
 # overhead per request dominates it. Only larger requests tighten the estimate.
 MIN_CALIBRATION_BYTES = 4096
@@ -172,7 +176,6 @@ class _Counters:
     last_prompt_tokens: int = 0
     # Bytes per token the previous call settled on, when denser than the default estimate.
     density: float = ASSUMED_DENSITY
-    dearest_call: Decimal = field(default_factory=lambda: Decimal(0))
     # The cost the provider charged, summed as exact decimals, over the calls that reported one.
     cost: Decimal = field(default_factory=lambda: Decimal(0))
     priced_calls: int = 0
@@ -229,7 +232,7 @@ class BudgetLedger:
         *,
         window_tokens: int = DEFAULT_WINDOW_TOKENS,
         output_tokens: int = DEFAULT_OUTPUT_TOKENS,
-        unit_costs: UnitCosts | None = None,
+        unit_costs: UnitCosts,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         if window_tokens < 1:
@@ -284,8 +287,9 @@ class BudgetLedger:
 
         Every attempt reserves, including a retry, a compaction or a hidden call: they are all model
         calls and they all spend the same budget. The request plus the output allowance must fit
-        the window (a backstop in front of the provider's own limit), and the cost spent, the cost
-        reserved for calls in flight and the cost this call could have must stay within the limit.
+        the window at a lenient density (a backstop in front of the provider's own limit, which
+        refuses only what cannot fit at all), and the cost spent, the cost reserved for calls in
+        flight and the cost this call could have must stay within the limit.
         """
         self.check_deadline()
         size = len(request_text.encode("utf-8", errors="replace"))
@@ -298,7 +302,7 @@ class BudgetLedger:
             # The byte count stays the proven bound on what the provider may report.
             estimate = max(math.ceil(size / counters.density), counters.last_prompt_tokens)
             bound = max(size, counters.last_prompt_tokens)
-            if estimate + allowance > self.window_tokens:
+            if math.ceil(size / WINDOW_CHECK_DENSITY) + allowance > self.window_tokens:
                 raise LimitError(
                     ErrorCode.DYNAMIC_BUDGET_EXCEEDED,
                     "the request plus its output allowance exceeds the model window",
@@ -317,11 +321,8 @@ class BudgetLedger:
         )
 
     def _call_cost(self, input_tokens: int, output_tokens: int) -> Decimal:
-        """What one call could cost, to reserve: priced when the unit costs are known."""
-        if self._unit_costs is not None:
-            return self._unit_costs.of_call(input_tokens, output_tokens)
-        dearest = _SUM.multiply(self._counters.dearest_call, Decimal(FALLBACK_GROWTH_FACTOR))
-        return max(FALLBACK_CALL_RESERVE_USD, dearest)
+        """What one call could cost, to reserve: estimate and allowance at the unit costs."""
+        return self._unit_costs.of_call(input_tokens, output_tokens)
 
     def settle_call(
         self,
@@ -374,7 +375,6 @@ class BudgetLedger:
                 )
             counters.cost = _SUM.add(counters.cost, cost)
             counters.priced_calls += 1
-            counters.dearest_call = max(counters.dearest_call, cost)
             if counters.cost > self.limits.max_cost_usd:
                 raise LimitError(ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the cost limit is used up")
 

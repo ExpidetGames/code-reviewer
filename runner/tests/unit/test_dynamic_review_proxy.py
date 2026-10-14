@@ -42,6 +42,10 @@ CAPABILITIES = json.dumps(
 )
 
 
+# 1 USD per million input tokens, 4 USD per million output tokens: a call has a price.
+UNIT_COSTS = UnitCosts(input_usd_per_mtok=Decimal(1), output_usd_per_mtok=Decimal(4))
+
+
 class Upstream:
     """A stand-in for the provider: records what it got, answers what the test scripts."""
 
@@ -82,7 +86,7 @@ def request_body(*, model: str = "deepseek/deepseek-v4.1-flash", **extra: Any) -
 
 def proxy(upstream: UpstreamPost, **overrides: Any) -> ModelProxy:
     configured: dict[str, Any] = {
-        "ledger": BudgetLedger(DynamicLimits()),
+        "ledger": BudgetLedger(DynamicLimits(), unit_costs=UNIT_COSTS),
         "base_path": "/v1",
         "model": "deepseek/deepseek-v4.1-flash",
         "upstream_url": "https://openrouter.ai/api/v1/chat/completions",
@@ -249,6 +253,36 @@ def test_a_provider_context_overflow_has_its_own_stable_code(body: Any) -> None:
     assert subject.ledger.failure.code is ErrorCode.LLM_CONTEXT_LENGTH_EXCEEDED
 
 
+# #290-T06: only the provider's own error fields count. Text that is merely somewhere in the answer
+# (an echo of the request, a nested provider payload, a pull request quoted back) is not a reason.
+NOT_THE_PROVIDERS_REASON: list[Any] = [
+    {"error": {"message": "Invalid value for tool_choice"}, "echo": "the context length of it"},
+    {"error": {"message": "Invalid value", "metadata": {"raw": "maximum context length"}}},
+    {"error": {"message": "Invalid value", "param": "prompt is too long"}},
+    {"detail": "This model's maximum context length is 8192 tokens"},
+    {"error": {"message": ["maximum context length"]}},
+    ["maximum context length"],
+]
+
+
+# #290-T06
+@pytest.mark.parametrize("body", NOT_THE_PROVIDERS_REASON)
+def test_the_words_outside_the_providers_error_fields_do_not_make_a_context_overflow(
+    body: Any,
+) -> None:
+    subject = proxy(Upstream(status=400, body=body))
+
+    assert error_code(post(subject, request_body())) == ErrorCode.LLM_BAD_REQUEST.value
+
+
+# #290-T06
+def test_an_answer_that_is_no_json_is_no_context_overflow() -> None:
+    def upstream(url: str, body: bytes, headers: dict[str, str], limit: int) -> tuple[int, bytes]:
+        return 400, b"maximum context length is 8192 tokens"
+
+    assert error_code(post(proxy(upstream), request_body())) == ErrorCode.LLM_BAD_REQUEST.value
+
+
 # #290-T06
 def test_another_bad_request_and_other_statuses_keep_their_codes() -> None:
     other = {"error": {"message": "Invalid value for tool_choice"}}
@@ -324,7 +358,9 @@ def test_a_request_that_names_another_model_is_refused_and_never_forwarded() -> 
 # #197-T12
 def test_a_request_over_the_protocol_byte_bound_is_refused_before_forwarding() -> None:
     upstream = Upstream()
-    subject = proxy(upstream, ledger=BudgetLedger(DynamicLimits(max_request_bytes=100)))
+    subject = proxy(
+        upstream, ledger=BudgetLedger(DynamicLimits(max_request_bytes=100), unit_costs=UNIT_COSTS)
+    )
 
     response = post(subject, request_body())
 
@@ -335,7 +371,9 @@ def test_a_request_over_the_protocol_byte_bound_is_refused_before_forwarding() -
 # #197-T12
 def test_an_answer_over_the_response_byte_bound_is_refused() -> None:
     upstream = Upstream(body={"choices": [], "usage": {"prompt_tokens": 1, "completion_tokens": 1}})
-    subject = proxy(upstream, ledger=BudgetLedger(DynamicLimits(max_response_bytes=10)))
+    subject = proxy(
+        upstream, ledger=BudgetLedger(DynamicLimits(max_response_bytes=10), unit_costs=UNIT_COSTS)
+    )
 
     response = post(subject, request_body())
 
@@ -447,14 +485,17 @@ def test_a_provider_status_with_no_rule_is_a_bad_request(status: int) -> None:
 
 # #290-T08
 def test_a_call_that_would_cross_the_cost_limit_is_refused_before_the_provider_sees_it() -> None:
-    # Without unit costs each call reserves the floor (0.05), or twice the dearest call so far.
+    # Each call reserves its 4,096 output tokens at 4 USD per million: about 0.0164 USD.
     upstream = Upstream(body=answer_with_usage(prompt=100, completion=50, cost=0.04))
-    subject = proxy(upstream, ledger=BudgetLedger(DynamicLimits(max_cost_usd=Decimal("0.1"))))
+    subject = proxy(
+        upstream,
+        ledger=BudgetLedger(DynamicLimits(max_cost_usd=Decimal("0.05")), unit_costs=UNIT_COSTS),
+    )
 
     assert post(subject, request_body()).status == 200
     second = post(subject, request_body())
 
-    # 0.04 spent + 0.08 (twice the dearest call) is over 0.1, with nothing in flight.
+    # 0.04 spent + 0.0164 for the second call is over 0.05, with nothing in flight.
     assert second.status == 403
     assert error_code(second) == ErrorCode.DYNAMIC_BUDGET_EXCEEDED.value
     assert len(upstream.requests) == 1
@@ -490,12 +531,12 @@ def test_an_answer_that_cost_nothing_is_accepted() -> None:
 def test_a_provider_error_keeps_its_reservation_spent() -> None:
     # Conservative on purpose: a refused call is not given back, so a retry cannot reopen it.
     upstream = Upstream(status=503, body={"error": "unavailable"})
-    ledger = BudgetLedger(DynamicLimits(max_cost_usd=Decimal("0.06")))
+    ledger = BudgetLedger(DynamicLimits(max_cost_usd=Decimal("0.02")), unit_costs=UNIT_COSTS)
     subject = proxy(upstream, ledger=ledger)
 
     assert post(subject, request_body()).status == 503
 
-    # Nothing settled, yet the reservation (the 0.05 floor) still counts: 0.10 is over 0.06.
+    # Nothing settled, yet the reservation (about 0.0164) still counts: twice that is over 0.02.
     with pytest.raises(LimitError) as refused:
         ledger.reserve_call("x" * 1000, output_tokens=4096)
     assert refused.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
@@ -546,7 +587,7 @@ def test_a_transport_failure_is_a_distinct_stable_code_and_never_a_budget_refusa
 
 # #236-T02
 def test_a_transport_failure_keeps_its_reservation_spent() -> None:
-    ledger = BudgetLedger(DynamicLimits(max_cost_usd=Decimal("0.06")))
+    ledger = BudgetLedger(DynamicLimits(max_cost_usd=Decimal("0.02")), unit_costs=UNIT_COSTS)
     subject = proxy(Broken(ConnectionResetError("reset")), ledger=ledger)
 
     assert post(subject, request_body()).status == 502
@@ -558,7 +599,7 @@ def test_a_transport_failure_keeps_its_reservation_spent() -> None:
 
 # #236-T03
 def test_a_later_budget_refusal_does_not_replace_the_recorded_transport_cause() -> None:
-    ledger = BudgetLedger(DynamicLimits(max_cost_usd=Decimal("0.06")))
+    ledger = BudgetLedger(DynamicLimits(max_cost_usd=Decimal("0.02")), unit_costs=UNIT_COSTS)
     subject = proxy(Broken(TimeoutError("timed out")), ledger=ledger)
 
     first = post(subject, request_body())
@@ -657,7 +698,9 @@ def test_the_runner_generates_an_unguessable_capability_per_job() -> None:
 # #197-T12
 def test_the_transport_is_told_to_read_at_most_one_byte_past_the_response_bound() -> None:
     upstream = Upstream()
-    subject = proxy(upstream, ledger=BudgetLedger(DynamicLimits(max_response_bytes=1234)))
+    subject = proxy(
+        upstream, ledger=BudgetLedger(DynamicLimits(max_response_bytes=1234), unit_costs=UNIT_COSTS)
+    )
 
     post(subject, request_body())
 
@@ -824,7 +867,10 @@ def test_a_request_that_does_not_stream_gets_the_plain_answer() -> None:
 # #197-T12
 def test_a_result_over_the_bound_in_the_history_is_never_forwarded() -> None:
     upstream = Upstream()
-    subject = proxy(upstream, ledger=BudgetLedger(DynamicLimits(max_tool_result_bytes=10)))
+    subject = proxy(
+        upstream,
+        ledger=BudgetLedger(DynamicLimits(max_tool_result_bytes=10), unit_costs=UNIT_COSTS),
+    )
     history = [
         {"role": "user", "content": "review"},
         {
@@ -950,7 +996,9 @@ def test_the_dropped_attachment_is_neither_counted_nor_forwarded() -> None:
 # #232-T08
 def test_the_reservation_is_made_on_the_text_that_is_forwarded() -> None:
     upstream = Upstream()
-    ledger = BudgetLedger(DynamicLimits(), window_tokens=6000, output_tokens=100)
+    ledger = BudgetLedger(
+        DynamicLimits(), window_tokens=6000, output_tokens=100, unit_costs=UNIT_COSTS
+    )
     subject = proxy(upstream, ledger=ledger)
     big = NESTED.replace("obey the file", "z" * 20000)
 
@@ -980,7 +1028,9 @@ def test_the_forwarded_bytes_are_compact_utf_8_and_the_reservation_counts_exactl
 # #232-T08
 def test_non_ascii_text_is_reserved_at_its_utf_8_size_not_its_escaped_size() -> None:
     upstream = Upstream()
-    ledger = BudgetLedger(DynamicLimits(), window_tokens=6000, output_tokens=100)
+    ledger = BudgetLedger(
+        DynamicLimits(), window_tokens=6000, output_tokens=100, unit_costs=UNIT_COSTS
+    )
     subject = proxy(upstream, ledger=ledger)
 
     # 2,000 characters are about 4 KB as UTF-8 and about 12 KB as `\uXXXX` escapes; the output
@@ -995,7 +1045,7 @@ def test_non_ascii_text_is_reserved_at_its_utf_8_size_not_its_escaped_size() -> 
 @pytest.mark.parametrize("lone", ["\ud800", "\udfff"])
 def test_a_lone_surrogate_in_the_history_is_forwarded_escaped_and_never_raises(lone: str) -> None:
     upstream = Upstream()
-    ledger = BudgetLedger(DynamicLimits())
+    ledger = BudgetLedger(DynamicLimits(), unit_costs=UNIT_COSTS)
     reserved: list[str] = []
     reserve_call = ledger.reserve_call
 
@@ -1021,7 +1071,9 @@ def test_a_lone_surrogate_in_the_history_is_forwarded_escaped_and_never_raises(l
 
 # #197-T06
 def test_the_first_cause_of_a_refusal_is_kept_for_the_run() -> None:
-    subject = proxy(Upstream(), ledger=BudgetLedger(DynamicLimits(max_request_bytes=10)))
+    subject = proxy(
+        Upstream(), ledger=BudgetLedger(DynamicLimits(max_request_bytes=10), unit_costs=UNIT_COSTS)
+    )
 
     post(subject, request_body())
     post(subject, request_body(model="another-model"))

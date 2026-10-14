@@ -33,7 +33,7 @@ from code_reviewer_runner.dynamic_review.adapter import (
     EngineAnswer,
     shutdown_engines,
 )
-from code_reviewer_runner.dynamic_review.budget import BudgetLedger, DynamicLimits
+from code_reviewer_runner.dynamic_review.budget import BudgetLedger, DynamicLimits, UnitCosts
 from code_reviewer_runner.dynamic_review.config import engine_environment, new_proxy_capability
 from code_reviewer_runner.dynamic_review.engine_user import EngineLaunch
 from code_reviewer_runner.dynamic_review.netguard import IsolationError
@@ -48,10 +48,20 @@ API_KEY = "dummy-openrouter-key-0123456789"
 HEAD = "1f3a5c7e9b2d4f60a8c1e3b5d7f90a2c4e6b8d01"
 OTHER_SHA = "0000000000000000000000000000000000000000"
 CAPABILITIES = json.dumps(
-    {"tool_choice_required": True, "structured_output": True, "max_output_tokens": 4096}
+    {
+        "tool_choice_required": True,
+        "structured_output": True,
+        "max_output_tokens": 4096,
+        "input_usd_per_mtok": 1,
+        "output_usd_per_mtok": 4,
+    }
 )
 UPSTREAM_USAGE = {"prompt_tokens": 11, "completion_tokens": 7, "cost": 0.0002}
 EXPORTED = frozenset({"src/api/handler.ts", "src/other.ts"})
+
+
+# 1 USD per million input tokens, 4 USD per million output tokens: a call has a price.
+UNIT_COSTS = UnitCosts(input_usd_per_mtok=Decimal(1), output_usd_per_mtok=Decimal(4))
 
 
 def tool_call(call_id: str, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -233,7 +243,7 @@ class Fixture:
         self.script_path = self.directory / ".fake-opencode-script.json"
         self.script_path.write_text(json.dumps(script), encoding="utf-8")
         self.trace_path = self.directory / ".fake-opencode-trace.jsonl"
-        self.ledger = BudgetLedger(limits or DynamicLimits())
+        self.ledger = BudgetLedger(limits or DynamicLimits(), unit_costs=UNIT_COSTS)
         self.port_source = port_source
         self.capability = ""
         self.exported: frozenset[str] = EXPORTED
@@ -471,11 +481,11 @@ def test_a_second_call_that_would_cross_the_cost_limit_is_refused_before_the_pro
     fixture = Fixture(
         tmp_path,
         {"answer": "structured", "findings": findings(), "proxy_calls": 3},
-        limits=DynamicLimits(max_cost_usd=Decimal("0.06")),
+        limits=DynamicLimits(max_cost_usd=Decimal("0.05")),
     )
 
-    # The first call settles at 0.04; the second would reserve twice that (0.08), end above the
-    # limit and never leaves the proxy.
+    # The first call settles at 0.04; the second would reserve about 0.0164 more (4,096 output
+    # tokens), end above the limit and never leaves the proxy.
     with FakeUpstream(
         [
             asks(tool_call("c1", "read", {"filePath": "src/api/handler.ts"})),
@@ -752,7 +762,7 @@ def test_the_engine_config_file_is_mode_0600_and_scratch_dir_0700(tmp_path: Path
     export_dir.mkdir(parents=True)
     engine = DynamicEngine(
         job,
-        ledger=BudgetLedger(DynamicLimits()),
+        ledger=BudgetLedger(DynamicLimits(), unit_costs=UNIT_COSTS),
         command=[sys.executable, str(FAKE_ENGINE)],
         directory=str(export_dir),
         proxy_url="http://127.0.0.1:9",

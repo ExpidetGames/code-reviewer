@@ -8,15 +8,25 @@ often the history is resent.
 """
 
 import json
+from decimal import Decimal
 from typing import Any
 
 import pytest
 
 from code_reviewer_runner.dynamic_review.audit import ToolAudit
-from code_reviewer_runner.dynamic_review.budget import BudgetLedger, DynamicLimits, LimitError
+from code_reviewer_runner.dynamic_review.budget import (
+    BudgetLedger,
+    DynamicLimits,
+    LimitError,
+    UnitCosts,
+)
 from code_reviewer_runner.result import ErrorCode
 
 EXPORT = "/job/export"
+
+
+# 1 USD per million input tokens, 4 USD per million output tokens: a call has a price.
+UNIT_COSTS = UnitCosts(input_usd_per_mtok=Decimal(1), output_usd_per_mtok=Decimal(4))
 
 
 def call(call_id: str, name: str, **arguments: Any) -> dict[str, Any]:
@@ -44,7 +54,7 @@ def read_file(path: str) -> str:
 
 
 def audit(**limits: Any) -> tuple[ToolAudit, BudgetLedger]:
-    ledger = BudgetLedger(DynamicLimits(**limits))
+    ledger = BudgetLedger(DynamicLimits(**limits), unit_costs=UNIT_COSTS)
     return ToolAudit(ledger, export_root=EXPORT), ledger
 
 

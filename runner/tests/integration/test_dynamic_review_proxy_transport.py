@@ -11,6 +11,7 @@ import json
 import socket
 import threading
 from collections.abc import Callable
+from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.error import HTTPError
@@ -20,7 +21,7 @@ import pytest
 
 from code_reviewer_runner.dynamic_review import proxy as proxy_module
 from code_reviewer_runner.dynamic_review.adapter import _http_request  # pyright: ignore[reportPrivateUsage]
-from code_reviewer_runner.dynamic_review.budget import BudgetLedger, DynamicLimits
+from code_reviewer_runner.dynamic_review.budget import BudgetLedger, DynamicLimits, UnitCosts
 from code_reviewer_runner.dynamic_review.config import new_proxy_capability
 from code_reviewer_runner.dynamic_review.proxy import (
     ModelProxy,
@@ -31,13 +32,23 @@ from code_reviewer_runner.result import ErrorCode
 
 UPSTREAM_KEY = "sk-or-v1-workspace-key-0123456789"
 CAPABILITIES = json.dumps(
-    {"tool_choice_required": True, "structured_output": True, "max_output_tokens": 4096}
+    {
+        "tool_choice_required": True,
+        "structured_output": True,
+        "max_output_tokens": 4096,
+        "input_usd_per_mtok": 1,
+        "output_usd_per_mtok": 4,
+    }
 )
 ANSWER = {
     "id": "chatcmpl-1",
     "choices": [{"message": {"role": "assistant", "content": "{}"}}],
     "usage": {"prompt_tokens": 10, "completion_tokens": 5, "cost": 0.0001},
 }
+
+
+# 1 USD per million input tokens, 4 USD per million output tokens: a call has a price.
+UNIT_COSTS = UnitCosts(input_usd_per_mtok=Decimal(1), output_usd_per_mtok=Decimal(4))
 
 
 class Listener:
@@ -118,7 +129,7 @@ def started_proxy(
     upstream_url: str, capability: str, ledger: BudgetLedger | None = None, **limits: Any
 ) -> Any:
     proxy = ModelProxy(
-        ledger=ledger or BudgetLedger(DynamicLimits(**limits)),
+        ledger=ledger or BudgetLedger(DynamicLimits(**limits), unit_costs=UNIT_COSTS),
         base_path="/v1",
         model="deepseek/deepseek-v4.1-flash",
         upstream_url=f"{upstream_url}/v1/chat/completions",
@@ -273,7 +284,7 @@ def test_an_upstream_that_never_answers_ends_the_call_with_llm_timeout(
     monkeypatch.setenv("NO_PROXY", "127.0.0.1")
     monkeypatch.setattr(proxy_module, "_REQUEST_TIMEOUT_SECONDS", 0.3)
     capability = new_proxy_capability()
-    ledger = BudgetLedger(DynamicLimits())
+    ledger = BudgetLedger(DynamicLimits(), unit_costs=UNIT_COSTS)
     with SilentListener() as upstream:
         server = started_proxy(upstream.url, capability, ledger)
         try:
@@ -294,7 +305,7 @@ def test_an_upstream_that_refuses_the_connection_ends_the_call_with_llm_unavaila
 ) -> None:
     monkeypatch.setenv("NO_PROXY", "127.0.0.1")
     capability = new_proxy_capability()
-    ledger = BudgetLedger(DynamicLimits())
+    ledger = BudgetLedger(DynamicLimits(), unit_costs=UNIT_COSTS)
     server = started_proxy(unused_loopback_url(), capability, ledger)
     try:
         code, document = call(server.url, capability)

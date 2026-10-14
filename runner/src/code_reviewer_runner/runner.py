@@ -250,15 +250,25 @@ def dynamic_ledger(
 ) -> BudgetLedger:
     """The ledger of one Dynamic run, from trusted runner configuration only (#290).
 
-    The window and the unit costs are the model's (its descriptor); the cost limit is the
-    operator's (`RUNNER_DYNAMIC_MAX_COST_USD`, up to a ceiling in code). Nothing of the job takes
-    part: the project's Diff "Token budget" (`llm.maxTokens`) is not the window of a Dynamic run,
-    and neither the claim nor the repository can name a limit.
+    The window and the unit costs are the model's (its descriptor, and a model without unit costs
+    is refused); the cost limit is the operator's (`RUNNER_DYNAMIC_MAX_COST_USD`, up to a ceiling
+    in code). Nothing of the job takes part: the project's Diff "Token budget" (`llm.maxTokens`)
+    is not the window of a Dynamic run, and neither the claim nor the repository can name a limit.
     """
+    # A model that cannot serve the run at all is named first, then one that cannot be priced.
+    capabilities.check_required()
     limits = DynamicLimits(
         deadline_seconds=deadline,
         max_cost_usd=max_cost_from_environment(environment.get(DYNAMIC_MAX_COST_VARIABLE)),
     )
+    # A cost that cannot be priced cannot be bounded before it is spent: a model without unit
+    # costs (only the default model has them built in) does not run, and nothing is assumed.
+    if capabilities.unit_costs is None:
+        raise LimitError(
+            ErrorCode.DYNAMIC_CONFIG_INVALID,
+            "the capability descriptor of the model has no unit costs "
+            "(input_usd_per_mtok and output_usd_per_mtok)",
+        )
     return BudgetLedger(
         limits,
         window_tokens=capabilities.context_window_tokens,
