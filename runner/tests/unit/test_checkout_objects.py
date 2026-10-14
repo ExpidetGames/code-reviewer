@@ -81,14 +81,26 @@ def test_delta_expansion_and_invalid_copy_ranges_are_bounded(tmp_path: Path, del
         store.unpack(payload + hashlib.sha1(payload).digest())
 
 
-# #196-T12
-def test_download_and_expansion_share_the_same_cumulative_budget(tmp_path: Path) -> None:
-    budget = Budget(Limits(preparation_bytes=8192))
+# #296-T04
+def test_download_is_not_charged_a_second_time_to_the_expansion_budget(tmp_path: Path) -> None:
+    # The wire bytes have their own budget: a pack as large as the whole preparation budget can be
+    # received and still expand within it.
+    budget = Budget(Limits(preparation_bytes=16_384, transfer_bytes=16_384))
     store = ObjectStore(tmp_path / "objects", budget)
     pack = packed(b"x" * 4096)
-    budget.charge(len(pack))
+    budget.charge_transfer(len(pack))
+    store.unpack(pack)
+    assert budget.transfer == len(pack)
+    assert budget.preparation == 4096 + 4096  # the staging directory and the inflated object
+    assert len(store.objects) == 1
+
+
+# #196-T12
+def test_expansion_beyond_the_preparation_budget_is_refused(tmp_path: Path) -> None:
+    budget = Budget(Limits(preparation_bytes=8192))
+    store = ObjectStore(tmp_path / "objects", budget)
     with pytest.raises(CheckoutError):
-        store.unpack(pack)
+        store.unpack(packed(b"x" * 4097))
     assert not store.objects
 
 

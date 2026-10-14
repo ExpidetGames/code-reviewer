@@ -171,6 +171,22 @@ kept as-is, with no provider rewrite and no routing field. How a configured mode
 whether it can serve the engine's needs is #197's business, not a project setting. `reviewKind` is
 independent of the Diff `model`, so each kind keeps its own model and skill across a switch.
 
+**Saving a Dynamic model checks it (#269).** Dynamic Review needs tool calling, so a `dynamicModel` that a
+project save sets (a string, not `null`) is looked up in the provider's public model metadata first
+(`src/llm/model-capabilities.ts`, before the write, outside the transaction). The outcome decides the save:
+
+| Outcome         | The save                                                                                                                                                              | Where it shows                                  |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| `supported`     | goes through                                                                                                                                                          | nothing                                         |
+| `unsupported`   | refused, nothing stored: `REVIEW_SETTINGS_INVALID` with the issue `DYNAMIC_MODEL_TOOLS_UNSUPPORTED` on `dynamicModel`                                                 | the sentence next to the model field            |
+| `unknown_model` | refused, nothing stored: the issue `DYNAMIC_MODEL_UNKNOWN` on `dynamicModel`                                                                                          | the sentence next to the model field            |
+| `unverifiable`  | goes through; the answer carries `warnings: [{ "field": "dynamicModel", "code": "DYNAMIC_MODEL_UNVERIFIED" }]` (the run-time check of the runner proxy still applies) | a warning under the "Saved" message of the form |
+
+Not checked: the Diff `model` and `fallbackModel`, a save that leaves the Dynamic model out or clears it, the
+global defaults (they cannot hold a Dynamic model), and a value that is already stored (a stored model is never
+re-checked or rewritten). A service built without a `modelCapabilities` checker checks nothing (tests of other
+behavior); the running server always passes the real one (`shared.ts`).
+
 **No schema migration.** The fields are JSON inside `projects.settings`, and missing values read as Diff
 Review, `deepseek/deepseek-v4.1-flash` and the shipped skill (`resolveProjectDynamicSettings`,
 `builtInProjectDynamicSettings`). An existing project therefore behaves exactly as before; a
@@ -277,7 +293,7 @@ The claim of the runner API and the webhook intake use `service.resolveForReposi
 ## Testing
 
 `validate.test.ts`, `effective.test.ts`, `runner-settings.test.ts`, `cost.test.ts` (unit, pure),
-`service.integration.test.ts` and `http.integration.test.ts` (real SQLite), the repositories' own tests in
+`service.integration.test.ts`, `dynamic-model-check.integration.test.ts` and `http.integration.test.ts` (real SQLite, the metadata from the fake LLM), the repositories' own tests in
 `src/db/repositories/`, and in `integration-tests/http/` the proxy in front of the routes
 (`review-settings-route.integration.test.ts`) and the real route files
 (`review-settings-route-file.integration.test.ts`). The test cases that need the real PR-Agent against the

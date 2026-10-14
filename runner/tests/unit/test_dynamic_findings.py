@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 
 from code_reviewer_runner.dynamic_findings import (
+    DROPPED_OUTSIDE_EXPORT,
     FindingsError,
     location_problem,
     parse_dynamic_findings,
@@ -70,13 +71,32 @@ def test_the_ordered_line_range_and_the_export_membership_are_semantic_checks() 
     assert refused.value.code is ErrorCode.DYNAMIC_POLICY_VIOLATION
     assert "lineStart" in refused.value.detail
 
-    # A path outside the prepared export is not a review: it must not be rendered.
-    with pytest.raises(FindingsError) as outside:
-        parse_dynamic_findings(document(), exported_paths={"src/other.ts"})
-    assert outside.value.code is ErrorCode.CHECKOUT_INCOMPLETE
-
     parsed = parse_dynamic_findings(document(), exported_paths={"src/api/handler.ts"})
     assert parsed.findings[0].path == "src/api/handler.ts"
+    assert parsed.dropped_outside_export == 0
+
+
+# #296-T13
+def test_a_finding_outside_the_export_is_dropped_and_counted_not_rendered() -> None:
+    kept = document()["findings"][0]
+    other = {**kept, "id": "f-2", "path": "assets/clip.bin"}
+    third = {**kept, "id": "f-3", "path": "docs/guide.md"}
+
+    parsed = parse_dynamic_findings(
+        document(findings=[other, kept, third]), exported_paths={"src/api/handler.ts"}
+    )
+
+    assert [finding.id for finding in parsed.findings] == ["f-1"]
+    assert parsed.dropped_outside_export == 2
+    assert DROPPED_OUTSIDE_EXPORT == "finding_path_not_exported"
+
+
+# #296-T13
+def test_a_malformed_finding_still_fails_even_when_its_path_is_outside_the_export() -> None:
+    finding = {**document()["findings"][0], "path": "assets/clip.bin", "lineStart": 9, "lineEnd": 1}
+
+    with pytest.raises(FindingsError):
+        parse_dynamic_findings(document(findings=[finding]), exported_paths={"src/other.ts"})
 
 
 def test_location_problem_is_none_for_a_safe_ordered_location() -> None:

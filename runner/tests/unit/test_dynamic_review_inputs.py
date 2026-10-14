@@ -17,6 +17,7 @@ from code_reviewer_runner.dynamic_review.inputs import (
     review_inputs,
     split_metadata,
 )
+from code_reviewer_runner.dynamic_review.limits import CheckoutMetrics
 from code_reviewer_runner.dynamic_review.prompts import compose_user_prompt
 
 HEAD = "1f3a5c7e9b2d4f60a8c1e3b5d7f90a2c4e6b8d01"
@@ -39,6 +40,7 @@ def content(**overrides: object) -> PreparedContent:
         "metadata": json.dumps({"title": "Fix a", "body": "Because of b."}),
         "prior_state": "",
         "deadline": 0.0,
+        "metrics": CheckoutMetrics(0, 0, 0, 1, {}, {}),
     }
     fields.update(overrides)
     return PreparedContent(**fields)  # type: ignore[arg-type]

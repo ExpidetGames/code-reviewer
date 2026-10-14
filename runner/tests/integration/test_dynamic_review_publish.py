@@ -28,6 +28,7 @@ from code_reviewer_runner.dynamic_review.state import (
     MARKER_SUFFIX,
     decode_state,
 )
+from code_reviewer_runner.dynamic_review.wrap_up import STOPPED_EARLY_NOTICES
 from code_reviewer_runner.result import ErrorCode
 
 TOKEN = "ghs_fake-installation-token-0123456789"
@@ -56,8 +57,15 @@ def finding(finding_id: str = "f-1", *, sha: str = SHA, **overrides: object) -> 
     return Finding(**base)  # type: ignore[arg-type]
 
 
-def run(*findings: Finding, resolved: tuple[str, ...] = (), sha: str = SHA) -> DynamicFindings:
-    return DynamicFindings(reviewed_sha=sha, findings=findings, resolved_ids=resolved)
+def run(
+    *findings: Finding,
+    resolved: tuple[str, ...] = (),
+    sha: str = SHA,
+    stopped_early: str | None = None,
+) -> DynamicFindings:
+    return DynamicFindings(
+        reviewed_sha=sha, findings=findings, resolved_ids=resolved, stopped_early=stopped_early
+    )
 
 
 @pytest.fixture
@@ -110,6 +118,24 @@ def test_one_comment_is_created_then_edited_across_pushes(
 
     # Only issue comments were touched: no reviews, labels or pull-request edits.
     assert all("/issues/" in path for _, path in server.requests)
+
+
+# #293-T07
+def test_a_review_that_stopped_early_is_published_with_the_notice_and_the_next_one_drops_it(
+    server: FakeGithubComments, publisher: Publisher
+) -> None:
+    early = publisher.publish(
+        run(finding(), stopped_early="cost_limit"), head_sha=SHA, previous_reviewed_sha=None
+    )
+    assert early.created is True
+    assert STOPPED_EARLY_NOTICES["cost_limit"] in server.comments[0]["body"]
+
+    publisher.publish(
+        run(finding("f-1", sha=NEXT), sha=NEXT), head_sha=NEXT, previous_reviewed_sha=SHA
+    )
+
+    assert len(server.comments) == 1
+    assert "stopped early" not in server.comments[0]["body"]
 
 
 # #199-T01

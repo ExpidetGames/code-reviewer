@@ -18,6 +18,7 @@ import { createInstallationLinkRequestsRepository } from "./installation-link-re
 import { createIntegrationsRepository } from "./integrations-repository.ts";
 import { createInvitationsRepository } from "./invitations-repository.ts";
 import { createWorkspaceMembersRepository } from "./workspace-members-repository.ts";
+import { createWorkspaceEntitlementsRepository } from "./workspace-entitlements-repository.ts";
 import { createWorkspaceSecretsRepository } from "./workspace-secrets-repository.ts";
 import { createJobsRepository } from "./jobs-repository.ts";
 import { createProjectsRepository } from "./projects-repository.ts";
@@ -39,9 +40,26 @@ function reposOf(db: Kysely<Database>, workspaceId: string) {
     invitations: createInvitationsRepository(db, workspaceId),
     linkRequests: createInstallationLinkRequestsRepository(db, workspaceId),
     workspaceSecrets: createWorkspaceSecretsRepository(db, workspaceId),
+    entitlements: createWorkspaceEntitlementsRepository(db, workspaceId),
   };
 }
 type Repos = ReturnType<typeof reposOf>;
+
+/** The entitlements of a workspace; the label says whose they are. */
+function entitlementsOf(tag: string, overrides: { planLabel?: string } = {}) {
+  return {
+    planLabel: overrides.planLabel ?? `plan-${tag}`,
+    keyMode: "managed" as const,
+    limits: {
+      diffRunsPerPeriod: 10,
+      dynamicRunsPerPeriod: null,
+      managedCostLimitMicroUsd: 1000,
+    },
+    periodStart: "2026-10-01T00:00:00.000Z",
+    suspended: false,
+    suspensionCode: null,
+  };
+}
 
 /** One workspace with an integration, a repository, a project, a job and a setting. */
 async function seed(
@@ -147,6 +165,7 @@ async function seed(
       roleDetail: "forbidden",
     },
   });
+  await repos.entitlements.put(entitlementsOf(tag), `user-${tag}`);
   await repos.workspaceSecrets.put({
     name: "llm_api_key",
     binding: `binding-${tag}`,
@@ -207,6 +226,11 @@ async function rowsOf(db: Kysely<Database>, workspaceId: string) {
       .selectAll()
       .where("workspace_id", "=", workspaceId)
       .orderBy("id")
+      .execute(),
+    entitlements: await db
+      .selectFrom("workspace_entitlements")
+      .selectAll()
+      .where("workspace_id", "=", workspaceId)
       .execute(),
     workspaceSecrets: await db
       .selectFrom("workspace_secrets")
@@ -671,6 +695,20 @@ const CASES: Case[] = [
     run: (a) => a.workspaceSecrets.remove("llm_api_key"),
     expectAnswer: (answer) => expect(answer).toBe(true),
   },
+  // entitlements: one row per workspace, so the scope alone decides whose row it is
+  {
+    name: "entitlements.get",
+    run: (a) => a.entitlements.get(),
+    expectAnswer: (answer) =>
+      expect(answer).toMatchObject({ planLabel: "plan-a" }),
+  },
+  {
+    name: "entitlements.put",
+    run: (a) =>
+      a.entitlements.put(entitlementsOf("a", { planLabel: "changed" }), null),
+    expectAnswer: (answer) =>
+      expect(answer).toMatchObject({ planLabel: "changed" }),
+  },
   // runs
   {
     name: "runs.list",
@@ -869,6 +907,23 @@ describe("two workspaces", () => {
     expect(methods.length).toBeGreaterThan(0);
     for (const method of methods)
       expect(covered, `${method} has no case in CASES`).toContain(method);
+  });
+
+  // #271-T06
+  it("keep the entitlements apart: changing A's leaves B with its own", async () => {
+    const { reposA, reposB } = await twoWorkspaces();
+
+    await reposA.entitlements.put(
+      entitlementsOf("a", { planLabel: "changed" }),
+      null,
+    );
+    expect(await reposB.entitlements.get()).toMatchObject({
+      planLabel: "plan-b",
+    });
+
+    expect(await reposA.entitlements.get()).toMatchObject({
+      planLabel: "changed",
+    });
   });
 
   // DM-10

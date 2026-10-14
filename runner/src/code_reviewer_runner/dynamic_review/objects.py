@@ -11,7 +11,7 @@ import zlib
 from dataclasses import dataclass
 from pathlib import Path
 
-from .limits import Budget, CheckoutError, ObjectUnavailable
+from .limits import Budget, CheckoutError, CheckoutReason, ObjectUnavailable
 
 _TYPES = {1: "commit", 2: "tree", 3: "blob", 4: "tag"}
 
@@ -45,18 +45,20 @@ class ObjectStore:
         self.budget.check()
         obj = self.objects.get(oid)
         if obj is None:
-            raise ObjectUnavailable()
+            raise ObjectUnavailable(CheckoutReason.OBJECT_MISSING)
         if obj.kind != kind:
-            raise CheckoutError()
+            raise CheckoutError(CheckoutReason.OBJECT_MISSING)
         return obj.path.read_bytes()
 
     def unpack(self, pack: bytes) -> None:
         self.budget.check()
         if len(pack) < 32 or pack[:4] != b"PACK" or hashlib.sha1(pack[:-20]).digest() != pack[-20:]:
-            raise CheckoutError()
+            raise CheckoutError(CheckoutReason.PACK_INVALID)
         version, count = struct.unpack(">II", pack[4:12])
-        if version not in (2, 3) or count > self.budget.limits.entries * 4:
-            raise CheckoutError()
+        if version not in (2, 3):
+            raise CheckoutError(CheckoutReason.PACK_INVALID)
+        if count > self.budget.limits.entries * 4:
+            raise CheckoutError(CheckoutReason.ENTRIES)
         position = 12
         offsets: dict[int, str] = {}
         pending: list[tuple[int, str | int, bytes]] = []
@@ -72,9 +74,9 @@ class ObjectStore:
                 size |= (byte & 127) << shift
                 shift += 7
                 if shift > 63:
-                    raise CheckoutError()
+                    raise CheckoutError(CheckoutReason.PACK_INVALID)
             if size > self.budget.limits.preparation_bytes - self.budget.preparation:
-                raise CheckoutError()
+                raise CheckoutError(CheckoutReason.BUDGET_PREPARATION)
             base: str | int = ""
             if kind == 6:
                 byte, position = _byte(pack, position)
@@ -83,20 +85,20 @@ class ObjectStore:
                     byte, position = _byte(pack, position)
                     offset = ((offset + 1) << 7) | (byte & 127)
                     if offset > start:
-                        raise CheckoutError()
+                        raise CheckoutError(CheckoutReason.PACK_INVALID)
                 base = start - offset
             elif kind == 7:
                 base = pack[position : position + 20].hex()
                 position += 20
             elif kind not in _TYPES:
-                raise CheckoutError()
+                raise CheckoutError(CheckoutReason.PACK_INVALID)
             raw, position = self._inflate(pack, position, size)
             if kind in _TYPES:
                 offsets[start] = self.put(_TYPES[kind], raw)
             else:
                 pending.append((start, base, raw))
         if position != len(pack) - 20:
-            raise CheckoutError()
+            raise CheckoutError(CheckoutReason.PACK_INVALID)
         # The server can send REF_DELTA bases later in the pack. Resolve bounded chains.
         for _ in range(64):
             if not pending:
@@ -112,10 +114,10 @@ class ObjectStore:
                 raw = self._delta(obj.path.read_bytes(), delta)
                 offsets[start] = self.put(obj.kind, raw)
             if len(next_pending) == len(pending):
-                raise CheckoutError()
+                raise CheckoutError(CheckoutReason.PACK_INVALID)
             pending = next_pending
         if pending:
-            raise CheckoutError()
+            raise CheckoutError(CheckoutReason.PACK_INVALID)
 
     def _inflate(self, pack: bytes, position: int, size: int) -> tuple[bytes, int]:
         decoder = zlib.decompressobj()
@@ -125,7 +127,7 @@ class ObjectStore:
                 self.budget.check()
                 chunk = pack[position : min(position + 16 * 1024, len(pack) - 20)]
                 if not chunk:
-                    raise CheckoutError()
+                    raise CheckoutError(CheckoutReason.PACK_INVALID)
                 inflated = decoder.decompress(chunk, min(64 * 1024, size - len(raw) + 1))
                 # At end of stream the trailing bytes of `chunk` appear in both `unused_data`
                 # and (when max_length stopped output exactly at the stream end) in
@@ -140,21 +142,20 @@ class ObjectStore:
                 self.budget.charge(len(inflated))
                 raw.extend(inflated)
                 if len(raw) > size:
-                    raise CheckoutError()
+                    raise CheckoutError(CheckoutReason.PACK_INVALID)
         except zlib.error:
-            raise CheckoutError() from None
+            raise CheckoutError(CheckoutReason.PACK_INVALID) from None
         if len(raw) != size:
-            raise CheckoutError()
+            raise CheckoutError(CheckoutReason.PACK_INVALID)
         return bytes(raw), position
 
     def _delta(self, base: bytes, delta: bytes) -> bytes:
         base_size, position = _varint(delta, 0)
         size, position = _varint(delta, position)
-        if (
-            base_size != len(base)
-            or size > self.budget.limits.preparation_bytes - self.budget.preparation
-        ):
-            raise CheckoutError()
+        if base_size != len(base):
+            raise CheckoutError(CheckoutReason.PACK_INVALID)
+        if size > self.budget.limits.preparation_bytes - self.budget.preparation:
+            raise CheckoutError(CheckoutReason.BUDGET_PREPARATION)
         self.budget.charge(size)
         result = bytearray()
         while position < len(delta):
@@ -173,23 +174,23 @@ class ObjectStore:
                         length |= byte << (8 * i)
                 length = length or 0x10000
                 if offset + length > len(base) or len(result) + length > size:
-                    raise CheckoutError()
+                    raise CheckoutError(CheckoutReason.PACK_INVALID)
                 result.extend(base[offset : offset + length])
             elif command and position + command <= len(delta):
                 if len(result) + command > size:
-                    raise CheckoutError()
+                    raise CheckoutError(CheckoutReason.PACK_INVALID)
                 result.extend(delta[position : position + command])
                 position += command
             else:
-                raise CheckoutError()
+                raise CheckoutError(CheckoutReason.PACK_INVALID)
         if len(result) != size:
-            raise CheckoutError()
+            raise CheckoutError(CheckoutReason.PACK_INVALID)
         return bytes(result)
 
 
 def _byte(raw: bytes, position: int) -> tuple[int, int]:
     if position >= len(raw):
-        raise CheckoutError()
+        raise CheckoutError(CheckoutReason.PACK_INVALID)
     return raw[position], position + 1
 
 
@@ -201,6 +202,6 @@ def _varint(raw: bytes, position: int) -> tuple[int, int]:
         value |= (byte & 127) << shift
         shift += 7
         if shift > 63:
-            raise CheckoutError()
+            raise CheckoutError(CheckoutReason.PACK_INVALID)
         if not byte & 128:
             return value, position

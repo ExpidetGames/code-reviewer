@@ -497,6 +497,11 @@ by whoever runs it (neither is part of the shipped files nor tested):
 After either, run a review (`/review` on a test pull request) and check the runner log for
 `no answer from the app` or model and GitHub errors (`git_unavailable`, `llm_unavailable`).
 
+The **app** also makes one outbound request to `openrouter.ai` (HTTPS port 443, no key) whenever a Dynamic
+model is saved in a project's settings, to read whether the model supports tool calling. If the app cannot
+reach that host, the save still works after a wait of at most 5 seconds and shows a warning that the model
+could not be checked (`src/llm/README.md`, "Model capabilities").
+
 ### Dynamic Review runner
 
 `compose.coolify.yml` has a third service, `runner-dynamic`, the runner of Dynamic Review

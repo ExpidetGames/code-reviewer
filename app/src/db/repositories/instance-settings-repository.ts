@@ -10,7 +10,24 @@ import {
   lockJobRowsInOrder,
 } from "../dynamic-review-lock.ts";
 import type { Kysely } from "kysely";
-import { decodeJson, encodeJson, formatTimestamp } from "../codecs.ts";
+import {
+  decodeJson,
+  encodeJson,
+  formatTimestamp,
+  tryDecodeJson,
+} from "../codecs.ts";
+import { lockDefaultEntitlements } from "../entitlements-lock.ts";
+import {
+  INVALID_ENTITLEMENTS,
+  type EntitlementsData,
+  type EntitlementsEntry,
+} from "../../workspaces/entitlements.ts";
+import {
+  EntitlementsError,
+  checkPeriodStartNotBackwards,
+  readEntitlements,
+  validateEntitlements,
+} from "../../workspaces/entitlements-validation.ts";
 import type { StoredGithubApp } from "../../github-config/settings.ts";
 import type { ImportNotice } from "../../legacy-import/notice.ts";
 import type { SmtpSettings } from "../../mail/smtp-settings.ts";
@@ -62,11 +79,25 @@ export type InstanceSettingValues = {
    * and turn it off before rolling back to an older app (contracts/README.md).
    */
   dynamic_review: { enabled: boolean };
+  /**
+   * #271: the entitlements of every workspace that has no row of its own (the fields of a workspace row). No
+   * row: such a workspace is unlimited (own key, no limits, not suspended), as before. `set` refuses what
+   * `validateEntitlements` refuses and a `periodStart` earlier than the stored one.
+   */
+  default_entitlements: EntitlementsData;
 };
 export type InstanceSettingKey = keyof InstanceSettingValues;
+/**
+ * The keys `get` and `getWithMeta` read as stored. The default entitlements are not among them: their stored
+ * JSON is not trusted and is read through `getDefaultEntitlements`, which checks it.
+ */
+export type ReadableSettingKey = Exclude<
+  InstanceSettingKey,
+  "default_entitlements"
+>;
 
 /** A setting with who saved it last and when. */
-export type InstanceSettingWithMeta<K extends InstanceSettingKey> = {
+export type InstanceSettingWithMeta<K extends ReadableSettingKey> = {
   value: InstanceSettingValues[K];
   /** The id of the user who saved it, or null (the system, or a user who was deleted since). */
   updatedBy: string | null;
@@ -76,13 +107,19 @@ export type InstanceSettingWithMeta<K extends InstanceSettingKey> = {
 
 export type InstanceSettingsRepository = {
   /** The value, or undefined when the setting has no row. */
-  get<K extends InstanceSettingKey>(
+  get<K extends ReadableSettingKey>(
     key: K,
   ): Promise<InstanceSettingValues[K] | undefined>;
   /** The value with who saved it last and when, or undefined when the setting has no row. */
-  getWithMeta<K extends InstanceSettingKey>(
+  getWithMeta<K extends ReadableSettingKey>(
     key: K,
   ): Promise<InstanceSettingWithMeta<K> | undefined>;
+  /**
+   * The default entitlements, or undefined when none were set. Damaged JSON or data that fails the same
+   * validation as a write comes back as `{ invalid: true }`, never as an exception and never as undefined;
+   * `resolveEntitlements` turns it into `invalid` for every workspace without a row of its own.
+   */
+  getDefaultEntitlements(): Promise<EntitlementsEntry | undefined>;
   /** Inserts the setting or replaces its value, recording who and when. */
   set<K extends InstanceSettingKey>(
     key: K,
@@ -134,7 +171,77 @@ export function createInstanceSettingsRepository(
     return db.isTransaction ? run(db) : db.transaction().execute(run);
   }
 
+  function readStoredDefault(text: string): {
+    entry: EntitlementsEntry;
+    periodStart: string | undefined;
+  } {
+    const decoded = tryDecodeJson(text);
+    const data = decoded.ok ? readEntitlements(decoded.value) : undefined;
+    return data === undefined
+      ? { entry: INVALID_ENTITLEMENTS, periodStart: undefined }
+      : { entry: data, periodStart: data.periodStart };
+  }
+
+  /**
+   * The default entitlements are validated like a workspace row, and the period start is checked against the
+   * stored one under a lock (an advisory transaction lock on Postgres, where the value is JSON and there may
+   * be no row to lock; SQLite's transactions take the write lock up front).
+   */
+  async function setDefaultEntitlements(
+    value: EntitlementsData,
+    updatedBy: string | null,
+  ): Promise<void> {
+    const moment = now();
+    const checked = validateEntitlements(value, moment);
+    if (!checked.ok) throw new EntitlementsError(checked.code, checked.field);
+    const row = {
+      key: "default_entitlements",
+      value: encodeJson(checked.value),
+      updated_by: updatedBy,
+      updated_at: formatTimestamp(moment),
+    };
+    const write = async (trx: Kysely<Database>) => {
+      await lockDefaultEntitlements(trx);
+      const stored = await trx
+        .selectFrom("instance_settings")
+        .select("value")
+        .where("key", "=", row.key)
+        .executeTakeFirst();
+      // An unreadable stored default has no period start to protect: a valid write repairs it.
+      const storedStart =
+        stored === undefined
+          ? undefined
+          : readStoredDefault(stored.value).periodStart;
+      const refused = checkPeriodStartNotBackwards(
+        checked.value.periodStart,
+        storedStart,
+      );
+      if (refused !== undefined) throw new EntitlementsError(refused);
+      await trx
+        .insertInto("instance_settings")
+        .values(row)
+        .onConflict((conflict) =>
+          conflict.column("key").doUpdateSet({
+            value: row.value,
+            updated_by: row.updated_by,
+            updated_at: row.updated_at,
+          }),
+        )
+        .execute();
+    };
+    return db.isTransaction ? write(db) : db.transaction().execute(write);
+  }
+
   return {
+    async getDefaultEntitlements() {
+      const row = await db
+        .selectFrom("instance_settings")
+        .select("value")
+        .where("key", "=", "default_entitlements")
+        .executeTakeFirst();
+      return row === undefined ? undefined : readStoredDefault(row.value).entry;
+    },
+
     async get(key) {
       const row = await db
         .selectFrom("instance_settings")
@@ -170,6 +277,11 @@ export function createInstanceSettingsRepository(
     },
 
     async set(key, value, updatedBy) {
+      if (key === "default_entitlements")
+        return setDefaultEntitlements(
+          value as InstanceSettingValues["default_entitlements"],
+          updatedBy,
+        );
       const row = {
         key,
         value: encodeJson(value),

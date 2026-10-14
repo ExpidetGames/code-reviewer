@@ -10,6 +10,7 @@ import {
   RUNNER_API_ERROR_CODES,
   RUNNER_ENV_KEY_PATTERN,
   RUNNER_API_VERSION,
+  RUNNER_CHECKOUT_REASONS,
   RUNNER_ERROR_CODES,
 } from "../../src/runner-api/contract.ts";
 import {
@@ -44,6 +45,15 @@ describe("the contract file", () => {
     const listed = readContract().$defs.KnownRunnerErrorCode?.enum;
 
     expect([...RUNNER_ERROR_CODES].sort()).toStrictEqual(
+      [...(listed ?? [])].sort(),
+    );
+  });
+
+  // #296-T10
+  it("lists the same checkout reasons as the app's TypeScript list", () => {
+    const listed = readContract().$defs.KnownCheckoutReason?.enum;
+
+    expect([...RUNNER_CHECKOUT_REASONS].sort()).toStrictEqual(
       [...(listed ?? [])].sort(),
     );
   });
@@ -357,6 +367,23 @@ describe("what the app accepts from a runner", () => {
         },
       },
     ],
+    // #293-T08: the reason a Dynamic Review was wrapped up, in the schema and in the parser.
+    ...["cost_limit", "time_limit", null].map(
+      (stoppedEarly): [string, unknown] => [
+        `usage that stopped early with ${String(stoppedEarly)}`,
+        {
+          leaseToken: TOKEN,
+          result: { ...result, usage: { ...result.usage, stoppedEarly } },
+        },
+      ],
+    ),
+    ...["budget", "", 1, true].map((stoppedEarly): [string, unknown] => [
+      `usage that stopped early with ${JSON.stringify(stoppedEarly)}`,
+      {
+        leaseToken: TOKEN,
+        result: { ...result, usage: { ...result.usage, stoppedEarly } },
+      },
+    ]),
     [
       "usage with a negative token count",
       {

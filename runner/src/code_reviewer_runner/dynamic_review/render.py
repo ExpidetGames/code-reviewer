@@ -32,6 +32,7 @@ from code_reviewer_runner.dynamic_review.state import (
     encode_state,
     fit_state,
 )
+from code_reviewer_runner.dynamic_review.wrap_up import STOPPED_EARLY_NOTICES
 from code_reviewer_runner.result import ErrorCode
 
 MAX_COMMENT_CHARS = 65_000
@@ -134,7 +135,13 @@ def _resolved_line(entry: ResolvedFinding, *, web_base: str, repository: str, sh
 
 
 def _visible(
-    state: ReviewState, *, repository: str, web_base: str, detail: int, reset: bool
+    state: ReviewState,
+    *,
+    repository: str,
+    web_base: str,
+    detail: int,
+    reset: bool,
+    stopped_early: str | None,
 ) -> str:
     counts = summary_counts(state.findings)
     active_total = len(state.findings)
@@ -144,6 +151,9 @@ def _visible(
         f"P0 {counts['P0']} · P1 {counts['P1']} · P2 {counts['P2']} · P3 {counts['P3']}"
     )
     parts = [IDENTITY_MARKER, _HEADING, ""]
+    notice = STOPPED_EARLY_NOTICES.get(stopped_early or "")
+    if notice is not None:
+        parts.extend([notice, ""])
     if reset:
         parts.extend([RESET_NOTICE, ""])
     parts.append(headline)
@@ -203,11 +213,14 @@ def render_comment(
     repository: str,
     web_base: str = "",
     reset: bool = False,
+    stopped_early: str | None = None,
 ) -> str:
     """The full comment body: the visible view plus the hidden state marker.
 
     `reset` (#257) adds the one-shot notice of a review that started over; it is not part of the
-    state, so the next normal run renders without it.
+    state, so the next normal run renders without it. `stopped_early` (#293) does the same for a
+    review that was wrapped up at its cost or time limit: one of two constant notices, chosen by
+    the runner's own reason and never built from other text.
 
     A state over the caps or the state budget is first reduced by `fit_state` (oldest resolved
     history, then the lowest priority active findings, which the view then counts), so the comment
@@ -222,7 +235,12 @@ def render_comment(
     suffix = f"\n\n{marker}" if marker else ""
     for detail in (3, 2, 1):
         visible = _visible(
-            state, repository=repository, web_base=web_base, detail=detail, reset=reset
+            state,
+            repository=repository,
+            web_base=web_base,
+            detail=detail,
+            reset=reset,
+            stopped_early=stopped_early,
         )
         body = f"{visible}{suffix}"
         if _fits(body):
