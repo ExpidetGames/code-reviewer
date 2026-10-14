@@ -5,12 +5,18 @@ import {
   CLAIM_FAILURE_CODES,
   CLAIM_RELEASE_REASONS,
 } from "../runner-api/claim.ts";
-import { RUNNER_ERROR_CODES } from "../runner-api/contract.ts";
+import {
+  RUNNER_CHECKOUT_REASONS,
+  RUNNER_ERROR_CODES,
+} from "../runner-api/contract.ts";
 import { JOB_ERROR_CODES } from "../jobs/job-types.ts";
 import {
+  CHECKOUT_REASON_COPY,
+  describeCheckoutReason,
   describeErrorCode,
   ERROR_COPY,
   UNKNOWN_ERROR_COPY,
+  UNKNOWN_REASON_COPY,
 } from "./error-copy.ts";
 
 const ALL_CODES = [
@@ -122,5 +128,31 @@ describe("the sentences for error codes", () => {
     }
     expect(describeErrorCode("<script>").code).toBeNull();
     expect(describeErrorCode("").code).toBeNull();
+  });
+
+  // #296-T11
+  it("has a full sentence for every reason the checkout can fail with", () => {
+    for (const reason of RUNNER_CHECKOUT_REASONS) {
+      expect(Object.hasOwn(CHECKOUT_REASON_COPY, reason)).toBe(true);
+      const description = describeCheckoutReason(reason);
+      expect(description).toStrictEqual({
+        code: reason,
+        text: CHECKOUT_REASON_COPY[reason],
+        known: true,
+      });
+      expect(description?.text).toMatch(/^[A-Z].*\.$/);
+      expect(description?.text).not.toContain(reason);
+    }
+  });
+
+  // #296-T11
+  it("shows a reason it does not know with the general sentence, and one that is not shaped like a code not at all", () => {
+    expect(describeCheckoutReason("brand_new_reason")).toStrictEqual({
+      code: "brand_new_reason",
+      text: UNKNOWN_REASON_COPY,
+      known: false,
+    });
+    expect(describeCheckoutReason("<script>alert(1)</script>")).toBeNull();
+    expect(describeCheckoutReason("")).toBeNull();
   });
 });

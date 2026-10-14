@@ -26,7 +26,7 @@ anything.
 | Bound | Where | How |
 |---|---|---|
 | 600 s whole job | adapter watch + proxy | the watch ends the run at the deadline; the proxy refuses calls after it |
-| cost limit (default 1.00 USD, operator-set, ceiling 20) | proxy | reserve a priced estimate before forwarding, settle from the provider's `usage.cost`; no cost means stop; retries count |
+| cost limit (default 1.00 USD, operator-set, ceiling 20) | proxy | reserve a priced estimate before forwarding, settle from the provider's `usage.cost`; no cost means stop; retries count; near the limit the call becomes the wrap-up call (#293) |
 | request/response bytes | proxy | refused before forwarding / before the engine gets the answer |
 | 64 KiB per result, 4 MiB cumulative | proxy | audited in the next request's history, before it is forwarded |
 | what a read can reach | engine config + export | default-deny permissions, read-only export; reads outside the export are denied |
@@ -34,6 +34,11 @@ anything.
 The audit reads the model requests, not the engine's session: the pinned server answers its own
 session list with HTTP 400 once a JSON-schema format is stored (the defect of #85, still present in
 v1.19.0 and pinned by an engine test).
+
+The message call that runs the turn blocks until the turn is done, so its socket timeout is the time
+left to the whole-job deadline plus a margin, not a cap (`docs/dynamic-review.md`, "How long a
+turn may take"). `prompt_async` exists in v1.19.0 but its result could only be read through the
+session message list (HTTP 400 with a stored JSON-schema format, #85) or the event stream.
 
 ## Found against the real binary
 

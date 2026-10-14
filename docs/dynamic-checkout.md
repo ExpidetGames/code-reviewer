@@ -82,10 +82,9 @@ preparation envelope (a busy repository can advertise many megabytes of `refs/pu
 is not limited by the 1 MiB per-field cap), and explicitly wants the queued
 commit, obtained from `refs/pull/<number>/head` in the **base** repository, and the base-ref snapshot.
 Both advertisement and fetched object identity are verified; the PR ref is checked again before
-returning preparation. Depth one and `blob:none` are requested when supported. The merge base is
+returning preparation. Depth one and a size filter, `filter blob:limit=<file limit + 1>`, are requested when supported, so the server sends the trees and every blob up to the file limit in the same response and leaves larger blobs out: an oversized file is never downloaded or charged. A blob that a tree names and the response does not hold is therefore above the limit and is omitted as `large_file` (and skipped as `too_large` when it changed). Checked against git `upload-pack` and live GitHub (#296): a filter applies to objects reached through the wanted commit, but a blob **wanted by name is always sent**, so no blob is ever wanted by name. Small blobs of denied paths arrive in the same response (the path is only known from the tree); they are never read, exported or wanted by name, and the private staging that holds them is deleted before sealing. The merge base is
 found with a bounded, commits-only ancestry walk (`deepen` with `filter tree:0`), so it cannot pull
-in trees or blobs. Ignored filters are allowed only within the same hard envelope. Missing eligible
-blobs are explicitly wanted in batches of at most 32 only after all endpoint paths/modes pass policy.
+in trees or blobs. Ignored filters are allowed only within the same hard envelope. Without the `filter` capability the response holds every blob and only the budgets bound it.
 
 No Git client object store, checkout or `index-pack` is used in production. The runner verifies
 PACK versions 2/3, checksums, object headers, bounded zlib output, REF/OFS deltas and copy ranges,
@@ -101,7 +100,8 @@ This works independently of bookworm Git's lack of `--no-lazy-fetch`.
 | 20,000 entries | Each exact endpoint tree, including directories; before blob reads. Pack object count also has a bounded envelope. |
 | 512 KiB/file | Blob size before content read/materialization; redacted output checked again. Oversized unchanged input has an omission; a changed oversized file is skipped with reason `too_large` rather than failing. |
 | 64 MiB exposed content | All exported regular content plus serialized evidence, including manifest, metadata and prior state. |
-| 256 MiB preparation | One cumulative budget across HTTP status/headers/chunk framing/body or offline Git transfer, every hydration, inflation/delta reconstruction and exported/evidence writes; 4 KiB allocation rounding and directories charged before writes. A conservative 64 KiB runtime/lifetime reservation is charged before creation. No retry resets. |
+| 256 MiB transfer | Raw bytes received from the server: HTTP status/headers/chunk framing/body, the ref advertisement and every pack, or the offline Git transfer. Counted once, here, and not again as expansion (#296). No retry resets. |
+| 256 MiB preparation | What the runner materializes: inflation/delta reconstruction of the staged objects, exported/evidence writes, 4 KiB allocation rounding and directories charged before writes. A conservative 64 KiB runtime/lifetime reservation is charged before creation. The staged objects and the export are both on disk until the staging is deleted, so both are charged. No retry resets. |
 | 2 MiB diff | Each endpoint diff, incrementally before adding lines; combined serialized evidence has an additional 3 MiB ceiling. |
 | 1 MiB response/data field | HTTP headers, each metadata/prior-state input and the serialized-evidence ceiling above the diff. The ref advertisement instead shares the cumulative preparation envelope. No compare API payload is used. |
 | Paths | 1,024 UTF-8 bytes, 32 components, 255 bytes/component; no absolute, drive/UNC, traversal, backslash, control, `.git`, ambiguous Windows reserved/trailing-dot names. |
@@ -109,7 +109,7 @@ This works independently of bookworm Git's lack of `--no-lazy-fetch`.
 
 Trusted limit overrides can only lower these fixed limits. The accounting is deliberately
 conservative: cumulative transfer, expansion and writes are charged even when earlier staging
-has already been deleted. Download accounting is application-level HTTP/Git bytes, not TLS/TCP
+has already been deleted, but a byte is charged to the budget of the resource it uses, once. Before #296 the wire bytes, the inflated bytes, the rounding and the export write were all charged to one 256 MiB budget, so a repository of about 140 MB of blobs needed about 290 MiB and could never be prepared. The maxima were not raised: the oversized blobs are no longer downloaded and the two resources have separate maxima. Download accounting is application-level HTTP/Git bytes, not TLS/TCP
 record overhead. Disk accounting bounds runner-written content and rounds file/directory
 allocations; it is not a filesystem-wide quota on unrelated container activity. #197 owns engine
 scratch; whole-job/container memory and deployment capacity are measured by hand
@@ -127,11 +127,15 @@ line to the next valid `END` line however long it is; an unterminated block is r
 of the text. Harmless example placeholders remain readable.
 
 Omissions use `OmissionReason` stable values and a bounded explicit manifest. A changed or deleted
-**denied or unsafe** file needed by either comparison (engine discovery, credential path, symlink
-or other non-regular mode) fails with `checkout_incomplete`. A changed **binary** file or a changed
-file over 512 KiB is instead excluded from the checkout and listed in the evidence `skipped` array
-with the stable reason code `binary` or `too_large`, so the review can say the file was not
-reviewed; it never fails the job. A file is skipped per comparison: only when one of the two sides
+file needed by either comparison that is **denied or unsafe** (engine discovery, credential path,
+symlink or other non-regular mode), **binary** or **over 512 KiB** is excluded from the checkout and
+the diff and listed in the evidence `skipped` array with the stable reason (`engine_discovery`,
+`credential_path`, `unsafe_mode`, `binary` or `too_large`), so the review can say the file was not
+reviewed; it never fails the job (#296). Before #296 a changed denied path failed the whole run,
+which made any repository that tracks such a path unreviewable (with an unknown merge base every
+head path counts as changed). Skipping is as safe as failing: a denied path is never read,
+exported, diffed or wanted by name, so nothing of it reaches the engine; the failure only protected
+completeness, which the `skipped` list now states. A file is skipped per comparison: only when one of the two sides
 of that diff is binary or oversized, so a binary earlier revision does not hide a text change from
 the base-to-head diff. Unchanged exclusions remain visible in the manifest; consumers
 must retain that limitation rather than claim that excluded content was reviewed. No excluded
@@ -195,3 +199,22 @@ egress.
 Remaining rollout validation: live installation-token access to private fork PR refs, unadvertised
 eligible blob wants and named GHES versions; no-filter servers and force pushes are covered locally
 but are not live-service certification. Activation stays off until the epic's remaining gates.
+
+## Failure reasons and metrics (#296)
+
+Every `CheckoutError` carries a stable `CheckoutReason` next to the `ErrorCode` a caller branches on:
+`invalid_request`, `ref_moved`, `ref_missing`, `protocol`, `pack_invalid`, `object_missing`,
+`tree_invalid`, `entries`, `path_invalid`, `budget_transfer`, `budget_preparation`, `budget_exposed`,
+`diff_too_large`, `input_too_large`, `cancelled`, `timeout`, `transport`, `isolation`, `context`. The
+reason is never free text. It reaches the run result as `errorReason`, the first line of the log tail
+(`checkout_incomplete [budget_preparation]: ...`), the runner's `finished:` line, the bare verdict the
+runner sends when the app refuses the full result (400/413), and the Runs view, which translates it to a
+sentence.
+
+Every Dynamic run logs one line of checkout metrics, for a failed run as well as a good one:
+`checkout: transfer=<bytes> preparation=<bytes> exposed=<bytes> entries=<files of the head tree>
+omitted=<reason>:<n>,... skipped=<reason>:<n>,...`. Counts and stable names only, never a path. The
+three byte counters only grow, so their final values are the peaks.
+
+A Dynamic finding that names a file the export does not hold is dropped and counted
+(`finding_path_not_exported`, in the run's log line) instead of failing the run.

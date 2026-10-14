@@ -41,7 +41,7 @@ from code_reviewer_runner.capabilities import (
     engines_from_environment,
 )
 from code_reviewer_runner.comment_recorder import CommentRecorder, install_comment_recorder
-from code_reviewer_runner.dynamic_findings import DynamicFindings
+from code_reviewer_runner.dynamic_findings import DROPPED_OUTSIDE_EXPORT, DynamicFindings
 from code_reviewer_runner.dynamic_review import findings_schema
 from code_reviewer_runner.dynamic_review.adapter import DynamicEngine, shutdown_engines
 from code_reviewer_runner.dynamic_review.budget import (
@@ -122,10 +122,22 @@ def _elapsed_ms(started: float) -> int:
     return int((time.monotonic() - started) * 1000)
 
 
-def _failure(code: ErrorCode, detail: str, started: float, capture: LogCapture | None) -> JobResult:
+def _failure(
+    code: ErrorCode,
+    detail: str,
+    started: float,
+    capture: LogCapture | None,
+    *,
+    reason: str | None = None,
+    facts: Sequence[str] = (),
+) -> JobResult:
+    """A failed result. `reason` is the stable finer name of the failure; `facts` are extra lines
+    that belong with the verdict (counts and stable names only, never repository content)."""
     tail, truncated = capture.snapshot() if capture is not None else ("", False)
-    # The code and the detail are the most important part: they stay, the old log lines make room.
-    header = f"{code.value}: {detail}"
+    # The code, the reason and the detail are the most important part: they stay, the old log
+    # lines make room.
+    header = f"{code.value}{f' [{reason}]' if reason else ''}: {detail}"
+    header = "\n".join([header, *facts])
     room = max(MAX_TAIL_BYTES - len(header.encode("utf-8")) - 1, 0)
     fitted = fit_to_bytes(tail, room)
     return JobResult(
@@ -135,6 +147,7 @@ def _failure(code: ErrorCode, detail: str, started: float, capture: LogCapture |
         error_code=code,
         log_tail=fit_to_bytes(header + (f"\n{fitted}" if fitted else ""), MAX_TAIL_BYTES),
         log_truncated=truncated or fitted != tail,
+        error_reason=reason,
     )
 
 
@@ -277,6 +290,13 @@ def dynamic_ledger(
     )
 
 
+def _turn_note(turn_seconds: Sequence[float]) -> str:
+    """How long each engine message call took: numbers only, never text from the repository."""
+    if not turn_seconds:
+        return ""
+    return "engine message call: " + ", ".join(f"{seconds:.1f} s" for seconds in turn_seconds)
+
+
 def run_dynamic_job(
     job: Job,
     capture: LogCapture | None,
@@ -406,13 +426,22 @@ def run_dynamic_job(
                     ripgrep=ripgrep,
                 )
                 answer = engine.run()
+                turn_note = _turn_note(engine.turn_seconds)
             finally:
                 server.stop()
     except CheckoutError as error:
-        return _failure(error.code, "the pull request could not be prepared", started, capture)
+        return _failure(
+            error.code,
+            "the pull request could not be prepared",
+            started,
+            capture,
+            reason=error.reason.value,
+            facts=[f"checkout: {error.metrics.describe()}"] if error.metrics else [],
+        )
 
     if answer.error is not None:
-        return _failure(answer.error.code, answer.error.detail, started, capture)
+        detail = answer.error.detail + (f" [{turn_note}]" if turn_note else "")
+        return _failure(answer.error.code, detail, started, capture)
     assert answer.findings is not None
     # The summary is written by this supervisor, never by the engine, and only for a run whose
     # findings passed every check above: any earlier failure leaves the previous comment untouched.
@@ -426,15 +455,28 @@ def run_dynamic_job(
         )
         return _failure(ErrorCode.LEASE_LOST, detail, started, capture)
     try:
-        published = (publish or publish_run)(job, answer.findings)
+        # A review that was wrapped up at its limit says so in the summary; the reason is the
+        # ledger's, never the model's.
+        findings = replace(answer.findings, stopped_early=ledger.stopped_early)
+        published = (publish or publish_run)(job, findings)
     except PublishError as error:
         return _failure(error.code, error.detail, started, capture)
     summary = (
         f"dynamic review: {len(answer.findings.findings)} findings against {base.head_sha}; "
         f"{ledger.model_calls} model calls, {ledger.tool_calls} tool calls, {ledger.files} files"
     )
+    if answer.findings.dropped_outside_export:
+        summary += (
+            f"; dropped {answer.findings.dropped_outside_export} finding(s): "
+            f"{DROPPED_OUTSIDE_EXPORT}"
+        )
     if published.reset:
         summary += f"; {STATE_RESET_CODE}"
+    if findings.stopped_early is not None:
+        summary += f"; stopped early ({findings.stopped_early})"
+    if turn_note:
+        summary += f"; {turn_note}"
+    summary += f"\ncheckout: {content.metrics.describe()}"
     return JobResult(
         ok=True,
         duration_ms=_elapsed_ms(started),

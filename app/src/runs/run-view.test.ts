@@ -11,7 +11,7 @@ import {
   toRunDetailView,
   toRunRowView,
 } from "./run-view.ts";
-import { UNKNOWN_ERROR_COPY } from "./error-copy.ts";
+import { CHECKOUT_REASON_COPY, UNKNOWN_ERROR_COPY } from "./error-copy.ts";
 
 const NOW = new Date("2026-10-10T12:10:00.000Z");
 
@@ -90,7 +90,7 @@ describe("the log of a run", () => {
     expect(cleanLog(raw)).toBe("red line\nnext\tcolumn\nlink <b>html</b> evil");
   });
 
-  it("reads only the comment link, the log and the truncation flag of a stored result", () => {
+  it("reads only the comment link, the log, the truncation flag and the reason of a stored result", () => {
     expect(
       readStoredResult({
         ok: true,
@@ -103,12 +103,14 @@ describe("the log of a run", () => {
       commentUrl: "https://github.com/a/b/pull/1#c",
       logTail: "line",
       logTruncated: true,
+      errorReason: null,
     });
     for (const odd of [null, "text", 7, [], { logTail: 5, commentUrl: {} }]) {
       expect(readStoredResult(odd)).toEqual({
         commentUrl: null,
         logTail: "",
         logTruncated: false,
+        errorReason: null,
       });
     }
   });
@@ -132,8 +134,25 @@ describe("the usage of a run", () => {
       totalTokens: 12900,
       aiCalls: 7,
       costUsd: 0.04,
+      stoppedEarly: null,
     });
   });
+
+  // #293-T08
+  it.each(["cost_limit", "time_limit"])(
+    "reads that a run stopped early (%s), and takes any other value as a complete run",
+    (stoppedEarly) => {
+      expect(
+        readStoredUsage({ ok: true, usage: { ...usage, stoppedEarly } }),
+      ).toMatchObject({ stoppedEarly });
+      expect(
+        readStoredUsage({ ok: true, usage: { ...usage, stoppedEarly: "x" } }),
+      ).toMatchObject({ stoppedEarly: null });
+      expect(
+        readStoredUsage({ ok: true, usage: { ...usage, stoppedEarly: 1 } }),
+      ).toMatchObject({ stoppedEarly: null });
+    },
+  );
 
   // #201-T23
   it("keeps a cost the runner could not know as unknown instead of zero", () => {
@@ -227,6 +246,7 @@ describe("the usage of a run", () => {
       totalTokens: 12900,
       aiCalls: 7,
       costUsd: 0.04,
+      stoppedEarly: null,
     });
     expect(toRunRowView(stored, "acme/widgets", NOW)).not.toHaveProperty(
       "usage",
@@ -463,6 +483,54 @@ describe("the detail of a run", () => {
     );
 
     expect(log.text).toBe("key [redacted] used");
+  });
+
+  // #296-T11
+  it("reads the checkout reason of a failed run from its stored result and explains it", () => {
+    const view = toRunDetailView(
+      job({
+        status: "failed",
+        errorCode: "checkout_incomplete",
+        result: {
+          ok: false,
+          errorCode: "checkout_incomplete",
+          errorReason: "budget_preparation",
+          logTail: "checkout_incomplete [budget_preparation]: not prepared",
+        },
+      }),
+      "p",
+      NOW,
+    );
+
+    expect(view.errorReason).toStrictEqual({
+      code: "budget_preparation",
+      text: CHECKOUT_REASON_COPY.budget_preparation,
+      known: true,
+    });
+    expect(view.log.text).toContain("budget_preparation");
+  });
+
+  // #296-T11
+  it("shows no reason for a run that has none, for a good run, or for a stored value that is no stable name", () => {
+    expect(
+      toRunDetailView(
+        job({ status: "failed", errorCode: "timeout", result: null }),
+        "p",
+        NOW,
+      ).errorReason,
+    ).toBeNull();
+    expect(toRunDetailView(succeeded, "p", NOW).errorReason).toBeNull();
+    expect(
+      toRunDetailView(
+        job({
+          status: "failed",
+          errorCode: "checkout_incomplete",
+          result: { ok: false, errorReason: "<b>oops</b>", logTail: "" },
+        }),
+        "p",
+        NOW,
+      ).errorReason,
+    ).toBeNull();
   });
 
   // CR-35-T09

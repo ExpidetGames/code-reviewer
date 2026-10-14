@@ -24,6 +24,7 @@ import { workspacePath } from "../../workspaces/paths.ts";
 import { formatDuration } from "../run-duration.ts";
 import { KIND_NAMES } from "../../review-settings/kind-names.ts";
 import { isSettled } from "../run-status.ts";
+import type { StoppedEarly } from "../../runner-api/contract.ts";
 import type { RunDetailSnapshot, RunDetailView } from "../run-view.ts";
 import { browserRunsApi, RUNS_POLL, type RunsApi } from "./api.ts";
 import {
@@ -58,6 +59,14 @@ function costText(costUsd: number): string {
     : COST.format(costUsd);
 }
 
+/** What a Dynamic Review that was wrapped up at a limit says about itself (#293). */
+const STOPPED_EARLY_TEXT: Record<StoppedEarly, string> = {
+  cost_limit:
+    "The review reached the cost limit and was wrapped up; it may be incomplete.",
+  time_limit:
+    "The review reached its time limit and was wrapped up; it may be incomplete.",
+};
+
 /** The model, tokens, calls and cost the runner reported; a text from outside is rendered as text. */
 function usageItems(run: RunDetailView) {
   const usage = run.usage;
@@ -91,6 +100,14 @@ function usageItems(run: RunDetailView) {
             costText(usage.costUsd)
           ),
       },
+      ...(usage.stoppedEarly === null
+        ? []
+        : [
+            {
+              term: "Stopped early",
+              description: STOPPED_EARLY_TEXT[usage.stoppedEarly],
+            },
+          ]),
     ],
   };
 }
@@ -346,6 +363,14 @@ export function RunDetail({
         {run.errorCode !== null ? (
           <p className="text-xs text-muted-foreground">
             Error code: <code className="font-mono">{run.errorCode}</code>
+          </p>
+        ) : null}
+        {run.errorReason !== null ? (
+          <p className="text-sm text-muted-foreground">
+            {run.errorReason.text}
+            <span className="block text-xs">
+              Reason: <code className="font-mono">{run.errorReason.code}</code>
+            </span>
           </p>
         ) : null}
       </div>
