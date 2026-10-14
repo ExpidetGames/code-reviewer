@@ -21,10 +21,12 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from fakes.dynamic_git.fixtures import GitFixture, git
 
+from code_reviewer_runner.dynamic_findings import DynamicFindings
 from code_reviewer_runner.dynamic_review.checkout import PreparedContent, prepare_content
 from code_reviewer_runner.dynamic_review.limits import Budget, Limits
 from code_reviewer_runner.dynamic_review.netguard import NetworkConfinement, table_name
 from code_reviewer_runner.dynamic_review.pr_context import PreparationContext, metadata_text
+from code_reviewer_runner.dynamic_review.publish import Published
 from code_reviewer_runner.dynamic_review.static_isolation import (
     DEFAULT_ENGINE_PORT,
     DEFAULT_PROXY_PORT,
@@ -292,3 +294,9 @@ def dynamic_job(head: str, base_url: str = "http://127.0.0.1:9") -> Job:
             }
         )
     )
+
+
+def no_publication(job: Job, found: DynamicFindings) -> Published:
+    """The `publish` seam of a suite that proves the engine boundary: the supervisor writes the
+    summary after the engine is gone (`runner.run_dynamic_job`), which these tests do not judge."""
+    return Published(comment_url="https://github.com/octo/repo/pull/7#issuecomment-1", created=True)

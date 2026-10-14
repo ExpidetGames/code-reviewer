@@ -275,3 +275,20 @@ def publisher_for(job: Job, client: CommentsClient | None = None) -> Publisher:
         web_base=web_base_of(job.git.base_url),
         redactor=Redactor(job.secrets),
     )
+
+
+def publish_run(job: Job, run: DynamicFindings) -> Published:
+    """Writes one finished run into the persistent summary comment of the job's own pull request.
+
+    The step the supervisor takes once the engine's findings are validated (#201): after it, the
+    pull request has exactly one summary of this kind, created or edited in place. Any failure
+    leaves the previous comment as it was (nothing is written before the state it builds on is
+    read and validated)."""
+    base = job.base
+    if base is None:
+        raise PublishError(
+            ErrorCode.DYNAMIC_POLICY_VIOLATION, "a Dynamic job without checkout facts"
+        )
+    return publisher_for(job).publish(
+        run, head_sha=base.head_sha, previous_reviewed_sha=base.previous_reviewed_sha
+    )
