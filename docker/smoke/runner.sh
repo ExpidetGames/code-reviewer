@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 
-# Smoke test of the runner image. Usage: docker/smoke/runner.sh <image>   (default: code-reviewer-runner:local)
+# Smoke test of the runner image. Usage: docker/smoke/runner.sh <image> [diff|dynamic]
+# (defaults: code-reviewer-runner:local, diff). `diff` is the default, PR-Agent-only image and proves
+# that it holds nothing of the engine; `dynamic` is the `dynamic` target of runner/Dockerfile and
+# proves the engine is the pinned one, runs as its own user, and that the startup self-check
+# advertises `opencode` exactly when it should (#202).
 #
 # The entry point of the image is the job loop (CR-29), which needs a running app, so this test does
 # not start it for real; it proves that it refuses to start without its configuration. The test
@@ -17,6 +21,8 @@ repo_root=$(cd "$here/../.." && pwd)
 source "$here/lib.sh"
 
 image=${1:-code-reviewer-runner:local}
+mode=${2:-diff}
+[ "$mode" = diff ] || [ "$mode" = dynamic ] || fail "unknown mode '$mode' (expected diff or dynamic)"
 require_image "$image"
 
 # Number of lines in a string (wc pads its output on macOS, hence tr).
@@ -153,5 +159,166 @@ $SCAN_OUTPUT"
 scan_in_image "$image" "0" sh -c 'for dir in /build /src /tests; do [ ! -e "$dir" ] || echo "$dir"; done'
 [ -z "$SCAN_OUTPUT" ] || fail "build directories are inside the image:
 $SCAN_OUTPUT"
+
+# ---- #202: what the image holds of the engine, and what the startup self-check says ----------------
+
+# The log of a detached runner container, waited for until a line matches. Fails with the log.
+# Usage: wait_for_log <container> <extended regex> <seconds>
+wait_for_log() {
+  local container=$1 pattern=$2 seconds=$3 waited=0
+  until docker logs "$container" 2>&1 | grep -Eq -e "$pattern"; do
+    [ "$waited" -lt "$seconds" ] || {
+      docker logs "$container" >&2 || true
+      fail "$container did not log '$pattern' within ${seconds}s"
+    }
+    sleep 1
+    waited=$((waited + 1))
+  done
+}
+
+# Starts the runner loop detached with no network at all (the app is an address nothing answers on),
+# so it only gets as far as its startup and its first, refused, claim.
+# Usage: start_loop <container> <docker run arguments...>   (the image is added)
+loop_token="smoke-runner-token-0123456789-abcdef-0123456789"
+start_loop() {
+  local name=$1
+  shift
+  CLEANUP_CONTAINERS+=("$name")
+  docker run --detach --name "$name" --network none \
+    --env RUNNER_API_URL=http://127.0.0.1:9 --env RUNNER_TOKEN="$loop_token" \
+    --env RUNNER_POLL_INTERVAL_SECONDS=1 "$@" "$image" >/dev/null
+}
+
+assert_no_token_in_log() {
+  if docker logs "$1" 2>&1 | grep -qF "$loop_token"; then fail "the runner token is in the log of $1"; fi
+}
+
+# The default user of both images: nothing makes the runner a Dynamic runner by itself.
+step "a runner started with the image's own settings serves Diff jobs only and says why"
+start_loop smoke-runner-default
+wait_for_log smoke-runner-default 'serves Diff jobs only \(not_a_dynamic_runner\)' 60
+if docker logs smoke-runner-default 2>&1 | grep -q "opencode is advertised"; then
+  fail "a runner without Dynamic configuration advertised opencode"
+fi
+assert_no_token_in_log smoke-runner-default
+docker rm --force smoke-runner-default >/dev/null
+
+step "the image sets no variable that enables Dynamic Review"
+image_env=$(docker image inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$image")
+if grep -Eq '^(RUNNER_DYNAMIC|RUNNER_OPENCODE|RUNNER_ADVERTISED|RUNNER_DIFF_JOB_USER)' <<<"$image_env"; then
+  fail "the image sets a Dynamic variable: $(grep -E '^RUNNER_' <<<"$image_env")"
+fi
+
+if [ "$mode" = diff ]; then
+  # #202-T03: the default image is the PR-Agent-only runner.
+  step "the default image holds no engine, no ripgrep, no nft and no engine user"
+  scan_in_image "$image" "0" sh -c \
+    'for path in /usr/local/bin/opencode /usr/local/bin/rg /usr/sbin/nft /sbin/nft /usr/bin/nft /opt/code-reviewer; do [ ! -e "$path" ] || echo "$path"; done; getent passwd 10101 || true; getent group 10101 || true'
+  [ -z "$SCAN_OUTPUT" ] || fail "the default image holds parts of the Dynamic engine:
+$SCAN_OUTPUT"
+  step "runner image smoke test passed (diff)"
+  exit 0
+fi
+
+# ---- the dynamic image ---------------------------------------------------------------------------
+
+# A value of a pin file, read on the host: <file> <key>...
+pin_value() {
+  python3 -I -c 'import json, sys
+value = json.load(open(sys.argv[1], encoding="utf-8"))
+for key in sys.argv[2:]:
+    value = value[key]
+print(value)' "$@"
+}
+
+opencode_pin="$repo_root/runner/opencode-pin.json"
+ripgrep_pin="$repo_root/runner/ripgrep-pin.json"
+
+# #202-T01: the exact pinned artifacts, root-owned and not writable by anyone else.
+for tool in opencode:"$opencode_pin" rg:"$ripgrep_pin"; do
+  name=${tool%%:*}
+  pin=${tool#*:}
+  step "$name in the image is the pinned executable, owned by root and not writable by others"
+  expected_sha=$(pin_value "$pin" platforms linux-x64 executableSha256)
+  expected_bytes=$(pin_value "$pin" platforms linux-x64 executableBytes)
+  actual_sha=$(in_image "$image" sha256sum "/usr/local/bin/$name" | cut -d ' ' -f 1)
+  [ "$actual_sha" = "$expected_sha" ] || fail "/usr/local/bin/$name has SHA-256 $actual_sha, the pin says $expected_sha"
+  facts=$(in_image "$image" stat -c '%u:%g %a %s %F' "/usr/local/bin/$name")
+  [ "$facts" = "0:0 755 $expected_bytes regular file" ] || fail "/usr/local/bin/$name is '$facts', expected '0:0 755 $expected_bytes regular file'"
+  in_image "$image" cat "/opt/code-reviewer/pins/$(basename "$pin")" | cmp -s - "$pin" ||
+    fail "the pin file in the image differs from $(basename "$pin")"
+  printf '    %s  %s\n' "$actual_sha" "$name"
+done
+
+# #202-T01: offline, as the engine user, with no network at all.
+step "opencode reports the pinned version as the engine user, offline"
+pinned_version=$(pin_value "$opencode_pin" version)
+reported=$(docker run --rm --network none --user 10101:10101 --env HOME=/tmp --env NO_COLOR=1 \
+  --entrypoint /usr/local/bin/opencode "$image" --version) || fail "opencode --version failed as the engine user"
+[ "$reported" = "$pinned_version" ] || fail "opencode reports '$reported', the pin says '$pinned_version'"
+printf '    opencode %s\n' "$reported"
+
+step "rg reports the pinned version"
+rg_version=$(pin_value "$ripgrep_pin" version)
+rg_output=$(docker run --rm --network none --user 10101:10101 --entrypoint /usr/local/bin/rg "$image" --version)
+rg_reported=${rg_output%%$'\n'*}
+[[ "$rg_reported" == "ripgrep $rg_version"* ]] || fail "rg reports '$rg_reported', the pin says $rg_version"
+
+step "nft is installed"
+in_image "$image" sh -c 'command -v nft >/dev/null || [ -x /usr/sbin/nft ]' || fail "nft is not installed in the image"
+
+step "the engine user 10101 exists with its own group, no shell and no other group; 10001 stays the Diff user"
+[ "$(in_image "$image" id 10101)" = "uid=10101(engine) gid=10101(engine) groups=10101(engine)" ] ||
+  fail "unexpected engine user: $(in_image "$image" id 10101)"
+in_image "$image" getent passwd 10101 | grep -q ':/usr/sbin/nologin$' || fail "the engine user has a login shell"
+[ "$(in_image "$image" id -u runner)" = "10001" ] || fail "the Diff job user is not 10001"
+
+# #202-T01 / #195-T09: the startup self-check, run for real in a container created like the one
+# compose.dynamic.yml creates (same user, capabilities, no-new-privileges), without any network.
+dynamic_caps=(
+  --user 0:0 --cap-drop ALL
+  --cap-add SETUID --cap-add SETGID --cap-add KILL --cap-add CHOWN --cap-add DAC_OVERRIDE
+  --cap-add FOWNER --cap-add NET_ADMIN --cap-add SETPCAP
+  --security-opt no-new-privileges:true
+)
+dynamic_env=(--env HOME=/home/runner --env RUNNER_DIFF_JOB_USER=10001:10001)
+
+step "the self-check of the Dynamic runner passes and opencode is advertised"
+start_loop smoke-runner-capable "${dynamic_caps[@]}" "${dynamic_env[@]}"
+wait_for_log smoke-runner-capable 'opencode is advertised' 90
+[ "$(docker inspect --format '{{.State.Running}}' smoke-runner-capable)" = true ] || fail "the capable runner stopped"
+assert_no_token_in_log smoke-runner-capable
+docker rm --force smoke-runner-capable >/dev/null
+
+# #202-T09: each broken prerequisite is "not advertised", with its stable reason, and the runner
+# keeps running to serve Diff jobs.
+expect_not_advertised() {
+  local name=$1 reason=$2
+  shift 2
+  start_loop "$name" "$@"
+  wait_for_log "$name" "opencode is not advertised.*$reason" 90
+  if docker logs "$name" 2>&1 | grep -q "opencode is advertised"; then fail "$name advertised opencode ($reason)"; fi
+  [ "$(docker inspect --format '{{.State.Running}}' "$name")" = true ] || fail "$name stopped; Diff jobs would no longer be served"
+  assert_no_token_in_log "$name"
+  docker rm --force "$name" >/dev/null
+}
+
+step "without NET_ADMIN the network rules cannot be installed: not advertised"
+expect_not_advertised smoke-runner-no-rules network_rules_not_installed \
+  --user 0:0 --cap-drop ALL --cap-add SETUID --cap-add SETGID --cap-add KILL --cap-add CHOWN \
+  --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETPCAP --security-opt no-new-privileges:true \
+  "${dynamic_env[@]}"
+
+step "with an engine user that does not exist: not advertised"
+expect_not_advertised smoke-runner-wrong-user engine_user_invalid \
+  "${dynamic_caps[@]}" "${dynamic_env[@]}" --env RUNNER_DYNAMIC_ENGINE_UID=10999 --env RUNNER_DYNAMIC_ENGINE_GID=10999
+
+step "with an engine binary that is not the pinned one: not advertised"
+replaced=$(mktemp)
+extra_cleanup() { rm -f "$replaced"; }
+printf '#!/bin/sh\necho 1.19.0\n' >"$replaced"
+chmod 755 "$replaced"
+expect_not_advertised smoke-runner-wrong-binary 'engine_binary_(untrusted|checksum_mismatch)' \
+  "${dynamic_caps[@]}" "${dynamic_env[@]}" --volume "$replaced:/usr/local/bin/opencode:ro"
 
 step "runner image smoke test passed"

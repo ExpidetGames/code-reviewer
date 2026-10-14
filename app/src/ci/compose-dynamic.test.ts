@@ -18,6 +18,7 @@ function read(path: string): string {
 
 type Service = {
   image?: string;
+  build?: { context?: string; dockerfile?: string; target?: string };
   restart?: string;
   ports?: string[];
   profiles?: string[];
@@ -110,10 +111,20 @@ describe("compose.dynamic.yml", () => {
   });
 
   // #202-T08
-  it("takes its image from a variable of its own, because the Dynamic image differs from the Diff one", () => {
-    expect(runnerDynamic().image).toMatch(
-      /^\$\{RUNNER_DYNAMIC_IMAGE:-ghcr\.io\/expidetgames\/code-reviewer-runner:development\}$/,
+  it("builds the dynamic target of the runner Dockerfile from the checkout, under an image name of its own", () => {
+    const service = runnerDynamic();
+
+    // The Dynamic image differs from the Diff one (it carries the engine), so it has a variable and
+    // a tag of its own; like the other topologies it is built from this checkout, not pulled.
+    expect(service.image).toBe(
+      "${RUNNER_DYNAMIC_IMAGE:-code-reviewer-runner-dynamic:local}",
     );
+    expect(service.build).toEqual({
+      context: ".",
+      dockerfile: "runner/Dockerfile",
+      target: "dynamic",
+    });
+    expect(plain.services.runner?.image).not.toContain("dynamic");
   });
 
   // #202-T05
@@ -300,6 +311,10 @@ describe("compose.dynamic.yml", () => {
     // The checkout and the node directory belong to the per-job preparation, not to deployment.
     expect(Object.keys(environment)).not.toContain("RUNNER_DYNAMIC_CHECKOUT");
     expect(Object.keys(environment)).not.toContain("RUNNER_DYNAMIC_NODE_BIN");
+    // The engine command and the advertised engines are decided by the runner's startup self-check
+    // and handed to its job processes; nothing in deployment configuration can set them.
+    expect(Object.keys(environment)).not.toContain("RUNNER_OPENCODE_COMMAND");
+    expect(Object.keys(environment)).not.toContain("RUNNER_ADVERTISED_ENGINES");
   });
 
   // #202-T08
@@ -314,10 +329,14 @@ describe("compose.dynamic.yml", () => {
   });
 
   // #202-T08
-  it("says in its first lines that Dynamic Review cannot be activated with it yet", () => {
-    const header = source.split("\n").slice(0, 12).join("\n");
+  it("says in its first lines that it is opt-in and that the gate is a separate, default-off switch", () => {
+    const header = source.split("\n").slice(0, 20).join("\n");
 
-    expect(header).toMatch(/not (yet )?activatable|cannot be activated/i);
+    expect(header).toMatch(/opt-in/i);
     expect(header).toContain("docs/dynamic-review.md");
+    expect(header).toMatch(/gate/i);
+    // The statements of the first slice no longer hold: the engine is in the image.
+    expect(header).not.toMatch(/not (yet )?activatable|cannot be activated/i);
+    expect(header).not.toMatch(/engine is not in the (runner )?image/i);
   });
 });

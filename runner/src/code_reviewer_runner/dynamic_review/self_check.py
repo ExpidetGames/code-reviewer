@@ -122,6 +122,9 @@ def startup_probe(uid: int, gid: int, proxy_port: int) -> None:
     "allowed" connection. A port somebody else holds fails the probe: the slot is not clean.
     """
     with socket.socket() as listener:
+        # A connection that only waits out its time on the port (the proxy of a job that just ended)
+        # does not make the port taken; a live listener of somebody else still fails the bind.
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             listener.bind((PROXY_HOST, proxy_port))
             listener.listen(1)
