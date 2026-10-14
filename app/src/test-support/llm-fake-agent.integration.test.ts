@@ -132,7 +132,8 @@ describe("the agent mode of the fake LLM", () => {
   });
 
   // #253-F05
-  it("reports fixed token counts, so a journey can check the usage the Runs page shows", async () => {
+  // #290: OpenRouter reports the charge of every call; a Dynamic run without it stops (fail closed).
+  it("reports fixed token counts and a fixed cost, so a journey can check the usage the Runs page shows", async () => {
     const fake = await setup();
     fake.scriptAgent({ steps: [], final: FINAL });
 
@@ -142,6 +143,7 @@ describe("the agent mode of the fake LLM", () => {
       prompt_tokens: 100,
       completion_tokens: 20,
       total_tokens: 120,
+      cost: 0.0001,
     });
   });
 

@@ -329,6 +329,7 @@ MODEL_FIXTURES = {
         "usage": {
             "prompt_tokens": 40,
             "completion_tokens": 9,
+            "cost": 0.0003,
             "completion_tokens_details": {"reasoning_tokens": 5},
         },
     },
@@ -341,6 +342,7 @@ MODEL_FIXTURES = {
             "prompt_tokens": 61,
             "completion_tokens": 12,
             "total_tokens": 73,
+            "cost": 0.0004,
             "prompt_tokens_details": {"cached_tokens": 30},
         },
     },
@@ -401,14 +403,14 @@ def test_a_configured_model_and_provider_run_through_the_same_protocol_without_s
     request = next(e["message_request"] for e in trace if "message_request" in e)
     assert request["model"]["modelID"] == fixture["model"]
     # The reported usage is summed over the real calls; detail counters are not added twice, and
-    # cost is not guessed.
+    # the cost is what the provider reported for each call, never guessed.
     assert result.usage is not None
     assert result.usage.model == fixture["upstream_model"]
     assert result.usage.ai_calls == 2
     assert result.usage.prompt_tokens == 2 * usage["prompt_tokens"]
     assert result.usage.completion_tokens == 2 * usage["completion_tokens"]
     assert result.usage.total_tokens == 2 * (usage["prompt_tokens"] + usage["completion_tokens"])
-    assert result.usage.cost_usd is None
+    assert result.usage.cost_usd == pytest.approx(2 * usage["cost"], rel=0, abs=1e-12)
     assert result.usage.fallback_used is False
 
 

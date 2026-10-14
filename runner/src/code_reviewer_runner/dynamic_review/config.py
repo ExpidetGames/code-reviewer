@@ -121,6 +121,10 @@ def build_engine_config(
         "snapshot": False,
         "share": "disabled",
         "autoupdate": False,
+        # Compaction stays off (#290): after one, the engine's requests no longer offer the
+        # `StructuredOutput` tool nor force a tool choice, so a run could not return its answer.
+        # See docs/dynamic-review.md, "Context window and compaction". The window is a backstop of
+        # the proxy and the cost limit bounds the run instead.
         "compaction": {"auto": False, "prune": False},
     }
 

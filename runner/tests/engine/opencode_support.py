@@ -17,6 +17,7 @@ import sys
 import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import ModuleType
@@ -25,7 +26,7 @@ from typing import Any
 from code_reviewer_runner.dynamic_review import findings_schema
 from code_reviewer_runner.dynamic_review.adapter import DynamicEngine, EngineAnswer
 from code_reviewer_runner.dynamic_review.audit import ToolAudit
-from code_reviewer_runner.dynamic_review.budget import BudgetLedger, DynamicLimits
+from code_reviewer_runner.dynamic_review.budget import BudgetLedger, DynamicLimits, UnitCosts
 from code_reviewer_runner.dynamic_review.checkout import PreparedContent
 from code_reviewer_runner.dynamic_review.config import new_proxy_capability
 from code_reviewer_runner.dynamic_review.inputs import review_inputs
@@ -37,12 +38,22 @@ from code_reviewer_runner.job_loop.jsonvalues import as_object
 RUNNER = Path(__file__).resolve().parents[2]
 API_KEY = "dummy-openrouter-key-0123456789"
 CAPABILITIES = json.dumps(
-    {"tool_choice_required": True, "structured_output": True, "max_output_tokens": 4096}
+    {
+        "tool_choice_required": True,
+        "structured_output": True,
+        "max_output_tokens": 4096,
+        "input_usd_per_mtok": 1,
+        "output_usd_per_mtok": 4,
+    }
 )
 # A directory holding trusted tools the engine needs on its PATH besides the system ones (a
 # ripgrep when the machine has none). Unset on CI, where the image's `rg` is in /usr/bin.
 EXTRA_PATH_VARIABLE = "OPENCODE_TEST_PATH"
 BINARY_VARIABLE = "OPENCODE_BIN"
+
+
+# 1 USD per million input tokens, 4 USD per million output tokens: a call has a price.
+UNIT_COSTS = UnitCosts(input_usd_per_mtok=Decimal(1), output_usd_per_mtok=Decimal(4))
 
 
 def _load_fetch_script() -> ModuleType:
@@ -111,6 +122,8 @@ class ScriptedModel:
     hold: float = 0.0
     requests: list[dict[str, Any]] = field(default_factory=lambda: [])
     on_request: Callable[[int], None] | None = None
+    # The charge every answer reports in `usage.cost`, like OpenRouter; None leaves it out.
+    cost: float | None = 0.0001
 
     def __post_init__(self) -> None:
         self._released = threading.Event()
@@ -154,10 +167,13 @@ class ScriptedModel:
                 assert self.final is not None, "the script ran out of steps and has no final answer"
                 message = asks(tool_call(f"call_final_{index}", "StructuredOutput", self.final))
         finish = "tool_calls" if message.get("tool_calls") else "stop"
+        usage: dict[str, Any] = {"prompt_tokens": 50, "completion_tokens": 10}
+        if self.cost is not None:
+            usage["cost"] = self.cost
         return {
             "id": "chatcmpl-test",
             "choices": [{"message": message, "finish_reason": finish}],
-            "usage": {"prompt_tokens": 50, "completion_tokens": 10},
+            "usage": usage,
         }
 
     @property
@@ -295,7 +311,7 @@ def run_engine(
 
     `export` overrides the directory the engine is pointed at (the control run uses a raw tree).
     """
-    ledger = BudgetLedger(limits or DynamicLimits())
+    ledger = BudgetLedger(limits or DynamicLimits(), unit_costs=UNIT_COSTS)
     capability = new_proxy_capability()
     proxy = ModelProxy(
         ledger=ledger,

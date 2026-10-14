@@ -103,6 +103,9 @@ export function runnerEnvironment(
       tool_choice_required: true,
       structured_output: true,
       max_output_tokens: 4096,
+      // Unit costs are required once a descriptor is set (#290); they only size a reservation.
+      input_usd_per_mtok: 1,
+      output_usd_per_mtok: 4,
     }),
     PR_AGENT_COMMAND: [options.python, options.wrapper, options.llmBaseUrl]
       .map(quoted)

@@ -22,7 +22,8 @@ jobs running. It is configured by environment variables:
 | `RUNNER_ID` | Free-form id sent as `X-Runner-Id` (bookkeeping only) | `runner-<hostname>` |
 | `PR_AGENT_COMMAND` | The command that runs one job, split like a shell would. Only for test stacks that replace PR-Agent with a fake | `python -m code_reviewer_runner.runner` |
 | `RUNNER_OPENCODE_COMMAND` | #197: the pinned stock engine that runs one Dynamic job, split like a shell would (the adapter appends `serve --hostname 127.0.0.1 --port <job port>`). The executable is the one `scripts/fetch_opencode.py` verified against `opencode-pin.json`. Unset means a Dynamic job is refused with `dynamic_engine_unavailable`; never falls back to PR-Agent. The engine also needs a trusted `rg` (ripgrep) on its `PATH`, or it is not started | unset |
-| `RUNNER_DYNAMIC_CAPABILITIES` | #197: trusted JSON descriptor of the selected model/destination: `{"tool_choice_required": true, "structured_output": true, "max_output_tokens": 8192}`. Operator-owned and always wins when set. Unset (or empty) applies the descriptor built into the runner for exactly the shipped default model `deepseek/deepseek-v4.1-flash` (#264); for any other model, or a descriptor without a required feature, the job ends with `dynamic_model_features_unsupported`, no fallback | unset |
+| `RUNNER_DYNAMIC_MAX_COST_USD` | #290: the most one Dynamic run may cost, in USD, a plain decimal number above 0 up to 20. Unset or empty: 1.00. Anything else ends the job with `dynamic_config_invalid`. Trusted operator configuration; nothing in a claim can set it | unset |
+| `RUNNER_DYNAMIC_CAPABILITIES` | #197: trusted JSON descriptor of the selected model/destination: `{"tool_choice_required": true, "structured_output": true, "max_output_tokens": 8192}`, with `input_usd_per_mtok` and `output_usd_per_mtok` (required: a model without unit costs ends the job with `dynamic_config_invalid`), optionally with `context_window_tokens` (#290). Operator-owned and always wins when set. Unset (or empty) applies the descriptor built into the runner for exactly the shipped default model `deepseek/deepseek-v4.1-flash` (#264); for any other model, or a descriptor without a required feature, the job ends with `dynamic_model_features_unsupported`, no fallback | unset |
 | `RUNNER_DYNAMIC_ENGINE_UID`, `RUNNER_DYNAMIC_ENGINE_GID` | #197: the numeric dedicated unprivileged user (and its own group) the engine runs as; it must exist in the image and be neither root nor the runner's own user. The Dynamic job process is the root supervisor that starts the engine as this user | `10101` and `10101` |
 | `RUNNER_DYNAMIC_PROXY_PORT`, `RUNNER_DYNAMIC_ENGINE_PORT` | #244: the two fixed loopback ports of the single Dynamic slot (model proxy, engine server), 1024 to 32767 and different. The engine user's static nft rules, installed once at container start, name exactly these; a stranger holding one makes the job fail closed | `10180` and `10181` |
 | `RUNNER_DIFF_JOB_USER` | #197: `uid:gid` the loop drops every non-Dynamic job process to, with no other group, in a working directory it owns. Set only on a loop that runs as root (`compose.dynamic.yml`), so PR-Agent never runs as root; unset runs jobs as the loop's own user | unset |
@@ -221,16 +222,14 @@ input and the boundaries around it (the epic's binding decision). Modules:
   proxy) and the discovery/runtime services switched off. The fixed core (#198) is the runner-defined
   `review` agent's prompt, so it reaches the model through the trusted channel. The flags are defence
   in depth, not a security boundary: #196 strips the discovery inputs from the export.
-- `dynamic_review/budget.py` is the epic's hard envelope (600 s, 30 model calls, 120,000 tokens, 200
-  tool calls, 100 files, 64 KiB per result, 4 MiB cumulative content) as a ledger shared by the proxy
-  and the adapter. Every call is reserved before it is sent, every tool part is counted, and a missing
-  or oversized answer fails closed. The token reservation uses UTF-8 bytes as a proven upper bound on
-  BPE tokens; a verified DeepSeek tokenizer may tighten it later without weakening the envelope.
-  The token cap is cumulative and preventive: a call is refused when the usage already settled, the
-  calls in flight and its own reservation would pass the cap. The reservation is the byte bound,
-  raised to the last settled prompt when that is larger; the last prompt is a heuristic safety net
-  that can over-reserve after a compaction, not a bound. The one unproven gap: the provider's
-  chat-template overhead on the first call is not in the bytes, so it is not proven covered.
+- `dynamic_review/budget.py` holds the limits and the ledger shared by the proxy and the adapter. The
+  one budget is an operator cost limit in USD (#290: default 1.00, `RUNNER_DYNAMIC_MAX_COST_USD`, a
+  ceiling of 20 in the code); the technical limits stay (600 s, 64 KiB per result, 4 MiB cumulative
+  content, the byte caps). Every call is reserved before it is sent (a priced estimate), every tool
+  part is counted, and a missing or oversized answer fails closed; a call without `usage.cost` ends
+  the run. The input estimate is bytes over 3, tightened by the previous call's real density, and the
+  model's window (from its capability descriptor, never the Diff `llm.maxTokens`) is a backstop in
+  front of the provider's own limit. Details: `docs/dynamic-review.md`, "Hard limits".
 - `dynamic_review/proxy.py` is the per-job model proxy on loopback. It holds the workspace credential.
   Every request must carry the job's random capability (256 bit, generated by the runner per job and
   handed to the engine only through the trusted config) as a bearer token, compared in constant time;
@@ -460,7 +459,8 @@ and the enum agree. Callers branch on the code, never on the text.
 | `llm_rate_limit` | The LLM provider rate limit (429) |
 | `llm_timeout` | The LLM provider did not answer in time |
 | `llm_unavailable` | The LLM provider could not be reached or answered 5xx |
-| `llm_bad_request` | The LLM provider refused the request (400, 422, context too large) |
+| `llm_bad_request` | The LLM provider refused the request (400, 422) |
+| `llm_context_length_exceeded` | A Dynamic Review request was larger than the model's context window (the provider said so, #290) |
 | `llm_output_invalid` | The model answered, but its answer could not be turned into a review |
 | `model_unknown` | PR-Agent does not know the model (set `llm.maxTokens`) or the provider has no such model. A Diff job also ends with it when OpenRouter answers 404 that no provider can handle the requested parameters (#270) |
 | `dynamic_engine_unavailable` | A Dynamic Review job arrived but no engine is available to run it; the runner never falls back to PR-Agent |

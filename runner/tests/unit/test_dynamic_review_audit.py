@@ -8,15 +8,25 @@ often the history is resent.
 """
 
 import json
+from decimal import Decimal
 from typing import Any
 
 import pytest
 
 from code_reviewer_runner.dynamic_review.audit import ToolAudit
-from code_reviewer_runner.dynamic_review.budget import BudgetLedger, DynamicLimits, LimitError
+from code_reviewer_runner.dynamic_review.budget import (
+    BudgetLedger,
+    DynamicLimits,
+    LimitError,
+    UnitCosts,
+)
 from code_reviewer_runner.result import ErrorCode
 
 EXPORT = "/job/export"
+
+
+# 1 USD per million input tokens, 4 USD per million output tokens: a call has a price.
+UNIT_COSTS = UnitCosts(input_usd_per_mtok=Decimal(1), output_usd_per_mtok=Decimal(4))
 
 
 def call(call_id: str, name: str, **arguments: Any) -> dict[str, Any]:
@@ -43,21 +53,20 @@ def read_file(path: str) -> str:
     return f"<path>{path}</path>\n<type>file</type>\n<content>\n1: x\n</content>"
 
 
-def audit(**limits: int) -> tuple[ToolAudit, BudgetLedger]:
-    ledger = BudgetLedger(DynamicLimits(**limits))
+def audit(**limits: Any) -> tuple[ToolAudit, BudgetLedger]:
+    ledger = BudgetLedger(DynamicLimits(**limits), unit_costs=UNIT_COSTS)
     return ToolAudit(ledger, export_root=EXPORT), ledger
 
 
-# #197-T05
-def test_the_tool_calls_of_an_answer_are_counted_before_the_engine_gets_it() -> None:
-    subject, ledger = audit(max_tool_calls=2)
+# #197-T05, #290-T07
+def test_the_tool_calls_of_an_answer_are_counted_and_not_limited() -> None:
+    subject, ledger = audit()
 
     subject.calls_in_answer(answer(call("a", "read"), call("b", "grep")))
-    with pytest.raises(LimitError) as over:
-        subject.calls_in_answer(answer(call("c", "glob")))
+    for index in range(300):
+        subject.calls_in_answer(answer(call(f"c{index}", "glob")))
 
-    assert over.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
-    assert ledger.tool_calls == 2
+    assert ledger.tool_calls == 302
 
 
 # #197-T05
@@ -287,15 +296,14 @@ def test_grep_counts_every_file_it_lists_and_glob_every_path() -> None:
     assert ledger.files == 3
 
 
-# #197-T05
-def test_the_distinct_file_bound_trips_on_a_multi_file_grep() -> None:
-    subject, _ = audit(max_files=2)
-    grep = "".join(f"{EXPORT}/f{index}.ts:\n  Line 1: x\n" for index in range(3))
+# #290-T07
+def test_the_distinct_files_of_a_multi_file_grep_are_counted_without_a_limit() -> None:
+    subject, ledger = audit()
+    grep = "".join(f"{EXPORT}/f{index}.ts:\n  Line 1: x\n" for index in range(250))
 
-    with pytest.raises(LimitError) as over:
-        subject.results_in_request([asks(call("g", "grep", pattern="x")), result("g", grep)])
+    subject.results_in_request([asks(call("g", "grep", pattern="x")), result("g", grep)])
 
-    assert over.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
+    assert ledger.files == 250
 
 
 # #197-T05
