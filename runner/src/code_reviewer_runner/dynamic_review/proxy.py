@@ -18,6 +18,11 @@ demands of the model boundary happens here, before a byte reaches the provider o
 - **Model, auth and routing overrides are refused.** The request must name the one configured model;
   the proxy replaces the dummy key with the workspace credential and never lets the caller pick a
   destination.
+- **OpenRouter must support every parameter (#270).** For an OpenRouter destination the proxy adds
+  `provider.require_parameters: true` to the body it forwards, so a provider that would silently
+  ignore `tools` or `tool_choice` is never used. It is a capability requirement, not routing: the
+  engine still cannot send `provider` or any other routing field, and OpenRouter finding no provider
+  for the parameters (404) ends the run with `dynamic_model_features_unsupported`.
 - **Usage is authoritative, and missing usage fails.** The provider's counters settle the
   reservation; an answer without usage, or larger than reserved, stops the run instead of being
   counted as zero.
@@ -55,6 +60,10 @@ from code_reviewer_runner.dynamic_review.config import PROXY_CAPABILITY_BYTES, P
 from code_reviewer_runner.dynamic_review.net import no_redirect_opener
 from code_reviewer_runner.error_mapping import llm_status_code
 from code_reviewer_runner.job_loop.jsonvalues import as_object
+from code_reviewer_runner.openrouter_parameters import (
+    REQUIRE_PARAMETERS,
+    is_no_provider_for_parameters,
+)
 from code_reviewer_runner.result import ErrorCode
 
 # The protocol the run requires. The pinned OpenCode uses tool calling for its StructuredOutput
@@ -240,6 +249,7 @@ class ModelProxy:
         capabilities: DynamicCapabilities,
         capability: str,
         post: UpstreamPost = _http_post,
+        require_parameters: bool = False,
     ) -> None:
         if len(capability) < _MIN_CAPABILITY_CHARS:
             raise LimitError(
@@ -255,6 +265,8 @@ class ModelProxy:
         self.capabilities = capabilities
         self.audit = ToolAudit(ledger)
         self._post = post
+        # True when the destination is OpenRouter (the runner decides, never the engine).
+        self._require_parameters = require_parameters
         # The proxy starts only after the capability descriptor was proven: an unusable destination
         # is a failure before the first request, not a downgrade at the first call.
         self.capabilities.check_required()
@@ -330,7 +342,7 @@ class ModelProxy:
         if status != 200:
             # The run ends with the provider's stable code; no partial success is claimed and no
             # counter is invented for a refused call (the reservation stays spent).
-            refusal, code = self._provider_error(status)
+            refusal, code = self._provider_error(status, response_body)
             self.ledger.record_failure(LimitError(code, "the model provider refused the request"))
             return ProxyResponse(status=status, body=refusal)
         completion = self._completion(response_body)
@@ -412,6 +424,8 @@ class ModelProxy:
         forwarded["model"] = self.upstream_model
         forwarded["max_tokens"] = self._output_allowance(request)
         forwarded["stream"] = False
+        if self._require_parameters:
+            forwarded["provider"] = dict(REQUIRE_PARAMETERS)
         # Compact UTF-8 like the engine's own serialisation: the reservation is made on these bytes,
         # and `\uXXXX` escapes of non-ASCII text would inflate it. A lone surrogate (a JSON escape
         # the engine or the provider can emit when a token splits an emoji) has no UTF-8 form: that
@@ -459,8 +473,16 @@ class ModelProxy:
         usage = as_object(document.get("usage"))
         return None if usage is None else exact_cost(usage.get("cost"))
 
-    @staticmethod
-    def _provider_error(status: int) -> tuple[bytes, ErrorCode]:
+    def _provider_error(self, status: int, body: bytes) -> tuple[bytes, ErrorCode]:
+        # OpenRouter has no provider that supports every parameter of the request (#270): the
+        # model cannot serve the run, which is no unknown model.
+        if (
+            status == 404
+            and self._require_parameters
+            and is_no_provider_for_parameters(body.decode("utf-8", errors="replace"))
+        ):
+            code = ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED
+            return error_body(code, "no provider supports every parameter of the request"), code
         # The static path's table (error_mapping.py); a status it has no rule for is a bad request.
         code = llm_status_code(status) or ErrorCode.LLM_BAD_REQUEST
         return error_body(code, "the model provider refused the request"), code

@@ -232,6 +232,8 @@ class Engine:
                 "model": MODEL,
                 "apiKey": API_KEY,
                 "baseUrl": self.llm.base_url,
+                # The fake stands in for OpenRouter: it asks for what OpenRouter always gets (#270).
+                "requireParameters": True,
                 "maxTokens": 32000,
             },
         }

@@ -38,6 +38,8 @@ export type FakeLlmRequest = {
   tools: string[];
   /** The result of every tool call the request carries, by the id of the call. */
   toolResults: Record<string, string>;
+  /** The `provider` object of the body (OpenRouter's routing options, #270); null when absent. */
+  provider: Record<string, unknown> | null;
 };
 
 /** One request's tool calls of the agent script. */
@@ -88,6 +90,12 @@ function toolNames(tools: unknown): string[] {
   return (tools as Array<{ function?: { name?: unknown } }>).flatMap((tool) =>
     typeof tool.function?.name === "string" ? [tool.function.name] : [],
   );
+}
+
+function providerOf(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
 }
 
 function toolResultsOf(messages: ChatMessage[]): Record<string, string> {
@@ -242,6 +250,7 @@ export async function startLlmFake(
         prompt: `${system}\n${textOf(messages, "user")}`,
         tools: toolNames((body as { tools?: unknown }).tools),
         toolResults: toolResultsOf(messages),
+        provider: providerOf((body as { provider?: unknown }).provider),
       });
 
       if (error !== null) {
