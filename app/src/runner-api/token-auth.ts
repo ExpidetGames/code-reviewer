@@ -14,7 +14,7 @@ export const MIN_RUNNER_TOKEN_LENGTH = 32;
 // a non-printable character inside is refused there, so it must not count as usable here either, or
 // the app would start and the runner would crash-loop. (Python's isprintable is false for the
 // categories C and Z, except the plain space, which is white space anyway.)
-const UNUSABLE_CHARACTER = /[\s\p{C}\p{Z}]/u;
+export const UNUSABLE_CHARACTER = /[\s\p{C}\p{Z}]/u;
 
 type Env = Readonly<Record<string, string | undefined>>;
 
