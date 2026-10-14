@@ -100,6 +100,31 @@ used, and it is reported as a _warning_ (`LLM_MODEL_INVALID`, `LLM_MAX_TOKENS_IN
 | `status.ts`  | `LlmStatus`: what the UI may know about the instance's LLM defaults (the built-in model and the warnings about an ignored option). The key is a matter of each workspace.                                                                                                                                                                                      |
 | `startup.ts` | `checkLlmConfigOnStart`: one warning for an optional variable that is ignored (`LLM_MODEL`, `LLM_MAX_TOKENS`) and the notes on the test endpoints. Says nothing about `LLM_PROVIDER` and `LLM_API_KEY`. Never stops the start.                                                                                                                                 |
 
+## Model capabilities
+
+`model-capabilities.ts` asks the provider's public model metadata whether a model can do what Dynamic Review
+needs (#269): `GET /api/v1/models/{author}/{slug}/endpoints` of OpenRouter, no key. `checkModelCapabilities`
+answers one of
+
+- `supported`: at least one endpoint lists both `tools` and `tool_choice` in `supported_parameters`;
+- `unsupported`: the model exists, no endpoint lists both;
+- `unknown_model`: 404, or a name that is not `author/slug` (no request is made then); a variant suffix such as
+  `:free` is dropped for the lookup;
+- `unverifiable`: a network error, a timeout, any status but 200 and 404 (a redirect included), an answer that is
+  not JSON, over 256 KiB or not shaped like the documented answer. It never throws.
+
+`supported` and `unsupported` carry the capabilities read, for #279 and #280: `tools`, `toolChoice`,
+`responseFormat`, `structuredOutputs` and `maxCompletionTokens` (the largest limit an endpoint states, or null).
+They come from the endpoints that support tools when there are any, otherwise from all of them.
+
+The request goes to the provider's fixed address (`endpoint.ts`; the test stack points it at the fake LLM with
+the existing switch), sends no credential, follows no redirect, has a timeout and the size limit, and the fetch is
+a parameter. The log line holds the model id and the outcome class only (`MODEL_CAPABILITY_CHECK`).
+`createModelCapabilityChecker` remembers a `supported` answer in memory for five minutes (at most 200 models), so
+saving the same model repeatedly asks once; no other outcome is remembered. The settings save is its first user
+(`src/review-settings/README.md`, "Saving a Dynamic model checks it"); the run-time enforcement is the runner
+proxy's (`dynamic_model_features_unsupported`).
+
 ## Rules
 
 - **A missing key is a state, not a crash.** The app starts, the workspace pages show "LLM not configured" with a link to
@@ -122,7 +147,7 @@ claimed-keys.ts`) and not in memory, so any app instance can mask a result after
 
 ## Testing
 
-`resolve.test.ts`, `config.test.ts`, `access.test.ts`, `startup.test.ts`, `endpoint.test.ts` and
+`resolve.test.ts`, `config.test.ts`, `access.test.ts`, `startup.test.ts`, `endpoint.test.ts`, `model-capabilities.test.ts` and
 `../instrumentation.test.ts` (unit, no database); `workspace-key.integration.test.ts`,
 `key-test.integration.test.ts` (real SQLite, the fake LLM over real HTTP); `ui/*.test.tsx`;
 `integration-tests/http/llm-key-route.integration.test.ts` (the real route files: roles, isolation, the request,
