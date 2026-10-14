@@ -62,12 +62,12 @@ export type JobListFilter = {
 export const JOB_LIST_DEFAULT_LIMIT = 100;
 export const JOB_LIST_MAX_LIMIT = 500;
 
-/** The lookup of the last reviewed head for one pull request and review kind (#199). */
 /** The most heads a claim names as attempted (#255); the contract bounds the list by the same number. */
 export const MAX_ATTEMPTED_SHAS = 20;
 // Rows read before the heads are made distinct; many reruns of one head must not hide an older one.
 const ATTEMPTED_SCAN_LIMIT = 200;
 
+/** The lookup of the last reviewed head for one pull request and review kind (#199). */
 export type PreviousReviewedShaInput = {
   repositoryId: string;
   prNumber: number;
@@ -116,12 +116,15 @@ export type JobsRepository = {
    */
   previousReviewedSha(input: PreviousReviewedShaInput): Promise<string | null>;
   /**
-   * The heads of this pull request's earlier jobs of the same review kind that did not succeed (#255),
-   * newest first and bounded, or an empty list. A run that wrote the summary and then did not end
-   * `succeeded` (failed, superseded, cancelled after a lost lease) leaves its head in the comment; the
-   * publisher accepts exactly these heads as a state it can account for. Only jobs created after the
-   * last successful review count (its state already includes everything before it), and a job created
-   * after the claimed one never does: that is a newer review, not a predecessor.
+   * The heads of this pull request's earlier jobs of the same review kind that ran and did not succeed
+   * (#255), newest first and bounded, or an empty list. A run that wrote the summary and then did not
+   * end `succeeded` (failed, or requeued and then superseded or cancelled) leaves its head in the
+   * comment; the publisher accepts exactly these heads as a state it can account for. A job that never
+   * ran (superseded or cancelled while waiting: `attempts = 0`, not `failed`) cannot have published and
+   * never counts, so a burst of pushes cannot push a real head out of the bounded list. Only jobs
+   * created strictly after the last successful review count (its state already includes everything
+   * before it) and strictly before the claimed one (a newer job is a newer review, not a predecessor).
+   * Ids are random, so jobs created in the same millisecond have no known order and are left out.
    */
   attemptedShas(input: PreviousReviewedShaInput): Promise<string[]>;
 };
@@ -205,6 +208,25 @@ export function createJobsRepository(
 ): JobsRepository {
   const now = options.now ?? (() => new Date());
   const newId = options.newId ?? (() => crypto.randomUUID());
+  // The jobs of one pull request and review kind in this workspace (#199, #255).
+  const scopeOf = (input: PreviousReviewedShaInput) =>
+    db
+      .selectFrom("jobs")
+      .where("workspace_id", "=", workspaceId)
+      .where("repository_id", "=", input.repositoryId)
+      .where("pr_number", "=", input.prNumber)
+      .where("review_kind", "=", input.reviewKind);
+  // The most recently finished successful review of that pull request and kind. A job that is still
+  // running is not a previous review; the claimed job itself is excluded.
+  const lastSucceeded = (input: PreviousReviewedShaInput) =>
+    scopeOf(input)
+      .select(["head_sha", "created_at"])
+      .where("status", "=", "succeeded")
+      .where("id", "!=", input.excludeJobId)
+      .orderBy("finished_at", "desc")
+      .orderBy("created_at", "desc")
+      .limit(1)
+      .executeTakeFirst();
   const resolveReviewKind =
     options.reviewKind ?? createStoredReviewKindResolver(workspaceId, now);
   const dynamicReviewAllowed =
@@ -538,51 +560,27 @@ export function createJobsRepository(
     },
 
     async previousReviewedSha(input) {
-      // The most recently finished successful review of this pull request and kind. A job that is
-      // still running is not a previous review; the claimed job itself is excluded.
-      const row = await db
-        .selectFrom("jobs")
-        .select("head_sha")
-        .where("workspace_id", "=", workspaceId)
-        .where("repository_id", "=", input.repositoryId)
-        .where("pr_number", "=", input.prNumber)
-        .where("review_kind", "=", input.reviewKind)
-        .where("status", "=", "succeeded")
-        .where("id", "!=", input.excludeJobId)
-        .orderBy("finished_at", "desc")
-        .orderBy("created_at", "desc")
-        .limit(1)
-        .executeTakeFirst();
-      return row?.head_sha ?? null;
+      return (await lastSucceeded(input))?.head_sha ?? null;
     },
 
     async attemptedShas(input) {
-      const scope = db
-        .selectFrom("jobs")
-        .where("workspace_id", "=", workspaceId)
-        .where("repository_id", "=", input.repositoryId)
-        .where("pr_number", "=", input.prNumber)
-        .where("review_kind", "=", input.reviewKind);
-      const claimed = await scope
+      const claimed = await scopeOf(input)
         .select("created_at")
         .where("id", "=", input.excludeJobId)
         .executeTakeFirst();
       if (claimed === undefined) return [];
-      const lastSucceeded = await scope
-        .select("created_at")
-        .where("status", "=", "succeeded")
-        .where("id", "!=", input.excludeJobId)
-        .orderBy("finished_at", "desc")
-        .orderBy("created_at", "desc")
-        .limit(1)
-        .executeTakeFirst();
-      let query = scope
+      const last = await lastSucceeded(input);
+      let query = scopeOf(input)
         .select("head_sha")
         .where("status", "!=", "succeeded")
+        // Only a job that ran can have published: failed, or a lost attempt (requeue, released claim).
+        .where((eb) =>
+          eb.or([eb("status", "=", "failed"), eb("attempts", ">", 0)]),
+        )
         .where("id", "!=", input.excludeJobId)
-        .where("created_at", "<=", claimed.created_at);
-      if (lastSucceeded !== undefined)
-        query = query.where("created_at", ">=", lastSucceeded.created_at);
+        .where("created_at", "<", claimed.created_at);
+      if (last !== undefined)
+        query = query.where("created_at", ">", last.created_at);
       const rows = await query
         .orderBy("created_at", "desc")
         .orderBy("id", "desc")

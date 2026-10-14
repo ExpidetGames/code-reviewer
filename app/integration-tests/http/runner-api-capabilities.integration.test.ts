@@ -404,7 +404,11 @@ describe("the heads the app attempted for a Dynamic job", () => {
     h: Awaited<ReturnType<typeof startDynamicHarness>>,
     headSha: string,
     status: "succeeded" | "failed" | "superseded" | "cancelled" | "queued",
-    overrides: { prNumber?: number; reviewKind?: "dynamic" | "diff" } = {},
+    overrides: {
+      prNumber?: number;
+      reviewKind?: "dynamic" | "diff";
+      attempts?: number;
+    } = {},
   ) {
     h.clock.advance(1000);
     await h.seedHistoricalJob({
@@ -414,6 +418,9 @@ describe("the heads the app attempted for a Dynamic job", () => {
       reviewKind: overrides.reviewKind ?? "dynamic",
       status,
       errorCode: status === "failed" ? "timeout" : null,
+      ...(overrides.attempts === undefined
+        ? {}
+        : { attempts: overrides.attempts }),
     });
   }
 
@@ -446,8 +453,9 @@ describe("the heads the app attempted for a Dynamic job", () => {
     await seedDynamic(h, "1".repeat(40), "failed");
     await seedDynamic(h, "2".repeat(40), "succeeded");
     await seedDynamic(h, "3".repeat(40), "failed");
-    await seedDynamic(h, "4".repeat(40), "superseded");
-    await seedDynamic(h, "5".repeat(40), "cancelled");
+    // Requeued after a lost attempt before they ended, so they ran and could have published.
+    await seedDynamic(h, "4".repeat(40), "superseded", { attempts: 1 });
+    await seedDynamic(h, "5".repeat(40), "cancelled", { attempts: 1 });
     await seedDynamic(h, "3".repeat(40), "failed");
 
     const body = await claimNew(h);
@@ -458,6 +466,79 @@ describe("the heads the app attempted for a Dynamic job", () => {
       attemptedShas: ["3".repeat(40), "5".repeat(40), "4".repeat(40)],
     });
     expectValid("ClaimResponse", body);
+  });
+
+  // #255-T01 (app side)
+  it("keeps the head of a failed run in the list through a burst of pushes that never ran", async () => {
+    const h = await startDynamicHarness();
+    await seedDynamic(h, "e".repeat(40), "failed");
+    // Superseded or cancelled while still waiting: attempts = 0, so they can never have published.
+    for (let n = 1; n <= 25; n += 1)
+      await seedDynamic(
+        h,
+        n.toString(16).padStart(40, "0"),
+        n % 2 === 0 ? "superseded" : "cancelled",
+      );
+
+    const body = await claimNew(h);
+
+    expect(body.job.input.base).toMatchObject({
+      attemptedShas: ["e".repeat(40)],
+    });
+    expectValid("ClaimResponse", body);
+  });
+
+  // #255-T01 (app side)
+  it("does not count a job created in the same millisecond as the claimed one", async () => {
+    const h = await startDynamicHarness();
+    h.clock.advance(1000);
+    const claimed = await h.enqueueNew({
+      prNumber: 8,
+      headSha: "f".repeat(40),
+      reviewKind: "dynamic",
+    });
+    // Ids are random, so the creation order inside one millisecond is unknown: not a predecessor.
+    await h.seedHistoricalJob({
+      command: "review",
+      prNumber: 8,
+      headSha: "d".repeat(40),
+      reviewKind: "dynamic",
+      status: "failed",
+      errorCode: "timeout",
+    });
+
+    const body = await h.claimed({ engines });
+
+    expect(body.job.id).toBe(claimed.id);
+    expect(body.job.input.base).toMatchObject({ attemptedShas: [] });
+  });
+
+  // #255-T01 (app side)
+  it("does not count a job created in the same millisecond as the last success", async () => {
+    const h = await startDynamicHarness();
+    h.clock.advance(1000);
+    await h.seedHistoricalJob({
+      command: "review",
+      prNumber: 8,
+      headSha: "2".repeat(40),
+      reviewKind: "dynamic",
+      status: "succeeded",
+    });
+    await h.seedHistoricalJob({
+      command: "review",
+      prNumber: 8,
+      headSha: "d".repeat(40),
+      reviewKind: "dynamic",
+      status: "failed",
+      errorCode: "timeout",
+    });
+
+    const body = await claimNew(h);
+
+    expect(body.job.input.base).toMatchObject({
+      previousReviewedSha: "2".repeat(40),
+      attemptedShas: [],
+    });
   });
 
   // #255-T02 (app side)
