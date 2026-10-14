@@ -33,6 +33,11 @@ type Service = {
   user?: string;
   privileged?: boolean;
   security_opt?: string[];
+  userns_mode?: string;
+  sysctls?: unknown;
+  configs?: unknown;
+  secrets?: unknown;
+  extends?: unknown;
   stop_grace_period?: string;
   entrypoint?: unknown;
   command?: unknown;
@@ -157,8 +162,12 @@ describe("compose.dynamic.yml", () => {
     ]) {
       expect(service.cap_add).not.toContain(forbidden);
     }
+    // cap_add and cap_drop are compared exactly above, so a capability such as SYS_ADMIN fails
+    // there; the loop only documents the ones that matter most, add no further per-name check.
     expect(service.privileged).not.toBe(true);
-    expect(service.security_opt).toContain("no-new-privileges:true");
+    // Exactly this, nothing else: seccomp=unconfined, apparmor=unconfined, systempaths=unconfined
+    // and label=disable would each widen what the container's processes can do.
+    expect(service.security_opt).toEqual(["no-new-privileges:true"]);
     expect(Number(service.pids_limit)).toBeGreaterThan(0);
     expect(Number(service.pids_limit)).toBeLessThanOrEqual(1024);
   });
@@ -238,10 +247,19 @@ describe("compose.dynamic.yml", () => {
       "uts",
       "cgroup",
       "privileged",
+      // Keys that change the namespaces or bring files and settings in from elsewhere:
+      "userns_mode",
+      "sysctls",
+      "configs",
+      "secrets",
+      // `extends` could import any of the keys above from another file, past this list.
+      "extends",
     ]) {
       expect(service, key).not.toHaveProperty(key);
     }
-    expect(dynamic).not.toHaveProperty("volumes");
+    for (const key of ["volumes", "configs", "secrets", "include"]) {
+      expect(dynamic, key).not.toHaveProperty(key);
+    }
     expect(code).not.toMatch(/docker\.sock/);
     expect(code).not.toMatch(/\/var\/run|\/run\//);
     expect(code).not.toMatch(/^\s*volumes:/m);
