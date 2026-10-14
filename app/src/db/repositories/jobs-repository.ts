@@ -123,7 +123,7 @@ export type JobsRepository = {
   previousReviewedSha(input: PreviousReviewedShaInput): Promise<string | null>;
   /**
    * The heads of this pull request's earlier jobs of the same review kind that ran and did not succeed
-   * (#255), newest first and bounded, or an empty list. A run that wrote the summary and then did not
+   * (#255), newest first and bounded, or an empty list, and whether the list was cut (#257). A run that wrote the summary and then did not
    * end `succeeded` (failed, or requeued and then superseded or cancelled) leaves its head in the
    * comment; the publisher accepts exactly these heads as a state it can account for. A job that never
    * ran (superseded or cancelled while waiting: `attempts = 0`, not `failed`) cannot have published and

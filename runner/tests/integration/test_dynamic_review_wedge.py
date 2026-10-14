@@ -166,12 +166,20 @@ def test_without_the_attempted_head_the_same_push_still_fails_closed(
     assert server.comments[0]["body"] == before
 
 
-def seed_state(server: FakeGithubComments, sha: str, *findings: Finding, **identity: str) -> str:
+def seed_state(
+    server: FakeGithubComments,
+    sha: str,
+    *findings: Finding,
+    author: str,
+    user_type: str | None = None,
+    app_slug: str | None = None,
+) -> str:
     """A summary comment as the publisher writes it (marker, state, head), by any author."""
     state = ReviewState(reviewed_sha=sha, findings=findings, resolved=())
     body = render_comment(state, repository=REPO, web_base="")
     assert IDENTITY_MARKER in body
-    return str(server.seed(body, **identity)["id"])
+    seeded = server.seed(body, author=author, user_type=user_type, app_slug=app_slug)
+    return str(seeded["id"])
 
 
 def bodies(server: FakeGithubComments) -> dict[str, str]:
@@ -267,9 +275,7 @@ def test_the_same_comment_on_a_claim_that_is_not_truncated_fails_closed(
 def test_a_comment_that_is_not_the_bots_is_never_rewritten(
     server: FakeGithubComments, truncated: bool, identity: dict[str, str]
 ) -> None:
-    forged = seed_state(
-        server, HEAD_A, finding("f-a", HEAD_A, "src/a.ts"), **identity
-    )
+    forged = seed_state(server, HEAD_A, finding("f-a", HEAD_A, "src/a.ts"), **identity)
     before = bodies(server)
     job = claim(server, HEAD_B, attempted=WINDOW, truncated=truncated)
 

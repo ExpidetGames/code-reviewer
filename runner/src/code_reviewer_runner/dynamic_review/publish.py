@@ -187,7 +187,7 @@ class Publisher:
         if state.reviewed_sha and state.reviewed_sha not in allowed:
             if attempted_shas_truncated:
                 # The bot's own summary, but its head fell out of the bounded list (#257): a full
-                # review that rewrites it. Nothing is merged from a state that cannot be accounted for.
+                # review that rewrites it. Nothing is merged from a state it cannot account for.
                 return _EMPTY_STATE
             # A head this job cannot account for: a newer review (a result that arrived late) or a
             # state the app never produced. Both are refused, never merged.
