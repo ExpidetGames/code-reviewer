@@ -186,11 +186,15 @@ def _ancestors_trusted(
 
     Somebody who can write into one of them can swap the whole subtree, however the file itself is
     owned. A link in the chain is refused as well: it would let the judged path lead elsewhere.
+    A directory that is not there raises `FileNotFoundError`: that is a missing file, not an
+    untrusted one.
     """
     directory = path.parent
     while True:
         try:
             facts = lstat(directory)
+        except (FileNotFoundError, NotADirectoryError):
+            raise FileNotFoundError from None
         except OSError:
             return False
         if (
@@ -213,7 +217,11 @@ def _open_trusted(
     untrusted: SelfCheckFailed,
 ) -> BinaryIO:
     """The open file at `path`, if only its owner can change it and every directory above it."""
-    if not _ancestors_trusted(path, where.chain_root, where.trusted_owner, where.lstat):
+    try:
+        trusted = _ancestors_trusted(path, where.chain_root, where.trusted_owner, where.lstat)
+    except FileNotFoundError:
+        raise unreadable from None
+    if not trusted:
         raise untrusted
     try:
         descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)

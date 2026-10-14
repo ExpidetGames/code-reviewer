@@ -12,6 +12,7 @@ injected.
 import hashlib
 import json
 import os
+import shutil
 import stat
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -327,12 +328,16 @@ UNTRUSTED_REASON = {
 LEVELS = [0, 1, 2, 3]
 
 
-def first_to_notice(world: World, directory: Path) -> SelfCheckReason:
-    """The reason of the first file whose chain holds `directory`, in the order of the check."""
+def first_to_notice_subject(world: World, directory: Path) -> str:
+    """The first file whose chain holds `directory`, in the order of the check."""
     for subject in UNTRUSTED_REASON:
         if directory in getattr(world.tools, subject).parents:
-            return UNTRUSTED_REASON[subject]
+            return subject
     raise AssertionError(directory)
+
+
+def first_to_notice(world: World, directory: Path) -> SelfCheckReason:
+    return UNTRUSTED_REASON[first_to_notice_subject(world, directory)]
 
 
 def directory_above(world: World, subject: str, level: int) -> Path:
@@ -390,6 +395,42 @@ def test_a_directory_above_a_pinned_file_that_is_a_link_is_refused(
     error = refused(world)
 
     assert getattr(error, "reason", None) is first_to_notice(world, directory)
+
+
+# #249-T04: a directory that is not there is a missing tool or pin, not an untrusted one: the
+# documented reasons (docs/dynamic-review.md) are what an operator searches the log for.
+MISSING_REASON = {
+    "opencode": SelfCheckReason.ENGINE_BINARY_MISSING,
+    "ripgrep": SelfCheckReason.RIPGREP_MISSING,
+    "opencode_pin": SelfCheckReason.PIN_UNREADABLE,
+    "ripgrep_pin": SelfCheckReason.PIN_UNREADABLE,
+}
+
+
+@pytest.mark.parametrize("subject", MISSING_REASON)
+@pytest.mark.parametrize("level", [0, 1, 2])
+def test_a_directory_above_a_pinned_file_that_does_not_exist_is_a_missing_file_not_an_untrusted_one(
+    world: World, subject: str, level: int
+) -> None:
+    directory = directory_above(world, subject, level)
+    shutil.rmtree(directory)
+
+    error = refused(world)
+
+    expected = MISSING_REASON[first_to_notice_subject(world, directory)]
+    assert getattr(error, "reason", None) is expected
+
+
+def test_a_directory_above_a_pinned_file_under_a_plain_file_is_a_missing_file(
+    world: World,
+) -> None:
+    directory = directory_above(world, "opencode", 2)
+    shutil.rmtree(directory)
+    directory.write_text("not a directory", encoding="utf-8")
+
+    error = refused(world)
+
+    assert getattr(error, "reason", None) is SelfCheckReason.ENGINE_BINARY_MISSING
 
 
 # #249-T04: the chain ends at the root it is given ("/" in the image), not above it.
