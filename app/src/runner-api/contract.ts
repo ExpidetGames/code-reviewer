@@ -120,6 +120,22 @@ export type DynamicReviewOptions = {
   model: string;
   skill: string;
   limits: { maxFindings: number };
+  /**
+   * #279: what the provider's model metadata says the model can do. Optional and sent only to a runner
+   * that advertised the `dynamic_capabilities` feature; a previous-release runner has a closed job
+   * contract and would refuse the key.
+   */
+  capabilities?: DynamicModelCapabilities;
+};
+
+/** `DynamicModelCapabilities` in the contract. Prices are exact decimal text, US dollars per million tokens. */
+export type DynamicModelCapabilities = {
+  toolChoiceRequired: boolean;
+  structuredOutput: boolean;
+  maxOutputTokens: number;
+  contextWindowTokens: number;
+  inputUsdPerMtok?: string;
+  outputUsdPerMtok?: string;
 };
 
 /**
