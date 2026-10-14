@@ -12,11 +12,14 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Generator
 from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 from typing import Any
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from fakes.dynamic_git.fixtures import GitFixture, git
@@ -80,6 +83,21 @@ RUNNER_ENVIRONMENT = {
     "RUNNER_DYNAMIC_ENGINE_UID": str(ENGINE_UID),
     "RUNNER_DYNAMIC_ENGINE_GID": str(ENGINE_GID),
 }
+
+
+def exec_directory(prefix: str) -> Path:
+    """A new directory, root-owned and enterable by everybody, where programs may run.
+
+    The container's tmpfs are `noexec`, as is the `/tmp` this suite runs on (#249), so a test that
+    needs to run a copy of the engine puts it here: a tmpfs of the script that allows exec, which
+    stands in for the image's `/usr/local/bin`. Fails, never skips, without it.
+    """
+    root = os.environ.get("CR_EXEC_DIR")
+    if not root:
+        pytest.fail("CR_EXEC_DIR is not set: use scripts/run_privileged_offline.sh")
+    directory = Path(tempfile.mkdtemp(prefix=prefix, dir=root))
+    directory.chmod(0o755)
+    return directory
 
 
 def python3() -> str:

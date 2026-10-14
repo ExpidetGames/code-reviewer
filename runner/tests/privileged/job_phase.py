@@ -26,14 +26,20 @@ PYTEST_ARGUMENTS = [
     "no:cacheprovider",
     "tests/privileged",
     "--ignore=tests/privileged/startup",
+    "--ignore=tests/privileged/execve",
 ]
 
 
-def main(argv: list[str]) -> int:
+def start_and_run(pytest_arguments: list[str], argv: list[str]) -> int:
+    """The production startup step, then pytest in the same process."""
     if not service.prepare_dynamic_runtime(settings_from_environment(RUNNER_ENVIRONMENT)):
         print("the static network rules could not be installed", file=sys.stderr)
         return 1
-    return int(pytest.main([*PYTEST_ARGUMENTS, *argv]))
+    return int(pytest.main([*pytest_arguments, *argv]))
+
+
+def main(argv: list[str]) -> int:
+    return start_and_run(PYTEST_ARGUMENTS, argv)
 
 
 if __name__ == "__main__":
