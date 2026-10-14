@@ -42,11 +42,11 @@ There is no rate limit beyond the strength of the token (out of scope of #275, l
 1. off: no usable token, `notFound()`
 2. token: 401
 3. route: a path the API does not have, 404 `not_found`
-4. method: not offered by the route, 405 `method_not_allowed` with `Allow`
-5. body: `GET`/`DELETE` carry none (400 `body_not_allowed`); `PUT` needs `application/json` (415
-   `unsupported_media_type`), at most 16 KiB (413 `body_too_large`), one JSON value (400 `request_invalid`)
-6. workspace: the id in the path names a workspace, else 404 `workspace_not_found`
-7. work
+4. method: not offered by the route, 405 `method_not_allowed` with `Allow`; `GET` and `DELETE` carry no body (400
+   `body_not_allowed`)
+5. workspace: the id in the path names a workspace, else 404 `workspace_not_found`
+6. work: for a `PUT` first its body, which needs `application/json` (415 `unsupported_media_type`), at most 16 KiB (413
+   `body_too_large`) and one JSON value (400 `request_invalid`); then the read, the replacement or the removal
 
 Every answer is JSON with `Cache-Control: no-store` and `"version": 1`; an error is `{ "version": 1, "error": <code> }`
 (plus `field` for a refused entitlement). There is no message text: callers branch on the code. Every route file

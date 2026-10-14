@@ -8,9 +8,10 @@
 //   1. token     `Authorization: Bearer <token>`, constant time compare                         401
 //   2. route     a path the API does not have                                                   404 not_found
 //   3. method    one the route does not offer                                                   405
-//   4. body      GET and DELETE carry none; PUT: application/json, up to 16 KiB, one JSON value  400 / 413 / 415
+//   4. body      GET and DELETE carry none                                                     400
 //   5. workspace the id in the path names a workspace                                          404 workspace_not_found
-//   6. work      read, replace or remove
+//   6. work      PUT: application/json, up to 16 KiB, one JSON value (415 / 413 / 400), then
+//                read, replace or remove
 //
 // Nothing before step 1 reads the request body or touches the database. The API is separate from the browser
 // session of `/api/admin/*`: no cookie is looked at.
@@ -32,6 +33,7 @@ import {
 import { EntitlementsError } from "../workspaces/entitlements-validation.ts";
 import {
   DEFAULT_PAGE_SIZE,
+  MAX_FIELD_LENGTH,
   MAX_PAGE_SIZE,
   OPERATOR_ID_PATTERN,
   OPERATOR_MAX_BODY_BYTES,
@@ -71,8 +73,13 @@ export type OperatorApi = {
 /** A refusal of the entitlements validation as an answer: 409 for a start that goes backwards, 422 otherwise. */
 function refused(error: EntitlementsError): Response {
   const status = error.code === "period_start_backwards" ? 409 : 422;
+  // An unknown key is client text: it is echoed only up to the length the contract allows for `field`.
+  const field =
+    error.field === undefined || error.field.length > MAX_FIELD_LENGTH
+      ? undefined
+      : error.field;
   return errorResponse(status, error.code, {
-    ...(error.field === undefined ? {} : { field: error.field }),
+    ...(field === undefined ? {} : { field }),
   });
 }
 

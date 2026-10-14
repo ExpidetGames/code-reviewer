@@ -9,6 +9,9 @@ export const OPERATOR_API_VERSION = 1;
 /** The only credential-free statement the API makes about itself: the largest request body (bytes). */
 export const OPERATOR_MAX_BODY_BYTES = 16 * 1024;
 
+/** The longest `field` an error carries (the contract's `ErrorResponse.field`). */
+export const MAX_FIELD_LENGTH = 100;
+
 export const DEFAULT_PAGE_SIZE = 50;
 export const MAX_PAGE_SIZE = 200;
 

@@ -43,7 +43,13 @@ export function operatorTokenReuseProblem(env: Env): string | null {
   if (token === undefined) return null;
   if (token === trimmed(env.RUNNER_TOKEN))
     return "must differ from RUNNER_TOKEN";
-  if (token === trimmed(env.APP_SECRET)) return "must differ from APP_SECRET";
+  // The master key is APP_SECRET, or the deprecated BETTER_AUTH_SECRET while APP_SECRET is not set
+  // (src/crypto/app-secret.ts); either one is the same credential.
+  if (
+    token === trimmed(env.APP_SECRET) ||
+    token === trimmed(env.BETTER_AUTH_SECRET)
+  )
+    return "must differ from APP_SECRET";
   return null;
 }
 

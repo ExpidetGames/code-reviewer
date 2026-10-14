@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   configuredOperatorToken,
   operatorTokenProblem,
+  operatorTokenReuseProblem,
   operatorTokensMatch,
 } from "./token.ts";
 
@@ -80,6 +81,19 @@ describe("judging the configured operator token", () => {
         RUNNER_TOKEN: `${RUNNER}\n`,
       }),
     ).toBe("must differ from RUNNER_TOKEN");
+  });
+
+  // #275-T02
+  it("refuses a token equal to BETTER_AUTH_SECRET, the accepted older name of the master key", () => {
+    const env = {
+      OPERATOR_API_TOKEN: SECRET,
+      APP_SECRET: "",
+      BETTER_AUTH_SECRET: SECRET,
+    };
+
+    expect(operatorTokenProblem(env)).toBe("must differ from APP_SECRET");
+    expect(operatorTokenReuseProblem(env)).toBe("must differ from APP_SECRET");
+    expect(configuredOperatorToken(env)).toBeUndefined();
   });
 
   // #275-T02

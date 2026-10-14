@@ -146,6 +146,23 @@ describe("checking the operator API token when the server starts", () => {
   });
 
   // #275-T02
+  it("stops the start when the operator token equals BETTER_AUTH_SECRET and APP_SECRET is not set", async () => {
+    const secret = "o".repeat(40);
+    const { exit, log } = await run({
+      ...validEnv,
+      APP_SECRET: "",
+      BETTER_AUTH_SECRET: secret,
+      OPERATOR_API_TOKEN: secret,
+    });
+
+    expect(exit).toHaveBeenCalledWith(1);
+    expect(String(log.mock.calls[0]?.[0])).toContain(
+      "OPERATOR_API_TOKEN must differ from APP_SECRET",
+    );
+    expect(String(log.mock.calls[0]?.[0])).not.toContain(secret);
+  });
+
+  // #275-T02
   it("lets a weak operator token start: the API stays off and a warning says why (operator-api/startup.ts)", async () => {
     const { exit } = await run({ ...validEnv, OPERATOR_API_TOKEN: "short" });
 

@@ -572,6 +572,37 @@ describe("what the API refuses before it works", () => {
   });
 
   // #275-T12
+  it("leaves out the field of a refusal when the name is longer than the contract allows", async () => {
+    const h = await startOperatorApiHarness();
+
+    const response = await h.call("PUT", path(h.workspaceId), {
+      body: { ...ENTITLEMENTS, ["k".repeat(5000)]: 1 },
+    });
+
+    expect(response.status).toBe(422);
+    expect(await json(response)).toEqual({
+      version: 1,
+      error: "entitlements_invalid",
+    });
+  });
+
+  // #275-T11
+  it("looks the workspace up before it reads the body of a PUT", async () => {
+    const h = await startOperatorApiHarness();
+
+    const response = await h.call("PUT", path("no-such-workspace"), {
+      rawBody: "x",
+      contentType: "text/plain",
+    });
+
+    expect(response.status).toBe(404);
+    expect(await json(response)).toEqual({
+      version: 1,
+      error: "workspace_not_found",
+    });
+  });
+
+  // #275-T12
   it("refuses a body over the limit with 413, declared or not", async () => {
     const h = await startOperatorApiHarness();
     const huge = JSON.stringify({
