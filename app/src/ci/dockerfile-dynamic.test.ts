@@ -114,6 +114,11 @@ describe("the dynamic runner image", () => {
 
   // #202-T01
   it("ships the pins the runner's self-check compares the installed files with", () => {
+    // The directory exists, root-owned and enterable, before the files go in: COPY would give a new
+    // directory the mode of the files.
+    expect(stage("dynamic").lines).toContain(
+      "RUN install -d -m 0755 -o 0 -g 0 /opt/code-reviewer/pins",
+    );
     expect(stage("dynamic").lines).toContain(
       "COPY --chown=0:0 --chmod=0644 runner/opencode-pin.json runner/ripgrep-pin.json /opt/code-reviewer/pins/",
     );

@@ -116,6 +116,8 @@ RUN groupadd --system --gid 10101 engine \
     && useradd --system --uid 10101 --gid engine --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin engine
 COPY --from=engine-tools --chown=0:0 --chmod=0755 /engine-tools/opencode /usr/local/bin/opencode
 COPY --from=engine-tools --chown=0:0 --chmod=0755 /engine-tools/rg /usr/local/bin/rg
+# The directory first: COPY would create it with the mode given to the files (0644, not enterable).
+RUN install -d -m 0755 -o 0 -g 0 /opt/code-reviewer/pins
 COPY --chown=0:0 --chmod=0644 runner/opencode-pin.json runner/ripgrep-pin.json /opt/code-reviewer/pins/
 USER 10001:10001
 
