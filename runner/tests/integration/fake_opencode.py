@@ -19,6 +19,7 @@ engine's own working directory, the export the runner gives it. Every key of the
       "results": {"call-1": "text"},  # what the fake "executes" a tool call to (default "ok")
       "stream": true,              # ask the proxy for a stream, like the real engine (default)
       "answer": "structured",      # "structured" | "text" | "none"
+      "answers": ["none", "structured"],  # the answer of each message in turn (the last repeats)
       "message_status": 200,
       "messages_status": 200,      # 400 reproduces the pinned structured-message codec defect
       "spawn_helper": false,       # leave a sleeping child in the engine's process group
@@ -50,6 +51,8 @@ from code_reviewer_runner.job_loop.jsonvalues import as_object
 # The fake reads its script and writes its trace in the engine's own working directory (the export
 # the runner gives it), so the adapter needs no test-only environment seam: the environment stays
 # the closed one the runner builds.
+# How many messages this server answered so far (it answers one at a time).
+SERVED: list[int] = [0]
 SCRIPT_FILE = ".fake-opencode-script.json"
 TRACE_FILE = ".fake-opencode-trace.jsonl"
 
@@ -206,10 +209,18 @@ class Handler(BaseHTTPRequestHandler):
         if "message_status" in script:
             self._answer(int(script["message_status"]), {"error": "scripted"})
             return
-        answer = script.get("answer", "structured")
+        answers: list[Any] = script.get("answers") or [script.get("answer", "structured")]
+        answer = answers[min(SERVED[0], len(answers) - 1)]
+        SERVED[0] += 1
         document = script.get("findings")
         if answer == "none":
-            self._answer(200, {"info": {"id": "msg-1", "error": None}, "parts": []})
+            # The shape the pinned server gives a turn that ended without a structured answer.
+            info = {
+                "id": "msg-1",
+                "finish": "stop",
+                "error": {"name": "StructuredOutputError", "data": {"retries": 0}},
+            }
+            self._answer(200, {"info": info, "parts": []})
         elif answer == "text":
             self._answer(
                 200,

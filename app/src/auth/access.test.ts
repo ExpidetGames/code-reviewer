@@ -16,6 +16,9 @@ describe("which paths are public", () => {
     "/api/auth",
     "/api/runners/v1/claim",
     "/api/runners/v1/jobs/42/heartbeat",
+    "/api/operator/v1/workspaces",
+    "/api/operator/v1/workspaces/abc/entitlements",
+    "/api/operator/v1/entitlements/default",
     "/api/webhooks/github-app",
   ])("lets %s through without a session", (pathname) => {
     expect(isPublicPath(pathname)).toBe(true);
@@ -36,6 +39,10 @@ describe("which paths are public", () => {
     "/api/workspaces",
     "/api/invitations/accept",
     "/invitations",
+    "/api/operator",
+    "/api/operator/v2/workspaces",
+    "/api/operator/admin",
+    "/api/admin/workspaces",
   ])("requires a session for %s", (pathname) => {
     expect(isPublicPath(pathname)).toBe(false);
   });
@@ -58,6 +65,11 @@ describe("which paths are public", () => {
     "/api//runners/v1/claim",
     "/api/%72unners/v1/claim",
     "/x/api/runners/v1/claim",
+    "/api/operator/v1x/workspaces",
+    "/api/operator/v10/workspaces",
+    "/api/operator//v1/workspaces",
+    "/API/operator/v1/workspaces",
+    "/api/%6fperator/v1/workspaces",
   ])("does not treat the look-alike %s as public", (pathname) => {
     expect(isPublicPath(pathname)).toBe(false);
   });
@@ -79,6 +91,7 @@ describe("which paths are public", () => {
       { path: "/api/verify-email", match: "prefix" },
       { path: "/invitation", match: "exact" },
       { path: "/api/runners", match: "prefix" },
+      { path: "/api/operator/v1", match: "prefix" },
       { path: "/api/webhooks", match: "prefix" },
     ]);
   });
@@ -112,6 +125,19 @@ describe("what a request without a session gets", () => {
     expect(
       decideAccess({ pathname: "/api/runners/v1/claim", authenticated: false }),
     ).toEqual({ kind: "allow" });
+  });
+
+  // #275-T03
+  it("passes the operator API without a session, and keeps the admin namespace session-only", () => {
+    expect(
+      decideAccess({
+        pathname: "/api/operator/v1/workspaces",
+        authenticated: false,
+      }),
+    ).toEqual({ kind: "allow" });
+    expect(
+      decideAccess({ pathname: "/api/admin/settings", authenticated: false }),
+    ).toEqual({ kind: "unauthorized" });
   });
 
   it("passes every path with a valid session", () => {

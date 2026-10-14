@@ -148,3 +148,15 @@ def test_the_engine_environment_is_closed() -> None:
             name.upper().endswith(prefix) for prefix in forbidden if not prefix.endswith("_")
         ), name
         assert value != ""
+
+
+# #309-T10: when the engine reaches a step limit it appends a final-step prompt and takes the tools
+# away; the run has no such limit, its bounds are the cost limit and the clock (#290).
+def test_the_agent_has_no_step_limit_that_could_end_a_turn() -> None:
+    agents = as_object(config()["agent"])
+    assert agents is not None
+    agent = as_object(agents.get("review"))
+    assert agent is not None
+    assert "steps" not in agent
+    assert "maxSteps" not in agent
+    assert "steps" not in config()

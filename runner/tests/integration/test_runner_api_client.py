@@ -68,7 +68,11 @@ def test_a_claim_with_a_job_returns_the_lease_and_the_input_and_sends_token_and_
     assert headers["Authorization"] == f"Bearer {RUNNER_TOKEN}"
     assert headers["X-Runner-Id"] == "client-test"
     # #195 finding 9: the client really sends the engines it was configured with.
-    assert app.requests[0]["body"] == {"engines": ["pr-agent"]}
+    # #279: the runner also says it reads the model capabilities of a Dynamic job.
+    assert app.requests[0]["body"] == {
+        "engines": ["pr-agent"],
+        "features": ["dynamic_capabilities"],
+    }
     assert app.violations == []
 
 
@@ -86,7 +90,10 @@ def test_a_claim_advertises_the_configured_engines(app: FakeApp) -> None:
         ).claim()
     )
 
-    assert app.requests[0]["body"] == {"engines": ["pr-agent", "opencode"]}
+    assert app.requests[0]["body"] == {
+        "engines": ["pr-agent", "opencode"],
+        "features": ["dynamic_capabilities"],
+    }
     assert app.violations == []
 
 

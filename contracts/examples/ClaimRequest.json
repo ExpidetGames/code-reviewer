@@ -1,3 +1,4 @@
 {
-  "engines": ["pr-agent", "opencode"]
+  "engines": ["pr-agent", "opencode"],
+  "features": ["dynamic_capabilities"]
 }

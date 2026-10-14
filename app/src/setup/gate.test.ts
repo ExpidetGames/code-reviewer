@@ -38,6 +38,7 @@ describe("the setup gate on a fresh installation", () => {
       "/api/runs",
       "/api/webhooks/github-app",
       "/api/runners/v1/claim",
+      "/api/operator/v1/workspaces",
       "/api/auth/sign-in/email",
       "/api/review-settings",
       "/api",

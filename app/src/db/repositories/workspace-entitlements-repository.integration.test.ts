@@ -480,4 +480,41 @@ describe("the default entitlements of the instance", () => {
 
     expect(await settings.getDefaultEntitlements()).toEqual(entitlements());
   });
+
+  // #275-T07
+  it("removes the row so that the workspace has none, and says whether there was one", async () => {
+    const { repository } = await setup();
+    await repository.put(entitlements(), null);
+
+    expect(await repository.remove()).toBe(true);
+    expect(await repository.get()).toBeUndefined();
+    expect(await repository.remove()).toBe(false);
+  });
+
+  // #275-T07
+  it("removes only the row of its own workspace", async () => {
+    const { db, repository } = await setup();
+    const otherId = await addWorkspace(db, "other");
+    const other = createWorkspaceEntitlementsRepository(db, otherId, () => NOW);
+    await repository.put(entitlements(), null);
+    await other.put(entitlements({ planLabel: "other" }), null);
+
+    await repository.remove();
+
+    expect(await other.get()).toMatchObject({ planLabel: "other" });
+  });
+
+  // #275-T07
+  it("lets a removed workspace start again with any period start (the guard ends with the row)", async () => {
+    const { repository } = await setup();
+    await repository.put(entitlements(), null);
+    await repository.remove();
+
+    const stored = await repository.put(
+      entitlements({ periodStart: "2026-09-01T00:00:00.000Z" }),
+      null,
+    );
+
+    expect(stored).toMatchObject({ periodStart: "2026-09-01T00:00:00.000Z" });
+  });
 });

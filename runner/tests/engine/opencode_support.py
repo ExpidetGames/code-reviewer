@@ -103,6 +103,11 @@ def asks(*calls: dict[str, Any]) -> dict[str, Any]:
     return {"role": "assistant", "content": None, "tool_calls": list(calls)}
 
 
+def says(text: str, finish_reason: str = "stop") -> dict[str, Any]:
+    """An assistant message in prose (no tool call), ending with the given finish reason."""
+    return {"role": "assistant", "content": text, "finish_reason": finish_reason}
+
+
 # A step is the model's next message, or a function of the request that produced it.
 Step = dict[str, Any] | Callable[[dict[str, Any]], dict[str, Any]]
 
@@ -171,7 +176,12 @@ class ScriptedModel:
             else:
                 assert self.final is not None, "the script ran out of steps and has no final answer"
                 message = asks(tool_call(f"call_final_{index}", "StructuredOutput", self.final))
-        finish = "tool_calls" if message.get("tool_calls") else "stop"
+        # A step may name the finish reason the provider reports (it defaults to what a provider
+        # reports for the message); it is not part of the message.
+        message = dict(message)
+        finish = message.pop("finish_reason", None) or (
+            "tool_calls" if message.get("tool_calls") else "stop"
+        )
         usage: dict[str, Any] = {"prompt_tokens": 50, "completion_tokens": 10}
         if self.cost is not None:
             usage["cost"] = self.cost

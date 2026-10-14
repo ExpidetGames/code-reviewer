@@ -62,6 +62,11 @@ export type AgentScript = {
 export type FakeModelEndpoint = {
   supported_parameters: string[];
   max_completion_tokens?: number | null;
+  /** #279: what the claim of a Dynamic job reads next to the parameters. Left out, the endpoint states none. */
+  context_length?: number | null;
+  /** US dollars per token as OpenRouter writes them (`"0.0000005"`). */
+  pricing?: { prompt?: string; completion?: string };
+  supports_tool_choice?: { required?: boolean };
 };
 
 export type FakeLlmError = { status: number; message: string };

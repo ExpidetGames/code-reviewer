@@ -17,6 +17,13 @@
 // - **A positive answer is remembered for a short time** (`createModelCapabilityChecker`), so saving the
 //   same model repeatedly asks once. No other outcome is remembered: a model that gained tool support, or a
 //   provider that was down, must be seen at the next try.
+// - **The numbers are read at the bound a reservation needs (#279).** The endpoints a run could be routed
+//   to are the ones that list `tools` and `tool_choice` and do not say they cannot force a tool choice.
+//   From those the window and the output limit are the smallest stated and the unit prices the highest,
+//   so a run is never held to a bound better than its worst route. A price that is not a plain decimal
+//   (missing, negative, exponent form) is no price: both are `null` and the runner refuses to run the
+//   model. Prices are per million tokens as exact decimal text, shifted from OpenRouter's per-token text
+//   without a float.
 //
 // The fetch is a parameter. #279 (per-job capabilities) and #280 (managed tiers) reuse the module.
 import "server-only";
@@ -38,10 +45,19 @@ export type ModelCapabilityOutcome = (typeof MODEL_CAPABILITY_OUTCOMES)[number];
 export type ModelCapabilities = {
   tools: boolean;
   toolChoice: boolean;
+  /** At least one endpoint lists tool calling and does not say it cannot force a tool choice. */
+  toolChoiceRequired: boolean;
   responseFormat: boolean;
   structuredOutputs: boolean;
   /** The largest `max_completion_tokens` an endpoint states, or null when none states one. */
   maxCompletionTokens: number | null;
+  /** The smallest `max_completion_tokens` an endpoint states, or null when none states one. */
+  smallestCompletionTokens: number | null;
+  /** The smallest context window of the endpoints, or null when one of them states none. */
+  contextLength: number | null;
+  /** US dollars per million input / output tokens, highest of the endpoints; null when unreadable. */
+  inputUsdPerMtok: string | null;
+  outputUsdPerMtok: string | null;
 };
 
 export type ModelCapabilityResult =
@@ -61,7 +77,54 @@ const UNKNOWN_MODEL = { outcome: "unknown_model" } as const;
 type Endpoint = {
   parameters: readonly string[];
   maxCompletionTokens: number | null;
+  contextLength: number | null;
+  /** The endpoint says it cannot force a tool choice (`supports_tool_choice.required === false`). */
+  cannotRequireToolChoice: boolean;
+  /** Per-token prices as the provider writes them, or null when not a plain decimal text. */
+  promptPrice: string | null;
+  completionPrice: string | null;
 };
+
+const PER_TOKEN_PRICE = /^([0-9]{1,24})(?:\.([0-9]{1,30}))?$/;
+const PRICE_SCALE_DIGITS = 6;
+const MAX_PRICE_INTEGER_DIGITS = 6;
+const MAX_PRICE_FRACTION_DIGITS = 18;
+
+/**
+ * A per-token price as exact US dollars per million tokens (the decimal point moved six places in the
+ * text, no float), or null when it is not a plain non-negative decimal or does not fit the contract's
+ * `UnitPrice`.
+ */
+export function pricePerMillionTokens(perToken: unknown): string | null {
+  if (typeof perToken !== "string") return null;
+  const match = PER_TOKEN_PRICE.exec(perToken);
+  if (match === null) return null;
+  const fraction = (match[2] ?? "").padEnd(PRICE_SCALE_DIGITS, "0");
+  const whole = (match[1] ?? "") + fraction.slice(0, PRICE_SCALE_DIGITS);
+  const rest = fraction.slice(PRICE_SCALE_DIGITS).replace(/0+$/, "");
+  const integer = whole.replace(/^0+(?=[0-9])/, "");
+  if (integer.length > MAX_PRICE_INTEGER_DIGITS) return null;
+  if (rest.length > MAX_PRICE_FRACTION_DIGITS) return null;
+  return rest === "" ? integer : `${integer}.${rest}`;
+}
+
+/** The comparable value of a text made by `pricePerMillionTokens`. */
+function priceValue(text: string): bigint {
+  const [integer = "0", fraction = ""] = text.split(".");
+  return BigInt(integer + fraction.padEnd(MAX_PRICE_FRACTION_DIGITS, "0"));
+}
+
+/** The highest of the prices, or null if there is none or any of them is unreadable. */
+function highestPrice(prices: readonly (string | null)[]): string | null {
+  let highest: string | null = null;
+  for (const raw of prices) {
+    const price = pricePerMillionTokens(raw);
+    if (price === null) return null;
+    if (highest === null || priceValue(price) > priceValue(highest))
+      highest = price;
+  }
+  return highest;
+}
 
 /** The metadata path of a model, or null for a name that cannot be an `author/slug` model. */
 function metadataPath(modelId: string): string | null {
@@ -107,6 +170,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function positiveInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value > 0
+    ? value
+    : null;
+}
+
 /** The endpoints of an answer, or null when it does not have the documented shape. */
 function readEndpoints(parsed: unknown): Endpoint[] | null {
   if (!isRecord(parsed) || !isRecord(parsed.data)) return null;
@@ -121,13 +190,18 @@ function readEndpoints(parsed: unknown): Endpoint[] | null {
       !parameters.every((name) => typeof name === "string")
     )
       return null;
-    const limit = entry.max_completion_tokens;
+    const pricing = isRecord(entry.pricing) ? entry.pricing : {};
+    const toolChoice = isRecord(entry.supports_tool_choice)
+      ? entry.supports_tool_choice
+      : {};
     endpoints.push({
       parameters: parameters as string[],
-      maxCompletionTokens:
-        typeof limit === "number" && Number.isFinite(limit) && limit > 0
-          ? limit
-          : null,
+      maxCompletionTokens: positiveInteger(entry.max_completion_tokens),
+      contextLength: positiveInteger(entry.context_length),
+      cannotRequireToolChoice: toolChoice.required === false,
+      promptPrice: typeof pricing.prompt === "string" ? pricing.prompt : null,
+      completionPrice:
+        typeof pricing.completion === "string" ? pricing.completion : null,
     });
   }
   return endpoints;
@@ -137,7 +211,8 @@ function summarize(endpoints: readonly Endpoint[]): ModelCapabilityResult {
   const usable = endpoints.filter(
     (endpoint) =>
       endpoint.parameters.includes("tools") &&
-      endpoint.parameters.includes("tool_choice"),
+      endpoint.parameters.includes("tool_choice") &&
+      !endpoint.cannotRequireToolChoice,
   );
   // The capabilities of the endpoints a run could use; when none can, of all that exist.
   const read = usable.length > 0 ? usable : endpoints;
@@ -146,14 +221,33 @@ function summarize(endpoints: readonly Endpoint[]): ModelCapabilityResult {
   const limits = read.flatMap((endpoint) =>
     endpoint.maxCompletionTokens === null ? [] : [endpoint.maxCompletionTokens],
   );
+  const windows = read.map((endpoint) => endpoint.contextLength);
+  const inputUsdPerMtok =
+    usable.length > 0
+      ? highestPrice(usable.map((endpoint) => endpoint.promptPrice))
+      : null;
+  const outputUsdPerMtok =
+    usable.length > 0
+      ? highestPrice(usable.map((endpoint) => endpoint.completionPrice))
+      : null;
+  // The two prices come together: a descriptor with one of them cannot price a call.
+  const priced = inputUsdPerMtok !== null && outputUsdPerMtok !== null;
   return {
     outcome: usable.length > 0 ? "supported" : "unsupported",
     capabilities: {
       tools: any("tools"),
       toolChoice: any("tool_choice"),
+      toolChoiceRequired: usable.length > 0,
       responseFormat: any("response_format"),
       structuredOutputs: any("structured_outputs"),
       maxCompletionTokens: limits.length > 0 ? Math.max(...limits) : null,
+      smallestCompletionTokens: limits.length > 0 ? Math.min(...limits) : null,
+      contextLength:
+        windows.length > 0 && windows.every((window) => window !== null)
+          ? Math.min(...windows)
+          : null,
+      inputUsdPerMtok: priced ? inputUsdPerMtok : null,
+      outputUsdPerMtok: priced ? outputUsdPerMtok : null,
     },
   };
 }
