@@ -41,6 +41,21 @@ export type RunRowView = {
   problem: string | null;
 };
 
+/**
+ * What a run consumed, as far as the runner reported it: only these four numbers and the model name
+ * leave the server, never the rest of the stored `usage` (prompt and completion split, fallback flag).
+ */
+export type RunUsageView = {
+  /** The model that answered, or null when the runner could not name it. A text from outside. */
+  model: string | null;
+  /** All tokens the run's calls used, summed. */
+  totalTokens: number;
+  /** How many model calls the run made. */
+  aiCalls: number;
+  /** The cost in US dollars; null when it is not known (a Dynamic Review never guesses it). */
+  costUsd: number | null;
+};
+
 export type RunDetailView = RunRowView & {
   headSha: string;
   /** The question of an `/ask`, or an empty string. Untrusted text. */
@@ -57,6 +72,8 @@ export type RunDetailView = RunRowView & {
   log: { text: string; truncated: boolean };
   /** The newer run that replaced this one, for a replaced run. */
   supersededBy: string | null;
+  /** The usage the runner reported, or null (a run that never reached a model, or an older result). */
+  usage: RunUsageView | null;
 };
 
 /** What the list can be narrowed by: one repository, one status. */
@@ -128,6 +145,40 @@ export function readStoredResult(result: JsonValue | null): StoredResult {
       typeof result.commentUrl === "string" ? result.commentUrl : null,
     logTail: typeof result.logTail === "string" ? result.logTail : "",
     logTruncated: result.logTruncated === true,
+  };
+}
+
+/** The longest model name the runner API accepts (`RunnerUsage.model`). */
+const MAX_MODEL_CHARS = 200;
+
+function isCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+/**
+ * The model, the summed tokens, the call count and the cost of a stored result, or null when the
+ * result has no usage or a field of it is not what the runner API promises. Nothing else of the usage
+ * is copied. The model name is cleaned like the log: it came from the runner.
+ */
+export function readStoredUsage(result: JsonValue | null): RunUsageView | null {
+  if (typeof result !== "object" || result === null || Array.isArray(result))
+    return null;
+  const usage = result.usage;
+  if (typeof usage !== "object" || usage === null || Array.isArray(usage))
+    return null;
+  const { model, totalTokens, aiCalls, costUsd } = usage;
+  if (!isCount(totalTokens) || !isCount(aiCalls)) return null;
+  const costKnown =
+    typeof costUsd === "number" && Number.isFinite(costUsd) && costUsd >= 0;
+  if (costUsd !== null && !costKnown) return null;
+  return {
+    model:
+      typeof model === "string"
+        ? cleanLog(model).slice(0, MAX_MODEL_CHARS)
+        : null,
+    totalTokens,
+    aiCalls,
+    costUsd: costKnown ? costUsd : null,
   };
 }
 
@@ -240,5 +291,15 @@ export function toRunDetailView(
       truncated: stored.logTruncated || overlong,
     },
     supersededBy: job.supersededBy,
+    usage: usageView(job, redact),
   };
+}
+
+function usageView(
+  job: Job,
+  redact: (text: string) => string,
+): RunUsageView | null {
+  const usage = readStoredUsage(job.result);
+  if (usage === null || usage.model === null) return usage;
+  return { ...usage, model: redact(usage.model) };
 }

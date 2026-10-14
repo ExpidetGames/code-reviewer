@@ -53,6 +53,7 @@ function detail(overrides: Partial<RunDetailView> = {}): RunDetailView {
     commentMissing: false,
     log: { text: "reviewed 3 files", truncated: false },
     supersededBy: null,
+    usage: null,
     ...overrides,
   };
 }
@@ -78,6 +79,78 @@ function apiAnswering(answers: RequestResult<RunDetailSnapshot>[]) {
 }
 
 const text = (container: HTMLElement) => container.textContent;
+
+describe("the usage of a run", () => {
+  const usage = {
+    model: "vendor/dynamic-model",
+    totalTokens: 12_900,
+    aiCalls: 7,
+    costUsd: 0.04,
+  };
+
+  // #201-T01
+  it("names the review kind with the model that answered, and the tokens, calls and cost", () => {
+    const { container } = render(
+      <RunDetail
+        workspaceSlug="acme"
+        initial={snap(detail({ reviewKind: "dynamic", usage }))}
+        api={apiAnswering([])}
+      />,
+    );
+
+    const content = text(container);
+    expect(content).toContain("Dynamic Review");
+    expect(content).toContain("vendor/dynamic-model");
+    expect(content).toContain("12,900 tokens in 7 model calls");
+    expect(content).toContain("$0.04");
+  });
+
+  // #201-T01: a Dynamic Review never guesses a price.
+  it("says the cost is unknown instead of showing zero", () => {
+    const { container } = render(
+      <RunDetail
+        workspaceSlug="acme"
+        initial={snap(detail({ usage: { ...usage, costUsd: null } }))}
+        api={apiAnswering([])}
+      />,
+    );
+
+    expect(text(container)).toContain("Not available");
+    expect(text(container)).not.toContain("$0");
+  });
+
+  // #201-T01
+  it("shows no model and no usage for a run that never reached a model", () => {
+    const { container } = render(
+      <RunDetail
+        workspaceSlug="acme"
+        initial={snap(detail({ status: "failed", usage: null }))}
+        api={apiAnswering([])}
+      />,
+    );
+
+    expect(text(container)).not.toContain("tokens in");
+    expect(screen.queryByText("Model")).toBeNull();
+  });
+
+  // #201-T01
+  it("renders a model name from outside as text", () => {
+    const { container } = render(
+      <RunDetail
+        workspaceSlug="acme"
+        initial={snap(
+          detail({
+            usage: { ...usage, model: "<img src=x onerror=alert(1)>" },
+          }),
+        )}
+        api={apiAnswering([])}
+      />,
+    );
+
+    expect(container.querySelector("img")).toBeNull();
+    expect(text(container)).toContain("<img src=x onerror=alert(1)>");
+  });
+});
 
 describe("the detail page", () => {
   // CR-35-T04

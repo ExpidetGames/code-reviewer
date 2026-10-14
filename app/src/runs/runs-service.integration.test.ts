@@ -231,6 +231,50 @@ describe("what leaves the server", () => {
   });
 });
 
+describe("the usage of a run", () => {
+  // #201-T01
+  it("is in the detail of a finished run with the model, summed tokens, calls and cost, and never in the list", async () => {
+    const f = await createRunsFixture({ dynamicReview: true });
+    const finished = await f.finished(
+      {
+        ok: true,
+        result: {
+          ok: true,
+          commentUrl: "https://github.com/acme/widgets/pull/1#c",
+          logTail: "ok",
+          usage: {
+            model: "vendor/dynamic-model",
+            promptTokens: 12_000,
+            completionTokens: 900,
+            totalTokens: 12_900,
+            aiCalls: 7,
+            fallbackUsed: false,
+            costUsd: null,
+          },
+        },
+      },
+      { reviewKind: "dynamic" },
+    );
+
+    const detail = await f.runs.get(finished.id);
+    const list = await f.runs.list({});
+
+    expect(detail?.run).toMatchObject({
+      reviewKind: "dynamic",
+      usage: {
+        model: "vendor/dynamic-model",
+        totalTokens: 12_900,
+        aiCalls: 7,
+        costUsd: null,
+      },
+    });
+    expect(JSON.stringify(detail)).not.toMatch(
+      /promptTokens|completionTokens|fallbackUsed/,
+    );
+    expect(JSON.stringify(list)).not.toContain("vendor/dynamic-model");
+  });
+});
+
 describe("the filter of a request", () => {
   it("accepts a known status and a repository id, and treats empty values as no filter", () => {
     expect(parseRunsFilter({})).toEqual({ ok: true, filter: {} });
