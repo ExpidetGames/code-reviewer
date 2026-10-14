@@ -49,7 +49,7 @@ class _BudgetReader(io.BufferedIOBase):
         self.budget.check()
         if self.sock is not None:
             self.sock.settimeout(self.budget.remaining())
-        available = self.budget.limits.preparation_bytes - self.budget.preparation
+        available = self.budget.limits.transfer_bytes - self.budget.transfer
         if self.headers:
             available = min(available, self.budget.limits.response_bytes - self.header_bytes)
         if available <= 0:
@@ -57,7 +57,7 @@ class _BudgetReader(io.BufferedIOBase):
         return min(available, size if size >= 0 else 16 * 1024)
 
     def _charge(self, data: bytes) -> bytes:
-        self.budget.charge(len(data))
+        self.budget.charge_transfer(len(data))
         if self.headers:
             self.header_bytes += len(data)
         return data
@@ -232,13 +232,13 @@ class LocalTransport:
                 ready, _, _ = select.select([process.stdout], [], [], min(0.05, budget.remaining()))
                 if not ready:
                     continue
-                available = budget.limits.preparation_bytes - budget.preparation
+                available = budget.limits.transfer_bytes - budget.transfer
                 if available <= 0:
                     raise CheckoutError(CheckoutReason.BUDGET_TRANSFER)
                 chunk = os.read(process.stdout.fileno(), min(16 * 1024, available))
                 if not chunk:
                     break
-                budget.charge(len(chunk))
+                budget.charge_transfer(len(chunk))
                 yield chunk
             # Observe the exit without reaping: the group id stays ours until it is ended below.
             if not wait_for_exit(process, budget.remaining()):

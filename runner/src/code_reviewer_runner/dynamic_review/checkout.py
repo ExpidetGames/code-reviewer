@@ -24,6 +24,7 @@ from .limits import (
     DEFAULT_LIMITS,
     Budget,
     CheckoutError,
+    CheckoutMetrics,
     CheckoutReason,
     Limits,
     ObjectUnavailable,
@@ -72,6 +73,7 @@ class PreparedContent:
     metadata: str
     prior_state: str
     deadline: float
+    metrics: CheckoutMetrics
 
 
 def prepare_job_content(
@@ -128,6 +130,13 @@ def prepare_content(
     if budget is not None and budget.limits != limits:
         raise CheckoutError(CheckoutReason.INVALID_REQUEST)
     budget = budget or Budget(limits, cancelled)
+    entries = 0
+    omissions: dict[str, Omission] = {}
+    skipped: dict[str, Skipped] = {}
+
+    def metrics() -> CheckoutMetrics:
+        return _metrics(budget, entries, omissions, skipped)
+
     # Validate authority fields independently of parse_job: ClaimBase can be constructed directly.
     repository_url(base.repository, "https://api.github.com")
     if not _SHA.fullmatch(base.head_sha) or not 1 <= number <= 999_999_999:
@@ -153,6 +162,7 @@ def prepare_content(
         store = ObjectStore(directory / "objects", budget)
         store.unpack(fetch_pack(transport, base.head_sha, caps, budget))
         head = tracked_tree(store, base.head_sha)
+        entries = len(head)
         # The base-to-head ("Files changed") diff is against the merge base, never the moving
         # base-ref snapshot. If the ancestry walk cannot find one within its bound, review the
         # whole head instead of guessing a base.
@@ -180,7 +190,6 @@ def prepare_content(
         required = changed_paths(head, base_tree)
         if previous is not None:
             required |= changed_paths(head, previous)
-        omissions: dict[str, Omission] = {}
         # Per tree (head, base, previous): changed paths whose content is binary or oversized.
         tree_skips: list[dict[str, SkipReason]] = [{}, {}, {}]
         texts: dict[str, str] = {}
@@ -274,10 +283,12 @@ def prepare_content(
             if previous is not None
             else ""
         )
-        skipped = {
-            path: Skipped(redact_text(path, redactor), reason)
-            for path, reason in {**previous_skips, **base_skips}.items()
-        }
+        skipped.update(
+            {
+                path: Skipped(redact_text(path, redactor), reason)
+                for path, reason in {**previous_skips, **base_skips}.items()
+            }
+        )
         metadata = _bounded_text(metadata, budget, redactor)
         prior_state = _bounded_text(prior_state, budget, redactor)
         export = directory / "checkout"
@@ -337,13 +348,40 @@ def prepare_content(
             metadata,
             prior_state,
             budget.deadline,
+            metrics(),
         )
     except (UnicodeError, ValueError):
         shutil.rmtree(directory)
-        raise CheckoutError(CheckoutReason.TREE_INVALID) from None
-    except BaseException:
+        error = CheckoutError(CheckoutReason.TREE_INVALID)
+        error.metrics = metrics()
+        raise error from None
+    except BaseException as error:
         shutil.rmtree(directory)
+        if isinstance(error, CheckoutError) and error.metrics is None:
+            error.metrics = metrics()
         raise
+
+
+def _metrics(
+    budget: Budget,
+    entries: int,
+    omissions: dict[str, Omission],
+    skipped: dict[str, Skipped],
+) -> CheckoutMetrics:
+    omitted: dict[str, int] = {}
+    for omission in omissions.values():
+        omitted[omission.reason.value] = omitted.get(omission.reason.value, 0) + 1
+    skips: dict[str, int] = {}
+    for skip in skipped.values():
+        skips[skip.reason.value] = skips.get(skip.reason.value, 0) + 1
+    return CheckoutMetrics(
+        transfer_bytes=budget.transfer,
+        preparation_bytes=budget.preparation,
+        exposed_bytes=budget.exposed,
+        entries=entries,
+        omitted=omitted,
+        skipped=skips,
+    )
 
 
 def _resolve_merge_base(

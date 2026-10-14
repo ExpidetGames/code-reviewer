@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from fakes.dynamic_git.fixtures import GitFixture, git
 
 from code_reviewer_runner.dynamic_review.checkout import prepare_content
-from code_reviewer_runner.dynamic_review.limits import CheckoutError, Limits
+from code_reviewer_runner.dynamic_review.limits import CheckoutError, CheckoutReason, Limits
 from code_reviewer_runner.dynamic_review.transport import LocalTransport
 from code_reviewer_runner.job import ClaimBase
 from code_reviewer_runner.redaction import Redactor
@@ -638,7 +638,7 @@ def test_whole_evidence_quotas_accept_exact_and_refuse_one_over(
             self.position += 1
             assert request == expected
             for chunk in chunks:
-                budget.charge(len(chunk))
+                budget.charge_transfer(len(chunk))
                 yield chunk
 
     measured: list[Budget] = []
@@ -943,3 +943,81 @@ def test_the_git_helper_group_is_only_signalled_while_its_leader_is_not_reaped(
     # Every transfer ended its helper's group, and never after the leader's id could be reused.
     assert signals
     assert all(unreaped for _, unreaped in signals)
+
+
+def _text_blob(seed: int, size: int) -> bytes:
+    # Incompressible printable text: the wire bytes are nearly as large as the inflated ones.
+    import base64
+    import random
+
+    raw = random.Random(seed).randbytes(size * 3 // 4)
+    return base64.encodebytes(raw)
+
+
+# #296-T05
+def test_a_repository_that_the_double_charging_refused_prepares_within_the_budget(
+    repo: GitFixture, tmp_path: Path
+) -> None:
+    files = {f"src/file-{i}.txt": _text_blob(i, 100_000) for i in range(8)}
+    repo.set_head({"README.md": b"base\n", **files})
+    git(repo.path, "update-ref", "refs/heads/main", repo.head)
+    raw = sum(len(blob) for blob in files.values())
+    # Counting the wire bytes on top of the inflated, rounded and exported ones needed about
+    # 2.8 times the content; materializing it once for staging and once for export needs 2.1.
+    limits = Limits(preparation_bytes=raw * 5 // 2)
+    result = prepare_content(
+        claim(repo),
+        196,
+        LocalTransport(repo.path),
+        tmp_path / "job",
+        Redactor(()),
+        limits=limits,
+    )
+    assert set(files) <= set(result.files)
+    assert result.metrics.preparation_bytes <= limits.preparation_bytes
+    assert result.metrics.transfer_bytes > raw // 2
+
+
+# #296-T12
+def test_preparation_reports_peak_bytes_entries_and_omissions_without_paths(
+    repo: GitFixture, tmp_path: Path
+) -> None:
+    repo.set_head(
+        {
+            "README.md": b"base\n",
+            "src/code.py": b"print('x')\n",
+            "assets/logo.bin": b"\0\1\2",
+        }
+    )
+    result = prepare_content(
+        claim(repo), 196, LocalTransport(repo.path), tmp_path / "job", Redactor(())
+    )
+    metrics = result.metrics
+    assert metrics.entries == 3
+    assert metrics.transfer_bytes > 0
+    assert metrics.preparation_bytes >= metrics.exposed_bytes > 0
+    assert metrics.omitted == {"binary": 1}
+    assert metrics.skipped == {"binary": 1}
+    line = metrics.describe()
+    assert "entries=3" in line and "omitted=binary:1" in line and "skipped=binary:1" in line
+    assert not any(name in line for name in ("logo", "code.py", "README"))
+
+
+# #296-T12
+def test_a_failed_preparation_still_reports_the_metrics_and_the_reason(
+    repo: GitFixture, tmp_path: Path
+) -> None:
+    repo.set_head({"README.md": b"base\n", "big.txt": _text_blob(1, 100_000)})
+    git(repo.path, "update-ref", "refs/heads/main", repo.head)
+    with pytest.raises(CheckoutError) as error:
+        prepare_content(
+            claim(repo),
+            196,
+            LocalTransport(repo.path),
+            tmp_path / "job",
+            Redactor(()),
+            limits=Limits(preparation_bytes=64 * 1024),
+        )
+    assert error.value.reason is CheckoutReason.BUDGET_PREPARATION
+    assert error.value.metrics is not None
+    assert error.value.metrics.transfer_bytes > 0

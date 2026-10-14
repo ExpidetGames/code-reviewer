@@ -64,9 +64,9 @@ def advertisement(transport: Transport, budget: Budget) -> tuple[dict[str, str],
             total += len(line) + 4
             # Protocol v0 advertises every ref in the repository. A busy repository can
             # advertise many megabytes of refs/pull/*/head, so the advertisement is bounded by
-            # the same cumulative preparation envelope as the rest of the transfer (the
+            # the same cumulative transfer envelope as the rest of the transfer (the
             # transport charges the raw bytes) rather than the small per-field response cap.
-            if total > budget.limits.preparation_bytes:
+            if total > budget.limits.transfer_bytes:
                 raise CheckoutError(CheckoutReason.BUDGET_TRANSFER)
             if line.startswith(b"# service=git-upload-pack"):
                 continue

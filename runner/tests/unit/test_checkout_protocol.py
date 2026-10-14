@@ -27,12 +27,12 @@ class OneShot:
         self.data = data
 
     def stream(self, request: bytes | None, budget: Budget) -> Generator[bytes]:
-        budget.charge(len(self.data))
+        budget.charge_transfer(len(self.data))
         yield self.data
 
 
 # #196-T01 #196-T04
-def test_a_large_ref_advertisement_is_bounded_by_the_preparation_budget() -> None:
+def test_a_large_ref_advertisement_is_bounded_by_the_transfer_budget() -> None:
     data = _advertisement(20_000)
     assert len(data) > Limits().response_bytes
     refs, capabilities = advertisement(OneShot(data), Budget(Limits()))
@@ -42,7 +42,7 @@ def test_a_large_ref_advertisement_is_bounded_by_the_preparation_budget() -> Non
 
 
 # #196-T04
-def test_an_advertisement_beyond_the_preparation_budget_is_refused() -> None:
+def test_an_advertisement_beyond_the_transfer_budget_is_refused() -> None:
     data = _advertisement(20_000)
 
     class Uncharged:
@@ -50,4 +50,4 @@ def test_an_advertisement_beyond_the_preparation_budget_is_refused() -> None:
             yield data
 
     with pytest.raises(CheckoutError):
-        advertisement(Uncharged(), Budget(Limits(preparation_bytes=len(data) // 2)))
+        advertisement(Uncharged(), Budget(Limits(transfer_bytes=len(data) // 2)))
