@@ -164,6 +164,7 @@ def test_a_dynamic_job_of_the_default_model_without_a_descriptor_variable_is_all
 def test_only_the_exact_default_model_id_gets_the_built_in_descriptor(model: str) -> None:
     document = dynamic_document()
     document["dynamic"]["model"] = model
+    document["llm"]["model"] = model
     result = runner.run_dynamic_job(
         parse_job(json.dumps(document)),
         None,
@@ -336,27 +337,34 @@ def test_a_dynamic_job_with_opencode_advertised_gets_past_the_engine_check(
     assert json.loads(out.getvalue())["errorCode"] == "dynamic_model_features_unsupported"
 
 
-# #264-T12: the descriptor is chosen by `dynamic.model` and the request goes upstream with
-# `llm.model`; a job that names two different models is refused before any model call.
-def test_a_dynamic_job_whose_two_model_names_differ_is_refused_before_any_model_call() -> None:
-    document = dynamic_document()
-    document["llm"]["model"] = OTHER_MODEL
-    environment = {
-        runner.OPENCODE_COMMAND_VARIABLE: "opencode",
-        runner.DYNAMIC_CAPABILITIES_VARIABLE: CAPABILITIES,
-    }
+# #264-T12: the built-in descriptor describes the destination the request goes to: it follows the
+# upstream model (`llm.model`), not the logical name (`dynamic.model`) that only the engine sees.
+def test_the_built_in_descriptor_follows_the_upstream_model_not_the_logical_name() -> None:
+    environment = {runner.OPENCODE_COMMAND_VARIABLE: "opencode"}
 
-    result = runner.run_dynamic_job(
-        parse_job(json.dumps(document)),
+    spoofed = dynamic_document()
+    spoofed["llm"]["model"] = OTHER_MODEL  # logical name is the default, the request is not
+    refused = runner.run_dynamic_job(
+        parse_job(json.dumps(spoofed)),
         None,
         0.0,
         environment,
         engines=ALL_ENGINES,
         prepare=never_prepared,
     )
+    assert refused.error_code is ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED
 
-    assert result.ok is False
-    assert result.error_code is ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED
+    alias = dynamic_document()
+    alias["dynamic"]["model"] = "my-alias"  # a logical name, the destination is the default model
+    with pytest.raises(Reached):
+        runner.run_dynamic_job(
+            parse_job(json.dumps(alias)),
+            None,
+            0.0,
+            environment,
+            engines=ALL_ENGINES,
+            prepare=reaching_the_checkout,
+        )
 
 
 # #264-T13: a variable that holds only whitespace is as empty as an empty one (a platform may store
