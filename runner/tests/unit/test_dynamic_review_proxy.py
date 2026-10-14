@@ -1060,7 +1060,7 @@ def test_a_call_the_provider_refused_leaves_the_cost_unknown() -> None:
     subject = proxy(upstream)
     statuses = [post(subject, request_body()).status for _ in range(3)]
 
-    # The retry after the refusal succeeded and the run goes on, but one reserved call has no
-    # reported charge, so the run cannot claim an exact total.
+    # Whatever the engine does after the refusal, the ledger holds a reserved call without a
+    # reported charge, so it cannot claim an exact total.
     assert statuses == [200, 503, 200]
     assert subject.ledger.usage(None).cost_usd is None

@@ -27,7 +27,7 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from decimal import Decimal
+from decimal import Context, Decimal
 
 from code_reviewer_runner.result import ErrorCode, Usage
 
@@ -106,19 +106,29 @@ class _Counters:
     files: set[str] = field(default_factory=lambda: set[str]())
 
 
+# The sum of costs is exact. A float is at most about 1e308 and at least about 5e-324, so any sum of
+# them fits in far fewer than this many significant digits; the context never rounds, and no sum
+# depends on the precision the calling thread happens to have set.
+_SUM = Context(prec=1000)
+
+
 def exact_cost(value: object) -> Decimal | None:
     """The charge the provider reported for one call, or None when it reported no usable one.
 
     Only a finite, non-negative number counts. A missing, null, boolean, textual or negative value
-    is not a cost; it is never read as zero. The decimal is the value as the provider wrote it (the
-    shortest text of the parsed number), so adding calls up does not drift the way a float sum does.
+    is not a cost; it is never read as zero. A negative zero is a plain zero. The decimal is the
+    shortest decimal text of the number as it was parsed from the provider's answer (a float64, so a
+    cost with more than about 17 significant digits is already shortened by then); adding calls up
+    in decimals does not drift the way a float sum does.
     """
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     if isinstance(value, float) and not math.isfinite(value):
         return None
     cost = Decimal(repr(value))
-    return cost if cost >= 0 else None
+    if cost == 0:
+        return Decimal(0)
+    return cost if cost > 0 else None
 
 
 def reserved_tokens(text: str) -> int:
@@ -268,7 +278,7 @@ class BudgetLedger:
             counters.completion_tokens += completion_tokens
             counters.last_prompt_tokens = prompt_tokens
             if cost is not None:
-                counters.cost += cost
+                counters.cost = _SUM.add(counters.cost, cost)
                 counters.priced_calls += 1
             if counters.prompt_tokens + counters.completion_tokens > self.limits.max_total_tokens:
                 raise LimitError(ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the token budget is used up")
@@ -361,11 +371,14 @@ class BudgetLedger:
         model call the run made has one. A call without a reported cost (the provider omitted it,
         refused the call, or never answered) may still have been charged, so the total is unknown
         (None) rather than a partial sum that would look exact. Nothing is derived from tokens or a
-        price table. A run that made no call has nothing to report.
+        price table. A run that made no call has nothing to report. A total that is not a finite
+        float (the providers' charges add up beyond the float range) is unknown too: it could not be
+        sent as a result.
         """
         with self._lock:
             counters = self._counters
             exact = counters.model_calls > 0 and counters.priced_calls == counters.model_calls
+            total = float(counters.cost)
             return Usage(
                 model=model,
                 prompt_tokens=counters.prompt_tokens,
@@ -373,5 +386,5 @@ class BudgetLedger:
                 total_tokens=counters.prompt_tokens + counters.completion_tokens,
                 ai_calls=counters.model_calls,
                 fallback_used=False,
-                cost_usd=float(counters.cost) if exact else None,
+                cost_usd=total if exact and math.isfinite(total) else None,
             )
