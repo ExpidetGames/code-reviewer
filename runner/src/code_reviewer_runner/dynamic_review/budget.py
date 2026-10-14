@@ -163,8 +163,9 @@ class BudgetLedger:
         with self._lock:
             return self._failure
 
-    def check_deadline(self) -> None:
-        if self.expired():
+    def check_deadline(self, *, tolerance: float = 0.0) -> None:
+        """Raise when the deadline has passed, or is closer than `tolerance` seconds."""
+        if self.remaining_seconds() <= tolerance:
             raise LimitError(
                 ErrorCode.DYNAMIC_BUDGET_EXCEEDED, "the whole-job deadline was reached"
             )

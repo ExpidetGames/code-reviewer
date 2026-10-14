@@ -819,3 +819,23 @@ def test_a_job_command_other_than_the_entry_point_is_announced_with_a_warning(
 
     caplog.set_level(logging.WARNING, logger="code_reviewer_runner.loop")
     run(scenario)
+
+
+# #197-T04
+def test_a_root_loop_drops_diff_jobs_to_the_job_user_and_keeps_dynamic_jobs_as_the_supervisor() -> (
+    None
+):
+    from test_dynamic_review_run import dynamic_document
+
+    async def scenario() -> None:
+        harness = Harness(concurrency=3, diff_job_user=(10001, 10001))
+        harness.api.claims = [make_claim(1), make_claim(2, **dynamic_document())]
+        await harness.start()
+        await settle()
+
+        diff, dynamic = (process.spec for process in harness.launcher.processes)
+        assert diff.run_as == (10001, 10001)
+        assert dynamic.run_as is None
+        await harness.stop()
+
+    run(scenario)

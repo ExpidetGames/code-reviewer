@@ -79,18 +79,24 @@ def test_a_dynamic_job_without_an_engine_is_refused_and_pr_agent_is_never_used()
     assert result.error_code is ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE
 
 
-# #197-T11
-def test_a_dynamic_job_without_a_prepared_checkout_is_refused() -> None:
+# #197-T04
+def test_a_dynamic_job_without_an_injected_preparer_needs_the_root_supervisor() -> None:
+    # The default is the production preparation: it seals the export for the dedicated user, which
+    # only the root supervisor can do. Anything else is refused with the isolation code (it used
+    # to end `checkout_incomplete` because no preparation existed at all).
     result = runner.run_dynamic_job(
         dynamic_job(),
         None,
         0.0,
-        {runner.OPENCODE_COMMAND_VARIABLE: "opencode"},
+        {
+            runner.OPENCODE_COMMAND_VARIABLE: "opencode",
+            runner.DYNAMIC_CAPABILITIES_VARIABLE: CAPABILITIES,
+        },
         engines=ALL_ENGINES,
     )
 
     assert result.ok is False
-    assert result.error_code is ErrorCode.CHECKOUT_INCOMPLETE
+    assert result.error_code is ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED
 
 
 # #197-T11
@@ -169,3 +175,32 @@ def test_the_runner_process_never_runs_a_dynamic_job_while_the_isolation_check_f
     result = json.loads(out.getvalue())
     assert code == 1
     assert result["errorCode"] == ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE.value
+
+
+# #197-T07
+def test_sigterm_unwinds_a_dynamic_job_and_arms_a_backstop_that_ends_the_engines(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import os
+    import signal
+    import time
+
+    stopped: list[str] = []
+    monkeypatch.setattr(runner, "_stop_hard", lambda: stopped.append("hard stop"))
+    monkeypatch.setattr(runner, "SIGTERM_BACKSTOP_SECONDS", 0.05)
+    before = signal.getsignal(signal.SIGTERM)
+    unwound: list[str] = []
+
+    with pytest.raises(KeyboardInterrupt), runner._unwind_on_sigterm():  # pyright: ignore[reportPrivateUsage]
+        try:
+            os.kill(os.getpid(), signal.SIGTERM)
+            time.sleep(1)  # the handler raises before this ends
+        finally:
+            unwound.append("cleanup ran")
+
+    assert unwound == ["cleanup ran"]
+    assert signal.getsignal(signal.SIGTERM) is before  # the previous handler is back
+    deadline = time.monotonic() + 2
+    while not stopped and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert stopped == ["hard stop"]
