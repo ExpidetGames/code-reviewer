@@ -342,6 +342,35 @@ def test_the_llm_endpoint_can_only_be_overridden_with_a_loopback_address() -> No
         assert refusal(json.dumps(job)).code is ErrorCode.INVALID_JOB, base_url
 
 
+# #270-T04
+def test_only_the_default_openrouter_destination_requires_parameters_unless_a_test_double_asks() -> None:
+    llm = valid_job()["llm"]
+    loopback = "http://127.0.0.1:4011/api/v1"
+
+    # No `baseUrl` is the provider itself (OpenRouter): the capability requirement applies.
+    assert parse(valid_job()).llm.require_parameters is True
+    # A local fake gets the request unchanged ...
+    assert parse(valid_job(llm={**llm, "baseUrl": loopback})).llm.require_parameters is False
+    # ... unless the test double that added the address asks for the field as well.
+    asking = {**llm, "baseUrl": loopback, "requireParameters": True}
+    assert parse(valid_job(llm=asking)).llm.require_parameters is True
+    declining = {**llm, "baseUrl": loopback, "requireParameters": False}
+    assert parse(valid_job(llm=declining)).llm.require_parameters is False
+
+
+# #270-T04
+def test_the_field_that_asks_for_required_parameters_is_only_accepted_with_a_loopback_address() -> None:
+    llm = valid_job()["llm"]
+
+    # The default destination always requires them: no switch to turn that off (or on) from a job.
+    for value in (True, False):
+        job = valid_job(llm={**llm, "requireParameters": value})
+        assert refusal(json.dumps(job)).code is ErrorCode.INVALID_JOB, value
+    for value in ("true", 1, None):
+        job = valid_job(llm={**llm, "baseUrl": "http://127.0.0.1:4011/api/v1", "requireParameters": value})
+        assert refusal(json.dumps(job)).code is ErrorCode.INVALID_JOB, value
+
+
 def test_the_context_window_of_an_unknown_model_is_an_explicit_bounded_number() -> None:
     llm = valid_job()["llm"]
 

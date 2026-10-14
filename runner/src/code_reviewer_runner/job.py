@@ -11,6 +11,7 @@ Shape (basis of the runner contract v1, see the lead decisions for CR-10):
               "token": "<installation token>", "botLogin": "<app slug>[bot]"},
       "llm": {"provider": "openrouter", "model": "<vendor>/<model>", "apiKey": "<key>",
               "baseUrl": "http://127.0.0.1:<port>/api/v1",     // optional, loopback only (fakes)
+              "requireParameters": true,                       // optional, only with baseUrl (fakes)
               "maxTokens": 163840,                             // optional, context window
               "fallbackModels": ["<vendor>/<model>"]},         // optional, at most five
       "env": {"PR_REVIEWER__EXTRA_INSTRUCTIONS": "<string>"}   // optional, tool settings only
@@ -57,7 +58,15 @@ _TOP_LEVEL_FIELDS = {
     "env",
 }
 _GIT_FIELDS = {"provider", "baseUrl", "token", "botLogin"}
-_LLM_FIELDS = {"provider", "model", "apiKey", "baseUrl", "maxTokens", "fallbackModels"}
+_LLM_FIELDS = {
+    "provider",
+    "model",
+    "apiKey",
+    "baseUrl",
+    "requireParameters",
+    "maxTokens",
+    "fallbackModels",
+}
 _DYNAMIC_FIELDS = {"model", "skill", "limits"}
 _DYNAMIC_LIMIT_FIELDS = {"maxFindings"}
 _BASE_FIELDS = {
@@ -195,6 +204,9 @@ class LlmAccess:
     base_url: str | None = None
     max_tokens: int | None = None
     fallback_models: tuple[str, ...] = ()
+    # Whether every request carries OpenRouter's `provider.require_parameters` (#270). True for the
+    # provider itself; a local fake only gets it when the test double that gave it its address asks.
+    require_parameters: bool = True
 
 
 @dataclass(frozen=True)
@@ -300,10 +312,12 @@ def _llm_access(data: dict[str, Any]) -> LlmAccess:
     model = _string(llm, "model", "llm.")
     if not _MODEL.fullmatch(model):
         raise _invalid("llm.model contains characters that are not allowed in a model name")
+    base_url = _llm_base_url(llm)
     return LlmAccess(
         model=model,
         api_key=_secret(llm, "apiKey", "llm."),
-        base_url=_llm_base_url(llm),
+        base_url=base_url,
+        require_parameters=_require_parameters(llm, base_url),
         max_tokens=_max_tokens(llm),
         fallback_models=_fallback_models(llm, model),
     )
@@ -318,6 +332,22 @@ def _llm_base_url(llm: dict[str, Any]) -> str | None:
     if (parts.hostname or "") not in _LOOPBACK_HOSTS:
         raise _invalid("llm.baseUrl is only accepted for loopback addresses")
     return base_url
+
+
+def _require_parameters(llm: dict[str, Any], base_url: str | None) -> bool:
+    """OpenRouter itself always requires the parameters; only a local fake may differ (#270).
+
+    `requireParameters` exists for the test doubles that add `llm.baseUrl`: without that address
+    the destination is OpenRouter and there is nothing to switch.
+    """
+    if base_url is None:
+        if "requireParameters" in llm:
+            raise _invalid("llm.requireParameters is only accepted with llm.baseUrl")
+        return True
+    value = llm.get("requireParameters", False)
+    if not isinstance(value, bool):
+        raise _invalid("llm.requireParameters must be a boolean")
+    return value
 
 
 def _max_tokens(llm: dict[str, Any]) -> int | None:
