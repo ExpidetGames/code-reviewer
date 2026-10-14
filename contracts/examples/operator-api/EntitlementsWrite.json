@@ -1,0 +1,11 @@
+{
+  "planLabel": "team",
+  "keyMode": "managed",
+  "limits": {
+    "diffRunsPerPeriod": 100,
+    "dynamicRunsPerPeriod": null,
+    "managedCostLimitMicroUsd": 5000000
+  },
+  "suspended": false,
+  "suspensionCode": null
+}

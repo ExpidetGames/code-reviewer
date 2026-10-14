@@ -125,7 +125,10 @@ export function createOperatorApi(deps: OperatorApiDeps): OperatorApi {
   /** The body of a PUT: a JSON value of the allowed size, or the answer that refuses it. */
   async function readJson(request: Request): Promise<Parsed<unknown>> {
     if (!isJsonContentType(request.headers.get("content-type")))
-      return { ok: false, response: errorResponse(415, "unsupported_media_type") };
+      return {
+        ok: false,
+        response: errorResponse(415, "unsupported_media_type"),
+      };
     const body = await readLimitedBody(request, OPERATOR_MAX_BODY_BYTES);
     if (!body.ok)
       return { ok: false, response: errorResponse(413, "body_too_large") };
@@ -244,7 +247,10 @@ export function createOperatorApi(deps: OperatorApiDeps): OperatorApi {
     return jsonResponse(200, { default: defaultView(stored) });
   }
 
-  async function work(request: Request, route: OperatorRoute): Promise<Response> {
+  async function work(
+    request: Request,
+    route: OperatorRoute,
+  ): Promise<Response> {
     switch (route.kind) {
       case "workspaces":
         return listWorkspaces(request);

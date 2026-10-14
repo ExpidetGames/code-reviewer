@@ -25,7 +25,10 @@ export function errorResponse(
 ): Response {
   return jsonResponse(
     status,
-    { error: code, ...(extra.field === undefined ? {} : { field: extra.field }) },
+    {
+      error: code,
+      ...(extra.field === undefined ? {} : { field: extra.field }),
+    },
     extra.headers,
   );
 }

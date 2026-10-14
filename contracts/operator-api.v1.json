@@ -1,0 +1,464 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ExpidetGames/code-reviewer/contracts/operator-api.v1.json",
+  "title": "Code Reviewer operator API, version 1",
+  "description": "The wire format of the operator API (#275): a machine interface for an operator who sets the entitlements of workspaces from outside the app. Every request carries 'Authorization: Bearer <OPERATOR_API_TOKEN>'; a request body is application/json up to 16384 bytes, and GET and DELETE carry none. Every answer is JSON with 'Cache-Control: no-store' and the version in its body; an error is {version, error, field?} with a stable code, never a message. Until OPERATOR_API_TOKEN is set the paths do not exist (the 404 of a missing path, not this format). The API identifies workspaces by id and slug only: no names of people, no emails, no repositories, no pull requests. A reader ignores fields it does not know. This file is the only source of the format; the app tests validate real answers and contracts/examples/operator-api holds one valid example per definition.",
+  "version": 1,
+  "$defs": {
+    "Version": {
+      "description": "The version of the format; also in the path (/api/operator/v1).",
+      "const": 1
+    },
+    "Timestamp": {
+      "description": "ISO 8601, UTC, with milliseconds.",
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+    },
+    "WorkspaceId": {
+      "description": "The id of a workspace, as listed by GET /workspaces.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,64}$"
+    },
+    "ApiErrorCode": {
+      "description": "Callers branch on the code. 401 unauthorized; 404 not_found (unknown path) or workspace_not_found; 405 method_not_allowed (with an Allow header); 400 body_not_allowed (a GET or DELETE with a body) or request_invalid (not JSON, or a bad query); 413 body_too_large; 415 unsupported_media_type; 409 period_start_backwards; 422 the other codes of a refused entitlement (the codes of the workspace entitlements validation, with 'field' naming the limit or key concerned); 500 internal_error.",
+      "type": "string",
+      "enum": [
+        "unauthorized",
+        "not_found",
+        "workspace_not_found",
+        "method_not_allowed",
+        "body_not_allowed",
+        "unsupported_media_type",
+        "body_too_large",
+        "request_invalid",
+        "internal_error",
+        "entitlements_invalid",
+        "plan_label_invalid",
+        "key_mode_invalid",
+        "limits_invalid",
+        "limit_invalid",
+        "period_start_invalid",
+        "period_start_in_future",
+        "period_start_backwards",
+        "suspended_invalid",
+        "suspension_code_invalid"
+      ]
+    },
+    "ErrorResponse": {
+      "type": "object",
+      "required": [
+        "version",
+        "error"
+      ],
+      "properties": {
+        "version": {
+          "$ref": "#/$defs/Version"
+        },
+        "error": {
+          "$ref": "#/$defs/ApiErrorCode"
+        },
+        "field": {
+          "description": "For a refused entitlement: the limit or the unknown key concerned (never its value).",
+          "type": "string",
+          "maxLength": 100
+        }
+      }
+    },
+    "EntitlementLimits": {
+      "description": "Every limit is required on a write; null is unlimited.",
+      "type": "object",
+      "required": [
+        "diffRunsPerPeriod",
+        "dynamicRunsPerPeriod",
+        "managedCostLimitMicroUsd"
+      ],
+      "properties": {
+        "diffRunsPerPeriod": {
+          "description": "A count (or micro-USD of measured model cost) per period, or null for unlimited.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "dynamicRunsPerPeriod": {
+          "description": "A count (or micro-USD of measured model cost) per period, or null for unlimited.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "managedCostLimitMicroUsd": {
+          "description": "A count (or micro-USD of measured model cost) per period, or null for unlimited.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "EntitlementLimitsWrite": {
+      "description": "The limits of a write: every limit, and no other key (a typo is refused with limits_invalid).",
+      "type": "object",
+      "required": [
+        "diffRunsPerPeriod",
+        "dynamicRunsPerPeriod",
+        "managedCostLimitMicroUsd"
+      ],
+      "properties": {
+        "diffRunsPerPeriod": {
+          "description": "A count (or micro-USD of measured model cost) per period, or null for unlimited.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "dynamicRunsPerPeriod": {
+          "description": "A count (or micro-USD of measured model cost) per period, or null for unlimited.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "managedCostLimitMicroUsd": {
+          "description": "A count (or micro-USD of measured model cost) per period, or null for unlimited.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "additionalProperties": false
+    },
+    "EntitlementsFields": {
+      "description": "What an operator allows a workspace, as read back.",
+      "type": "object",
+      "required": [
+        "planLabel",
+        "keyMode",
+        "limits",
+        "periodStart",
+        "suspended",
+        "suspensionCode"
+      ],
+      "properties": {
+        "planLabel": {
+          "description": "A label for display and audit, 1 to 64 printable characters. The app never branches on it.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "keyMode": {
+          "description": "Whose LLM key the workspace's reviews use. 'managed' is the operator's key.",
+          "type": "string",
+          "enum": [
+            "own",
+            "managed"
+          ]
+        },
+        "limits": {
+          "$ref": "#/$defs/EntitlementLimits"
+        },
+        "periodStart": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "suspended": {
+          "type": "boolean"
+        },
+        "suspensionCode": {
+          "description": "Why the workspace is suspended: lowercase letters, digits, '_' and '-', starting with a letter, at most 64 characters. null unless suspended.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        }
+      }
+    },
+    "EntitlementsWrite": {
+      "description": "The body of PUT /workspaces/{id}/entitlements and PUT /entitlements/default: the whole entitlements, replacing what was stored. Unknown keys are refused (a typo must not pass). 'periodStart' may be left out: the stored start is kept, or the period starts now when nothing is stored. A start earlier than the stored one is refused (period_start_backwards, 409) and one more than five minutes ahead as period_start_in_future. A write is idempotent. A numeric limit above 2^53-1 is refused (limit_invalid) instead of being rounded. Removing a workspace's row (DELETE) ends the 'never backwards' guard for that workspace: a later PUT without periodStart begins now.",
+      "type": "object",
+      "required": [
+        "planLabel",
+        "keyMode",
+        "limits",
+        "suspended",
+        "suspensionCode"
+      ],
+      "properties": {
+        "planLabel": {
+          "description": "A label for display and audit, 1 to 64 printable characters. The app never branches on it.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "keyMode": {
+          "description": "Whose LLM key the workspace's reviews use. 'managed' is the operator's key.",
+          "type": "string",
+          "enum": [
+            "own",
+            "managed"
+          ]
+        },
+        "limits": {
+          "$ref": "#/$defs/EntitlementLimitsWrite"
+        },
+        "periodStart": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "suspended": {
+          "type": "boolean"
+        },
+        "suspensionCode": {
+          "description": "Why the workspace is suspended: lowercase letters, digits, '_' and '-', starting with a letter, at most 64 characters. null unless suspended.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "InvalidEntitlements": {
+      "description": "A stored entry that cannot be read. It counts as 'invalid' for enforcement (fail closed); a valid PUT repairs it.",
+      "type": "object",
+      "required": [
+        "invalid"
+      ],
+      "properties": {
+        "invalid": {
+          "const": true
+        }
+      }
+    },
+    "StoredEntitlements": {
+      "description": "The row of a workspace, with the time of its last write. Who wrote it is not part of the format.",
+      "oneOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/EntitlementsFields"
+            },
+            {
+              "type": "object",
+              "required": [
+                "updatedAt"
+              ],
+              "properties": {
+                "updatedAt": {
+                  "$ref": "#/$defs/Timestamp"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/InvalidEntitlements"
+            },
+            {
+              "type": "object",
+              "required": [
+                "updatedAt"
+              ],
+              "properties": {
+                "updatedAt": {
+                  "$ref": "#/$defs/Timestamp"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "EffectiveEntitlements": {
+      "description": "What applies to the workspace on its next claim: its own row, else the default, else nothing (unlimited: own key, no limits, not suspended). A running job is not touched.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "unlimited"
+            }
+          }
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/EntitlementsFields"
+            },
+            {
+              "type": "object",
+              "required": [
+                "kind",
+                "source"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "limited"
+                },
+                "source": {
+                  "$ref": "#/$defs/EntitlementsSource"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "code",
+            "source"
+          ],
+          "properties": {
+            "kind": {
+              "const": "invalid"
+            },
+            "code": {
+              "const": "entitlements_invalid"
+            },
+            "source": {
+              "$ref": "#/$defs/EntitlementsSource"
+            }
+          }
+        }
+      ]
+    },
+    "EntitlementsSource": {
+      "description": "'workspace': the workspace's own row. 'default': the instance default.",
+      "type": "string",
+      "enum": [
+        "workspace",
+        "default"
+      ]
+    },
+    "WorkspaceSummary": {
+      "type": "object",
+      "required": [
+        "id",
+        "slug",
+        "createdAt"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/WorkspaceId"
+        },
+        "slug": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "createdAt": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      }
+    },
+    "WorkspaceList": {
+      "description": "GET /workspaces?after=<id>&limit=<1..200, default 50>: workspaces ordered by id after the cursor. 'nextAfter' is the id to pass as 'after' for the next page, null on the last page.",
+      "type": "object",
+      "required": [
+        "version",
+        "workspaces",
+        "nextAfter"
+      ],
+      "properties": {
+        "version": {
+          "$ref": "#/$defs/Version"
+        },
+        "workspaces": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WorkspaceSummary"
+          },
+          "maxItems": 200
+        },
+        "nextAfter": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/WorkspaceId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "WorkspaceEntitlementsResponse": {
+      "description": "The answer of GET, PUT and DELETE /workspaces/{id}/entitlements: the stored row (null when none, e.g. after DELETE) and the effective entitlements.",
+      "type": "object",
+      "required": [
+        "version",
+        "workspaceId",
+        "stored",
+        "effective"
+      ],
+      "properties": {
+        "version": {
+          "$ref": "#/$defs/Version"
+        },
+        "workspaceId": {
+          "$ref": "#/$defs/WorkspaceId"
+        },
+        "stored": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/StoredEntitlements"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "effective": {
+          "$ref": "#/$defs/EffectiveEntitlements"
+        }
+      }
+    },
+    "DefaultEntitlementsResponse": {
+      "description": "The answer of GET and PUT /entitlements/default: the default for workspaces without a row, an invalid marker for damaged data, or null when none was set. The default cannot be removed through the API.",
+      "type": "object",
+      "required": [
+        "version",
+        "default"
+      ],
+      "properties": {
+        "version": {
+          "$ref": "#/$defs/Version"
+        },
+        "default": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/EntitlementsFields"
+            },
+            {
+              "$ref": "#/$defs/InvalidEntitlements"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

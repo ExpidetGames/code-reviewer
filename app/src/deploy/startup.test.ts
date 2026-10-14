@@ -152,4 +152,3 @@ describe("checking the operator API token when the server starts", () => {
     expect(exit).not.toHaveBeenCalled();
   });
 });
-

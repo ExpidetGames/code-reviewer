@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// The runner API contract (contracts/runner-api.v1.json) as validators, for tests that check a real
+// The contracts (contracts/runner-api.v1.json by default, contracts/operator-api.v1.json) as validators, for tests that check a real
 // answer or request against the file. The file is read from disk, not copied: it is the one source.
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -20,9 +20,12 @@ export type ContractSchema = {
   $defs: Record<string, { enum?: string[] } & Record<string, unknown>>;
 };
 
-export function readContract(): ContractSchema {
+export const RUNNER_CONTRACT_FILE = "runner-api.v1.json";
+export const OPERATOR_CONTRACT_FILE = "operator-api.v1.json";
+
+export function readContract(file = RUNNER_CONTRACT_FILE): ContractSchema {
   return JSON.parse(
-    readFileSync(join(CONTRACTS_DIRECTORY, "runner-api.v1.json"), "utf8"),
+    readFileSync(join(CONTRACTS_DIRECTORY, file), "utf8"),
   ) as ContractSchema;
 }
 
@@ -34,8 +37,10 @@ export type ContractValidator = {
   ): { valid: boolean; errors: string };
 };
 
-export function createContractValidator(): ContractValidator {
-  const schema = readContract();
+export function createContractValidator(
+  file = RUNNER_CONTRACT_FILE,
+): ContractValidator {
+  const schema = readContract(file);
   const ajv = new Ajv2020({
     strict: true,
     strictTypes: false,
@@ -60,11 +65,11 @@ export function createContractValidator(): ContractValidator {
 }
 
 /** The examples of the contract: definition name and document. */
-export function readExamples(): Array<{
+export function readExamples(folder = "examples"): Array<{
   definition: string;
   document: unknown;
 }> {
-  const directory = join(CONTRACTS_DIRECTORY, "examples");
+  const directory = join(CONTRACTS_DIRECTORY, folder);
   return readdirSync(directory)
     .filter((name) => name.endsWith(".json"))
     .sort()

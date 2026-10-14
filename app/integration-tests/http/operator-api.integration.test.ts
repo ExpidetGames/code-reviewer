@@ -149,7 +149,11 @@ describe("listing workspaces", () => {
     expect(first.headers.get("cache-control")).toBe("no-store");
     expect(workspaces).toHaveLength(3);
     for (const workspace of workspaces)
-      expect(Object.keys(workspace).sort()).toEqual(["createdAt", "id", "slug"]);
+      expect(Object.keys(workspace).sort()).toEqual([
+        "createdAt",
+        "id",
+        "slug",
+      ]);
     expect(firstBody.nextAfter).toBe(workspaces[2]?.id);
     expect(second.workspaces).toHaveLength(1);
     expect(second.nextAfter).toBeNull();
@@ -168,7 +172,10 @@ describe("listing workspaces", () => {
       `after=${"a".repeat(65)}`,
       "after=",
     ]) {
-      const response = await h.call("GET", `/api/operator/v1/workspaces?${query}`);
+      const response = await h.call(
+        "GET",
+        `/api/operator/v1/workspaces?${query}`,
+      );
       expect(response.status).toBe(400);
       expect(await json(response)).toEqual({
         version: 1,
@@ -185,7 +192,9 @@ describe("the entitlements of a workspace", () => {
   it("stores a row and reads back the same stored and effective values", async () => {
     const h = await startOperatorApiHarness();
 
-    const put = await h.call("PUT", path(h.workspaceId), { body: ENTITLEMENTS });
+    const put = await h.call("PUT", path(h.workspaceId), {
+      body: ENTITLEMENTS,
+    });
     const get = await h.call("GET", path(h.workspaceId));
 
     expect(put.status).toBe(200);
@@ -231,7 +240,10 @@ describe("the entitlements of a workspace", () => {
     });
     const withDefault = await json(await h.call("GET", path(h.workspaceId)));
 
-    expect(none).toMatchObject({ stored: null, effective: { kind: "unlimited" } });
+    expect(none).toMatchObject({
+      stored: null,
+      effective: { kind: "unlimited" },
+    });
     expect(withDefault).toMatchObject({
       stored: null,
       effective: { kind: "limited", source: "default", planLabel: "team" },
@@ -270,17 +282,20 @@ describe("the entitlements of a workspace", () => {
     [{ ...ENTITLEMENTS, extra: true }, "entitlements_invalid"],
     [[1, 2], "entitlements_invalid"],
     [null, "entitlements_invalid"],
-  ])("refuses invalid entitlements with 422 and the code of the validation", async (body, code) => {
-    const h = await startOperatorApiHarness();
+  ])(
+    "refuses invalid entitlements with 422 and the code of the validation",
+    async (body, code) => {
+      const h = await startOperatorApiHarness();
 
-    const response = await h.call("PUT", path(h.workspaceId), { body });
+      const response = await h.call("PUT", path(h.workspaceId), { body });
 
-    expect(response.status).toBe(422);
-    expect(await json(response)).toMatchObject({ version: 1, error: code });
-    expect(
-      await h.db.selectFrom("workspace_entitlements").selectAll().execute(),
-    ).toEqual([]);
-  });
+      expect(response.status).toBe(422);
+      expect(await json(response)).toMatchObject({ version: 1, error: code });
+      expect(
+        await h.db.selectFrom("workspace_entitlements").selectAll().execute(),
+      ).toEqual([]);
+    },
+  );
 
   // #275-T06
   it("refuses a limit above 2^53 instead of storing a rounded number", async () => {
@@ -320,9 +335,9 @@ describe("the entitlements of a workspace", () => {
       version: 1,
       error: "period_start_backwards",
     });
-    expect(
-      await json(await h.call("GET", path(h.workspaceId))),
-    ).toMatchObject({ stored: { periodStart: "2026-10-01T00:00:00.000Z" } });
+    expect(await json(await h.call("GET", path(h.workspaceId)))).toMatchObject({
+      stored: { periodStart: "2026-10-01T00:00:00.000Z" },
+    });
   });
 
   // #275-T06 (follow-up of #271: a stale start must not block an unrelated update)
@@ -506,7 +521,10 @@ describe("the default entitlements", () => {
     });
 
     expect(await json(response)).toMatchObject({
-      default: { planLabel: "renamed", periodStart: "2026-10-01T00:00:00.000Z" },
+      default: {
+        planLabel: "renamed",
+        periodStart: "2026-10-01T00:00:00.000Z",
+      },
     });
   });
 
@@ -556,12 +574,20 @@ describe("what the API refuses before it works", () => {
   // #275-T12
   it("refuses a body over the limit with 413, declared or not", async () => {
     const h = await startOperatorApiHarness();
-    const huge = JSON.stringify({ ...ENTITLEMENTS, planLabel: "x".repeat(20_000) });
+    const huge = JSON.stringify({
+      ...ENTITLEMENTS,
+      planLabel: "x".repeat(20_000),
+    });
 
-    const response = await h.call("PUT", path(h.workspaceId), { rawBody: huge });
+    const response = await h.call("PUT", path(h.workspaceId), {
+      rawBody: huge,
+    });
 
     expect(response.status).toBe(413);
-    expect(await json(response)).toEqual({ version: 1, error: "body_too_large" });
+    expect(await json(response)).toEqual({
+      version: 1,
+      error: "body_too_large",
+    });
   });
 
   // #275-T12

@@ -41,7 +41,8 @@ export function operatorTokenProblem(env: Env): string | null {
 export function operatorTokenReuseProblem(env: Env): string | null {
   const token = trimmed(env.OPERATOR_API_TOKEN);
   if (token === undefined) return null;
-  if (token === trimmed(env.RUNNER_TOKEN)) return "must differ from RUNNER_TOKEN";
+  if (token === trimmed(env.RUNNER_TOKEN))
+    return "must differ from RUNNER_TOKEN";
   if (token === trimmed(env.APP_SECRET)) return "must differ from APP_SECRET";
   return null;
 }

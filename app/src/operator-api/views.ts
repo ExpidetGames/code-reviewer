@@ -28,7 +28,8 @@ export function fieldsOf(data: EntitlementsData): EntitlementsData {
 /** The row of a workspace as the API shows it, or null when there is none. */
 export function storedView(stored: StoredEntitlements | undefined) {
   if (stored === undefined) return null;
-  if ("invalid" in stored) return { invalid: true, updatedAt: stored.updatedAt };
+  if ("invalid" in stored)
+    return { invalid: true, updatedAt: stored.updatedAt };
   return { ...fieldsOf(stored), updatedAt: stored.updatedAt };
 }
 
