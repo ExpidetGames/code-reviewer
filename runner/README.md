@@ -132,7 +132,7 @@ The job is JSON on stdin (the shape is documented in `src/code_reviewer_runner/j
 | `git` | `provider` (`github`), `baseUrl`, `token` (installation token), `botLogin` (`<app slug>[bot]`) |
 | `llm` | `provider` (`openrouter`), `model`, `apiKey`; optional `baseUrl` (loopback only, for test fakes), `maxTokens` and `fallbackModels` (see below) |
 | `env` | optional options of the PR-Agent tools, as strings; one option per key (`PR_REVIEWER__NUM_MAX_FINDINGS`, never a second `__`). The app sends only `PR_REVIEWER__*`; the removed tools' families (`PR_DESCRIPTION__*`, `PR_CODE_SUGGESTIONS__*`, `PR_QUESTIONS__*`) are accepted for v1 compatibility and ignored. Nothing else is accepted. See "Settings policy" for how the values are read. |
-| `reviewKind`, `dynamic`, `base` | #195: a tagged **Dynamic** job. Absent means a Diff job (the legacy shape). `dynamic` is a closed object `{ model, skill, limits: { maxFindings } }` — model/skill/limits only, the skill is literal data and no field can add a command, a core override, a permission or an endpoint. `base` is `{ repository, baseRef, headSha, previousReviewedSha, comparison }`, the checkout facts; `comparison` is a declared mode, not proof of completeness. `previousReviewedSha` is the head of the last successful review of the same kind (#199), or null. The skill is untrusted project data, bounded to 16 KiB of UTF-8 bytes; the runner composes it after its own fixed core (see "Dynamic Review prompts"). |
+| `reviewKind`, `dynamic`, `base` | #195: a tagged **Dynamic** job. Absent means a Diff job (the legacy shape). `dynamic` is a closed object `{ model, skill, limits: { maxFindings } }` — model/skill/limits only, the skill is literal data and no field can add a command, a core override, a permission or an endpoint. `base` is `{ repository, baseRef, headSha, previousReviewedSha, comparison }`, the checkout facts; `comparison` is a declared mode, not proof of completeness. `previousReviewedSha` is the head of the last successful review of the same kind (#199), or null; the optional `attemptedShas` (#255) lists the heads of earlier jobs of that pull request that did not succeed (at most 20, distinct; absent means none). The skill is untrusted project data, bounded to 16 KiB of UTF-8 bytes; the runner composes it after its own fixed core (see "Dynamic Review prompts"). |
 
 Checkout preparation (#196) is available through the root-supervised
 `dynamic_review.export_isolation.prepared_checkout` lifetime: bounded exact-head acquisition,
@@ -394,11 +394,11 @@ second status comment) and reconciles each run with the earlier ones:
   edit one — nothing else. `dynamic_review/publish.py` selects the bot-owned summary by its exact
   hidden identity marker **and** author (the bot login, a `Bot` account and, when GitHub names the
   app, its slug; the claim has no app id, so an id comparison is a follow-up), refuses a stale
-  result (a head other than the job's own or its `previousReviewedSha`, including a predecessor
-  that published and lost its lease, is refused with `review_not_published` and left as it is: a
-  known, fail-closed limitation), redacts the job's secrets from the
-  findings before storing them, and re-reads after an ambiguous create instead of duplicating a
-  comment.
+  result (a head other than the job's own, its `previousReviewedSha` or one of the app's
+  `attemptedShas` (#255: earlier unsuccessful jobs, which may have published before they failed) is
+  refused with `review_not_published` and left as it is), redacts the job's secrets from the
+  findings before storing them, and re-reads after an ambiguous create or edit instead of
+  duplicating a comment or failing a write that landed.
 
 The app supplies `base.previousReviewedSha` from the last successful review of the same kind
 (`jobs.previousReviewedSha`), so the checkout and the publisher compare against the head the earlier

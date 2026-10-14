@@ -437,6 +437,9 @@ def test_the_tagged_union_is_bidirectional_and_both_sides_give_the_same_verdict(
                 "previousReviewedSha": "a" * 40,
             },
         },
+        # #255: optional, absent means none.
+        {**dynamic, "base": {**base, "attemptedShas": ["b" * 40, "c" * 40]}},
+        {**dynamic, "base": {**base, "attemptedShas": []}},
     ]
     negatives: list[Document] = [
         without_key("dynamic"),
@@ -445,6 +448,10 @@ def test_the_tagged_union_is_bidirectional_and_both_sides_give_the_same_verdict(
             **dynamic,
             "base": {name: value for name, value in base.items() if name != "previousReviewedSha"},
         },
+        {**dynamic, "base": {**base, "attemptedShas": ["B" * 40]}},
+        {**dynamic, "base": {**base, "attemptedShas": ["b" * 40, "b" * 40]}},
+        {**dynamic, "base": {**base, "attemptedShas": [f"{n:040x}" for n in range(21)]}},
+        {**dynamic, "base": {**base, "attemptedShas": "b" * 40}},
         {**dynamic, "dynamic": {**options, "model": "bad model name"}},
         {**diff_shape, "dynamic": options},
         {**diff_shape, "base": base},

@@ -4,8 +4,8 @@
 
 It speaks the routes the narrow Dynamic client uses (the three comment calls and the read of one
 pull request), so the publisher runs against a real socket with the real `HttpCommentsClient`. It
-records every request and can be scripted to answer a 404/401/403/429/503 or to accept a create and
-then lose the answer, which is what a retry must survive.
+records every request and can be scripted to answer a 404/401/403/429/503 or to accept a create or
+an edit and then lose the answer, which is what a retry must survive.
 """
 
 import json
@@ -31,6 +31,8 @@ class FakeGithubComments:
         self.requests: list[tuple[str, str]] = []
         self.faults: dict[str, tuple[int, dict[str, str]]] = {}
         self.ambiguous_create = False
+        # The next edit lands but the answer is lost (a 503): a retry must recognise its own write.
+        self.ambiguous_edit = False
         # Seconds every answer is held back (a slow GitHub), applied before the request is served.
         self.delay = 0.0
         self._next_id = 1
@@ -157,6 +159,10 @@ class FakeGithubComments:
                 for comment in self.comments:
                     if comment["id"] == comment_id:
                         comment["body"] = str(_body(request).get("body", ""))
+                        if self.ambiguous_edit:
+                            self.ambiguous_edit = False
+                            _reply(request, 503, {"message": "lost"})
+                            return
                         _reply(request, 200, comment)
                         return
                 _reply(request, 404, {"message": "no comment"})
