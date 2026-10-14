@@ -19,6 +19,7 @@
 // Nothing in here logs or keeps a credential: the revealed access exists only as a local value that
 // is built as late as possible and dropped with the response.
 import "server-only";
+import type { AttemptedShas } from "../db/repositories/jobs-repository.ts";
 import type { IntegrationsRepository } from "../db/repositories/integrations-repository.ts";
 import type { RepositoriesRepository } from "../db/repositories/repositories-repository.ts";
 import { IntegrationError } from "../integrations/errors.ts";
@@ -29,6 +30,7 @@ import type {
   GitPlatform,
   IntegrationType,
   RepoRef,
+  ReviewCommand,
 } from "../integrations/types.ts";
 import type { RunnerQueue } from "../jobs/runner-queue.ts";
 import type { ClaimResult, Job, JobErrorCode } from "../jobs/job-types.ts";
@@ -43,9 +45,12 @@ import type { ClaimGuard } from "./claim-guard.ts";
 import {
   RUNNER_API_VERSION,
   RUNNER_ENV_KEY_PATTERN,
+  type ClaimBase,
   type ClaimResponse,
+  type DynamicReviewOptions,
   type RunnerJobInput,
 } from "./contract.ts";
+import type { RunnerEngine } from "../jobs/runner-capabilities.ts";
 import type { JobOptions, JobOptionsSource } from "./job-options.ts";
 import { describeError, type RunnerApiLogger } from "./logger.ts";
 import { errorResponse, jsonResponse, noContent } from "./responses.ts";
@@ -67,6 +72,10 @@ export const CLAIM_FAILURE_CODES = [
   "job_args_invalid",
   "job_env_invalid",
   "job_llm_options_invalid",
+  // #195: the claimed job's kind is not one the runner advertised (a raced settings change), or its
+  // Dynamic options are missing/unusable. The runner is never silently given the other engine.
+  "dynamic_engine_unavailable",
+  "dynamic_config_invalid",
 ] as const;
 
 /** Why a job is given back (the code becomes the job's error code if it was the last attempt). */
@@ -81,8 +90,6 @@ export const DEFAULT_RETRY_AFTER_SECONDS = 30;
 const MAX_RETRY_AFTER_SECONDS = 900;
 /** How many jobs one claim request may end at claim time before it answers 204 and lets the runner ask again. */
 const MAX_REFUSED_PER_REQUEST = 25;
-/** The question of an `ask` job: the runner refuses more (and none). */
-const MAX_QUESTION_CHARS = 4000;
 
 export type ClaimDeps = {
   queue: Pick<
@@ -95,6 +102,19 @@ export type ClaimDeps = {
    */
   repositories: (workspaceId: string) => Pick<RepositoriesRepository, "get">;
   integrations: (workspaceId: string) => Pick<IntegrationsRepository, "get">;
+  /**
+   * The exact head of the last successful review of the claimed job's pull request for the same
+   * review kind (#199), or null when there is none. Only a Dynamic claim asks; it becomes the
+   * `previousReviewedSha` the checkout and the publisher compare against.
+   */
+  previousReviewedSha: (job: Job) => Promise<string | null>;
+  /**
+   * The heads of the earlier jobs of that pull request that did not succeed (#255), newest first. A
+   * run may have written the summary before it ended; the publisher accepts these heads as a state
+   * it can account for, so one lost run never wedges the pull request. `truncated` (#257) says the
+   * list was cut, so the runner can recover a state head that fell out of it. Only a Dynamic claim asks.
+   */
+  attemptedShas: (job: Job) => Promise<AttemptedShas>;
   registry: IntegrationRegistry;
   guard: ClaimGuard;
   jobOptions: JobOptionsSource;
@@ -176,17 +196,77 @@ function llmOptionsOf(
   return chosen;
 }
 
-/** The question of an `ask` job; other commands take no arguments. Null when it cannot be sent. */
-function argsOf(job: Job): { args?: [string] } | null {
-  if (job.command !== "ask") return {};
-  const question = job.args.trim();
-  if (question === "" || question.length > MAX_QUESTION_CHARS) return null;
-  return { args: [question] };
+/** `/review` takes no arguments; it is the only command a claim may hand out (#203). */
+function commandOf(job: Job): ReviewCommand | null {
+  return job.command === "review" ? "review" : null;
+}
+
+/** The largest skill text a Dynamic job may carry, in UTF-8 bytes (`PROJECT_DYNAMIC_LIMITS`). */
+const MAX_DYNAMIC_SKILL_BYTES = 16 * 1024;
+const MAX_DYNAMIC_MODEL_CHARS = 200;
+
+/**
+ * The Dynamic options of a job (#195), taken from the project's settings resolved at claim time. Only
+ * model/skill/limits: there is no field for the fixed core, a command, an endpoint or a permission,
+ * so nothing of that kind can be smuggled in. `null` when the options are missing or unusable.
+ */
+function dynamicOptionsOf(options: JobOptions): DynamicReviewOptions | null {
+  const dynamic = options.dynamic;
+  if (dynamic === undefined) return null;
+  if (
+    !MODEL_NAME_PATTERN.test(dynamic.model) ||
+    dynamic.model.length > MAX_DYNAMIC_MODEL_CHARS
+  )
+    return null;
+  if (
+    new TextEncoder().encode(dynamic.skill).byteLength > MAX_DYNAMIC_SKILL_BYTES
+  )
+    return null;
+  if (
+    !Number.isInteger(dynamic.maxFindings) ||
+    dynamic.maxFindings < 1 ||
+    dynamic.maxFindings > 30
+  )
+    return null;
+  return {
+    model: dynamic.model,
+    skill: dynamic.skill,
+    limits: { maxFindings: dynamic.maxFindings },
+  };
+}
+
+/**
+ * The checkout facts a Dynamic job carries. The head SHA is the one that was queued; the base is the
+ * identity the provider reported. `comparison` is a declared mode, not proof: the checkout verifies
+ * completeness before it trusts it, and `previousReviewedSha` is the head of the last successful
+ * review of the same kind (#199), or null; `attemptedShas` are the heads of the earlier jobs that did
+ * not succeed (#255, left out when there are none) and `attemptedShasTruncated` (#257) says the list was
+ * cut, left out unless true. Nothing here is a permission or an endpoint.
+ */
+function claimBaseOf(
+  repositoryFullName: string,
+  baseRef: string,
+  headSha: string,
+  previousReviewedSha: string | null,
+  attempted: AttemptedShas,
+): ClaimBase {
+  return {
+    repository: repositoryFullName,
+    baseRef,
+    headSha,
+    previousReviewedSha,
+    // Left out when empty or false: a runner from before #255/#257 has a closed job contract and
+    // rejects a key it does not know.
+    ...(attempted.shas.length === 0 ? {} : { attemptedShas: attempted.shas }),
+    ...(attempted.truncated ? { attemptedShasTruncated: true } : {}),
+    comparison: "full",
+  };
 }
 
 async function prepare(
   deps: ClaimDeps,
   claimed: NonNullable<ClaimResult>,
+  engines: readonly RunnerEngine[],
 ): Promise<Prepared> {
   const { job, leaseToken } = claimed;
 
@@ -211,13 +291,24 @@ async function prepare(
         : llm.reason,
     );
 
-  const args = argsOf(job);
-  if (args === null) return refuse("job_args_invalid");
+  const command = commandOf(job);
+  if (command === null) return refuse("job_args_invalid");
   const options = await deps.jobOptions.optionsFor(job);
   if (Object.keys(options.env).some((key) => !RUNNER_ENV_KEY_PATTERN.test(key)))
     return refuse("job_env_invalid");
   const llmOptions = llmOptionsOf(options);
   if (llmOptions === null) return refuse("job_llm_options_invalid");
+
+  // #195: a Dynamic job is only built for a runner that advertised `opencode`, and it must carry the
+  // project's Dynamic options. Both are checked before any credential is created.
+  const dynamic =
+    job.reviewKind === "dynamic" ? dynamicOptionsOf(options) : null;
+  if (job.reviewKind === "dynamic") {
+    if (!engines.includes("opencode"))
+      return refuse("dynamic_engine_unavailable");
+    if (dynamic === null) return refuse("dynamic_config_invalid");
+  }
+
   if (job.leaseExpiresAt === null)
     throw new Error(`Claimed job ${job.id} has no lease expiry.`);
 
@@ -245,8 +336,9 @@ async function prepare(
     url: repository.url,
   };
 
-  // The pull request must still be there and open; its URL comes from the platform.
+  // The pull request must still be there and open; its URL and base branch come from the platform.
   let prUrl: string;
+  let baseRef: string;
   try {
     const pullRequest = await provider.getPullRequest(
       integration,
@@ -255,6 +347,7 @@ async function prepare(
     );
     if (pullRequest.state !== "open") return refuse("pull_request_closed");
     prUrl = pullRequest.url;
+    baseRef = pullRequest.baseRef;
   } catch (error) {
     if (
       error instanceof IntegrationError &&
@@ -297,24 +390,63 @@ async function prepare(
   // replace them. The job never carries `fallbackModels`: the MVP has no fallback chain.
   const llmAccess = revealLlmAccess(llm.access);
   const maxTokens = llmOptions.maxTokens ?? llmAccess.contextWindowTokens;
-  const input: RunnerJobInput = {
-    prUrl,
-    command: job.command,
-    ...args,
-    git: {
-      provider: "github",
-      baseUrl: git.baseUrl,
-      token: git.token,
-      botLogin: git.botLogin,
-    },
-    llm: {
-      provider: llmAccess.provider,
-      model: llmOptions.model ?? llmAccess.model,
-      apiKey: llmAccess.apiKey,
-      ...(maxTokens === null ? {} : { maxTokens }),
-    },
-    env: options.env,
-  };
+  // #199: the head of the last successful Dynamic review of this pull request, so the dynamic job
+  // can compare against it. A Diff job never carries a base, so it is not looked up.
+  const previousReviewedSha =
+    job.reviewKind === "dynamic" ? await deps.previousReviewedSha(job) : null;
+  const attempted: AttemptedShas =
+    job.reviewKind === "dynamic"
+      ? await deps.attemptedShas(job)
+      : { shas: [], truncated: false };
+  // The exact legacy Diff payload for every Diff job, whatever kind of runner asked: the keys are in
+  // the order the previous release wrote them, byte for byte (prUrl, command, git, llm, env;
+  // llm.provider, model, apiKey, maxTokens), so a golden serialization matches. A Dynamic job is only
+  // ever handed to a runner that advertised `opencode`, so its tagged fields never reach an old runner.
+  const input: RunnerJobInput =
+    dynamic === null
+      ? {
+          prUrl,
+          command,
+          git: {
+            provider: "github",
+            baseUrl: git.baseUrl,
+            token: git.token,
+            botLogin: git.botLogin,
+          },
+          llm: {
+            provider: llmAccess.provider,
+            model: llmOptions.model ?? llmAccess.model,
+            apiKey: llmAccess.apiKey,
+            ...(maxTokens === null ? {} : { maxTokens }),
+          },
+          env: options.env,
+        }
+      : {
+          prUrl,
+          command,
+          reviewKind: "dynamic",
+          dynamic,
+          base: claimBaseOf(
+            repo.fullName,
+            baseRef,
+            job.headSha,
+            previousReviewedSha,
+            attempted,
+          ),
+          git: {
+            provider: "github",
+            baseUrl: git.baseUrl,
+            token: git.token,
+            botLogin: git.botLogin,
+          },
+          llm: {
+            provider: llmAccess.provider,
+            model: dynamic.model,
+            apiKey: llmAccess.apiKey,
+            ...(maxTokens === null ? {} : { maxTokens }),
+          },
+          env: {},
+        };
   return {
     kind: "ready",
     response: {
@@ -408,15 +540,16 @@ async function giveBack(
 export async function handleClaim(
   deps: ClaimDeps,
   runnerId: string,
+  engines: readonly RunnerEngine[],
 ): Promise<Response> {
   for (let refused = 0; refused < MAX_REFUSED_PER_REQUEST; refused += 1) {
-    const claimed = await deps.queue.claimNext(runnerId);
+    const claimed = await deps.queue.claimNext(runnerId, engines);
     if (claimed === null) return noContent();
 
     // Whatever goes wrong from here on, the job is given back instead of staying under a lease that
     // nobody uses (it would only run out after two minutes).
     try {
-      const prepared = await prepare(deps, claimed);
+      const prepared = await prepare(deps, claimed, engines);
 
       if (prepared.kind === "refused") {
         await endJob(

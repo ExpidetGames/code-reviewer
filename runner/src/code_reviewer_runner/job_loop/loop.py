@@ -23,10 +23,18 @@ Rules the code below follows (see the CR-29 decisions):
 import asyncio
 import json
 import logging
-from collections.abc import Mapping
+import shlex
+from collections.abc import Callable, Mapping
 from typing import Any
 
-from code_reviewer_runner.job import JobError, parse_job
+from code_reviewer_runner.capabilities import (
+    ENGINE_DYNAMIC,
+    ENGINES_VARIABLE,
+    OPENCODE_COMMAND_VARIABLE,
+    RIPGREP_PATH_VARIABLE,
+)
+from code_reviewer_runner.dynamic_review.engine_user import sweep_user
+from code_reviewer_runner.job import Job, JobError, ReviewKind, parse_job
 from code_reviewer_runner.job_loop.api import (
     MAX_RETRY_AFTER_SECONDS,
     ApiError,
@@ -55,10 +63,26 @@ from code_reviewer_runner.job_loop.reporting import (
     result_from_outcome,
 )
 from code_reviewer_runner.job_loop.settings import LoopSettings, default_job_command
+from code_reviewer_runner.lease_check import LeaseState
 from code_reviewer_runner.pr_agent_config import PASSTHROUGH_VARIABLES
 from code_reviewer_runner.result import ErrorCode
 
 TIMEOUT_VARIABLE = "RUNNER_JOB_TIMEOUT_SECONDS"
+# #260: the lease check right before a Dynamic run publishes. Up to three tries, a second and two
+# seconds apart, within less than the 45 seconds the job process waits for the answer.
+LEASE_CHECK_ATTEMPTS = 3
+LEASE_CHECK_PAUSE_SECONDS = 1.0
+LEASE_CHECK_BUDGET_SECONDS = 40.0
+# The operator's non-secret Dynamic configuration, read by the Dynamic job process: the model
+# description and the engine user and ports of the slot (the names of `supervisor.py` and
+# `static_isolation.py`).
+DYNAMIC_PASSTHROUGH_VARIABLES = (
+    "RUNNER_DYNAMIC_CAPABILITIES",
+    "RUNNER_DYNAMIC_ENGINE_UID",
+    "RUNNER_DYNAMIC_ENGINE_GID",
+    "RUNNER_DYNAMIC_PROXY_PORT",
+    "RUNNER_DYNAMIC_ENGINE_PORT",
+)
 # The pause after a failure never starts below this, however short the poll interval is.
 MIN_BACKOFF_SECONDS = 5.0
 # A shutdown report is tried for this long; the process is going away either way.
@@ -107,6 +131,7 @@ class RunnerLoop:
         logger: logging.Logger | None = None,
         environment: Mapping[str, str] | None = None,
         masker: SecretMasker | None = None,
+        sweeper: Callable[[int, int], bool] = sweep_user,
     ) -> None:
         self._settings = settings
         self._api = api
@@ -119,6 +144,11 @@ class RunnerLoop:
         self._hard_stop = asyncio.Event()
         self._force = asyncio.Event()
         self._tasks: set[asyncio.Task[None]] = set()
+        # Ends everything the engine user runs (uid, gid); it is only called once no Dynamic job
+        # process runs, under the lock that also guards the start of one.
+        self._sweeper = sweeper
+        self._engine_lock = asyncio.Lock()
+        self._engine_jobs = 0
 
     # -- control ------------------------------------------------------------------------------
 
@@ -247,7 +277,7 @@ class RunnerLoop:
         finally:
             self._masker.discard(claimed.id)
 
-    def _child_environment(self) -> dict[str, str]:
+    def _child_environment(self, job: Job) -> dict[str, str]:
         """Only the plain runtime variables; never the runner token or anything of another job."""
         env = {
             name: self._environment[name]
@@ -255,6 +285,28 @@ class RunnerLoop:
             if name in self._environment
         }
         env[TIMEOUT_VARIABLE] = f"{self._settings.job_timeout:g}"
+        if job.review_kind is ReviewKind.DYNAMIC:
+            env.update(self._dynamic_environment())
+        return env
+
+    def _dynamic_environment(self) -> dict[str, str]:
+        """What only a Dynamic job process gets (#202), all of it decided by trusted configuration.
+
+        The engines the startup self-check advertised, the engine command and `rg` it verified
+        (never ones the operator typed) and the operator's description of the model and of the
+        slot. A runner whose check failed hands over no command: the job process then refuses with
+        `dynamic_engine_unavailable`.
+        """
+        env = {
+            name: self._environment[name]
+            for name in DYNAMIC_PASSTHROUGH_VARIABLES
+            if name in self._environment
+        }
+        env[ENGINES_VARIABLE] = ",".join(self._settings.engines)
+        if ENGINE_DYNAMIC in self._settings.engines and self._settings.dynamic_command:
+            env[OPENCODE_COMMAND_VARIABLE] = shlex.join(self._settings.dynamic_command)
+            if self._settings.dynamic_ripgrep:
+                env[RIPGREP_PATH_VARIABLE] = self._settings.dynamic_ripgrep
         return env
 
     def _ms_since(self, started: float) -> int:
@@ -279,10 +331,22 @@ class RunnerLoop:
             # process reads the same JSON.
             spec = ProcessSpec(
                 argv=self._settings.job_command,
-                env=self._child_environment(),
+                env=self._child_environment(job),
                 stdin=json.dumps(claimed.input).encode("ascii"),
+                # A Dynamic job is the root supervisor (it drops the engine to its own user); every
+                # other job drops to the unprivileged job user when the loop itself is root.
+                run_as=(
+                    None if job.review_kind is ReviewKind.DYNAMIC else self._settings.diff_job_user
+                ),
+                # #260: a Dynamic job writes its own comment, so it asks right before (a Diff job
+                # does not publish this way).
+                lease_check=(
+                    (lambda: self._confirm_lease(claimed))
+                    if job.review_kind is ReviewKind.DYNAMIC
+                    else None
+                ),
             )
-            process = await self._launcher.start(spec)
+            process = await self._start_process(spec, job)
         except Exception as error:
             self._log.error(
                 "job %s: cannot start the job process (%s)", claimed.id, type(error).__name__
@@ -294,7 +358,10 @@ class RunnerLoop:
             )
             await self._report(claimed, result, window=self._settings.complete_retry_window)
             return
-        result = await self._supervise(claimed, process, redactor, started)
+        try:
+            result = await self._supervise(claimed, process, redactor, started)
+        finally:
+            await self._after_process(job)
         if result is None:
             return
         await self._report(
@@ -307,6 +374,45 @@ class RunnerLoop:
             ),
             shutdown=result["errorCode"] == RUNNER_SHUTDOWN,
         )
+
+    def _engine_user(self, job: Job) -> tuple[int, int] | None:
+        """The engine user whose leftovers follow this job's process, if it has one."""
+        if job.review_kind is not ReviewKind.DYNAMIC:
+            return None
+        return self._settings.dynamic_engine_user
+
+    async def _start_process(self, spec: ProcessSpec, job: Job) -> RunningProcess:
+        if self._engine_user(job) is None:
+            return await self._launcher.start(spec)
+        # Under the lock that guards the sweep: a sweep that runs while this process is being
+        # started would end the engine of a job that has only just begun.
+        async with self._engine_lock:
+            process = await self._launcher.start(spec)
+            self._engine_jobs += 1
+            return process
+
+    async def _after_process(self, job: Job) -> None:
+        """The job process is gone (however it ended): end what its engine user still runs.
+
+        A job killed outright (SIGKILL, an OOM kill) cannot clean up after itself, and a helper
+        may have left the engine's process group. The loop is root and holds `KILL`; whatever it
+        cannot end here is met by the next job, which sweeps again right after taking the lease
+        and does not start while the user still runs something.
+        """
+        user = self._engine_user(job)
+        if user is None:
+            return
+        async with self._engine_lock:
+            self._engine_jobs -= 1
+            if self._engine_jobs > 0:
+                return  # the user belongs to another job's engine now; its end will sweep
+            try:
+                ended = await asyncio.shield(asyncio.to_thread(self._sweeper, *user))
+            except Exception as error:
+                self._log.error("the engine user could not be swept (%s)", type(error).__name__)
+                return
+        if not ended:
+            self._log.warning("a process of the engine user survived the sweep")
 
     async def _supervise(
         self,
@@ -394,6 +500,39 @@ class RunnerLoop:
                 # the class of an unexpected error is logged, its text may hold part of the input.
                 detail = str(error) if isinstance(error, ApiError) else type(error).__name__
                 self._log.warning("job %s: heartbeat failed (%s)", claimed.id, detail)
+
+    async def _confirm_lease(self, claimed: ClaimedJob) -> LeaseState:
+        """Beat the heart now. A lost lease and a cancelled job are both answered with 409.
+
+        An answer that only says the app could not be reached (5xx, a reset, a timeout) is asked
+        again after a short pause, so one hiccup does not cost a finished review. The whole question
+        stays inside what the process waits for. 409 and 404 are final, and so is a refusal.
+        """
+        try:
+            async with asyncio.timeout(LEASE_CHECK_BUDGET_SECONDS):
+                return await self._ask_app(claimed)
+        except TimeoutError:
+            self._log.warning("job %s: the lease check ran out of time", claimed.id)
+            return LeaseState.UNCONFIRMED
+
+    async def _ask_app(self, claimed: ClaimedJob) -> LeaseState:
+        for attempt in range(1, LEASE_CHECK_ATTEMPTS + 1):
+            try:
+                await self._api.heartbeat(claimed.id, claimed.lease_token)
+            except LeaseLost:
+                self._log.warning("job %s: the lease check before publishing: lost", claimed.id)
+                return LeaseState.LOST
+            except Exception as error:
+                detail = str(error) if isinstance(error, ApiError) else type(error).__name__
+                self._log.warning(
+                    "job %s: the lease check could not be made (%s)", claimed.id, detail
+                )
+                if isinstance(error, ApiUnavailable) and attempt < LEASE_CHECK_ATTEMPTS:
+                    await self._clock.sleep(LEASE_CHECK_PAUSE_SECONDS * 2 ** (attempt - 1))
+                    continue
+                return LeaseState.UNCONFIRMED
+            return LeaseState.HELD
+        return LeaseState.UNCONFIRMED  # pragma: no cover  (the last attempt returns above)
 
     def _log_outcome(self, claimed: ClaimedJob, result: Result, outcome: ProcessOutcome) -> None:
         if result["ok"]:

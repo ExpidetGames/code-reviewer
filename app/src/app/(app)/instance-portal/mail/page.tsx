@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Mail: the mail server (SMTP) and the test mail. Instance admin only.
+// Mail: the mail server (SMTP) and the test mail. Instance admin only. The cards and the danger zone
+// (#184); the page itself just stacks them.
 import type { Metadata } from "next";
 import { requireAdmin } from "@/admin/session";
 import { getAdminService } from "@/admin/shared";
 import { MailForm } from "@/admin/ui/mail-form";
 import { TestMailPanel } from "@/admin/ui/test-mail-panel";
-import { PageHeader } from "@/ui/page-header";
+import { Breadcrumbs } from "@/components/breadcrumbs";
+import { PageHeader } from "@/components/page-header";
 
 export const metadata: Metadata = { title: "Mail · Admin" };
 
@@ -17,19 +19,23 @@ export default async function AdminMailPage() {
     <>
       <PageHeader
         title="Mail"
-        description="The mail server of this instance."
+        breadcrumb={
+          <Breadcrumbs
+            items={[{ label: "Admin", href: "/admin" }, { label: "Mail" }]}
+          />
+        }
       />
-      <section className="settings-section">
+      <div className="flex max-w-[44rem] flex-col gap-6 pt-6">
         {/* Not keyed on the saved values: the form keeps what was typed (which is what was saved) and its
-            "Saved." sentence while the page's data is refreshed; it clears itself after a removal. */}
-        <MailForm settings={settings} />
-      </section>
-      <section className="settings-section">
-        <TestMailPanel
-          configured={settings.smtp.value !== null}
-          adminEmail={user.email}
-        />
-      </section>
+            "Saved." sentence while the page's data is refreshed; it clears itself after a removal. The
+            test mail card is a child so the danger zone stays the last card. */}
+        <MailForm settings={settings}>
+          <TestMailPanel
+            configured={settings.smtp.value !== null}
+            adminEmail={user.email}
+          />
+        </MailForm>
+      </div>
     </>
   );
 }

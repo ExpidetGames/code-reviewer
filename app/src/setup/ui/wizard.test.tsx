@@ -1,16 +1,42 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // @vitest-environment jsdom
-// Pins down the wizard: three steps in order, the choices are kept while going back and forth, the
-// fail-closed hint is shown next to an email or domain rule, the password rule and its reason are
-// shown, and the problems the server reports are shown at the field and take the person to its step.
-import { cleanup, render, screen } from "@testing-library/react";
+// Pins down the wizard: three steps in order, each step one named form with the heading outside it
+// and a visible step count, the choices are kept while going back and forth, the fail-closed hint
+// and the password rule each fit one line with the long text in a hint, and the problems the server
+// reports are shown at the field and take the person to its step.
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { PASSWORD_RULE_HINT } from "../../auth/password-policy.ts";
+import { FAIL_CLOSED_WARNING } from "../../signup/ui/rule-copy.ts";
 import type { SetupApi } from "./api.ts";
+import { FAIL_CLOSED_LINE, PASSWORD_REASON } from "./messages.ts";
 import { splitEntries, Wizard } from "./wizard.tsx";
 
 afterEach(cleanup);
+
+function radio(name: RegExp): HTMLElement {
+  return screen.getByRole("radio", { name });
+}
+
+function isChecked(name: RegExp): boolean {
+  return radio(name).getAttribute("aria-checked") === "true";
+}
+
+/** Opens the InfoHint of that name and returns its text; the trigger opens on hover/focus (#167). */
+async function hintText(
+  user: ReturnType<typeof userEvent.setup>,
+  name: string,
+): Promise<string> {
+  const trigger = screen.getByRole("button", { name });
+  await user.hover(trigger);
+  await waitFor(() =>
+    expect(trigger.getAttribute("aria-describedby")).toBeTruthy(),
+  );
+  const describedBy = trigger.getAttribute("aria-describedby") as string;
+  return document.getElementById(describedBy)?.textContent ?? "";
+}
 
 function renderWizard(
   result: Awaited<ReturnType<SetupApi["complete"]>> = {
@@ -52,23 +78,11 @@ describe("the wizard of an update from before accounts", () => {
     );
     await user.click(screen.getByRole("button", { name: "Next" }));
 
-    expect(
-      (
-        screen.getByRole("radio", {
-          name: /A list of email addresses/,
-        }) as HTMLInputElement
-      ).checked,
-    ).toBe(true);
-    expect(
-      (screen.getByRole("radio", { name: /Everyone/ }) as HTMLInputElement)
-        .checked,
-    ).toBe(false);
+    expect(isChecked(/A list of email addresses/)).toBe(true);
+    expect(isChecked(/Everyone/)).toBe(false);
     expect(screen.getByText(/are not carried over as a rule/)).toBeTruthy();
     await user.click(screen.getByRole("radio", { name: /Everyone/ }));
-    expect(
-      (screen.getByRole("radio", { name: /Everyone/ }) as HTMLInputElement)
-        .checked,
-    ).toBe(true);
+    expect(isChecked(/Everyone/)).toBe(true);
     await user.click(
       screen.getByRole("radio", { name: /Allowed email domains/ }),
     );
@@ -104,10 +118,7 @@ describe("the wizard of an update from before accounts", () => {
     );
     await user.click(screen.getByRole("button", { name: "Next" }));
 
-    expect(
-      (screen.getByRole("radio", { name: /Everyone/ }) as HTMLInputElement)
-        .checked,
-    ).toBe(true);
+    expect(isChecked(/Everyone/)).toBe(true);
     expect(screen.queryByText(/not carried over/)).toBeNull();
   });
 });
@@ -149,10 +160,7 @@ describe("the wizard", () => {
     await toStep3(user);
     await user.click(screen.getByRole("button", { name: "Back" }));
     await user.click(screen.getByRole("button", { name: "Back" }));
-    expect(
-      (screen.getByRole("radio", { name: /Multi-tenant/ }) as HTMLInputElement)
-        .checked,
-    ).toBe(true);
+    expect(isChecked(/Multi-tenant/)).toBe(true);
     await toStep3(user);
     await fillAdmin(user);
 
@@ -171,6 +179,10 @@ describe("the wizard", () => {
       screen.getByRole("radio", { name: /list of email addresses/i }),
     );
     expect(screen.getByText(/nobody except you can sign up/)).toBeTruthy();
+    // The longer shared warning is behind the hint, so the line stays one sentence (#172-T04).
+    expect(
+      await hintText(user, "Why this rule cannot verify anyone yet"),
+    ).toMatch(/mail server or GitHub/);
     await user.type(
       screen.getByLabelText("Email addresses"),
       "anna@example.com, bob@example.org",
@@ -274,6 +286,146 @@ describe("the wizard", () => {
       /Restart the app/,
     );
     expect(onDone).not.toHaveBeenCalled();
+  });
+});
+
+describe("the shape of the steps", () => {
+  // #172-T02
+  it("renders every step as exactly one form named by its heading, which sits outside it", async () => {
+    const { user } = renderWizard();
+
+    const firstHeading = screen.getByRole("heading", {
+      level: 1,
+      name: "How is this instance used?",
+    });
+    const firstForm = screen.getByRole("form", {
+      name: "How is this instance used?",
+    });
+    expect(firstForm.contains(firstHeading)).toBe(false);
+    expect(screen.getAllByRole("form")).toHaveLength(1);
+
+    await user.click(screen.getByRole("button", { name: "Next" }));
+
+    const secondHeading = screen.getByRole("heading", {
+      level: 1,
+      name: "Who may sign up?",
+    });
+    const secondForm = screen.getByRole("form", { name: "Who may sign up?" });
+    expect(secondForm.contains(secondHeading)).toBe(false);
+    expect(screen.getAllByRole("form")).toHaveLength(1);
+
+    await user.click(screen.getByRole("button", { name: "Next" }));
+
+    const thirdHeading = screen.getByRole("heading", {
+      level: 1,
+      name: "Create the admin account",
+    });
+    const thirdForm = screen.getByRole("form", {
+      name: "Create the admin account",
+    });
+    expect(thirdForm.contains(thirdHeading)).toBe(false);
+    expect(screen.getAllByRole("form")).toHaveLength(1);
+  });
+
+  // #172-T03
+  it("shows the step count as text and on the progress element", async () => {
+    const { user } = renderWizard();
+
+    expect(screen.getByText("Step 1 of 3")).toBeTruthy();
+    expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe(
+      "33",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByText("Step 2 of 3")).toBeTruthy();
+    expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe(
+      "67",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByText("Step 3 of 3")).toBeTruthy();
+    expect(screen.getByRole("progressbar").getAttribute("aria-valuenow")).toBe(
+      "100",
+    );
+  });
+
+  // #172-T04
+  it("shows the fail-closed warning as one line with the long text in a hint", async () => {
+    const { user } = renderWizard();
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.click(
+      screen.getByRole("radio", { name: /list of email addresses/i }),
+    );
+
+    expect(screen.getByText(FAIL_CLOSED_LINE)).toBeTruthy();
+    expect(screen.queryByText(FAIL_CLOSED_WARNING)).toBeNull();
+
+    expect(
+      await hintText(user, "Why this rule cannot verify anyone yet"),
+    ).toContain(FAIL_CLOSED_WARNING);
+  });
+
+  // #172-T04
+  it("shows the password rule as one line with the reason in a hint", async () => {
+    const { user } = renderWizard();
+    await toStep3(user);
+
+    expect(screen.getByText(PASSWORD_RULE_HINT)).toBeTruthy();
+    expect(screen.queryByText(PASSWORD_REASON)).toBeNull();
+
+    expect(await hintText(user, "What makes a good password")).toContain(
+      PASSWORD_REASON,
+    );
+  });
+
+  // #172-T04 (rulebook R20)
+  it("moves focus to the field the server refuses", async () => {
+    const { user } = renderWizard({
+      ok: false,
+      status: 422,
+      code: "invalid_input",
+      issues: [{ field: "admin.password", code: "password_too_common" }],
+    });
+    await toStep3(user);
+    await fillAdmin(user, "password1234");
+
+    await user.click(screen.getByRole("button", { name: "Finish setup" }));
+
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByLabelText("Password")),
+    );
+  });
+
+  // #172-T04 (rulebook R20)
+  it("moves focus to a field of an earlier step it goes back to", async () => {
+    const { user } = renderWizard({
+      ok: false,
+      status: 422,
+      code: "invalid_input",
+      issues: [{ field: "signUp.entries", code: "entry_invalid" }],
+    });
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.click(
+      screen.getByRole("radio", { name: /list of email addresses/i }),
+    );
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.type(
+      screen.getByLabelText("Email addresses"),
+      "anna@example.com",
+    );
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await fillAdmin(user);
+
+    await user.click(screen.getByRole("button", { name: "Finish setup" }));
+
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Who may sign up?" }),
+    ).toBeTruthy();
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByLabelText("Email addresses"),
+      ),
+    );
   });
 });
 

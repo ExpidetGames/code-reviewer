@@ -137,22 +137,14 @@ def test_a_project_rule_that_references_the_github_token_stays_literal() -> None
 def test_every_kind_of_reference_in_a_job_option_stays_the_text_that_was_sent(
     text: str,
 ) -> None:
-    job = make_job(
-        env={
-            "PR_REVIEWER__EXTRA_INSTRUCTIONS": text,
-            "PR_DESCRIPTION__EXTRA_INSTRUCTIONS": text,
-            "PR_CODE_SUGGESTIONS__EXTRA_INSTRUCTIONS": text,
-            "PR_QUESTIONS__EXTRA_INSTRUCTIONS": text,
-        }
-    )
+    job = make_job(env={"PR_REVIEWER__EXTRA_INSTRUCTIONS": text})
 
     with request_scope() as settings:
         configure_settings(job, settings, RepoSettingsGuard())
 
-        for section in ("pr_reviewer", "pr_description", "pr_code_suggestions", "pr_questions"):
-            value = settings.get(f"{section}.extra_instructions")
-            assert value == text
-            assert type(value) is str
+        value = settings.get("pr_reviewer.extra_instructions")
+        assert value == text
+        assert type(value) is str
 
 
 # CR-45-T03
@@ -192,16 +184,12 @@ def test_every_kind_of_reference_in_a_repository_file_stays_the_text_that_was_se
         with request_scope() as settings:
             configure_settings(make_job(), settings, guard)
 
-            content = "".join(
-                f'[{section}]\nextra_instructions = """{text}"""\n'
-                for section in ("pr_reviewer", "pr_description", "pr_code_suggestions")
-            )
+            content = f'[pr_reviewer]\nextra_instructions = """{text}"""\n'
             apply_repo_file(tmp_path, content)
 
-            for section in ("pr_reviewer", "pr_description", "pr_code_suggestions"):
-                value = settings.get(f"{section}.extra_instructions")
-                assert value == text
-                assert type(value) is str
+            value = settings.get("pr_reviewer.extra_instructions")
+            assert value == text
+            assert type(value) is str
     finally:
         uninstall()
 
@@ -229,12 +217,10 @@ def test_the_first_load_of_the_environment_the_runner_builds_evaluates_nothing(
         monkeypatch.setenv(name, value)
     monkeypatch.setenv("CANARY_ENV", CANARY)
     monkeypatch.setenv("PR_REVIEWER__EXTRA_INSTRUCTIONS", "@format {env[CANARY_ENV]}")
-    monkeypatch.setenv("PR_DESCRIPTION__EXTRA_INSTRUCTIONS", "@jinja {{ env.CANARY_ENV }}")
 
     settings = fresh_settings()
 
     assert settings.pr_reviewer.extra_instructions == "@format {env[CANARY_ENV]}"
-    assert settings.pr_description.extra_instructions == "@jinja {{ env.CANARY_ENV }}"
 
 
 # CR-45-T04

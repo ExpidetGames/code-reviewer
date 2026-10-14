@@ -12,6 +12,7 @@ import {
   type Page,
 } from "@playwright/test";
 import { randomUUID } from "node:crypto";
+import { signOutThroughTheMenu } from "../helpers/github-fake";
 import { e2eEnv } from "../helpers/e2e-env";
 import { messageTo, readInbox, verificationLinkTo } from "../helpers/mail";
 
@@ -21,7 +22,7 @@ const ADDRESS = `forgetful-${randomUUID().slice(0, 8)}@e2e.test`;
 const OLD_PASSWORD = "e2e-forgetful-passphrase-old-41";
 const NEW_PASSWORD = "e2e-forgetful-passphrase-new-93";
 const ANSWER =
-  "Check your inbox. If this address has an account that signs in with a password, we sent it a link to choose a new password. The link works once and for 30 minutes.";
+  "Check your inbox. If this address has an account that signs in with a password, we sent it a link to choose a new password.";
 
 async function signInThroughTheForm(
   page: Page,
@@ -98,7 +99,7 @@ test.describe("resetting a password by mail", () => {
     await expect(page).toHaveURL(/\/no-access$/);
 
     // The link works once.
-    await page.getByRole("button", { name: "Sign out" }).click();
+    await signOutThroughTheMenu(page, { name: ADDRESS.split("@")[0] ?? "" });
     await page.goto(link);
     await page
       .getByLabel("New password")
@@ -108,7 +109,7 @@ test.describe("resetting a password by mail", () => {
       .fill("e2e-forgetful-passphrase-third-17");
     await page.getByRole("button", { name: "Set the password" }).click();
     await expect(
-      page.getByRole("alert").filter({ hasText: "not valid any more" }),
+      page.getByRole("alert").filter({ hasText: "no longer works" }),
     ).toBeVisible();
   });
 

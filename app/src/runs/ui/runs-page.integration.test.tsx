@@ -2,10 +2,11 @@
 
 // @vitest-environment jsdom
 // Pins down the Runs page and the page of one run with real data: runs made through the job queue in
-// a real SQLite file, the filter from the address, and the not-found case. Rendering is the real
-// component tree.
+// a real SQLite file, the filter from the address (the toolbar follows it without a remount key), and
+// the not-found case. Rendering is the real component tree.
 import { cleanup, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createProjectsRepository } from "../../db/repositories/projects-repository.ts";
 import { createProjectService } from "../../projects/service.ts";
 import { createLastRunSource } from "../runs-service.ts";
@@ -13,6 +14,11 @@ import { createRunsFixture } from "../../test-support/runs.ts";
 import { loadRunDetailPage, RunDetailPageContent } from "./run-detail-page.tsx";
 import { loadRunsPage, RunsPageContent } from "./runs-page.tsx";
 import { defaultWorkspaceId } from "../../test-support/workspaces.ts";
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  usePathname: () => "/w/acme/runs",
+}));
 
 afterEach(cleanup);
 
@@ -57,10 +63,21 @@ async function openRuns() {
   };
 }
 
+/** The data rows of the runs table, without its header row. */
 function rowTexts(): string[] {
-  return within(screen.getByRole("list", { name: "Runs" }))
-    .getAllByRole("listitem")
+  return within(screen.getByRole("table", { name: "Runs" }))
+    .getAllByRole("row")
+    .slice(1)
     .map((row) => row.textContent ?? "");
+}
+
+async function optionLabels(name: string): Promise<string[]> {
+  const user = userEvent.setup();
+  await user.click(screen.getByLabelText(name));
+  const options = await screen.findAllByRole("option");
+  const labels = options.map((option) => option.textContent ?? "");
+  await user.keyboard("{Escape}");
+  return labels;
 }
 
 describe("the Runs page", () => {
@@ -72,13 +89,17 @@ describe("the Runs page", () => {
 
     const rows = rowTexts();
     expect(rows).toHaveLength(4);
-    expect(rows[0]).toContain(`acme/widgets #${app.widgetsWaiting.prNumber}`);
+    expect(rows[0]).toContain("acme/widgets");
+    expect(rows[0]).toContain(`#${String(app.widgetsWaiting.prNumber)}`);
     expect(rows[0]).toContain("Waiting");
-    expect(rows[1]).toContain(`acme/widgets #${app.widgetsFailed.prNumber}`);
+    expect(rows[1]).toContain("acme/widgets");
+    expect(rows[1]).toContain(`#${String(app.widgetsFailed.prNumber)}`);
     expect(rows[1]).toContain("Failed");
-    expect(rows[2]).toContain(`acme/gadgets #${app.gadgetsDone.prNumber}`);
+    expect(rows[2]).toContain("acme/gadgets");
+    expect(rows[2]).toContain(`#${String(app.gadgetsDone.prNumber)}`);
     expect(rows[2]).toContain("Succeeded");
-    expect(rows[3]).toContain(`acme/gadgets #${app.gadgetsFailed.prNumber}`);
+    expect(rows[3]).toContain("acme/gadgets");
+    expect(rows[3]).toContain(`#${String(app.gadgetsFailed.prNumber)}`);
   });
 
   // CR-35-T02
@@ -96,21 +117,21 @@ describe("the Runs page", () => {
     expect(rowTexts()[0]).toContain("Failed");
   });
 
-  it("offers the projects and statuses in the filter and keeps the chosen ones selected", async () => {
+  it("offers the projects and statuses in the filter and shows the chosen ones", async () => {
     const app = await openRuns();
 
     await app.page({ repository: app.f.otherRepositoryId, status: "failed" });
 
-    const project = screen.getByLabelText("Project") as HTMLSelectElement;
-    const status = screen.getByLabelText("Status") as HTMLSelectElement;
-    expect([...project.options].map((option) => option.text)).toEqual([
+    expect(screen.getByLabelText("Project").textContent).toContain(
+      "acme/widgets",
+    );
+    expect(screen.getByLabelText("Status").textContent).toContain("Failed");
+    expect(await optionLabels("Project")).toEqual([
       "All projects",
       "acme/gadgets",
       "acme/widgets",
     ]);
-    expect(project.value).toBe(app.f.otherRepositoryId);
-    expect(status.value).toBe("failed");
-    expect([...status.options].map((option) => option.text)).toEqual([
+    expect(await optionLabels("Status")).toEqual([
       "All statuses",
       "Waiting",
       "Running",
@@ -124,7 +145,8 @@ describe("the Runs page", () => {
     ).toBe("/w/acme/runs");
   });
 
-  it("moves the selects with the address when the filter is reset or the person goes back", async () => {
+  // #175-T01
+  it("moves the controls with the address when the filter is reset or the person goes back", async () => {
     const app = await openRuns();
     const data = (
       searchParams: Record<string, string | string[] | undefined>,
@@ -145,14 +167,14 @@ describe("the Runs page", () => {
       />,
     );
     const values = () => [
-      (screen.getByLabelText("Project") as HTMLSelectElement).value,
-      (screen.getByLabelText("Status") as HTMLSelectElement).value,
+      screen.getByLabelText("Project").textContent,
+      screen.getByLabelText("Status").textContent,
     ];
-    expect(values()).toEqual([app.f.repositoryId, "failed"]);
+    expect(values()).toEqual(["acme/gadgets", "Failed"]);
 
-    // "Reset filter" is a link to /runs: the page renders again with no filter.
+    // "Reset filter" is a link to /runs: the page renders again with no filter, without a remount key.
     rerender(<RunsPageContent workspaceSlug="acme" data={await data({})} />);
-    expect(values()).toEqual(["", ""]);
+    expect(values()).toEqual(["All projects", "All statuses"]);
 
     // Back brings the filter back.
     rerender(
@@ -161,7 +183,7 @@ describe("the Runs page", () => {
         data={await data({ status: "succeeded" })}
       />,
     );
-    expect(values()).toEqual(["", "succeeded"]);
+    expect(values()).toEqual(["All projects", "Succeeded"]);
   });
 
   // #80
@@ -187,10 +209,7 @@ describe("the Runs page", () => {
 
     render(<RunsPageContent workspaceSlug="acme" data={data} />);
 
-    const project = screen.getByLabelText("Project") as HTMLSelectElement;
-    expect([...project.options].map((option) => option.text)).toEqual([
-      "All projects",
-    ]);
+    expect(await optionLabels("Project")).toEqual(["All projects"]);
   });
 
   // #80
@@ -200,8 +219,7 @@ describe("the Runs page", () => {
 
     await app.page();
 
-    const project = screen.getByLabelText("Project") as HTMLSelectElement;
-    expect([...project.options].map((option) => option.text)).toEqual([
+    expect(await optionLabels("Project")).toEqual([
       "All projects",
       "acme/gadgets",
       "acme/widgets",
@@ -233,6 +251,9 @@ describe("the Runs page", () => {
     render(<RunsPageContent workspaceSlug="acme" data={data} />);
 
     expect(screen.getByRole("heading", { name: "No runs yet" })).toBeTruthy();
+    expect(
+      screen.getByRole("link", { name: "Open projects" }).getAttribute("href"),
+    ).toBe("/w/acme/projects");
   });
 
   it("does not take a filter it does not know for no filter", async () => {
@@ -243,7 +264,7 @@ describe("the Runs page", () => {
     expect(
       screen.getByRole("heading", { name: "This filter is not valid" }),
     ).toBeTruthy();
-    expect(screen.queryByRole("list", { name: "Runs" })).toBeNull();
+    expect(screen.queryByRole("table", { name: "Runs" })).toBeNull();
   });
 });
 
@@ -265,8 +286,18 @@ describe("the page of one run", () => {
     render(<RunDetailPageContent workspaceSlug="acme" data={data} />);
 
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
-      `acme/gadgets #${job.prNumber}`,
+      `acme/gadgets #${String(job.prNumber)}`,
     );
+    // #165 breadcrumb rule: the detail starts at the Runs list (the area root) and ends at the run.
+    const crumbs = screen.getByRole("navigation", { name: "breadcrumb" });
+    expect(
+      within(crumbs).getByRole("link", { name: "Runs" }).getAttribute("href"),
+    ).toBe("/w/acme/runs");
+    expect(
+      within(crumbs)
+        .getByText(`acme/gadgets #${String(job.prNumber)}`)
+        .getAttribute("aria-current"),
+    ).toBe("page");
     expect(
       screen.getByText(
         "GitHub is limiting requests right now. Try again later.",

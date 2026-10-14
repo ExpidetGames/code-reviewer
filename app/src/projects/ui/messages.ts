@@ -6,28 +6,71 @@
 // gets a generic one.
 import type { SyncErrorCode } from "../../integrations/sync/errors.ts";
 import {
+  CROSS_SITE_REQUEST_RELOAD_PAGE,
+  REQUEST_NOT_UNDERSTOOD,
+} from "../../copy/messages.ts";
+import {
   describeTransportFailure,
   GENERIC_FAILURE,
 } from "../../ui/transport-messages.ts";
 import type { ProjectErrorCode } from "../errors.ts";
 
+/** The one owner of the three project state wordings (#169): the list badge and the settings page. */
+export const PROJECT_STATE_LABEL: Record<
+  "active" | "inactive" | "unavailable",
+  string
+> = {
+  active: "Active",
+  inactive: "Inactive",
+  unavailable: "Unavailable",
+};
+
+/** The badge tone of a state; a state is never told by colour alone, the label always stands next to it. */
+export const PROJECT_STATE_BADGE: Record<
+  "active" | "inactive" | "unavailable",
+  "success" | "neutral" | "warning"
+> = {
+  active: "success",
+  inactive: "neutral",
+  unavailable: "warning",
+};
+
+/**
+ * What the settings page says about a project that is not running reviews (#174). The state itself is
+ * the badge next to the title; what it means for this page is a row of the one "Needs attention" strip.
+ * An active project has no row.
+ */
+export const PROJECT_STATE_NOTICE: Record<
+  "inactive" | "unavailable",
+  { severity: "warning" | "error"; title: string; detail: string }
+> = {
+  inactive: {
+    severity: "warning",
+    title: "Project is inactive",
+    detail:
+      "No reviews run until the project is activated. You can save settings now; they apply once it is switched on.",
+  },
+  unavailable: {
+    severity: "error",
+    title: "Repository is unavailable",
+    detail:
+      "The GitHub App cannot read this repository any more. Its settings are kept.",
+  },
+};
+
 const FAILURE_COPY: Record<ProjectErrorCode | SyncErrorCode, string> = {
-  PROJECT_REQUEST_INVALID:
-    "The request was not understood. Reload the page and try again.",
-  PROJECT_CROSS_SITE_REQUEST:
-    "The request did not come from this page. Reload the page and try again.",
+  PROJECT_REQUEST_INVALID: REQUEST_NOT_UNDERSTOOD,
+  PROJECT_CROSS_SITE_REQUEST: CROSS_SITE_REQUEST_RELOAD_PAGE,
   PROJECT_BODY_TOO_LARGE:
     "The request was too large. Reload the page and try again.",
-  PROJECT_CONTENT_TYPE_UNSUPPORTED:
-    "The request was not understood. Reload the page and try again.",
+  PROJECT_CONTENT_TYPE_UNSUPPORTED: REQUEST_NOT_UNDERSTOOD,
   PROJECT_REPOSITORY_NOT_FOUND:
     "This repository does not exist any more. Reload the page.",
   PROJECT_REPOSITORY_UNAVAILABLE:
     "This repository is no longer available to the GitHub App, so it cannot be activated.",
   PROJECT_INTEGRATION_UNAVAILABLE:
     "The GitHub App installation of this repository is suspended or removed, so the repository cannot be activated.",
-  SYNC_CROSS_SITE_REQUEST:
-    "The request did not come from this page. Reload the page and try again.",
+  SYNC_CROSS_SITE_REQUEST: CROSS_SITE_REQUEST_RELOAD_PAGE,
 };
 
 function hasCopy(code: string): code is keyof typeof FAILURE_COPY {

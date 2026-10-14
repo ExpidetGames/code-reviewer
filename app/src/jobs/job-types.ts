@@ -2,8 +2,12 @@
 
 // The vocabulary of the job queue: what a job is and what goes in and out. Everything here is plain
 // data; the rules live in job-status.ts, job-input.ts and job-queue.ts.
-import type { ReviewCommand } from "../integrations/types.ts";
+import type {
+  ReviewCommand,
+  StoredReviewCommand,
+} from "../integrations/types.ts";
 import type { JsonValue } from "../integrations/types.ts";
+import type { ProjectReviewKind } from "../review-settings/settings.ts";
 import type { JobStatus } from "./job-status.ts";
 
 /**
@@ -24,7 +28,14 @@ export type Job = {
   prUrl: string;
   /** The head commit of the pull request when the job was created (a reference, not a promise). */
   headSha: string;
-  command: ReviewCommand;
+  /**
+   * The review kind the job was queued for (#195): `diff` runs PR-Agent, `dynamic` runs the
+   * read-only agent. It is pinned when the job is enqueued from the project's settings, so a later
+   * kind change cancels this waiting job instead of running it under the wrong engine.
+   */
+  reviewKind: ProjectReviewKind;
+  /** The command of the job. Historical rows may still carry a removed one (#203). */
+  command: StoredReviewCommand;
   /** Text after the command; an empty string when there is none. Untrusted: it comes from a comment. */
   args: string;
   triggerKind: JobTriggerKind;
@@ -58,6 +69,13 @@ export type EnqueueJobInput = {
   prNumber: number;
   prUrl: string;
   headSha: string;
+  /**
+   * The review kind the job runs (#195). Test-only: no producer sets it. The queue resolves the kind
+   * from the project's settings inside the enqueue transaction through the one shared resolver
+   * (`review-kind.ts`), so no entry point can choose it. Left out, the stored kind applies; a project
+   * that never chose one is `diff`.
+   */
+  reviewKind?: ProjectReviewKind;
   command: ReviewCommand;
   /** Defaults to an empty string. */
   args?: string;
@@ -115,6 +133,14 @@ export const JOB_ERROR_CODES = [
   "pull_request_closed",
   /** Cancelled because the pull request was turned into a draft (automatic jobs only). */
   "pull_request_draft",
+  /** Cancelled because the project's review kind changed while the job was waiting (#195). */
+  "review_kind_changed",
+  /** Cancelled because no runner that can run this job claimed it within the deadline (#195). */
+  "no_capable_runner",
+  /** Failed because Dynamic Review is not enabled on this instance yet (#195 rollout gate). */
+  "dynamic_review_disabled",
+  /** Cancelled because the job's command was removed from the product (#203). */
+  "command_removed",
 ] as const;
 export type JobErrorCode = (typeof JOB_ERROR_CODES)[number];
 
@@ -143,6 +169,8 @@ export type ReleaseResult =
   | { status: "requeued"; job: Job }
   /** That was the last allowed attempt: the job is failed with the given reason. */
   | { status: "failed"; job: Job }
+  /** The job carried a removed command (#203) and was cancelled instead of requeued. */
+  | { status: "cancelled"; job: Job }
   | { status: "not_holder" };
 
 /**

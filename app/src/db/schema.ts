@@ -83,7 +83,7 @@ export interface VerificationsTable {
   updated_at: string;
 }
 
-/** Which GitHub account a login on the allow list is bound to (src/auth/login-pins.ts). */
+/** Which GitHub account a login on the allow list is bound to; used by the update to accounts (`src/legacy-import/`). */
 export interface AllowedLoginPinsTable {
   /** The lower-cased GitHub login. */
   login: string;
@@ -201,6 +201,12 @@ export interface JobsTable {
   pr_url: string;
   /** 40 hexadecimal characters, lower case. */
   head_sha: string;
+  /**
+   * A ProjectReviewKind (#195), 'diff' for PR-Agent and 'dynamic' for the read-only agent. The
+   * database default is 'diff', so a row written without it (a migration, an older app instance) is a
+   * Diff job.
+   */
+  review_kind: ColumnType<string, string | undefined, string>;
   /** A ReviewCommand (src/integrations/types.ts). */
   command: string;
   /** Text after the command, an empty string when there is none. Untrusted. */

@@ -52,8 +52,8 @@ const openedFields = {
 const commandTrigger: ReviewTrigger = {
   ...openedFields,
   kind: "command",
-  command: "ask",
-  args: "why?",
+  command: "review",
+  args: "",
   commentId: "99001",
 };
 

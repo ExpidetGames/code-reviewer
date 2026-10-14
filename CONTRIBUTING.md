@@ -114,6 +114,10 @@ issue for it.
   and formatted with ruff. `make lint` checks both parts; `pnpm --dir app format` and
   `uv --directory runner run ruff format . ../fakes` fix formatting.
 - Identifiers, comments, documentation and every user visible string are in English.
+- The app is styled with Tailwind CSS v4 and shadcn/ui (components copied into
+  `app/src/components/ui/`). Every colour lives only in `app/src/app/theme.css`; a check under
+  `app/src/ci/colors` fails on a colour literal in any other source file, with no exception. The
+  stylesheet also carries the Tailwind preflight reset and the project's base rules.
 - Keep secrets out of code, logs, test output and commits. Configuration comes from environment
   variables, documented in the `.env.example` files.
 - Update the documentation next to the code you change, and `TESTING.md` if you change how
@@ -134,6 +138,11 @@ files (JSON, YAML, TOML, lock files), Markdown, the license texts, `docs/` and `
 none. A new source file without the header fails a unit test; `make fix-spdx-headers` adds it to every
 file that lacks it. The rules (which files count, how the header looks) are in
 `app/src/ci/spdx-headers/rules.ts`.
+
+One documented exception: the shadcn/ui components copied into `app/src/components/ui/` keep their
+real license. They start with `// SPDX-License-Identifier: MIT` and a provenance line
+(`// Adapted from shadcn/ui (MIT), https://ui.shadcn.com`) instead of the Apache-2.0 header; the
+rule and `make fix-spdx-headers` know that folder. Do not "fix" those headers.
 
 If you add a dependency, check its license. `make check-licenses` (part of `make verify`, and the CI
 job "Licenses: dependency check") fails when a package of `app/pnpm-lock.yaml` or `runner/uv.lock`

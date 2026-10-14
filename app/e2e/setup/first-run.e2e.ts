@@ -6,6 +6,7 @@
 // The journeys run in order: they share that one instance.
 import { expect, test, type Response } from "@playwright/test";
 import { e2eEnv } from "../helpers/e2e-env";
+import { rawRequest } from "../helpers/raw-request";
 import { readSetupCode } from "../helpers/setup";
 
 test.use({ baseURL: e2eEnv.setupAppUrl });
@@ -17,6 +18,60 @@ const submits = (response: Response) =>
 
 test.describe("the first-run setup", () => {
   test.describe.configure({ mode: "serial" });
+
+  // A reverse proxy or a client can send any `X-Forwarded-Proto`; nothing in front of the app can be
+  // told from a client that sends the same. The setup page in place of the page that was asked for
+  // must not depend on it: the proxy builds no address, next.config.ts serves the setup page (bug
+  // #155). Red before the change (500), green after.
+  // #155
+  test("a forged X-Forwarded-Proto does not break the setup gate before the setup", async ({
+    page,
+  }) => {
+    const plain = await rawRequest(page, e2eEnv.setupAppUrl, "/");
+    expect(plain.status).toBe(200);
+    expect(plain.body).toContain("Set up Code Reviewer");
+
+    for (const forwarded of [
+      "https",
+      "http",
+      "HTTPS",
+      "https, http",
+      "javascript",
+      "",
+      "garbage ://",
+    ]) {
+      const label = JSON.stringify(forwarded);
+      const answer = await rawRequest(page, e2eEnv.setupAppUrl, "/", {
+        headers: { "x-forwarded-proto": forwarded },
+      });
+      expect(answer.status, `page ${label}`).toBe(200);
+      expect(answer.body, `page ${label}`).toContain("Set up Code Reviewer");
+    }
+
+    // What a reverse proxy (Coolify, Traefik) sends with a request.
+    const proxied = await rawRequest(page, e2eEnv.setupAppUrl, "/", {
+      headers: {
+        "x-forwarded-proto": "https",
+        "x-forwarded-host": "reviewer.example.com",
+        "x-forwarded-port": "443",
+      },
+    });
+    expect(proxied.status).toBe(200);
+    expect(proxied.body).toContain("Set up Code Reviewer");
+
+    // An API route answers setup_required, not a 500.
+    for (const forwarded of ["https", "garbage ://"]) {
+      const label = JSON.stringify(forwarded);
+      const answer = await rawRequest(
+        page,
+        e2eEnv.setupAppUrl,
+        "/api/projects",
+        { headers: { "x-forwarded-proto": forwarded } },
+      );
+      expect(answer.status, `api ${label}`).toBe(503);
+      expect(answer.body, `api ${label}`).toContain("setup_required");
+    }
+  });
 
   // #97-SU-20
   test("@smoke an operator reads the code from the log, walks through the three steps and lands in the admin area signed in", async ({
@@ -32,15 +87,16 @@ test.describe("the first-run setup", () => {
     ).toBeVisible();
     expect(await page.content()).not.toContain(code);
 
-    // A wrong code is refused with a sentence, and nothing about it.
-    await page.getByLabel("Setup code").fill("000000");
+    // A wrong code is refused with a sentence, and nothing about it. The form and the input share
+    // the accessible name "Setup code", so the input is addressed by its role (#172).
+    await page.getByRole("textbox", { name: "Setup code" }).fill("000000");
     await page.getByRole("button", { name: "Continue" }).click();
     await expect(
       page.getByRole("alert").filter({ hasText: "not correct" }),
     ).toBeVisible();
 
     // The right one opens the wizard.
-    await page.getByLabel("Setup code").fill(code);
+    await page.getByRole("textbox", { name: "Setup code" }).fill(code);
     await page.getByRole("button", { name: "Continue" }).click();
     await expect(
       page.getByRole("heading", { name: "How is this instance used?" }),
@@ -50,7 +106,7 @@ test.describe("the first-run setup", () => {
     await expect(
       page.getByRole("heading", { name: "Who may sign up?" }),
     ).toBeVisible();
-    await page.getByRole("radio", { name: /Allowed email domains/ }).check();
+    await page.getByRole("radio", { name: /Allowed email domains/ }).click();
     await expect(page.getByText(/nobody except you can sign up/)).toBeVisible();
     await page.getByLabel("Domains", { exact: true }).fill("e2e.test");
     await page.getByRole("button", { name: "Next" }).click();
@@ -75,7 +131,9 @@ test.describe("the first-run setup", () => {
 
     await expect(page).toHaveURL(/\/admin$/);
     await expect(page.getByRole("heading", { name: "Admin" })).toBeVisible();
-    await expect(page.getByText(e2eEnv.adminEmail).first()).toBeVisible();
+    // Signed in as the address the wizard used: the header menu names the account.
+    await page.getByRole("button", { name: "admin", exact: true }).click();
+    await expect(page.getByText(e2eEnv.adminEmail)).toBeVisible();
 
     // The setup is gone: a second visit is a 404, and so is the code form's route.
     const again = await page.goto("/setup");

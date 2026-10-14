@@ -2,10 +2,17 @@
 
 // @vitest-environment jsdom
 // Pins down the mail page's building blocks: what the form sends (an empty password field sends none, the
-// checkbox sends the clear), the sentence for every field the server refuses, the warnings for a connection
-// without encryption and for a certificate that is not checked, that a saved password is never shown, and
-// the test mail button with the words for each class of failure.
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+// checkbox sends the clear), the sentence for every field the server refuses, only the warning of the
+// selected security mode, that a saved password is never shown and each password state is one line, the
+// removal in a confirmed danger zone, and the test mail button with a result in a polite status region and
+// the words for each class of failure.
+import {
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RequestResult } from "../../ui/json-request.ts";
@@ -45,6 +52,7 @@ function view(
       ...never,
     },
     maxWorkspacesPerUser: { value: 10, ...never },
+    dynamicReview: { value: false, ...never },
     smtp: { value: null, password: "none", ...never, ...smtp },
     workspaceCount: 1,
     githubConfigured: false,
@@ -179,10 +187,13 @@ describe("the mail form", () => {
       />,
     );
 
-    expect(screen.getByRole("alert").textContent).toContain("cannot be read");
-    expect(screen.getByRole("alert").textContent).toContain(
-      "Enter the password again",
-    );
+    const note = screen.getByRole("note");
+    expect(note.textContent).toContain("cannot be read");
+    expect(note.textContent).toContain("Enter the password again");
+    // The field still points at the message, so a screen reader hears it (review fix).
+    expect(
+      screen.getByLabelText("Password").getAttribute("aria-describedby"),
+    ).toContain(note.id);
   });
 
   // #100-SM-03
@@ -282,9 +293,7 @@ describe("the mail form", () => {
     const confirmBox = screen.getByRole("checkbox", {
       name: "I understand that the login is sent without encryption",
     });
-    expect(
-      screen.getByText(/password would be sent in the clear/),
-    ).toBeTruthy();
+    expect(screen.getByText(/would be sent in the clear/)).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Save mail server" }));
     await waitFor(() => expect(changeMock).toHaveBeenCalledTimes(1));
     expect(changeMock.mock.calls[0]?.[0]).toMatchObject({
@@ -337,7 +346,7 @@ describe("the mail form", () => {
   });
 
   // #100-SM-07
-  it("removes the mail server only after a second click", async () => {
+  it("removes the mail server only after the dialog is confirmed", async () => {
     const { api: mock, changeMock } = api();
     const user = userEvent.setup();
     render(<MailForm settings={configured()} api={mock} />);
@@ -346,7 +355,10 @@ describe("the mail form", () => {
       screen.getByRole("button", { name: "Remove the mail server" }),
     );
     expect(changeMock).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "Yes, remove it" }));
+    const dialog = await screen.findByRole("alertdialog");
+    await user.click(
+      within(dialog).getByRole("button", { name: "Remove the mail server" }),
+    );
 
     await waitFor(() =>
       expect(changeMock).toHaveBeenCalledWith({ smtp: null }),
@@ -366,6 +378,124 @@ describe("the mail form", () => {
     expect(
       screen.queryByRole("button", { name: "Remove the mail server" }),
     ).toBeNull();
+  });
+
+  // #184-T01
+  it("shows only the warning of the chosen security mode", async () => {
+    const user = userEvent.setup();
+    render(<MailForm settings={view()} api={api().api} />);
+
+    // STARTTLS with the certificate checked: nothing to warn about.
+    expect(screen.queryByRole("note")).toBeNull();
+
+    // The certificate check switched off: one warning about it.
+    await user.click(
+      screen.getByRole("checkbox", {
+        name: "Accept a self-signed certificate",
+      }),
+    );
+    expect(screen.getAllByRole("note")).toHaveLength(1);
+    expect(screen.getByRole("note").textContent).toContain(
+      "not checked at all",
+    );
+
+    // TLS keeps the same single warning and offers no self-signed option change.
+    await user.click(screen.getByRole("radio", { name: /^TLS/ }));
+    expect(screen.getAllByRole("note")).toHaveLength(1);
+    expect(screen.getByRole("note").textContent).toContain(
+      "not checked at all",
+    );
+
+    // No encryption: the certificate question is gone and only the "not encrypted" warning shows.
+    await user.click(screen.getByRole("radio", { name: /None/ }));
+    expect(screen.getAllByRole("note")).toHaveLength(1);
+    expect(screen.getByRole("note").textContent).toContain("not encrypted");
+    expect(screen.getByRole("note").textContent).not.toContain(
+      "not checked at all",
+    );
+  });
+
+  // #184-T02
+  it("keeps the removal in a danger zone with a confirmation dialog, apart from Save", async () => {
+    const { api: mock, changeMock } = api();
+    const user = userEvent.setup();
+    render(<MailForm settings={configured()} api={mock} />);
+
+    const danger = screen.getByRole("region", { name: "Danger zone" });
+    // The title is the card's h2 and gives the card its name.
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Danger zone" }),
+    ).toBeTruthy();
+    // The destructive action is not next to the save action.
+    expect(
+      within(danger).queryByRole("button", {
+        name: "Save mail server",
+      }),
+    ).toBeNull();
+    const opener = within(danger).getByRole("button", {
+      name: "Remove the mail server",
+    });
+
+    await user.click(opener);
+    const dialog = await screen.findByRole("alertdialog");
+    expect(dialog.textContent).toContain("stop working");
+    expect(changeMock).not.toHaveBeenCalled();
+    await user.click(
+      within(dialog).getByRole("button", { name: "Remove the mail server" }),
+    );
+
+    await waitFor(() =>
+      expect(changeMock).toHaveBeenCalledWith({ smtp: null }),
+    );
+  });
+
+  // #184-T04
+  it("renders one line per password state", () => {
+    const { rerender } = render(<MailForm settings={view()} api={api().api} />);
+    expect(screen.getByText("No password is saved.")).toBeTruthy();
+    expect(screen.queryByRole("note")).toBeNull();
+
+    rerender(<MailForm settings={configured()} api={api().api} />);
+    expect(
+      screen.getByText(
+        "A password is saved; leave the field empty to keep it.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText("No password is saved.")).toBeNull();
+
+    rerender(
+      <MailForm
+        settings={configured({ password: "unreadable" })}
+        api={api().api}
+      />,
+    );
+    const lines = screen.getAllByRole("note");
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.textContent).toContain("cannot be read");
+    expect(screen.queryByText(/A password is saved/)).toBeNull();
+  });
+
+  // #184 review: focus the first invalid field after a failed save.
+  it("moves focus to the first invalid field, in the order of the page", async () => {
+    const { api: mock } = api({
+      ok: false,
+      status: 422,
+      code: "invalid_input",
+      issues: [
+        { field: "senderAddress", code: "sender_invalid" },
+        { field: "port", code: "port_not_allowed" },
+        { field: "host", code: "host_invalid" },
+      ],
+    });
+    const user = userEvent.setup();
+    render(<MailForm settings={view()} api={mock} />);
+
+    await user.click(screen.getByRole("button", { name: "Save mail server" }));
+
+    // Host comes first in the card, so it wins over the server's order.
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByLabelText("Host")),
+    );
   });
 });
 
@@ -434,9 +564,9 @@ describe("the test mail button", () => {
     await user.click(screen.getByRole("button", { name: "Send test mail" }));
 
     await waitFor(() =>
-      expect(screen.getByRole("alert").textContent).toContain(sentence),
+      expect(screen.getByRole("status").textContent).toContain(sentence),
     );
-    expect(screen.getByRole("alert").textContent).toContain(
+    expect(screen.getByRole("status").textContent).toContain(
       "535 5.7.8 Authentication credentials invalid",
     );
   });
@@ -456,9 +586,24 @@ describe("the test mail button", () => {
     await user.click(screen.getByRole("button", { name: "Send test mail" }));
 
     await waitFor(() =>
-      expect(screen.getByRole("alert").textContent).toContain(
+      expect(screen.getByRole("status").textContent).toContain(
         "Too many test mails",
       ),
     );
+  });
+
+  // #184-T03
+  it("announces the result in a polite status region", async () => {
+    const { api: mock } = api();
+    const user = userEvent.setup();
+    render(
+      <TestMailPanel configured adminEmail="admin@example.com" api={mock} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Send test mail" }));
+
+    const status = await screen.findByRole("status");
+    expect(status.getAttribute("aria-live")).toBe("polite");
+    expect(status.textContent).toContain("handed to the mail server");
   });
 });

@@ -1,8 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// The content of the Members page: the members with what the viewer may do to them, and (for an Admin or an
-// Owner) the form that invites and the invitations that are waiting. `loadMembersPage` gathers the data from
-// the services (passed in), `MembersPageContent` renders it. The page file only wires the real ones.
+// The content of the Members page (#177): one card for the members with what the viewer may do to them, and
+// (for an Admin or an Owner) one card for the invitations that holds the invite form, the waiting list and
+// its empty state. `loadMembersPage` gathers the data from the services (passed in), `MembersPageContent`
+// renders it. The page file only wires the real ones and the heading.
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "../../components/ui/card.tsx";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "../../components/ui/empty.tsx";
 import type { Member } from "../../db/repositories/workspace-members-repository.ts";
 import type { MailSender } from "../../mail/sender.ts";
 import type { OpenInvitation } from "../invitations.ts";
@@ -12,7 +25,6 @@ import type { WorkspaceApi } from "./api.ts";
 import { InvitationList } from "./invitation-list.tsx";
 import { InviteForm } from "./invite-form.tsx";
 import { MemberList } from "./member-list.tsx";
-import { ROLE_HELP, ROLE_LABEL } from "./role-copy.ts";
 
 export type MembersPageData = {
   members: Member[];
@@ -40,6 +52,16 @@ export async function loadMembersPage(
   return { members, invitations, mailConfigured };
 }
 
+function SectionTitle({ id, children }: { id: string; children: string }) {
+  return (
+    <CardTitle>
+      <h2 id={id} className="text-lg font-semibold tracking-tight">
+        {children}
+      </h2>
+    </CardTitle>
+  );
+}
+
 export function MembersPageContent({
   workspaceSlug,
   viewerId,
@@ -56,52 +78,54 @@ export function MembersPageContent({
 }) {
   const withApi = api === undefined ? {} : { api };
   return (
-    <>
-      <p className="muted">
-        You are {viewerRole === "admin" ? "an" : "a"}{" "}
-        <strong>{ROLE_LABEL[viewerRole]}</strong> of this workspace.{" "}
-        {ROLE_HELP[viewerRole]}
-      </p>
-      <section className="settings-section" aria-labelledby="members-heading">
-        <h2 id="members-heading">Members</h2>
-        <MemberList
-          workspaceSlug={workspaceSlug}
-          viewerId={viewerId}
-          viewerRole={viewerRole}
-          members={data.members}
-          {...withApi}
-        />
-      </section>
+    <div className="flex max-w-[64rem] flex-col gap-6 pt-6">
+      <Card role="region" aria-labelledby="members-heading">
+        <CardHeader>
+          <SectionTitle id="members-heading">Members</SectionTitle>
+        </CardHeader>
+        <CardContent>
+          <MemberList
+            workspaceSlug={workspaceSlug}
+            viewerId={viewerId}
+            viewerRole={viewerRole}
+            members={data.members}
+            {...withApi}
+          />
+        </CardContent>
+      </Card>
       {data.invitations !== null ? (
-        <section
-          className="settings-section"
-          aria-labelledby="invitations-heading"
-        >
-          <h2 id="invitations-heading">Invitations</h2>
-          <p className="muted">
-            {viewerRole === "owner"
-              ? "Owners can invite people with any role."
-              : "Admins can invite Members."}{" "}
-            An invitation is a link that works once, for 7 days, for the address
-            it is made for.{" "}
-            {data.mailConfigured
-              ? "It is sent by mail."
-              : "This instance cannot send mail, so the link is shown once for you to send."}
-          </p>
-          <InviteForm
-            workspaceSlug={workspaceSlug}
-            viewerRole={viewerRole}
-            {...withApi}
-          />
-          <InvitationList
-            workspaceSlug={workspaceSlug}
-            viewerRole={viewerRole}
-            invitations={data.invitations}
-            canResend={data.mailConfigured}
-            {...withApi}
-          />
-        </section>
+        <Card role="region" aria-labelledby="invitations-heading">
+          <CardHeader>
+            <SectionTitle id="invitations-heading">Invitations</SectionTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-5">
+            <InviteForm
+              workspaceSlug={workspaceSlug}
+              viewerRole={viewerRole}
+              {...withApi}
+            />
+            {data.invitations.length === 0 ? (
+              <Empty className="border border-border bg-card">
+                <EmptyHeader>
+                  <EmptyTitle>No invitations waiting.</EmptyTitle>
+                  <EmptyDescription>
+                    Send an invitation above; it appears here until the person
+                    accepts it.
+                  </EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            ) : (
+              <InvitationList
+                workspaceSlug={workspaceSlug}
+                viewerRole={viewerRole}
+                invitations={data.invitations}
+                canResend={data.mailConfigured}
+                {...withApi}
+              />
+            )}
+          </CardContent>
+        </Card>
       ) : null}
-    </>
+    </div>
   );
 }

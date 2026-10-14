@@ -11,7 +11,7 @@ import { createInstanceSettingsRepository } from "../db/repositories/instance-se
 import { getDatabase } from "../db/startup.ts";
 import { suggestedAppName } from "../integrations/registry.ts";
 import { createSignedStates } from "../signed-state/state.ts";
-import { readEmailConflicts, readGithubIdentity } from "./facts.ts";
+import { readEmailConflicts } from "./facts.ts";
 import {
   createGithubCredentialStore,
   type GithubCredentialStore,
@@ -59,19 +59,17 @@ export function getGithubConfigService(): GithubConfigService {
   });
 }
 
-/** What the Integrations page shows besides the integration itself: the admin's own GitHub account, the addresses that could not be updated, the name the one-click form starts with and the tenancy. */
-export async function getIntegrationsPageData(adminId: string) {
+/** What the Integrations pages show besides the integration itself: what could not be updated, the name the one-click form starts with and the tenancy. */
+export async function getIntegrationsPageData() {
   const db = getDatabase();
   const config = loadAuthConfig(process.env);
-  const [view, identity, conflicts, tenancy] = await Promise.all([
+  const [view, conflicts, tenancy] = await Promise.all([
     getGithubConfigService().view(),
-    readGithubIdentity(db, adminId),
     readEmailConflicts(db),
     createInstanceSettingsRepository(db).get("tenancy"),
   ]);
   return {
     view,
-    identity,
     conflicts,
     tenancy: tenancy ?? "single",
     suggestedName: suggestedAppName(config.baseUrl),

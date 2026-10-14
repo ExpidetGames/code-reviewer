@@ -1,20 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Metadata } from "next";
+import { Badge } from "@/components/ui/badge";
 import { getMailSender } from "@/mail/shared";
-import { PageHeader } from "@/ui/page-header";
+import { PageHeader } from "@/components/page-header";
 import { requireWorkspace } from "@/workspaces/access-runtime";
 import { getInvitationService, getMembersService } from "@/workspaces/shared";
 import {
   loadMembersPage,
   MembersPageContent,
 } from "@/workspaces/ui/members-page";
+import { ROLE_LABEL } from "@/workspaces/ui/role-copy";
 
 export const metadata: Metadata = { title: "Members" };
 
 // Who belongs to the workspace and with which role, and (for an Admin or an Owner) the invitations. The
 // workspace is the one in the address, for a member only; the buttons show what the role allows and the
-// routes decide again.
+// routes decide again. The viewer's role is a badge next to the title; Members is its own area root, so
+// it shows no breadcrumb (lead decision 2026-10-13, epic #165).
 export default async function MembersPage({
   params,
 }: PageProps<"/w/[workspace]/members">) {
@@ -28,6 +31,7 @@ export default async function MembersPage({
       <PageHeader
         title="Members"
         description={`Who works in ${workspace.name}.`}
+        badge={<Badge variant="secondary">{ROLE_LABEL[role]}</Badge>}
       />
       <MembersContent
         workspaceId={workspace.id}

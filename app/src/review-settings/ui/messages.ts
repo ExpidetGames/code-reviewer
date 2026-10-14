@@ -3,7 +3,16 @@
 // The copy for review settings: what a problem with one field means and what to do about it, and what
 // a save that failed as a whole means. The service answers with stable codes (a field and a code per
 // problem); this is where a code becomes a sentence next to its field. A code is never shown.
-import { REVIEW_SETTING_LIMITS, type ReviewSettingField } from "../settings.ts";
+import {
+  DEFAULT_DYNAMIC_MODEL,
+  PROJECT_DYNAMIC_LIMITS,
+  REVIEW_SETTING_LIMITS,
+  type ReviewSettingField,
+} from "../settings.ts";
+import {
+  CROSS_SITE_REQUEST_RELOAD_PAGE,
+  REQUEST_NOT_UNDERSTOOD,
+} from "../../copy/messages.ts";
 import type { ReviewSettingIssueCode } from "../validate.ts";
 import type { ReviewSettingsErrorCode } from "../errors.ts";
 import {
@@ -12,7 +21,11 @@ import {
 } from "../../ui/transport-messages.ts";
 
 const GENERIC_ISSUE = "This value is not valid.";
-const MODEL_FIELDS: readonly string[] = ["model", "fallbackModel"];
+const MODEL_FIELDS: readonly string[] = [
+  "model",
+  "fallbackModel",
+  "dynamicModel",
+];
 
 function numberWithCommas(value: number): string {
   return value.toLocaleString("en-US");
@@ -28,6 +41,7 @@ const ISSUE_COPY: Record<ReviewSettingIssueCode, (field: string) => string> = {
       case "allowedCommands":
         return "Choose from the listed commands.";
       case "extraInstructions":
+      case "reviewSkill":
         return "Enter text.";
       default:
         return MODEL_FIELDS.includes(field)
@@ -35,8 +49,13 @@ const ISSUE_COPY: Record<ReviewSettingIssueCode, (field: string) => string> = {
           : GENERIC_ISSUE;
     }
   },
-  EMPTY: (field) =>
-    field === "model" ? "Enter a model name." : "Enter a value.",
+  EMPTY: (field) => {
+    if (field === "model" || field === "dynamicModel")
+      return "Enter a model name.";
+    if (field === "reviewSkill")
+      return "Enter the skill text, or reset the skill to the default.";
+    return "Enter a value.";
+  },
   TOO_SMALL: (field) => {
     if (field === "maxFindings")
       return `Enter ${String(REVIEW_SETTING_LIMITS.maxFindings.min)} or more.`;
@@ -51,13 +70,18 @@ const ISSUE_COPY: Record<ReviewSettingIssueCode, (field: string) => string> = {
       return `Enter ${numberWithCommas(REVIEW_SETTING_LIMITS.maxTokens.max)} or less.`;
     return "This value is too large.";
   },
-  TOO_LONG: (field) =>
-    field === "extraInstructions"
-      ? `Use at most ${numberWithCommas(REVIEW_SETTING_LIMITS.extraInstructionsMaxChars)} characters.`
-      : "This text is too long.",
+  TOO_LONG: (field) => {
+    if (field === "extraInstructions")
+      return `Use at most ${numberWithCommas(REVIEW_SETTING_LIMITS.extraInstructionsMaxChars)} characters.`;
+    if (field === "reviewSkill")
+      return `Use at most ${numberWithCommas(PROJECT_DYNAMIC_LIMITS.reviewSkillMaxBytes)} bytes. Characters outside plain English letters count as several bytes.`;
+    return "This text is too long.";
+  },
   INVALID_FORMAT: (field) => {
-    if (field === "allowedCommands")
-      return "Only the commands review, improve, describe and ask exist.";
+    if (field === "allowedCommands") return "Only the command review exists.";
+    if (field === "reviewKind") return "Choose Diff Review or Dynamic Review.";
+    if (field === "dynamicModel")
+      return `Use a model name as your provider spells it, for example ${DEFAULT_DYNAMIC_MODEL} (letters, digits and . _ : / + -, no spaces).`;
     if (MODEL_FIELDS.includes(field))
       return "Use a model name as OpenRouter spells it, for example anthropic/claude-haiku-5.5 (letters, digits and . _ : / + -, no spaces).";
     return GENERIC_ISSUE;
@@ -86,13 +110,10 @@ export function describeIssue(
 const SAVE_FAILURE_COPY: Record<ReviewSettingsErrorCode, string> = {
   REVIEW_SETTINGS_INVALID:
     "Some settings are not valid. Fix the marked fields and save again.",
-  REVIEW_SETTINGS_REQUEST_INVALID:
-    "The request was not understood. Reload the page and try again.",
-  REVIEW_SETTINGS_CROSS_SITE_REQUEST:
-    "The request did not come from this page. Reload the page and try again.",
+  REVIEW_SETTINGS_REQUEST_INVALID: REQUEST_NOT_UNDERSTOOD,
+  REVIEW_SETTINGS_CROSS_SITE_REQUEST: CROSS_SITE_REQUEST_RELOAD_PAGE,
   REVIEW_SETTINGS_BODY_TOO_LARGE: "The settings are too large to save.",
-  REVIEW_SETTINGS_CONTENT_TYPE_UNSUPPORTED:
-    "The request was not understood. Reload the page and try again.",
+  REVIEW_SETTINGS_CONTENT_TYPE_UNSUPPORTED: REQUEST_NOT_UNDERSTOOD,
   REVIEW_SETTINGS_PROJECT_NOT_FOUND:
     "This repository was not found. Reload the Projects page and try again.",
 };

@@ -23,6 +23,15 @@ export type JobOptions = {
      */
     fallbackModels?: readonly string[];
   };
+  /**
+   * #195: the Dynamic options of a job whose project runs Dynamic Review. Present only then; a Diff
+   * job leaves it out so it gets the exact legacy payload. Model, skill and the output limit only.
+   */
+  dynamic?: {
+    model: string;
+    skill: string;
+    maxFindings: number;
+  };
 };
 
 export type JobOptionsSource = {

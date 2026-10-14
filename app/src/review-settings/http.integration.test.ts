@@ -319,6 +319,102 @@ describe("changing the settings over HTTP", () => {
   });
 });
 
+describe("the project-only settings over HTTP", () => {
+  // #194-T03
+  it("saves and reloads Dynamic settings and exposes the defaults, sources and limits", async () => {
+    const app = await setup();
+
+    const saved = await app.putProject({
+      settings: {
+        reviewKind: "dynamic",
+        dynamicModel: "vendor/dynamic-model",
+        reviewSkill: "Review this pull request dynamically.",
+      },
+    });
+
+    expect(saved.status).toBe(200);
+    expect(await saved.json()).toMatchObject({
+      dynamic: {
+        effective: {
+          reviewKind: "dynamic",
+          dynamicModel: "vendor/dynamic-model",
+          reviewSkill: "Review this pull request dynamically.",
+        },
+        sources: { reviewKind: "project", dynamicModel: "project" },
+        limits: { reviewSkillMaxBytes: 16_384 },
+      },
+    });
+
+    const read = await app.handlers.getProject(
+      new Request(`${URL_BASE}${app.projectPath}`),
+      app.first.id,
+    );
+    expect(await read.json()).toMatchObject({
+      dynamic: {
+        effective: {
+          reviewKind: "dynamic",
+          dynamicModel: "vendor/dynamic-model",
+        },
+      },
+    });
+  });
+
+  // #194-T05
+  it("refuses an oversize skill with a stable code and never echoes the value", async () => {
+    const app = await setup();
+    const sentinel = "skill-sentinel-should-not-be-echoed";
+    const oversize = `${sentinel}${"ü".repeat(9_000)}`;
+
+    const response = await app.putProject({
+      settings: { reviewSkill: oversize },
+    });
+    const text = await response.text();
+
+    expect(response.status).toBe(400);
+    expect(JSON.parse(text)).toEqual({
+      error: "REVIEW_SETTINGS_INVALID",
+      issues: [{ field: "reviewSkill", code: "TOO_LONG" }],
+    });
+    expect(text).not.toContain(sentinel);
+    expect((await app.projects.get(app.first.id))?.settings).toEqual({});
+  });
+
+  // #194-T05
+  it("cannot become a workspace default: the global route refuses a project-only field", async () => {
+    const app = await setup();
+
+    const response = await app.putGlobal({
+      settings: { reviewKind: "dynamic" },
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "REVIEW_SETTINGS_INVALID",
+      issues: [{ field: "reviewKind", code: "UNKNOWN_FIELD" }],
+    });
+    expect(await app.appSettingRows()).toEqual([]);
+  });
+
+  // #194-T05
+  it("refuses a cross-site Dynamic save without echoing the skill", async () => {
+    const app = await setup();
+    const sentinel = "skill-sentinel-cross-site";
+
+    const response = await app.putProject(
+      { settings: { reviewSkill: sentinel } },
+      { "content-type": "application/json", "sec-fetch-site": "cross-site" },
+    );
+    const text = await response.text();
+
+    expect(response.status).toBe(403);
+    expect(JSON.parse(text)).toEqual({
+      error: "REVIEW_SETTINGS_CROSS_SITE_REQUEST",
+    });
+    expect(text).not.toContain(sentinel);
+    expect((await app.projects.get(app.first.id))?.settings).toEqual({});
+  });
+});
+
 describe("the user check", () => {
   it("runs first, before the body is read or the database is touched", async () => {
     const stop = new Error("NEXT_REDIRECT");

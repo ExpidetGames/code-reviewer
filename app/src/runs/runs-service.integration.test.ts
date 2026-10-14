@@ -6,7 +6,13 @@ import { describe, expect, it } from "vitest";
 import { sql } from "kysely";
 import { sha } from "../test-support/jobs.ts";
 import { createRunsFixture } from "../test-support/runs.ts";
-import { createLastRunSource, parseRunsFilter } from "./runs-service.ts";
+import { addWorkspace } from "../test-support/workspaces.ts";
+import { createRunsRepository } from "../db/repositories/runs-repository.ts";
+import {
+  createLastRunSource,
+  createRunsService,
+  parseRunsFilter,
+} from "./runs-service.ts";
 
 describe("the runs list", () => {
   // CR-35-T01
@@ -16,10 +22,15 @@ describe("the runs list", () => {
       ok: true,
       result: { ok: true, commentUrl: null, logTail: "" },
     });
-    const second = await f.finished(
-      { ok: false, errorCode: "timeout" },
-      { repositoryId: f.otherRepositoryId, command: "improve" },
-    );
+    f.clock.advance(1000);
+    // A historical run of a removed command (#203): seeded directly, since the queue cannot create
+    // one any more. It must stay readable with its original command and status.
+    const second = await f.seedHistoricalJob({
+      command: "improve",
+      repositoryId: f.otherRepositoryId,
+      status: "failed",
+      errorCode: "timeout",
+    });
     const third = await f.running({ triggerKind: "manual" });
     const fourth = await f.waiting({ repositoryId: f.otherRepositoryId });
 
@@ -226,6 +237,60 @@ describe("what leaves the server", () => {
   });
 });
 
+describe("the usage of a run", () => {
+  // #201-T31
+  it("is in the detail of a finished run with the model, summed tokens, calls and cost, and never in the list", async () => {
+    const f = await createRunsFixture({ dynamicReview: true });
+    const finished = await f.finished(
+      {
+        ok: true,
+        result: {
+          ok: true,
+          commentUrl: "https://github.com/acme/widgets/pull/1#c",
+          logTail: "ok",
+          usage: {
+            model: "vendor/dynamic-model",
+            promptTokens: 12_000,
+            completionTokens: 900,
+            totalTokens: 12_900,
+            aiCalls: 7,
+            fallbackUsed: false,
+            costUsd: null,
+          },
+        },
+      },
+      { reviewKind: "dynamic" },
+    );
+
+    const detail = await f.runs.get(finished.id);
+    const list = await f.runs.list({});
+
+    expect(detail?.run).toMatchObject({
+      reviewKind: "dynamic",
+      usage: {
+        model: "vendor/dynamic-model",
+        totalTokens: 12_900,
+        aiCalls: 7,
+        costUsd: null,
+      },
+    });
+    expect(JSON.stringify(detail)).not.toMatch(
+      /promptTokens|completionTokens|fallbackUsed/,
+    );
+    expect(JSON.stringify(list)).not.toContain("vendor/dynamic-model");
+
+    // A member of another workspace reads neither the run nor its usage.
+    const otherRuns = createRunsService({
+      runs: createRunsRepository(f.db, await addWorkspace(f.db, "bravo")),
+      now: f.clock.now,
+    });
+    expect(await otherRuns.get(finished.id)).toBeUndefined();
+    expect(JSON.stringify(await otherRuns.list({}))).not.toContain(
+      "vendor/dynamic-model",
+    );
+  });
+});
+
 describe("the filter of a request", () => {
   it("accepts a known status and a repository id, and treats empty values as no filter", () => {
     expect(parseRunsFilter({})).toEqual({ ok: true, filter: {} });
@@ -387,8 +452,38 @@ describe("the read side with many jobs", () => {
       "prNumber",
       "prUrl",
       "repositoryId",
+      "reviewKind",
       "status",
       "triggerKind",
     ]);
+  });
+});
+
+// #203-T12
+describe("a historical run of a removed command", () => {
+  it("keeps its original command, its read-only question and its result", async () => {
+    const f = await createRunsFixture();
+    const run = await f.seedHistoricalJob({
+      command: "ask",
+      status: "succeeded",
+      args: "why is ![x](https://evil.test/a.png) this?",
+      result: {
+        ok: true,
+        commentUrl: "https://github.com/acme/widgets/pull/7#issuecomment-9",
+        logTail: "the answer",
+      },
+    });
+
+    const listed = (await f.runs.list({})).runs.find(
+      (entry) => entry.id === run.id,
+    );
+    expect(listed).toMatchObject({ command: "ask" });
+
+    const detail = await f.runs.get(run.id);
+    expect(detail?.run).toMatchObject({
+      command: "ask",
+      args: "why is ![x](https://evil.test/a.png) this?",
+      commentUrl: "https://github.com/acme/widgets/pull/7#issuecomment-9",
+    });
   });
 });

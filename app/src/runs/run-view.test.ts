@@ -6,6 +6,7 @@ import {
   cleanLog,
   MAX_LOG_CHARS,
   readStoredResult,
+  readStoredUsage,
   safeGithubUrl,
   toRunDetailView,
   toRunRowView,
@@ -22,6 +23,7 @@ function job(overrides: Partial<Job> = {}): Job {
     prNumber: 7,
     prUrl: "https://github.com/acme/widgets/pull/7",
     headSha: "a".repeat(40),
+    reviewKind: "diff",
     command: "review",
     args: "",
     triggerKind: "webhook",
@@ -112,6 +114,126 @@ describe("the log of a run", () => {
   });
 });
 
+describe("the usage of a run", () => {
+  const usage = {
+    model: "vendor/dynamic-model",
+    promptTokens: 12000,
+    completionTokens: 900,
+    totalTokens: 12900,
+    aiCalls: 7,
+    fallbackUsed: false,
+    costUsd: 0.04,
+  };
+
+  // #201-T22
+  it("reads the model, the summed tokens, the model calls and the cost of a stored result, and nothing else of it", () => {
+    expect(readStoredUsage({ ok: true, usage })).toEqual({
+      model: "vendor/dynamic-model",
+      totalTokens: 12900,
+      aiCalls: 7,
+      costUsd: 0.04,
+    });
+  });
+
+  // #201-T23
+  it("keeps a cost the runner could not know as unknown instead of zero", () => {
+    expect(
+      readStoredUsage({ ok: true, usage: { ...usage, costUsd: null } }),
+    ).toMatchObject({ costUsd: null });
+  });
+
+  // #201-T24
+  it.each([
+    ["no result", null],
+    ["a result without usage", { ok: true }],
+    ["usage null", { ok: true, usage: null }],
+    ["usage of the wrong type", { ok: true, usage: "12900 tokens" }],
+    [
+      "tokens that are not a number",
+      { ok: true, usage: { ...usage, totalTokens: "many" } },
+    ],
+    ["negative tokens", { ok: true, usage: { ...usage, totalTokens: -1 } }],
+    [
+      "a fractional call count",
+      { ok: true, usage: { ...usage, aiCalls: 1.5 } },
+    ],
+    [
+      "a cost that is not finite",
+      { ok: true, usage: { ...usage, costUsd: Infinity } },
+    ],
+  ])("shows no usage for %s", (_name, stored) => {
+    expect(readStoredUsage(stored)).toBeNull();
+  });
+
+  // #201-T25
+  it("takes a model without a name as unknown and cleans one that has control characters", () => {
+    expect(
+      readStoredUsage({ ok: true, usage: { ...usage, model: null } }),
+    ).toMatchObject({ model: null });
+    expect(
+      readStoredUsage({
+        ok: true,
+        usage: { ...usage, model: "vendor/\u001b[31mmodel\u0000" },
+      }),
+    ).toMatchObject({ model: "vendor/model" });
+  });
+
+  // #201-T32
+  it("cuts a long model name on a whole character, never inside a surrogate pair", () => {
+    const name = `${"a".repeat(199)}\u{1F600}${"b".repeat(5)}`;
+
+    const model = readStoredUsage({
+      ok: true,
+      usage: { ...usage, model: name },
+    })?.model;
+
+    expect(model).toBe(`${"a".repeat(199)}\u{1F600}`);
+    expect(model?.isWellFormed()).toBe(true);
+  });
+
+  // #201-T33
+  it("keeps the model name within its limit after the redaction, on a whole character", () => {
+    const stored = job({
+      reviewKind: "dynamic",
+      result: {
+        ok: true,
+        commentUrl: null,
+        logTail: "",
+        usage: { ...usage, model: `${"a".repeat(190)}SECRET` },
+      },
+    });
+
+    const { model } = toRunDetailView(stored, "acme/widgets", NOW, (text) =>
+      text.replace("SECRET", "\u{1F600}".repeat(30)),
+    ).usage ?? { model: null };
+
+    expect(Array.from(model ?? "").length).toBeLessThanOrEqual(200);
+    expect(model?.isWellFormed()).toBe(true);
+  });
+
+  // #201-T26
+  it("is in the detail of a run, redacted, and not in the row of the list", () => {
+    const stored = job({
+      reviewKind: "dynamic",
+      result: { ok: true, commentUrl: null, logTail: "", usage },
+    });
+
+    const detail = toRunDetailView(stored, "acme/widgets", NOW, (text) =>
+      text.replace("dynamic-model", "[redacted]"),
+    );
+
+    expect(detail.usage).toEqual({
+      model: "vendor/[redacted]",
+      totalTokens: 12900,
+      aiCalls: 7,
+      costUsd: 0.04,
+    });
+    expect(toRunRowView(stored, "acme/widgets", NOW)).not.toHaveProperty(
+      "usage",
+    );
+  });
+});
+
 describe("the row of a run", () => {
   it("carries what the list shows and nothing of the lease", () => {
     const view = toRunRowView(job(), "acme/widgets", NOW);
@@ -123,6 +245,7 @@ describe("the row of a run", () => {
       prNumber: 7,
       prUrl: "https://github.com/acme/widgets/pull/7",
       command: "review",
+      reviewKind: "diff",
       triggerKind: "webhook",
       trigger: "Automatic",
       status: "succeeded",
@@ -135,6 +258,14 @@ describe("the row of a run", () => {
     const text = JSON.stringify(view);
     expect(text).not.toContain("runner-secret-name");
     expect(text).not.toContain("delivery-1");
+  });
+
+  // #200
+  it("carries the review kind the run was queued for, in the list and in the detail", () => {
+    const dynamic = job({ reviewKind: "dynamic" });
+
+    expect(toRunRowView(dynamic, "p", NOW).reviewKind).toBe("dynamic");
+    expect(toRunDetailView(dynamic, "p", NOW).reviewKind).toBe("dynamic");
   });
 
   // CR-35-T04
@@ -212,7 +343,15 @@ describe("the detail of a run", () => {
       commentUrl: "https://github.com/acme/widgets/pull/7#issuecomment-9",
       logTail: "reviewed 3 files",
       logTruncated: false,
-      usage: { model: "m", costUsd: 0.01 },
+      usage: {
+        model: "m",
+        promptTokens: 11,
+        completionTokens: 22,
+        totalTokens: 33,
+        aiCalls: 2,
+        fallbackUsed: true,
+        costUsd: 0.01,
+      },
       errorMessage: null,
     },
   });
@@ -246,8 +385,10 @@ describe("the detail of a run", () => {
       "delivery-1",
       "leaseExpiresAt",
       "heartbeat",
-      "usage",
-      "costUsd",
+      // The usage is shown (#201), but only the four fields of `RunUsageView`: the rest of it stays.
+      "promptTokens",
+      "completionTokens",
+      "fallbackUsed",
       "errorMessage",
     ]) {
       expect(text).not.toContain(secret);

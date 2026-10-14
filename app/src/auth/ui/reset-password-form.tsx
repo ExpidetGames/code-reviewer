@@ -2,11 +2,22 @@
 
 "use client";
 // The form behind a password reset link: the new password twice. The server judges the password (the
-// password rule of every account) and the token; this form collects them and shows the reasons. The token
-// comes from the link and is sent as it is; it is never shown or kept.
+// password rule of every account, stated once as an InfoHint) and the token; this form collects them and
+// shows the reasons. The token comes from the link and is sent as it is; it is never shown or kept. A link
+// that does not work says what happened and the next step, the detail behind a disclosure (#170).
 import Link from "next/link";
 import { useId, useState, type FormEvent } from "react";
-import { Button } from "../../ui/button.tsx";
+import { Button } from "../../components/button.tsx";
+import { HelpDisclosure } from "../../components/help-disclosure.tsx";
+import { InfoHint } from "../../components/info-hint.tsx";
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "../../components/ui/alert.tsx";
+import { Field, FieldLabel } from "../../components/ui/field.tsx";
+import { Input } from "../../components/ui/input.tsx";
+import { CROSS_SITE_REQUEST } from "../../copy/messages.ts";
 import {
   requestJson,
   type FetchLike,
@@ -18,17 +29,15 @@ import {
 } from "../../ui/transport-messages.ts";
 import {
   PASSWORD_ERROR_COPY,
-  PASSWORD_MAX_LENGTH,
-  PASSWORD_MIN_LENGTH,
+  PASSWORD_RULE_HINT,
+  PASSWORDS_DO_NOT_MATCH,
   type PasswordErrorCode,
 } from "../password-policy.ts";
 
 const FAILURE_COPY: Record<string, string> = {
-  invalid_token:
-    'This link is not valid any more. It was used already, or it expired after 30 minutes, or it is not complete. Ask for a new one with "Forgot your password?" on the sign-in page (if this instance sends mail), or ask the operator of this instance, who can run `admin reset-password` on the server.',
   rate_limited:
     "Too many attempts in a short time. Wait a minute and try again.",
-  cross_site_request: "The request did not come from this page. Reload it.",
+  cross_site_request: CROSS_SITE_REQUEST,
 };
 
 function describe(code: string, issues: RequestIssue[]): string {
@@ -56,23 +65,44 @@ export function ResetPasswordForm({
   const [repeat, setRepeat] = useState("");
   const [pending, setPending] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const [invalidLink, setInvalidLink] = useState(false);
   const [done, setDone] = useState(false);
 
   if (token === null)
     return (
-      <p role="alert" className="alert alert-error">
-        This link is incomplete: it has no token. Copy the whole link that
-        `admin reset-password` printed.
-      </p>
+      <Alert variant="destructive">
+        <AlertTitle>This link is incomplete.</AlertTitle>
+        <AlertDescription>
+          Ask for a new link on the sign-in page.
+        </AlertDescription>
+      </Alert>
     );
 
   if (done)
     return (
       <>
-        <p role="status" className="alert alert-success">
-          The password was changed and every session of this account was ended.
-        </p>
+        <Alert variant="success" role="status">
+          <AlertDescription>
+            The password was changed and every session of this account was
+            ended.
+          </AlertDescription>
+        </Alert>
         <Link href="/login">Sign in</Link>
+      </>
+    );
+
+  if (invalidLink)
+    return (
+      <>
+        <Alert variant="destructive">
+          <AlertTitle>This link no longer works.</AlertTitle>
+          <AlertDescription>
+            Ask for a new link on the sign-in page.
+          </AlertDescription>
+        </Alert>
+        <HelpDisclosure label="Why links stop working">
+          A reset link works once and only for 30 minutes.
+        </HelpDisclosure>
       </>
     );
 
@@ -80,7 +110,7 @@ export function ResetPasswordForm({
     event.preventDefault();
     setProblem(null);
     if (password !== repeat) {
-      setProblem("The two passwords are not the same.");
+      setProblem(PASSWORDS_DO_NOT_MATCH);
       return;
     }
     setPending(true);
@@ -95,21 +125,32 @@ export function ResetPasswordForm({
       setDone(true);
       return;
     }
+    if (result.code === "invalid_token") {
+      setInvalidLink(true);
+      return;
+    }
     setProblem(describe(result.code, result.issues));
   }
 
   return (
-    <form onSubmit={(event) => void submit(event)} className="login-form">
-      {problem ? (
-        <p role="alert" className="alert alert-error">
-          {problem}
-        </p>
-      ) : null}
-      <div className="field">
-        <label htmlFor={`${ids}-password`} className="field-label">
-          New password
-        </label>
-        <input
+    <form
+      onSubmit={(event) => void submit(event)}
+      className="flex flex-col gap-4"
+      aria-label="Reset the password"
+    >
+      {problem === null ? null : (
+        <Alert variant="destructive">
+          <AlertDescription>{problem}</AlertDescription>
+        </Alert>
+      )}
+      <Field>
+        <div className="flex items-center gap-1">
+          <FieldLabel htmlFor={`${ids}-password`}>New password</FieldLabel>
+          <InfoHint label="About the password rule">
+            {PASSWORD_RULE_HINT}
+          </InfoHint>
+        </div>
+        <Input
           id={`${ids}-password`}
           type="password"
           autoComplete="new-password"
@@ -117,16 +158,10 @@ export function ResetPasswordForm({
           value={password}
           onChange={(event) => setPassword(event.target.value)}
         />
-        <p className="muted small">
-          At least {String(PASSWORD_MIN_LENGTH)} and at most{" "}
-          {String(PASSWORD_MAX_LENGTH)} characters, and not a common password.
-        </p>
-      </div>
-      <div className="field">
-        <label htmlFor={`${ids}-repeat`} className="field-label">
-          Repeat the password
-        </label>
-        <input
+      </Field>
+      <Field>
+        <FieldLabel htmlFor={`${ids}-repeat`}>Repeat the password</FieldLabel>
+        <Input
           id={`${ids}-repeat`}
           type="password"
           autoComplete="new-password"
@@ -134,9 +169,13 @@ export function ResetPasswordForm({
           value={repeat}
           onChange={(event) => setRepeat(event.target.value)}
         />
-      </div>
-      <Button type="submit" className="btn-block" disabled={pending}>
-        {pending ? "Saving..." : "Set the password"}
+      </Field>
+      <Button
+        type="submit"
+        loading={pending}
+        loadingLabel="Saving the password"
+      >
+        Set the password
       </Button>
     </form>
   );

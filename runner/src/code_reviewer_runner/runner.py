@@ -20,25 +20,72 @@ import argparse
 import asyncio
 import logging
 import os
+import shlex
+import signal
 import sys
 import threading
 import time
-from collections.abc import Mapping, Sequence
-from contextlib import ExitStack
+from collections.abc import Callable, Generator, Mapping, Sequence
+from contextlib import ExitStack, contextmanager
 from dataclasses import replace
+from pathlib import Path
 from typing import Any, TextIO
 
 from loguru import logger
 
 from code_reviewer_runner import __version__
+from code_reviewer_runner.capabilities import (
+    ENGINE_DYNAMIC,
+    OPENCODE_COMMAND_VARIABLE,
+    RIPGREP_PATH_VARIABLE,
+    engines_from_environment,
+)
 from code_reviewer_runner.comment_recorder import CommentRecorder, install_comment_recorder
+from code_reviewer_runner.dynamic_findings import DynamicFindings
+from code_reviewer_runner.dynamic_review import findings_schema
+from code_reviewer_runner.dynamic_review.adapter import DynamicEngine, shutdown_engines
+from code_reviewer_runner.dynamic_review.budget import (
+    DEFAULT_WINDOW_TOKENS,
+    TOTAL_DEADLINE_SECONDS,
+    BudgetLedger,
+    DynamicLimits,
+    LimitError,
+)
+from code_reviewer_runner.dynamic_review.config import new_proxy_capability
+from code_reviewer_runner.dynamic_review.inputs import review_inputs
+from code_reviewer_runner.dynamic_review.limits import CheckoutError
+from code_reviewer_runner.dynamic_review.prompts import compose_system_prompt
+from code_reviewer_runner.dynamic_review.proxy import ModelProxy, capabilities_from_config
+from code_reviewer_runner.dynamic_review.publish import (
+    STATE_RESET_CODE,
+    Published,
+    PublishError,
+    publish_run,
+)
+from code_reviewer_runner.dynamic_review.supervisor import (
+    ContentPreparer,
+    Prepared,
+    production_preparer,
+)
 from code_reviewer_runner.error_mapping import classify_failure
 from code_reviewer_runner.identity_patch import (
     IdentityPatchError,
     apply_identity_patch,
     check_pr_agent_version,
 )
-from code_reviewer_runner.job import MAX_JOB_BYTES, Command, Job, JobError, parse_job
+from code_reviewer_runner.job import (
+    MAX_JOB_BYTES,
+    Command,
+    Job,
+    JobError,
+    ReviewKind,
+    parse_job,
+)
+from code_reviewer_runner.lease_check import (
+    LeaseCheck,
+    LeaseState,
+    lease_check_from_environment,
+)
 from code_reviewer_runner.log_capture import (
     MAX_TAIL_BYTES,
     LogCapture,
@@ -143,7 +190,7 @@ def run_job(
         patches.close()
 
     failure_comment = recorder.failure_comment_posted()
-    comment_url = None if failure_comment else recorder.comment_url(job.command)
+    comment_url = None if failure_comment else recorder.comment_url()
     ok = handled and not failed_flag and not failure_comment
     error_code: ErrorCode | None = None
     truncation = _truncation(job.command, watch, recorder) if ok else None
@@ -171,6 +218,178 @@ def run_job(
         log_tail=log_tail,
         log_truncated=log_truncated,
         usage=usage,
+    )
+
+
+DYNAMIC_CAPABILITIES_VARIABLE = "RUNNER_DYNAMIC_CAPABILITIES"
+DYNAMIC_NODE_BIN_VARIABLE = "RUNNER_DYNAMIC_NODE_BIN"
+
+
+def run_dynamic_job(
+    job: Job,
+    capture: LogCapture | None,
+    started: float,
+    environment: Mapping[str, str],
+    timeout_seconds: float | None = None,
+    *,
+    engines: Sequence[str] = (),
+    prepare: ContentPreparer | None = None,
+    publish: Callable[[Job, DynamicFindings], Published] | None = None,
+    lease_check: LeaseCheck | None = None,
+) -> JobResult:
+    """Run a Dynamic job with the read-only stock engine (#197) and publish its summary (#201).
+
+    Everything that decides what the run may do comes from trusted runner configuration here: the
+    engine command, the prepared checkout, the model capability descriptor and the model endpoint
+    are environment and claim fields, never repository content. Anything missing is a stable
+    refusal, never a fallback to PR-Agent or to Diff Review.
+
+    The engine is stock and is never started in production until #202 proves the isolation
+    (`capabilities.py` stays fail-closed, so `opencode` is not advertised and no Dynamic job
+    reaches a runner). This function does not rely on that alone: `engines` is what the runner
+    advertised, and a Dynamic job is refused unless it contains `opencode`, whatever else is
+    configured. The default (nothing advertised) refuses.
+    """
+    dynamic = job.dynamic
+    base = job.base
+    assert dynamic is not None and base is not None  # parse_job guarantees the tagged shape
+
+    if ENGINE_DYNAMIC not in engines:
+        return _failure(
+            ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE,
+            "the Dynamic engine is not advertised by this runner",
+            started,
+            capture,
+        )
+
+    command = shlex.split(environment.get(OPENCODE_COMMAND_VARIABLE, "").strip())
+    if not command:
+        return _failure(
+            ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE,
+            "no Dynamic engine is configured",
+            started,
+            capture,
+        )
+    # The `rg` the startup self-check verified, named by the loop and not looked up along the PATH.
+    # Without one the adapter refuses to start the engine.
+    ripgrep = (
+        Path(named_ripgrep) if (named_ripgrep := environment.get(RIPGREP_PATH_VARIABLE)) else None
+    )
+    # The descriptor describes the destination the request really goes to, so it is chosen by the
+    # upstream model (`llm.model`); `dynamic.model` is the logical name the engine sees, and the app
+    # sends the same name in both.
+    try:
+        capabilities = capabilities_from_config(
+            environment.get(DYNAMIC_CAPABILITIES_VARIABLE), model=job.llm.model
+        )
+    except LimitError as error:
+        return _failure(error.code, error.detail, started, capture)
+
+    deadline = TOTAL_DEADLINE_SECONDS
+    if timeout_seconds is not None:
+        deadline = min(deadline, timeout_seconds)
+    ledger = BudgetLedger(
+        DynamicLimits(deadline_seconds=deadline),
+        window_tokens=job.llm.max_tokens or DEFAULT_WINDOW_TOKENS,
+        output_tokens=capabilities.max_output_tokens,
+    )
+    upstream = job.llm.base_url or "https://openrouter.ai/api/v1"
+    # One unguessable capability per job: the proxy demands it, the engine config carries it.
+    capability = new_proxy_capability()
+    try:
+        proxy = ModelProxy(
+            ledger=ledger,
+            base_path="/v1",
+            model=dynamic.model,
+            upstream_url=f"{upstream}/chat/completions",
+            upstream_api_key=job.llm.api_key,
+            upstream_model=job.llm.model,
+            capabilities=capabilities,
+            capability=capability,
+        )
+    except LimitError as error:
+        # The destination cannot serve the run: fail before the engine starts, with no fallback.
+        return _failure(error.code, error.detail, started, capture)
+    # Without an injected preparer this is the root supervisor: the export is prepared and sealed
+    # for the dedicated engine user, and the engine is launched as that user (#197). A process
+    # that is not the supervisor is refused there; the engine never runs unconfined.
+    prepare = prepare or production_preparer(
+        environment, cancelled=lambda: ledger.remaining_seconds() <= 0
+    )
+    try:
+        with prepare(job) as prepared:
+            prepared = prepared if isinstance(prepared, Prepared) else Prepared(prepared)
+            content = prepared.content
+            # The export is the one directory the engine may read; the audit names files relative
+            # to it, and a finding may only point at a file it really holds.
+            proxy.audit.set_export_root(str(content.export))
+            # With the dedicated engine user the proxy listens on the slot's fixed port: the
+            # engine user's static network rules name it. Somebody else holding it is a slot that
+            # is not clean, and the job does not start.
+            try:
+                server = proxy.serve(
+                    "127.0.0.1", prepared.launch.proxy_port if prepared.launch else 0
+                ).start()
+            except OSError:
+                return _failure(
+                    ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED,
+                    "the model proxy port of the slot is not free",
+                    started,
+                    capture,
+                )
+            try:
+                engine = DynamicEngine(
+                    job,
+                    ledger=ledger,
+                    command=command,
+                    directory=str(content.export),
+                    proxy_url=server.url,
+                    proxy_capability=capability,
+                    agent_prompt=compose_system_prompt(dynamic.skill, base.head_sha),
+                    model_schema=findings_schema(),
+                    inputs=review_inputs(job.pr_url, content),
+                    exported_paths=frozenset(content.files),
+                    launch=prepared.launch,
+                    node_bin=environment.get(DYNAMIC_NODE_BIN_VARIABLE) or None,
+                    ripgrep=ripgrep,
+                )
+                answer = engine.run()
+            finally:
+                server.stop()
+    except CheckoutError as error:
+        return _failure(error.code, "the pull request could not be prepared", started, capture)
+
+    if answer.error is not None:
+        return _failure(answer.error.code, answer.error.detail, started, capture)
+    assert answer.findings is not None
+    # The summary is written by this supervisor, never by the engine, and only for a run whose
+    # findings passed every check above: any earlier failure leaves the previous comment untouched.
+    # A run whose job is no longer ours (lease lost, cancelled) writes nothing (#260). Without a
+    # check (a process the loop did not start) there is no lease to ask about.
+    if lease_check is not None and (state := lease_check()) is not LeaseState.HELD:
+        detail = (
+            "the lease could not be confirmed, so nothing was written"
+            if state is LeaseState.UNCONFIRMED
+            else "the job is no longer held by this runner, so nothing was written"
+        )
+        return _failure(ErrorCode.LEASE_LOST, detail, started, capture)
+    try:
+        published = (publish or publish_run)(job, answer.findings)
+    except PublishError as error:
+        return _failure(error.code, error.detail, started, capture)
+    summary = (
+        f"dynamic review: {len(answer.findings.findings)} findings against {base.head_sha}; "
+        f"{ledger.model_calls} model calls, {ledger.tool_calls} tool calls, {ledger.files} files"
+    )
+    if published.reset:
+        summary += f"; {STATE_RESET_CODE}"
+    return JobResult(
+        ok=True,
+        duration_ms=_elapsed_ms(started),
+        comment_url=published.comment_url,
+        error_code=None,
+        log_tail=summary,
+        usage=ledger.usage(job.llm.model),
     )
 
 
@@ -243,16 +462,57 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+# After a SIGTERM the job unwinds (engine, proxy, export and leases are released by the `finally`
+# blocks); if that has not finished in this time the engines are killed and the process ends. The
+# job loop sends SIGKILL after its own grace (five seconds by default), so this is shorter.
+SIGTERM_BACKSTOP_SECONDS = 3.0
+
+
+def _stop_hard() -> None:
+    shutdown_engines()
+    os._exit(128 + signal.SIGTERM)
+
+
+@contextmanager
+def _unwind_on_sigterm() -> Generator[None]:
+    """A Dynamic job that gets SIGTERM ends its engine, helpers, proxy and export (#197-T07).
+
+    The job loop ends a job this way on lease loss, shutdown and timeout. The engine leads a
+    process group of its own (and runs as another user), so the default action (die at once) would
+    leave it running. The handler unwinds the job as a `KeyboardInterrupt` and arms a backstop
+    that kills everything if the unwinding takes too long.
+    """
+
+    def on_term(signum: int, frame: object) -> None:
+        backstop = threading.Timer(SIGTERM_BACKSTOP_SECONDS, _stop_hard)
+        backstop.daemon = True
+        backstop.start()
+        raise KeyboardInterrupt
+
+    try:
+        previous = signal.signal(signal.SIGTERM, on_term)
+    except ValueError:  # not the main thread: nothing to install
+        yield
+        return
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+
 def _start_watchdog(
     seconds: float,
     channel: _ResultChannel,
     started: float,
-    capture: LogCapture,
+    capture: LogCapture | None,
     secrets: Sequence[str],
 ) -> threading.Timer:
     """Last resort for a command that blocks the event loop and so ignores the soft timeout."""
 
     def fire() -> None:
+        # A Dynamic engine runs in its own process group (it can outlive this process); end it
+        # before this process ends, so no engine or helper survives the timeout (#197-T07).
+        shutdown_engines()
         try:
             result = _failure(
                 ErrorCode.TIMEOUT, "the command did not stop in time", started, capture
@@ -310,9 +570,38 @@ def main(
             channel.write(_failure(ErrorCode.RUNNER_ERROR, "cannot read the job", started, None))
         )
 
+    saved_env = dict(os.environ)
+    if job.review_kind is ReviewKind.DYNAMIC:
+        # A Dynamic job is never run by PR-Agent (#195/#197). It gets the same process-level timeout
+        # as a Diff job; on expiry the watchdog ends the engine's process group too (#197-T07).
+        dynamic_timeout = _timeout_from(saved_env)
+        dynamic_watchdog = (
+            _start_watchdog(dynamic_timeout, channel, started, None, job.secrets)
+            if dynamic_timeout
+            else None
+        )
+        try:
+            with _unwind_on_sigterm():
+                result = run_dynamic_job(
+                    job,
+                    None,
+                    started,
+                    saved_env,
+                    dynamic_timeout,
+                    engines=engines_from_environment(saved_env),
+                    lease_check=lease_check_from_environment(saved_env, required=True),
+                )
+        except KeyboardInterrupt:
+            raise
+        except BaseException:
+            result = _failure(ErrorCode.RUNNER_ERROR, "unexpected runner error", started, None)
+        finally:
+            if dynamic_watchdog is not None:
+                dynamic_watchdog.cancel()
+        return _exit_code(channel.write(result, job.secrets))
+
     redactor = Redactor(job.secrets)
     capture = LogCapture(redactor)
-    saved_env = dict(os.environ)
     saved_streams: tuple[Any, Any] = (sys.stdout, sys.stderr)
     timeout_seconds = _timeout_from(saved_env)
     watchdog = (

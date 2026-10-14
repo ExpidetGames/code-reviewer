@@ -4,10 +4,13 @@
 // sentences name what to do (restart the app) where only that helps, and none of them can contain
 // a code, a password or any value.
 import { describe, expect, it } from "vitest";
+import { PASSWORD_RULE_HINT } from "../../auth/password-policy.ts";
+import { FAIL_CLOSED_WARNING } from "../../signup/ui/rule-copy.ts";
 import { SETUP_ERROR_CODES } from "../errors.ts";
 import {
   describeSetupFailure,
   describeSetupIssue,
+  FAIL_CLOSED_LINE,
   PASSWORD_REASON,
   stepOfField,
 } from "./messages.ts";
@@ -80,10 +83,19 @@ describe("the sentence for a problem with a field", () => {
     );
   });
 
+  // #169-T01
   it("states the password rule and its reason", () => {
-    expect(PASSWORD_REASON).toMatch(/12/);
-    expect(PASSWORD_REASON).toMatch(/128/);
-    expect(PASSWORD_REASON).toMatch(/common/);
+    expect(PASSWORD_RULE_HINT).toMatch(/at least 12/i);
+    expect(PASSWORD_RULE_HINT).toMatch(/at most 128/i);
+    expect(PASSWORD_RULE_HINT).toMatch(/not a common password/);
+    expect(PASSWORD_REASON).toMatch(/no other rules/i);
+  });
+
+  // #172-T04
+  it("keeps the fail-closed line to one sentence, the long warning in its shared owner", () => {
+    expect(FAIL_CLOSED_LINE.split(".").filter(Boolean)).toHaveLength(1);
+    expect(FAIL_CLOSED_LINE).not.toBe(FAIL_CLOSED_WARNING);
+    expect(FAIL_CLOSED_WARNING).toMatch(/mail server or GitHub/);
   });
 
   it("puts a problem on the step where it can be fixed", () => {

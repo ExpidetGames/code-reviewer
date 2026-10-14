@@ -6,8 +6,7 @@ Shape (basis of the runner contract v1, see the lead decisions for CR-10):
 
     {
       "prUrl": "https://github.com/<owner>/<repo>/pull/<n>",
-      "command": "review" | "improve" | "describe" | "ask",
-      "args": ["<question>"],                       // ask only
+      "command": "review",
       "git": {"provider": "github", "baseUrl": "https://api.github.com",
               "token": "<installation token>", "botLogin": "<app slug>[bot]"},
       "llm": {"provider": "openrouter", "model": "<vendor>/<model>", "apiKey": "<key>",
@@ -17,9 +16,15 @@ Shape (basis of the runner contract v1, see the lead decisions for CR-10):
       "env": {"PR_REVIEWER__EXTRA_INSTRUCTIONS": "<string>"}   // optional, tool settings only
     }
 
-Everything that decides where a credential or a request goes (GitHub and LLM endpoints, tokens, the
-model, output switches) has its own validated field above or is pinned by the runner; `env` can only
-carry the settings of the four tools. Values of `env` are text: PR-Agent never evaluates them (see
+`/review` is the only command (the product removed `/ask`, `/improve` and `/describe`). A job that
+names a removed command is refused with `invalid_command` before PR-Agent is loaded; that failure is
+reported for the job (the loop completes it), so a mixed deployment never strands it. For a `review`
+job the runner stays compatible with the previous release's v1 payload: the legacy `args` field and
+the option families of the removed tools (`PR_DESCRIPTION__*`, `PR_CODE_SUGGESTIONS__*`,
+`PR_QUESTIONS__*`) are **accepted and ignored** — they are never handed to PR-Agent. The `env` the
+runner builds holds only `PR_REVIEWER__*` settings. Everything that decides where a credential or a
+request goes (GitHub and LLM endpoints, tokens, the model, output switches) has its own validated
+field above or is pinned by the runner. Values of `env` are text: PR-Agent never evaluates them (see
 `pr_agent_config.build_option_settings`).
 
 Validation never echoes a value from the job into its error detail: the job holds secrets, and the
@@ -30,20 +35,48 @@ import json
 import re
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, NoReturn
+from typing import Any, NoReturn, cast
 from urllib.parse import SplitResult, urlsplit
 
+from code_reviewer_runner.dynamic_review.prompts import MAX_SKILL_BYTES as MAX_DYNAMIC_SKILL_BYTES
 from code_reviewer_runner.platforms import PLATFORMS
-from code_reviewer_runner.question_images import remove_image_links
 from code_reviewer_runner.result import ErrorCode
 
 MAX_JOB_BYTES = 1024 * 1024
-MAX_QUESTION_CHARS = 4000
 MAX_SECRET_CHARS = 4096
 
-_TOP_LEVEL_FIELDS = {"prUrl", "command", "args", "git", "llm", "env"}
+_TOP_LEVEL_FIELDS = {
+    "prUrl",
+    "command",
+    "args",
+    "reviewKind",
+    "dynamic",
+    "base",
+    "git",
+    "llm",
+    "env",
+}
 _GIT_FIELDS = {"provider", "baseUrl", "token", "botLogin"}
 _LLM_FIELDS = {"provider", "model", "apiKey", "baseUrl", "maxTokens", "fallbackModels"}
+_DYNAMIC_FIELDS = {"model", "skill", "limits"}
+_DYNAMIC_LIMIT_FIELDS = {"maxFindings"}
+_BASE_FIELDS = {
+    "repository",
+    "baseRef",
+    "headSha",
+    "previousReviewedSha",
+    "attemptedShas",
+    "attemptedShasTruncated",
+    "comparison",
+}
+# The contract bounds the list; a longer one is not a claim of this app.
+MAX_ATTEMPTED_SHAS = 20
+_ATTEMPTED_SHAS_DETAIL = (
+    f"base.attemptedShas must be a list of at most {MAX_ATTEMPTED_SHAS} distinct "
+    "40 character lower-case commit ids"
+)
+_COMPARISONS = ("full", "incremental")
+_LOWER_SHA = re.compile(r"[0-9a-f]{40}")
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 MIN_CONTEXT_TOKENS = 1000
 MAX_CONTEXT_TOKENS = 10_000_000
@@ -57,12 +90,17 @@ _PR_PATH = re.compile(r"/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/pull/([1-9][0-9]{0,
 # the identity patch (identity_patch.py) both validate with it.
 BOT_LOGIN_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}(\[bot\])?")
 _MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+-]{0,199}")
-# `env` may only set the options of the four tools. An allowlist instead of a list of forbidden
+# `env` may only set the options of the PR-Agent tools. An allowlist instead of a list of forbidden
 # keys: PR-Agent has many sections (litellm, openai, azure, push_outputs, ...) that route requests
 # or credentials, and a new PR-Agent version can add more. One option name per key: a second `__`
 # would address a nested value.
+# The previous release's app could send the option families of the removed tools; they are accepted
+# (v1 compatibility) but ignored, never handed to PR-Agent. Only the review family reaches the job.
 _ENV_KEY = re.compile(
     r"(PR_REVIEWER|PR_DESCRIPTION|PR_CODE_SUGGESTIONS|PR_QUESTIONS)__[A-Z0-9]+(_[A-Z0-9]+)*"
+)
+_REMOVED_TOOL_ENV_KEY = re.compile(
+    r"(PR_DESCRIPTION|PR_CODE_SUGGESTIONS|PR_QUESTIONS)__[A-Z0-9]+(_[A-Z0-9]+)*"
 )
 # The names of the options the runner sets itself (switches that decide what is published). A job
 # may not set them: the runner's value must win, and a repository file may not change them either
@@ -70,7 +108,6 @@ _ENV_KEY = re.compile(
 RESERVED_OPTIONS = frozenset(
     {
         "PR_REVIEWER__FINAL_UPDATE_MESSAGE",
-        "PR_DESCRIPTION__FINAL_UPDATE_MESSAGE",
         "PR_REVIEWER__ENABLE_REVIEW_LABELS_SECURITY",
         "PR_REVIEWER__ENABLE_REVIEW_LABELS_EFFORT",
     }
@@ -90,9 +127,48 @@ def without_openrouter_prefix(model: str) -> str:
 
 class Command(StrEnum):
     REVIEW = "review"
-    IMPROVE = "improve"
-    DESCRIBE = "describe"
-    ASK = "ask"
+
+
+class ReviewKind(StrEnum):
+    """The review kind a job was queued for (#195). Diff is the legacy shape (absent field)."""
+
+    DIFF = "diff"
+    DYNAMIC = "dynamic"
+
+
+@dataclass(frozen=True)
+class DynamicLimits:
+    max_findings: int
+
+
+@dataclass(frozen=True)
+class DynamicReview:
+    """The Dynamic options (#195): model, skill and the output limit.
+
+    Closed; the skill is literal.
+    """
+
+    model: str
+    skill: str
+    limits: DynamicLimits
+
+
+@dataclass(frozen=True)
+class ClaimBase:
+    """The checkout facts (#195).
+
+    Exact head, base identity, declared comparison mode, prior head and (#255) the heads of the
+    app's earlier jobs of this pull request that did not succeed, and (#257) whether that list was
+    cut at its bound.
+    """
+
+    repository: str
+    base_ref: str
+    head_sha: str
+    previous_reviewed_sha: str | None
+    comparison: str
+    attempted_shas: tuple[str, ...] = ()
+    attempted_shas_truncated: bool = False
 
 
 class JobError(Exception):
@@ -127,8 +203,10 @@ class Job:
     command: Command
     git: GitAccess
     llm: LlmAccess
-    args: tuple[str, ...] = ()
     env: dict[str, str] = field(default_factory=lambda: {})
+    review_kind: ReviewKind = ReviewKind.DIFF
+    dynamic: DynamicReview | None = None
+    base: ClaimBase | None = None
 
     @property
     def secrets(self) -> tuple[str, ...]:
@@ -307,39 +385,127 @@ def _command(data: dict[str, Any]) -> Command:
         _refuse_command()
 
 
-def _args(data: dict[str, Any], command: Command) -> tuple[str, ...]:
-    raw = data.get("args")
-    if raw is None or raw == []:
-        if command is Command.ASK:
-            raise _invalid("args must hold the question for the ask command")
-        return ()
-    if command is not Command.ASK:
-        raise _invalid("args is only allowed for the ask command")
-    if not isinstance(raw, list) or len(raw) != 1:  # pyright: ignore[reportUnknownArgumentType]
-        raise _invalid("args must hold exactly one string, the question")
-    question: Any = raw[0]  # pyright: ignore[reportUnknownVariableType]
-    if not isinstance(question, str) or not question.strip() or len(question) > MAX_QUESTION_CHARS:
-        raise _invalid("the question must be a non-empty string of at most 4000 characters")
-    # The question is a comment of somebody else: PR-Agent would download an image it links to from
-    # here, so none reaches it (the app removes them too, this is the second line).
-    return (remove_image_links(question),)
-
-
 def _env(data: dict[str, Any]) -> dict[str, str]:
+    """The review tool's options. A legacy option of a removed tool is accepted and dropped."""
     if data.get("env") is None:
         return {}
     env: dict[str, str] = {}
     for key, value in _object(data["env"], "env").items():
         if not _ENV_KEY.fullmatch(key):
-            raise _invalid(
-                "env may only set options of the review, describe, improve and ask tools"
-            )
-        if key in RESERVED_OPTIONS:
-            raise _invalid(f"env option {key} is set by the runner and cannot be set by a job")
+            raise _invalid("env may only set options of the PR-Agent tools")
         if not isinstance(value, str):
             raise _invalid("env values must be strings")
+        # A previous release sent the removed tools' options too; they are ignored, so they never
+        # reach PR-Agent (which no longer runs those tools).
+        if _REMOVED_TOOL_ENV_KEY.fullmatch(key):
+            continue
+        if key in RESERVED_OPTIONS:
+            raise _invalid(f"env option {key} is set by the runner and cannot be set by a job")
         env[key] = value
     return env
+
+
+def _review_kind(data: dict[str, Any]) -> ReviewKind:
+    """The pinned review kind (#195). Absent means Diff, the shape of a previous-release job."""
+    if "reviewKind" not in data:
+        return ReviewKind.DIFF
+    value = data["reviewKind"]
+    if not isinstance(value, str):
+        raise _invalid("reviewKind must be 'diff' or 'dynamic'")
+    try:
+        return ReviewKind(value)
+    except ValueError:
+        raise _invalid("reviewKind must be 'diff' or 'dynamic'") from None
+
+
+def _dynamic_review(data: dict[str, Any]) -> DynamicReview:
+    """The Dynamic options (#195). Closed: an executable, core override, endpoint or permission
+    field is an unknown field and is refused. The skill is literal data and is never interpreted."""
+    dynamic = _section(data, "dynamic")
+    _check_fields(dynamic, _DYNAMIC_FIELDS, "dynamic.")
+    model = _string(dynamic, "model", "dynamic.", max_chars=200)
+    if not _MODEL.fullmatch(model):
+        raise _invalid("dynamic.model contains characters that are not allowed in a model name")
+    skill = dynamic.get("skill")
+    if not isinstance(skill, str):
+        raise _invalid("dynamic.skill must be a string")
+    # The bound is in UTF-8 bytes, not characters (#198): a multibyte character counts as its bytes.
+    try:
+        skill_bytes = skill.encode("utf-8")
+    except UnicodeEncodeError:
+        raise _invalid("dynamic.skill must be valid UTF-8") from None
+    if len(skill_bytes) > MAX_DYNAMIC_SKILL_BYTES:
+        raise _invalid(
+            f"dynamic.skill must be a string of at most {MAX_DYNAMIC_SKILL_BYTES} UTF-8 bytes"
+        )
+    limits = _object(dynamic.get("limits"), "dynamic.limits")
+    _check_fields(limits, _DYNAMIC_LIMIT_FIELDS, "dynamic.limits.")
+    max_findings = limits.get("maxFindings")
+    if (
+        isinstance(max_findings, bool)
+        or not isinstance(max_findings, int)
+        or not 1 <= max_findings <= 30
+    ):
+        raise _invalid("dynamic.limits.maxFindings must be an integer between 1 and 30")
+    return DynamicReview(model=model, skill=skill, limits=DynamicLimits(max_findings=max_findings))
+
+
+def _claim_base(data: dict[str, Any]) -> ClaimBase:
+    """The checkout facts (#195). `comparison` is a declared mode, not proof of completeness."""
+    base = _section(data, "base")
+    _check_fields(base, _BASE_FIELDS, "base.")
+    repository = _string(base, "repository", "base.", max_chars=200)
+    base_ref = _string(base, "baseRef", "base.", max_chars=255)
+    head_sha = _string(base, "headSha", "base.")
+    if not _LOWER_SHA.fullmatch(head_sha):
+        raise _invalid("base.headSha must be a 40 character lower-case commit id")
+    # Required, like the schema: a tagged Dynamic job always states the previous reviewed head.
+    if "previousReviewedSha" not in base:
+        raise _invalid("base.previousReviewedSha is required")
+    previous = base["previousReviewedSha"]
+    if previous is not None and (
+        not isinstance(previous, str) or not _LOWER_SHA.fullmatch(previous)
+    ):
+        raise _invalid(
+            "base.previousReviewedSha must be null or a 40 character lower-case commit id"
+        )
+    attempted = _attempted_shas(base)
+    comparison = _string(base, "comparison", "base.")
+    if comparison not in _COMPARISONS:
+        raise _invalid("base.comparison must be 'full' or 'incremental'")
+    return ClaimBase(
+        repository=repository,
+        base_ref=base_ref,
+        head_sha=head_sha,
+        previous_reviewed_sha=previous,
+        comparison=comparison,
+        attempted_shas=attempted,
+        attempted_shas_truncated=_attempted_shas_truncated(base),
+    )
+
+
+def _attempted_shas(base: dict[str, Any]) -> tuple[str, ...]:
+    """The optional `attemptedShas` (#255): absent means none (an app from before the field)."""
+    if "attemptedShas" not in base:
+        return ()
+    raw: object = base["attemptedShas"]
+    if not isinstance(raw, list):
+        raise _invalid(_ATTEMPTED_SHAS_DETAIL)
+    items = cast("list[object]", raw)
+    shas = [item for item in items if isinstance(item, str) and _LOWER_SHA.fullmatch(item)]
+    if len(shas) != len(items) or len(items) > MAX_ATTEMPTED_SHAS or len(set(shas)) != len(shas):
+        raise _invalid(_ATTEMPTED_SHAS_DETAIL)
+    return tuple(shas)
+
+
+def _attempted_shas_truncated(base: dict[str, Any]) -> bool:
+    """The optional `attemptedShasTruncated` (#257): absent means false (an app from before it)."""
+    if "attemptedShasTruncated" not in base:
+        return False
+    raw: object = base["attemptedShasTruncated"]
+    if not isinstance(raw, bool):
+        raise _invalid("base.attemptedShasTruncated must be a boolean")
+    return raw
 
 
 def parse_job(raw: str) -> Job:
@@ -352,7 +518,18 @@ def parse_job(raw: str) -> Job:
         raise _invalid("stdin is not valid JSON") from None
     job = _object(data, "the job")
     command = _command(job)
+    review_kind = _review_kind(job)
+    # `args` (the legacy question of the removed `/ask`) is an allowed field so a previous release's
+    # payload still parses for a review; it is never read, so it never reaches PR-Agent.
     _check_fields(job, _TOP_LEVEL_FIELDS, "")
+    if review_kind is ReviewKind.DYNAMIC:
+        dynamic = _dynamic_review(job)
+        base = _claim_base(job)
+    else:
+        if "dynamic" in job or "base" in job:
+            raise _invalid("a diff job must not carry dynamic options")
+        dynamic = None
+        base = None
     git = _git_access(job)
     llm = _llm_access(job)
     return Job(
@@ -360,6 +537,8 @@ def parse_job(raw: str) -> Job:
         command=command,
         git=git,
         llm=llm,
-        args=_args(job, command),
         env=_env(job),
+        review_kind=review_kind,
+        dynamic=dynamic,
+        base=base,
     )

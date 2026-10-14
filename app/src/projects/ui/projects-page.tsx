@@ -1,9 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// The content of the Projects page: the configuration hints on top, then the list of repositories.
-// `loadProjectsPage` gathers the data from the services (passed in, so a test uses real ones against
-// a test database), `ProjectsPageContent` renders it. The page file only wires the real services.
-import { ConfigNotices } from "../../config-status/notices.tsx";
+// The content of the Projects page: one "Needs attention" strip with the configuration hints and
+// the workspace's LLM hint, then the list of repositories. `loadProjectsPage` gathers the data from
+// the services (passed in, so a test uses real ones against a test database), `ProjectsPageContent`
+// renders it. The page file only wires the real services.
+import {
+  NeedsAttention,
+  type AttentionNotice,
+} from "../../components/needs-attention.tsx";
+import {
+  describeConfigNotices,
+  GITHUB_NOT_CONFIGURED_COPY,
+} from "../../config-status/notices.ts";
 import type {
   ConfigAudience,
   ConfigStatus,
@@ -39,14 +47,14 @@ export async function loadProjectsPage(deps: {
 export const ACTIVATION_BLOCKED_TEXT =
   "The GitHub App is not configured, so projects cannot be activated yet.";
 /** The same for a member of a workspace, who is not the one to configure it. */
-export const ACTIVATION_BLOCKED_TEXT_FOR_MEMBERS =
-  "GitHub is not set up yet, so projects cannot be activated. Ask your instance admin.";
+export const ACTIVATION_BLOCKED_TEXT_FOR_MEMBERS = `${GITHUB_NOT_CONFIGURED_COPY} Projects cannot be activated until then.`;
 
 export function ProjectsPageContent({
   workspaceSlug,
   audience = "member",
   canManage = true,
   canConnect = canManage,
+  llmNotice = null,
   data,
   api,
 }: {
@@ -58,12 +66,20 @@ export function ProjectsPageContent({
   canManage?: boolean;
   /** Whether the person may connect GitHub (an Admin or an Owner). */
   canConnect?: boolean;
+  /** The workspace's LLM notice, built by the page (it needs the server's summary); merged into the one strip. */
+  llmNotice?: AttentionNotice | null;
   data: ProjectsPageData;
   api?: ProjectsApi;
 }) {
+  // One attention region for the whole page (#173): the configuration hints and the workspace's LLM
+  // hint are rows of the same strip instead of two separate notice regions.
+  const notices: AttentionNotice[] = [
+    ...describeConfigNotices(data.config, audience),
+    ...(llmNotice === null ? [] : [llmNotice]),
+  ];
   return (
     <>
-      <ConfigNotices status={data.config} audience={audience} />
+      <NeedsAttention notices={notices} />
       <ProjectList
         workspaceSlug={workspaceSlug}
         canManage={canManage}

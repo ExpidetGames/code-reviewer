@@ -4,6 +4,7 @@
 
 import pytest
 
+from code_reviewer_runner.dynamic_review.static_isolation import SlotPorts
 from code_reviewer_runner.job_loop.settings import SettingsError, settings_from_environment
 
 TOKEN = "dummy-runner-token-0123456789-abcdef-0123456789"
@@ -86,3 +87,78 @@ def test_the_job_command_is_the_job_entry_point_unless_a_test_stack_replaces_it(
 def test_a_job_command_with_an_open_quote_is_refused() -> None:
     with pytest.raises(SettingsError, match="PR_AGENT_COMMAND"):
         settings_from_environment({**BASE, "PR_AGENT_COMMAND": "python 'unfinished"})
+
+
+# #197-T04
+def test_the_diff_job_user_is_unset_by_default_and_read_as_uid_and_gid() -> None:
+    assert settings_from_environment(BASE).diff_job_user is None
+    settings = settings_from_environment({**BASE, "RUNNER_DIFF_JOB_USER": "10001:10002"})
+    assert settings.diff_job_user == (10001, 10002)
+
+
+# #197-T04
+@pytest.mark.parametrize("value", ["10001", "root:root", "0:0", "10001:0", "0:10001", "-1:5", ":"])
+def test_a_diff_job_user_that_is_root_or_not_numeric_is_refused(value: str) -> None:
+    with pytest.raises(SettingsError, match="RUNNER_DIFF_JOB_USER"):
+        settings_from_environment({**BASE, "RUNNER_DIFF_JOB_USER": value})
+
+
+# #197-T04
+def test_the_engine_user_of_a_root_loop_defaults_to_the_image_user_and_follows_the_variables() -> (
+    None
+):
+    assert settings_from_environment(BASE).dynamic_engine_user is None  # not the Dynamic runner
+    root = {**BASE, "RUNNER_DIFF_JOB_USER": "10001:10001"}
+    assert settings_from_environment(root).dynamic_engine_user == (10101, 10101)
+    custom = {**root, "RUNNER_DYNAMIC_ENGINE_UID": "20001", "RUNNER_DYNAMIC_ENGINE_GID": "20002"}
+    assert settings_from_environment(custom).dynamic_engine_user == (20001, 20002)
+
+
+# #244-T04
+def test_the_slot_ports_default_to_fixed_ones_and_follow_the_variables_on_a_root_loop() -> None:
+    assert settings_from_environment(BASE).dynamic_ports is None  # not the Dynamic runner
+    root = {**BASE, "RUNNER_DIFF_JOB_USER": "10001:10001"}
+    assert settings_from_environment(root).dynamic_ports == SlotPorts(10180, 10181)
+    custom = {**root, "RUNNER_DYNAMIC_PROXY_PORT": "20000", "RUNNER_DYNAMIC_ENGINE_PORT": "20001"}
+    assert settings_from_environment(custom).dynamic_ports == SlotPorts(20000, 20001)
+
+
+# #244-T04
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"RUNNER_DYNAMIC_PROXY_PORT": "80"},  # privileged range
+        {"RUNNER_DYNAMIC_ENGINE_PORT": "40000"},  # inside the ephemeral range
+        {"RUNNER_DYNAMIC_PROXY_PORT": "proxy"},
+        {"RUNNER_DYNAMIC_PROXY_PORT": "10181"},  # the same as the default engine port
+    ],
+)
+def test_unusable_slot_ports_stop_the_runner_from_starting(extra: dict[str, str]) -> None:
+    with pytest.raises(SettingsError, match="RUNNER_DYNAMIC_"):
+        settings_from_environment({**BASE, "RUNNER_DIFF_JOB_USER": "10001:10001", **extra})
+
+
+# #197-T04
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"RUNNER_DYNAMIC_ENGINE_UID": "10001"},  # the Diff jobs' user
+        {"RUNNER_DYNAMIC_ENGINE_GID": "10001"},  # the Diff jobs' group
+        {"RUNNER_DYNAMIC_ENGINE_UID": "0"},
+        {"RUNNER_DYNAMIC_ENGINE_GID": "engine"},
+    ],
+)
+def test_an_engine_user_that_is_the_diff_job_user_or_root_is_refused(extra: dict[str, str]) -> None:
+    with pytest.raises(SettingsError, match=r"RUNNER_DYNAMIC_ENGINE_[UG]ID"):
+        settings_from_environment({**BASE, "RUNNER_DIFF_JOB_USER": "10001:10001", **extra})
+
+
+# #202-T03: settings alone never advertise opencode; only the startup self-check can add it.
+def test_the_settings_alone_advertise_diff_only() -> None:
+    from code_reviewer_runner.capabilities import ENGINE_DIFF
+
+    root = {**BASE, "RUNNER_DIFF_JOB_USER": "10001:10001"}
+
+    assert settings_from_environment(BASE).engines == (ENGINE_DIFF,)
+    assert settings_from_environment(root).engines == (ENGINE_DIFF,)
+    assert settings_from_environment(root).dynamic_command is None

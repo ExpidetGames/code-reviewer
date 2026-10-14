@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: Apache-2.0
+
+# The network guard of the privileged Dynamic e2e lane (#253). Loaded by runner/scripts/run_dynamic_e2e.sh
+# as root, in the lane's own network namespace, before anything else starts. The namespace has loopback
+# and a default route that leads nowhere (a veth pair nothing answers on), so a connection attempt to any
+# other address reaches the output hook, where this chain counts and rejects it: at once, with an error
+# in the process that tried, never a hang.
+#
+# It is in the kernel, so it sees every process alike: the pinned OpenCode as the engine user, Git (the fake
+# GitHub's upload-pack, the runner's checkout), ripgrep, Node, a shell, whatever else starts. It counts
+# per user: the engine user of the Dynamic image (10101), the Diff job user (10001), root, and anyone else.
+# The runner installs its own table for the engine user (priority 0, after this one); that table is the
+# production boundary and stays untouched.
+#
+# Two kinds of counters, read by e2e/helpers/dynamic-lane-guard.ts:
+#   violation-*  a connection to anything but loopback. The lane must end with all of them at zero.
+#   control-*    a connection to 192.0.2.0/24 (TEST-NET-1, reserved for documentation, never routed). The
+#                lane itself connects there as each kind of process to prove the counters move.
+# A rule without a counter name above would not be read, so every counter has the comment the reader looks for.
+
+add table inet cr_lane_guard
+flush table inet cr_lane_guard
+add chain inet cr_lane_guard output { type filter hook output priority -10 ; policy accept ; }
+
+# Loopback is the only way to the fakes.
+add rule inet cr_lane_guard output oifname "lo" accept
+
+add rule inet cr_lane_guard output ip daddr 192.0.2.0/24 meta skuid 10101 counter reject comment "control-engine"
+add rule inet cr_lane_guard output ip daddr 192.0.2.0/24 meta skuid 10001 counter reject comment "control-job"
+add rule inet cr_lane_guard output ip daddr 192.0.2.0/24 meta skuid 0 counter reject comment "control-root"
+
+add rule inet cr_lane_guard output meta skuid 10101 counter reject comment "violation-engine"
+add rule inet cr_lane_guard output meta skuid 10001 counter reject comment "violation-job"
+add rule inet cr_lane_guard output meta skuid 0 counter reject comment "violation-root"
+add rule inet cr_lane_guard output meta skuid != { 0, 10001, 10101 } counter reject comment "violation-other"

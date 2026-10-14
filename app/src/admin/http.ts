@@ -10,6 +10,8 @@
 //                             { "signUp": { "kind": "everyone" | "emails" | "domains", "entries": [...] } }
 //                             { "signInMethods": { "emailPassword": boolean, "github": boolean } }
 //                             { "limits": { "maxWorkspacesPerUser": number } }
+//                             { "dynamicReview": { "enabled": boolean } }   the Dynamic Review rollout gate
+//                             (contracts/README.md: off cancels the waiting Dynamic jobs, running ones finish)
 //                             { "smtp": { host, port, security, user, password, clearPassword,
 //                                         senderAddress, senderName, allowSelfSigned } | null }
 //                             (the password is write-only: an empty one keeps the stored one, and no
@@ -100,6 +102,7 @@ const SETTING_KEYS = [
   "signUp",
   "signInMethods",
   "limits",
+  "dynamicReview",
   "smtp",
   "importNotice",
 ] as const;
@@ -164,6 +167,8 @@ export function createAdminRouteHandlers({
             return service.changeSignUpRule(who.id, fields.signUp);
           case "signInMethods":
             return service.changeSignInMethods(who.id, fields.signInMethods);
+          case "dynamicReview":
+            return service.changeDynamicReview(who.id, fields.dynamicReview);
           case "smtp":
             return service.changeSmtp(who.id, fields.smtp);
           case "importNotice": {

@@ -1,34 +1,57 @@
 // SPDX-License-Identifier: Apache-2.0
 
 "use client";
-// The review settings form, for the global defaults and for one project. Every field shows the value
-// that is in force and where it comes from. Changing a field sets it for this layer; "Use default"
-// takes it back so the layer inherits it again. A save replaces the whole set of the layer. Problems
-// are checked before sending (the same validation the server runs, which checks again) and shown as
-// sentences next to the field; the estimated cost updates while the person types and warns above the
-// limit without blocking anything.
+// The review settings form, for the global defaults and for one project (#174). One form, one save:
+// the three cards (Model, Review, When to review) read the values in force, and every field shows where
+// its value comes from and can be taken back to the layer below with "Reset to default". A save
+// replaces the whole set of the layer and is the only action in the footer; resetting the whole
+// project to the defaults is a separate action in its own card at the bottom. Problems are checked
+// before sending (the same validation the server runs, which checks again), shown as sentences at
+// their field, and the first marked field gets the focus; the estimated cost updates while the person
+// types and warns above the limit without blocking anything.
 import {
+  useEffect,
   useId,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
-  type ReactNode,
 } from "react";
-import { REVIEW_COMMANDS } from "../../integrations/types.ts";
-import { Button } from "../../ui/button.tsx";
-import { estimateReviewCost } from "../cost.ts";
-import { MODEL_PRICES } from "../model-pricing.ts";
+import { Alert } from "../../components/ui/alert.tsx";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "../../components/ui/alert-dialog.tsx";
+import { Button } from "../../components/button.tsx";
+import { DangerZone } from "../../components/danger-zone.tsx";
+import { formatUtc } from "../../ui/format-time.ts";
+import {
+  PROJECT_DYNAMIC_SETTING_FIELDS,
   REVIEW_SETTING_FIELDS,
-  REVIEW_SETTING_LIMITS,
+  type ProjectReviewKind,
   type ReviewSettingField,
 } from "../settings.ts";
+import type { ReviewCostGuard } from "../cost.ts";
+import { estimateReviewCost } from "../cost.ts";
+import { MODEL_PRICES } from "../model-pricing.ts";
 import {
   browserGlobalSettingsApi,
   browserProjectSettingsApi,
   type SettingsApi,
 } from "./api.ts";
-import { CostSummary } from "./cost-summary.tsx";
+import {
+  editSkill,
+  resetSkill,
+  setDynamicModel,
+  setReviewKind,
+  setSkillText,
+} from "./dynamic-form-state.ts";
 import { modelFromAnswer, type SettingsFormModel } from "./form-model.ts";
 import {
   buildPatch,
@@ -38,37 +61,64 @@ import {
   setBoolean,
   setCommand,
   setText,
+  type BooleanField,
   type FormState,
+  type TextField,
 } from "./form-state.ts";
+import { adoptCards, planProjectSave, type SaveStep } from "./project-save.ts";
+import { ModelFieldset } from "./model-fieldset.tsx";
+import { KIND_NAMES } from "../kind-names.ts";
+import {
+  GATE_OFF_WARNING,
+  ReviewKindFieldset,
+  type ReviewKindHandlers,
+} from "./review-kind-fieldset.tsx";
+import { ReviewFieldset } from "./review-fieldset.tsx";
+import { WhenFieldset } from "./when-fieldset.tsx";
+import type { SettingsFieldHandlers } from "./settings-fields.tsx";
 import { describeIssue, describeSaveFailure } from "./messages.ts";
 import type { RequestIssue } from "../../ui/json-request.ts";
 
 type Errors = Partial<Record<string, string>>;
-type ControlIds = {
-  id: string;
-  describedBy: string | undefined;
-  invalid: boolean;
-  /**
-   * Where the value comes from and the button that takes an own value back. A field with a label
-   * shows them in its head; a field without one (a checkbox, whose label is part of its control)
-   * places them next to the control's own text, so they never float away from it.
-   */
-  origin: ReactNode;
-};
 
-// The settings accept a fallback model, but the app does not send it to the runner yet (lead
-// decision for the MVP, src/review-settings/README.md), so the form says so instead of promising it.
-export const FALLBACK_MODEL_HINT =
-  "Stored but not used yet: reviews do not switch to this model when the main model fails. Leave empty for none.";
+/** The Diff fields an agent review does not show: an error on one of them is hidden while Dynamic is chosen. */
+const DIFF_ONLY_FIELDS: readonly string[] = [
+  "model",
+  "fallbackModel",
+  "maxTokens",
+  "largePrChunking",
+  "inlineKeyIssues",
+  "extraInstructions",
+];
+const DYNAMIC_ONLY_FIELDS: readonly string[] = ["dynamicModel", "reviewSkill"];
 
-// Plain-language hints for the two fields people ask about most.
-export const MODEL_HINT =
-  "The AI model that writes the review. Pick one from the list or type the name of any model OpenRouter offers. Smaller models cost less per review, larger ones usually review more thoroughly.";
-
-export function tokenBudgetHint(): string {
-  const { min, max } = REVIEW_SETTING_LIMITS.maxTokens;
-  return `How much of a pull request the model can read in one go. A token is about three quarters of a word, so a bigger budget lets it see more of a large change, but costs more. Between ${min.toLocaleString("en-US")} and ${max.toLocaleString("en-US")}.`;
+/** The kind that has a problem the selected kind does not show, or null. */
+function hiddenProblemOf(
+  errors: Errors,
+  selected: ProjectReviewKind,
+): ProjectReviewKind | null {
+  const other = selected === "diff" ? "dynamic" : "diff";
+  const hidden = selected === "diff" ? DYNAMIC_ONLY_FIELDS : DIFF_ONLY_FIELDS;
+  return Object.keys(errors).some((field) => hidden.includes(field))
+    ? other
+    : null;
 }
+
+const UNCHANGED_TEXT = "No changes to save.";
+
+function confirmText(
+  kind: ProjectReviewKind,
+  dynamicReviewEnabled: boolean,
+): string {
+  const base =
+    "Reviews of this project that are still waiting are cancelled, and a review that is already running finishes. The next review posts a new summary comment on the pull request; the findings of the current comment are not carried over.";
+  return kind === "dynamic" && !dynamicReviewEnabled
+    ? `${base} ${GATE_OFF_WARNING}`
+    : base;
+}
+
+const SAVED_TEXT =
+  "Saved. Reviews that start from now on use these values; a review that is already running keeps the values it started with.";
 
 /**
  * Splits the problems of a save into those that belong to a field of the form and those that do not
@@ -83,29 +133,16 @@ function splitIssues(issues: readonly RequestIssue[]): {
   const general: string[] = [];
   for (const issue of issues) {
     const text = describeIssue(issue.field, issue.code);
-    if ((REVIEW_SETTING_FIELDS as readonly string[]).includes(issue.field))
+    if (
+      (REVIEW_SETTING_FIELDS as readonly string[]).includes(issue.field) ||
+      (PROJECT_DYNAMIC_SETTING_FIELDS as readonly string[]).includes(
+        issue.field,
+      )
+    )
       fieldErrors[issue.field] = text;
     else general.push(text);
   }
   return { fieldErrors, general };
-}
-
-const SAVED_TEXT =
-  "Saved. Reviews that start from now on use these values; a review that is already running keeps the values it started with.";
-
-function sourceText(
-  model: SettingsFormModel,
-  state: FormState,
-  field: ReviewSettingField,
-): string {
-  if (state.overridden[field])
-    return model.mode === "project"
-      ? "Set for this project"
-      : "Changed from the built-in value";
-  if (model.mode === "global") return "Built-in value";
-  return model.sources[field] === "global"
-    ? "Global default"
-    : "Built-in value";
 }
 
 export function SettingsForm({
@@ -113,6 +150,7 @@ export function SettingsForm({
   initial,
   repositoryId,
   readOnly = false,
+  dynamicReviewEnabled = false,
   api: apiOverride,
 }: {
   /** The workspace of the page: the call is made in it. */
@@ -125,6 +163,11 @@ export function SettingsForm({
    * save in any case, src/workspaces/permissions.ts).
    */
   readOnly?: boolean;
+  /**
+   * Whether the instance has turned Dynamic Review on (the #195 gate). Unknown counts as off: the card
+   * never implies that Dynamic Review works when it may not.
+   */
+  dynamicReviewEnabled?: boolean;
   /** Only tests pass this: a server component cannot hand functions to this client component. */
   api?: SettingsApi;
 }) {
@@ -137,24 +180,62 @@ export function SettingsForm({
     [initial.mode, repositoryId, workspaceSlug],
   );
   const api = apiOverride ?? defaultApi;
-  const prefix = useId();
+  const datalistId = `${useId()}-models`;
+  const formRef = useRef<HTMLFormElement>(null);
+  const saveRef = useRef<HTMLButtonElement>(null);
+  // Set synchronously, so a confirmation that fires twice cannot start two saves (#200 review).
+  const savingRef = useRef(false);
   const [model, setModel] = useState(initial);
   const [state, setState] = useState(() => initialFormState(initial));
   const [errors, setErrors] = useState<Errors>({});
   const [formError, setFormError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
+  // The message of a request of the Review kind card that failed after another one was saved.
+  const [kindError, setKindError] = useState<string | null>(null);
+  const [status, setStatus] = useState<"saved" | "unchanged" | null>(null);
   const [busy, setBusy] = useState(false);
-  const [confirmingReset, setConfirmingReset] = useState(false);
+  // A save that waits for the person to confirm the switch of the review kind.
+  const [confirming, setConfirming] = useState<{
+    steps: SaveStep[];
+    to: ProjectReviewKind;
+  } | null>(null);
+  // Bumped when a save was refused: the first marked field is focused then (rulebook R20).
+  const [focusRequest, setFocusRequest] = useState(0);
 
+  // The project form of a repository holds the project-only settings (#194); the global form does not.
+  const projectView = model.mode === "project" ? model.dynamic : undefined;
+  const kind: ProjectReviewKind = state.dynamic?.reviewKind ?? "diff";
   const preview = useMemo(() => previewSettings(model, state), [model, state]);
-  const cost = preview === null ? null : estimateReviewCost(preview);
-  const resetLabel =
-    model.mode === "project" ? "Use default" : "Use built-in value";
+  const cost: ReviewCostGuard | null =
+    preview === null ? null : estimateReviewCost(preview);
+  // Whether anything differs from what was loaded; the person can take it all back.
+  const dirty = useMemo(() => {
+    if (projectView === undefined) return false;
+    const plan = planProjectSave(model, state);
+    return !plan.ok || plan.steps.length > 0;
+  }, [model, projectView, state]);
+  const hiddenProblem =
+    projectView === undefined ? null : hiddenProblemOf(errors, kind);
 
-  // A change takes the problem of its field away: the estimate already works with the new value.
-  function edit(next: FormState, changed: ReviewSettingField) {
+  // After the refusals are in the DOM, the first marked control takes the focus; a problem in a field
+  // the selected kind does not show, or a failure that belongs to no field, takes it instead.
+  useEffect(() => {
+    if (focusRequest === 0) return;
+    const form = formRef.current;
+    const target =
+      form?.querySelector<HTMLElement>('[aria-invalid="true"]') ??
+      form?.querySelector<HTMLElement>("[data-hidden-problem]") ??
+      form?.querySelector<HTMLElement>("[data-kind-error]") ??
+      form?.querySelector<HTMLElement>("[data-form-error]");
+    target?.focus();
+  }, [focusRequest]);
+
+  // A change takes the problem of its field away, and any message of a save that failed: the
+  // person is working on the form again, so a "not saved" of an earlier try no longer applies.
+  function edit(next: FormState, changed: string) {
     setState(next);
-    setSaved(false);
+    setStatus(null);
+    setKindError(null);
+    setFormError(null);
     setErrors((current) => {
       if (current[changed] === undefined) return current;
       const rest = { ...current };
@@ -172,15 +253,98 @@ export function SettingsForm({
     return true;
   }
 
+  function refuse(fieldErrors: Errors, message: string) {
+    setErrors(fieldErrors);
+    setFormError(message);
+    setFocusRequest((count) => count + 1);
+  }
+
+  // The requests of one project save, in order. The first failure stops the rest; what an earlier
+  // request saved stays saved and is shown as saved, the cards of the failed request keep their edits.
+  // The guard is a ref, not `busy`: a second activation of the confirmation can arrive before React
+  // has re-rendered with `busy` true, and would send the same save twice (#200 review).
+  async function runSteps(steps: SaveStep[]) {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setBusy(true);
+    try {
+      let currentModel = model;
+      let currentState = state;
+      for (const [index, step] of steps.entries()) {
+        const result = await api.save(step.body);
+        if (!result.ok) {
+          const { fieldErrors, general } = splitIssues(result.issues);
+          const failure = [describeSaveFailure(result.code), ...general].join(
+            " ",
+          );
+          const partial = index > 0;
+          // After a saved first request, the card of the failed one says what was not saved.
+          if (partial && step.cards.length === 1 && step.cards[0] === "kind")
+            setKindError(`Not saved. ${failure}`);
+          refuse(
+            fieldErrors,
+            partial
+              ? `Some changes were saved, the others were not. ${failure}`
+              : failure,
+          );
+          return;
+        }
+        const next = modelFromAnswer("project", result.data);
+        if (next === null) {
+          refuse({}, describeSaveFailure("UNEXPECTED_RESPONSE"));
+          return;
+        }
+        currentModel = next;
+        currentState = adoptCards(currentState, next, step.cards);
+        setModel(currentModel);
+        setState(currentState);
+      }
+      setErrors({});
+      setStatus("saved");
+    } finally {
+      savingRef.current = false;
+      setBusy(false);
+    }
+  }
+
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (busy) return;
-    setSaved(false);
+    setStatus(null);
     setFormError(null);
+    setKindError(null);
+    if (projectView !== undefined) {
+      const plan = planProjectSave(model, state);
+      if (!plan.ok) {
+        const { fieldErrors, general } = splitIssues(plan.issues);
+        refuse(
+          fieldErrors,
+          [describeSaveFailure("REVIEW_SETTINGS_INVALID"), ...general].join(
+            " ",
+          ),
+        );
+        return;
+      }
+      setErrors({});
+      // An untouched form sends nothing: an empty request would clear the Diff overrides.
+      if (plan.steps.length === 0) {
+        setStatus("unchanged");
+        return;
+      }
+      if (plan.kindChange !== null) {
+        setConfirming({ steps: plan.steps, to: plan.kindChange.to });
+        return;
+      }
+      await runSteps(plan.steps);
+      return;
+    }
     const built = buildPatch(state);
     if (!built.ok) {
-      setErrors(splitIssues(built.issues).fieldErrors);
-      setFormError(describeSaveFailure("REVIEW_SETTINGS_INVALID"));
+      const { fieldErrors, general } = splitIssues(built.issues);
+      refuse(
+        fieldErrors,
+        [describeSaveFailure("REVIEW_SETTINGS_INVALID"), ...general].join(" "),
+      );
       return;
     }
     setErrors({});
@@ -189,20 +353,22 @@ export function SettingsForm({
     setBusy(false);
     if (!result.ok) {
       const { fieldErrors, general } = splitIssues(result.issues);
-      setErrors(fieldErrors);
-      setFormError([describeSaveFailure(result.code), ...general].join(" "));
+      refuse(
+        fieldErrors,
+        [describeSaveFailure(result.code), ...general].join(" "),
+      );
       return;
     }
     if (!adopt(result.data))
       setFormError(describeSaveFailure("UNEXPECTED_RESPONSE"));
-    else setSaved(true);
+    else setStatus("saved");
   }
 
   async function resetAll() {
-    setConfirmingReset(false);
     if (api.reset === undefined || busy) return;
-    setSaved(false);
+    setStatus(null);
     setFormError(null);
+    setKindError(null);
     setBusy(true);
     const result = await api.reset();
     setBusy(false);
@@ -212,312 +378,192 @@ export function SettingsForm({
     }
     if (!adopt(result.data))
       setFormError(describeSaveFailure("UNEXPECTED_RESPONSE"));
-    else setSaved(true);
+    else setStatus("saved");
   }
 
-  function field(
-    name: ReviewSettingField,
-    label: string | null,
-    control: (ids: ControlIds) => ReactNode,
-    hint?: string,
-    /** What the reset button names; defaults to the label. Required when there is no label. */
-    resetFor: string | undefined = label ?? undefined,
-  ) {
-    const id = `${prefix}-${name}`;
-    const error = errors[name];
-    const describedBy =
-      [
-        hint !== undefined ? `${id}-hint` : null,
-        error !== undefined ? `${id}-error` : null,
-      ]
-        .filter(Boolean)
-        .join(" ") || undefined;
-    const origin = (
-      <>
-        <span className="badge badge-source">
-          {sourceText(model, state, name)}
-        </span>
-        {state.overridden[name] ? (
-          <button
-            type="button"
-            className="link-button"
-            aria-label={`${resetLabel} for ${resetFor ?? "this setting"}`}
-            onClick={() => edit(resetField(state, name, model), name)}
-          >
-            {resetLabel}
-          </button>
-        ) : null}
-      </>
-    );
-    return (
-      <div className="field" data-field={name}>
-        {label !== null ? (
-          <div className="field-head">
-            <label htmlFor={id}>{label}</label>
-            {origin}
-          </div>
-        ) : null}
-        {control({ id, describedBy, invalid: error !== undefined, origin })}
-        {hint !== undefined ? (
-          <p id={`${id}-hint`} className="muted small">
-            {hint}
-          </p>
-        ) : null}
-        {error !== undefined ? (
-          <p id={`${id}-error`} className="field-error">
-            {error}
-          </p>
-        ) : null}
-      </div>
-    );
+  // Takes every unsaved change back to what was loaded; nothing is sent.
+  function discard() {
+    setState(initialFormState(model));
+    setErrors({});
+    setFormError(null);
+    setKindError(null);
+    setStatus(null);
   }
 
-  const textInput = (
-    name: "model" | "fallbackModel" | "maxFindings" | "maxTokens",
-    { id, describedBy, invalid }: ControlIds,
-    extra: {
-      list?: string;
-      inputMode?: "numeric";
-      placeholder?: string;
-    } = {},
-  ) => (
-    <input
-      id={id}
-      type="text"
-      autoComplete="off"
-      spellCheck={false}
-      value={state.values[name]}
-      aria-invalid={invalid}
-      aria-describedby={describedBy}
-      onChange={(event) => edit(setText(state, name, event.target.value), name)}
-      {...extra}
-    />
-  );
+  const handlers: SettingsFieldHandlers = {
+    setText: (name: TextField, value: string) =>
+      edit(setText(state, name, value), name),
+    setBoolean: (name: BooleanField, value: boolean) =>
+      edit(setBoolean(state, name, value), name),
+    setCommand: (command, allowed) =>
+      edit(setCommand(state, command, allowed), "allowedCommands"),
+    reset: (name: ReviewSettingField) =>
+      edit(resetField(state, name, model), name),
+  };
+  const shippedSkill = projectView?.defaults.reviewSkill ?? "";
+  const defaultModel = projectView?.defaults.dynamicModel ?? "";
+  const kindHandlers: ReviewKindHandlers = {
+    setKind: (next) => edit(setReviewKind(state, next), "reviewKind"),
+    setModel: (text) => edit(setDynamicModel(state, text), "dynamicModel"),
+    resetModel: () =>
+      edit(setDynamicModel(state, defaultModel), "dynamicModel"),
+    editSkill: () => edit(editSkill(state, shippedSkill), "reviewSkill"),
+    setSkill: (text) => edit(setSkillText(state, text), "reviewSkill"),
+    resetSkill: () => edit(resetSkill(state, shippedSkill), "reviewSkill"),
+  };
+  const disabled = busy || readOnly;
+  const saveLabel =
+    model.mode === "project" ? "Save review settings" : "Save review defaults";
 
-  const checkbox = (
-    name:
-      | "largePrChunking"
-      | "inlineKeyIssues"
-      | "autoReviewOnOpen"
-      | "autoReviewOnPush",
-    label: string,
-    hint: string,
-  ) =>
-    field(
-      name,
-      null,
-      ({ id, describedBy, origin }) => (
-        <div className="check-line">
-          <label className="check" htmlFor={id}>
-            <input
-              id={id}
-              type="checkbox"
-              checked={state.values[name]}
-              aria-describedby={describedBy}
-              onChange={(event) =>
-                edit(setBoolean(state, name, event.target.checked), name)
-              }
-            />
-            {label}
-          </label>
-          {origin}
-        </div>
-      ),
-      hint,
-      label,
-    );
-
-  const datalistId = `${prefix}-models`;
-  const instructionsLength = state.values.extraInstructions.length;
   return (
-    <form
-      className="settings-form"
-      onSubmit={(event) => void submit(event)}
-      noValidate
-    >
-      <datalist id={datalistId}>
-        {Object.keys(MODEL_PRICES).map((name) => (
-          <option key={name} value={name} />
-        ))}
-      </datalist>
+    <div className="flex max-w-[44rem] flex-col gap-6">
+      <form
+        ref={formRef}
+        onSubmit={(event) => void submit(event)}
+        aria-label="Review settings"
+        noValidate
+        className="flex flex-col gap-6"
+      >
+        <datalist id={datalistId}>
+          {Object.keys(MODEL_PRICES).map((name) => (
+            <option key={name} value={name} />
+          ))}
+        </datalist>
 
-      <fieldset disabled={busy || readOnly}>
-        <legend>Model</legend>
-        {field(
-          "model",
-          "Model",
-          (ids) => textInput("model", ids, { list: datalistId }),
-          MODEL_HINT,
-        )}
-        {field(
-          "fallbackModel",
-          "Fallback model",
-          (ids) =>
-            textInput("fallbackModel", ids, {
-              list: datalistId,
-              placeholder: "None",
-            }),
-          FALLBACK_MODEL_HINT,
-        )}
-        {field(
-          "maxTokens",
-          "Token budget",
-          (ids) => textInput("maxTokens", ids, { inputMode: "numeric" }),
-          tokenBudgetHint(),
-        )}
-        <CostSummary cost={cost} />
-      </fieldset>
+        {projectView !== undefined && state.dynamic !== undefined ? (
+          <ReviewKindFieldset
+            view={projectView}
+            values={state.dynamic}
+            errors={errors}
+            disabled={disabled}
+            dynamicReviewEnabled={dynamicReviewEnabled}
+            hiddenProblem={hiddenProblem}
+            kindError={kindError}
+            handlers={kindHandlers}
+          />
+        ) : null}
+        {kind === "diff" ? (
+          <ModelFieldset
+            model={model}
+            state={state}
+            errors={errors}
+            disabled={disabled}
+            handlers={handlers}
+            cost={cost}
+            datalistId={datalistId}
+          />
+        ) : null}
+        <ReviewFieldset
+          model={model}
+          state={state}
+          errors={errors}
+          disabled={disabled}
+          handlers={handlers}
+          kind={kind}
+        />
+        <WhenFieldset
+          model={model}
+          state={state}
+          errors={errors}
+          disabled={disabled}
+          handlers={handlers}
+        />
 
-      <fieldset disabled={busy || readOnly}>
-        <legend>Review</legend>
-        {field(
-          "maxFindings",
-          "Most findings per review",
-          (ids) => textInput("maxFindings", ids, { inputMode: "numeric" }),
-          `${String(REVIEW_SETTING_LIMITS.maxFindings.min)} to ${String(REVIEW_SETTING_LIMITS.maxFindings.max)}.`,
-        )}
-        {checkbox(
-          "largePrChunking",
-          "Review a large pull request in chunks",
-          "Otherwise files that do not fit the token budget are left out.",
-        )}
-        {checkbox(
-          "inlineKeyIssues",
-          "Also post every finding as an inline comment",
-          "On the line the finding is about.",
-        )}
-        {field(
-          "extraInstructions",
-          "Project rules",
-          ({ id, describedBy, invalid }) => (
-            <textarea
-              id={id}
-              rows={6}
-              value={state.values.extraInstructions}
-              aria-invalid={invalid}
-              aria-describedby={describedBy}
-              onChange={(event) =>
-                edit(
-                  setText(state, "extraInstructions", event.target.value),
-                  "extraInstructions",
-                )
-              }
-            />
-          ),
-          `Free text added to every review prompt (${instructionsLength.toLocaleString("en-US")} of ${REVIEW_SETTING_LIMITS.extraInstructionsMaxChars.toLocaleString("en-US")} characters).`,
-        )}
-      </fieldset>
+        {formError !== null ? (
+          <Alert variant="destructive" tabIndex={-1} data-form-error="">
+            {formError}
+          </Alert>
+        ) : null}
+        {status === "saved" ? (
+          <Alert variant="success" role="status">
+            {SAVED_TEXT}
+          </Alert>
+        ) : null}
+        {status === "unchanged" ? (
+          <Alert variant="info" role="status">
+            {UNCHANGED_TEXT}
+          </Alert>
+        ) : null}
 
-      <fieldset disabled={busy || readOnly}>
-        <legend>When to review</legend>
-        {checkbox(
-          "autoReviewOnOpen",
-          "Review when a pull request is opened, reopened or marked ready",
-          "Draft pull requests wait until they are ready.",
-        )}
-        {checkbox(
-          "autoReviewOnPush",
-          "Review again when commits are pushed",
-          "A short pause lets several pushes count as one.",
-        )}
-        {field(
-          "allowedCommands",
-          null,
-          ({ id, describedBy, origin }) => (
-            <div
-              role="group"
-              aria-labelledby={`${id}-label`}
-              aria-describedby={describedBy}
-              id={id}
-            >
-              <div className="check-line">
-                <span id={`${id}-label`} className="field-label">
-                  Comment commands people may use
-                </span>
-                {origin}
-              </div>
-              <div className="check-row">
-                {REVIEW_COMMANDS.map((command) => (
-                  <label key={command} className="check">
-                    <input
-                      type="checkbox"
-                      checked={state.values.allowedCommands.includes(command)}
-                      onChange={(event) =>
-                        edit(
-                          setCommand(state, command, event.target.checked),
-                          "allowedCommands",
-                        )
-                      }
-                    />
-                    /{command}
-                  </label>
-                ))}
-              </div>
-            </div>
-          ),
-          undefined,
-          "comment commands",
-        )}
-      </fieldset>
-
-      {formError !== null ? (
-        <p role="alert" className="alert alert-error">
-          {formError}
-        </p>
-      ) : null}
-      {saved ? (
-        <p role="status" className="alert alert-success">
-          {SAVED_TEXT}
-        </p>
-      ) : null}
-
-      {readOnly ? (
-        <p className="muted small">
-          Only Admins and Owners can change these values.
-        </p>
-      ) : (
-        <div className="form-actions">
-          <Button type="submit" disabled={busy}>
-            {busy
-              ? "Saving..."
-              : model.mode === "project"
-                ? "Save project settings"
-                : "Save defaults"}
-          </Button>
-          {api.reset !== undefined && !confirmingReset ? (
-            <Button
-              variant="ghost"
-              disabled={busy}
-              onClick={() => setConfirmingReset(true)}
-            >
-              Use the defaults for everything
-            </Button>
-          ) : null}
-          {api.reset !== undefined && confirmingReset ? (
-            <span className="confirm" role="group" aria-label="Confirm reset">
-              <span>
-                Remove every value of this project and follow the defaults?
-              </span>
+        <div className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+          {readOnly ? (
+            <p className="text-sm text-muted-foreground">
+              Only Admins and Owners can change these values.
+            </p>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2">
               <Button
-                variant="destructive"
-                disabled={busy}
-                onClick={() => void resetAll()}
+                ref={saveRef}
+                type="submit"
+                loading={busy}
+                loadingLabel="Saving"
               >
-                Yes, use the defaults
+                {saveLabel}
               </Button>
-              <Button variant="ghost" onClick={() => setConfirmingReset(false)}>
-                Cancel
-              </Button>
-            </span>
-          ) : null}
+              {dirty && !busy ? (
+                <Button variant="ghost" onClick={discard}>
+                  Discard changes
+                </Button>
+              ) : null}
+            </div>
+          )}
           {model.lastSaved !== null ? (
-            <span className="muted small">
-              Last saved {model.lastSaved.at.slice(0, 16).replace("T", " ")} UTC
+            <p className="text-sm text-muted-foreground">
+              Last saved{" "}
+              <time dateTime={model.lastSaved.at}>
+                {formatUtc(model.lastSaved.at)}
+              </time>
               {model.lastSaved.by !== null ? ` by ${model.lastSaved.by}` : ""}.
-            </span>
+            </p>
           ) : null}
         </div>
+      </form>
+
+      {api.reset === undefined ? null : (
+        <DangerZone
+          title="Reset to defaults"
+          description="Removes every value set for this project — the Review kind, the Dynamic Review model and the review skill, together with the Diff settings — and follows the workspace defaults again."
+          actionLabel="Reset everything"
+          confirmTitle="Reset this project to the defaults?"
+          confirmDescription="Every value set for this project is removed, including the Review kind, the Dynamic Review model and the review skill, and the workspace defaults apply again. Reviews started afterwards use the defaults."
+          confirmLabel="Reset to defaults"
+          onConfirm={resetAll}
+        />
       )}
-    </form>
+
+      <AlertDialog
+        open={confirming !== null}
+        onOpenChange={(open) => {
+          if (!open) setConfirming(null);
+        }}
+      >
+        <AlertDialogContent
+          onCloseAutoFocus={(event) => {
+            // There is no trigger to return to: the focus goes back to the Save button.
+            event.preventDefault();
+            saveRef.current?.focus();
+          }}
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Switch to {KIND_NAMES[confirming?.to ?? kind]}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirmText(confirming?.to ?? kind, dynamicReviewEnabled)}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (confirming !== null) void runSteps(confirming.steps);
+              }}
+            >
+              Switch to {KIND_NAMES[confirming?.to ?? kind]}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
   );
 }

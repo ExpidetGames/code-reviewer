@@ -1,7 +1,8 @@
 # LLM access
 
 Every workspace brings its own LLM key (bring your own key, BYOK; `docs/decisions/0001-editions-setup-and-accounts.md`,
-sections 2.7 and 2.8). An Admin or an Owner enters it under **Settings, LLM access** of the workspace; the app
+sections 2.7 and 2.8). An Admin or an Owner enters it under **Settings → LLM access** of the workspace
+(`/w/:workspace/settings/llm`); removing the key is a danger zone under **Settings → Advanced**. The app
 hands the key of the job's own workspace to the runner with every job. The legacy `LLM_PROVIDER` and `LLM_API_KEY`
 were imported once into the default workspace by the update of an existing installation (`src/legacy-import/`) and
 are not read any more; `LLM_MODEL` and `LLM_MAX_TOKENS` are instance settings.
@@ -32,13 +33,13 @@ runner-api-llm-key.integration.test.ts`).
 
 ## The key of a workspace
 
-| File               | Role                                                                                                                                                                                                  |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `workspace-key.ts` | `createWorkspaceLlmKeyService`: `status`, `save`, `remove`, `reveal`, `forJob`, on the encrypted store of the workspace (`src/secrets/workspace-store.ts`)                                            |
-| `http.ts`          | The handlers of `GET\|PUT\|DELETE /api/w/:workspace/llm-key` and `POST /api/w/:workspace/llm-key/test` (the route files are below `src/app/api/w/[workspace]/llm-key/`)                               |
-| `key-test.ts`      | The "Test key" button: one call to the provider (`GET /key` of OpenRouter, which costs nothing), the failure classes, the limits                                                                      |
-| `endpoint.ts`      | The provider's API address. Not configurable by a person; the test stack points it at the fake LLM with `LLM_API_BASE_URL` together with `ALLOW_TEST_LLM_ENDPOINTS=true`, which anything else ignores |
-| `ui/`              | The settings section (`LlmAccessSection`, form), the hint "LLM not configured" with its link (`LlmAccessNotice`), the copy for the codes                                                              |
+| File               | Role                                                                                                                                                                                                                                                                |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `workspace-key.ts` | `createWorkspaceLlmKeyService`: `status`, `save`, `remove`, `reveal`, `forJob`, on the encrypted store of the workspace (`src/secrets/workspace-store.ts`)                                                                                                          |
+| `http.ts`          | The handlers of `GET\|PUT\|DELETE /api/w/:workspace/llm-key` and `POST /api/w/:workspace/llm-key/test` (the route files are below `src/app/api/w/[workspace]/llm-key/`)                                                                                             |
+| `key-test.ts`      | The "Test key" button: one call to the provider (`GET /key` of OpenRouter, which costs nothing), the failure classes, the limits                                                                                                                                    |
+| `endpoint.ts`      | The provider's API address. Not configurable by a person; the test stack points it at the fake LLM with `LLM_API_BASE_URL` together with `ALLOW_TEST_LLM_ENDPOINTS=true`, which anything else ignores                                                               |
+| `ui/`              | The settings section (`LlmAccessSection`, form), the hint "LLM not configured": `llmAccessAttention` builds it as an `AttentionNotice` so a page can merge it into its one "Needs attention" strip, `LlmAccessNotice` renders it on its own; the copy for the codes |
 
 - **Storage.** Table `workspace_secrets`, AES-256-GCM with a key derived from `APP_SECRET`; the additional
   authenticated data is the table, the **workspace id** and the name `llm_api_key`, so a row copied to another
@@ -92,12 +93,12 @@ hand; a contract test belongs to the runner API contracts (CR-28).
 no model name, `LLM_MAX_TOKENS` that is no number in range) does not stop the reviews: it is ignored, the default is
 used, and it is reported as a _warning_ (`LLM_MODEL_INVALID`, `LLM_MAX_TOKENS_INVALID`).
 
-| File         | Role                                                                                                                                                                                                                                                    |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `config.ts`  | `loadLlmConfig(env)`: the only place that knows the variable names (the import reads the legacy ones through it); `checkLlmApiKey` (the one rule for a key), `readLlmDefaults` (model and context window without a key). Returns a state, never throws. |
-| `access.ts`  | `LlmAccessResult` (with its `source` or its `reason`), `revealLlmAccess` (the one way to get the key out, `LLM_ACCESS_HAS_NO_KEY` without a key), `maskSecretInText` (masks secrets in a text).                                                         |
-| `status.ts`  | `describeLlmStatus(state)`: what the UI may know about a configuration (the instance status reports the model options only).                                                                                                                            |
-| `startup.ts` | `checkLlmConfigOnStart`: one warning for an optional variable that is ignored (`LLM_MODEL`, `LLM_MAX_TOKENS`) and the notes on the test endpoints. Says nothing about `LLM_PROVIDER` and `LLM_API_KEY`. Never stops the start.                          |
+| File         | Role                                                                                                                                                                                                                                                                                                                                                           |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `config.ts`  | `readLlmDefaults(env)`: the built-in model (`LLM_MODEL`) and the context window (`LLM_MAX_TOKENS`), a wrong one ignored with a warning; `configuredLlmModel`; `checkLlmApiKey` (the one rule for a key, shared with the key routes and the legacy import). The legacy `LLM_PROVIDER` / `LLM_API_KEY` are not read here (src/legacy-import/ imports them once). |
+| `access.ts`  | `LlmAccessResult` (with its `source` or its `reason`), `revealLlmAccess` (the one way to get the key out, `LLM_ACCESS_HAS_NO_KEY` without a key), `maskSecretInText` (masks secrets in a text).                                                                                                                                                                |
+| `status.ts`  | `LlmStatus`: what the UI may know about the instance's LLM defaults (the built-in model and the warnings about an ignored option). The key is a matter of each workspace.                                                                                                                                                                                      |
+| `startup.ts` | `checkLlmConfigOnStart`: one warning for an optional variable that is ignored (`LLM_MODEL`, `LLM_MAX_TOKENS`) and the notes on the test endpoints. Says nothing about `LLM_PROVIDER` and `LLM_API_KEY`. Never stops the start.                                                                                                                                 |
 
 ## Rules
 
@@ -121,7 +122,7 @@ claimed-keys.ts`) and not in memory, so any app instance can mask a result after
 
 ## Testing
 
-`resolve.test.ts`, `config.test.ts`, `access.test.ts`, `status.test.ts`, `startup.test.ts`, `endpoint.test.ts` and
+`resolve.test.ts`, `config.test.ts`, `access.test.ts`, `startup.test.ts`, `endpoint.test.ts` and
 `../instrumentation.test.ts` (unit, no database); `workspace-key.integration.test.ts`,
 `key-test.integration.test.ts` (real SQLite, the fake LLM over real HTTP); `ui/*.test.tsx`;
 `integration-tests/http/llm-key-route.integration.test.ts` (the real route files: roles, isolation, the request,

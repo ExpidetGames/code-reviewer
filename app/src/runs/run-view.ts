@@ -6,9 +6,10 @@
 // among them, and of the stored result only the comment link and the log tail are read. Everything
 // that came from outside (the question of an `/ask`, a login, the log of the runner) is data and is
 // rendered as text; the one link made from stored data is checked here.
-import type { JsonValue, ReviewCommand } from "../integrations/types.ts";
+import type { JsonValue, StoredReviewCommand } from "../integrations/types.ts";
 import type { JobStatus } from "../jobs/job-status.ts";
 import type { Job, JobTriggerKind } from "../jobs/job-types.ts";
+import type { ProjectReviewKind } from "../review-settings/settings.ts";
 import { describeErrorCode } from "./error-copy.ts";
 import { runDurationMs } from "./run-duration.ts";
 
@@ -23,7 +24,9 @@ export type RunRowView = {
   prNumber: number;
   /** The link to the pull request when it is an `https://github.com/` address, otherwise null. */
   prUrl: string | null;
-  command: ReviewCommand;
+  command: StoredReviewCommand;
+  /** The review kind the run was queued for (#200): Diff Review or Dynamic Review. */
+  reviewKind: ProjectReviewKind;
   triggerKind: JobTriggerKind;
   /** "Automatic", "Comment by octocat" or "Started by octocat". */
   trigger: string;
@@ -36,6 +39,21 @@ export type RunRowView = {
   durationMs: number | null;
   /** One sentence for a run that did not succeed, or null. */
   problem: string | null;
+};
+
+/**
+ * What a run consumed, as far as the runner reported it: only these four numbers and the model name
+ * leave the server, never the rest of the stored `usage` (prompt and completion split, fallback flag).
+ */
+export type RunUsageView = {
+  /** The model that answered, or null when the runner could not name it. A text from outside. */
+  model: string | null;
+  /** All tokens the run's calls used, summed. */
+  totalTokens: number;
+  /** How many model calls the run made. */
+  aiCalls: number;
+  /** The cost in US dollars; null when it is not known (a Dynamic Review never guesses it). */
+  costUsd: number | null;
 };
 
 export type RunDetailView = RunRowView & {
@@ -54,6 +72,8 @@ export type RunDetailView = RunRowView & {
   log: { text: string; truncated: boolean };
   /** The newer run that replaced this one, for a replaced run. */
   supersededBy: string | null;
+  /** The usage the runner reported, or null (a run that never reached a model, or an older result). */
+  usage: RunUsageView | null;
 };
 
 /** What the list can be narrowed by: one repository, one status. */
@@ -128,6 +148,46 @@ export function readStoredResult(result: JsonValue | null): StoredResult {
   };
 }
 
+/** The longest model name the runner API accepts (`RunnerUsage.model`). */
+const MAX_MODEL_CHARS = 200;
+
+/** The first `max` characters of `text`, never a half of a surrogate pair. */
+function cutCharacters(text: string, max: number): string {
+  const characters = Array.from(text);
+  return characters.length <= max ? text : characters.slice(0, max).join("");
+}
+
+function isCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+/**
+ * The model, the summed tokens, the call count and the cost of a stored result, or null when the
+ * result has no usage or a field of it is not what the runner API promises. Nothing else of the usage
+ * is copied. The model name is cleaned like the log: it came from the runner.
+ */
+export function readStoredUsage(result: JsonValue | null): RunUsageView | null {
+  if (typeof result !== "object" || result === null || Array.isArray(result))
+    return null;
+  const usage = result.usage;
+  if (typeof usage !== "object" || usage === null || Array.isArray(usage))
+    return null;
+  const { model, totalTokens, aiCalls, costUsd } = usage;
+  if (!isCount(totalTokens) || !isCount(aiCalls)) return null;
+  const costKnown =
+    typeof costUsd === "number" && Number.isFinite(costUsd) && costUsd >= 0;
+  if (costUsd !== null && !costKnown) return null;
+  return {
+    model:
+      typeof model === "string"
+        ? cutCharacters(cleanLog(model), MAX_MODEL_CHARS)
+        : null,
+    totalTokens,
+    aiCalls,
+    costUsd: costKnown ? costUsd : null,
+  };
+}
+
 /**
  * Failed runs whose review is on the pull request all the same: the runner shortened it to fit
  * GitHub's comment limit and reports it as a failure, with the link to the comment it posted.
@@ -156,6 +216,7 @@ export type RunRowSource = Pick<
   | "prNumber"
   | "prUrl"
   | "command"
+  | "reviewKind"
   | "triggerKind"
   | "actorLogin"
   | "status"
@@ -189,6 +250,7 @@ export function toRunRowView(
     prNumber: job.prNumber,
     prUrl: safeGithubUrl(job.prUrl),
     command: job.command,
+    reviewKind: job.reviewKind,
     triggerKind: job.triggerKind,
     trigger: describeTrigger(job.triggerKind, job.actorLogin),
     status: job.status,
@@ -235,5 +297,19 @@ export function toRunDetailView(
       truncated: stored.logTruncated || overlong,
     },
     supersededBy: job.supersededBy,
+    usage: usageView(job, redact),
+  };
+}
+
+function usageView(
+  job: Job,
+  redact: (text: string) => string,
+): RunUsageView | null {
+  const usage = readStoredUsage(job.result);
+  if (usage === null || usage.model === null) return usage;
+  // Redaction can lengthen the name: cut again, after it.
+  return {
+    ...usage,
+    model: cutCharacters(redact(usage.model), MAX_MODEL_CHARS),
   };
 }

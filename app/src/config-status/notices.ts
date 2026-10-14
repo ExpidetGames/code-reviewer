@@ -3,11 +3,7 @@
 // The copy of the configuration hints. The status holds variable names and stable codes; this turns
 // them into the sentences a person reads (the UI translates codes, never the other way round). Never
 // a value: a hint names what to fix, not what is there.
-import {
-  legacyConfigIsAbsent,
-  type LlmConfigIssue,
-  type LlmConfigIssueCode,
-} from "../llm/config.ts";
+import type { LlmConfigIssue, LlmConfigIssueCode } from "../llm/config.ts";
 import type { ConfigAudience, ConfigStatus } from "./status.ts";
 
 export type ConfigNotice = {
@@ -17,6 +13,11 @@ export type ConfigNotice = {
   detail: string;
 };
 
+/** The one owner of the "GitHub is not set up" fact (#169); every screen that needs it imports it. */
+export const GITHUB_NOT_CONFIGURED_TITLE = "GitHub is not set up yet";
+export const GITHUB_NOT_CONFIGURED_COPY =
+  "The GitHub App of this instance is not set up yet. Ask your instance admin to set it up.";
+
 export const LLM_ISSUE_COPY: Record<
   LlmConfigIssueCode,
   {
@@ -25,30 +26,6 @@ export const LLM_ISSUE_COPY: Record<
     detail: (v: string) => string;
   }
 > = {
-  LLM_API_KEY_MISSING: {
-    severity: "error",
-    title: "LLM key missing",
-    detail: (variable) =>
-      `Set ${variable} on the server. Until then every review fails before it starts.`,
-  },
-  LLM_API_KEY_INVALID: {
-    severity: "error",
-    title: "LLM key not valid",
-    detail: (variable) =>
-      `${variable} is set but cannot be used (no spaces or control characters, at most 4096 characters). Every review fails until it is fixed.`,
-  },
-  LLM_PROVIDER_MISSING: {
-    severity: "error",
-    title: "LLM provider missing",
-    detail: (variable) =>
-      `Set ${variable} (only "openrouter" is supported). Until then every review fails before it starts.`,
-  },
-  LLM_PROVIDER_UNKNOWN: {
-    severity: "error",
-    title: "LLM provider not supported",
-    detail: (variable) =>
-      `${variable} must be "openrouter". Every review fails until it is fixed.`,
-  },
   LLM_MODEL_INVALID: {
     severity: "warning",
     title: "LLM model setting ignored",
@@ -84,9 +61,8 @@ function describeNoticesForMembers(status: ConfigStatus): ConfigNotice[] {
     notices.push({
       id: "github_app",
       severity: "error",
-      title: "GitHub is not set up yet",
-      detail:
-        "Ask your instance admin to set it up. Repositories cannot be read from GitHub and projects cannot be activated until then.",
+      title: GITHUB_NOT_CONFIGURED_TITLE,
+      detail: `${GITHUB_NOT_CONFIGURED_COPY} Repositories cannot be read from GitHub and projects cannot be activated until then.`,
     });
   return notices;
 }
@@ -117,14 +93,8 @@ export function describeConfigNotices(
     });
   }
   // The LLM access is a matter of the workspace now (its own key, `src/llm/`), and its hint is shown by the
-  // workspace pages (`LlmAccessNotice`). An absent `LLM_*` configuration (neither the provider nor the key is
-  // set) is therefore no problem of the instance; a half set one, one that is set but wrong, and an optional
-  // variable that is ignored are still reported.
-  const llmIssues =
-    status.llm.configured || legacyConfigIsAbsent(status.llm.issues)
-      ? []
-      : status.llm.issues;
-  for (const issue of [...llmIssues, ...status.llm.warnings])
-    notices.push(llmNotice(issue));
+  // workspace pages (`LlmAccessNotice`). The instance only has the model options, and a wrong one is a
+  // warning.
+  for (const issue of status.llm.warnings) notices.push(llmNotice(issue));
   return notices;
 }

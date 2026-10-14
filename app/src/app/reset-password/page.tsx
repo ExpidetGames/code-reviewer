@@ -6,6 +6,7 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { ResetPasswordForm } from "@/auth/ui/reset-password-form";
+import { AuthCard } from "@/components/auth-card";
 
 export const metadata: Metadata = {
   title: "Set a new password",
@@ -17,14 +18,9 @@ export default function ResetPasswordPage({
   searchParams,
 }: PageProps<"/reset-password">) {
   return (
-    <main className="auth-page">
-      <div className="card auth-card">
-        <h1>Set a new password</h1>
-        <Suspense fallback={null}>
-          <ResetForm searchParams={searchParams} />
-        </Suspense>
-      </div>
-    </main>
+    <Suspense fallback={<AuthCard title="Set a new password" />}>
+      <ResetForm searchParams={searchParams} />
+    </Suspense>
   );
 }
 
@@ -32,5 +28,9 @@ async function ResetForm({
   searchParams,
 }: Pick<PageProps<"/reset-password">, "searchParams">) {
   const { token } = await searchParams;
-  return <ResetPasswordForm token={typeof token === "string" ? token : null} />;
+  return (
+    <AuthCard title="Set a new password">
+      <ResetPasswordForm token={typeof token === "string" ? token : null} />
+    </AuthCard>
+  );
 }

@@ -5,7 +5,12 @@
 import { describe, expect, it } from "vitest";
 import { REVIEW_SETTING_ISSUE_CODES } from "../validate.ts";
 import { REVIEW_SETTINGS_ERROR_CODES } from "../errors.ts";
-import { REVIEW_SETTING_FIELDS, REVIEW_SETTING_LIMITS } from "../settings.ts";
+import {
+  PROJECT_DYNAMIC_LIMITS,
+  PROJECT_DYNAMIC_SETTING_FIELDS,
+  REVIEW_SETTING_FIELDS,
+  REVIEW_SETTING_LIMITS,
+} from "../settings.ts";
 import { TRANSPORT_ERROR_CODES } from "../../ui/json-request.ts";
 import { describeIssue, describeSaveFailure } from "./messages.ts";
 
@@ -46,10 +51,10 @@ describe("the copy for a problem with one setting", () => {
     expect(describeIssue("extraInstructions", "TOO_LONG")).toMatch(/4,000/);
   });
 
-  // CR-34-T06
-  it("says an unknown command is not one of the four", () => {
+  // CR-34-T06, #203
+  it("says an unknown command is not one that exists", () => {
     expect(describeIssue("allowedCommands", "INVALID_FORMAT")).toMatch(
-      /review, improve, describe and ask/,
+      /Only the command review exists/,
     );
   });
 
@@ -67,6 +72,42 @@ describe("the copy for a problem with one setting", () => {
     );
     expect(describeIssue("fallbackModel", "EXCEEDS_MODEL_CONTEXT")).toMatch(
       /context window/,
+    );
+  });
+
+  // #200-T03
+  it.each(REVIEW_SETTING_ISSUE_CODES)(
+    "has a sentence for %s on every project-only field that is not the code itself",
+    (code) => {
+      for (const field of PROJECT_DYNAMIC_SETTING_FIELDS) {
+        const text = describeIssue(field, code);
+
+        expect(text, `${field} ${code}`).not.toBe("");
+        expect(text, `${field} ${code}`).not.toContain(code);
+      }
+    },
+  );
+
+  // #200-T03
+  it("names the byte limit of the review skill and says that multibyte characters count as their bytes", () => {
+    const text = describeIssue("reviewSkill", "TOO_LONG");
+
+    expect(text).toContain(
+      PROJECT_DYNAMIC_LIMITS.reviewSkillMaxBytes.toLocaleString("en-US"),
+    );
+    expect(text).toMatch(/bytes/);
+  });
+
+  // #200-T03
+  it("tells the person to reset the skill instead of saving it empty", () => {
+    expect(describeIssue("reviewSkill", "EMPTY")).toMatch(/reset/i);
+  });
+
+  // #200-T03
+  it("asks for a model name of the provider for the Dynamic model, not for an OpenRouter one", () => {
+    expect(describeIssue("dynamicModel", "EMPTY")).toBe("Enter a model name.");
+    expect(describeIssue("dynamicModel", "INVALID_FORMAT")).toMatch(
+      /deepseek\/deepseek-v4\.1-flash/,
     );
   });
 

@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // @vitest-environment jsdom
-// Pins down the Settings page with real data: the form for the global defaults saves through the
-// route handler into the real database and every project that has no value of its own follows, the
-// LLM state is shown without the key, and the instance block names what is wrong.
+// Pins down the "Review defaults" sub-page with real data (#178): the form for the global defaults
+// saves through the route handler into the real database and every project that has no value of its
+// own follows, while one with its own keeps it. The configuration hints and the instance facts moved
+// to the "General" sub-page (general-settings-page.test.tsx).
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -13,12 +14,6 @@ vi.mock("next/navigation", () => ({
 }));
 
 import type { SessionUser } from "../../auth/access-policy.ts";
-import {
-  describeConfigStatus,
-  statusForMembers,
-  type ConfigAudience,
-} from "../../config-status/status.ts";
-import { testGithubAppEnv } from "../../test-support/github-app.ts";
 import { setupReviewSettings } from "../../test-support/review-settings-harness.ts";
 import { createReviewSettingsRouteHandlers } from "../http.ts";
 import { createGlobalSettingsApi } from "./api.ts";
@@ -29,17 +24,7 @@ import {
 
 afterEach(cleanup);
 
-const LLM_KEY = "dummy-llm-key-0123456789";
-const WORKING_ENV = {
-  ...testGithubAppEnv(),
-  LLM_PROVIDER: "openrouter",
-  LLM_API_KEY: LLM_KEY,
-};
-
-async function openSettings(
-  env: Record<string, string | undefined> = WORKING_ENV,
-  audience: ConfigAudience = "operator",
-) {
+async function openReviewDefaults() {
   const s = await setupReviewSettings();
   const handlers = createReviewSettingsRouteHandlers({
     requireUser: async () =>
@@ -59,30 +44,25 @@ async function openSettings(
       ),
     "acme",
   );
-  const data = await loadGlobalSettingsPage({
-    settings: s.service,
-    // What the page file does: the whole status for the instance admin, the reduced one for a member.
-    config: () =>
-      audience === "operator"
-        ? describeConfigStatus(env)
-        : statusForMembers(describeConfigStatus(env)),
-  });
+  const data = await loadGlobalSettingsPage({ settings: s.service });
   const view = render(
-    <GlobalSettingsPageContent
-      workspaceSlug="acme"
-      audience={audience}
-      data={data}
-      api={api}
-    />,
+    <GlobalSettingsPageContent workspaceSlug="acme" data={data} api={api} />,
   );
   return { ...s, view };
 }
 
-describe("the Settings page", () => {
+describe("the Review defaults sub-page", () => {
+  // #178-T02
+  it("is exactly one form", async () => {
+    const { view } = await openReviewDefaults();
+
+    expect(view.container.querySelectorAll("form")).toHaveLength(1);
+  });
+
   // CR-34-T08
   it("saves a changed global default, and a project without its own value uses it while one with its own keeps it", async () => {
     const user = userEvent.setup();
-    const app = await openSettings();
+    const app = await openReviewDefaults();
     await app.projects.activate(app.first.id);
     await app.projects.activate(app.second.id);
     await app.service.updateProjectSettings(app.second.id, { maxFindings: 3 });
@@ -90,7 +70,9 @@ describe("the Settings page", () => {
     const findings = screen.getByLabelText("Most findings per review");
     await user.clear(findings);
     await user.type(findings, "9");
-    await user.click(screen.getByRole("button", { name: "Save defaults" }));
+    await user.click(
+      screen.getByRole("button", { name: "Save review defaults" }),
+    );
 
     expect((await screen.findByRole("status")).textContent).toMatch(/Saved\./);
     expect(
@@ -109,59 +91,16 @@ describe("the Settings page", () => {
   // CR-34-T06 (the page's own check, before anything reaches the route)
   it("names a wrong value at its field and stores nothing", async () => {
     const user = userEvent.setup();
-    const app = await openSettings();
+    const app = await openReviewDefaults();
 
     const findings = screen.getByLabelText("Most findings per review");
     await user.clear(findings);
     await user.type(findings, "none");
-    await user.click(screen.getByRole("button", { name: "Save defaults" }));
+    await user.click(
+      screen.getByRole("button", { name: "Save review defaults" }),
+    );
 
     expect(await screen.findByText("Enter a whole number.")).toBeTruthy();
     expect(await app.appSettingRows()).toEqual([]);
-  });
-
-  // #104-LK-13 (the hint about the workspace's LLM key is src/llm/ui/llm-access-notice.tsx)
-  it("does not report an absent LLM variable as a problem of the instance, and shows no key value", async () => {
-    const app = await openSettings({
-      ...WORKING_ENV,
-      LLM_API_KEY: undefined,
-      LLM_PROVIDER: undefined,
-    });
-
-    expect(screen.queryByText("LLM key missing")).toBeNull();
-    expect(screen.queryByRole("alert")).toBeNull();
-    expect(app.view.container.textContent).not.toContain(LLM_KEY);
-  });
-
-  // CR-34-T11
-  it("shows no hint while the configuration is complete, and never the key", async () => {
-    const app = await openSettings();
-
-    expect(screen.queryByRole("alert")).toBeNull();
-    expect(app.view.container.textContent).not.toContain(LLM_KEY);
-  });
-
-  // #101-WM-08
-  it("tells a member only that a part is not set up, in the hints and in the instance block, and nothing of how it is configured", async () => {
-    const app = await openSettings(
-      { ...WORKING_ENV, LLM_API_KEY: undefined, GITHUB_APP_ID: undefined },
-      "member",
-    );
-
-    const text = app.view.container.textContent ?? "";
-    expect(screen.queryByText("Reviews are not set up yet")).toBeNull();
-    expect(screen.getByText("GitHub is not set up yet")).toBeTruthy();
-    expect(text).toContain("Ask your instance admin");
-    expect(text).not.toMatch(/GITHUB_APP|LLM_|openrouter|Missing:/);
-  });
-
-  // #101-WM-08
-  it("keeps the provider and the model from a member of a working instance", async () => {
-    const app = await openSettings(WORKING_ENV, "member");
-
-    const text = app.view.container.textContent ?? "";
-    expect(text).not.toMatch(/openrouter|claude/);
-    expect(text).not.toContain(LLM_KEY);
-    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

@@ -4,7 +4,10 @@
 // command. The routes answer with stable codes; this is where a code becomes a sentence (the UI
 // translates codes, never the other way round). Nothing a response carried (a raw answer of GitHub,
 // a token) is ever put into a sentence: the sentences are fixed. An unknown code gets a generic one.
-import { ASK_QUESTION_MAX_CHARS } from "../../integrations/comment-command.ts";
+import {
+  CROSS_SITE_REQUEST_RELOAD_PAGE,
+  REQUEST_NOT_UNDERSTOOD,
+} from "../../copy/messages.ts";
 import type { ManualReviewErrorCode } from "../errors.ts";
 import {
   describeTransportFailure,
@@ -12,14 +15,11 @@ import {
 } from "../../ui/transport-messages.ts";
 
 const FAILURE_COPY: Record<ManualReviewErrorCode, string> = {
-  MANUAL_REVIEW_REQUEST_INVALID:
-    "The request was not understood. Reload the page and try again.",
-  MANUAL_REVIEW_CROSS_SITE_REQUEST:
-    "The request did not come from this page. Reload the page and try again.",
+  MANUAL_REVIEW_REQUEST_INVALID: REQUEST_NOT_UNDERSTOOD,
+  MANUAL_REVIEW_CROSS_SITE_REQUEST: CROSS_SITE_REQUEST_RELOAD_PAGE,
   MANUAL_REVIEW_BODY_TOO_LARGE:
-    "The request was too large. Shorten the question and try again.",
-  MANUAL_REVIEW_CONTENT_TYPE_UNSUPPORTED:
-    "The request was not understood. Reload the page and try again.",
+    "The request was too large. Try again with a single pull request.",
+  MANUAL_REVIEW_CONTENT_TYPE_UNSUPPORTED: REQUEST_NOT_UNDERSTOOD,
   MANUAL_REVIEW_PROJECT_NOT_FOUND:
     "This repository is not an active project. Switch it on in the project list first.",
   MANUAL_REVIEW_PULL_REQUEST_NOT_FOUND:
@@ -51,23 +51,3 @@ export function staleListFailure(code: string): boolean {
     code === "MANUAL_REVIEW_PULL_REQUEST_NOT_OPEN"
   );
 }
-
-/**
- * The sentence for the question field when the route refused the question (`issues` of a
- * `MANUAL_REVIEW_REQUEST_INVALID` answer), or null when the issues are not about the question.
- */
-export function describeQuestionIssue(
-  issues: readonly { field: string; code: string }[],
-): string | null {
-  const issue = issues.find((candidate) => candidate.field === "question");
-  if (issue === undefined) return null;
-  if (issue.code === "too_long")
-    return QUESTION_TOO_LONG_COPY(ASK_QUESTION_MAX_CHARS);
-  if (issue.code === "required") return QUESTION_REQUIRED_COPY;
-  return null;
-}
-
-export const QUESTION_REQUIRED_COPY =
-  "Write the question you want answered about this pull request.";
-export const QUESTION_TOO_LONG_COPY = (max: number) =>
-  `The question is too long. Keep it under ${max.toLocaleString("en-US")} characters.`;

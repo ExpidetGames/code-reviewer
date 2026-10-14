@@ -6,8 +6,15 @@
 // job-queue-concurrency.integration.test.ts.
 import { sql } from "kysely";
 import { describe, expect, it } from "vitest";
+import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
 import { SLOT_HOLDING_STATUSES } from "./job-status.ts";
 import { JobQueueError } from "./errors.ts";
+import { DEFAULT_NO_CAPABLE_RUNNER_MS } from "./job-limits.ts";
+import { createJobReviewSettingsHooks } from "./review-settings-hooks.ts";
+import { createAppSettingsRepository } from "../db/repositories/app-settings-repository.ts";
+import { createProjectsRepository } from "../db/repositories/projects-repository.ts";
+import { createReviewSettingsService } from "../review-settings/service.ts";
+import { builtInReviewSettings } from "../review-settings/settings.ts";
 import { createJobQueueFixture, sha, T0 } from "../test-support/jobs.ts";
 
 const SECOND = 1000;
@@ -37,6 +44,7 @@ describe("enqueueing a job", () => {
       prNumber: 7,
       prUrl: "https://github.test/acme/widgets/pull/7",
       headSha: sha("a"),
+      reviewKind: "diff",
       command: "review",
       args: "",
       triggerKind: "webhook",
@@ -58,20 +66,18 @@ describe("enqueueing a job", () => {
     });
   });
 
-  it("keeps the arguments of a comment command and a later run-after time", async () => {
+  it("keeps a comment job's run-after time and stores no arguments for /review", async () => {
     const fixture = await createJobQueueFixture();
     const runAfter = new Date(T0.getTime() + 90 * SECOND);
 
     const job = await fixture.enqueueNew({
       triggerKind: "comment",
-      command: "ask",
-      args: "why is this loop quadratic?",
       runAfter,
     });
 
     expect(job).toMatchObject({
-      command: "ask",
-      args: "why is this loop quadratic?",
+      command: "review",
+      args: "",
       triggerKind: "comment",
       runAfter: runAfter.toISOString(),
     });
@@ -246,25 +252,19 @@ describe("replacing and deduplicating jobs", () => {
     expect(await fixture.queue.claimNext("runner-b")).toBeNull();
   });
 
-  it("replaces only waiting jobs of the same command on the same pull request", async () => {
+  it("replaces only waiting automatic jobs of the same pull request, whatever else waits", async () => {
     const fixture = await createJobQueueFixture();
     const otherPr = await fixture.enqueueNew({ prNumber: 8 });
     const otherRepository = await fixture.enqueueNew({
       repositoryId: fixture.otherRepositoryId,
     });
-    const otherCommand = await fixture.enqueueNew({
-      triggerKind: "comment",
-      command: "improve",
-    });
-    const asked = await fixture.enqueueNew({
-      triggerKind: "comment",
-      command: "ask",
-      args: "what?",
+    const manual = await fixture.enqueueNew({
+      triggerKind: "manual",
     });
 
     await fixture.enqueueNew({ headSha: sha("b") });
 
-    for (const job of [otherPr, otherRepository, otherCommand, asked])
+    for (const job of [otherPr, otherRepository, manual])
       expect((await fixture.queue.get(job.id))?.status).toBe("queued");
   });
 
@@ -327,14 +327,17 @@ describe("replacing and deduplicating jobs", () => {
     expect(afterClose.status).toBe("created");
   });
 
-  // CR-27-T09
-  it("creates a job for another command on the same head commit", async () => {
+  // CR-27-T09, #203
+  it("creates a comment job for a pull request whose automatic review is still waiting", async () => {
     const fixture = await createJobQueueFixture();
     await fixture.enqueueNew({ command: "review", prNumber: 7 });
 
+    // A comment job is exempt from the head-commit rule; with a different pull request it is its own
+    // job (a second `/review` on the same pull request is the already_active rule instead).
     const result = await fixture.enqueue({
-      command: "improve",
-      triggerKind: "webhook",
+      triggerKind: "comment",
+      prNumber: 8,
+      deliveryId: "delivery-8",
     });
 
     expect(result.status).toBe("created");
@@ -407,31 +410,25 @@ describe("replacing and deduplicating jobs", () => {
     expect(manual.runAfter).toBe(T0.toISOString());
     const next = await fixture.enqueue({
       triggerKind: "manual",
-      command: "improve",
+      prNumber: 8,
     });
     expect(next).toMatchObject({ status: "created", supersededJobIds: [] });
   });
 
-  it("treats different questions to /ask as different jobs", async () => {
+  // #203: /review takes no arguments; a person job with arguments is refused instead of creating a
+  // duplicate review that would run the same command.
+  it("refuses a person job with arguments instead of creating a duplicate review", async () => {
     const fixture = await createJobQueueFixture();
-    const first = await fixture.enqueueNew({
-      triggerKind: "comment",
-      command: "ask",
-      args: "why?",
-    });
+    const first = await fixture.enqueueNew({ triggerKind: "comment" });
 
-    const other = await fixture.enqueue({
-      triggerKind: "comment",
-      command: "ask",
-      args: "how?",
+    await expect(
+      fixture.enqueue({ triggerKind: "comment", args: "second" }),
+    ).rejects.toMatchObject({
+      name: "JobQueueError",
+      code: "JOB_INPUT_INVALID",
+      fieldErrors: [{ field: "args", code: "invalid" }],
     });
-    const same = await fixture.enqueue({
-      triggerKind: "comment",
-      command: "ask",
-      args: "why?",
-    });
-
-    expect(other.status).toBe("created");
+    const same = await fixture.enqueue({ triggerKind: "comment" });
     expect(same).toMatchObject({
       status: "existing",
       reason: "already_active",
@@ -568,7 +565,12 @@ describe("leases that run out", () => {
     }
     const report = await fixture.queue.expireStaleJobs();
 
-    expect(report).toEqual({ requeued: 0, leaseExpired: 1, timedOut: 0 });
+    expect(report).toEqual({
+      requeued: 0,
+      leaseExpired: 1,
+      timedOut: 0,
+      noCapableRunner: 0,
+    });
     expect(await fixture.queue.get(job.id)).toMatchObject({
       status: "failed",
       errorCode: "lease_expired",
@@ -871,10 +873,12 @@ describe("dropping waiting jobs", () => {
       prNumber: 7,
       headSha: sha("a"),
     });
-    const asked = await fixture.enqueueNew({
+    // A person job on the same pull request: seeded, because with only `/review` a second queue
+    // entry for the same pull request would be `already_active` instead of a new job.
+    const person = await fixture.seedHistoricalJob({
+      command: "review",
+      status: "queued",
       prNumber: 7,
-      command: "ask",
-      args: "why?",
       triggerKind: "comment",
     });
     const otherPullRequest = await fixture.enqueueNew({
@@ -892,7 +896,7 @@ describe("dropping waiting jobs", () => {
       status: "cancelled",
       errorCode: "pull_request_draft",
     });
-    expect((await fixture.queue.get(asked.id))?.status).toBe("queued");
+    expect((await fixture.queue.get(person.id))?.status).toBe("queued");
     expect((await fixture.queue.get(otherPullRequest.id))?.status).toBe(
       "queued",
     );
@@ -909,9 +913,11 @@ describe("dropping waiting jobs", () => {
       prNumber: 7,
       headSha: sha("b"),
     });
-    const improve = await fixture.enqueueNew({
+    // A person job on the same pull request: seeded (see the draft test above).
+    const person = await fixture.seedHistoricalJob({
+      command: "review",
+      status: "queued",
       prNumber: 7,
-      command: "improve",
       triggerKind: "comment",
     });
     const other = await fixture.enqueueNew({ prNumber: 8 });
@@ -923,7 +929,7 @@ describe("dropping waiting jobs", () => {
 
     expect(discarded).toBe(2);
     expect((await fixture.queue.get(running.id))?.status).toBe("running");
-    for (const job of [waiting, improve])
+    for (const job of [waiting, person])
       expect(await fixture.queue.get(job.id)).toMatchObject({
         status: "cancelled",
         errorCode: "pull_request_closed",
@@ -1257,9 +1263,13 @@ describe("jobs a person asked for", () => {
       triggerKind: "comment",
       headSha: sha("a"),
     });
-    const manualImprove = await fixture.enqueueNew({
+    // A second person job on the same pull request: seeded, since with only `/review` a manual start
+    // would be `already_active` against the waiting comment job.
+    const manual = await fixture.seedHistoricalJob({
+      command: "review",
+      status: "queued",
+      prNumber: 7,
       triggerKind: "manual",
-      command: "improve",
     });
 
     const automatic = await fixture.enqueue({ headSha: sha("b") });
@@ -1269,7 +1279,7 @@ describe("jobs a person asked for", () => {
       supersededJobIds: [],
     });
     expect((await fixture.queue.get(comment.id))?.status).toBe("queued");
-    expect((await fixture.queue.get(manualImprove.id))?.status).toBe("queued");
+    expect((await fixture.queue.get(manual.id))?.status).toBe("queued");
   });
 
   it("pull a waiting job that is held back by a debounce forward to now", async () => {
@@ -1510,3 +1520,360 @@ describe("the automatic slot index", () => {
     expect(listed.sort()).toEqual([...SLOT_HOLDING_STATUSES].sort());
   });
 });
+
+// #203-T10, #203-T11
+describe("jobs of a command the product removed", () => {
+  it("are never claimed, are cancelled when the claim runs the expiry step, and never starve a review", async () => {
+    const fixture = await createJobQueueFixture();
+    const removed = await fixture.seedHistoricalJob({
+      command: "ask",
+      status: "queued",
+      prNumber: 9,
+      args: "why?",
+    });
+    const review = await fixture.enqueueNew({ prNumber: 7 });
+
+    const claim = await fixture.queue.claimNext("runner-a");
+
+    expect(claim?.job.id).toBe(review.id);
+    expect(await fixture.queue.get(removed.id)).toMatchObject({
+      status: "cancelled",
+      errorCode: "command_removed",
+    });
+    expect(await fixture.queue.claimNext("runner-a")).toBeNull();
+  });
+
+  it("that are running may finish under their lease", async () => {
+    const fixture = await createJobQueueFixture();
+    const running = await fixture.seedHistoricalJob({
+      command: "improve",
+      status: "running",
+      prNumber: 7,
+      leaseToken: "historical-lease",
+      leaseExpiresAt: new Date(
+        fixture.clock.now().getTime() + 60_000,
+      ).toISOString(),
+    });
+
+    const heartbeat = await fixture.queue.heartbeat(
+      running.id,
+      "historical-lease",
+    );
+    expect(heartbeat.status).toBe("ok");
+
+    const completed = await fixture.queue.complete(
+      running.id,
+      "historical-lease",
+      { ok: true, result: { ok: true } },
+    );
+    expect(completed).toMatchObject({
+      status: "completed",
+      job: { status: "succeeded", command: "improve" },
+    });
+  });
+
+  it("whose lease ran out are cancelled instead of requeued, and a stale holder is refused", async () => {
+    const fixture = await createJobQueueFixture();
+    const running = await fixture.seedHistoricalJob({
+      command: "describe",
+      status: "running",
+      prNumber: 7,
+      leaseToken: "historical-lease",
+      leaseExpiresAt: fixture.clock.now().toISOString(),
+    });
+    fixture.clock.advance(3 * 60 * 1000);
+
+    // The claim's expiry step sees the lapsed lease of the removed command and cancels it.
+    expect(await fixture.queue.claimNext("runner-a")).toBeNull();
+
+    expect(await fixture.queue.get(running.id)).toMatchObject({
+      status: "cancelled",
+      errorCode: "command_removed",
+    });
+    // The old holder can no longer complete or release it.
+    expect(
+      await fixture.queue.complete(running.id, "historical-lease", {
+        ok: true,
+        result: {},
+      }),
+    ).toEqual({ status: "not_holder" });
+    expect(
+      await fixture.queue.release(running.id, "historical-lease", "x"),
+    ).toEqual({ status: "not_holder" });
+  });
+
+  it("are cancelled instead of requeued when the holder gives one back", async () => {
+    const fixture = await createJobQueueFixture();
+    const running = await fixture.seedHistoricalJob({
+      command: "improve",
+      status: "running",
+      prNumber: 7,
+      leaseToken: "historical-lease",
+      leaseExpiresAt: new Date(
+        fixture.clock.now().getTime() + 60_000,
+      ).toISOString(),
+    });
+
+    const released = await fixture.queue.release(
+      running.id,
+      "historical-lease",
+      "runner_shutdown",
+    );
+
+    expect(released).toMatchObject({
+      status: "cancelled",
+      job: { status: "cancelled", errorCode: "command_removed" },
+    });
+    expect(await fixture.queue.list({ status: "queued" })).toEqual([]);
+  });
+});
+
+/** Enables Dynamic Review on the fixture and (optionally) switches the project's kind. */
+async function enableDynamicReview(
+  fixture: Awaited<ReturnType<typeof createJobQueueFixture>>,
+  kind: "diff" | "dynamic" = "dynamic",
+) {
+  const projects = createProjectsRepository(
+    fixture.db,
+    fixture.workspaceId,
+    fixture.clock.now,
+  );
+  await projects.activate(fixture.repositoryId);
+  if (kind === "dynamic") {
+    const service = createReviewSettingsService({
+      appSettings: createAppSettingsRepository(fixture.db, fixture.workspaceId),
+      projects,
+      builtIn: () => builtInReviewSettings("test/model"),
+    });
+    await service.updateProjectSettings(fixture.repositoryId, {
+      reviewKind: "dynamic",
+    });
+  }
+}
+
+describe("the Dynamic Review rollout gate (#195)", () => {
+  // #195 finding 4
+  it("fails a Dynamic project's run visibly when the gate is off, and leaves Diff alone", async () => {
+    const fixture = await createJobQueueFixture();
+
+    const dynamic = await fixture.enqueueNew({ reviewKind: "dynamic" });
+    expect(dynamic).toMatchObject({
+      reviewKind: "dynamic",
+      status: "failed",
+      errorCode: "dynamic_review_disabled",
+      attempts: 0,
+    });
+    expect(dynamic.finishedAt).not.toBeNull();
+
+    const diff = await fixture.enqueueNew({ prNumber: 8, headSha: sha("b") });
+    expect(diff).toMatchObject({
+      reviewKind: "diff",
+      status: "queued",
+      errorCode: null,
+    });
+  });
+
+  // #195 finding 4
+  it("queues the same job once the gate is on", async () => {
+    const fixture = await createJobQueueFixture({ dynamicReview: true });
+
+    const dynamic = await fixture.enqueueNew({ reviewKind: "dynamic" });
+
+    expect(dynamic).toMatchObject({
+      reviewKind: "dynamic",
+      status: "queued",
+      errorCode: null,
+    });
+  });
+
+  // #195 finding 4: a previous-release app's claim SQL ignores `review_kind`; with the gate off there
+  // is no queued Dynamic row it could hand out as Diff, whatever it asks for.
+  it("leaves no queued Dynamic row a previous-release claim could pick up", async () => {
+    const fixture = await createJobQueueFixture();
+    await fixture.enqueueNew({ reviewKind: "dynamic" });
+    await fixture.enqueueNew({ prNumber: 8, headSha: sha("b") });
+
+    const { rows } = await sql<{ count: number }>`
+      select count(*) as count from jobs
+      where status = 'queued' and review_kind = 'dynamic'`.execute(fixture.db);
+
+    expect(rows[0]?.count).toBe(0);
+  });
+});
+
+describe("a Dynamic job no capable runner can claim (#195)", () => {
+  // #195 finding 1
+  it("is cancelled with no_capable_runner after the deadline, without an attempt, and Diff is untouched", async () => {
+    const fixture = await createJobQueueFixture({ dynamicReview: true });
+    const dynamic = await fixture.enqueueNew({ reviewKind: "dynamic" });
+    const diff = await fixture.enqueueNew({
+      prNumber: 8,
+      headSha: sha("b"),
+      reviewKind: "diff",
+    });
+
+    fixture.clock.advance(DEFAULT_NO_CAPABLE_RUNNER_MS - 1);
+    await fixture.queue.expireStaleJobs();
+    expect(await fixture.queue.get(dynamic.id)).toMatchObject({
+      status: "queued",
+      attempts: 0,
+    });
+
+    fixture.clock.advance(1);
+    const report = await fixture.queue.expireStaleJobs();
+
+    expect(report.noCapableRunner).toBe(1);
+    expect(await fixture.queue.get(dynamic.id)).toMatchObject({
+      status: "cancelled",
+      errorCode: "no_capable_runner",
+      attempts: 0,
+    });
+    expect(await fixture.queue.get(diff.id)).toMatchObject({
+      status: "queued",
+    });
+  });
+});
+
+describe("resolving the review kind inside the enqueue transaction (#195)", () => {
+  // #195 finding 3
+  it("queues a Dynamic project's new job as Dynamic", async () => {
+    const fixture = await createJobQueueFixture({ dynamicReview: true });
+    await enableDynamicReview(fixture, "dynamic");
+
+    const job = await fixture.enqueueNew({ prNumber: 7 });
+
+    expect(job.reviewKind).toBe("dynamic");
+  });
+
+  // #195 finding 3
+  it("never leaves a waiting job of a kind the project has left when the change races the enqueue", async () => {
+    const fixture = await createJobQueueFixture({ dynamicReview: true });
+    await enableDynamicReview(fixture, "diff");
+    const service = createReviewSettingsService({
+      appSettings: createAppSettingsRepository(fixture.db, fixture.workspaceId),
+      projects: createProjectsRepository(
+        fixture.db,
+        fixture.workspaceId,
+        fixture.clock.now,
+      ),
+      builtIn: () => builtInReviewSettings("test/model"),
+      hooks: createJobReviewSettingsHooks(fixture.workspaceId),
+    });
+
+    const [created] = await Promise.all([
+      fixture.enqueue({ prNumber: 7 }),
+      service.updateProjectSettings(fixture.repositoryId, {
+        reviewKind: "dynamic",
+      }),
+    ]);
+    const stored = await fixture.queue.get(created.job.id);
+
+    // Either the settings change committed first (the job is Dynamic and waiting) or the enqueue did
+    // (a Diff job, cancelled by the change). Never a waiting Diff job after the project turned Dynamic.
+    expect(stored).toMatchObject(
+      stored?.status === "queued"
+        ? { status: "queued", reviewKind: "dynamic" }
+        : { status: "cancelled", errorCode: "review_kind_changed" },
+    );
+  });
+});
+
+// #195-T04: disable preserves running leases; their later loss fails instead of requeueing.
+it.each(["disable", "remove"] as const)(
+  "%s of the Dynamic gate cancels waiting jobs, preserves running leases and prevents requeue",
+  async (action) => {
+    const fixture = await createJobQueueFixture();
+    const settings = createInstanceSettingsRepository(
+      fixture.db,
+      fixture.clock.now,
+    );
+    await settings.set("dynamic_review", { enabled: true }, null);
+    const running = await fixture.enqueueNew({ reviewKind: "dynamic" });
+    const claim = await fixture.queue.claimNext("runner", ["opencode"]);
+    expect(claim?.job.id).toBe(running.id);
+    const waiting = await fixture.enqueueNew({
+      prNumber: 8,
+      reviewKind: "dynamic",
+    });
+    if (action === "remove")
+      expect(await settings.remove("dynamic_review")).toBe(true);
+    else await settings.set("dynamic_review", { enabled: false }, null);
+    expect(await fixture.queue.get(waiting.id)).toMatchObject({
+      status: "cancelled",
+      errorCode: "dynamic_review_disabled",
+    });
+    expect(await fixture.queue.get(running.id)).toEqual(claim?.job);
+    fixture.clock.advance(60 * MINUTE);
+    await fixture.queue.expireStaleJobs();
+    expect(await fixture.queue.get(running.id)).toMatchObject({
+      status: "failed",
+      errorCode: "dynamic_review_disabled",
+      attempts: 1,
+    });
+    expect(
+      await fixture.queue.release(
+        running.id,
+        claim!.leaseToken,
+        "runner_shutdown",
+      ),
+    ).toMatchObject({ status: "not_holder" });
+    const { rows } = await sql<{
+      count: number;
+    }>`select count(*) as count from jobs where review_kind = 'dynamic' and status in ('queued', 'running')`.execute(
+      fixture.db,
+    );
+    expect(rows[0]?.count).toBe(0);
+    expect(
+      await fixture.enqueueNew({ prNumber: 9, reviewKind: "dynamic" }),
+    ).toMatchObject({ status: "failed", errorCode: "dynamic_review_disabled" });
+  },
+);
+
+// #195-T01: the deadline starts at eligibility, not creation.
+it("does not expire a scheduled Dynamic job before its eligible waiting deadline", async () => {
+  const fixture = await createJobQueueFixture({ dynamicReview: true });
+  const runAfter = new Date(T0.getTime() + 45 * MINUTE);
+  const job = await fixture.enqueueNew({ reviewKind: "dynamic", runAfter });
+  fixture.clock.advance(30 * MINUTE);
+  expect((await fixture.queue.expireStaleJobs()).noCapableRunner).toBe(0);
+  fixture.clock.set(
+    new Date(runAfter.getTime() + DEFAULT_NO_CAPABLE_RUNNER_MS - 1),
+  );
+  expect((await fixture.queue.expireStaleJobs()).noCapableRunner).toBe(0);
+  expect(await fixture.queue.get(job.id)).toMatchObject({ status: "queued" });
+  fixture.clock.advance(1);
+  expect((await fixture.queue.expireStaleJobs()).noCapableRunner).toBe(1);
+});
+
+// #195-T01: losing a claimed lease follows the retry policy, independently of polling order.
+it.each([false, true])(
+  "preserves Dynamic lease retries when a legacy runner polls first: %s",
+  async (legacyFirst) => {
+    const fixture = await createJobQueueFixture({ dynamicReview: true });
+    const job = await fixture.enqueueNew({ reviewKind: "dynamic" });
+    fixture.clock.advance(29 * MINUTE);
+    expect(
+      (await fixture.queue.claimNext("capable", ["opencode"]))?.job.id,
+    ).toBe(job.id);
+    fixture.clock.advance(2 * MINUTE);
+    if (legacyFirst) expect(await fixture.queue.claimNext("legacy")).toBeNull();
+    const retry = await fixture.queue.claimNext("capable", ["opencode"]);
+    expect(retry?.job).toMatchObject({ id: job.id, attempts: 1 });
+    expect(
+      (
+        await fixture.queue.release(
+          job.id,
+          retry!.leaseToken,
+          "runner_shutdown",
+          { retryAt: new Date(fixture.clock.now().getTime() + 45 * MINUTE) },
+        )
+      ).status,
+    ).toBe("requeued");
+    fixture.clock.advance(30 * MINUTE);
+    expect((await fixture.queue.expireStaleJobs()).noCapableRunner).toBe(0);
+    fixture.clock.advance(15 * MINUTE);
+    expect(
+      (await fixture.queue.claimNext("capable", ["opencode"]))?.job,
+    ).toMatchObject({ id: job.id, attempts: 2 });
+  },
+);

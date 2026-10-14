@@ -18,8 +18,6 @@ const USER: User = {
   githubLogin: null,
   githubId: null,
   image: null,
-  orgCheckedAt: null,
-  orgCheckedFor: null,
 };
 const WORKSPACE = {
   id: "w1",

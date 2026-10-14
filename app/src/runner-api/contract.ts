@@ -5,8 +5,20 @@
 // integration-tests/compatibility/runner-api-contract.integration.test.ts (the sets are compared
 // with the file, and real answers and the request checks are validated against it).
 import type { ReviewCommand } from "../integrations/types.ts";
+import type { ProjectReviewKind } from "../review-settings/settings.ts";
+import {
+  RUNNER_ENGINES,
+  type RunnerEngine,
+} from "../jobs/runner-capabilities.ts";
 
 export const RUNNER_API_VERSION = 1 as const;
+
+/** The engines a runner may advertise in a claim (`Engine` in the contract). */
+export const CLAIM_ENGINES = RUNNER_ENGINES;
+export type ClaimEngine = RunnerEngine;
+
+/** The request body of a claim: which engines the runner can run. Absent/empty means `pr-agent`. */
+export type ClaimRequest = { engines?: ClaimEngine[] };
 
 /** The path prefix of this version; the version is part of the URL. */
 export const RUNNER_API_PATH = "/api/runners/v1" as const;
@@ -18,10 +30,11 @@ export const RUNNER_MAX_BODY_BYTES = 64 * 1024;
 export const HEARTBEAT_INTERVAL_SECONDS = 30;
 
 /**
- * The environment variables a job may carry: the options of the four PR-Agent tools, one option
- * name per key (a second `__` would address a nested value). The same pattern as `propertyNames` of
- * `JobEnv` in the contract and as the runner's `_ENV_KEY` (a test compares it with the contract). The
- * only definition in the app: the review settings (`toRunnerSettings`) import it from here.
+ * The environment variables a job may carry: the options of the PR-Agent tools, one option name per
+ * key (a second `__` would address a nested value). The app only ever sends the review tool's family
+ * (`toRunnerSettings`); the removed tools' families are accepted for v1 compatibility with a
+ * previous-release app and ignored by the runner. The same pattern as `propertyNames` of `JobEnv` in
+ * the contract and as the runner's `_ENV_KEY` (a test compares it with the contract).
  */
 export const RUNNER_ENV_KEY_PATTERN =
   /^(PR_REVIEWER|PR_DESCRIPTION|PR_CODE_SUGGESTIONS|PR_QUESTIONS)__[A-Z0-9]+(_[A-Z0-9]+)*$/;
@@ -55,6 +68,16 @@ export const RUNNER_ERROR_CODES = [
   "timeout",
   "runner_shutdown",
   "unknown",
+  // Dynamic Review (#195). Stable codes a caller may branch on; never a fallback to Diff.
+  "dynamic_engine_unavailable",
+  "dynamic_isolation_self_check_failed",
+  "dynamic_config_invalid",
+  "checkout_incomplete",
+  "dynamic_policy_violation",
+  "dynamic_budget_exceeded",
+  "dynamic_accounting_failed",
+  "dynamic_model_features_unsupported",
+  "lease_lost",
 ] as const;
 export type RunnerErrorCode = (typeof RUNNER_ERROR_CODES)[number];
 
@@ -84,12 +107,54 @@ export type ErrorResponse = {
   };
 };
 
+/** The review kind of a job (`ReviewKind` in the contract). Diff is the legacy shape. */
+export type ReviewKind = ProjectReviewKind;
+
+/**
+ * The Dynamic options of a tagged job (#195). Only model/skill/limits: the fixed core, the tools, the
+ * permissions, the endpoints and the executable command are runner-owned and never arrive here. The
+ * skill is literal data.
+ */
+export type DynamicReviewOptions = {
+  model: string;
+  skill: string;
+  limits: { maxFindings: number };
+};
+
+/**
+ * The checkout facts a Dynamic job carries (#195/#196), all pinned when the job was queued or claimed.
+ * `comparison` is the declared comparison mode; it is a hint for preparation, never proof that the
+ * comparison is complete — the runner's checkout verifies that before it trusts it.
+ */
+export type ClaimBase = {
+  repository: string;
+  baseRef: string;
+  headSha: string;
+  previousReviewedSha: string | null;
+  /** #255: heads of earlier jobs of the pull request that did not succeed, newest first; absent when none. */
+  attemptedShas?: string[];
+  /**
+   * #257: true when more heads were attempted than `attemptedShas` holds; absent means false. Only
+   * `true` or absent on purpose: the app is stricter than the contract (the schema and the runner
+   * accept a boolean), and a runner from before #257 rejects the key, so `false` is never sent.
+   */
+  attemptedShasTruncated?: true;
+  comparison: "full" | "incremental";
+};
+
 /** The job as the runner reads it on stdin. Contains secrets: only the claim response has it. */
 export type RunnerJobInput = {
   prUrl: string;
   command: ReviewCommand;
-  /** Only for `ask`: exactly the question. */
-  args?: [string];
+  /**
+   * #195: absent means Diff, the legacy shape. `dynamic` is only sent to a runner that advertised
+   * `opencode`; a previous-release runner never receives it.
+   */
+  reviewKind?: ReviewKind;
+  /** Present exactly when `reviewKind` is `dynamic`. */
+  dynamic?: DynamicReviewOptions;
+  /** Checkout facts; present with `dynamic`. */
+  base?: ClaimBase;
   git: {
     provider: "github";
     baseUrl: string;

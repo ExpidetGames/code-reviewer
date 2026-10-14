@@ -20,7 +20,11 @@ const [command, databasePath, argument] = process.argv.slice(2);
 if (!command || !databasePath || !argument)
   throw new Error("Usage: e2e-accounts-child.ts <command> <db> <json>");
 
-const db = openDatabase({ path: databasePath, busyTimeoutMs: 5000 });
+const db = openDatabase({
+  driver: "sqlite",
+  path: databasePath,
+  busyTimeoutMs: 5000,
+});
 try {
   if (command !== "import-user") throw new Error(`Unknown command: ${command}`);
   const input = JSON.parse(argument) as {

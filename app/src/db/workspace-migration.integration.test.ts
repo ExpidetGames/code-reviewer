@@ -7,7 +7,11 @@ import { join } from "node:path";
 import { sql, type Kysely } from "kysely";
 import type { Migration, MigrationProvider } from "kysely/migration";
 import { describe, expect, it } from "vitest";
-import { createTestDirectory, track } from "../test-support/test-database.ts";
+import {
+  createTestDatabase,
+  createTestDirectory,
+  track,
+} from "../test-support/test-database.ts";
 import { openDatabase } from "./connection.ts";
 import { migrateToLatest } from "./migrate.ts";
 import { migrationProvider } from "./migrations/index.ts";
@@ -34,7 +38,11 @@ type OldDb = Kysely<any>;
 async function openAtPreviousVersion(): Promise<OldDb> {
   const directory = await createTestDirectory();
   const db: OldDb = track(
-    openDatabase({ path: join(directory, "app.db"), busyTimeoutMs: 5000 }),
+    openDatabase({
+      driver: "sqlite",
+      path: join(directory, "app.db"),
+      busyTimeoutMs: 5000,
+    }),
   );
   await migrateToLatest(db, previousVersion);
   return db;
@@ -665,5 +673,23 @@ describe("a failing step of the migration", () => {
         "select name as value from kysely_migration order by name",
       ),
     ).not.toContain(FIRST_WORKSPACE_MIGRATION);
+  });
+});
+
+describe("the shipped SQLite schema object order", () => {
+  // #105-PG-05
+  it("creates the integrations unique index after the repositories table, as shipped", async () => {
+    const { db } = await createTestDatabase();
+    const { rows } = await sql<{ name: string }>`
+      select name from sqlite_master
+      where type in ('table', 'index') and name not like 'sqlite_%'
+      order by rowid`.execute(db);
+    const names = rows.map((row) => row.name);
+
+    // The migration runs the Postgres-only early index on Postgres only; on SQLite the object order
+    // is exactly the shipped one (the index follows the table it was created after).
+    expect(names.indexOf("integrations_id_workspace_unique")).toBeGreaterThan(
+      names.indexOf("repositories"),
+    );
   });
 });

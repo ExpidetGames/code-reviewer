@@ -20,13 +20,19 @@ export function UserAvatar({ user }: { user: ShellUser }) {
 
   if (url === null || failedUrl === url) {
     return (
-      <span className="avatar" aria-hidden="true">
+      <span
+        className="inline-grid size-8 shrink-0 place-items-center overflow-hidden rounded-full bg-accent text-xs font-bold text-accent-foreground"
+        aria-hidden="true"
+      >
         {initials(user)}
       </span>
     );
   }
   return (
-    <span className="avatar" aria-hidden="true">
+    <span
+      className="inline-grid size-8 shrink-0 place-items-center overflow-hidden rounded-full bg-accent text-xs font-bold text-accent-foreground"
+      aria-hidden="true"
+    >
       {/* A plain img: the address comes from the GitHub profile and next/image would need every
           avatar host configured. It is https only (safeAvatarUrl) and sent without a referrer. */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -36,6 +42,7 @@ export function UserAvatar({ user }: { user: ShellUser }) {
         alt=""
         width={32}
         height={32}
+        className="block size-full object-cover"
         referrerPolicy="no-referrer"
         onError={() => setFailedUrl(url)}
       />

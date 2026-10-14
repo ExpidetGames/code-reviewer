@@ -10,7 +10,9 @@ vi.mock("@/auth/session", () => ({ currentLookup: () => undefined }));
 vi.mock("@/signup/ui/verify-email-form", () => ({
   VerifyEmailForm: () => null,
 }));
-vi.mock("@/signup/ui/resend-form", () => ({ ResendForm: () => null }));
+vi.mock("@/signup/ui/verify-email-help", () => ({
+  VerifyEmailHelp: () => null,
+}));
 
 import { metadata } from "./page.tsx";
 

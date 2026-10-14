@@ -17,10 +17,15 @@ import {
   describeConfigStatus,
   statusForMembers,
   type ConfigAudience,
+  type GithubAppStatus,
 } from "../../config-status/status.ts";
-import { testGithubAppEnv } from "../../test-support/github-app.ts";
+import {
+  testGithubAppEnv,
+  testGithubAppStatus,
+} from "../../test-support/github-app.ts";
 import { startSyncHarness } from "../../test-support/integration-sync-harness.ts";
 import { createProjectService } from "../service.ts";
+import type { AttentionNotice } from "../../components/needs-attention.tsx";
 import { loadProjectsPage, ProjectsPageContent } from "./projects-page.tsx";
 import { defaultWorkspaceId } from "../../test-support/workspaces.ts";
 
@@ -32,10 +37,17 @@ const WORKING_ENV: Record<string, string | undefined> = {
   LLM_PROVIDER: "openrouter",
   LLM_API_KEY: LLM_KEY,
 };
+const MISSING_GITHUB: GithubAppStatus = {
+  configured: false,
+  kind: "missing",
+  variables: ["app_id", "github_app_webhook_secret", "github_app_private_key"],
+  slug: null,
+};
 
 async function openPage(
-  env: Record<string, string | undefined> = WORKING_ENV,
+  github: GithubAppStatus = testGithubAppStatus(),
   audience: ConfigAudience = "operator",
+  llmNotice: AttentionNotice | null = null,
 ) {
   const h = await startSyncHarness();
   h.fake.addInstallation({
@@ -67,26 +79,44 @@ async function openPage(
     // What the page file does: the whole status for the instance admin, the reduced one for a member.
     config: () =>
       audience === "operator"
-        ? describeConfigStatus(env)
-        : statusForMembers(describeConfigStatus(env)),
+        ? describeConfigStatus({}, github)
+        : statusForMembers(describeConfigStatus({}, github)),
   });
   return render(
     <ProjectsPageContent
       workspaceSlug="acme"
       audience={audience}
+      llmNotice={llmNotice}
       data={data}
     />,
   );
 }
 
 describe("the Projects page", () => {
+  // #173-T01
+  it("has exactly one Needs attention region, also with a configuration hint and the LLM hint", async () => {
+    await openPage(MISSING_GITHUB, "operator", {
+      id: "llm_access",
+      severity: "error",
+      title: "LLM not configured",
+      detail: "Reviews of this workspace cannot run until it has an LLM key.",
+    });
+
+    const regions = screen.getAllByRole("region", { name: "Needs attention" });
+    expect(regions).toHaveLength(1);
+    expect(
+      within(regions[0]!).getByText("GitHub App not configured"),
+    ).toBeTruthy();
+    expect(within(regions[0]!).getByText("LLM not configured")).toBeTruthy();
+  });
+
   // CR-34-T01
   it("lists the four repositories of two installations, the activated one with its switch on", async () => {
     await openPage();
 
-    const items = within(
-      screen.getByRole("list", { name: "Repositories" }),
-    ).getAllByRole("listitem");
+    const items = within(screen.getByRole("table", { name: "Repositories" }))
+      .getAllByRole("row")
+      .slice(1);
     expect(items).toHaveLength(4);
     const on = screen
       .getAllByRole("switch")
@@ -106,18 +136,14 @@ describe("the Projects page", () => {
     await openPage();
 
     expect(
-      screen.queryByRole("region", { name: "Configuration problems" }),
+      screen.queryByRole("region", { name: "Needs attention" }),
     ).toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
   // #104-LK-13 (the hint about the workspace's LLM key is src/llm/ui/llm-access-notice.tsx)
   it("does not report an absent LLM variable, and shows no key value", async () => {
-    const { container } = await openPage({
-      ...WORKING_ENV,
-      LLM_API_KEY: undefined,
-      LLM_PROVIDER: undefined,
-    });
+    const { container } = await openPage();
 
     expect(screen.queryByText("LLM key missing")).toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();
@@ -133,23 +159,17 @@ describe("the Projects page", () => {
   });
 
   // CR-34-T10
-  it("names the missing GitHub App variables and disables switching a project on", async () => {
-    const { container } = await openPage({
-      ...WORKING_ENV,
-      GITHUB_APP_ID: undefined,
-      GITHUB_APP_PRIVATE_KEY: undefined,
-      GITHUB_APP_WEBHOOK_SECRET: undefined,
-    });
+  it("names the missing GitHub App fields and disables switching a project on", async () => {
+    const { container } = await openPage(MISSING_GITHUB);
 
-    const hint = screen
-      .getByText("GitHub App not configured")
-      .closest("div") as HTMLElement;
+    const region = screen.getByRole("region", { name: "Needs attention" });
+    expect(region.textContent).toContain("GitHub App not configured");
     for (const name of [
-      "GITHUB_APP_ID",
-      "GITHUB_APP_WEBHOOK_SECRET",
-      "GITHUB_APP_PRIVATE_KEY",
+      "app_id",
+      "github_app_webhook_secret",
+      "github_app_private_key",
     ])
-      expect(hint.textContent).toContain(name);
+      expect(region.textContent).toContain(name);
     expect(container.innerHTML).not.toContain(
       WORKING_ENV.GITHUB_APP_PRIVATE_KEY ?? "x",
     );
@@ -168,15 +188,7 @@ describe("the Projects page", () => {
 
   // #101-WM-08
   it("tells a member that GitHub is not set up and to ask the instance admin, without a variable name, and still blocks activating", async () => {
-    const { container } = await openPage(
-      {
-        ...WORKING_ENV,
-        GITHUB_APP_ID: undefined,
-        GITHUB_APP_PRIVATE_KEY: undefined,
-        LLM_API_KEY: undefined,
-      },
-      "member",
-    );
+    const { container } = await openPage(MISSING_GITHUB, "member");
 
     expect(screen.getByText("GitHub is not set up yet")).toBeTruthy();
     expect(screen.queryByText("Reviews are not set up yet")).toBeNull();
@@ -193,8 +205,10 @@ describe("the Projects page", () => {
 
   // #101-WM-08
   it("shows a member of a working instance no hint at all", async () => {
-    const { container } = await openPage(WORKING_ENV, "member");
+    await openPage(undefined, "member");
 
-    expect(container.querySelector(".notices")).toBeNull();
+    expect(
+      screen.queryByRole("region", { name: "Needs attention" }),
+    ).toBeNull();
   });
 });

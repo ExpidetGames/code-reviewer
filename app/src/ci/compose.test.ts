@@ -207,10 +207,13 @@ const SHIPPED_COMPOSE_FILES = readdirSync(repoRoot).filter((name) =>
 );
 
 describe("compose files and the test command of the runner", () => {
-  it("finds the three compose files of the repository", () => {
+  // #264-T07 (there is no second Coolify file: the Dynamic runner is a service of compose.coolify.yml)
+  it("finds the five compose files of the repository", () => {
     expect(SHIPPED_COMPOSE_FILES.sort()).toEqual([
       "compose.build.yml",
       "compose.coolify.yml",
+      "compose.dynamic.yml",
+      "compose.large.yml",
       "compose.yml",
     ]);
   });
@@ -430,7 +433,11 @@ function variablesRead(): Set<string> {
 
 function composeReferences(): Set<string> {
   const names = new Set<string>();
-  for (const file of ["compose.yml", "compose.build.yml"]) {
+  for (const file of [
+    "compose.yml",
+    "compose.build.yml",
+    "compose.dynamic.yml",
+  ]) {
     for (const match of read(file).matchAll(/\$\{([A-Z][A-Z0-9_]*)/g))
       names.add(match[1] ?? "");
   }

@@ -12,6 +12,8 @@
 //                              with POST /__fake/installations
 //   GITHUB_FAKE_APP_SLUG       optional: the slug the app's comments are authored with (<slug>[bot])
 //   GITHUB_FAKE_SELF_LINKS     optional, "true": links in answers (html_url) point to the fake itself
+//   GITHUB_FAKE_COMMENT_LINKS  optional, for example "https://github.com": the html_url of comments (what the
+//                              Runs page links to) points there, like a real GitHub's
 //   GITHUB_FAKE_PORT           default 4010
 //   GITHUB_FAKE_HOST           default 127.0.0.1
 import { startGithubFake } from "./server.ts";
@@ -53,6 +55,9 @@ const fake = await startGithubFake({
     ? { appSlug: process.env.GITHUB_FAKE_APP_SLUG }
     : {}),
   selfLinks: process.env.GITHUB_FAKE_SELF_LINKS === "true",
+  ...(process.env.GITHUB_FAKE_COMMENT_LINKS
+    ? { commentLinks: process.env.GITHUB_FAKE_COMMENT_LINKS }
+    : {}),
   host: process.env.GITHUB_FAKE_HOST || "127.0.0.1",
   port: Number(process.env.GITHUB_FAKE_PORT) || 4010,
 });

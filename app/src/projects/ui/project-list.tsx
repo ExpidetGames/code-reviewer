@@ -1,22 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// The list of repositories on the Projects page: name (a link to the settings, also while the
-// repository is inactive), installation, state, the status of the last run and the switch. Everything that
-// comes from GitHub (names, addresses) is untrusted and rendered as text.
+// The list of repositories on the Projects page, as a compact table: name (a link to the settings,
+// also while the repository is inactive), installation, state, the status of the last run and the
+// switch. Everything that comes from GitHub (names, addresses) is untrusted and rendered as text; a
+// long name truncates instead of widening the page.
 import Link from "next/link";
+import { Badge } from "../../components/ui/badge.tsx";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../../components/ui/table.tsx";
 import { workspacePath } from "../../workspaces/paths.ts";
 import { formatUtc } from "../../ui/format-time.ts";
 import { NoRepositories } from "./no-repositories.tsx";
 import { ProjectToggle } from "./project-toggle.tsx";
 import type { ProjectsApi } from "./api.ts";
+import { PROJECT_STATE_BADGE, PROJECT_STATE_LABEL } from "./messages.ts";
 import { RUN_STATUS_PRESENTATION } from "../../runs/run-status.ts";
 import type { LastRun, ProjectListView, ProjectRowView } from "./list-view.ts";
-
-const STATE_COPY: Record<ProjectRowView["status"], string> = {
-  active: "Active",
-  inactive: "Inactive",
-  unavailable: "Unavailable",
-};
 
 function LastRunStatus({
   run,
@@ -27,14 +32,16 @@ function LastRunStatus({
   repositoryId: string;
   workspaceSlug: string;
 }) {
-  if (run === null) return <span className="muted">No run yet</span>;
+  if (run === null)
+    return <span className="text-muted-foreground">No run yet</span>;
   return (
     <span>
       {RUN_STATUS_PRESENTATION[run.status].label}{" "}
-      <time dateTime={run.at} className="muted">
+      <time dateTime={run.at} className="text-muted-foreground">
         {formatUtc(run.at)}
       </time>{" "}
       <Link
+        className="text-primary underline-offset-4 hover:underline"
         href={workspacePath(
           workspaceSlug,
           `/runs?repository=${encodeURIComponent(repositoryId)}`,
@@ -82,67 +89,78 @@ export function ProjectList({
       />
     );
   return (
-    <ul className="project-list" aria-label="Repositories">
-      {view.rows.map((row) => (
-        <li key={row.repositoryId} className="project-row">
-          <div className="project-main">
-            <Link
-              href={workspacePath(
-                workspaceSlug,
-                `/projects/${encodeURIComponent(row.repositoryId)}`,
-              )}
-              className="project-name"
-            >
-              {row.fullName}
-            </Link>
-            <span className="muted small">
-              Installation: {row.installation}
+    <Table aria-label="Repositories" className="table-fixed">
+      <TableHeader>
+        <TableRow>
+          <TableHead className="w-[38%]">Name</TableHead>
+          <TableHead className="w-[16%]">Installation</TableHead>
+          <TableHead className="w-[12%]">Status</TableHead>
+          <TableHead className="w-[26%]">Last run</TableHead>
+          <TableHead className="w-[8%]">
+            <span className="sr-only">Review</span>
+          </TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {view.rows.map((row) => (
+          <TableRow key={row.repositoryId}>
+            <TableCell className="min-w-0 align-top whitespace-normal">
+              <Link
+                href={workspacePath(
+                  workspaceSlug,
+                  `/projects/${encodeURIComponent(row.repositoryId)}`,
+                )}
+                className="block truncate font-medium text-foreground no-underline"
+              >
+                {row.fullName}
+              </Link>
               {row.url !== null ? (
-                <>
-                  {" "}
-                  &middot;{" "}
-                  <a
-                    href={row.url}
-                    rel="noreferrer noopener"
-                    target="_blank"
-                    aria-label={`${row.fullName} on GitHub`}
-                  >
-                    On GitHub
-                  </a>
-                </>
+                <a
+                  href={row.url}
+                  rel="noreferrer noopener"
+                  target="_blank"
+                  aria-label={`${row.fullName} on GitHub`}
+                  className="text-xs text-muted-foreground hover:text-foreground no-underline"
+                >
+                  On GitHub
+                </a>
               ) : null}
-            </span>
-          </div>
-          <div className="project-status">
-            <span className={`badge badge-${row.status}`}>
-              {STATE_COPY[row.status]}
-            </span>
-            <span className="small">
-              Last run:{" "}
+            </TableCell>
+            <TableCell className="align-top whitespace-normal break-words text-muted-foreground">
+              {row.installation}
+            </TableCell>
+            <TableCell className="align-top">
+              <Badge variant={PROJECT_STATE_BADGE[row.status]}>
+                {PROJECT_STATE_LABEL[row.status]}
+              </Badge>
+            </TableCell>
+            <TableCell className="align-top whitespace-normal">
               <LastRunStatus
                 run={row.lastRun}
                 repositoryId={row.repositoryId}
                 workspaceSlug={workspaceSlug}
               />
-            </span>
-            {row.status === "unavailable" && row.switchedOn ? (
-              <span className="muted small">
-                It was on and resumes if the repository comes back.
-              </span>
-            ) : null}
-          </div>
-          <ProjectToggle
-            key={`${row.repositoryId}:${String(row.switchedOn)}`}
-            workspaceSlug={workspaceSlug}
-            canManage={canManage}
-            repositoryId={row.repositoryId}
-            fullName={row.fullName}
-            checked={row.switchedOn}
-            blockedReason={blockedReasonOf(row, activationBlocked)}
-            {...(api === undefined ? {} : { api })}
-          />
-        </li>
-      ))}
-    </ul>
+              {row.status === "unavailable" && row.switchedOn ? (
+                <p className="text-xs text-muted-foreground">
+                  It was on and resumes if the repository comes back.
+                </p>
+              ) : null}
+            </TableCell>
+            <TableCell className="align-top">
+              <ProjectToggle
+                key={`${row.repositoryId}:${String(row.switchedOn)}`}
+                workspaceSlug={workspaceSlug}
+                canManage={canManage}
+                repositoryId={row.repositoryId}
+                fullName={row.fullName}
+                checked={row.switchedOn}
+                blockedReason={blockedReasonOf(row, activationBlocked)}
+                {...(api === undefined ? {} : { api })}
+              />
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
   );
 }

@@ -53,6 +53,7 @@ if (command === "hold-lock") {
     while (Date.now() < startAt);
     try {
       const { db, migrationsApplied } = await startDatabase({
+        driver: "sqlite",
         path: databasePath,
         busyTimeoutMs: 5000,
       });
@@ -75,7 +76,11 @@ if (command === "hold-lock") {
   lines.once("line", async (line) => {
     const startAt = Number(line.split(" ")[1]);
     while (Date.now() < startAt);
-    const db = openDatabase({ path: databasePath, busyTimeoutMs: 5000 });
+    const db = openDatabase({
+      driver: "sqlite",
+      path: databasePath,
+      busyTimeoutMs: 5000,
+    });
     try {
       const result =
         command === "set-tenancy"

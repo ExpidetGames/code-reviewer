@@ -71,6 +71,13 @@ Run from the repository root.
 - English for code, comments, documentation and UI strings.
 - Every new source file starts with `SPDX-License-Identifier: Apache-2.0` in its language's comment syntax
   (`make fix-spdx-headers` adds it; a unit test fails without it; `CONTRIBUTING.md`, section "License").
+  Copied shadcn/ui components under `app/src/components/ui/` are the one exception: they keep
+  `SPDX-License-Identifier: MIT` plus a provenance line (`app/src/ci/spdx-headers/rules.ts`); do not
+  "fix" them.
+- The app is styled with Tailwind CSS v4 and shadcn/ui. Every colour lives only in
+  `app/src/app/theme.css` (`@theme inline`, tokens per light/dark/system, plus the base rules and the
+  preflight reset); a check under `app/src/ci/colors` fails on a colour literal in any other source
+  file, with no exception.
 - TypeScript strict. No `any` without a comment explaining why. Python is checked with pyright in
   strict mode.
 - Stable error codes (`as const` sets in TypeScript, enums or constants in Python) for anything a

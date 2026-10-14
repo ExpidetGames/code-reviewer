@@ -18,8 +18,8 @@ describe("SPDX license headers", () => {
     expect(files.length).toBeGreaterThan(300);
     for (const path of [
       "app/src/ci/spdx-headers/rules.ts",
-      "app/src/ui/button.tsx",
-      "app/src/app/globals.css",
+      "app/src/components/button.tsx",
+      "app/src/app/theme.css",
       "app/next.config.ts",
       "runner/src/code_reviewer_runner/cli.py",
       "runner/scripts/list_licenses.py",
@@ -39,10 +39,11 @@ describe("SPDX license headers", () => {
   });
 
   // #118-T04
-  it("start every source file with SPDX-License-Identifier: Apache-2.0", () => {
+  it("start every source file with the SPDX header its path requires", () => {
     const without = files.filter(
       (path) =>
-        headerProblem(readFileSync(`${repoRoot}${path}`, "utf8")) !== null,
+        headerProblem(readFileSync(`${repoRoot}${path}`, "utf8"), path) !==
+        null,
     );
 
     expect(

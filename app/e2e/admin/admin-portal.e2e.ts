@@ -141,7 +141,7 @@ test.describe("the admin portal", () => {
     await signInAsAdmin(page);
 
     await page.getByRole("button", { name: "admin", exact: true }).click();
-    await page.getByRole("link", { name: "Admin" }).click();
+    await page.getByRole("menuitem", { name: "Admin" }).click();
 
     await expect(page).toHaveURL(/\/admin$/);
     await expect(
@@ -152,20 +152,99 @@ test.describe("the admin portal", () => {
     const sections = page.getByRole("navigation", { name: "Admin" });
     await expect(sections.getByRole("link")).toHaveText([
       "Overview",
-      "Setup",
-      "Integrations",
       "Approvals",
+      "Instance",
+      "Sign-up",
+      "Sign-in",
+      "Integrations",
+      "GitHub App",
       "Mail",
-      "Limits",
     ]);
     await expect(
       sections.getByRole("link", { name: "Overview" }),
     ).toHaveAttribute("aria-current", "page");
-    const checklist = page.getByRole("region", { name: "Checklist" });
-    await expect(checklist.getByText("Mail server")).toBeVisible();
-    await expect(checklist.getByText("GitHub", { exact: true })).toBeVisible();
-    await expect(checklist.getByText("Tenancy")).toBeVisible();
-    await expect(checklist.getByText("Sign-up rule")).toBeVisible();
+    const setup = page.getByRole("region", { name: "Setup" });
+    await expect(setup.getByText("Mail server")).toBeVisible();
+    await expect(setup.getByText("GitHub", { exact: true })).toBeVisible();
+    await expect(setup.getByText("Tenancy")).toBeVisible();
+    await expect(setup.getByText("Sign-up rule")).toBeVisible();
+    await expect(setup.getByText("Ways to sign in")).toBeVisible();
+    await expect(setup.getByRole("link", { name: /^Configure / })).toHaveCount(
+      5,
+    );
+  });
+
+  // #168-T05
+  test("@smoke the admin opens the sections from the drawer and it closes after a choice", async ({
+    page,
+  }) => {
+    // A narrow window on the one app of this project: set here, not with `test.use`, so the file
+    // keeps its single worker (its `beforeAll` imports the member once).
+    await page.setViewportSize({ width: 375, height: 812 });
+    await signInAsAdmin(page);
+    await page.goto("/admin");
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Admin" }),
+    ).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Admin" })).toHaveCount(
+      0,
+    );
+
+    await page.getByRole("button", { name: "Toggle Sidebar" }).click();
+    const nav = page.getByRole("navigation", { name: "Admin" });
+    await expect(nav.getByRole("link")).toHaveText([
+      "Overview",
+      "Approvals",
+      "Instance",
+      "Sign-up",
+      "Sign-in",
+      "Integrations",
+      "GitHub App",
+      "Mail",
+    ]);
+    await nav.getByRole("link", { name: "Mail" }).click();
+
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Mail" }),
+    ).toBeVisible();
+    await expect(page.getByRole("navigation", { name: "Admin" })).toHaveCount(
+      0,
+    );
+  });
+
+  // #156
+  test("an admin's portal prefetch answer is private and no-store, never a year of shared caching", async ({
+    page,
+  }) => {
+    await signInAsAdmin(page);
+
+    // What the browser asks for ahead of a navigation inside the portal, and what the server answers.
+    const prefetches = new Map<string, string>();
+    page.on("response", (response) => {
+      const url = new URL(response.url());
+      if (url.origin !== e2eEnv.appUrl) return;
+      if (!url.pathname.startsWith("/admin")) return;
+      if (response.request().headers()["next-router-prefetch"] !== "1") return;
+      prefetches.set(url.pathname, response.headers()["cache-control"] ?? "");
+    });
+
+    // Straight to the portal: driving it through the user-menu link races that link's own prefetch
+    // (the navigation can win, so no prefetch for `/admin` is ever recorded). The portal's navigation
+    // offers its sections, and the browser prefetches them.
+    const portal = await page.goto("/admin");
+    expect(portal?.status()).toBe(200);
+    const nav = page.getByRole("navigation", { name: "Admin" });
+    await expect(nav).toBeVisible();
+    await nav.getByRole("link", { name: "Instance" }).hover();
+    await expect.poll(() => prefetches.has("/admin/setup/instance")).toBe(true);
+
+    // A prefetch answer is an admin-only answer: no shared cache may keep it, and never for the year
+    // of a prerendered answer.
+    for (const [path, cacheControl] of prefetches) {
+      expect(cacheControl, path).toContain("private");
+      expect(cacheControl, path).toContain("no-store");
+      expect(cacheControl, path).not.toContain("s-maxage");
+    }
   });
 
   // #98-AD-14
@@ -174,32 +253,41 @@ test.describe("the admin portal", () => {
   }) => {
     await signInAsAdmin(page);
 
-    await page.goto("/admin/setup");
-    await page.getByRole("radio", { name: /Allowed email domains/ }).check();
+    await page.goto("/admin/setup/sign-up");
+    await page.getByRole("radio", { name: /Allowed email domains/ }).click();
     await page.getByLabel("Domains", { exact: true }).fill("e2e.test");
     await page.getByRole("button", { name: "Save sign-up rule" }).click();
-    // ("Saved." only shows for an instant: the form starts again from the saved values, so the lasting
-    // proof is what the page says once it has the new data.)
-    // Nothing can verify addresses yet, so the notice says the rule does not work.
-    await expect(page.getByRole("note")).toContainText("does not work yet");
+    // ("Saved." stays next to the button: the form is no longer remounted after a save (#181).)
+    await expect(
+      page.getByRole("form", { name: "Sign-up rule" }).getByRole("status"),
+    ).toHaveText("Saved.");
+    // Nothing can verify addresses yet, so the page says the rule does not work.
+    await expect(
+      page.getByRole("region", { name: "Needs attention" }),
+    ).toContainText("does not work yet");
     await expect(
       page
-        .getByRole("form", { name: "Who may sign up" })
+        .getByRole("form", { name: "Sign-up rule" })
         .getByText(`Last changed by ${e2eEnv.adminEmail}`),
     ).toBeVisible();
 
     await page.goto("/admin/limits");
+    await expect(page).toHaveURL(/\/admin\/setup\/instance$/);
+    // The Instance page holds two cards; the limit's "last changed" belongs to the Limits card.
+    const limitsCard = page.locator('[data-slot="card"]', {
+      has: page.getByLabel(/Maximum number of workspaces/),
+    });
     await page.getByLabel(/Maximum number of workspaces/).fill("4");
-    await page.getByRole("button", { name: "Save limit" }).click();
+    await page.getByRole("button", { name: "Save instance settings" }).click();
     await expect(
-      page.getByText(`Last changed by ${e2eEnv.adminEmail}`),
+      limitsCard.getByText(`Last changed by ${e2eEnv.adminEmail}`),
     ).toBeVisible();
     await page.reload();
     await expect(page.getByLabel(/Maximum number of workspaces/)).toHaveValue(
       "4",
     );
     await expect(
-      page.getByText(`Last changed by ${e2eEnv.adminEmail}`),
+      limitsCard.getByText(`Last changed by ${e2eEnv.adminEmail}`),
     ).toBeVisible();
   });
 
@@ -232,7 +320,7 @@ test.describe("the admin portal", () => {
     );
     await page.goto("/w/default/projects");
     await page.getByRole("button", { name: member.name }).click();
-    await expect(page.getByRole("link", { name: "Admin" })).toHaveCount(0);
+    await expect(page.getByRole("menuitem", { name: "Admin" })).toHaveCount(0);
   });
 
   // #138
@@ -307,7 +395,7 @@ test.describe("the admin portal", () => {
     await signInAsAdmin(page);
     const plain = await observe(page, "/api/admin/settings");
     expect(plain.status).toBe(200);
-    const portal = await observe(page, "/admin/setup", {
+    const portal = await observe(page, "/admin/setup/instance", {
       headers: { accept: "text/html" },
     });
     expect(portal.status).toBe(200);
@@ -326,7 +414,7 @@ test.describe("the admin portal", () => {
       const data = await observe(page, "/api/admin/settings", { headers });
       expect(data.status, `data route ${label}`).toBe(200);
       expect(data.body, `data route ${label}`).toBe(plain.body);
-      const rendered = await observe(page, "/admin/setup", {
+      const rendered = await observe(page, "/admin/setup/instance", {
         headers: { ...headers, accept: "text/html" },
       });
       expect(rendered.status, `page ${label}`).toBe(200);
@@ -356,7 +444,12 @@ test.describe("the admin portal", () => {
         "x-forwarded-proto": forwarded,
         "x-portal-rewrite": "anything",
       };
-      for (const path of ["/api/admin/settings", "/admin", "/admin/setup"]) {
+      for (const path of [
+        "/api/admin/settings",
+        "/admin",
+        "/admin/setup/instance",
+        "/admin/setup/sign-up",
+      ]) {
         const expected = await observe(page, MISSING, { headers });
         const answer = await observe(page, path, { headers });
         expect(answer.status, `${path} ${JSON.stringify(forwarded)}`).toBe(404);

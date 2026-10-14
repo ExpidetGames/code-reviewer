@@ -2,9 +2,10 @@
 
 // @vitest-environment jsdom
 // Pins down the "Review now" panel with a stand-in for the routes: it loads the open pull requests,
-// starts a command only for a picked pull request, validates the question of `ask` before it sends
-// anything, shows every failure as a sentence (with "Try again" for a failed load), tells a repeated
-// start from a new one, and cannot be sent twice at once.
+// starts a review only for a picked pull request, shows every failure as a sentence (with "Try
+// again" for a failed load), tells a repeated start from a new one, and cannot be sent twice at
+// once. Since #203 there is no command selector and no question field: the only command is `/review`,
+// and whether the project allows it governs the submit button.
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -22,12 +23,7 @@ function list(
     author?: string;
     draft?: boolean;
   }>,
-  allowedCommands: OpenPullRequests["allowedCommands"] = [
-    "review",
-    "improve",
-    "describe",
-    "ask",
-  ],
+  allowedCommands: OpenPullRequests["allowedCommands"] = ["review"],
 ): RequestResult<OpenPullRequests> {
   return {
     ok: true,
@@ -105,6 +101,19 @@ describe("loading the pull requests", () => {
     expect(listPullRequests).toHaveBeenCalledWith("repo-1");
   });
 
+  // CR-33-T03, #203-T07
+  it("has no command selector and no question field", async () => {
+    await renderPanel(
+      fakeApi([list([{ number: 7, title: "Add caching" }])]).api,
+    );
+    await screen.findByRole("radio", { name: /Add caching/ });
+
+    expect(screen.queryByLabelText("Command to run")).toBeNull();
+    expect(screen.queryByLabelText("Question")).toBeNull();
+    expect(document.querySelector("select")).toBeNull();
+    expect(document.querySelector("textarea")).toBeNull();
+  });
+
   // CR-33-T03
   it("explains the empty list and leaves the button unclickable", async () => {
     await renderPanel(fakeApi([list([])]).api);
@@ -173,7 +182,8 @@ describe("loading the pull requests", () => {
   });
 });
 
-describe("starting a command", () => {
+describe("starting a review", () => {
+  // #203-T07
   it("keeps the button off until a pull request is picked", async () => {
     const { api, startReview } = fakeApi([list([{ number: 7 }])]);
     const user = await renderPanel(api);
@@ -186,32 +196,37 @@ describe("starting a command", () => {
     expect(startReview).not.toHaveBeenCalled();
   });
 
-  // CR-33-T04
-  it("sends the picked pull request and command, then links to the new run", async () => {
+  // CR-33-T04, #203-T07
+  it("sends the picked pull request as a review, then links to the new run", async () => {
     const { api, startReview } = fakeApi(
       [list([{ number: 7 }, { number: 3 }])],
-      started({ runId: "run-42", prNumber: 7, command: "improve" }),
+      started({ runId: "run-42", prNumber: 7 }),
     );
     const user = await renderPanel(api);
     await user.click(await screen.findByRole("radio", { name: /#7/ }));
-    await user.selectOptions(
-      screen.getByLabelText("Command to run"),
-      "improve",
-    );
 
     await user.click(button());
 
     expect(startReview).toHaveBeenCalledWith("repo-1", {
       prNumber: 7,
-      command: "improve",
+      command: "review",
     });
     const status = await screen.findByRole("status");
-    expect(status.textContent).toContain(
-      "Started: improve for pull request #7",
-    );
+    expect(status.textContent).toContain("Started: review for pull request #7");
     expect(
       screen.getByRole("link", { name: "View the run" }).getAttribute("href"),
     ).toBe("/w/acme/runs/run-42");
+  });
+
+  // #203-T07
+  it("cannot start while review is switched off in the project, and says so", async () => {
+    const { api, startReview } = fakeApi([list([{ number: 7 }], [])]);
+    const user = await renderPanel(api);
+    await user.click(await screen.findByRole("radio", { name: /#7/ }));
+
+    expect(screen.getByText(/Review is switched off/)).toBeTruthy();
+    expect((button() as HTMLButtonElement).disabled).toBe(true);
+    expect(startReview).not.toHaveBeenCalled();
   });
 
   // CR-33-T10
@@ -254,70 +269,6 @@ describe("starting a command", () => {
     );
   });
 
-  // CR-33-T06
-  it.each(["", "   ", "\n"])(
-    "shows a message and sends nothing for ask with the question %j",
-    async (question) => {
-      const { api, startReview } = fakeApi([list([{ number: 7 }])]);
-      const user = await renderPanel(api);
-      await user.click(await screen.findByRole("radio", { name: /#7/ }));
-      await user.selectOptions(screen.getByLabelText("Command to run"), "ask");
-      if (question.trim() !== "")
-        await user.type(screen.getByLabelText("Question"), question);
-
-      await user.click(button());
-
-      expect((await screen.findByRole("alert")).textContent).toContain(
-        "Write the question",
-      );
-      expect(startReview).not.toHaveBeenCalled();
-    },
-  );
-
-  it("shows a question the route refused as too long at the question, not as a general failure", async () => {
-    const { api, startReview } = fakeApi([list([{ number: 7 }])]);
-    startReview.mockResolvedValueOnce({
-      ok: false,
-      status: 400,
-      code: "MANUAL_REVIEW_REQUEST_INVALID",
-      issues: [{ field: "question", code: "too_long" }],
-    });
-    const user = await renderPanel(api);
-    await user.click(await screen.findByRole("radio", { name: /#7/ }));
-    await user.selectOptions(screen.getByLabelText("Command to run"), "ask");
-    await user.type(
-      screen.getByLabelText("Question"),
-      "What is in the pictures?",
-    );
-
-    await user.click(button());
-
-    const message = await screen.findByText(/The question is too long/);
-    expect(message.textContent).toContain("2,000 characters");
-    expect(screen.getByLabelText("Question").getAttribute("aria-invalid")).toBe(
-      "true",
-    );
-    expect(screen.queryByText(/reload the page/i)).toBeNull();
-    expect(screen.getByRole("radio", { name: /#7/ })).toBeTruthy();
-  });
-
-  // CR-33-T05
-  it("sends the question with ask and nothing with the other commands", async () => {
-    const { api, startReview } = fakeApi([list([{ number: 7 }])]);
-    const user = await renderPanel(api);
-    await user.click(await screen.findByRole("radio", { name: /#7/ }));
-    await user.selectOptions(screen.getByLabelText("Command to run"), "ask");
-    await user.type(screen.getByLabelText("Question"), "Why was it removed?");
-
-    await user.click(button());
-
-    expect(startReview).toHaveBeenCalledWith("repo-1", {
-      prNumber: 7,
-      command: "ask",
-      question: "Why was it removed?",
-    });
-  });
-
   // CR-33-T09
   it("says the pull request is closed and loads the list again", async () => {
     const { api, startReview, listPullRequests } = fakeApi([
@@ -340,7 +291,7 @@ describe("starting a command", () => {
     expect(screen.queryByRole("radio")).toBeNull();
   });
 
-  it("keeps the typed question and the closed-pull-request sentence when the list cannot be reloaded, and shows the failure beside them", async () => {
+  it("keeps the closed-pull-request sentence when the list cannot be reloaded, and shows the failure beside it", async () => {
     const { api, startReview } = fakeApi([
       list([{ number: 7 }]),
       failure("MANUAL_REVIEW_GITHUB_UNAVAILABLE", 502),
@@ -351,16 +302,11 @@ describe("starting a command", () => {
     );
     const user = await renderPanel(api);
     await user.click(await screen.findByRole("radio", { name: /#7/ }));
-    await user.selectOptions(screen.getByLabelText("Command to run"), "ask");
-    await user.type(screen.getByLabelText("Question"), "Why was it removed?");
 
     await user.click(button());
 
     expect(await screen.findByText(/closed or merged/)).toBeTruthy();
     expect(await screen.findByText(/GitHub could not be reached/)).toBeTruthy();
-    expect(
-      (screen.getByLabelText("Question") as HTMLTextAreaElement).value,
-    ).toBe("Why was it removed?");
     expect(screen.getByRole("radio", { name: /#7/ })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() =>
@@ -381,22 +327,6 @@ describe("starting a command", () => {
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("switched off in the settings");
     expect(alert.textContent).not.toContain("MANUAL_REVIEW");
-  });
-
-  it("starts with the first command the project allows and cannot start when none is allowed", async () => {
-    const { api } = fakeApi([list([{ number: 7 }], ["describe"])]);
-    const user = await renderPanel(api);
-    await user.click(await screen.findByRole("radio", { name: /#7/ }));
-
-    expect(
-      (screen.getByLabelText("Command to run") as HTMLSelectElement).value,
-    ).toBe("describe");
-    cleanup();
-    const none = fakeApi([list([{ number: 7 }], [])]);
-    const user2 = await renderPanel(none.api);
-    await user2.click(await screen.findByRole("radio", { name: /#7/ }));
-    expect((button() as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText(/Every command is switched off/)).toBeTruthy();
   });
 
   // CR-33-T15

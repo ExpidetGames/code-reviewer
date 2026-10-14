@@ -68,6 +68,23 @@ jobs:
     if: ${{ github.event_name == 'push' || github.base_ref == 'main' || needs.changes.outputs.app == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    # The database integration tests run against both SQLite (the default of the test suite) and this
+    # Postgres service container; TEST_DATABASE_URL turns the Postgres tests on (they skip without
+    # it). The credentials are throwaway: CI uses no repository secret.
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     defaults:
       run:
         working-directory: app
@@ -92,6 +109,9 @@ jobs:
       - name: Unit tests
         run: pnpm test
       - name: Integration tests on the host
+        # SQLite plus the Postgres service container above.
+        env:
+          TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
         run: pnpm test:int
       - name: Build
         # Placeholder environment for the production build. Required settings get a dummy value
@@ -214,6 +234,75 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
+  # The privileged Dynamic lane (#253, #201-T01): the journey of a pull request through the real app,
+  # the real Dynamic runner (root, the capabilities of compose.dynamic.yml, its own startup self-check)
+  # and the real pinned OpenCode as the engine user, against the loopback fakes only. It needs root, so
+  # it has a job of its own: the GitHub runner has passwordless sudo and the nf_tables module.
+  # runner/scripts/run_dynamic_e2e.sh fetches the pinned OpenCode and ripgrep (the pin files accept
+  # only the pinned bytes), makes the one production build and runs the journeys in a network
+  # namespace of their own; nothing is skipped, and what is missing is named by the preflight.
+  # The job runs the code of the pull request as root. Its safety is the GitHub-hosted, ephemeral VM,
+  # the read-only token, the absence of any secret and the `pull_request` trigger: it must never move
+  # to a self-hosted runner, to `pull_request_target` or to a job with secrets or write permissions
+  # (pinned by app/src/ci/dynamic-lane.test.ts, #253-C06), and its checkout keeps no credentials.
+  e2e-dynamic:
+    name: "E2E: Dynamic Review with the real OpenCode (privileged)"
+    needs: changes
+    if: ${{ github.event_name == 'push' || github.base_ref == 'main' || needs.changes.outputs.app == 'true' || needs.changes.outputs.runner == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: app/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - name: Install dependencies
+        working-directory: app
+        run: pnpm install --frozen-lockfile
+      - name: Install the browser and its system libraries
+        working-directory: app
+        run: pnpm exec playwright install --with-deps chromium
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.0"
+          enable-cache: true
+          cache-dependency-glob: runner/uv.lock
+      - name: Install the runner
+        working-directory: runner
+        run: uv sync --locked
+      # nft installs the engine user's network rules and the lane's network guard. ripgrep is not installed
+      # here: the lane uses the pinned one (the runner's self-check compares it with runner/ripgrep-pin.json).
+      - name: Install nftables
+        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends nftables
+      # The pinned OpenCode (runner/opencode-pin.json); the cache just saves the download.
+      - name: Restore the pinned OpenCode
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/code-reviewer/opencode
+          key: opencode-${{ hashFiles('runner/opencode-pin.json') }}
+      - name: Run the Dynamic Review journey and the network guard
+        working-directory: runner
+        run: scripts/run_dynamic_e2e.sh
+      - name: Upload the Playwright report and the logs
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-dynamic-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            app/playwright-report
+            app/test-results
+          retention-days: 14
+          if-no-files-found: ignore
+
   # The dependency license check (license-policy.json, app/src/ci/license-check): fails when a
   # package of pnpm-lock.yaml or uv.lock has a license outside the allow list. It reads the license
   # metadata that pnpm and uv installed, so it needs both parts installed from the lockfiles and no
@@ -308,6 +397,50 @@ jobs:
       - name: Smoke test the image
         run: docker/smoke/runner.sh code-reviewer-runner:ci
 
+  # The Dynamic runner image (#202): the `dynamic` target of the same Dockerfile. Its smoke test
+  # proves the exact pinned OpenCode and ripgrep, the engine user, and runs the real startup
+  # self-check in a container created like compose.dynamic.yml creates it (root, the capability
+  # list, no network): `opencode` is advertised, and not when NET_ADMIN, the engine user or the
+  # binary is wrong. It is not published (compose.dynamic.yml builds it from the checkout), so only
+  # this job and pull requests into main build it.
+  image-runner-dynamic:
+    name: "Image: Dynamic runner build & smoke test"
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && (github.base_ref == 'main' || needs.changes.outputs.runner == 'true') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build the image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: runner/Dockerfile
+          target: dynamic
+          load: true
+          push: false
+          tags: code-reviewer-runner-dynamic:ci
+          cache-from: type=gha,scope=runner-dynamic
+          cache-to: type=gha,mode=max,scope=runner-dynamic
+      - name: Smoke test the image
+        run: docker/smoke/runner.sh code-reviewer-runner-dynamic:ci dynamic
+      # Only linux-x64 is pinned (#264). The fetch stage must succeed on any other platform and
+      # install nothing, so that a Coolify server on arm64 can still build and deploy the stack: the
+      # image then has no engine and its runner serves Diff jobs only. Emulated, and only this stage.
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          platforms: arm64
+      - name: The engine stage builds on arm64 and installs nothing
+        run: |
+          docker buildx build --platform linux/arm64 --file runner/Dockerfile --target engine-tools \
+            --output type=tar,dest="$RUNNER_TEMP/engine-tools-arm64.tar" .
+          # No -q: grep reads the whole listing, so tar is never cut off by a closed pipe.
+          if tar -tf "$RUNNER_TEMP/engine-tools-arm64.tar" | grep -E '^engine-tools/.' > /dev/null; then
+            echo "an engine was installed on an unpinned platform" >&2
+            exit 1
+          fi
+
   # The Docker Compose stack (compose.yml): both images are built here and the stack is started
   # with dummy settings by docker/smoke/compose.sh. Nothing is pushed; the job has no login and only
   # the read-only token of the workflow. Pushes to development and main are covered by the publish
@@ -363,7 +496,7 @@ jobs:
   # fails on any failed or cancelled job and accepts skipped jobs (path filter).
   ci-passed:
     name: All checks passed?
-    needs: [changes, app-fast, runner-fast, engine, e2e, licenses, image-app, image-runner, compose, actionlint]
+    needs: [changes, app-fast, runner-fast, engine, e2e, e2e-dynamic, licenses, image-app, image-runner, image-runner-dynamic, compose, actionlint]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5

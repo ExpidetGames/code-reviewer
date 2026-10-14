@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // @vitest-environment jsdom
-// Pins down the user menu in the header: who is signed in, the way to sign out, and that the menu
-// works from the keyboard. The name and avatar come from the GitHub profile, so they are shown as
-// plain text and a missing or unusable avatar never leaves a broken image.
+// Pins down the user menu in the header: who is signed in, the way to sign out, the color theme and
+// the admin portal for the instance admin only, and that the menu works from the keyboard. The name
+// and avatar come from the GitHub profile, so they are shown as plain text and a missing or unusable
+// avatar never leaves a broken image.
 import {
   act,
   cleanup,
@@ -32,67 +33,65 @@ function renderMenu(
   return render(<UserMenu user={user} signOutAction={signOut} />);
 }
 
+function openMenu() {
+  return userEvent
+    .setup()
+    .click(screen.getByRole("button", { name: /Ada Lovelace/ }));
+}
+
 describe("the way to the admin portal", () => {
-  // #98-AD-03
+  // #168-T03
   it("is offered to the instance admin and to nobody else", async () => {
     const user = userEvent.setup();
     const admin = renderMenu({ ...ada, isInstanceAdmin: true });
     await user.click(screen.getByRole("button", { name: /Ada Lovelace/ }));
-    const link = screen.getByRole("link", { name: "Admin" });
-    expect(link.getAttribute("href")).toBe("/admin");
+    const entry = screen.getByRole("menuitem", { name: "Admin" });
+    expect(entry.getAttribute("href")).toBe("/admin");
     admin.unmount();
 
     renderMenu(ada);
     await user.click(screen.getByRole("button", { name: /Ada Lovelace/ }));
 
-    expect(screen.queryByRole("link", { name: "Admin" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Admin" })).toBeNull();
   });
 });
 
 describe("opening the user menu", () => {
   // CR-36-T02
-  it("shows the name and the sign out entry after the button is pressed", async () => {
+  it("shows the person and the sign out entry after the button is pressed", async () => {
     const user = userEvent.setup();
     renderMenu(ada);
     const button = screen.getByRole("button", { name: /Ada Lovelace/ });
-    expect(screen.queryByRole("button", { name: "Sign out" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Sign out" })).toBeNull();
 
     await user.click(button);
 
     expect(button.getAttribute("aria-expanded")).toBe("true");
-    const panel = document.getElementById(
-      button.getAttribute("aria-controls") ?? "",
-    );
-    expect(panel).not.toBeNull();
-    expect(within(panel!).getByText("Ada Lovelace")).toBeTruthy();
-    expect(within(panel!).getByText("@ada")).toBeTruthy();
+    const menu = screen.getByRole("menu");
+    expect(within(menu).getByText("Ada Lovelace")).toBeTruthy();
+    expect(within(menu).getByText("@ada")).toBeTruthy();
     expect(
-      within(panel!).getByRole("button", { name: "Sign out" }),
+      within(menu).getByRole("menuitem", { name: "Sign out" }),
     ).toBeTruthy();
   });
 
   // CR-36-T02
-  it("opens from the keyboard and reaches the sign out entry with Tab", async () => {
+  it("opens from the keyboard and reaches the entries with the arrow keys", async () => {
     const user = userEvent.setup();
-    renderMenu(ada);
+    renderMenu({ ...ada, isInstanceAdmin: true });
 
     await user.tab();
     expect(document.activeElement).toBe(
       screen.getByRole("button", { name: /Ada Lovelace/ }),
     );
     await user.keyboard("{Enter}");
-    // The account link, the two entries of the theme, then sign out.
-    await user.tab();
     expect(document.activeElement).toBe(
-      screen.getByRole("link", { name: "Account" }),
+      screen.getByRole("menuitem", { name: "Account" }),
     );
-    await user.tab();
-    await user.tab();
-    await user.tab();
-    await user.tab();
+    await user.keyboard("{ArrowDown}");
 
     expect(document.activeElement).toBe(
-      screen.getByRole("button", { name: "Sign out" }),
+      screen.getByRole("menuitem", { name: "Admin" }),
     );
   });
 
@@ -104,7 +103,7 @@ describe("opening the user menu", () => {
     await user.click(screen.getByRole("button", { name: /Ada Lovelace/ }));
 
     expect(
-      screen.getByRole("link", { name: "Account" }).getAttribute("href"),
+      screen.getByRole("menuitem", { name: "Account" }).getAttribute("href"),
     ).toBe("/account");
   });
 
@@ -114,57 +113,13 @@ describe("opening the user menu", () => {
     renderMenu(ada);
     const button = screen.getByRole("button", { name: /Ada Lovelace/ });
     await user.click(button);
-    screen.getByRole("button", { name: "Sign out" }).focus();
+    screen.getByRole("menuitem", { name: "Sign out" }).focus();
 
     await user.keyboard("{Escape}");
 
     expect(button.getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByRole("button", { name: "Sign out" })).toBeNull();
+    expect(screen.queryByRole("menu")).toBeNull();
     expect(document.activeElement).toBe(button);
-  });
-
-  it("closes when the keyboard focus moves past the last control", async () => {
-    const user = userEvent.setup();
-    render(
-      <>
-        <UserMenu user={ada} signOutAction={async () => {}} />
-        <button type="button">elsewhere</button>
-      </>,
-    );
-    const button = screen.getByRole("button", { name: /Ada Lovelace/ });
-    await user.tab();
-    await user.keyboard("{Enter}");
-    screen.getByRole("button", { name: "Sign out" }).focus();
-    expect(button.getAttribute("aria-expanded")).toBe("true");
-
-    await user.tab();
-
-    expect(document.activeElement).toBe(
-      screen.getByRole("button", { name: "elsewhere" }),
-    );
-    expect(button.getAttribute("aria-expanded")).toBe("false");
-  });
-
-  it("closes when the focus moves back before the button, and stays open while it moves inside", async () => {
-    const user = userEvent.setup();
-    render(
-      <>
-        <button type="button">before</button>
-        <UserMenu user={ada} signOutAction={async () => {}} />
-      </>,
-    );
-    const button = screen.getByRole("button", { name: /Ada Lovelace/ });
-    await user.click(button);
-
-    await user.tab();
-    expect(button.getAttribute("aria-expanded")).toBe("true");
-    await user.tab({ shift: true });
-    await user.tab({ shift: true });
-
-    expect(document.activeElement).toBe(
-      screen.getByRole("button", { name: "before" }),
-    );
-    expect(button.getAttribute("aria-expanded")).toBe("false");
   });
 
   it("closes on a click outside it", async () => {
@@ -184,12 +139,13 @@ describe("opening the user menu", () => {
     renderMenu(ada, signOut);
     await user.click(screen.getByRole("button", { name: /Ada Lovelace/ }));
 
-    await user.click(screen.getByRole("button", { name: "Sign out" }));
+    await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
 
     expect(signOut).toHaveBeenCalledTimes(1);
   });
 
-  it("disables the sign out button while the action runs, so a double click cannot post it twice", async () => {
+  // CR-36-T02
+  it("disables the sign out entry while the action runs, so a second press cannot end the session twice", async () => {
     const user = userEvent.setup();
     let finish: () => void = () => {};
     const signOut = vi.fn(
@@ -200,7 +156,7 @@ describe("opening the user menu", () => {
     );
     renderMenu(ada, signOut);
     await user.click(screen.getByRole("button", { name: /Ada Lovelace/ }));
-    const entry = screen.getByRole("button", { name: "Sign out" });
+    const entry = screen.getByRole("menuitem", { name: "Sign out" });
 
     await user.dblClick(entry);
 
@@ -209,17 +165,14 @@ describe("opening the user menu", () => {
     await act(async () => finish());
   });
 
-  it("offers the color theme choice with the current one pressed", async () => {
-    const user = userEvent.setup();
+  it("offers the color theme choice with the current one checked", async () => {
     renderMenu(ada);
-    await user.click(screen.getByRole("button", { name: /Ada Lovelace/ }));
-
-    const group = screen.getByRole("group", { name: "Color theme" });
+    await openMenu();
 
     expect(
-      within(group)
-        .getAllByRole("button")
-        .map((b) => [b.textContent, b.getAttribute("aria-pressed")]),
+      screen
+        .getAllByRole("menuitemradio")
+        .map((item) => [item.textContent, item.getAttribute("aria-checked")]),
     ).toEqual([
       ["System", "true"],
       ["Light", "false"],
@@ -239,7 +192,7 @@ describe("a person without a display name or avatar", () => {
     expect(button.textContent).toContain("O");
     await user.click(button);
     expect(document.querySelector("img")).toBeNull();
-    expect(screen.getByRole("button", { name: "Sign out" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Sign out" })).toBeTruthy();
   });
 
   // CR-36-T05

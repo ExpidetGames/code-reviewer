@@ -12,8 +12,13 @@ import { createTestDatabase } from "./test-database.ts";
 import { defaultWorkspaceId } from "./workspaces.ts";
 import { createReviewSettingsService } from "../review-settings/service.ts";
 import { builtInReviewSettings } from "../review-settings/settings.ts";
+import { readDefaultReviewSkill } from "../review-settings/default-skill.ts";
+import type { ReviewSettingsHooks } from "../review-settings/hooks.ts";
 
 export const TEST_MODEL = "deepseek/deepseek-v3.2";
+
+/** The shipped default skill, so a test can compare against the exact text a project resolves to. */
+export const TEST_DEFAULT_SKILL = readDefaultReviewSkill();
 
 export async function seedRepositories(
   db: Kysely<Database>,
@@ -42,7 +47,10 @@ export async function seedRepositories(
   return { first, second, workspaceId: workspace };
 }
 
-export async function setupReviewSettings(db?: Kysely<Database>) {
+export async function setupReviewSettings(
+  db?: Kysely<Database>,
+  options: { hooks?: ReviewSettingsHooks } = {},
+) {
   const database = db ?? (await createTestDatabase()).db;
   const workspaceId = await defaultWorkspaceId(database);
   const { first, second } = await seedRepositories(database, workspaceId);
@@ -53,6 +61,8 @@ export async function setupReviewSettings(db?: Kysely<Database>) {
     appSettings,
     projects,
     builtIn: () => builtInReviewSettings(model),
+    defaultSkill: () => TEST_DEFAULT_SKILL,
+    ...(options.hooks === undefined ? {} : { hooks: options.hooks }),
   });
   return {
     db: database,

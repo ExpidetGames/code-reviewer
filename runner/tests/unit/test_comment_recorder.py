@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """Pins down the comment recorder: PR-Agent returns no URL of what it posted, so the runner wraps
-the two write paths of the GitHub provider (create and edit a comment) and picks the comment of the
-command from what was recorded, by the hidden marker PR-Agent puts into its own comments."""
+the two write paths of the GitHub provider (create and edit a comment) and picks the review comment
+from what was recorded, by the hidden marker PR-Agent puts into its own comments. `/review` is the
+only command (the product removed `/ask`, `/improve` and `/describe`)."""
 
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -15,10 +16,8 @@ from code_reviewer_runner.comment_recorder import (
     CommentRecorder,
     install_comment_recorder,
 )
-from code_reviewer_runner.job import Command
 
 REVIEW_MARKER = "<!-- pr-agent:review:full -->"
-IMPROVE_MARKER = "<!-- pr-agent:improve:summary -->"
 
 
 @dataclass
@@ -166,14 +165,14 @@ def test_the_review_comment_is_picked_by_its_marker_and_the_status_comment_is_ig
         recorder, "created", "https://x/status", "**[Persistent review](https://x/review)** updated"
     )
 
-    assert recorder.comment_url(Command.REVIEW) == "https://x/review"
+    assert recorder.comment_url() == "https://x/review"
 
 
 def test_the_last_edit_of_the_review_wins(recorder: CommentRecorder) -> None:
     record(recorder, "created", "https://x/first", f"{REVIEW_MARKER}\nold")
     record(recorder, "edited", "https://x/second", f"{REVIEW_MARKER}\nnew")
 
-    assert recorder.comment_url(Command.REVIEW) == "https://x/second"
+    assert recorder.comment_url() == "https://x/second"
 
 
 # CR-12 review finding: the heading alone is no identity (it is configurable, and PR-Agent keeps it
@@ -184,15 +183,7 @@ def test_a_review_heading_without_the_hidden_marker_is_not_the_result(
     record(recorder, "created", "https://x/review", "## PR Reviewer Guide 🔍\n\ntext")
     record(recorder, "created", "https://x/incremental", "## Incremental PR Reviewer Guide 🔍\n\nx")
 
-    assert recorder.comment_url(Command.REVIEW) is None
-
-
-def test_the_improve_heading_without_the_hidden_marker_is_not_the_result(
-    recorder: CommentRecorder,
-) -> None:
-    record(recorder, "created", "https://x/improve", "## PR Code Suggestions ✨\n\ntext")
-
-    assert recorder.comment_url(Command.IMPROVE) is None
+    assert recorder.comment_url() is None
 
 
 def test_the_standalone_review_of_pr_agent_is_not_the_result_but_the_canonical_review_is(
@@ -205,10 +196,10 @@ def test_the_standalone_review_of_pr_agent_is_not_the_result_but_the_canonical_r
     assert standalone.startswith("## Standalone PR Review")
 
     record(recorder, "created", "https://x/standalone", standalone)
-    assert recorder.comment_url(Command.REVIEW) is None
+    assert recorder.comment_url() is None
 
     record(recorder, "edited", "https://x/canonical", canonical)
-    assert recorder.comment_url(Command.REVIEW) == "https://x/canonical"
+    assert recorder.comment_url() == "https://x/canonical"
 
 
 def test_the_marker_counts_only_as_an_exact_line_near_the_top(recorder: CommentRecorder) -> None:
@@ -216,7 +207,7 @@ def test_the_marker_counts_only_as_an_exact_line_near_the_top(recorder: CommentR
     record(recorder, "created", "https://x/quoted", f"text quoting {REVIEW_MARKER} inline")
     record(recorder, "created", "https://x/far", far_down)
 
-    assert recorder.comment_url(Command.REVIEW) is None
+    assert recorder.comment_url() is None
 
 
 def test_the_link_reference_form_of_the_marker_is_accepted(recorder: CommentRecorder) -> None:
@@ -226,40 +217,14 @@ def test_the_link_reference_form_of_the_marker_is_accepted(recorder: CommentReco
     assert reference != REVIEW_MARKER
     record(recorder, "created", "https://x/review", f"## PR Reviewer Guide 🔍\n\n{reference}\n\nx")
 
-    assert recorder.comment_url(Command.REVIEW) == "https://x/review"
-
-
-def test_the_improve_summary_is_picked_by_its_marker(recorder: CommentRecorder) -> None:
-    record(recorder, "created", "https://x/review", f"{REVIEW_MARKER}\n")
-    record(
-        recorder, "created", "https://x/improve", f"## PR Code Suggestions ✨\n\n{IMPROVE_MARKER}\n"
-    )
-
-    assert recorder.comment_url(Command.IMPROVE) == "https://x/improve"
-
-
-def test_the_answer_to_a_question_is_the_last_comment_that_was_not_temporary(
-    recorder: CommentRecorder,
-) -> None:
-    record(recorder, "created", "https://x/progress", "Preparing answer...", temporary=True)
-    record(recorder, "created", "https://x/answer", "### **Ask** ❓\n\nanswer")
-
-    assert recorder.comment_url(Command.ASK) == "https://x/answer"
-
-
-def test_describe_has_no_comment_url_because_it_edits_the_pull_request_itself(
-    recorder: CommentRecorder,
-) -> None:
-    record(recorder, "created", "https://x/other", "some comment")
-
-    assert recorder.comment_url(Command.DESCRIBE) is None
+    assert recorder.comment_url() == "https://x/review"
 
 
 def test_no_comment_url_when_nothing_matching_was_posted(recorder: CommentRecorder) -> None:
-    assert recorder.comment_url(Command.REVIEW) is None
+    assert recorder.comment_url() is None
 
     record(recorder, "created", "https://x/other", "unrelated")
-    assert recorder.comment_url(Command.REVIEW) is None
+    assert recorder.comment_url() is None
 
 
 def test_a_failure_comment_is_detected_and_never_chosen_as_the_result(
@@ -268,8 +233,7 @@ def test_a_failure_comment_is_detected_and_never_chosen_as_the_result(
     record(recorder, "created", "https://x/failed", "Failed to review PR: boom")
 
     assert recorder.failure_comment_posted() is True
-    assert recorder.comment_url(Command.REVIEW) is None
-    assert recorder.comment_url(Command.ASK) is None
+    assert recorder.comment_url() is None
 
 
 def test_no_failure_comment_in_a_healthy_run(recorder: CommentRecorder) -> None:
