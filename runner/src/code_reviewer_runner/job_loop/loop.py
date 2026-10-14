@@ -63,6 +63,7 @@ from code_reviewer_runner.job_loop.reporting import (
     result_from_outcome,
 )
 from code_reviewer_runner.job_loop.settings import LoopSettings, default_job_command
+from code_reviewer_runner.lease_check import LeaseState
 from code_reviewer_runner.pr_agent_config import PASSTHROUGH_VARIABLES
 from code_reviewer_runner.result import ErrorCode
 
@@ -332,6 +333,13 @@ class RunnerLoop:
                 run_as=(
                     None if job.review_kind is ReviewKind.DYNAMIC else self._settings.diff_job_user
                 ),
+                # #260: a Dynamic job writes its own comment, so it asks right before (a Diff job
+                # does not publish this way).
+                lease_check=(
+                    (lambda: self._confirm_lease(claimed))
+                    if job.review_kind is ReviewKind.DYNAMIC
+                    else None
+                ),
             )
             process = await self._start_process(spec, job)
         except Exception as error:
@@ -487,6 +495,19 @@ class RunnerLoop:
                 # the class of an unexpected error is logged, its text may hold part of the input.
                 detail = str(error) if isinstance(error, ApiError) else type(error).__name__
                 self._log.warning("job %s: heartbeat failed (%s)", claimed.id, detail)
+
+    async def _confirm_lease(self, claimed: ClaimedJob) -> LeaseState:
+        """Beat the heart once, now. A lost lease and a cancelled job are both answered with 409."""
+        try:
+            await self._api.heartbeat(claimed.id, claimed.lease_token)
+        except LeaseLost:
+            self._log.warning("job %s: the lease check before publishing: lost", claimed.id)
+            return LeaseState.LOST
+        except Exception as error:
+            detail = str(error) if isinstance(error, ApiError) else type(error).__name__
+            self._log.warning("job %s: the lease check could not be made (%s)", claimed.id, detail)
+            return LeaseState.UNCONFIRMED
+        return LeaseState.HELD
 
     def _log_outcome(self, claimed: ClaimedJob, result: Result, outcome: ProcessOutcome) -> None:
         if result["ok"]:
