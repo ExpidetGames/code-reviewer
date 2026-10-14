@@ -10,4 +10,62 @@ require us to keep are in THIRD_PARTY_LICENSES.md, in particular:
   Copyright (c) 2026 The PR Agent
   Licensed under the MIT License.
   The runner installs the pinned release of PR-Agent as a dependency and runs it to produce the
-  reviews.
+  reviews. The fixed core of Dynamic Review also adapts the untrusted-input sentence PR-Agent uses
+  in its own prompts.
+
+  shadcn/ui (https://ui.shadcn.com)
+  Copyright (c) 2023 shadcn
+  Licensed under the MIT License.
+  The component kit under app/src/components/ui/ is copied from shadcn/ui and keeps its MIT header
+  and provenance line; the full list of components and the MIT text are in THIRD_PARTY_LICENSES.md.
+
+  OpenAI Codex (https://github.com/openai/codex)
+  Copyright 2025 OpenAI
+  Licensed under the Apache License, Version 2.0.
+  The default Dynamic Review review skill adapts the Codex review rubric and the companion
+  review-agent skill. The upstream NOTICE, retained as section 4 of the Apache License requires,
+  reads:
+
+  "OpenAI Codex
+  Copyright 2025 OpenAI
+
+  This project includes code derived from Ratatui (https://github.com/ratatui/ratatui), licensed
+  under the MIT license.
+  Copyright (c) 2016-2022 Florian Dehau
+  Copyright (c) 2023-2025 The Ratatui Developers"
+
+  Google run-gemini-cli (https://github.com/google-github-actions/run-gemini-cli)
+  Licensed under the Apache License, Version 2.0.
+  The fixed core of Dynamic Review adapts the workflow's "Input Demarcation" paragraph.
+
+  OpenCode (https://github.com/anomalyco/opencode)
+  Copyright (c) 2025 opencode
+  Licensed under the MIT License.
+  The Dynamic runner image carries the unmodified release 1.19.0 (source commit
+  733b2c627e5aec39cb33cc22373bdce33053ef2c) as its review engine. The npm packages bundled in the
+  executable are listed, with their licenses, in runner/opencode-bundled-licenses.json (an upper
+  bound, see THIRD_PARTY_LICENSES.md).
+
+  ripgrep (https://github.com/BurntSushi/ripgrep)
+  Copyright (c) 2015 Andrew Gallant
+  Licensed under the MIT License (upstream offers it as an alternative to the Unlicense).
+  The Dynamic runner image carries the unmodified release 14.1.1 (source commit
+  4649aa9700619f94cf9c66876e9549d83420e16c) as the search helper of the engine.
+
+  caniuse-lite (https://github.com/browserslist/caniuse-lite)
+  Credit: Alexis Deveria and the caniuse-lite contributors.
+  Licensed under Creative Commons Attribution 4.0 International
+  (https://creativecommons.org/licenses/by/4.0/). Data, used unmodified, provided without
+  warranties (the license disclaims them). It appears in the build tooling and inside the OpenCode
+  executable of the Dynamic runner image.
+
+  spdx-exceptions (https://github.com/kemitchell/spdx-exceptions.json)
+  Credit: The Linux Foundation.
+  Licensed under Creative Commons Attribution 3.0 Unported
+  (https://creativecommons.org/licenses/by/3.0/). Data, used unmodified, provided without
+  warranties (the license disclaims them). It appears inside the OpenCode executable of the Dynamic
+  runner image.
+
+  The exact source URLs, revisions and modifications of every adapted passage are in
+  THIRD_PARTY_LICENSES.md.
+

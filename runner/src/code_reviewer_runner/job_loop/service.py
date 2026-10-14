@@ -7,8 +7,18 @@ import logging
 import os
 import signal
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from dataclasses import replace
+from typing import Any
 
+from code_reviewer_runner.capabilities import self_check_outcome
+from code_reviewer_runner.dynamic_review.netguard import IsolationError
+from code_reviewer_runner.dynamic_review.self_check import (
+    DEFAULT_TOOLS,
+    SelfCheckReason,
+    check_dynamic_runner,
+)
+from code_reviewer_runner.dynamic_review.static_isolation import SlotPorts, secure_startup
 from code_reviewer_runner.job_loop.api import HttpRunnerApi
 from code_reviewer_runner.job_loop.loop import RunnerLoop
 from code_reviewer_runner.job_loop.masking import SecretMasker
@@ -32,6 +42,68 @@ def configure_logging(stream: object = None) -> None:
     logger.propagate = False
 
 
+def prepare_dynamic_runtime(
+    settings: LoopSettings, *, startup: Callable[[int, SlotPorts], bool] = secure_startup
+) -> bool:
+    """The Dynamic runner's one-time network setup, before the loop and any thread exist (#244).
+
+    Installs the engine user's static nft rules and drops `NET_ADMIN` for good. Returns False when
+    the rules could not be installed (Dynamic jobs then fail closed; `secure_startup` logs why).
+    Raises `IsolationError` when the capabilities could not be dropped: such a runner must not
+    start. A runner without an engine user (Diff only) has nothing to do.
+    """
+    user, ports = settings.dynamic_engine_user, settings.dynamic_ports
+    if user is None or ports is None:
+        return True
+    return startup(user[0], ports)
+
+
+def advertise_engines(
+    settings: LoopSettings,
+    rules_installed: bool,
+    *,
+    check: Callable[..., None] | None = None,
+) -> LoopSettings:
+    """The settings with the engines this runner may advertise, decided by the startup self-check.
+
+    `opencode` is added (with the verified engine command the Dynamic job process is handed) only
+    when `check_dynamic_runner` passes: root supervisor, engine user, static rules installed,
+    startup capabilities dropped, pinned and trusted engine and `rg`, probe as the engine user. Any
+    failure leaves `pr-agent` only and logs the stable reason, never a value. A runner without an
+    engine user (every runner but the Dynamic one) is not a failure: it serves Diff jobs, as
+    designed.
+    """
+    run_check = check or check_dynamic_runner
+    engines, error = self_check_outcome(
+        lambda: run_check(
+            user=settings.dynamic_engine_user,
+            ports=settings.dynamic_ports,
+            rules_installed=rules_installed,
+        )
+    )
+    log = logging.getLogger(LOGGER_NAME)
+    if error is None:
+        log.info("Dynamic Review: opencode is advertised, the startup self-check passed")
+        return replace(
+            settings,
+            engines=engines,
+            dynamic_command=(str(DEFAULT_TOOLS.opencode),),
+            dynamic_ripgrep=str(DEFAULT_TOOLS.ripgrep),
+        )
+    reason: Any = getattr(error, "reason", None)
+    named = reason.value if isinstance(reason, SelfCheckReason) else "self_check_error"
+    if settings.dynamic_engine_user is None:
+        log.info("Dynamic Review: this runner serves Diff jobs only (%s)", named)
+    else:
+        log.warning(
+            "Dynamic Review: opencode is not advertised, this runner serves Diff jobs only "
+            "(%s: %s)",
+            error.code.value,
+            named,
+        )
+    return replace(settings, engines=engines, dynamic_command=None, dynamic_ripgrep=None)
+
+
 async def serve(
     settings: LoopSettings,
     environment: Mapping[str, str],
@@ -43,6 +115,7 @@ async def serve(
         settings.api_url,
         settings.token,
         settings.runner_id,
+        engines=settings.engines,
         request_timeout=settings.request_timeout,
     )
     loop = RunnerLoop(
@@ -83,4 +156,11 @@ def run_from_environment(environment: Mapping[str, str] | None = None) -> int:
     except SettingsError as error:
         logging.getLogger(LOGGER_NAME).error("cannot start: %s", error)
         return 2
-    return asyncio.run(serve(settings, env))
+    try:
+        rules_installed = prepare_dynamic_runtime(settings)
+    except IsolationError as error:
+        logging.getLogger(LOGGER_NAME).error("cannot start: %s", error)
+        return 2
+    # After the network setup and the end of NET_ADMIN, before the first claim: `opencode` is only
+    # ever in a claim after the self-check passed.
+    return asyncio.run(serve(advertise_engines(settings, rules_installed), env))

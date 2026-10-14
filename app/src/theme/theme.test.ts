@@ -155,9 +155,9 @@ describe("the script that runs before the first paint", () => {
   });
 });
 
-describe("the stylesheet", () => {
+describe("the theme stylesheet", () => {
   const css = readFileSync(
-    join(import.meta.dirname, "..", "app", "globals.css"),
+    join(import.meta.dirname, "..", "app", "theme.css"),
     "utf8",
   );
 
@@ -172,9 +172,37 @@ describe("the stylesheet", () => {
     );
   });
 
-  it("writes colors only in the token block", () => {
-    const afterTokens = css.slice(css.indexOf(":root[data-theme"));
+  // #185: the base element rules live in `@layer base`, so a Tailwind utility wins over them (the
+  // rule the deleted `globals-layers.test.ts` guarded while the legacy stylesheet still existed).
+  it("keeps the element-level rules in a layer so a utility wins over them", () => {
+    const base = css.slice(css.indexOf("@layer base {"));
+    expect(base).toMatch(/body\s*{/);
+    expect(base).toMatch(/:focus-visible\s*{/);
+    expect(base).not.toMatch(/\.(btn|card|page-header)\b/);
+  });
 
-    expect(afterTokens).not.toMatch(/#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(/);
+  // #185 (review): a link in running text is underlined by default, so colour is not the only cue.
+  it("underlines links in the base layer", () => {
+    const base = css.slice(css.indexOf("@layer base {"));
+    expect(base).toMatch(/a\s*{[^}]*text-decoration:\s*underline;/);
+  });
+});
+
+describe("the Tailwind theme", () => {
+  const theme = readFileSync(
+    join(import.meta.dirname, "..", "app", "theme.css"),
+    "utf8",
+  );
+
+  // #166-T05
+  it("wires the dark variant to the data-theme attribute and follows the system setting", () => {
+    // The `dark:` variant reacts to the attribute `theme.ts` writes, not to shadcn's `.dark` class.
+    expect(theme).toMatch(/@custom-variant dark/);
+    expect(theme).toMatch(/\[data-theme="dark"\]/);
+    // The system state (no attribute) changes the tokens through the media query, and the explicit
+    // dark choice pins them, so a stored choice and no choice both end up with the right values.
+    expect(theme).toMatch(/@media \(prefers-color-scheme: dark\)/);
+    expect(theme).toMatch(/:root:not\(\[data-theme\]\)/);
+    expect(theme).toMatch(/:root\[data-theme="dark"\]\s*{/);
   });
 });

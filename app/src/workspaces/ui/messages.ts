@@ -3,18 +3,29 @@
 // The copy for the error codes of the workspace routes (the UI translates a code to copy, never the other
 // way round).
 import {
+  CROSS_SITE_REQUEST,
+  INVALID_EMAIL,
+  NOT_AVAILABLE_TO_YOU,
+  ROLE_NOT_ALLOWED,
+  TOO_MANY_ATTEMPTS,
+} from "../../copy/messages.ts";
+import {
   describeTransportFailure,
   GENERIC_FAILURE,
 } from "../../ui/transport-messages.ts";
 
+/** The one owner of the lifetime of an invitation link (#169). */
+export const INVITATION_LINK_LIFETIME =
+  "An invitation works once, for 7 days, for the address it was made for.";
+
 const FAILURE_COPY: Record<string, string> = {
-  forbidden: "Your role in this workspace does not allow that.",
-  not_found: "That is not available to you.",
+  forbidden: ROLE_NOT_ALLOWED,
+  not_found: NOT_AVAILABLE_TO_YOU,
   member_not_found: "That person is not a member of this workspace.",
   last_owner: "A workspace needs an Owner. Make somebody else an Owner first.",
   invalid_role: "That is not a role.",
   invalid_name: "Use 1 to 80 characters, without line breaks.",
-  invalid_email: "Enter a valid email address.",
+  invalid_email: INVALID_EMAIL,
   invalid_request:
     "The request was not complete. Reload the page and try again.",
   email_not_allowed:
@@ -26,7 +37,7 @@ const FAILURE_COPY: Record<string, string> = {
     "That address has an invitation already. Revoke it first, or send it again.",
   not_available:
     "This instance cannot send mail, so a link cannot be sent again. Revoke the invitation and invite the address once more to get a new link.",
-  rate_limited: "Too many attempts. Wait a while and try again.",
+  rate_limited: TOO_MANY_ATTEMPTS,
   multi_tenant_required:
     "This instance has one workspace and people cannot create more.",
   workspace_limit_reached:
@@ -39,7 +50,7 @@ const FAILURE_COPY: Record<string, string> = {
     "You are signed in with another address than the one this invitation is for.",
   email_not_verified:
     "Confirm your email address first, then accept the invitation.",
-  cross_site_request: "The request did not come from this page. Reload it.",
+  cross_site_request: CROSS_SITE_REQUEST,
 };
 
 /** The sentence for a failed call of a workspace route. */

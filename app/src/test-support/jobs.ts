@@ -3,13 +3,27 @@
 // Fixtures for the job queue tests: a migrated database with one integration and a few repositories,
 // a clock the test moves by hand, and a way to enqueue with sensible defaults.
 import type { Kysely } from "kysely";
+import { formatTimestamp } from "../db/codecs.ts";
 import { createIntegrationsRepository } from "../db/repositories/integrations-repository.ts";
+import { createInstanceSettingsRepository } from "../db/repositories/instance-settings-repository.ts";
+import { toJob } from "../db/repositories/jobs-repository.ts";
 import { createRepositoriesRepository } from "../db/repositories/repositories-repository.ts";
 import type { Database } from "../db/schema.ts";
 import { createJobQueue, type JobQueue } from "../jobs/job-queue.ts";
 import { createRunnerQueue, type RunnerQueue } from "../jobs/runner-queue.ts";
-import type { EnqueueJobInput, Job } from "../jobs/job-types.ts";
+import {
+  dynamicReviewEnabled as allowDynamicReview,
+  type DynamicReviewGate,
+} from "../jobs/dynamic-review-gate.ts";
+import type { ReviewKindResolver } from "../jobs/review-kind.ts";
+import type {
+  EnqueueJobInput,
+  Job,
+  JobTriggerKind,
+} from "../jobs/job-types.ts";
+import type { JobStatus } from "../jobs/job-status.ts";
 import type { JobQueueLimits } from "../jobs/job-limits.ts";
+import type { ProjectReviewKind } from "../review-settings/settings.ts";
 import { createTestDatabase } from "./test-database.ts";
 import { defaultWorkspaceId } from "./workspaces.ts";
 
@@ -47,7 +61,14 @@ export type TestQueue = JobQueue & RunnerQueue;
 export function createTestQueue(
   db: Kysely<Database>,
   workspaceId: string,
-  options: { now?: () => Date; limits?: Partial<JobQueueLimits> } = {},
+  options: {
+    now?: () => Date;
+    limits?: Partial<JobQueueLimits>;
+    /** #195 rollout gate; default: the instance setting (off). */
+    dynamicReviewEnabled?: DynamicReviewGate;
+    /** #195: override the in-transaction kind resolver (tests). */
+    reviewKind?: ReviewKindResolver;
+  } = {},
 ): TestQueue {
   return {
     ...createJobQueue(db, workspaceId, options),
@@ -58,7 +79,11 @@ export function createTestQueue(
 export type JobQueueFixture = {
   db: Kysely<Database>;
   workspaceId: string;
-  /** The path of the database file, for a second connection or a child process. */
+  /**
+   * The path of the SQLite database file, for a second connection or a child process. A fixture on
+   * a supplied (Postgres) database has no file: reading this throws instead of handing out an empty
+   * path.
+   */
   databasePath: string;
   queue: TestQueue;
   clock: TestClock;
@@ -73,13 +98,58 @@ export type JobQueueFixture = {
   tokenOf(jobId: string): Promise<string>;
   /** Enqueues, expects a new job, and returns it. */
   enqueueNew(overrides?: Partial<EnqueueJobInput>): Promise<Job>;
+  /**
+   * Inserts a job row directly, for history tests only (#203): the queue cannot create a removed
+   * command any more, but a database from before the upgrade still holds such rows.
+   */
+  seedHistoricalJob(overrides: {
+    command: "review" | "improve" | "describe" | "ask";
+    repositoryId?: string;
+    prNumber?: number;
+    /** Defaults to a finished, succeeded review. */
+    status?: JobStatus;
+    triggerKind?: JobTriggerKind;
+    args?: string;
+    result?: unknown;
+    errorCode?: string | null;
+    actorLogin?: string;
+    /** #199: the head the historical review saw; defaults to `sha("a")`. */
+    headSha?: string;
+    /** #199: the review kind of the historical review; defaults to the column default (diff). */
+    reviewKind?: ProjectReviewKind;
+    /** #255: the lost attempts of the row; defaults to 0 (a job that never ran). */
+    attempts?: number;
+    /** For a `running` row: the claim token; defaults to a fixed one, and the lease is live. */
+    leaseToken?: string;
+    /** For a `running` row: an ISO timestamp; defaults to the fixture's now. */
+    leaseExpiresAt?: string;
+  }): Promise<Job>;
 };
 
 export async function createJobQueueFixture(
-  options: { limits?: Partial<JobQueueLimits> } = {},
+  options: {
+    limits?: Partial<JobQueueLimits>;
+    /** A database to seed instead of a fresh SQLite one (for the Postgres tests). */
+    database?: Kysely<Database>;
+    /** #195: enable the Dynamic Review rollout gate for this fixture (default off). */
+    dynamicReview?: boolean;
+  } = {},
 ): Promise<JobQueueFixture> {
-  const { db, config } = await createTestDatabase();
+  const created = options.database
+    ? { db: options.database, databasePath: null as string | null }
+    : await (async () => {
+        const test = await createTestDatabase();
+        return { db: test.db, databasePath: test.config.path as string | null };
+      })();
+  const { db } = created;
   const clock = createTestClock();
+  // Both enqueue and lease-loss policy read the stored instance gate.
+  if (options.dynamicReview === true)
+    await createInstanceSettingsRepository(db, clock.now).set(
+      "dynamic_review",
+      { enabled: true },
+      null,
+    );
   const workspaceId = await defaultWorkspaceId(db);
   const integration = await createIntegrationsRepository(
     db,
@@ -115,6 +185,8 @@ export async function createJobQueueFixture(
   const queue = createTestQueue(db, workspaceId, {
     now: clock.now,
     limits: options.limits,
+    dynamicReviewEnabled:
+      options.dynamicReview === true ? allowDynamicReview : undefined,
   });
   const defaults = (overrides: Partial<EnqueueJobInput>): EnqueueJobInput => ({
     repositoryId: first.id,
@@ -129,7 +201,13 @@ export async function createJobQueueFixture(
   return {
     db,
     workspaceId,
-    databasePath: config.path,
+    get databasePath(): string {
+      if (created.databasePath === null)
+        throw new Error(
+          "A Postgres job queue fixture has no database file path; use its connection.",
+        );
+      return created.databasePath;
+    },
     queue,
     clock,
     repositoryId: first.id,
@@ -150,6 +228,59 @@ export async function createJobQueueFixture(
       if (result.status !== "created")
         throw new Error(`Expected a new job, got: ${result.reason}`);
       return result.job;
+    },
+    async seedHistoricalJob(overrides) {
+      const status = overrides.status ?? "succeeded";
+      const timestamp = formatTimestamp(clock.now());
+      const id = crypto.randomUUID();
+      const running = status === "running";
+      await db
+        .insertInto("jobs")
+        .values({
+          id,
+          workspace_id: workspaceId,
+          repository_id: overrides.repositoryId ?? first.id,
+          pr_number: overrides.prNumber ?? 7,
+          pr_url: "https://github.test/acme/widgets/pull/7",
+          head_sha: overrides.headSha ?? sha("a"),
+          command: overrides.command,
+          args: overrides.args ?? "",
+          trigger_kind: overrides.triggerKind ?? "comment",
+          ...(overrides.reviewKind === undefined
+            ? {}
+            : { review_kind: overrides.reviewKind }),
+          actor_login: overrides.actorLogin ?? "octocat",
+          delivery_id: null,
+          status,
+          run_after: timestamp,
+          attempts: overrides.attempts ?? 0,
+          runner_id: running ? "runner-1" : null,
+          lease_token: running
+            ? (overrides.leaseToken ?? "historical-lease")
+            : null,
+          claimed_at: running ? timestamp : null,
+          heartbeat_at: running ? timestamp : null,
+          lease_expires_at: running
+            ? (overrides.leaseExpiresAt ?? timestamp)
+            : null,
+          result:
+            overrides.result === undefined
+              ? null
+              : JSON.stringify(overrides.result),
+          error_code: overrides.errorCode ?? null,
+          superseded_by: null,
+          created_at: timestamp,
+          updated_at: timestamp,
+          finished_at:
+            status === "queued" || status === "running" ? null : timestamp,
+        })
+        .execute();
+      const row = await db
+        .selectFrom("jobs")
+        .selectAll()
+        .where("id", "=", id)
+        .executeTakeFirstOrThrow();
+      return toJob(row);
     },
   };
 }

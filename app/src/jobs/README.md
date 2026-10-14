@@ -1,6 +1,7 @@
 # Job queue
 
-A job is one requested run of a command (`review`, `improve`, `describe`, `ask`) on one pull request.
+A job is one requested run of a command (`review`; `/ask`, `/improve` and `/describe` were removed)
+on one pull request.
 The queue lives in SQLite (table `jobs`, migration `20261010191500_create_jobs`); runners take jobs
 from it through the runner API (CR-28), webhooks and the UI put jobs in. Everything goes through
 `createJobQueue` (`job-queue.ts`, scoped to one workspace) and `createRunnerQueue` (`runner-queue.ts`, the
@@ -31,12 +32,60 @@ by the code that enqueues (the trigger policy of the webhook handler, CR-31), no
 queued --claim--> running --complete--> succeeded | failed
 queued --newer automatic job--> superseded     running --lease lost or release--> queued (attempts + 1)
 queued --project off / PR closed--> cancelled  running --last attempt lost, or too long--> failed
+queued --review kind changed--> cancelled
 ```
 
 `succeeded`, `failed`, `superseded` and `cancelled` are final; nothing leads back from them. A
 superseded job keeps `superseded_by`; a cancelled or failed job keeps its `error_code`
-(`project_deactivated`, `pull_request_closed`, `lease_expired`, `timeout`, or the code a runner
-reported).
+(`project_deactivated`, `pull_request_closed`, `review_kind_changed`, `lease_expired`, `timeout`, or
+the code a runner reported).
+
+## The review kind of a job (#195)
+
+A job is queued for exactly one review kind, `diff` (PR-Agent) or `dynamic` (the read-only agent of
+the epic), stored in `jobs.review_kind`. It is resolved when the job is enqueued, from the project's
+stored settings, **inside the enqueue transaction** (`review-kind.ts`). Before resolving the kind,
+`jobs-repository.ts` locks the workspace-scoped repository row, the same row settings saves lock
+with `FOR UPDATE` on PostgreSQL (including before the first project row exists). SQLite uses its
+immediate transaction write lock. Both retain the lock through commit, so a concurrent kind change
+can never leave a stale-kind job waiting. A producer never passes a kind; a repository without a project row is Diff.
+
+The rollout gate: Dynamic Review is only **queued** when the instance setting `dynamic_review` says
+`{ enabled: true }` (`dynamic-review-gate.ts`), default off. With the gate off, a
+Dynamic project still gets a run, and that run is created `failed` with `dynamic_review_disabled` —
+visible in Runs, never a silent Diff review and never a Dynamic row a previous-release app could
+claim. PostgreSQL queue writers take the instance gate advisory lock before row locks: shared for
+enqueue/settings, exclusive for gate changes and runner transitions; multi-row operations then lock
+jobs by ascending id (full order: `contracts/README.md`). Disabling cancels queued Dynamic work and
+leaves running jobs, their leases/heartbeats and PR slots unchanged. A release or lease expiry with
+the gate off fails Dynamic work with `dynamic_review_disabled` instead of requeueing it. Use the
+instance settings repository setter; a raw SQL update bypasses this boundary. The instance admin
+switches it on the portal's Instance page (the Dynamic Review card, `src/admin/`), which uses that
+setter; there is no CLI. See `contracts/README.md` for the
+upgrade/rollback order.
+
+The kind widens what the queue treats as "the same job": the automatic per-head uniqueness, the
+comment/manual duplicate check and supersession all include it, so a Diff job and a Dynamic job of one
+pull request are two jobs. Per-PR serialization (one running job per pull request) is **not** split by
+kind: two waiting kinds of one pull request still run one after the other.
+
+A runner only ever claims a kind one of its engines can run (`runner-capabilities.ts`,
+`runner-queue.ts`): the claim filters on `review_kind` in the atomic statement, so an ineligible job is
+never selected — it keeps waiting without an attempt being counted and without credentials being
+created. A runner advertises `opencode` only when it is the Dynamic runner and its startup self-check
+passed (a default runner never does), so a Dynamic job that no such runner claims is
+**cancelled** after `noCapableRunnerMs` (default 30 minutes, `RUNNER_NO_CAPABLE_TIMEOUT_SECONDS`) with
+the stable code `no_capable_runner`. That is the one exception to "waiting forever": it is a bounded
+outcome, not a failed review, and no attempt is counted. This initial-claim deadline starts at the
+later of creation and `run_after`, so a scheduled delay does not consume the waiting budget. Jobs
+already claimed (`attempts > 0` after lease loss/release) follow the existing lease/attempt/backoff
+policy instead, independently of which runner polls first.
+
+When the project's review kind changes, #194's `ReviewSettingsHooks.onProjectSettingsChanged` calls
+`cancelWaitingForReviewKindChange` in the settings transaction: the project's waiting jobs become
+`cancelled` with `review_kind_changed`, a running job finishes, and a rejecting hook rolls the
+settings change (and the cancellation) back. The hook is `createJobReviewSettingsHooks`, wired in
+`review-settings/shared.ts`.
 
 ## Enqueueing
 
@@ -58,7 +107,8 @@ reported).
    duplicate of a waiting or running job for the same pull request, command and arguments
    (`already_active`): the existing job is returned, and if it is waiting behind a `run_after` in the
    future (a debounced automatic job) it is made due now, because a person does not wait for a
-   debounce. Different arguments are different jobs (two questions to `/ask`).
+   debounce. Different arguments are different jobs (`/review` takes none; a historical person job
+   with arguments is still its own job).
 4. **Supersession.** A new automatic job replaces the waiting _automatic_ jobs of the same pull request,
    command and arguments (status `superseded`, `superseded_by` set). Waiting `comment` and `manual`
    jobs are never replaced, and a running job is never touched: the new job waits behind it, because
@@ -153,6 +203,6 @@ checked in code review.
   without an active project (`project-claim-guard.ts`, wired in CR-46). The runner (CR-29) reports its
   shutdown through `complete` with the error code `runner_shutdown`; the runner API turns that into
   `release`, so the job is requeued with the attempt cap (the runner never calls `release` itself).
-- **CR-32 (comments).** Done: the provider cuts a question to 2000 characters before the trigger
-  exists (`src/integrations/comment-command.ts`), the trigger carries the comment id, and the queue
+- **CR-32 (comments).** Done: the trigger carries the comment id, and the queue
   dedupes on it (`same_comment`). The queue's own limit of 10 000 characters stays as a safety net.
+  The removed command question truncation went away with the commands (#203).

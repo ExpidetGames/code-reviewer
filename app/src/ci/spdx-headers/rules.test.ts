@@ -10,16 +10,18 @@ import {
   findHeader,
   headerProblem,
   isSourceFile,
+  MIT_IDENTIFIER,
+  requiredIdentifier,
   SPDX_HEADER_TEXT,
 } from "./rules.ts";
 
 describe("isSourceFile", () => {
   it.each([
     "app/src/auth/session.ts",
-    "app/src/ui/button.tsx",
+    "app/src/components/button.tsx",
     "app/eslint.config.mjs",
     "app/vitest.config.mts",
-    "app/src/app/globals.css",
+    "app/src/app/theme.css",
     "app/src/db/migrations/0001_create_app_meta.ts",
     "runner/src/code_reviewer_runner/cli.py",
     "runner/tests/unit/test_cli.py",
@@ -196,5 +198,45 @@ describe("headerProblem", () => {
     expect(
       headerProblem("// SPDX-License-Identifier: MIT\n\nexport {};\n"),
     ).toBe("HEADER_OTHER_LICENSE");
+  });
+});
+
+describe("the copied shadcn/ui components keep MIT", () => {
+  const MIT = `// SPDX-License-Identifier: ${MIT_IDENTIFIER}\n\nexport {};\n`;
+
+  // #166-T03
+  it("accepts MIT below app/src/components/ui/ and rejects it elsewhere", () => {
+    expect(headerProblem(MIT, "app/src/components/ui/button.tsx")).toBeNull();
+    expect(headerProblem(MIT, "app/src/button.tsx")).toBe(
+      "HEADER_OTHER_LICENSE",
+    );
+  });
+
+  // #166-T03
+  it("rejects Apache-2.0 below app/src/components/ui/", () => {
+    expect(
+      headerProblem(
+        `// ${SPDX_HEADER_TEXT}\n\nexport {};\n`,
+        "app/src/components/ui/button.tsx",
+      ),
+    ).toBe("HEADER_OTHER_LICENSE");
+  });
+
+  // #166-T03
+  it("adds MIT only below app/src/components/ui/ and Apache-2.0 elsewhere", () => {
+    expect(
+      addHeader(
+        "export {};\n",
+        "slashes",
+        requiredIdentifier("app/src/components/ui/button.tsx"),
+      ),
+    ).toBe(MIT);
+    expect(
+      addHeader(
+        "export {};\n",
+        "slashes",
+        requiredIdentifier("app/src/button.tsx"),
+      ),
+    ).toBe(`// ${SPDX_HEADER_TEXT}\n\nexport {};\n`);
   });
 });

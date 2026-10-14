@@ -43,6 +43,43 @@ describe("the sentences for error codes", () => {
     }
   });
 
+  // #200: the codes a Dynamic project's run can end with are read by people on the Runs pages.
+  it("tells a person what to do about a Dynamic Review that is not enabled, and about a model the engine cannot use", () => {
+    expect(describeErrorCode("dynamic_review_disabled").text).toMatch(
+      /instance|server/i,
+    );
+    expect(describeErrorCode("dynamic_review_disabled").text).toMatch(
+      /Diff Review/,
+    );
+    expect(describeErrorCode("no_capable_runner").text).toMatch(/runner/);
+    expect(
+      describeErrorCode("dynamic_model_features_unsupported").text,
+    ).toMatch(/Choose another model/);
+    expect(describeErrorCode("dynamic_config_invalid").text).toMatch(
+      /project page/,
+    );
+  });
+
+  // #260: the code is also reported when the app could not be asked, not only when the job was lost.
+  it("says for lease_lost that the job may have been lost or that this could not be confirmed, and that nothing was written", () => {
+    const { text } = describeErrorCode("lease_lost");
+
+    expect(text).toMatch(/no longer held/);
+    expect(text).toMatch(/could not be confirmed/);
+    expect(text).toMatch(/nothing was written/);
+  });
+
+  // #201-T20
+  it("does not say the engine ran when review_not_published can come from the preparation", () => {
+    const { text } = describeErrorCode("review_not_published");
+
+    // The Dynamic preparation raises this code before any engine starts, when the earlier review
+    // on the pull request cannot be used as the starting point.
+    expect(text).not.toMatch(/engine finished/i);
+    expect(text).toMatch(/earlier review/i);
+    expect(text).toMatch(/no review was posted/i);
+  });
+
   it("has no sentence for a code that does not exist", () => {
     const extra = Object.keys(ERROR_COPY).filter(
       (code) => !ALL_CODES.includes(code),

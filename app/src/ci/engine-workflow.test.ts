@@ -15,6 +15,10 @@ const script = readFileSync(
   `${repoRoot}runner/scripts/run_engine_offline.sh`,
   "utf8",
 );
+const privilegedScript = readFileSync(
+  `${repoRoot}runner/scripts/run_privileged_offline.sh`,
+  "utf8",
+);
 
 type Step = {
   name?: string;
@@ -81,9 +85,58 @@ describe("engine workflow", () => {
     expect(script).toMatch(/setpriv [^\n]*--no-new-privs/);
   });
 
+  // #197-T02
+  it("fetches the pinned OpenCode and installs ripgrep before the namespace, and caches the pin", () => {
+    expect(script).toContain("scripts/fetch_opencode.py");
+    expect(script.indexOf("scripts/fetch_opencode.py")).toBeLessThan(
+      script.indexOf("unshare --net"),
+    );
+    // The engine needs a trusted ripgrep, or the pinned release downloads one on its first grep.
+    expect(script).toContain("command -v rg");
+    expect(commandLines().join("\n")).toContain("apt-get install");
+    expect(commandLines().join("\n")).toContain("ripgrep");
+
+    const cache = steps.find(
+      (step) =>
+        step.uses?.startsWith("actions/cache@") &&
+        String(step.with?.key).includes("opencode"),
+    );
+    expect(cache?.with?.path).toBe("~/.cache/code-reviewer/opencode");
+    expect(String(cache?.with?.key)).toContain("opencode-pin.json");
+  });
+
+  // #197-T09
+  it("runs the privileged suite after the engine suite, as root with the production capabilities and no network", () => {
+    const lines = commandLines();
+
+    expect(lines).toContain("scripts/run_privileged_offline.sh");
+    expect(lines.indexOf("scripts/run_privileged_offline.sh")).toBeGreaterThan(
+      lines.indexOf("scripts/run_engine_offline.sh"),
+    );
+    // nftables is what the engine user's network rules are proven with.
+    expect(lines.join("\n")).toContain("nftables");
+    // Root, but only with the capabilities of compose.dynamic.yml (compose-dynamic.test.ts pins
+    // the list), without new privileges, in a namespace that has loopback and no route out.
+    expect(privilegedScript).toContain("sudo");
+    expect(privilegedScript).toContain("unshare --net");
+    expect(privilegedScript).toContain("ip link set lo up");
+    expect(privilegedScript).toMatch(/setpriv[\s\\]+--bounding-set=-all/);
+    expect(privilegedScript).toMatch(/--no-new-privs/);
+    expect(privilegedScript).toContain("pytest -m privileged");
+    // The pinned engine is fetched before the namespace, the only step with the internet.
+    expect(privilegedScript).toContain("scripts/fetch_opencode.py");
+    expect(privilegedScript.indexOf("scripts/fetch_opencode.py")).toBeLessThan(
+      privilegedScript.indexOf("unshare --net"),
+    );
+  });
+
   // CR-41-T15
   it("caches the tiktoken encoding", () => {
-    const cache = steps.find((step) => step.uses?.startsWith("actions/cache@"));
+    const cache = steps.find(
+      (step) =>
+        step.uses?.startsWith("actions/cache@") &&
+        String(step.with?.key).includes("tiktoken"),
+    );
 
     expect(cache?.with?.path).toBe("/tmp/data-gym-cache");
     expect(String(cache?.with?.key)).toContain("o200k_base");

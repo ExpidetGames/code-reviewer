@@ -120,7 +120,8 @@ test.describe("an Owner invites a colleague who accepts", () => {
 
     const form = page.getByRole("form", { name: "Invite a person" });
     await form.getByLabel("Email address").fill(colleague);
-    await form.getByLabel("Role").selectOption("member");
+    await form.getByRole("combobox", { name: "Role", exact: true }).click();
+    await page.getByRole("option", { name: "Member" }).click();
     await form.getByRole("button", { name: "Send invitation" }).click();
 
     const link = form.getByLabel("Invitation link");
@@ -154,7 +155,7 @@ test.describe("an Owner invites a colleague who accepts", () => {
     await page.getByRole("link", { name: "Create an account" }).click();
     await expect(page).toHaveURL(/\/sign-up\?invitation=/);
     await signUp(page, colleague);
-    await page.getByRole("link", { name: "Go to the sign-in" }).click();
+    await page.getByRole("link", { name: "Back to sign in" }).click();
     await expect(page).toHaveURL(/\/login\?invitation=/);
     await page.getByLabel("Email address").fill(colleague);
     await page.getByLabel("Password").fill(PASSWORD);
@@ -162,7 +163,7 @@ test.describe("an Owner invites a colleague who accepts", () => {
 
     // Signed in, back on the invitation: the button accepts it.
     await expect(page).toHaveURL(/\/invitation\?token=/);
-    await page.getByRole("button", { name: /Accept the invitation/ }).click();
+    await page.getByRole("button", { name: /Accept invitation/ }).click();
     await expect(page).toHaveURL(/\/w\/default\/projects$/);
     await expect(page.getByRole("button", { name: /Workspace/ })).toContainText(
       "Default workspace",
@@ -204,7 +205,7 @@ test.describe("an Owner invites a colleague who accepts", () => {
 
     // Back on the invitation, not on a page that says there is no workspace.
     await expect(page).toHaveURL(/\/invitation\?token=/);
-    await page.getByRole("button", { name: /Accept the invitation/ }).click();
+    await page.getByRole("button", { name: /Accept invitation/ }).click();
     await expect(page).toHaveURL(/\/w\/default\/projects$/);
     await context.close();
   });
@@ -224,7 +225,7 @@ test.describe("an Owner invites a colleague who accepts", () => {
     );
     await expect(
       page.getByRole("combobox", { name: `Role of ${colleague}` }),
-    ).toHaveValue("member");
+    ).toContainText("Member");
   });
 
   // #101-WM-08, #101-WM-11
@@ -240,7 +241,7 @@ test.describe("an Owner invites a colleague who accepts", () => {
     await signUp(page, member);
     await signIn(page, member, PASSWORD);
     await page.goto(link);
-    await page.getByRole("button", { name: /Accept the invitation/ }).click();
+    await page.getByRole("button", { name: /Accept invitation/ }).click();
     await expect(page).toHaveURL(/\/w\/default\/projects$/);
 
     await page.goto("/w/default/members");

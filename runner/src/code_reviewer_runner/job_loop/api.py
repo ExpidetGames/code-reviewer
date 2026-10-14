@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from code_reviewer_runner import __version__
+from code_reviewer_runner.capabilities import ENGINE_DIFF
 from code_reviewer_runner.job_loop.jsonvalues import as_object
 
 _JOB_ID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
@@ -131,11 +132,18 @@ class HttpRunnerApi:
     """The runner API over HTTP. Blocking calls run in a thread, so the loop stays responsive."""
 
     def __init__(
-        self, base_url: str, token: str, runner_id: str, *, request_timeout: float = 30.0
+        self,
+        base_url: str,
+        token: str,
+        runner_id: str,
+        *,
+        engines: tuple[str, ...] = (ENGINE_DIFF,),
+        request_timeout: float = 30.0,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._token = token
         self._runner_id = runner_id
+        self._engines = engines or (ENGINE_DIFF,)
         self._timeout = request_timeout
         # No proxy: the token must only go to the app, and the app is reached directly.
         self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirects)
@@ -143,7 +151,9 @@ class HttpRunnerApi:
     # -- the three calls ----------------------------------------------------------------------
 
     async def claim(self) -> ClaimedJob | None:
-        reply = await asyncio.to_thread(self._send, "/claim", None)
+        # #195: the engines this runner can run. A previous-release runner sends no body; this one
+        # advertises what its startup self-check proved.
+        reply = await asyncio.to_thread(self._send, "/claim", {"engines": list(self._engines)})
         if reply.status == 204:
             return None
         if reply.status != 200:
@@ -156,6 +166,12 @@ class HttpRunnerApi:
         )
         if reply.status != 200:
             raise self._failure(reply)
+        # #260: a 200 is the app's "yes" only as the contract's answer for this very job. A gateway
+        # or a captive portal that answers 200 to everything is not the app.
+        body = as_object(_json(reply))
+        job = as_object(body.get("job")) if body and body.get("version") == 1 else None
+        if job is None or job.get("id") != job_id:
+            raise ApiUnavailable("the heartbeat answer does not match the contract", 200)
 
     async def complete(
         self, job_id: str, lease_token: str, result: Mapping[str, Any]

@@ -56,9 +56,13 @@ const PROTECTED_ROUTES = [
   "/instance-portal",
   "/instance-portal/approvals",
   "/instance-portal/integrations",
+  "/instance-portal/integrations/github",
   "/instance-portal/limits",
   "/instance-portal/mail",
   "/instance-portal/setup",
+  "/instance-portal/setup/instance",
+  "/instance-portal/setup/sign-in",
+  "/instance-portal/setup/sign-up",
   "/account",
   // The binding of a GitHub installation to a workspace: where GitHub sends the browser after an installation
   // (the Setup URL of the App; a route that redirects) and where a flow ends when no workspace can be named
@@ -79,9 +83,13 @@ const PROTECTED_ROUTES = [
   "/w/[workspace]/members",
   "/w/[workspace]/projects",
   "/w/[workspace]/projects/[repositoryId]",
+  "/w/[workspace]/projects/[repositoryId]/review",
   "/w/[workspace]/runs",
   "/w/[workspace]/runs/[id]",
   "/w/[workspace]/settings",
+  "/w/[workspace]/settings/advanced",
+  "/w/[workspace]/settings/llm",
+  "/w/[workspace]/settings/review-defaults",
 ] as const;
 // Data routes: a visitor without a session gets 401 instead of a redirect.
 const PROTECTED_DATA_ROUTES = [
@@ -91,7 +99,6 @@ const PROTECTED_DATA_ROUTES = [
   "/api/instance-portal/mail/test",
   "/api/instance-portal/github",
   "/api/instance-portal/github/check",
-  "/api/instance-portal/github/link",
   "/api/instance-portal/github/manifest",
   "/api/instance-portal/github/manifest/callback",
   "/api/instance-portal/integrations/sync",

@@ -1,0 +1,102 @@
+# Code Reviewer, the opt-in Dynamic Review runner (#202). Opt-in in two ways, both off by default:
+# nothing starts this file unless you name it, and the runner it adds never claims a Dynamic job
+# until the instance admin turns the Dynamic Review gate on (a separate switch of the app, default
+# off). The image carries the pinned stock OpenCode, `nft`, a pinned `rg` and the engine user; at
+# start the runner proves its isolation (root supervisor, static network rules, NET_ADMIN gone,
+# pinned binaries, a probe as the engine user) and only then advertises `opencode`. If the proof
+# fails it logs a stable reason and serves Diff jobs only. docs/dynamic-review.md has the activation
+# steps, the verification of the self-check, the sizing and the rollback.
+#
+# An override file like compose.build.yml; compose.yml and the other topologies do not know it. It
+# builds the `dynamic` target of runner/Dockerfile from this checkout:
+#   docker compose -f compose.yml -f compose.dynamic.yml up -d --build --wait
+#
+# It adds a SECOND runner next to the Diff one, so a Diff-only installation is unchanged and Diff
+# jobs keep being served if the Dynamic runner fails its self-check. No secret is written here.
+services:
+  runner-dynamic:
+    # The Dynamic image is a different image from the Diff one (it carries the engine and nft), so
+    # it has a tag and a variable of its own. It is built from this checkout, like the other
+    # topologies build theirs; RUNNER_DYNAMIC_IMAGE names a prebuilt one instead.
+    image: ${RUNNER_DYNAMIC_IMAGE:-code-reviewer-runner-dynamic:local}
+    build:
+      context: .
+      dockerfile: runner/Dockerfile
+      target: dynamic
+    restart: unless-stopped
+    # No published port: the runner only talks to the app, over the compose network.
+    # One job at a time is one Dynamic slot. The spike (docs/spike/85-opencode-dynamic-review.md)
+    # recommends at least 1 GiB per Dynamic slot plus the runner and proxy reserve; the default
+    # limit is 2 GiB with 1.5 GiB reserved. Whole-job peaks are not measured yet: do not raise the
+    # concurrency without the worst-case/OOM measurements (docs/dynamic-review.md).
+    mem_limit: ${RUNNER_DYNAMIC_MEMORY_LIMIT:-2g}
+    mem_reservation: ${RUNNER_DYNAMIC_MEMORY_RESERVATION:-1536m}
+    # No swap: the cgroup peak must show up as an OOM kill of this job, not as a slow host.
+    memswap_limit: ${RUNNER_DYNAMIC_MEMORY_LIMIT:-2g}
+    # A bounded number of processes for the job, the engine and its helpers.
+    pids_limit: 512
+    # The loop and the Dynamic job process run as root: the job process is the SUPERVISOR that
+    # prepares the read-only export, owns every credential and the model proxy, and starts the
+    # engine as a different, unprivileged user (#197, docs/dynamic-review.md "The engine boundary").
+    # Diff jobs are dropped to uid 10001 by the loop (RUNNER_DIFF_JOB_USER), so PR-Agent never
+    # runs as root. Root here holds exactly the capabilities below and nothing else: the engine user
+    # has none, and no-new-privileges means no program can regain one.
+    #
+    # Nothing is mounted from outside and nothing is shared with the host or another container: no
+    # `volumes`, no `network_mode`, `pid` or `ipc`, no Docker socket. A unix socket cannot leave the
+    # container, and the engine user's nft rules do not cover AF_UNIX, so this is what keeps that gap
+    # empty (app/src/ci/compose-dynamic.test.ts fails the day one of them is added, #244). The only
+    # mounts are the three private tmpfs below.
+    user: "0:0"
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETUID # start the engine as the dedicated user (setuid in the child; no sudo, no helper)
+      - SETGID # the same, for its group and no supplementary group
+      - KILL # end the engine's process group and everything else that user runs
+      - CHOWN # seal the read-only export for the engine user (#196)
+      - DAC_OVERRIDE # remove the sealed 0550 export and the tree the engine user filled
+      - FOWNER # remove entries of that tree in sticky directories
+      # The next two exist for STARTUP ONLY (#244, ADR 0003). The container is created with exactly
+      # this set, so they must be listed; the runner's entry point installs the engine user's static
+      # nft rules (its proxy and its own port, nothing else), then drops both from every capability
+      # set and from the bounding set, before the job loop and any thread exists. A job process,
+      # the supervisor and the engine never hold them (the privileged suite proves it); if the drop
+      # fails the runner refuses to start.
+      - NET_ADMIN # install the engine user's static nft rules once, at container start
+      - SETPCAP # drop NET_ADMIN (and itself) from the bounding set right after
+    security_opt:
+      - no-new-privileges:true
+    # A read-only root filesystem (#249, ADR 0003 decision 5). NET_ADMIN and SETPCAP are dropped for
+    # the life of the container, but `restart: unless-stopped` starts a new one with them again, so
+    # a compromised root supervisor (it holds DAC_OVERRIDE) must not be able to change `nft`, `tini`
+    # or the runner source and then crash the container. Nothing is written to the image: the only
+    # writable paths are these three private tmpfs, empty again after every restart, none able to run
+    # a program, honour a setuid bit or hold a device. A tmpfs is charged to mem_limit, hence the
+    # sizes. The engine user (10101) gains no write path: /tmp is world-writable as it is in the
+    # image, /run is root's (0755) and /home/runner is 10001's (0700).
+    #   /tmp          job working directories, the per-job export, the engine's HOME, XDG and TMPDIR
+    #   /run          the identity leases of the checkout
+    #   /home/runner  HOME of the Diff job user 10001 (PR-Agent, git) and of the root loop
+    # The test pins these exact strings (and docker/smoke/runner.sh runs the image with them).
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=512m,mode=1777
+      - /run:rw,noexec,nosuid,nodev,size=1m,mode=0755
+      - /home/runner:rw,noexec,nosuid,nodev,size=64m,uid=10001,gid=10001,mode=0700
+    stop_grace_period: 90s
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      RUNNER_API_URL: http://app:3000
+      # The loop is root here, so the home of the unprivileged job user is set explicitly.
+      HOME: /home/runner
+      RUNNER_DIFF_JOB_USER: "10001:10001"
+      RUNNER_TOKEN: ${RUNNER_TOKEN:?RUNNER_TOKEN is required, see .env.example}
+      RUNNER_CONCURRENCY: ${RUNNER_DYNAMIC_CONCURRENCY:-1}
+      RUNNER_JOB_TIMEOUT_SECONDS: ${RUNNER_JOB_TIMEOUT_SECONDS:-1200}
+      RUNNER_POLL_INTERVAL_SECONDS: ${RUNNER_POLL_INTERVAL_SECONDS:-5}
+      # The operator's description of the selected model and destination (JSON). Empty: every
+      # Dynamic job fails with dynamic_model_features_unsupported, there is no fallback.
+      RUNNER_DYNAMIC_CAPABILITIES: ${RUNNER_DYNAMIC_CAPABILITIES:-}

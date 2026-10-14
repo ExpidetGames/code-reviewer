@@ -61,6 +61,7 @@ app/src/test-support
 app/src/ci
 app/vitest.config.mts
 app/playwright.config.ts
+app/playwright.dynamic.config.ts
 
 # Docker files themselves
 app/Dockerfile

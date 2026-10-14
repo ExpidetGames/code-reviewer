@@ -5,11 +5,10 @@
 //
 //   POST /api/account/github/link    starts the linking from the account's page: answers { url }, the
 //                                    address of GitHub's authorization page
-//   POST /api/admin/github/link      the same from the admin portal (src/github-config/http.ts)
 //   GET  /api/auth/callback/github   where GitHub sends the browser back; this handler takes only the
 //                                    requests whose `state` is one of ours (it contains a dot; Better Auth's
-//                                    own are plain random text) and answers a redirect to one of two fixed
-//                                    pages with the outcome in the query. Everything else goes to Better Auth.
+//                                    own are plain random text) and answers a redirect to a fixed page with
+//                                    the outcome in the query. Everything else goes to Better Auth.
 //
 // Every answer is `Cache-Control: no-store`; the callback sends `Referrer-Policy: no-referrer` so the code
 // and the state in its address never travel in a header.
@@ -17,7 +16,7 @@ import type { SessionUser } from "../auth/access-policy.ts";
 import { JSON_BODY_ERROR_STATUS, readJsonObject } from "../http/json-body.ts";
 import {
   LINK_ERROR_CODES,
-  LINK_RETURN_PAGES,
+  LINK_RETURN_PAGE,
   type GithubLinkService,
   type LinkErrorCode,
 } from "./link.ts";
@@ -56,7 +55,6 @@ export type StartLinkHandlerDependencies = {
   requireUser: () => Promise<SessionUser>;
   sessionId: () => Promise<string | null>;
   service: GithubLinkService;
-  surface: "account" | "admin";
 };
 
 /** `POST` handler that starts the linking and answers the address to go to. */
@@ -64,7 +62,6 @@ export function createStartLinkHandler({
   requireUser,
   sessionId,
   service,
-  surface,
 }: StartLinkHandlerDependencies): (request: Request) => Promise<Response> {
   return async (request) => {
     const user = await requireUser();
@@ -74,10 +71,7 @@ export function createStartLinkHandler({
     const session = await sessionId();
     if (session === null) return refusal("session_required", 401);
     try {
-      const result = await service.start(
-        { id: user.id, sessionId: session },
-        { surface },
-      );
+      const result = await service.start({ id: user.id, sessionId: session });
       if (result.ok)
         return Response.json(
           { ok: true, url: result.url },
@@ -154,11 +148,9 @@ export function createLinkCallbackHandler({
       console.error(
         "[github-link] LINK_UNAVAILABLE: the request was not served.",
       );
-      return redirectTo(
-        `${LINK_RETURN_PAGES.account}?github_error=unavailable`,
-      );
+      return redirectTo(`${LINK_RETURN_PAGE}?github_error=unavailable`);
     }
-    const page = LINK_RETURN_PAGES[result.surface];
+    const page = LINK_RETURN_PAGE;
     // Only a code of our own list ever appears in the address, nothing GitHub or the request said.
     return redirectTo(
       result.ok

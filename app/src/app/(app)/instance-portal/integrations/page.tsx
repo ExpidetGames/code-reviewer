@@ -1,32 +1,33 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Integrations: GitHub first. The status of the GitHub App, the one-click and the manual way to configure it,
-// the prompts for an App that was imported, and the admin's own GitHub account. Instance admin only.
+// The Integrations index of the admin portal (#182): the status of every service the instance works
+// with, one card each, with the link to the page that owns it. The GitHub App page is a route of its
+// own (`./github`); the Mail page stays where it is. Instance admin only.
 import type { Metadata } from "next";
 import { requireAdmin } from "@/admin/session";
+import { getAdminService } from "@/admin/shared";
+import {
+  githubIntegrationCard,
+  mailIntegrationCard,
+  IntegrationsIndex,
+} from "@/admin/ui/integrations-index";
 import { getIntegrationsPageData } from "@/github-config/shared";
-import { GithubSection } from "@/github-config/ui/github-section";
 
 export const metadata: Metadata = { title: "Integrations · Admin" };
 
-function single(value: string | string[] | undefined): string | null {
-  return typeof value === "string" && value !== "" ? value : null;
-}
-
-export default async function AdminIntegrationsPage(
-  props: PageProps<"/instance-portal/integrations">,
-) {
+export default async function AdminIntegrationsPage() {
   // The admin first: a person who is not one gets the 404 before anything is read.
-  const user = await requireAdmin();
-  const data = await getIntegrationsPageData(user.id);
-  const query = await props.searchParams;
+  await requireAdmin();
+  const [github, settings] = await Promise.all([
+    getIntegrationsPageData(),
+    getAdminService().readSettings(),
+  ]);
   return (
-    <GithubSection
-      {...data}
-      outcome={{
-        ok: single(query.github),
-        error: single(query.github_error),
-      }}
+    <IntegrationsIndex
+      cards={[
+        githubIntegrationCard(github.view),
+        mailIntegrationCard(settings),
+      ]}
     />
   );
 }

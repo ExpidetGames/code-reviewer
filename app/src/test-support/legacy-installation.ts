@@ -11,6 +11,7 @@
 // Used by the integration tests of the import, by the journey of the update (e2e/upgrade/) and by the smoke test
 // of the image (docker/smoke/upgrade.sh, through legacy-installation-cli.ts). No `vitest` import: the programs
 // run it with plain Node.
+import { randomUUID } from "node:crypto";
 import { symmetricEncrypt } from "better-auth/crypto";
 import type { Kysely } from "kysely";
 import type { MigrationProvider } from "kysely/migration";
@@ -61,6 +62,13 @@ export type LegacyInstallationSeed = {
   repositories: Array<{ id: number; fullName: string; project?: boolean }>;
 };
 
+export type LegacyHistoricalRun = {
+  /** A command the previous release could run but this one cannot (#203). */
+  command: string;
+  status?: string;
+  errorCode?: string | null;
+};
+
 export type LegacySeed = {
   /** The master key the previous release ran with (`BETTER_AUTH_SECRET`). */
   secret: string;
@@ -70,6 +78,8 @@ export type LegacySeed = {
   installations?: LegacyInstallationSeed[];
   /** Finished jobs per repository (default 2 for the first repository of each installation). */
   jobsPerProject?: number;
+  /** Runs of a command this release removed (#203), kept in history. One per entry. */
+  historicalRuns?: LegacyHistoricalRun[];
   /** The review defaults the team saved (default: a few). Null: none saved. */
   reviewDefaults?: Record<string, unknown> | null;
 };
@@ -82,7 +92,7 @@ export async function createLegacyInstallation(
   path: string,
   seed: LegacySeed,
 ): Promise<void> {
-  const db = openDatabase({ path, busyTimeoutMs: 5000 });
+  const db = openDatabase({ driver: "sqlite", path, busyTimeoutMs: 5000 });
   try {
     await migrateToLatest(db, previousReleaseMigrations);
     await seedLegacyRows(db, seed);
@@ -209,7 +219,7 @@ async function seedLegacyRows(db: OldDb, seed: LegacySeed): Promise<void> {
         })
         .execute();
       for (let n = 1; n <= jobsPerProject; n += 1) {
-        const jobId = `legacy-job-${String(repository.id)}-${String(n)}`;
+        const jobId = randomUUID();
         await db
           .insertInto("jobs")
           .values({
@@ -252,6 +262,42 @@ async function seedLegacyRows(db: OldDb, seed: LegacySeed): Promise<void> {
             outcome: "processed",
             claim_token: "legacy-claim",
             received_at: T,
+          })
+          .execute();
+      }
+      // Runs of a removed command (#203): the next release must keep them readable. They are the
+      // shape the old queue left behind, so the data migration leaves them alone (they are not
+      // waiting) and the runs pages still decode their command.
+      for (const [index, run] of (seed.historicalRuns ?? []).entries()) {
+        const number = jobsPerProject + 1 + index;
+        await db
+          .insertInto("jobs")
+          .values({
+            id: randomUUID(),
+            repository_id: repositoryId,
+            pr_number: number,
+            pr_url: `https://github.test/${repository.fullName}/pull/${String(number)}`,
+            head_sha: String(number).repeat(40).slice(0, 40),
+            command: run.command,
+            args:
+              run.command === "ask"
+                ? "<img src=x onerror=alert(1)> a historical question"
+                : "",
+            trigger_kind: "comment",
+            actor_login: seed.users[0]?.login ?? "someone",
+            delivery_id: null,
+            status: run.status ?? "succeeded",
+            run_after: T,
+            attempts: 1,
+            result: JSON.stringify({
+              ok: true,
+              durationMs: 4200,
+              commentUrl: `https://github.test/${repository.fullName}/pull/${String(number)}#issuecomment-history-${String(index)}`,
+            }),
+            error_code: run.errorCode ?? null,
+            created_at: T,
+            updated_at: T,
+            finished_at: T,
           })
           .execute();
       }

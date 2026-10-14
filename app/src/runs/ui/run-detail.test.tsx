@@ -4,9 +4,16 @@
 // Pins down the detail page of a run: the facts, the comment link rules, the error sentence with its
 // code, the log notices, text from outside rendered as text, and the polling that stops at the last
 // state or goes on after a failed update.
-import { act, cleanup, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RequestResult } from "../../ui/json-request.ts";
+import { RUN_STATUS_PRESENTATION } from "../run-status.ts";
 import type { RunDetailSnapshot, RunDetailView } from "../run-view.ts";
 import type { RunsApi } from "./api.ts";
 import { DETAIL_POLL_FAILED_TEXT } from "./poll-messages.ts";
@@ -28,6 +35,7 @@ function detail(overrides: Partial<RunDetailView> = {}): RunDetailView {
     prNumber: 7,
     prUrl: "https://github.com/acme/widgets/pull/7",
     command: "review",
+    reviewKind: "diff",
     triggerKind: "webhook",
     trigger: "Automatic",
     status: "succeeded",
@@ -45,6 +53,7 @@ function detail(overrides: Partial<RunDetailView> = {}): RunDetailView {
     commentMissing: false,
     log: { text: "reviewed 3 files", truncated: false },
     supersededBy: null,
+    usage: null,
     ...overrides,
   };
 }
@@ -70,6 +79,78 @@ function apiAnswering(answers: RequestResult<RunDetailSnapshot>[]) {
 }
 
 const text = (container: HTMLElement) => container.textContent;
+
+describe("the usage of a run", () => {
+  const usage = {
+    model: "vendor/dynamic-model",
+    totalTokens: 12_900,
+    aiCalls: 7,
+    costUsd: 0.04,
+  };
+
+  // #201-T27
+  it("names the review kind with the model that answered, and the tokens, calls and cost", () => {
+    const { container } = render(
+      <RunDetail
+        workspaceSlug="acme"
+        initial={snap(detail({ reviewKind: "dynamic", usage }))}
+        api={apiAnswering([])}
+      />,
+    );
+
+    const content = text(container);
+    expect(content).toContain("Dynamic Review");
+    expect(content).toContain("vendor/dynamic-model");
+    expect(content).toContain("12,900 tokens in 7 model calls");
+    expect(content).toContain("$0.04");
+  });
+
+  // #201-T28: a Dynamic Review never guesses a price.
+  it("says the cost is unknown instead of showing zero", () => {
+    const { container } = render(
+      <RunDetail
+        workspaceSlug="acme"
+        initial={snap(detail({ usage: { ...usage, costUsd: null } }))}
+        api={apiAnswering([])}
+      />,
+    );
+
+    expect(text(container)).toContain("Not available");
+    expect(text(container)).not.toContain("$0");
+  });
+
+  // #201-T29
+  it("shows no model and no usage for a run that never reached a model", () => {
+    const { container } = render(
+      <RunDetail
+        workspaceSlug="acme"
+        initial={snap(detail({ status: "failed", usage: null }))}
+        api={apiAnswering([])}
+      />,
+    );
+
+    expect(text(container)).not.toContain("tokens in");
+    expect(screen.queryByText("Model")).toBeNull();
+  });
+
+  // #201-T30
+  it("renders a model name from outside as text", () => {
+    const { container } = render(
+      <RunDetail
+        workspaceSlug="acme"
+        initial={snap(
+          detail({
+            usage: { ...usage, model: "<img src=x onerror=alert(1)>" },
+          }),
+        )}
+        api={apiAnswering([])}
+      />,
+    );
+
+    expect(container.querySelector("img")).toBeNull();
+    expect(text(container)).toContain("<img src=x onerror=alert(1)>");
+  });
+});
 
 describe("the detail page", () => {
   // CR-35-T04
@@ -99,6 +180,85 @@ describe("the detail page", () => {
     );
     expect(link.getAttribute("rel")).toContain("noopener");
     expect(link.getAttribute("target")).toBe("_blank");
+  });
+
+  // #200
+  it("names the review kind of the run in the summary, for both kinds", () => {
+    const { rerender } = render(
+      <RunDetail
+        workspaceSlug="acme"
+        initial={snap(detail())}
+        api={apiAnswering([])}
+      />,
+    );
+    const kind = () =>
+      screen.getByText("Review kind").nextElementSibling?.textContent;
+
+    expect(kind()).toBe("Diff Review");
+
+    rerender(
+      <RunDetail
+        key="dynamic"
+        workspaceSlug="acme"
+        initial={snap(detail({ reviewKind: "dynamic" }))}
+        api={apiAnswering([])}
+      />,
+    );
+    expect(kind()).toBe("Dynamic Review");
+  });
+
+  // #175-T03
+  it("groups the facts and keeps the status description behind the badge", async () => {
+    render(
+      <RunDetail
+        workspaceSlug="acme"
+        initial={snap(detail())}
+        api={apiAnswering([])}
+      />,
+    );
+
+    expect(screen.getByRole("heading", { name: "Summary" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Timings" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Diagnostics" })).toBeTruthy();
+    expect(
+      screen.queryByText(RUN_STATUS_PRESENTATION.succeeded.description),
+    ).toBeNull();
+
+    const hint = screen.getByRole("button", {
+      name: "About the status Succeeded",
+    });
+    fireEvent.focus(hint);
+
+    const describedBy = hint.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    expect(document.getElementById(describedBy ?? "")?.textContent).toContain(
+      RUN_STATUS_PRESENTATION.succeeded.description,
+    );
+  });
+
+  it("copies the log and announces the result", async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    render(
+      <RunDetail
+        workspaceSlug="acme"
+        initial={snap(
+          detail({ log: { text: "reviewed 3 files", truncated: false } }),
+        )}
+        api={apiAnswering([])}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy log" }));
+    await act(async () => {});
+
+    expect(
+      screen.getByRole("status", { name: "Copying the log" }).textContent,
+    ).toBe("Copied.");
+    expect(writeText).toHaveBeenCalledWith("reviewed 3 files");
   });
 
   // CR-35-T04
@@ -352,13 +512,15 @@ describe("polling the detail page", () => {
     );
 
     await pass(3000);
-    expect(screen.getByRole("status").textContent).toBe(
-      DETAIL_POLL_FAILED_TEXT,
-    );
+    expect(
+      screen.getByRole("status", { name: "Updating the run" }).textContent,
+    ).toBe(DETAIL_POLL_FAILED_TEXT);
     expect(screen.getByText("Running")).toBeTruthy();
 
     await pass(3000);
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(
+      screen.getByRole("status", { name: "Updating the run" }).textContent,
+    ).toBe("");
     expect(screen.getByText("Succeeded")).toBeTruthy();
   });
 
@@ -385,12 +547,11 @@ describe("polling the detail page", () => {
 
     await pass(3000);
 
-    expect(screen.getByRole("status").textContent).toContain(
+    const status = screen.getByRole("status", { name: "Updating the run" });
+    expect(status.textContent).toContain(
       "Your session has ended. Sign in again.",
     );
-    expect(screen.getByRole("status").textContent).toContain(
-      "no longer updates",
-    );
+    expect(status.textContent).toContain("no longer updates");
     await pass(600_000);
     expect(api.detail).toHaveBeenCalledTimes(1);
   });
@@ -406,9 +567,9 @@ describe("polling the detail page", () => {
 
     await pass(3000);
 
-    expect(screen.getByRole("status").textContent).toContain(
-      "This run no longer exists.",
-    );
+    expect(
+      screen.getByRole("status", { name: "Updating the run" }).textContent,
+    ).toContain("This run no longer exists.");
     await pass(600_000);
     expect(api.detail).toHaveBeenCalledTimes(1);
   });

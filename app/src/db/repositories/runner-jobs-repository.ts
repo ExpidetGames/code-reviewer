@@ -12,12 +12,22 @@
 // database take the write lock up front (`begin immediate`, see `dialect.ts`), so the check "is there
 // a job already?" and the update that follows it cannot be separated by another writer.
 import "server-only";
+import {
+  lockDynamicReviewGate,
+  lockJobRowsInOrder,
+} from "../dynamic-review-lock.ts";
+import { createInstanceSettingsRepository } from "./instance-settings-repository.ts";
 import { isDeepStrictEqual } from "node:util";
 import type { ExpressionBuilder, Kysely } from "kysely";
 import {
   DEFAULT_JOB_QUEUE_LIMITS,
   type JobQueueLimits,
 } from "../../jobs/job-limits.ts";
+import {
+  DEFAULT_ENGINES,
+  reviewKindsForEngines,
+  type RunnerEngine,
+} from "../../jobs/runner-capabilities.ts";
 import type { JobStatus } from "../../jobs/job-status.ts";
 import type {
   CancelClaimedResult,
@@ -30,18 +40,21 @@ import type {
   ReleaseResult,
 } from "../../jobs/job-types.ts";
 import { encodeJson, formatTimestamp } from "../codecs.ts";
+import { databaseDriver, type DatabaseDriver } from "../driver.ts";
 import type { Database } from "../schema.ts";
-import { claimOldestDueJob } from "./jobs-claim.ts";
+import { claimOldestDueJob, claimOldestDueJobPostgres } from "./jobs-claim.ts";
 import { toJob } from "./jobs-repository.ts";
 
 /** What `expireStaleJobs` did. */
 export type ExpiryReport = {
   /** Running jobs whose lease ran out and that were put back in the queue. */
   requeued: number;
-  /** Running jobs whose lease ran out on the last allowed attempt. */
+  /** Expired running leases that ended the job (last attempt, or Dynamic with its gate off). */
   leaseExpired: number;
   /** Running jobs that ran longer than the hard limit. */
   timedOut: number;
+  /** Waiting Dynamic jobs no capable runner claimed within the deadline (#195). */
+  noCapableRunner: number;
 };
 
 export type RunnerJobsRepositoryOptions = {
@@ -49,14 +62,20 @@ export type RunnerJobsRepositoryOptions = {
   /** The random lease token of a claim. */
   newToken?: () => string;
   limits?: Partial<JobQueueLimits>;
+  /** Overrides the engine read from the connection; tests only. */
+  driver?: DatabaseDriver;
 };
 
 export type RunnerJobsRepository = {
   /**
-   * Expires stale leases and runtimes, then hands the oldest due job to the runner (or null). The
-   * result carries the lease token the runner must present from then on.
+   * Expires stale leases and runtimes, then hands the oldest due job the runner's engines can run to
+   * the runner (or null). `engines` defaults to `pr-agent` for a previous-release caller that sends
+   * no capability list. The result carries the lease token the runner must present from then on.
    */
-  claimNext(runnerId: string): Promise<ClaimResult>;
+  claimNext(
+    runnerId: string,
+    engines?: readonly RunnerEngine[],
+  ): Promise<ClaimResult>;
   /**
    * Extends the lease of the claim `leaseToken` belongs to. A job past the hard limit is failed with
    * `timeout` by this call and answers `not_holder`.
@@ -129,12 +148,28 @@ export function createRunnerJobsRepository(
   const now = options.now ?? (() => new Date());
   const newToken = options.newToken ?? (() => crypto.randomUUID());
   const limits = { ...DEFAULT_JOB_QUEUE_LIMITS, ...options.limits };
+  const driver = options.driver ?? databaseDriver(db);
+  // The transaction guard already holds the exclusive gate lock; read without taking another lock
+  // after job rows. This keeps every transition on the documented gate-before-rows order.
+  async function dynamicReviewAllowed(
+    executor: Kysely<Database>,
+  ): Promise<boolean> {
+    return (
+      (await createInstanceSettingsRepository(executor).get("dynamic_review"))
+        ?.enabled === true
+    );
+  }
 
   // A transaction cannot start another one; inside one, just use it.
   function inTransaction<T>(
     run: (executor: Kysely<Database>) => Promise<T>,
   ): Promise<T> {
-    return db.isTransaction ? run(db) : db.transaction().execute(run);
+    const guarded = async (trx: Kysely<Database>) => {
+      // The first lock, before any job row: disable and every runner transition serialize here.
+      await lockDynamicReviewGate(trx, true);
+      return run(trx);
+    };
+    return db.isTransaction ? guarded(db) : db.transaction().execute(guarded);
   }
 
   /**
@@ -150,6 +185,23 @@ export function createRunnerJobsRepository(
     timestamp: string,
     runAfter?: string,
   ): Promise<{ failed: number; requeued: number }> {
+    let disabled = 0;
+    if (!(await dynamicReviewAllowed(executor))) {
+      const result = await executor
+        .updateTable("jobs")
+        .set((eb) => ({
+          status: "failed",
+          attempts: eb("attempts", "+", 1),
+          error_code: "dynamic_review_disabled" satisfies JobErrorCode,
+          lease_expires_at: null,
+          finished_at: timestamp,
+          updated_at: timestamp,
+        }))
+        .where(runningWhere(scope))
+        .where("review_kind", "=", "dynamic")
+        .executeTakeFirst();
+      disabled = Number(result.numUpdatedRows);
+    }
     const failed = await executor
       .updateTable("jobs")
       .set((eb) => ({
@@ -181,9 +233,51 @@ export function createRunnerJobsRepository(
       .executeTakeFirst();
 
     return {
-      failed: Number(failed.numUpdatedRows),
+      failed: disabled + Number(failed.numUpdatedRows),
       requeued: Number(requeued.numUpdatedRows),
     };
+  }
+
+  /**
+   * Cancels every removed command (#203) that is still waiting or whose running lease ran out. Such
+   * a row can never be executed again, so it must not occupy its pull request or be requeued. The
+   * job keeps its id, command, args, actor, attempts and results; only the status, the error code
+   * and the timestamps change.
+   */
+  async function cancelRemovedCommands(
+    executor: Kysely<Database>,
+    timestamp: string,
+  ): Promise<number> {
+    const waiting = await executor
+      .updateTable("jobs")
+      .set({
+        status: "cancelled",
+        error_code: "command_removed" satisfies JobErrorCode,
+        runner_id: null,
+        lease_token: null,
+        claimed_at: null,
+        heartbeat_at: null,
+        lease_expires_at: null,
+        finished_at: timestamp,
+        updated_at: timestamp,
+      })
+      .where("status", "=", "queued")
+      .where("command", "!=", "review")
+      .executeTakeFirst();
+    const expired = await executor
+      .updateTable("jobs")
+      .set({
+        status: "cancelled",
+        error_code: "command_removed" satisfies JobErrorCode,
+        lease_expires_at: null,
+        finished_at: timestamp,
+        updated_at: timestamp,
+      })
+      .where("status", "=", "running")
+      .where("command", "!=", "review")
+      .where("lease_expires_at", "<=", timestamp)
+      .executeTakeFirst();
+    return Number(waiting.numUpdatedRows) + Number(expired.numUpdatedRows);
   }
 
   /** Fails running jobs that were claimed longer ago than the hard limit allows. */
@@ -211,11 +305,71 @@ export function createRunnerJobsRepository(
     return Number(result.numUpdatedRows);
   }
 
+  /**
+   * #195 (finding 1): a Dynamic job no capable runner claims within the deadline would wait forever,
+   * because eligibility excludes it and expiry only handles running jobs. It is cancelled (not failed
+   * for a review reason), with the stable code `no_capable_runner`, without an attempt and without a
+   * credential. The deadline is operator-owned (`noCapableRunnerMs`).
+   */
+  async function cancelStrandedDynamic(
+    executor: Kysely<Database>,
+    current: Date,
+  ): Promise<number> {
+    const timestamp = formatTimestamp(current);
+    const strandedBefore = formatTimestamp(
+      new Date(current.getTime() - limits.noCapableRunnerMs),
+    );
+    const result = await executor
+      .updateTable("jobs")
+      .set({
+        status: "cancelled",
+        error_code: "no_capable_runner" satisfies JobErrorCode,
+        finished_at: timestamp,
+        updated_at: timestamp,
+      })
+      .where("status", "=", "queued")
+      .where("review_kind", "=", "dynamic")
+      // A claimed job follows the lease/attempt policy, never this initial capability deadline.
+      .where("attempts", "=", 0)
+      .where("created_at", "<=", strandedBefore)
+      .where("run_after", "<=", strandedBefore)
+      .executeTakeFirst();
+    return Number(result.numUpdatedRows);
+  }
+
   async function expire(
     executor: Kysely<Database>,
     current: Date,
   ): Promise<ExpiryReport> {
     const timestamp = formatTimestamp(current);
+    // Before the expiry passes or claim: reserve all live candidates in the same row order. The
+    // exclusive gate prevents another queue writer from inserting/changing that set meanwhile.
+    await lockJobRowsInOrder(
+      executor,
+      executor
+        .selectFrom("jobs")
+        .select("id")
+        .where("status", "in", ["queued", "running"]),
+    );
+    if (!(await dynamicReviewAllowed(executor))) {
+      await executor
+        .updateTable("jobs")
+        .set({
+          status: "cancelled",
+          error_code: "dynamic_review_disabled" satisfies JobErrorCode,
+          finished_at: timestamp,
+          updated_at: timestamp,
+        })
+        .where("status", "=", "queued")
+        .where("review_kind", "=", "dynamic")
+        .execute();
+    }
+    // Removed commands (#203) never run again. A waiting row may still appear after the data
+    // migration (a race); a running one was claimed before the upgrade. They are cancelled here so
+    // they can neither starve review jobs nor be requeued.
+    await cancelRemovedCommands(executor, timestamp);
+    // A Dynamic job no runner can run must not wait forever (#195).
+    const noCapableRunner = await cancelStrandedDynamic(executor, current);
     const lost = await loseAttempt(
       executor,
       { leaseExpiredBefore: timestamp },
@@ -229,21 +383,26 @@ export function createRunnerJobsRepository(
       requeued: lost.requeued,
       leaseExpired: lost.failed,
       timedOut,
+      noCapableRunner,
     };
   }
 
   return {
-    claimNext(runnerId) {
+    claimNext(runnerId, engines = DEFAULT_ENGINES) {
       return inTransaction(async (trx) => {
         const current = now();
         await expire(trx, current);
         const leaseToken = newToken();
-        const row = await claimOldestDueJob(trx, {
+        const claim = {
           runnerId,
           leaseToken,
           now: current,
           leaseExpiresAt: new Date(current.getTime() + limits.leaseMs),
-        });
+        };
+        const reviewKinds = reviewKindsForEngines(engines);
+        const row = await (
+          driver === "postgres" ? claimOldestDueJobPostgres : claimOldestDueJob
+        )(trx, claim, reviewKinds);
         return row === undefined ? null : { job: toJob(row), leaseToken };
       });
     },
@@ -320,6 +479,23 @@ export function createRunnerJobsRepository(
     release(jobId, leaseToken, reason, releaseOptions = {}) {
       return inTransaction<ReleaseResult>(async (trx) => {
         const timestamp = formatTimestamp(now());
+        // A removed command (#203) that is given back is cancelled, never requeued: no attempt of it
+        // may ever run again. Only the current holder (the lease token) may cancel it this way.
+        const removed = await trx
+          .updateTable("jobs")
+          .set({
+            status: "cancelled",
+            error_code: "command_removed" satisfies JobErrorCode,
+            lease_expires_at: null,
+            finished_at: timestamp,
+            updated_at: timestamp,
+          })
+          .where(runningWhere({ claim: { jobId, leaseToken } }))
+          .where("command", "!=", "review")
+          .returningAll()
+          .executeTakeFirst();
+        if (removed !== undefined)
+          return { status: "cancelled", job: toJob(removed) };
         const lost = await loseAttempt(
           trx,
           { claim: { jobId, leaseToken } },
@@ -355,26 +531,28 @@ export function createRunnerJobsRepository(
       return inTransaction((trx) => expire(trx, now()));
     },
 
-    async cancelClaimed(jobId, leaseToken, errorCode) {
-      const timestamp = formatTimestamp(now());
-      // Not a transition of the shared table (`canTransition`): `cancelWaiting` derives its statuses
-      // from that table and a deactivation must never cancel running jobs. This one statement is the
-      // only way a running job becomes cancelled, and only for the holder of the claim.
-      const row = await db
-        .updateTable("jobs")
-        .set({
-          status: "cancelled",
-          error_code: errorCode,
-          lease_expires_at: null,
-          finished_at: timestamp,
-          updated_at: timestamp,
-        })
-        .where(runningWhere({ claim: { jobId, leaseToken } }))
-        .returningAll()
-        .executeTakeFirst();
-      return row === undefined
-        ? { status: "not_holder" }
-        : { status: "cancelled", job: toJob(row) };
+    cancelClaimed(jobId, leaseToken, errorCode) {
+      return inTransaction<CancelClaimedResult>(async (trx) => {
+        const timestamp = formatTimestamp(now());
+        // Not a transition of the shared table (`canTransition`): `cancelWaiting` derives its statuses
+        // from that table and a deactivation must never cancel running jobs. This one statement is the
+        // only way a running job becomes cancelled, and only for the holder of the claim.
+        const row = await trx
+          .updateTable("jobs")
+          .set({
+            status: "cancelled",
+            error_code: errorCode,
+            lease_expires_at: null,
+            finished_at: timestamp,
+            updated_at: timestamp,
+          })
+          .where(runningWhere({ claim: { jobId, leaseToken } }))
+          .returningAll()
+          .executeTakeFirst();
+        return row === undefined
+          ? { status: "not_holder" }
+          : { status: "cancelled", job: toJob(row) };
+      });
     },
   };
 }

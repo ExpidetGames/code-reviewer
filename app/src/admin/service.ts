@@ -71,6 +71,11 @@ export type AdminSettingsView = {
   };
   maxWorkspacesPerUser: SettingView<number>;
   /**
+   * #195/#202 rollout gate: whether Dynamic Review may be queued. Off until an admin turns it on; turning
+   * it off cancels the waiting Dynamic jobs and leaves the running ones (contracts/README.md).
+   */
+  dynamicReview: SettingView<boolean>;
+  /**
    * The mail server (null: none). The password is never part of it: `password` says whether one is set, and
    * whether it can still be read.
    */
@@ -116,6 +121,11 @@ export type AdminService = {
     actorId: string,
     limits: { maxWorkspacesPerUser: unknown },
   ): Promise<ChangeResult>;
+  /**
+   * `change` is the request's `dynamicReview` value as received: `{ enabled: boolean }`. It goes through the
+   * instance settings repository, which takes the gate lock and cancels the waiting Dynamic jobs on off.
+   */
+  changeDynamicReview(actorId: string, change: unknown): Promise<ChangeResult>;
   /** `smtp` is the request's `smtp` value as received: an object to save, or null to remove the mail server. */
   changeSmtp(actorId: string, smtp: unknown): Promise<ChangeResult>;
   /** Sends the test mail to the acting admin's own address. */
@@ -184,9 +194,17 @@ export function createAdminService({
         "max_workspaces_per_user",
         "setup_completed_at",
         "import_notice",
+        "dynamic_review",
       ];
-      const [tenancy, rule, methods, maxWorkspaces, completed, notice] =
-        await Promise.all(keys.map((key) => settings.getWithMeta(key)));
+      const [
+        tenancy,
+        rule,
+        methods,
+        maxWorkspaces,
+        completed,
+        notice,
+        dynamicReview,
+      ] = await Promise.all(keys.map((key) => settings.getWithMeta(key)));
       const importNotice = readImportNotice(notice?.value);
       const mailServer = await smtp.view();
       const ids = [
@@ -194,6 +212,7 @@ export function createAdminService({
         rule?.updatedBy,
         methods?.updatedBy,
         maxWorkspaces?.updatedBy,
+        dynamicReview?.updatedBy,
         mailServer.updatedBy,
       ].filter((id): id is string => typeof id === "string");
       const emails = await emailsOf([...new Set(ids)]);
@@ -234,6 +253,11 @@ export function createAdminService({
           maxWorkspaces,
           (maxWorkspaces?.value as number | undefined) ??
             DEFAULT_MAX_WORKSPACES_PER_USER,
+        ),
+        dynamicReview: view(
+          dynamicReview,
+          (dynamicReview?.value as { enabled: boolean } | undefined)
+            ?.enabled === true,
         ),
         smtp: {
           ...view(
@@ -298,6 +322,21 @@ export function createAdminService({
       });
       if (!checked.ok) return checked;
       await settings.set("sign_in_methods", wanted, actorId);
+      return { ok: true };
+    },
+
+    async changeDynamicReview(actorId, change) {
+      if (!isObject(change) || typeof change.enabled !== "boolean")
+        return {
+          ok: false,
+          error: "invalid_input",
+          issues: [{ field: "dynamicReview", code: "dynamic_review_invalid" }],
+        };
+      await settings.set(
+        "dynamic_review",
+        { enabled: change.enabled },
+        actorId,
+      );
       return { ok: true };
     },
 

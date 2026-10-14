@@ -291,22 +291,6 @@ def test_the_command_line_of_the_process_holds_no_token_and_no_key(
 
 
 # CR-29-T16
-def test_a_question_full_of_shell_characters_is_one_value_on_stdin_and_nothing_runs(
-    app: FakeApp, tmp_path: Path
-) -> None:
-    canary = tmp_path / "canary"
-    question = f"; rm -rf / $(touch {canary}) `touch {canary}`\n&& id"
-    app.queue.append(claim_response(job_id(1), job_input(command="ask", args=[question])))
-
-    drive(app, tmp_path, "ok", completed(app))
-
-    (report,) = reports(tmp_path)
-    assert json.loads(report["stdin"])["args"] == [question]
-    assert report["argv"] == [str(FAKE_JOB), "ok", str(tmp_path)]
-    assert not canary.exists()
-
-
-# CR-29-T16
 def test_a_pull_request_url_full_of_shell_characters_is_refused_and_starts_nothing(
     app: FakeApp, tmp_path: Path
 ) -> None:

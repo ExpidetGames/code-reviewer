@@ -1,35 +1,104 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // @vitest-environment jsdom
-// Pins down the navigation of the portal: the sections in order, and the current one marked, with
-// Overview current only on its own page (every other page of the portal is below /admin).
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
-import { SectionLinks } from "./admin-nav.tsx";
+// Pins down the navigation of the portal on the shadcn Sidebar: the grouped sections in order, the
+// current one marked (Overview only on its own page, every other page of the portal is below
+// /admin), and the narrow-screen drawer that opens the same sections.
+import { cleanup, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
+
+const navigation = vi.hoisted(() => ({ pathname: "/admin/setup/instance" }));
+vi.mock("next/navigation", () => ({
+  usePathname: () => navigation.pathname,
+}));
+
+import { AdminNav } from "./admin-nav.tsx";
 import { ADMIN_NAV_ITEMS, isCurrentSection } from "./nav-items.ts";
 
-afterEach(cleanup);
+// The shim of the setup file (matchMedia always "desktop"); a narrow-screen test replaces it and
+// this puts it back.
+const desktopMatchMedia = window.matchMedia;
+afterEach(() => {
+  window.matchMedia = desktopMatchMedia;
+  cleanup();
+  navigation.pathname = "/admin/setup/instance";
+});
+
+function narrowScreen() {
+  window.matchMedia = ((query: string) => ({
+    matches: query.includes("767px"),
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia;
+}
+
+function renderAdminNav() {
+  return render(
+    <SidebarProvider>
+      <AdminNav />
+    </SidebarProvider>,
+  );
+}
 
 describe("the sections of the portal", () => {
-  // #98-AD-03
-  it("are Overview, Setup, Integrations, Approvals, Mail and Limits, in that order", () => {
-    render(<SectionLinks pathname={null} />);
+  // #168-T02
+  it("are grouped and in order, and mark only the current one", () => {
+    renderAdminNav();
 
-    expect(screen.getAllByRole("link").map((link) => link.textContent)).toEqual(
-      ["Overview", "Setup", "Integrations", "Approvals", "Mail", "Limits"],
+    const nav = screen.getByRole("navigation", { name: "Admin" });
+    const groups = Array.from(
+      nav.querySelectorAll('[data-slot="sidebar-group"]'),
     );
     expect(
-      screen.getAllByRole("link").map((link) => link.getAttribute("href")),
-    ).toEqual(ADMIN_NAV_ITEMS.map((item) => item.href));
+      groups.map(
+        (group) =>
+          group.querySelector('[data-slot="sidebar-group-label"]')?.textContent,
+      ),
+    ).toEqual(["Admin", "Setup", "Integrations"]);
+
+    const links = Array.from(nav.querySelectorAll("a"));
+    expect(links.map((link) => link.textContent)).toEqual([
+      "Overview",
+      "Approvals",
+      "Instance",
+      "Sign-up",
+      "Sign-in",
+      "Integrations",
+      "GitHub App",
+      "Mail",
+    ]);
+    expect(links.map((link) => link.getAttribute("href"))).toEqual(
+      ADMIN_NAV_ITEMS.map((item) => item.href),
+    );
+    expect(
+      links
+        .filter((link) => link.getAttribute("aria-current") === "page")
+        .map((link) => link.textContent),
+    ).toEqual(["Instance"]);
   });
 
-  it("mark the current section only", () => {
-    render(<SectionLinks pathname="/admin/setup" />);
+  // #185: the nested GitHub App page under Integrations (#182 lead note).
+  it("marks the nested GitHub App page and not the Integrations index", () => {
+    navigation.pathname = "/admin/integrations/github";
+    renderAdminNav();
 
-    const current = screen
-      .getAllByRole("link")
-      .filter((link) => link.getAttribute("aria-current") === "page");
-    expect(current.map((link) => link.textContent)).toEqual(["Setup"]);
+    const nav = screen.getByRole("navigation", { name: "Admin" });
+    const links = Array.from(nav.querySelectorAll("a"));
+    expect(
+      links
+        .filter((link) => link.getAttribute("aria-current") === "page")
+        .map((link) => link.textContent),
+    ).toEqual(["GitHub App"]);
+    expect(nav.querySelectorAll('[data-slot="sidebar-menu-sub"]').length).toBe(
+      1,
+    );
   });
 
   it("do not mark Overview on the other pages, which are all below /admin", () => {
@@ -38,5 +107,38 @@ describe("the sections of the portal", () => {
     expect(isCurrentSection("/admin", overview)).toBe(true);
     expect(isCurrentSection("/admin/mail", overview)).toBe(false);
     expect(isCurrentSection(null, overview)).toBe(false);
+  });
+});
+
+describe("the sections on a narrow screen", () => {
+  // #168-T02, #168-T05
+  it("open in the Sheet drawer from the trigger", async () => {
+    const user = userEvent.setup();
+    narrowScreen();
+    render(
+      <SidebarProvider>
+        <AdminNav />
+        <SidebarTrigger className="size-11" />
+      </SidebarProvider>,
+    );
+    expect(screen.queryByRole("navigation", { name: "Admin" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Toggle Sidebar" }));
+
+    const nav = screen.getByRole("navigation", { name: "Admin" });
+    expect(
+      within(nav)
+        .getAllByRole("link")
+        .map((link) => link.textContent),
+    ).toEqual([
+      "Overview",
+      "Approvals",
+      "Instance",
+      "Sign-up",
+      "Sign-in",
+      "Integrations",
+      "GitHub App",
+      "Mail",
+    ]);
   });
 });

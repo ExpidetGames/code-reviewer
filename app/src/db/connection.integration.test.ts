@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { sql, type Kysely } from "kysely";
 import { describe, expect, it } from "vitest";
 import { startDbProcess } from "../test-support/db-process.ts";
+import { itNeedsNonRoot } from "../test-support/root-only.ts";
 import {
   createTestDatabase,
   createTestDirectory,
@@ -66,7 +67,8 @@ describe("openDatabase", () => {
       const directory = await createTestDirectory();
       const path = join(directory, "does-not-exist", "app.db");
 
-      const open = () => openDatabase({ path, busyTimeoutMs: 100 });
+      const open = () =>
+        openDatabase({ driver: "sqlite", path, busyTimeoutMs: 100 });
 
       expect(open).toThrow(DatabaseError);
       expect(open).toThrow(
@@ -84,6 +86,7 @@ describe("openDatabase", () => {
 
       const open = () =>
         openDatabase({
+          driver: "sqlite",
           path: join(notADirectory, "app.db"),
           busyTimeoutMs: 100,
         });
@@ -95,48 +98,59 @@ describe("openDatabase", () => {
     });
 
     // CR-15-T10
-    it("reports a permission problem instead of a missing directory when a parent cannot be entered", async () => {
-      const directory = await createTestDirectory();
-      const closed = join(directory, "closed");
-      await mkdir(join(closed, "inner"), { recursive: true });
-      await chmod(closed, 0o000);
+    itNeedsNonRoot(
+      "reports a permission problem instead of a missing directory when a parent cannot be entered",
+      async () => {
+        const directory = await createTestDirectory();
+        const closed = join(directory, "closed");
+        await mkdir(join(closed, "inner"), { recursive: true });
+        await chmod(closed, 0o000);
 
-      try {
-        const open = () =>
-          openDatabase({
-            path: join(closed, "inner", "app.db"),
-            busyTimeoutMs: 100,
-          });
+        try {
+          const open = () =>
+            openDatabase({
+              driver: "sqlite",
+              path: join(closed, "inner", "app.db"),
+              busyTimeoutMs: 100,
+            });
 
-        expect(open).toThrow(
-          expect.objectContaining({ code: "DATABASE_DIRECTORY_UNAVAILABLE" }),
-        );
-        expect(open).toThrow(/permission denied/);
-        expect(open).not.toThrow(/does not exist/);
-      } finally {
-        await chmod(closed, 0o700);
-      }
-    });
+          expect(open).toThrow(
+            expect.objectContaining({ code: "DATABASE_DIRECTORY_UNAVAILABLE" }),
+          );
+          expect(open).toThrow(/permission denied/);
+          expect(open).not.toThrow(/does not exist/);
+        } finally {
+          await chmod(closed, 0o700);
+        }
+      },
+    );
 
     // CR-15-T10
-    it("refuses a directory the process may not write to", async () => {
-      const directory = await createTestDirectory();
-      const readOnly = join(directory, "read-only");
-      await mkdir(readOnly);
-      await chmod(readOnly, 0o500);
+    itNeedsNonRoot(
+      "refuses a directory the process may not write to",
+      async () => {
+        const directory = await createTestDirectory();
+        const readOnly = join(directory, "read-only");
+        await mkdir(readOnly);
+        await chmod(readOnly, 0o500);
 
-      try {
-        const open = () =>
-          openDatabase({ path: join(readOnly, "app.db"), busyTimeoutMs: 100 });
+        try {
+          const open = () =>
+            openDatabase({
+              driver: "sqlite",
+              path: join(readOnly, "app.db"),
+              busyTimeoutMs: 100,
+            });
 
-        expect(open).toThrow(
-          expect.objectContaining({ code: "DATABASE_DIRECTORY_UNAVAILABLE" }),
-        );
-        expect(open).toThrow(/cannot be written to/);
-      } finally {
-        await chmod(readOnly, 0o700);
-      }
-    });
+          expect(open).toThrow(
+            expect.objectContaining({ code: "DATABASE_DIRECTORY_UNAVAILABLE" }),
+          );
+          expect(open).toThrow(/cannot be written to/);
+        } finally {
+          await chmod(readOnly, 0o700);
+        }
+      },
+    );
   });
 
   // CR-15-T10
@@ -150,7 +164,8 @@ describe("openDatabase", () => {
       ),
     );
 
-    const open = () => track(openDatabase({ path, busyTimeoutMs: 100 }));
+    const open = () =>
+      track(openDatabase({ driver: "sqlite", path, busyTimeoutMs: 100 }));
 
     expect(open).toThrow(
       expect.objectContaining({ code: "DATABASE_OPEN_FAILED" }),
@@ -159,7 +174,8 @@ describe("openDatabase", () => {
   });
 
   it("refuses a database that cannot use WAL mode instead of running in another journal mode", () => {
-    const open = () => openDatabase({ path: ":memory:", busyTimeoutMs: 100 });
+    const open = () =>
+      openDatabase({ driver: "sqlite", path: ":memory:", busyTimeoutMs: 100 });
 
     expect(open).toThrow(
       expect.objectContaining({ code: "DATABASE_OPEN_FAILED" }),
@@ -175,7 +191,8 @@ describe("openDatabase", () => {
     expect(await holder.nextLine()).toBe("locked");
     const started = Date.now();
 
-    const open = () => openDatabase({ path, busyTimeoutMs: 300 });
+    const open = () =>
+      openDatabase({ driver: "sqlite", path, busyTimeoutMs: 300 });
 
     expect(open).toThrow(
       expect.objectContaining({ code: "DATABASE_OPEN_FAILED" }),

@@ -2,9 +2,12 @@
 
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { getDatabase } from "@/db/startup";
+import { isDynamicReviewEnabled } from "@/jobs/dynamic-review-gate";
 import { getConfigStatusFor } from "@/config-status/shared";
 import { configAudienceOf } from "@/config-status/status";
-import { WorkspaceLlmNotice } from "@/llm/ui/workspace-llm-notice";
+import { getWorkspaceLlm } from "@/llm/shared";
+import { llmAccessAttention } from "@/llm/ui/llm-access-notice";
 import { projectServiceFor } from "@/projects/shared";
 import {
   loadProjectSettingsPage,
@@ -56,20 +59,22 @@ async function ProjectSettingsContent({
     settings: reviewSettingsServiceFor(workspaceId),
     // Only the instance admin gets the names of the variables that are wrong.
     config: () => getConfigStatusFor(user),
+    // Shown on the Review kind card: Dynamic Review runs only while the instance has turned it on.
+    dynamicReviewEnabled: () => isDynamicReviewEnabled(getDatabase()),
   });
   if (data.kind === "not_found") notFound();
+  // The workspace's LLM hint is a row of the page's one "Needs attention" strip, not its own region.
+  const llmNotice = llmAccessAttention({
+    workspaceSlug,
+    summary: await getWorkspaceLlm().summaryFor(workspaceId),
+    canManage: canManageLlmKey,
+  });
   return (
-    <>
-      <WorkspaceLlmNotice
-        workspaceId={workspaceId}
-        workspaceSlug={workspaceSlug}
-        canManage={canManageLlmKey}
-      />
-      <ProjectSettingsPageContent
-        workspaceSlug={workspaceSlug}
-        audience={configAudienceOf(user)}
-        data={data}
-      />
-    </>
+    <ProjectSettingsPageContent
+      workspaceSlug={workspaceSlug}
+      audience={configAudienceOf(user)}
+      llmNotice={llmNotice}
+      data={data}
+    />
   );
 }

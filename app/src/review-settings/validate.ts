@@ -6,8 +6,15 @@
 import { REVIEW_COMMANDS, type ReviewCommand } from "../integrations/types.ts";
 import { MODEL_NAME_PATTERN } from "../llm/config.ts";
 import {
+  PROJECT_DYNAMIC_LIMITS,
+  PROJECT_DYNAMIC_SETTING_FIELDS,
+  PROJECT_REVIEW_KINDS,
   REVIEW_SETTING_FIELDS,
   REVIEW_SETTING_LIMITS,
+  type ProjectDynamicOverrides,
+  type ProjectDynamicPatch,
+  type ProjectDynamicSettingField,
+  type ProjectReviewKind,
   type ReviewSettingField,
   type ReviewSettings,
   type ReviewSettingsOverrides,
@@ -39,7 +46,11 @@ export type ReviewSettingIssueCode =
 
 export type ReviewSettingIssue = {
   /** The field the problem is about; `settings` when it is about the whole object. */
-  field: ReviewSettingField | "settings" | (string & {});
+  field:
+    | ReviewSettingField
+    | ProjectDynamicSettingField
+    | "settings"
+    | (string & {});
   code: ReviewSettingIssueCode;
 };
 
@@ -137,6 +148,132 @@ export type ValidationResult =
   | { ok: true; value: ReviewSettingsOverrides }
   | { ok: false; issues: ReviewSettingIssue[] };
 
+// --- The project-only settings (#194). They never appear in the global validation below. ---
+
+function reviewKind(value: unknown): FieldResult<ProjectReviewKind> {
+  if (typeof value !== "string") return fail("INVALID_TYPE");
+  const known = PROJECT_REVIEW_KINDS.find((kind) => kind === value);
+  return known === undefined ? fail("INVALID_FORMAT") : ok(known);
+}
+
+// The skill is untrusted text: a size bound in UTF-8 bytes (multibyte characters count as their
+// bytes), no forbidden control characters, no unpaired surrogate. Those are checked on the raw text
+// before an empty (or blank) value is read as an explicit reset to the shipped default, so forbidden
+// or oversized text is refused rather than silently normalized away.
+const UTF8 = new TextEncoder();
+
+function reviewSkill(value: unknown): FieldResult<string | null> {
+  if (value === null) return ok(null);
+  if (typeof value !== "string") return fail("INVALID_TYPE");
+  if (FORBIDDEN_TEXT.test(value) || hasLoneSurrogate(value))
+    return fail("FORBIDDEN_CHARACTERS");
+  if (UTF8.encode(value).length > PROJECT_DYNAMIC_LIMITS.reviewSkillMaxBytes)
+    return fail("TOO_LONG");
+  if (value.trim() === "") return ok(null);
+  return ok(value);
+}
+
+/** The Dynamic model of a project save: like the Diff model, or `null` to clear the override (#200). */
+function dynamicModelValue(value: unknown): FieldResult<string | null> {
+  if (value === null) return ok(null);
+  return modelName(value);
+}
+
+const DYNAMIC_FIELD_CHECKS: {
+  [K in ProjectDynamicSettingField]: (
+    value: unknown,
+  ) => FieldResult<ProjectDynamicPatch[K]>;
+} = {
+  reviewKind,
+  // The same rule as the Diff model: the identifier is kept literally, no provider rewrite (#194-T08).
+  dynamicModel: dynamicModelValue,
+  reviewSkill,
+};
+
+export type ProjectSettingsPatch = {
+  review: ReviewSettingsOverrides;
+  dynamic: ProjectDynamicPatch;
+};
+
+export type ProjectValidationResult =
+  | { ok: true; value: ProjectSettingsPatch }
+  | { ok: false; issues: ReviewSettingIssue[] };
+
+function isProjectDynamicField(
+  name: string,
+): name is ProjectDynamicSettingField {
+  return (PROJECT_DYNAMIC_SETTING_FIELDS as readonly string[]).includes(name);
+}
+
+function checkDynamicField<K extends ProjectDynamicSettingField>(
+  target: ProjectDynamicPatch,
+  field: K,
+  raw: unknown,
+): ReviewSettingIssue | undefined {
+  const result = DYNAMIC_FIELD_CHECKS[field](raw);
+  if (!result.ok) return { field, code: result.code };
+  target[field] = result.value as ProjectDynamicPatch[K];
+  return undefined;
+}
+
+/**
+ * Validates the settings of one project: the Diff overrides **and** the project-only fields (kind,
+ * Dynamic model, skill). The global defaults use `validateReviewSettingsPatch`, which does not know
+ * the project-only fields, so they cannot become workspace-wide values.
+ */
+export function validateProjectSettingsPatch(
+  input: unknown,
+): ProjectValidationResult {
+  if (!isPlainObject(input))
+    return { ok: false, issues: [{ field: "settings", code: "INVALID_TYPE" }] };
+  const review: ReviewSettingsOverrides = {};
+  const dynamic: ProjectDynamicPatch = {};
+  const issues: ReviewSettingIssue[] = [];
+  for (const [name, raw] of Object.entries(input)) {
+    if (isProjectDynamicField(name)) {
+      const issue = checkDynamicField(dynamic, name, raw);
+      if (issue !== undefined) issues.push(issue);
+      continue;
+    }
+    if (!isField(name)) {
+      issues.push({
+        field: /^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(name) ? name : "settings",
+        code: "UNKNOWN_FIELD",
+      });
+      continue;
+    }
+    const issue = checkField(review, name, raw);
+    if (issue !== undefined) issues.push(issue);
+  }
+  return issues.length > 0
+    ? { ok: false, issues }
+    : { ok: true, value: { review, dynamic } };
+}
+
+/**
+ * Reads the project-only fields of a stored layer. Like `parseStoredOverrides`, a field this version
+ * would not accept is dropped (so the shipped default applies) instead of failing a review. An
+ * explicit `null` (or blank) skill, or a `null` model, reads as "no override".
+ */
+export function parseStoredProjectDynamicOverrides(
+  stored: unknown,
+): ProjectDynamicOverrides {
+  const value: ProjectDynamicPatch = {};
+  if (!isPlainObject(stored)) return {};
+  for (const field of PROJECT_DYNAMIC_SETTING_FIELDS) {
+    if (!Object.hasOwn(stored, field)) continue;
+    checkDynamicField(value, field, stored[field]);
+  }
+  // A stored null (or blank) skill or model is "no override", not an override of `null`.
+  const overrides: ProjectDynamicOverrides = {};
+  if (value.reviewKind !== undefined) overrides.reviewKind = value.reviewKind;
+  if (typeof value.dynamicModel === "string")
+    overrides.dynamicModel = value.dynamicModel;
+  if (typeof value.reviewSkill === "string")
+    overrides.reviewSkill = value.reviewSkill;
+  return overrides;
+}
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value))
     return false;
@@ -197,11 +334,34 @@ export function validateReviewSettingsPatch(input: unknown): ValidationResult {
  * Reads a stored layer. Storage may hold something this version would not accept (a limit was
  * tightened, a field was removed, the text was edited by hand): such a field is dropped, so the
  * layer below applies, instead of making every review of the project fail.
+ *
+ * `allowedCommands` is the one field that is normalized instead of dropped: a stored list is
+ * intersected with the commands that still exist (#203). An explicit empty list stays empty (an
+ * explicit "no commands" must never fall back to enabling `/review`), and a list whose removed
+ * entries leave nothing becomes `[]`. A missing field still inherits.
  */
 export function parseStoredOverrides(stored: unknown): ReviewSettingsOverrides {
   const value: ReviewSettingsOverrides = {};
   if (!isPlainObject(stored)) return value;
-  for (const field of REVIEW_SETTING_FIELDS)
-    if (Object.hasOwn(stored, field)) checkField(value, field, stored[field]);
+  for (const field of REVIEW_SETTING_FIELDS) {
+    if (!Object.hasOwn(stored, field)) continue;
+    if (field === "allowedCommands") {
+      const normalized = storedCommands(stored[field]);
+      if (normalized !== undefined) value.allowedCommands = normalized;
+      continue;
+    }
+    checkField(value, field, stored[field]);
+  }
   return value;
+}
+
+/** A stored `allowedCommands` list intersected with the commands that still exist; order canonical. */
+function storedCommands(value: unknown): ReviewCommand[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const seen = new Set<ReviewCommand>();
+  for (const entry of value) {
+    const command = REVIEW_COMMANDS.find((known) => known === entry);
+    if (command !== undefined) seen.add(command);
+  }
+  return REVIEW_COMMANDS.filter((command) => seen.has(command));
 }

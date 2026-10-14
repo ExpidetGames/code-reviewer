@@ -8,7 +8,8 @@
 // admin, in the admin portal) and notes the installations nobody has linked.
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { Button } from "../../ui/button.tsx";
+import { Button } from "../../components/button.tsx";
+import { StatusRegion } from "../../components/status-region.tsx";
 import {
   browserInstanceSyncApi,
   browserProjectsApi,
@@ -54,24 +55,24 @@ function SyncControl({ api }: { api: Pick<ProjectsApi, "sync"> }) {
   }
 
   return (
-    <div className="sync">
-      <Button variant="secondary" disabled={pending} onClick={() => void run()}>
-        {pending ? "Syncing..." : "Sync from GitHub"}
+    <div className="flex items-center gap-2">
+      <Button variant="primary" disabled={pending} onClick={() => void run()}>
+        {pending ? "Syncing…" : "Sync from GitHub"}
       </Button>
-      <div role="status" className="sync-result">
+      <StatusRegion className="min-w-0">
         {outcome?.kind === "failed" ? (
-          <span className="field-error">{outcome.text}</span>
+          <span className="text-destructive">{outcome.text}</span>
         ) : outcome?.kind === "done" ? (
           <>
             <span>{addedText(outcome.added)}</span>
             {outcome.problems.map((text) => (
-              <span key={text} className="field-error">
+              <span key={text} className="text-destructive">
                 {text}
               </span>
             ))}
           </>
         ) : null}
-      </div>
+      </StatusRegion>
     </div>
   );
 }

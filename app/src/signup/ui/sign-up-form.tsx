@@ -2,16 +2,21 @@
 
 "use client";
 // The sign-up form: an email address and a password (the password rule of every account, which the server
-// judges and the form states). The answer is the same whether or not the address may sign up, so the page
-// says what happens next in words that are true either way: with a mail server a link is sent to the
-// address if it may sign up, without one the person signs in.
+// judges and the form states once, as an InfoHint from its single owner). The answer is the same whether or
+// not the address may sign up, so the page says what happens next in words that are true either way: with a
+// mail server a link is sent to the address if it may sign up, without one the person signs in. Both answers
+// are one success card with a single link back to the sign-in (#170).
 import Link from "next/link";
 import { useId, useState, type FormEvent } from "react";
 import {
-  PASSWORD_MAX_LENGTH,
-  PASSWORD_MIN_LENGTH,
+  PASSWORD_RULE_HINT,
+  PASSWORDS_DO_NOT_MATCH,
 } from "../../auth/password-policy.ts";
-import { Button } from "../../ui/button.tsx";
+import { Button } from "../../components/button.tsx";
+import { InfoHint } from "../../components/info-hint.tsx";
+import { Alert, AlertDescription } from "../../components/ui/alert.tsx";
+import { Field, FieldLabel } from "../../components/ui/field.tsx";
+import { Input } from "../../components/ui/input.tsx";
 import { requestJson, type FetchLike } from "../../ui/json-request.ts";
 import { describeSignUpFailure } from "./messages.ts";
 
@@ -21,7 +26,7 @@ export function SignUpForm({
   signInPath = "/login",
   fetchImpl = (url, init) => fetch(url, init),
 }: {
-  /** Where "go to the sign-in" leads: the login page, with an invitation link carried along. */
+  /** Where "Back to sign in" leads: the login page, with an invitation link carried along. */
   signInPath?: string;
   /** Only tests pass this. */
   fetchImpl?: FetchLike;
@@ -34,24 +39,22 @@ export function SignUpForm({
   const [problem, setProblem] = useState<string | null>(null);
   const [next, setNext] = useState<Next | null>(null);
 
-  if (next === "verify_email")
+  if (next !== null)
     return (
       <>
-        <p role="status" className="alert alert-success">
-          Check your inbox. If this address may sign up, we sent it a link to
-          confirm it. The account can be used once the address is confirmed.
-        </p>
-        <Link href="/verify-email">Did not get the email?</Link>
-      </>
-    );
-  if (next === "sign_in")
-    return (
-      <>
-        <p role="status" className="alert alert-success">
-          Thank you. If this address may sign up, the account is ready: sign in
-          with it.
-        </p>
-        <Link href={signInPath}>Go to the sign-in</Link>
+        <Alert variant="success" role="status">
+          <AlertDescription>
+            {next === "verify_email"
+              ? "Check your inbox. If this address may sign up, we sent it a link to confirm it."
+              : "If this address may sign up, the account is ready: sign in with your password."}
+          </AlertDescription>
+        </Alert>
+        <Link
+          className="text-sm underline underline-offset-4"
+          href={signInPath}
+        >
+          Back to sign in
+        </Link>
       </>
     );
 
@@ -59,7 +62,7 @@ export function SignUpForm({
     event.preventDefault();
     setProblem(null);
     if (password !== repeat) {
-      setProblem("The two passwords are not the same.");
+      setProblem(PASSWORDS_DO_NOT_MATCH);
       return;
     }
     setPending(true);
@@ -78,62 +81,66 @@ export function SignUpForm({
   }
 
   return (
-    <form
-      onSubmit={(event) => void submit(event)}
-      className="login-form"
-      aria-label="Sign-up form"
-    >
-      {problem ? (
-        <p role="alert" className="alert alert-error">
-          {problem}
-        </p>
-      ) : null}
-      <div className="field">
-        <label htmlFor={`${ids}-email`} className="field-label">
-          Email address
-        </label>
-        <input
-          id={`${ids}-email`}
-          type="email"
-          autoComplete="email"
-          required
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-        />
-      </div>
-      <div className="field">
-        <label htmlFor={`${ids}-password`} className="field-label">
-          Password
-        </label>
-        <input
-          id={`${ids}-password`}
-          type="password"
-          autoComplete="new-password"
-          required
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-        />
-        <p className="muted small">
-          At least {String(PASSWORD_MIN_LENGTH)} and at most{" "}
-          {String(PASSWORD_MAX_LENGTH)} characters, and not a common password.
-        </p>
-      </div>
-      <div className="field">
-        <label htmlFor={`${ids}-repeat`} className="field-label">
-          Repeat the password
-        </label>
-        <input
-          id={`${ids}-repeat`}
-          type="password"
-          autoComplete="new-password"
-          required
-          value={repeat}
-          onChange={(event) => setRepeat(event.target.value)}
-        />
-      </div>
-      <Button type="submit" className="btn-block" disabled={pending}>
-        {pending ? "Creating..." : "Create account"}
-      </Button>
-    </form>
+    <>
+      <form
+        onSubmit={(event) => void submit(event)}
+        className="flex flex-col gap-4"
+        aria-label="Sign-up form"
+      >
+        {problem === null ? null : (
+          <Alert variant="destructive">
+            <AlertDescription>{problem}</AlertDescription>
+          </Alert>
+        )}
+        <Field>
+          <FieldLabel htmlFor={`${ids}-email`}>Email address</FieldLabel>
+          <Input
+            id={`${ids}-email`}
+            type="email"
+            autoComplete="email"
+            required
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+          />
+        </Field>
+        <Field>
+          <div className="flex items-center gap-1">
+            <FieldLabel htmlFor={`${ids}-password`}>Password</FieldLabel>
+            <InfoHint label="About the password rule">
+              {PASSWORD_RULE_HINT}
+            </InfoHint>
+          </div>
+          <Input
+            id={`${ids}-password`}
+            type="password"
+            autoComplete="new-password"
+            required
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+          />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor={`${ids}-repeat`}>Repeat the password</FieldLabel>
+          <Input
+            id={`${ids}-repeat`}
+            type="password"
+            autoComplete="new-password"
+            required
+            value={repeat}
+            onChange={(event) => setRepeat(event.target.value)}
+          />
+        </Field>
+        <Button
+          type="submit"
+          loading={pending}
+          loadingLabel="Creating your account"
+        >
+          Create account
+        </Button>
+      </form>
+      <Link className="text-sm underline underline-offset-4" href={signInPath}>
+        Back to sign in
+      </Link>
+    </>
   );
 }

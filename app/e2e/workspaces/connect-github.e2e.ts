@@ -92,7 +92,7 @@ async function founder(
   await expect(page).toHaveURL(/\/no-access$/);
   const create = page.getByRole("form", { name: "Create a workspace" });
   await create.getByLabel("Name of the workspace").fill(workspace);
-  await create.getByRole("button", { name: "Create the workspace" }).click();
+  await create.getByRole("button", { name: "Create workspace" }).click();
   const slug = workspace.toLowerCase().replace(/[^a-z0-9]+/g, "-");
   await expect(page).toHaveURL(new RegExp(`/w/${slug}/projects$`));
   return { page, slug };
@@ -190,13 +190,13 @@ test.describe("connecting GitHub to a workspace", () => {
     await expect(page.getByRole("status").first()).toContainText(
       "GitHub is connected",
     );
-    const connections = page.getByRole("list", { name: "Connections" });
+    const connections = page.getByRole("list", { name: "Installations" });
     await expect(connections.getByRole("listitem")).toHaveCount(1);
     await expect(connections).toContainText(ORG_A.login);
     await expect(connections).toContainText("Connected");
     await page.goto(`/w/${slug}/projects`);
     await expect(
-      page.getByRole("listitem").filter({ hasText: REPO_A }),
+      page.getByRole("row").filter({ hasText: REPO_A }),
     ).toBeVisible();
     await page.context().close();
   });
@@ -218,10 +218,10 @@ test.describe("connecting GitHub to a workspace", () => {
 
     await expect(
       page
-        .getByRole("alert")
+        .getByRole("status")
         .filter({ hasText: "Only the owner of a personal account" }),
     ).toBeVisible();
-    await expect(page.getByRole("list", { name: "Connections" })).toHaveCount(
+    await expect(page.getByRole("list", { name: "Installations" })).toHaveCount(
       0,
     );
     await page.goto(`/w/${slug}/projects`);
@@ -246,10 +246,10 @@ test.describe("connecting GitHub to a workspace", () => {
 
     await b.page.goto(`/w/${b.slug}/projects`);
     await expect(
-      b.page.getByRole("listitem").filter({ hasText: REPO_B }),
+      b.page.getByRole("row").filter({ hasText: REPO_B }),
     ).toBeVisible();
     await expect(
-      b.page.getByRole("listitem").filter({ hasText: REPO_A }),
+      b.page.getByRole("row").filter({ hasText: REPO_A }),
     ).toHaveCount(0);
     // The workspace of the first journey does not see these.
     const a = await browser.newContext({ baseURL: e2eEnv.multiAppUrl });
@@ -260,10 +260,10 @@ test.describe("connecting GitHub to a workspace", () => {
     await pageA.getByRole("button", { name: "Sign in", exact: true }).click();
     await expect(pageA).toHaveURL(/\/w\/connect-a\/projects$/);
     await expect(
-      pageA.getByRole("listitem").filter({ hasText: REPO_A }),
+      pageA.getByRole("row").filter({ hasText: REPO_A }),
     ).toBeVisible();
     await expect(
-      pageA.getByRole("listitem").filter({ hasText: REPO_B }),
+      pageA.getByRole("row").filter({ hasText: REPO_B }),
     ).toHaveCount(0);
     // Reading the connections again from GitHub does not bring a foreign installation in.
     await pageA.getByRole("button", { name: "Sync from GitHub" }).click();
@@ -271,7 +271,7 @@ test.describe("connecting GitHub to a workspace", () => {
       "No new repositories.",
     );
     await expect(
-      pageA.getByRole("listitem").filter({ hasText: REPO_B }),
+      pageA.getByRole("row").filter({ hasText: REPO_B }),
     ).toHaveCount(0);
     await a.close();
     await b.page.context().close();
@@ -291,9 +291,9 @@ test.describe("connecting GitHub to a workspace", () => {
     await expect(o.page.getByRole("status").first()).toContainText(
       "admin of this instance has to approve",
     );
-    await expect(o.page.getByRole("list", { name: "Connections" })).toHaveCount(
-      0,
-    );
+    await expect(
+      o.page.getByRole("list", { name: "Installations" }),
+    ).toHaveCount(0);
     const requests = o.page.getByRole("list", {
       name: "Requests for the instance admin",
     });
@@ -318,11 +318,22 @@ test.describe("connecting GitHub to a workspace", () => {
     // Signed in: the admin lands on a page of the app (they may have a workspace of their own by now).
     await expect(admin).toHaveURL(/\/(no-access|w\/[a-z0-9-]+\/projects)$/);
     await admin.goto("/admin/approvals");
+    // The screen header carries the one action; the three states are tabs (#183).
+    await expect(
+      admin.getByRole("heading", { level: 1, name: "Approvals" }),
+    ).toBeVisible();
+    await expect(
+      admin.getByRole("button", { name: "Sync from GitHub" }),
+    ).toBeVisible();
     const waiting = admin
       .getByRole("list", { name: "Requests waiting for a decision" })
       .getByRole("listitem")
       .filter({ hasText: ORG_OPAQUE.login });
     await expect(waiting).toBeVisible();
+    // The evidence is behind a disclosure, closed at first (#183).
+    await waiting
+      .getByRole("button", { name: `Evidence for ${ORG_OPAQUE.login}` })
+      .click();
     await expect(waiting).toContainText("connect-o@e2e.test");
     await expect(waiting).toContainText(`GitHub account ${opaque.login}`);
     await expect(waiting).toContainText("Connect O");
@@ -338,14 +349,14 @@ test.describe("connecting GitHub to a workspace", () => {
     // The workspace now has the connection and its repositories.
     await o.page.goto(`/w/${o.slug}/connections`);
     await expect(
-      o.page.getByRole("list", { name: "Connections" }),
+      o.page.getByRole("list", { name: "Installations" }),
     ).toContainText(ORG_OPAQUE.login);
     await expect(
       o.page.getByRole("list", { name: "Requests for the instance admin" }),
     ).toContainText("Approved");
     await o.page.goto(`/w/${o.slug}/projects`);
     await expect(
-      o.page.getByRole("listitem").filter({ hasText: REPO_OPAQUE }),
+      o.page.getByRole("row").filter({ hasText: REPO_OPAQUE }),
     ).toBeVisible();
     await adminContext.close();
     await o.page.context().close();
@@ -367,11 +378,12 @@ test.describe("connecting GitHub to a workspace", () => {
     await page
       .getByRole("button", { name: `Disconnect ${ORG_A.login}` })
       .click();
+    await expect(page.getByRole("alertdialog")).toBeVisible();
     await page
       .getByRole("button", { name: `Confirm disconnecting ${ORG_A.login}` })
       .click();
 
-    const connections = page.getByRole("list", { name: "Connections" });
+    const connections = page.getByRole("list", { name: "Installations" });
     await expect(connections).toContainText("Disconnected");
     await expect(
       page.getByRole("button", { name: `Disconnect ${ORG_A.login}` }),
@@ -385,7 +397,7 @@ test.describe("connecting GitHub to a workspace", () => {
     await page.goto("/workspaces/new");
     const create = page.getByRole("form", { name: "Create a workspace" });
     await create.getByLabel("Name of the workspace").fill("Connect A2");
-    await create.getByRole("button", { name: "Create the workspace" }).click();
+    await create.getByRole("button", { name: "Create workspace" }).click();
     await expect(page).toHaveURL(/\/w\/connect-a2\/projects$/);
     await connectGithub(page, "connect-a2", {
       installOn: ORG_A.login,
@@ -393,10 +405,10 @@ test.describe("connecting GitHub to a workspace", () => {
     });
     await expect(
       page
-        .getByRole("alert")
+        .getByRole("status")
         .filter({ hasText: "connected already and cannot be connected here" }),
     ).toBeVisible();
-    await expect(page.getByRole("list", { name: "Connections" })).toHaveCount(
+    await expect(page.getByRole("list", { name: "Installations" })).toHaveCount(
       0,
     );
     await context.close();

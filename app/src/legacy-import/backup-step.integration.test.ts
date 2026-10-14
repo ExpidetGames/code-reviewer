@@ -103,7 +103,11 @@ describe("the backup before the update", () => {
     expect(lines.join("\n")).toContain("BACKUP_BEFORE_UPDATE");
     // Then the update runs (the migrations) and the file moves on.
     const db = track(
-      openDatabase({ path: files.databasePath, busyTimeoutMs: 5000 }),
+      openDatabase({
+        driver: "sqlite",
+        path: files.databasePath,
+        busyTimeoutMs: 5000,
+      }),
     );
     await migrateToLatest(db);
     await createInstanceSettingsRepository(db).set(
@@ -167,7 +171,11 @@ describe("the backup before the update", () => {
     const [wayBack] = readdirSync(files.backupDir);
     // The migrations ran, the import failed (the marker is still `none`), and the app restarts again and again.
     const db = track(
-      openDatabase({ path: files.databasePath, busyTimeoutMs: 5000 }),
+      openDatabase({
+        driver: "sqlite",
+        path: files.databasePath,
+        busyTimeoutMs: 5000,
+      }),
     );
     await migrateToLatest(db);
     await db.destroy();
@@ -247,7 +255,11 @@ describe("the backup before the update", () => {
     // Migrated: the schema is not the previous release's any more, whatever the import marker says.
     expect(holdsDatabaseOfThePreviousRelease(files.databasePath)).toBe(true);
     const db = track(
-      openDatabase({ path: files.databasePath, busyTimeoutMs: 5000 }),
+      openDatabase({
+        driver: "sqlite",
+        path: files.databasePath,
+        busyTimeoutMs: 5000,
+      }),
     );
     await migrateToLatest(db);
     expect(holdsDatabaseOfThePreviousRelease(files.databasePath)).toBe(false);

@@ -1,0 +1,503 @@
+# Dynamic Review: operating it
+
+Dynamic Review is the second review kind next to Diff Review (PR-Agent): an agent reads the pull
+request's code in a sanitised, read-only export and returns structured findings that the runner
+publishes as one persistent summary comment. The decisions are in epic
+[#193](https://github.com/ExpidetGames/code-reviewer/issues/193), the research in
+`docs/spike/85-opencode-dynamic-review.md`, and the short deployment record is
+[`docs/decisions/0002-dynamic-review-deployment.md`](decisions/0002-dynamic-review-deployment.md).
+
+> **Status: shippable, off by default.** The engine is in the Dynamic runner image, the runner proves
+> its isolation at start and advertises `opencode` only when the proof passes, and the instance admin
+> has a switch for the rollout gate. Nothing turns Dynamic Review on by itself: the gate is off in
+> every shipped configuration, `compose.dynamic.yml` is opt-in, and the default runner image holds no
+> engine. The steps to switch it on are under "Activation, step by step"; whether and when to do it
+> on an instance is the operator's decision. Read "Known limitations and residual risks" first.
+
+## What exists, and what does not
+
+| Part | State |
+|---|---|
+| Project setting `review_kind` (Diff or Dynamic), editable skill, default model `deepseek/deepseek-v4.1-flash` | Shipped (#194, #200) |
+| Rollout gate `dynamic_review` (instance setting, default off), admin control | Shipped (#195, #202) |
+| Job tag, capability matching, `no_capable_runner`, `dynamic_review_disabled` | Shipped (#195) |
+| Sanitised read-only checkout of the pull request head | Shipped (#196) |
+| Fixed review core and the editable skill | Shipped (#198) |
+| Engine seam: trusted config, hard limits, per-job model proxy, adapter, process-group cleanup | Shipped (#197 part 1, #202 process-group reuse) |
+| Summary comment, findings state, reconciliation | Shipped (#199) |
+| Real pinned OpenCode fetch, proxy-side audit, hostile-repository proof; launch as the dedicated engine user, static per-user network rules, `NET_ADMIN` dropped after startup | Shipped (#197 parts 2a and 2b, #244) |
+| The Dynamic runner image: the `dynamic` target of `runner/Dockerfile` with the pinned OpenCode, a pinned `rg`, `nft` and the engine user (**linux-x64 glibc only**: the pins have no other platform. On another platform such as arm64 the image still builds, without an engine, and its runner serves Diff jobs only (#264); an arm64 engine needs its own pinned digests) | Shipped (#202, #264) |
+| Startup self-check that advertises `opencode` only when everything holds, with a stable logged reason otherwise | Shipped (#202) |
+| Deployment: `compose.dynamic.yml` (Docker Compose, opt-in override file) and the `runner-dynamic` service of `compose.coolify.yml` (Coolify, built and started with the rest, **untested on a real Coolify**) | Shipped (#202, #264) |
+| Provenance audit of the engine binary and `rg` in `make check-licenses` (source commit, licence, the Bun-lock runtime closure of the pinned commit), notices in `NOTICE` and `THIRD_PARTY_LICENSES.md` | Shipped (#202) |
+| Worst-case memory and OOM measurements, the decision to run more than one Dynamic job at a time | **Manual step, not done** (needs a real deployment target, see "Capacity") |
+| Full path from a signed webhook to the Run: the pull request title, body and previous-review state in the prompt (#251), the review kind proved for every entry point and the model and usage in Runs (#252), and the privileged `e2e-dynamic` journey with the real pinned OpenCode that publishes the summary (#253) | Shipped (#251, #252, #253) |
+| Recovery when a run wrote the summary and then ended failed | Shipped (#255, #257): the claim names the heads of earlier unsuccessful runs and says when that list was cut, see "Known limitations" |
+| Hosted activation | Needs the hosted egress gate (#82) |
+
+## How a Dynamic job reaches an engine
+
+1. A project set to Dynamic Review enqueues a job tagged `review_kind: dynamic`, **only while the
+   instance gate is on**. With the gate off the run is created `failed` with
+   `dynamic_review_disabled`; it is never reviewed as a Diff. The kind comes from the project's
+   stored settings, resolved by the queue inside the enqueue transaction, so it is the same for an
+   automatic review, an authorized `/review` and a manual Review now. Nothing a pull request or a
+   comment says (title, body, `/review` text) can select or change the kind, model, budget or skill.
+   The Run's detail page shows the actual kind, model, tokens, model calls and cost (unknown for
+   Dynamic, which never guesses a price).
+2. A runner claims a Dynamic job only if it advertises `opencode` in the claim. The runner
+   advertises it only after its startup self-check proved the dedicated engine user, the read-only
+   export and proxy-only egress (`runner/src/code_reviewer_runner/dynamic_review/self_check.py`, see
+   "The startup self-check"). A runner that fails it, and every PR-Agent-only runner, serves Diff
+   jobs only.
+3. A Dynamic job that no capable runner claims waits, without an attempt being counted, and is
+   **cancelled with `no_capable_runner`** after `RUNNER_NO_CAPABLE_TIMEOUT_SECONDS` (app setting,
+   default 30 minutes). It is visible in Runs; it never waits forever and never falls back to Diff.
+4. The runner prepares the export (#196), starts one engine per job behind its own model proxy (the
+   workspace key never reaches the engine), enforces the hard limits below and removes the job's
+   temporary files and process group. Only after the engine has ended successfully, its findings
+   passed validation and the export is released, the supervisor publishes (#199, wired in #253): the
+   one persistent summary comment of the pull request, created on the first run and **edited in
+   place** by every later run (a person's comment that merely quotes the marker is never edited). It
+   writes with the job's own installation token; the engine never sees it. A failed run writes
+   nothing, a failed write fails the run with its own stable code, and the Run links the comment.
+   Right before the write the process asks the job loop whether the job is still its own (#260): the
+   loop beats the heart once and answers from the app (a lost lease and a cancelled job are both
+   409; a 5xx, a reset or a timeout is tried again up to three times within 40 seconds, and a 200
+   counts only as the contract's heartbeat answer for this job). Anything but a clear yes ends the
+   run with `lease_lost` and writes nothing, and so does a Dynamic job that was not handed the
+   channel at all.
+
+PR-Agent-only runners keep processing Diff jobs unchanged. A Dynamic-capable runner also serves Diff
+jobs.
+
+## The engine boundary
+
+The container, not a sandbox, is the boundary (lead decision of 2026-10-12): no bubblewrap, no user
+namespaces, no host kernel setting beyond the `nf_tables` support every current kernel has.
+
+- **Two users in one container.** The job process is the **supervisor** and runs as root with exactly
+  the capabilities listed in `compose.dynamic.yml` (`SETUID`, `SETGID`, `KILL`, `CHOWN`,
+  `DAC_OVERRIDE`, `FOWNER` for its whole life; `NET_ADMIN` and `SETPCAP` for container startup only,
+  see below; everything else dropped, `no-new-privileges` on). It holds
+  every credential and the model proxy. The **engine** runs as the dedicated unprivileged user
+  `10101:10101` of the image, with no capability, no supplementary group, a closed environment, its
+  own home and temporary directories, and a config file only it can read. It is started with
+  `setuid()` in the child process: no `sudo`, no setuid helper, so `no-new-privileges` can stay.
+- **Why those capabilities.** `SETUID`/`SETGID` start the engine as the other user; `KILL` signals
+  its process group and its leftovers; `CHOWN` seals the read-only export (#196); `DAC_OVERRIDE` and
+  `FOWNER` remove the sealed export and the tree the engine user may have filled (sticky and
+  unreadable directories included). `SYS_ADMIN`,
+  `SYS_PTRACE` and `NET_RAW` are deliberately absent. Diff jobs on the same loop are dropped to uid
+  10001 (`RUNNER_DIFF_JOB_USER`) and hold none of these.
+- **Network: one user, one proxy.** The runner installs `nftables` output rules keyed on the socket
+  owner **once, when the container starts**, for the single slot's fixed ports
+  (`RUNNER_DYNAMIC_PROXY_PORT`, default 10180; `RUNNER_DYNAMIC_ENGINE_PORT`, default 10181). The
+  engine user may open new connections only to the job's proxy port and its own server port on
+  `127.0.0.1`; everything else it tries (another job's loopback service, any other
+  address, IPv6, UDP, a flow that someone else opened and closed) is rejected at once. Only the
+  replies of the engine's own server pass as tracked traffic. A per-job network namespace would need `SYS_ADMIN`, and a
+  container-level egress rule cannot tell the supervisor (GitHub, the model upstream) from the engine
+  in the same container. The rules are proven before every engine starts, by a probe running as the
+  engine user against sentinel listeners (without `NET_ADMIN` not even the supervisor can list the
+  ruleset, so the probe is how a job verifies them); any other result is
+  `dynamic_isolation_self_check_failed` and no engine is started. The hosted egress gate (#82) is
+  still a separate requirement.
+- **Cleanup.** At the end of a job, on SIGTERM (the job loop's way to end a job on lease loss,
+  shutdown and timeout) and in the watchdog, the supervisor kills the engine's process group and then
+  every process of the engine user, also helpers that left the group with `setsid()`, removes the
+  user's processes and deletes the job directory (the rules are static and stay; the lease on the user and its group is released with the
+  process). A job that was killed without a chance to clean up (SIGKILL, an OOM kill) leaves its
+  engine user's processes behind; the job loop (root) sweeps the user after every Dynamic job process
+  has ended, and every job sweeps it again as its first step after taking the lease. If a sweep cannot
+  finish, the next job does not start (`dynamic_isolation_self_check_failed`).
+  A second Dynamic job on the same user is refused by the lease with the same code: run one Dynamic
+  job at a time per engine user.
+- **`NET_ADMIN` is held during startup only (#244).** The container is created with `NET_ADMIN` and
+  `SETPCAP` because the capabilities of a container are fixed at start. The runner's entry point
+  installs the static rules, then drops both from the bounding set and from its own sets, before its
+  event loop and before any other thread exists (a runner that cannot confirm the drop does not
+  start). From then on the loop, every job process, the supervisor and the engine have a bounding set
+  without them: `nft` fails for all of them, root included, and no process can add or remove a rule
+  for the life of the container. It is per container, not forever: the container restarts
+  (`restart: unless-stopped`) and gets `NET_ADMIN` again, so what a restart runs must not be
+  changeable by a compromised root supervisor. That is what the read-only root filesystem is for
+  (next item, #249).
+  If the rules cannot be installed (no `nft`, no `nf_tables`) the capabilities are dropped anyway and
+  every Dynamic job fails with `dynamic_isolation_self_check_failed` while Diff jobs keep running.
+  The fixed slot ports are checked at startup against the kernel's ephemeral port range
+  (`/proc/sys/net/ipv4/ip_local_port_range`); a port inside it, or a range that cannot be read,
+  means the rules are not installed and every Dynamic job fails closed. Keep the defaults (10180,
+  10181) or other ports below the range.
+  Only PID 1 (`tini`) keeps them. Do not run the container with `seccomp=unconfined`.
+- **Read-only root filesystem (#249).** `compose.dynamic.yml` runs the container with
+  `read_only: true`: nothing in the image can be written, not even by root with `DAC_OVERRIDE`, so
+  `nft`, `tini`, the pinned tools and pins, and the runner source stay as built and a restart cannot
+  run altered code with `NET_ADMIN`. The only writable paths are three private `tmpfs`, all
+  `noexec,nosuid,nodev`, empty again after every restart: `/tmp` (512 MiB, world-writable with the
+  sticky bit as before: job working directories, the per-job export, the engine's HOME, XDG and
+  TMPDIR), `/run` (1 MiB, root only: the identity leases) and `/home/runner` (64 MiB, owned by the
+  Diff job user 10001, mode 0700: its HOME). The engine user (10101) has **no new write path**: `/tmp`
+  is what it could write before, `/run` and `/home/runner` are closed to it, and the rest of the
+  filesystem is read-only (besides Docker's own `/dev/shm`, as before); the image smoke test checks
+  this against the same image without the layout. The three files Docker binds into `/etc`
+  (`hosts`, `hostname`, `resolv.conf`) are read-only too under `read_only`, which the image smoke
+  test checks. Because a tmpfs is
+  charged to the container's memory limit, `/tmp` counts against the 2 GiB (see "Capacity"): a
+  repository export is limited to 64 MiB and a preparation to 256 MiB, but a runaway engine that
+  fills `/tmp` takes memory, not disk, and ends in the OOM kill of the job, bounded at 512 MiB. Do
+  not add `volumes` or widen the tmpfs; the file test pins them. It is not a way to a read-only
+  Diff runner: only `compose.dynamic.yml` and the `runner-dynamic` service of `compose.coolify.yml` use it.
+- **Nothing mounted, nothing shared.** Besides those three tmpfs, `compose.dynamic.yml` has no
+  `volumes`, `network_mode`, `pid`, `ipc` or Docker socket (a file test fails otherwise); do not add any. The rules do not cover
+  AF_UNIX, and this is what keeps that gap empty. The privileged suite reads `/proc/net/unix` as the
+  engine user and asserts that no listener other than its own exists and that no Docker socket is
+  present.
+- **What it does not give.** The engine can still reach a service on `127.0.0.1` that belongs to the
+  engine user itself, a Unix socket (abstract or on a path) of the container's network namespace if
+  one is ever added (none exists, see above) and anything the supervisor deliberately exposes
+  there. The two ports are fixed, so a stranger holding one makes the job fail closed. With a concurrency above one the users and groups are leased
+  per job (the image would need one pair per slot); the default is one slot.
+- **Proof.** `runner/tests/privileged` runs as root with exactly the capability list above, in a
+  startup phase (the container's created-with set) and a job phase (after the production startup
+  step) (TESTING.md, "Privileged suite"); its CI step is part of the engine workflow.
+
+## The Dynamic runner image
+
+`runner/Dockerfile` builds two images from one shared base. The default target, `runtime`, is the
+PR-Agent-only runner and is the last stage, so a plain `docker build -f runner/Dockerfile .` gives
+it. The `dynamic` target adds:
+
+| Part | Where | How it is pinned |
+|---|---|---|
+| Stock OpenCode v1.19.0 (about 186 MB, 60 MB compressed), unmodified | `/usr/local/bin/opencode`, owned by root, mode 0755 | `runner/opencode-pin.json`: release asset, source commit, size and SHA-256 of the archive and of the executable. The build downloads through `runner/scripts/fetch_opencode.py`, which accepts only the pinned bytes and checks that the executable reports the pinned version |
+| ripgrep 14.1.1 (static musl release) | `/usr/local/bin/rg`, owned by root, mode 0755 | `runner/ripgrep-pin.json`, same checks (`runner/scripts/fetch_ripgrep.py`). The engine's grep and glob need it; without one the stock engine would download it at run time, which the runner never allows |
+| `nft` | Debian's signed `nftables` package | Not pinned, by decision: `apt` installs the version Debian's repository has at build time (like `tini`), so it does not follow the base image digest and two builds on different days can differ. An exact `nftables=<version>` would not be reproducible either, because the Debian mirrors drop superseded versions and the build would break at the next point release. The package is signed, root-owned and has no setuid file (the smoke test measures that). It installs the engine user's network rules once, at container start |
+| The engine user `engine` (uid and gid 10101, no home, no login shell, no other group) | `/etc/passwd` of the image | Fixed numeric ids, distinct from the Diff job user 10001 |
+| Both pin files | `/opt/code-reviewer/pins/`, owned by root | The runner's self-check compares the installed files with them |
+
+**Why a separate image and not one image.** The engine adds about 186 MB, and `nft`, `rg`, a second
+user and a deployment shape that needs root and eight capabilities are things a Diff-only
+installation never uses. A smaller image with fewer executables is a smaller attack surface, and the
+default runner can never advertise `opencode`: it has no engine, no engine user and no `nft`, and its
+smoke test asserts exactly that. Both images start as the unprivileged user 10001; the Dynamic image
+only becomes a root supervisor through `compose.dynamic.yml` (`user: "0:0"` plus the capability list).
+
+**What is trusted.** The build downloads from GitHub release URLs and accepts the bytes only if they
+equal the pinned size and SHA-256; at start the runner hashes the installed files again. Nothing at
+run time downloads anything (no `curl`, no package manager, no model-catalog fetch, no repository
+plugin discovery). The checksums say the files are the ones that were pinned, not that upstream is
+free of defects. `make check-licenses` audits the licences of the two binaries and of the runtime
+dependency closure of OpenCode's Bun lock at the pinned commit (`runner/opencode-bundled-licenses.json`);
+that closure is an upper bound of what Bun's bundler embedded, because the embedded set cannot be
+read from the binary offline.
+
+## The startup self-check
+
+When the Dynamic runner starts it first installs the engine user's static network rules and drops
+`NET_ADMIN` and `SETPCAP` for good (ADR 0003), then runs this check **before its first claim**, and
+only then does it send `opencode` in the claim. Every failure is "not advertised": the runner logs a
+stable reason (never a value) and keeps serving Diff jobs.
+
+| Reason (in the log) | What did not hold |
+|---|---|
+| `not_a_dynamic_runner` | No engine user is configured: this is the default runner (information, not a warning) |
+| `not_root_supervisor` | The process is not root; `compose.dynamic.yml` sets `user: "0:0"` |
+| `engine_user_invalid` | The engine user does not exist with its own group, or is root. Image users are 10101; do not change `RUNNER_DYNAMIC_ENGINE_UID`/`GID` without a matching image |
+| `network_rules_not_installed` | `nft` could not install the rules: no `NET_ADMIN` at container creation, no `nf_tables` in the host kernel, no `nft`, or a slot port inside the kernel's ephemeral range |
+| `capabilities_not_dropped` | The process still holds `NET_ADMIN` or `SETPCAP` |
+| `pin_unreadable` | A pin file in `/opt/code-reviewer/pins/` is missing (or a directory above it is), malformed or has no entry for this platform (an x64 image started on arm64) |
+| `pin_untrusted` | A pin file, or a directory above it up to `/`, is a link, is not owned by root or can be written by group or others |
+| `engine_binary_missing`, `ripgrep_missing` | The file (or a directory above it) is absent, the file is a link, or not executable. This is also what an image **built on arm64** reports: the build installs no engine where there is no pin (#264), so the image builds and the runner serves Diff jobs only |
+| `engine_binary_untrusted`, `ripgrep_untrusted` | The file, or a directory above it up to `/`, is not owned by root, is a link (directories) or can be written by group or others |
+| `engine_binary_checksum_mismatch`, `ripgrep_checksum_mismatch` | Size or SHA-256 differ from the pin |
+| `engine_version_mismatch` | Run offline as the engine user, the engine does not report the pinned version |
+| `network_probe_failed` | A probe run as the engine user could not reach the slot's proxy port, or could reach something else (another loopback service, another address, UDP). Also: a stranger holds the proxy port |
+
+The full log line is `Dynamic Review: opencode is not advertised, this runner serves Diff jobs only
+(dynamic_isolation_self_check_failed: <reason>)`; a passing check logs `Dynamic Review: opencode is
+advertised, the startup self-check passed`. A successful `--version` is one item of the list and
+proves nothing about isolation; what cannot be known at start (the sealed read-only export, the
+unreadable private state, the network again) is proven for every job before its engine starts, and a
+failure there ends that job with `dynamic_isolation_self_check_failed`.
+
+The loop hands the job process of a Dynamic job the engines it advertised, the verified engine
+command, the verified `rg` (the engine runs exactly that file, first on its `PATH`) and the
+operator's `RUNNER_DYNAMIC_CAPABILITIES`; nothing an operator sets under `RUNNER_OPENCODE_COMMAND`,
+`RUNNER_DYNAMIC_RIPGREP` or `RUNNER_ADVERTISED_ENGINES` reaches a job. A Dynamic job that arrives at
+a runner without `opencode` in that list is refused with `dynamic_engine_unavailable`.
+
+## The model
+
+Dynamic Review is model- and provider-agnostic. The default model is `deepseek/deepseek-v4.1-flash`,
+the id OpenRouter serves (the name is sent to the provider as it is). It is a default, not an
+allow-list, and there is no provider routing or fallback. The workspace's existing encrypted BYOK
+credential is used (no new key variable, no per-project key).
+
+The runner carries a **built-in description of the default model** `deepseek/deepseek-v4.1-flash`
+(verified on OpenRouter: tools, `tool_choice` and structured outputs), so the default model needs no
+variable, and a correction of it ships with the next image. It applies only when the job's model is
+exactly that id and `RUNNER_DYNAMIC_CAPABILITIES` is unset or empty. For any other model the operator
+describes what the selected model and destination can do in `RUNNER_DYNAMIC_CAPABILITIES` (trusted
+runner configuration, never repository input); one value per runner, so it must hold for every
+project's model on that instance:
+
+```json
+{"tool_choice_required": true, "structured_output": true, "max_output_tokens": 8192}
+```
+
+A value that is set always wins, including over the built-in description for the default model. If a
+job's model has no description (unset variable, another model), the value is not JSON, or it lacks a
+required feature, the run fails with `dynamic_model_features_unsupported`. There is no silent fallback
+to another model or to a Diff review.
+
+## Hard limits
+
+The limits are fixed in the code (`runner/src/code_reviewer_runner/dynamic_review/budget.py`); no
+project setting or pull request text widens them, and the wall-clock limit is the minimum of the
+epic's 600 seconds and the runner's job timeout.
+
+| Limit | Value |
+|---|---|
+| Wall clock | 600 s (lower when `RUNNER_JOB_TIMEOUT_SECONDS` is lower) |
+| Model calls | 30 |
+| Total tokens consumed (cumulative, not the context window) | 120,000 |
+| Tool calls | 200 |
+| Distinct files read | 100 |
+| One tool result | 64 KiB |
+| All tool results together | 4 MiB |
+| Untrusted input to the engine | 2 MiB |
+| Findings | 30 |
+
+A limit hit ends the run with `dynamic_budget_exceeded`; a run whose usage cannot be established ends
+with `dynamic_accounting_failed`. The previous summary comment is preserved in both cases. The
+tool, file and result-byte limits are enforced at the model proxy, before the request is forwarded
+(#197 part 2a): a model request whose history exceeds one of them never reaches the provider.
+
+## Errors an operator sees
+
+| Code | Meaning | What to check |
+|---|---|---|
+| `dynamic_review_disabled` | The instance gate is off | Turn the gate on (below) when the rollout is ready |
+| `no_capable_runner` | No runner advertised `opencode` within the timeout | Is a Dynamic runner running, and did its self-check pass? (`docker compose logs runner-dynamic`) |
+| `dynamic_engine_unavailable` | The runner got a Dynamic job but has no engine | The job should only reach a capable runner; report it |
+| `dynamic_isolation_self_check_failed` | The startup self-check did not prove user, export and network | The runner logs the failed property, never a value |
+| `dynamic_model_features_unsupported` | The model or destination lacks tool choice or structured output | `RUNNER_DYNAMIC_CAPABILITIES`, the model |
+| `lease_lost` | Right before the summary would have been written the job was no longer held by this runner (lease lost, job cancelled), or the app could not be asked; nothing was written | Normal after a requeue or a cancel. Often: the app was unreachable at that moment; the next push reviews again |
+| `dynamic_config_invalid` | Model, skill or limits of the job are unusable | The project's settings page |
+| `dynamic_budget_exceeded`, `dynamic_accounting_failed`, `dynamic_policy_violation` | A hard limit or rule stopped the run | The Runs page |
+
+Switching a project from Dynamic to Diff (or back) starts a fresh summary comment; findings are not
+carried across kinds (lead decision of 2026-10-13, see #199). Cancelling a run kills its engine's
+whole process group and removes its temporary directory.
+
+## The opt-in runner (`compose.dynamic.yml`)
+
+`compose.dynamic.yml` is an override file that adds a second runner, `runner-dynamic`, next to the
+Diff runner of `compose.yml`. It builds the `dynamic` target from the checkout (the Dynamic image is
+not published to GHCR):
+
+```sh
+docker compose -f compose.yml -f compose.dynamic.yml up -d --build --wait
+```
+
+| Setting | Default | Why |
+|---|---|---|
+| `RUNNER_DYNAMIC_CONCURRENCY` | 1 | One Dynamic job at a time until the memory matrix below exists |
+| `RUNNER_DYNAMIC_MEMORY_LIMIT` | `2g` | At least 1 GiB per Dynamic slot plus the runner and proxy reserve (the spike's conservative, unvalidated proposal) |
+| `RUNNER_DYNAMIC_MEMORY_RESERVATION` | `1536m` | The soft reservation under the limit |
+| `RUNNER_DYNAMIC_IMAGE` | `code-reviewer-runner-dynamic:local` | Name of the image compose builds; set it to use a prebuilt one |
+| `RUNNER_DYNAMIC_CAPABILITIES` | empty | The model description (see "The model"); empty applies the description built into the runner for the default model only, and makes a job of any other model fail with `dynamic_model_features_unsupported` |
+
+The container runs the supervisor as root with only the capabilities of "The engine boundary", sets
+`no-new-privileges`, bounds its process count (512) and has no swap, so a memory peak shows up as an
+OOM kill of the job rather than as a slow host. It publishes no port and reaches only the app. The
+slot's proxy and engine ports are fixed (10180, 10181); they, the engine user and the Diff job user
+belong to the image and the file, not to settings. Do not set `RUNNER_OPENCODE_COMMAND` by hand: the
+runner ignores it.
+
+With one slot (`RUNNER_DYNAMIC_CONCURRENCY=1`) a long Diff job can occupy the Dynamic runner's only
+slot, because that runner also serves Diff jobs. A Dynamic job can then end with `no_capable_runner`
+although a capable runner exists. Keep the Diff runner of `compose.yml` for Diff work and do not raise
+the concurrency before the memory matrix exists; a later change can keep Diff jobs off this runner.
+
+## Activation, step by step
+
+This is the order to follow; every step can be stopped and rolled back. Nothing in it is done by
+installing the files.
+
+**Deploy order.** `base.attemptedShas` (#255) is only sent when it is not empty and
+`base.attemptedShasTruncated` (#257) only when it is true; a runner from before the respective issue
+rejects the key (its job contract is closed). Update the app and the Dynamic runner image together, or
+the runner first. A newer runner with an older app is safe: an absent key means none and false.
+
+**Before you start.** A Linux Docker host (Docker Engine with Compose v2) whose kernel has
+`nf_tables` (every current distribution kernel; the self-check tells you when it does not), that can
+give the Dynamic runner container at least 2 GiB; an app that is already running with the workspace's
+LLM key entered (Settings, LLM access; Dynamic Review reuses it, there is no other key); and, for the
+model you choose, the knowledge of what it supports (tool choice "required" and structured output).
+
+1. **Upgrade every app instance** to the version that routes by `review_kind`
+   (`contracts/README.md`, "Rolling out Dynamic Review"). A previous-release app on the same database
+   could hand a Dynamic row to a runner as an untagged Diff job. Do not continue until all instances
+   are upgraded.
+2. **Describe the model** in `.env` only if projects use a model other than the default:
+   `RUNNER_DYNAMIC_CAPABILITIES={"tool_choice_required": true, "structured_output": true,
+   "max_output_tokens": 8192}` (use what your model and destination really support; it applies to every
+   Dynamic job of this runner). The default model needs nothing. Review the memory settings of the
+   table above.
+3. **Deploy the Dynamic runner:**
+   `docker compose -f compose.yml -f compose.dynamic.yml up -d --build --wait`.
+   The first build downloads the pinned engine (about 60 MB) and verifies it; if the bytes are not the
+   pinned ones the build fails and the Dynamic runner is not started. Containers that already run
+   (the app, the Diff runner) stay up: only the new service is missing.
+4. **Verify the self-check.** `docker compose logs runner-dynamic | grep "Dynamic Review"` must show
+   `Dynamic Review: opencode is advertised, the startup self-check passed`. If it shows `opencode is
+   not advertised` the reason is in the same line: see the table in "The startup self-check". Fix it
+   and recreate the container. Do not go on while it is not advertised. The Diff runner and the Diff
+   jobs of this runner are unaffected either way.
+5. **Turn the gate on.** As instance admin open **Admin, Setup, Instance, Dynamic Review**, tick *Allow
+   Dynamic Review on this instance*, confirm that step 1 is done and save. The control is server side
+   and admin only; it uses the instance settings setter (lock, then cancellation), never raw SQL.
+   Nothing changes for existing projects: all are Diff until step 6.
+6. **Choose one project to try it on:** set its review kind to Dynamic on its settings page. Open a
+   pull request (or use Review now) and look at the Run: the kind, the model and a result URL are
+   visible, and the previous successful summary stays in place if a run fails.
+
+**Rollback** (the full procedure and its reasons are in `contracts/README.md`):
+
+1. Switch the gate off in the same admin card. That stops new Dynamic jobs and cancels the waiting ones
+   with `dynamic_review_disabled`; **running jobs finish** on their leases. Projects set to Dynamic
+   get a visibly failed run, never a silent Diff review.
+2. To stop the Dynamic runner: `docker compose -f compose.yml -f compose.dynamic.yml stop runner-dynamic`
+   (it ends running jobs within the 90-second grace period) and, to remove it,
+   `docker compose -f compose.yml -f compose.dynamic.yml rm -f runner-dynamic`. The Diff runner and
+   the data are not touched.
+3. Before any **downgrade of the app**, quiesce the runners, check that no Dynamic engine process is
+   left and that no Dynamic job is `queued` or `running`, as `contracts/README.md` says. Switching a
+   project from Dynamic back to Diff starts a fresh summary comment.
+
+**Coolify.** The `runner-dynamic` service is part of `compose.coolify.yml` (#264): the existing
+Coolify resource builds and starts it with the app and the Diff runner after the next release, and a
+file test keeps it equal to the service of `compose.dynamic.yml`. It does nothing until the gate is
+turned on (it also takes Diff jobs, see "Capacity"), and the runner has the capability descriptor of the default model built in. Read the section
+"Dynamic Review runner" of `docs/deployment-coolify.md` first. It has **not been tested on a real
+Coolify instance**.
+
+## Capacity: slots, memory and what is not measured
+
+The Dynamic runner is also a Diff runner: it keeps `pr-agent` among its engines (as every runner
+does), so the app hands it Diff jobs as well. Its one slot is shared: a Diff job (up to
+`RUNNER_JOB_TIMEOUT_SECONDS`, 20 minutes by default) can occupy it once the gate is on, and a Dynamic
+run then waits for it. Dynamic jobs wait for the gate and for an advertising runner; Diff jobs are
+shared by both runners, and the total Diff capacity is the Diff runner's slots plus this one.
+
+The shipped defaults are **one Dynamic slot** (`RUNNER_DYNAMIC_CONCURRENCY=1`) and a **2 GiB limit with
+1.5 GiB reserved and no swap**: at least 1 GiB per slot plus the runner and proxy reserve. That is the
+spike's conservative proposal, not a measurement. The spike's stock trace (11 model calls, 5.8 s,
+596.57 MiB peak RSS of the engine process with fake model answers) is **not** a capacity figure: it
+excludes the export's page cache, the proxy, the runner and helper processes, and it used a tiny
+repository. Do not raise the concurrency, and do not lower the limit below 1 GiB per slot plus the
+reserve, until the following has been measured on your deployment target. The read-only root
+filesystem (#249) puts the job working directories in a 512 MiB `tmpfs` (`/tmp`), which is charged
+to this limit like any other memory: it is part of the figure to measure, not extra.
+
+**What an out-of-memory kill does.** With no swap, a peak above the limit makes the kernel kill
+processes of the container. If the engine or the job process is killed, the loop ends the job, the
+job's engine-user processes are swept (also before the next job starts), the job directory is removed
+by the loop, and the run fails; the previous summary comment is untouched. If the kernel kills the
+runner's loop or PID 1, Docker restarts the container (`restart: unless-stopped`), the lease on the job
+expires and the job is taken back or fails per the normal rules.
+
+**Manual measurement (not part of CI; it needs a real host).** Record the host, the kernel, Docker's
+version, the cgroup version and the image digest with the result.
+
+1. Start the Dynamic runner as in the activation steps on a test instance with a test repository at
+   the size you want to support (the checkout limits are in `docs/dynamic-checkout.md`) and a model
+   endpoint you control.
+2. Run a worst-case job: the largest export and the largest tool-result envelope the limits above
+   allow. Read the container's cgroup peak, not process RSS: with cgroup v2,
+   `docker exec <runner-dynamic> cat /sys/fs/cgroup/memory.peak` and `memory.events` (`oom_kill`);
+   with v1, `memory.max_usage_in_bytes`. `docker stats` is a coarse cross-check.
+3. Measure one slot only. The shipped image has one engine user and one pair of ports, so a second
+   concurrent Dynamic job is refused by the lease (`dynamic_isolation_self_check_failed`);
+   concurrency above one needs a pair of ports, an engine user and a ruleset per slot, which is not
+   shipped.
+4. Inject an OOM kill and an engine kill (`docker kill --signal=SIGKILL` of the engine's process, or a
+   deliberately small `RUNNER_DYNAMIC_MEMORY_LIMIT`) and check that the previous comment is preserved,
+   no process of the engine user and no job directory survives (`docker exec <runner-dynamic> ps -eo
+   user,pid,cmd`, `ls /tmp`).
+5. Write the measured peaks, the host and the recommended concurrency per GiB into this page. Until
+   then no recommendation beyond the defaults exists. The byte-to-token calibration of the token cap
+   (#235) uses the same runs.
+
+No prices, quality or latency claim is made here; the offline benchmark plan is in the spike
+write-up and needs a separately authorised run.
+
+## Known limitations and residual risks
+
+These are known and accepted for the switch-on decision, or tracked in an issue. They are not hidden
+by the defaults.
+
+- **A run that wrote the summary and then ended without success (#255).** The publisher refuses a
+  comment whose recorded head it cannot account for, with `review_not_published` (fail-closed on
+  purpose, #199). A run can edit the comment and then fail (the watchdog or `SIGTERM` fires after the
+  write, the lease is lost, the completion report is lost): the comment says head A while the app has
+  no succeeded review of A. The claim therefore carries `base.attemptedShas`: the heads of the
+  pull request's earlier jobs of the same kind that *ran* and did not succeed (`failed`, or at least
+  one lost attempt; a job superseded or cancelled while still waiting never ran and is not counted),
+  created after the last succeeded job and before the claimed one (newest first, at most 20, the key
+  is left out when there are none). The publisher accepts such a head next to the job's own head and
+  `previousReviewedSha`, reconciles from that state and edits the same comment; the next success
+  makes it the previous review again. A head the app never attempted (foreign, tampered, newer) is
+  still refused.
+- **The attempted-heads list is bounded, so a truncated claim recovers with a full review (#257).**
+  After more than 20 distinct heads that ran and failed *without* a success in between, an older head
+  of the summary comment can fall out of the list. The app then also sends `base.attemptedShasTruncated:
+  true` (left out otherwise), and a state head the job cannot account for on the **bot-owned** summary
+  (author and exact identity marker, and a valid state) no longer ends in `review_not_published`: the
+  run is a full review (the checkout is full whatever `comparison` the claim declares), the old state
+  is dropped (nothing of it is carried over as active or resolved, nothing is resolved by inference)
+  and the same comment is rewritten. The history of resolved findings restarts **and the active
+  findings are re-derived from scratch too**: a finding of the earlier summary is only on the pull
+  request again if this run finds it. The rewritten summary says so in a one-shot notice ("Full
+  review after a state reset: ..."), its footer no longer claims the previous state is kept, and the
+  result log of the run carries `state_reset_attempted_shas_truncated` (visible in Runs). The notice
+  is not part of the state, so the next normal run renders without it. A comment that is not the bot's, a corrupt state and a claim that was not
+  truncated stay fail-closed. Residual risk: on a truncated claim a late result of an older run can no
+  longer be told from a lost head and may overwrite a newer review; the next push reviews again.
+  Since #260 the run asks for its lease right before it writes (see "How a Dynamic job reaches an
+  engine"), so only a run that loses the lease *after* that check and before its write lands (a few
+  requests of GitHub) can still overwrite; the check is not a lock and the write is not fenced by the
+  app. The check also makes a run on a plain (not truncated) claim publish nothing as a zombie.
+  A lost edit response is recognised by re-reading the comment (it must hold exactly the body sent).
+- **Hidden Unicode tag characters in repository files reach the model untouched (#247).** An attacker
+  who controls repository text can hide instructions in tag characters.
+- **A restarted container runs with `NET_ADMIN` again, by design (#249).** The capability is dropped
+  per container lifetime. Because the root filesystem is read-only, a compromised root supervisor
+  that crashes the container cannot have changed `nft`, `tini` or the runner source for the restart;
+  what it can still do is bounded by the three tmpfs, which are empty after the restart. PID 1
+  (`tini`) still holds the two capabilities, and the supervisor's startup is the same code as before.
+- **The byte-to-token estimate of the token cap is uncalibrated (#235).** The cap is preventive and
+  conservative, but its calibration against real tokenizers is open.
+- **Nested `AGENTS.md` and similar files** in the repository can influence the model. The core marks
+  repository content as untrusted data and the engine has no write, execute or general-network
+  capability, but there is no guarantee of model resistance.
+- **The boundary is the container, not a sandbox.** The engine user's network is confined by nft rules
+  that cover TCP, UDP and IPv6 but not AF_UNIX (kept empty by mounting and sharing nothing), and the
+  supervisor is a root process that parses untrusted Git objects and HTTP. See ADR 0003.
+- **Supported hosts.** Linux/amd64 (x86_64) glibc images only, on a Docker host whose kernel has
+  `nf_tables`. **Dynamic Review needs x86_64.** On an arm64 host the stack still builds and deploys,
+  but the Dynamic image has no engine (the build skips the unpinned download, #264), the runner reports
+  `engine_binary_missing` and serves Diff jobs only: Dynamic stays unavailable. Nothing is tested on
+  rootless Docker, user-namespace remapping or Podman. Coolify support is written down but untested.
+- **Capacity beyond one slot is unknown** (see above).
+- **Hosted activation needs the egress gate (#82).** It is not permission for unrestricted
+  self-hosted agent egress either.
+
+## Not covered
+
+- The firewall of hosted runners (#82) is a separate gate for hosted activation, not a permission
+  for unrestricted self-hosted agent egress.
+- Running repository code (build, tests) is out of scope (#130 and #82).
+- Guarantees about model behaviour: see "Known limitations and residual risks".

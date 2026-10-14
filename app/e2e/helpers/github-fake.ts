@@ -151,17 +151,17 @@ export async function joinWorkspace(
 }
 
 /** The button of the user menu in the header, named after the person. */
-export function userMenuButton(page: Page, account: GithubAccount) {
+export function userMenuButton(page: Page, account: { name: string }) {
   return page.getByRole("button", { name: account.name });
 }
 
 /** Opens the user menu and presses "Sign out". */
 export async function signOutThroughTheMenu(
   page: Page,
-  account: GithubAccount,
+  account: { name: string },
 ): Promise<void> {
   await userMenuButton(page, account).click();
-  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.getByRole("menuitem", { name: "Sign out" }).click();
 }
 
 export type GithubInstallation = {
@@ -257,6 +257,8 @@ export type GithubPullRequest = {
   /** The head commit. Derived from the number when omitted, so every pull request has its own. */
   headSha?: string;
   author?: { login: string; id: number };
+  /** The description. Empty when omitted. */
+  body?: string;
 };
 
 /**
@@ -283,6 +285,22 @@ export async function addGithubPullRequest(
         },
       },
     },
+  );
+  expect(response.status()).toBe(201);
+}
+
+/**
+ * Has the fake GitHub serve a Git repository (a `.git` directory made with `fakes/github/git-fixture.ts`) over
+ * smart HTTP as `<fake>/<owner>/<name>.git`, the way the runner's checkout reads a pull request.
+ */
+export async function addGithubGitRepository(
+  request: APIRequestContext,
+  repositoryFullName: string,
+  path: string,
+): Promise<void> {
+  const response = await request.post(
+    `${e2eEnv.githubUrl}/__fake/git-repositories`,
+    { data: { repository: repositoryFullName, path } },
   );
   expect(response.status()).toBe(201);
 }

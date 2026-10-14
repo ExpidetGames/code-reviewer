@@ -20,6 +20,14 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
     "The pull request was closed before this run could start.",
   pull_request_draft:
     "The pull request was turned into a draft before this run could start.",
+  command_removed:
+    "This command was removed from the product, so the waiting run was cancelled.",
+  review_kind_changed:
+    "The project's review kind was changed before this run could start, so the waiting run was cancelled.",
+  no_capable_runner:
+    "No runner that can run this kind of review picked up the run within the time limit, so it was cancelled. It will run again on the next push or review request.",
+  dynamic_review_disabled:
+    "Dynamic Review is not switched on for this instance yet, so this run could not start. Ask whoever runs the server to turn it on, or switch the project to Diff Review on its settings page.",
 
   // The claim of the runner API
   llm_not_configured:
@@ -36,8 +44,7 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
   git_access_failed:
     "The server could not get access to the repository on GitHub.",
   pr_not_found: "The pull request could not be found on GitHub.",
-  job_args_invalid:
-    "The question or arguments of this command could not be used.",
+  job_args_invalid: "The command or arguments of this run could not be used.",
   job_env_invalid:
     "The review settings of this project could not be used for this run. Check them on the project page.",
   job_llm_options_invalid:
@@ -59,7 +66,7 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
   runner_error: "The runner hit an unexpected error.",
   command_failed: "The review engine reported an error.",
   review_not_published:
-    "The review engine finished, but no review was posted on the pull request.",
+    "No review was posted on the pull request. Either the engine did not post one, or the earlier review on the pull request belongs to a commit this run cannot account for.",
   review_state_truncated:
     "The review was posted, but it grew past GitHub's comment size limit, so earlier findings are no longer tracked.",
   review_text_truncated:
@@ -82,6 +89,24 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
     "The AI model answered in a form the review engine could not use.",
   model_unknown: "The configured model is not known to the AI provider.",
   runner_shutdown: "The runner was shut down while it worked on this run.",
+  dynamic_engine_unavailable:
+    "This run needs the Dynamic Review engine, which no runner that answered has available yet.",
+  dynamic_isolation_self_check_failed:
+    "The Dynamic Review engine could not prove its isolation is safe, so no runner advertises it.",
+  dynamic_config_invalid:
+    "The Dynamic Review settings of this project could not be used for this run. Check them on the project page.",
+  checkout_incomplete:
+    "The Dynamic Review could not prepare the repository checkout, so it was not started.",
+  dynamic_policy_violation:
+    "The Dynamic Review stopped because it would have broken a safety rule.",
+  dynamic_budget_exceeded:
+    "The Dynamic Review used more than its allowed budget and was stopped.",
+  dynamic_accounting_failed:
+    "The Dynamic Review's model usage could not be accounted for, so it was stopped.",
+  dynamic_model_features_unsupported:
+    "The configured model does not support the features Dynamic Review requires. Choose another model.",
+  lease_lost:
+    "When the review was ready, the job was no longer held by its runner or this could not be confirmed, so nothing was written. The next push reviews again.",
   unknown: "The run failed for a reason this version does not know.",
 };
 

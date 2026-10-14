@@ -6,6 +6,7 @@ import "server-only";
 import { createAppSettingsRepository } from "../db/repositories/app-settings-repository.ts";
 import { createProjectsRepository } from "../db/repositories/projects-repository.ts";
 import { getDatabase } from "../db/startup.ts";
+import { createJobReviewSettingsHooks } from "../jobs/review-settings-hooks.ts";
 import { configuredLlmModel } from "../llm/config.ts";
 import {
   createReviewSettingsService,
@@ -21,6 +22,8 @@ export function reviewSettingsServiceFor(
   return createReviewSettingsService({
     appSettings: createAppSettingsRepository(db, workspaceId),
     projects: createProjectsRepository(db, workspaceId),
+    // #195: a kind change cancels the project's waiting review jobs in this transaction.
+    hooks: createJobReviewSettingsHooks(workspaceId),
     // Read on every call, so a changed LLM_MODEL reaches the next review.
     builtIn: () => builtInReviewSettings(configuredLlmModel(process.env)),
   });

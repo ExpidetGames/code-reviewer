@@ -8,12 +8,23 @@ import { accessSync, constants, statSync } from "node:fs";
 import { dirname } from "node:path";
 import BetterSqlite3 from "better-sqlite3";
 import { Kysely } from "kysely";
-import type { DatabaseConfig } from "./config.ts";
+import type { DatabaseConfig, SqliteDatabaseConfig } from "./config.ts";
 import { AppSqliteDialect } from "./dialect.ts";
 import { DatabaseError, describeError, errorCode } from "./errors.ts";
+import { openPostgresDatabase } from "./postgres.ts";
 import type { Database } from "./schema.ts";
 
+/**
+ * Opens the database named by the configuration: a SQLite file or an external Postgres. The rest of
+ * the app never learns which one it is, except through `config.driver` where a dialect difference
+ * shows (the claim).
+ */
 export function openDatabase(config: DatabaseConfig): Kysely<Database> {
+  if (config.driver === "postgres") return openPostgresDatabase(config);
+  return openSqliteDatabase(config);
+}
+
+function openSqliteDatabase(config: SqliteDatabaseConfig): Kysely<Database> {
   assertDirectoryUsable(config.path);
 
   let sqlite: BetterSqlite3.Database | undefined;

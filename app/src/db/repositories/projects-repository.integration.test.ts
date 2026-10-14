@@ -600,6 +600,51 @@ describe("updating the settings of a project", () => {
       maxFindings: 3,
     });
   });
+
+  // #194-T07
+  it("computes the next settings from the stored ones in one transaction", async () => {
+    const { projects, first } = await setup();
+    await projects.activate(first.id);
+    await projects.updateSettings(first.id, {
+      maxFindings: 2,
+      reviewKind: "dynamic",
+    });
+
+    const updated = await projects.updateSettingsWith(first.id, (current) => ({
+      ...current,
+      maxFindings: 9,
+    }));
+
+    expect(updated?.settings).toEqual({
+      maxFindings: 9,
+      reviewKind: "dynamic",
+    });
+    expect((await projects.get(first.id))?.settings).toEqual({
+      maxFindings: 9,
+      reviewKind: "dynamic",
+    });
+  });
+
+  // #194-T07
+  it("rolls a settings write back when the change hook rejects", async () => {
+    const { projects, first } = await setup();
+    await projects.activate(first.id);
+    await projects.updateSettings(first.id, { maxFindings: 2 });
+
+    await expect(
+      projects.updateSettingsWith(
+        first.id,
+        () => ({ maxFindings: 9 }),
+        async () => {
+          throw new Error("hook failed");
+        },
+      ),
+    ).rejects.toThrow("hook failed");
+
+    expect((await projects.get(first.id))?.settings).toEqual({
+      maxFindings: 2,
+    });
+  });
 });
 
 describe("settings that are not valid JSON", () => {

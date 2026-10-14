@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // @vitest-environment jsdom
-// Pins down the list of runs: what a row shows, the empty states, text from outside rendered as text,
-// and the polling (the status moves on without a reload; a failed update keeps the last data).
+// Pins down the list of runs: what a table row shows, the empty states, the capped footer, text from
+// outside rendered as text, and the polling (the status moves on without a reload; a failed update
+// keeps the last data).
 import { act, cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RequestResult } from "../../ui/json-request.ts";
@@ -27,6 +28,7 @@ function run(overrides: Partial<RunRowView> = {}): RunRowView {
     prNumber: 7,
     prUrl: "https://github.com/acme/widgets/pull/7",
     command: "review",
+    reviewKind: "diff",
     triggerKind: "webhook",
     trigger: "Automatic",
     status: "succeeded",
@@ -51,6 +53,13 @@ function snapshot(
   };
 }
 
+/** The data rows of the runs table, without its header row. */
+function dataRows(): HTMLElement[] {
+  return within(screen.getByRole("table", { name: "Runs" }))
+    .getAllByRole("row")
+    .slice(1);
+}
+
 function apiAnswering(
   answers: RequestResult<RunsSnapshot>[],
 ): RunsApi & { list: ReturnType<typeof vi.fn> } {
@@ -69,6 +78,53 @@ const failure: RequestResult<RunsSnapshot> = {
 const answer = (data: RunsSnapshot): RequestResult<RunsSnapshot> => ({
   ok: true,
   data,
+});
+
+describe("the review kind in the list", () => {
+  // #200
+  it("marks a Dynamic Review run with a small badge and leaves the default Diff Review runs unmarked", () => {
+    render(
+      <RunsList
+        workspaceSlug="acme"
+        initial={snapshot([
+          run({ id: "diff-run" }),
+          run({ id: "dynamic-run", reviewKind: "dynamic" }),
+        ])}
+        filter={{}}
+        api={apiAnswering([])}
+      />,
+    );
+
+    const [diff, dynamic] = dataRows();
+    expect(
+      within(diff as HTMLElement).queryByText("Dynamic Review"),
+    ).toBeNull();
+    expect(
+      within(dynamic as HTMLElement).getByText("Dynamic Review"),
+    ).toBeTruthy();
+  });
+
+  // #200
+  it("shows the sentence of a Dynamic code in the row of a run that failed with it", () => {
+    render(
+      <RunsList
+        workspaceSlug="acme"
+        initial={snapshot([
+          run({
+            reviewKind: "dynamic",
+            status: "failed",
+            problem: "Dynamic Review is not switched on for this instance yet.",
+          }),
+        ])}
+        filter={{}}
+        api={apiAnswering([])}
+      />,
+    );
+
+    expect(
+      within(dataRows()[0] as HTMLElement).getByText(/not switched on/),
+    ).toBeTruthy();
+  });
 });
 
 describe("the rows of the list", () => {
@@ -96,25 +152,48 @@ describe("the rows of the list", () => {
       />,
     );
 
-    const rows = within(
-      screen.getByRole("list", { name: "Runs" }),
-    ).getAllByRole("listitem");
+    const rows = dataRows();
     expect(rows).toHaveLength(2);
     const [first, second] = rows;
-    expect(first?.textContent).toContain("acme/widgets #7");
+    expect(first?.textContent).toContain("acme/widgets");
+    expect(first?.textContent).toContain("#7");
     expect(first?.textContent).toContain("/review");
     expect(first?.textContent).toContain("Succeeded");
     expect(first?.textContent).toContain("2026-10-10 12:00 UTC");
-    expect(second?.textContent).toContain("acme/gadgets #9");
+    expect(second?.textContent).toContain("acme/gadgets");
     expect(second?.textContent).toContain("/improve");
     expect(second?.textContent).toContain("Comment by alice");
     expect(second?.textContent).toContain("Failed");
     expect(second?.textContent).toContain("time limit");
     expect(
       within(first as HTMLElement)
-        .getByRole("link")
+        .getByRole("link", { name: "acme/widgets #7" })
         .getAttribute("href"),
     ).toBe("/w/acme/runs/6b1f0a52-5f43-4a53-9d0e-8d4a0f1c2e11");
+  });
+
+  // #175 review: two runs of one project must be told apart in a screen reader's link list.
+  it("names each run link with its project and pull request", () => {
+    render(
+      <RunsList
+        workspaceSlug="acme"
+        initial={snapshot([
+          run({ id: "a", prNumber: 7 }),
+          run({ id: "b", prNumber: 9 }),
+        ])}
+        filter={{}}
+        api={apiAnswering([])}
+      />,
+    );
+
+    const links = screen.getAllByRole("link", { name: /^acme\/widgets #/ });
+    expect(links.map((link) => link.getAttribute("aria-label"))).toEqual([
+      "acme/widgets #7",
+      "acme/widgets #9",
+    ]);
+    expect(new Set(links.map((link) => link.getAttribute("href"))).size).toBe(
+      2,
+    );
   });
 
   it("tell a waiting run from one that started, and show how long a run took", () => {
@@ -142,7 +221,7 @@ describe("the rows of the list", () => {
       />,
     );
 
-    const [waiting, going, done] = screen.getAllByRole("listitem");
+    const [waiting, going, done] = dataRows();
     expect(waiting?.textContent).toContain(
       "Waiting since 2026-10-10 12:00 UTC",
     );
@@ -151,7 +230,8 @@ describe("the rows of the list", () => {
     expect(done?.textContent).toContain("Took 3 min 05 s");
   });
 
-  it("say when the list is cut off", () => {
+  // #175-T02
+  it("says the list is capped in a footer line, not in a row", () => {
     render(
       <RunsList
         workspaceSlug="acme"
@@ -161,7 +241,10 @@ describe("the rows of the list", () => {
       />,
     );
 
-    expect(screen.getByText(/Only the newest 1 runs are shown/)).toBeTruthy();
+    const note = screen.getByText(/Only the newest 1 runs are shown/);
+    expect(note.tagName).toBe("P");
+    expect(note.closest("table")).toBeNull();
+    expect(dataRows()).toHaveLength(1);
   });
 
   // CR-35-T13
@@ -190,7 +273,7 @@ describe("the rows of the list", () => {
 
 describe("the empty list", () => {
   // CR-35-T03
-  it("explains that there are no runs yet", () => {
+  it("explains that there are no runs yet and offers one action", () => {
     render(
       <RunsList
         workspaceSlug="acme"
@@ -201,7 +284,10 @@ describe("the empty list", () => {
     );
 
     expect(screen.getByRole("heading", { name: "No runs yet" })).toBeTruthy();
-    expect(screen.queryByRole("link", { name: "Reset filter" })).toBeNull();
+    expect(
+      screen.getByRole("link", { name: "Open projects" }).getAttribute("href"),
+    ).toBe("/w/acme/projects");
+    expect(screen.queryByRole("table")).toBeNull();
   });
 
   // CR-35-T03
@@ -341,7 +427,7 @@ describe("polling the list", () => {
     expect(screen.getByText("Waiting")).toBeTruthy();
 
     await pass(3000);
-    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe("");
     expect(screen.getByText("Succeeded")).toBeTruthy();
   });
 

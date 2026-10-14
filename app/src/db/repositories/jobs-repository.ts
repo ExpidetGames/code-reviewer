@@ -12,9 +12,28 @@
 // database take the write lock up front (`begin immediate`, see `dialect.ts`), so the check "is there
 // a job already?" and the insert that follows it cannot be separated by another writer.
 import "server-only";
-import type { Kysely } from "kysely";
-import { REVIEW_COMMANDS, type JsonValue } from "../../integrations/types.ts";
+import {
+  lockDynamicReviewGate,
+  lockJobRowsInOrder,
+} from "../dynamic-review-lock.ts";
+import type { Kysely, Selectable } from "kysely";
+import {
+  STORED_REVIEW_COMMANDS,
+  type JsonValue,
+} from "../../integrations/types.ts";
+import {
+  PROJECT_REVIEW_KINDS,
+  type ProjectReviewKind,
+} from "../../review-settings/settings.ts";
 import type { ValidEnqueueInput } from "../../jobs/job-input.ts";
+import {
+  createInstanceDynamicReviewGate,
+  type DynamicReviewGate,
+} from "../../jobs/dynamic-review-gate.ts";
+import {
+  createStoredReviewKindResolver,
+  type ReviewKindResolver,
+} from "../../jobs/review-kind.ts";
 import {
   SLOT_HOLDING_STATUSES,
   isJobStatus,
@@ -27,6 +46,7 @@ import {
   type Job,
   type JobErrorCode,
 } from "../../jobs/job-types.ts";
+import { databaseDriver } from "../driver.ts";
 import { decodeJson, formatTimestamp } from "../codecs.ts";
 import type { Database, JobsTable } from "../schema.ts";
 import type { WorkspaceId } from "../workspace-scope.ts";
@@ -42,9 +62,38 @@ export type JobListFilter = {
 export const JOB_LIST_DEFAULT_LIMIT = 100;
 export const JOB_LIST_MAX_LIMIT = 500;
 
+/** The most heads a claim names as attempted (#255); the contract bounds the list by the same number. */
+export const MAX_ATTEMPTED_SHAS = 20;
+// Rows read before the heads are made distinct; many reruns of one head must not hide an older one.
+const ATTEMPTED_SCAN_LIMIT = 200;
+
+/**
+ * The heads a claim names as attempted (#255), newest first and bounded. `truncated` (#257) says that
+ * more distinct heads qualified than `shas` holds, or that the scan filled up before it could tell.
+ */
+export type AttemptedShas = { shas: string[]; truncated: boolean };
+
+/** The lookup of the last reviewed head for one pull request and review kind (#199). */
+export type PreviousReviewedShaInput = {
+  repositoryId: string;
+  prNumber: number;
+  reviewKind: ProjectReviewKind;
+  /** The claimed job itself never counts as its own previous review. */
+  excludeJobId: string;
+};
+
 export type JobsRepositoryOptions = {
   now?: () => Date;
   newId?: () => string;
+  /**
+   * #195: resolves a job's review kind from the project's settings, inside the enqueue transaction so
+   * it cannot race a settings change. Defaults to the stored project settings.
+   */
+  reviewKind?: ReviewKindResolver;
+  /**
+   * #195 rollout gate: whether Dynamic Review may be queued. Default: the instance setting, off.
+   */
+  dynamicReviewEnabled?: DynamicReviewGate;
 };
 
 export type JobsRepository = {
@@ -52,6 +101,11 @@ export type JobsRepository = {
   enqueue(input: ValidEnqueueInput): Promise<EnqueueResult>;
   /** Cancels every waiting job of a repository (its project was deactivated); returns how many. */
   cancelWaitingForRepository(repositoryId: string): Promise<number>;
+  /**
+   * Cancels every waiting job of a repository because its project's review kind changed (#195):
+   * they were queued for the other engine. Running jobs finish.
+   */
+  cancelWaitingForReviewKindChange(repositoryId: string): Promise<number>;
   /** Cancels the waiting jobs of one pull request (it was closed); returns how many. */
   discardWaitingForPr(repositoryId: string, prNumber: number): Promise<number>;
   discardWaitingAutomaticForPr(
@@ -60,6 +114,25 @@ export type JobsRepository = {
   ): Promise<number>;
   get(id: string): Promise<Job | undefined>;
   list(filter?: JobListFilter): Promise<Job[]>;
+  /**
+   * The exact head of the most recently successful review of this pull request for the same review
+   * kind (#199), or null when there is none. A Dynamic job carries it as `previousReviewedSha`, so a
+   * re-review compares against the head the earlier review actually saw; the claimed job itself is
+   * never its own previous review.
+   */
+  previousReviewedSha(input: PreviousReviewedShaInput): Promise<string | null>;
+  /**
+   * The heads of this pull request's earlier jobs of the same review kind that ran and did not succeed
+   * (#255), newest first and bounded, or an empty list, and whether the list was cut (#257). A run that wrote the summary and then did not
+   * end `succeeded` (failed, or requeued and then superseded or cancelled) leaves its head in the
+   * comment; the publisher accepts exactly these heads as a state it can account for. A job that never
+   * ran (superseded or cancelled while waiting: `attempts = 0`, not `failed`) cannot have published and
+   * never counts, so a burst of pushes cannot push a real head out of the bounded list. Only jobs
+   * created strictly after the last successful review count (its state already includes everything
+   * before it) and strictly before the claimed one (a newer job is a newer review, not a predecessor).
+   * Ids are random, so jobs created in the same millisecond have no known order and are left out.
+   */
+  attemptedShas(input: PreviousReviewedShaInput): Promise<AttemptedShas>;
 };
 
 /**
@@ -74,7 +147,7 @@ export function decodeJobVocabulary(
     throw new Error(
       `Stored job ${row.id} has the unknown status "${row.status}".`,
     );
-  const command = REVIEW_COMMANDS.find((known) => known === row.command);
+  const command = STORED_REVIEW_COMMANDS.find((known) => known === row.command);
   if (command === undefined)
     throw new Error(
       `Stored job ${row.id} has the unknown command "${row.command}".`,
@@ -89,8 +162,21 @@ export function decodeJobVocabulary(
   return { status: row.status, command, triggerKind };
 }
 
+/** The stored review kind of a job (#195); a value this version does not know fails loudly. */
+export function decodeReviewKind(row: {
+  id: string;
+  review_kind: string;
+}): ProjectReviewKind {
+  const kind = PROJECT_REVIEW_KINDS.find((known) => known === row.review_kind);
+  if (kind === undefined)
+    throw new Error(
+      `Stored job ${row.id} has the unknown review kind "${row.review_kind}".`,
+    );
+  return kind;
+}
+
 /** A stored row as the rest of the app sees it; also used by the read side (`runs-repository.ts`). */
-export function toJob(row: JobsTable): Job {
+export function toJob(row: Selectable<JobsTable>): Job {
   const { status, command, triggerKind } = decodeJobVocabulary(row);
   return {
     id: row.id,
@@ -99,6 +185,7 @@ export function toJob(row: JobsTable): Job {
     prNumber: row.pr_number,
     prUrl: row.pr_url,
     headSha: row.head_sha,
+    reviewKind: decodeReviewKind(row),
     command,
     args: row.args,
     triggerKind,
@@ -127,12 +214,39 @@ export function createJobsRepository(
 ): JobsRepository {
   const now = options.now ?? (() => new Date());
   const newId = options.newId ?? (() => crypto.randomUUID());
+  // The jobs of one pull request and review kind in this workspace (#199, #255).
+  const scopeOf = (input: PreviousReviewedShaInput) =>
+    db
+      .selectFrom("jobs")
+      .where("workspace_id", "=", workspaceId)
+      .where("repository_id", "=", input.repositoryId)
+      .where("pr_number", "=", input.prNumber)
+      .where("review_kind", "=", input.reviewKind);
+  // The most recently finished successful review of that pull request and kind. A job that is still
+  // running is not a previous review; the claimed job itself is excluded.
+  const lastSucceeded = (input: PreviousReviewedShaInput) =>
+    scopeOf(input)
+      .select(["head_sha", "created_at"])
+      .where("status", "=", "succeeded")
+      .where("id", "!=", input.excludeJobId)
+      .orderBy("finished_at", "desc")
+      .orderBy("created_at", "desc")
+      .limit(1)
+      .executeTakeFirst();
+  const resolveReviewKind =
+    options.reviewKind ?? createStoredReviewKindResolver(workspaceId, now);
+  const dynamicReviewAllowed =
+    options.dynamicReviewEnabled ?? createInstanceDynamicReviewGate();
 
   // A transaction cannot start another one; inside one, just use it.
   function inTransaction<T>(
     run: (executor: Kysely<Database>) => Promise<T>,
   ): Promise<T> {
-    return db.isTransaction ? run(db) : db.transaction().execute(run);
+    const guarded = async (trx: Kysely<Database>) => {
+      await lockDynamicReviewGate(trx, false);
+      return run(trx);
+    };
+    return db.isTransaction ? guarded(db) : db.transaction().execute(guarded);
   }
 
   async function cancelWaiting(
@@ -144,24 +258,35 @@ export function createJobsRepository(
     },
     errorCode: JobErrorCode,
   ): Promise<number> {
-    const timestamp = formatTimestamp(now());
-    let query = db
-      .updateTable("jobs")
-      .set({
-        status: "cancelled",
-        error_code: errorCode,
-        finished_at: timestamp,
-        updated_at: timestamp,
-      })
-      .where("workspace_id", "=", workspaceId)
-      .where("status", "in", statusesThatCanBecome("cancelled"))
-      .where("repository_id", "=", where.repositoryId);
-    if (where.prNumber !== undefined)
-      query = query.where("pr_number", "=", where.prNumber);
-    if (where.automaticOnly === true)
-      query = query.where("trigger_kind", "=", "webhook");
-    const result = await query.executeTakeFirst();
-    return Number(result.numUpdatedRows);
+    return inTransaction(async (trx) => {
+      const timestamp = formatTimestamp(now());
+      let query = trx
+        .updateTable("jobs")
+        .set({
+          status: "cancelled",
+          error_code: errorCode,
+          finished_at: timestamp,
+          updated_at: timestamp,
+        })
+        .where("workspace_id", "=", workspaceId)
+        .where("status", "in", statusesThatCanBecome("cancelled"))
+        .where("repository_id", "=", where.repositoryId);
+      if (where.prNumber !== undefined)
+        query = query.where("pr_number", "=", where.prNumber);
+      if (where.automaticOnly === true)
+        query = query.where("trigger_kind", "=", "webhook");
+      await lockJobRowsInOrder(
+        trx,
+        trx
+          .selectFrom("jobs")
+          .select("id")
+          .where("workspace_id", "=", workspaceId)
+          .where("repository_id", "=", where.repositoryId)
+          .where("status", "=", "queued"),
+      );
+      const result = await query.executeTakeFirst();
+      return Number(result.numUpdatedRows);
+    });
   }
 
   return {
@@ -169,6 +294,40 @@ export function createJobsRepository(
       return inTransaction<EnqueueResult>(async (trx) => {
         const current = now();
         const timestamp = formatTimestamp(current);
+
+        // Settings saves lock this same workspace-scoped row, including before a project exists.
+        const repository = trx
+          .selectFrom("repositories")
+          .select("id")
+          .where("workspace_id", "=", workspaceId)
+          .where("id", "=", input.repositoryId);
+        await (
+          databaseDriver(trx) === "postgres"
+            ? repository.forUpdate()
+            : repository
+        ).executeTakeFirst();
+
+        await lockJobRowsInOrder(
+          trx,
+          trx
+            .selectFrom("jobs")
+            .select("id")
+            .where("workspace_id", "=", workspaceId)
+            .where("repository_id", "=", input.repositoryId)
+            .where("status", "in", ["queued", "running"]),
+        );
+
+        // #195 (finding 3): resolve the kind here, in the same transaction as the insert, so a
+        // concurrent settings change cannot slip between the read and the write. A kind named by the
+        // caller (tests, a re-queue) wins.
+        const reviewKind =
+          input.reviewKind ??
+          (await resolveReviewKind(trx, input.repositoryId));
+        // #195 rollout gate: with Dynamic Review off, the job is created failed instead of queued, so
+        // a previous-release app can never claim a Dynamic row as Diff and no run is silently a Diff
+        // review.
+        const dynamicDisabled =
+          reviewKind === "dynamic" && !(await dynamicReviewAllowed(trx));
 
         // 1. The same delivery again (GitHub's "Redeliver", or a request that ran twice).
         if (input.deliveryId !== null) {
@@ -226,7 +385,10 @@ export function createJobsRepository(
             .where("workspace_id", "=", workspaceId)
             .where("repository_id", "=", input.repositoryId)
             .where("pr_number", "=", input.prNumber)
-            .where("command", "=", input.command);
+            .where("command", "=", input.command)
+            // #195: a Diff job and a Dynamic job are different jobs. Dedupe and supersession must
+            // never treat one kind's job as a duplicate of the other's.
+            .where("review_kind", "=", reviewKind);
 
         if (input.triggerKind === "webhook") {
           // 2. One automatic job per head commit and command, whatever became of it, unless it was
@@ -274,7 +436,8 @@ export function createJobsRepository(
           }
         }
 
-        // 3. The new job.
+        // 3. The new job. With Dynamic Review gated off, it is created already failed so the run is
+        // visible (Runs) and no runner is ever handed a Dynamic row.
         const id = newId();
         const inserted = await trx
           .insertInto("jobs")
@@ -286,11 +449,12 @@ export function createJobsRepository(
             pr_url: input.prUrl,
             head_sha: input.headSha,
             command: input.command,
+            review_kind: reviewKind,
             args: input.args,
             trigger_kind: input.triggerKind,
             actor_login: input.actorLogin,
             delivery_id: input.deliveryId,
-            status: "queued",
+            status: dynamicDisabled ? "failed" : "queued",
             run_after: formatTimestamp(input.runAfter ?? current),
             attempts: 0,
             runner_id: null,
@@ -299,11 +463,11 @@ export function createJobsRepository(
             heartbeat_at: null,
             lease_expires_at: null,
             result: null,
-            error_code: null,
+            error_code: dynamicDisabled ? "dynamic_review_disabled" : null,
             superseded_by: null,
             created_at: timestamp,
             updated_at: timestamp,
-            finished_at: null,
+            finished_at: dynamicDisabled ? timestamp : null,
           })
           .returningAll()
           .executeTakeFirstOrThrow();
@@ -343,6 +507,14 @@ export function createJobsRepository(
 
     cancelWaitingForRepository(repositoryId) {
       return cancelWaiting({ repositoryId }, "project_deactivated");
+    },
+
+    // #195: the project's review kind changed (Diff <-> Dynamic), so every waiting job of the
+    // repository was queued for the wrong engine. The settings change and this cancellation run in
+    // one transaction (the #194 hook), so a failed save keeps the kind and the jobs. A running job
+    // finishes.
+    cancelWaitingForReviewKindChange(repositoryId) {
+      return cancelWaiting({ repositoryId }, "review_kind_changed");
     },
 
     discardWaitingForPr(repositoryId, prNumber) {
@@ -391,6 +563,43 @@ export function createJobsRepository(
         .limit(limit)
         .execute();
       return rows.map(toJob);
+    },
+
+    async previousReviewedSha(input) {
+      return (await lastSucceeded(input))?.head_sha ?? null;
+    },
+
+    async attemptedShas(input) {
+      const claimed = await scopeOf(input)
+        .select("created_at")
+        .where("id", "=", input.excludeJobId)
+        .executeTakeFirst();
+      if (claimed === undefined) return { shas: [], truncated: false };
+      const last = await lastSucceeded(input);
+      let query = scopeOf(input)
+        .select("head_sha")
+        .where("status", "!=", "succeeded")
+        // Only a job that ran can have published: failed, or a lost attempt (requeue, released claim).
+        .where((eb) =>
+          eb.or([eb("status", "=", "failed"), eb("attempts", ">", 0)]),
+        )
+        .where("id", "!=", input.excludeJobId)
+        .where("created_at", "<", claimed.created_at);
+      if (last !== undefined)
+        query = query.where("created_at", ">", last.created_at);
+      const rows = await query
+        .orderBy("created_at", "desc")
+        .orderBy("id", "desc")
+        // One row more than the scan: a full scan cannot tell whether an older head is left out.
+        .limit(ATTEMPTED_SCAN_LIMIT + 1)
+        .execute();
+      const distinct = [...new Set(rows.map((row) => row.head_sha))];
+      return {
+        shas: distinct.slice(0, MAX_ATTEMPTED_SHAS),
+        truncated:
+          rows.length > ATTEMPTED_SCAN_LIMIT ||
+          distinct.length > MAX_ATTEMPTED_SHAS,
+      };
     },
   };
 }

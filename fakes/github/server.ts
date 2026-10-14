@@ -22,6 +22,7 @@ import {
   type AppPart,
   type FakeGithubAppControls,
 } from "./app-api.ts";
+import { basicToken } from "./git-http.ts";
 import { send, sendJson } from "./http.ts";
 import { createInstallPart, type InstallPart } from "./install-flow.ts";
 import {
@@ -87,6 +88,11 @@ export type FakeGithubOptions = {
    * and the API address of a job are on the same host. Default false.
    */
   selfLinks?: boolean;
+  /**
+   * The address the links of comments (`html_url`) point to, for example `https://github.com`: what a real
+   * GitHub answers with whatever API address is used. Default: the same as the other links. GitHub App API only.
+   */
+  commentLinks?: string;
   /** Default 127.0.0.1. */
   host?: string;
   /** Default 0: a free port. */
@@ -210,6 +216,9 @@ export async function startGithubFake(
             ...(options.selfLinks === true
               ? { webBase: () => baseUrl, apiBase: () => baseUrl }
               : {}),
+            ...(options.commentLinks === undefined
+              ? {}
+              : { commentWebBase: options.commentLinks }),
           },
           registry,
         )
@@ -281,6 +290,9 @@ export async function startGithubFake(
           ? header.slice(6)
           : undefined;
       if (bearer !== undefined) credentials.push(bearer);
+      // Git over HTTP sends the installation token as the password of Basic authentication.
+      const gitToken = basicToken(header);
+      if (gitToken !== undefined) credentials.push(gitToken);
 
       // The control endpoints of the test itself are not GitHub and never fail on purpose.
       const failure = path.startsWith("/__fake/")

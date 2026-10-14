@@ -10,6 +10,7 @@ import type { BackupStatus } from "./status.ts";
 
 const USER = { id: "u1", githubLogin: "octocat" } as unknown as SessionUser;
 const STATUS: BackupStatus = {
+  applicable: true,
   schedule: { enabled: true, timeUtc: "02:30" },
   target: { usable: true, errorCode: null },
   lastRun: null,

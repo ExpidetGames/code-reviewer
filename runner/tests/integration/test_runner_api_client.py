@@ -67,6 +67,26 @@ def test_a_claim_with_a_job_returns_the_lease_and_the_input_and_sends_token_and_
     headers = app.requests[0]["headers"]
     assert headers["Authorization"] == f"Bearer {RUNNER_TOKEN}"
     assert headers["X-Runner-Id"] == "client-test"
+    # #195 finding 9: the client really sends the engines it was configured with.
+    assert app.requests[0]["body"] == {"engines": ["pr-agent"]}
+    assert app.violations == []
+
+
+# #195 finding 9
+def test_a_claim_advertises_the_configured_engines(app: FakeApp) -> None:
+    app.queue.append(claim_response(JOB_ID, JOB_INPUT))
+
+    asyncio.run(
+        HttpRunnerApi(
+            app.url,
+            RUNNER_TOKEN,
+            "client-test",
+            engines=("pr-agent", "opencode"),
+            request_timeout=5,
+        ).claim()
+    )
+
+    assert app.requests[0]["body"] == {"engines": ["pr-agent", "opencode"]}
     assert app.violations == []
 
 
@@ -228,5 +248,41 @@ def test_a_claim_answer_that_is_cut_off_is_unavailable() -> None:
 
         with pytest.raises(ApiUnavailable):
             asyncio.run(api.claim())
+    finally:
+        server.close()
+
+
+def _answer_200(body: bytes) -> bytes:
+    return (
+        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "
+        + str(len(body)).encode()
+        + b"\r\nConnection: close\r\n\r\n"
+        + body
+    )
+
+
+# #260: a 200 only means "held" when it is the answer of the contract for this very job. A gateway
+# or captive portal that answers 200 to everything must not authorize a write.
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param(b"OK", id="not JSON"),
+        pytest.param(b"{}", id="an empty object"),
+        pytest.param(b'{"version": 1}', id="no job"),
+        pytest.param(b'{"version": 2, "job": {"id": "' + JOB_ID.encode() + b'"}}', id="version"),
+        pytest.param(
+            b'{"version": 1, "job": {"id": "0b9f6f4e-3c1a-4d9e-8f43-2a7d5e1c9b11"}}',
+            id="another job",
+        ),
+        pytest.param(b'{"version": 1, "job": {"id": 7}}', id="id is not text"),
+    ],
+)
+def test_a_200_that_is_not_the_heartbeat_answer_of_the_job_is_unavailable(body: bytes) -> None:
+    server = RawServer(_answer_200(body))
+    try:
+        api = HttpRunnerApi(server.url, RUNNER_TOKEN, "client-test", request_timeout=5)
+
+        with pytest.raises(ApiUnavailable):
+            asyncio.run(api.heartbeat(JOB_ID, "lease-1234567890"))
     finally:
         server.close()

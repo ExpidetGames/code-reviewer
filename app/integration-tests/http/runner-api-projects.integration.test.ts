@@ -448,10 +448,20 @@ describe("the contract file and the options the app sends", () => {
     expect(contract.check("JobEnv", { [key]: "x" }).valid).toBe(false);
   });
 
+  it.each(["PR_REVIEWER__NUM_MAX_FINDINGS", "PR_REVIEWER__EXTRA_INSTRUCTIONS"])(
+    "accepts the key %s in the contract and in the app",
+    (key) => {
+      expect(RUNNER_ENV_KEY_PATTERN.test(key)).toBe(true);
+      expect(contract.check("JobEnv", { [key]: "x" }).valid).toBe(true);
+    },
+  );
+
+  // #203 v1 compatibility: the removed tools' option families are still accepted (and ignored).
   it.each([
-    "PR_REVIEWER__NUM_MAX_FINDINGS",
     "PR_QUESTIONS__EXTRA_INSTRUCTIONS",
-  ])("accepts the key %s in the contract and in the app", (key) => {
+    "PR_DESCRIPTION__ADD_ORIGINAL_USER_DESCRIPTION",
+    "PR_CODE_SUGGESTIONS__NUM_CODE_SUGGESTIONS",
+  ])("accepts the legacy key %s in the contract and in the app", (key) => {
     expect(RUNNER_ENV_KEY_PATTERN.test(key)).toBe(true);
     expect(contract.check("JobEnv", { [key]: "x" }).valid).toBe(true);
   });

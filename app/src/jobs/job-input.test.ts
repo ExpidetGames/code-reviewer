@@ -3,7 +3,7 @@
 // Pins down which input the queue accepts: the checks run before anything is written, and every
 // refusal names the field and a stable code.
 import { describe, expect, it } from "vitest";
-import { validateEnqueueInput, JOB_ARGS_MAX_LENGTH } from "./job-input.ts";
+import { validateEnqueueInput } from "./job-input.ts";
 import type { EnqueueJobInput } from "./job-types.ts";
 
 const SHA = "1f3a5c7e9b2d4f60a8c1e3b5d7f90a2c4e6b8d01";
@@ -32,6 +32,7 @@ describe("validating a job to enqueue", () => {
         prNumber: 7,
         prUrl: "https://github.test/acme/widgets/pull/7",
         headSha: SHA,
+        reviewKind: undefined,
         command: "review",
         args: "",
         triggerKind: "webhook",
@@ -63,10 +64,13 @@ describe("validating a job to enqueue", () => {
     expect(result).toMatchObject({ ok: true, value: { headSha: SHA } });
   });
 
-  // CR-27-T12
+  // CR-27-T12, #203-T02
   it.each([
     ["empty", "", "required"],
     ["unknown", "deploy", "invalid"],
+    ["the removed ask command", "ask", "invalid"],
+    ["the removed improve command", "improve", "invalid"],
+    ["the removed describe command", "describe", "invalid"],
     ["wrongly cased", "Review", "invalid"],
     ["missing", undefined, "required"],
   ])("refuses a command that is %s", (_name, command, code) => {
@@ -122,18 +126,42 @@ describe("validating a job to enqueue", () => {
     });
   });
 
-  it("refuses arguments that are too long or not text", () => {
+  // #195: the review kind a job carries is decided at enqueue time; a producer that names an unknown
+  // one is refused, and leaving it out lets the queue resolve it inside the enqueue transaction.
+  it("accepts a known or absent review kind and refuses an unknown one", () => {
     expect(
-      validateEnqueueInput(
-        input({ args: "x".repeat(JOB_ARGS_MAX_LENGTH + 1) }),
-      ),
+      validateEnqueueInput(input({ reviewKind: "dynamic" })),
+    ).toMatchObject({ ok: true, value: { reviewKind: "dynamic" } });
+    expect(validateEnqueueInput(input())).toMatchObject({
+      ok: true,
+      value: { reviewKind: undefined },
+    });
+    expect(validateEnqueueInput(input({ reviewKind: "agentic" }))).toEqual({
+      ok: false,
+      fieldErrors: [{ field: "reviewKind", code: "invalid" }],
+    });
+  });
+
+  // #203: /review takes no text; non-empty arguments would name a duplicate job that runs the same
+  // review, so every non-empty argument is refused.
+  it("refuses non-empty review arguments and arguments that are not text", () => {
+    expect(validateEnqueueInput(input({ args: "first" }))).toEqual({
+      ok: false,
+      fieldErrors: [{ field: "args", code: "invalid" }],
+    });
+    expect(
+      validateEnqueueInput(input({ args: "--pr_reviewer.num_max_findings=9" })),
     ).toEqual({
       ok: false,
-      fieldErrors: [{ field: "args", code: "too_long" }],
+      fieldErrors: [{ field: "args", code: "invalid" }],
     });
     expect(validateEnqueueInput(input({ args: 5 }))).toEqual({
       ok: false,
       fieldErrors: [{ field: "args", code: "invalid" }],
+    });
+    expect(validateEnqueueInput(input({ args: "" }))).toMatchObject({
+      ok: true,
+      value: { args: "" },
     });
   });
 

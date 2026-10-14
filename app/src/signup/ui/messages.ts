@@ -7,6 +7,12 @@ import {
   PASSWORD_ERROR_COPY,
   type PasswordErrorCode,
 } from "../../auth/password-policy.ts";
+import {
+  CROSS_SITE_REQUEST,
+  INVALID_EMAIL,
+  TOO_MANY_ATTEMPTS,
+  UNAVAILABLE,
+} from "../../copy/messages.ts";
 import type { RequestIssue } from "../../ui/json-request.ts";
 import {
   describeTransportFailure,
@@ -18,8 +24,8 @@ const FAILURE_COPY: Record<string, string> = {
     "Signing up is not open on this instance right now. Ask the person who runs it.",
   sign_up_disabled:
     "Signing up with an email address is switched off on this instance. Use the sign-in on the login page.",
-  rate_limited: "Too many attempts. Wait a while and try again.",
-  unavailable: "This is not available right now. Please try again later.",
+  rate_limited: TOO_MANY_ATTEMPTS,
+  unavailable: UNAVAILABLE,
   not_available:
     "Email is not set up on this instance, so there is nothing to confirm.",
   invalid_token:
@@ -27,11 +33,11 @@ const FAILURE_COPY: Record<string, string> = {
   token_expired: "This link has expired. Ask for a new one.",
   token_used:
     "This link was used already. If you cannot sign in, ask for a new one.",
-  cross_site_request: "The request did not come from this page. Reload it.",
+  cross_site_request: CROSS_SITE_REQUEST,
 };
 
 const FIELD_ISSUE_COPY: Record<string, string> = {
-  invalid_email: "Enter a valid email address.",
+  invalid_email: INVALID_EMAIL,
 };
 
 /** The sentence for a failed call of the sign-up, the resend or the verification. */

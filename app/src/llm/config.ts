@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Reads the shared LLM access from the environment. The only place that knows the variable names.
+// The instance's LLM defaults and the one rule for a key. Two things live here:
 //
-// One LLM account serves the whole instance (a key per project or per user comes later). The app
-// hands the key to the runner with every job. A problem is a *state* ("misconfigured"), not an
-// exception: the app starts anyway, the UI shows the problem and a job fails with `llm_not_configured`
-// when it is claimed. Only the provider and the key can make the state misconfigured. A wrong
-// optional value (`LLM_MODEL`, `LLM_MAX_TOKENS`) is ignored with the default used instead, and
-// reported as a *warning* next to a working configuration: a typo in the model must not stop every
-// review. A problem is reported with the variable name and a stable code, never with a value (the
-// variables hold a secret, and a wrong value may be a secret pasted into the wrong place).
+// - `readLlmDefaults`: the built-in model (`LLM_MODEL`) and the context window (`LLM_MAX_TOKENS`) of the
+//   instance. A wrong optional value is ignored with the default used instead, and reported as a
+//   *warning*: a typo in the model must not stop every review. A problem is reported with the variable
+//   name and a stable code, never with a value.
+// - `checkLlmApiKey`, the one rule for an LLM key, shared by the key routes of a workspace
+//   (src/llm/*), the legacy import (src/legacy-import/, which reads the old `LLM_API_KEY` once) and
+//   nothing else. The key of a workspace is a matter of that workspace (BYOK, src/llm/), not of the
+//   instance: the old instance-wide provider and key (`LLM_PROVIDER`, `LLM_API_KEY`) were imported once
+//   and are no longer read here.
 //
 // The limits below are the ones the runner enforces on a job (runner/README.md, "llm"); a value the
 // runner would refuse is refused here, so it shows up in the UI instead of as a failed job.
@@ -23,19 +24,11 @@ export type LlmProvider = (typeof LLM_PROVIDERS)[number];
  */
 export const DEFAULT_LLM_MODEL = "anthropic/claude-haiku-5.5";
 
-export const LLM_VARIABLES = [
-  "LLM_PROVIDER",
-  "LLM_API_KEY",
-  "LLM_MODEL",
-  "LLM_MAX_TOKENS",
-] as const;
-export type LlmVariable = (typeof LLM_VARIABLES)[number];
+/** The variables that configure the instance's LLM defaults (the import reads the legacy ones once). */
+export const LLM_DEFAULT_VARIABLES = ["LLM_MODEL", "LLM_MAX_TOKENS"] as const;
+export type LlmDefaultVariable = (typeof LLM_DEFAULT_VARIABLES)[number];
 
 export const LLM_CONFIG_ISSUE_CODES = [
-  "LLM_PROVIDER_MISSING",
-  "LLM_PROVIDER_UNKNOWN",
-  "LLM_API_KEY_MISSING",
-  "LLM_API_KEY_INVALID",
   "LLM_MODEL_INVALID",
   "LLM_MAX_TOKENS_INVALID",
 ] as const;
@@ -43,7 +36,7 @@ export type LlmConfigIssueCode = (typeof LLM_CONFIG_ISSUE_CODES)[number];
 
 export type LlmConfigIssue = {
   code: LlmConfigIssueCode;
-  variable: LlmVariable;
+  variable: LlmDefaultVariable;
 };
 
 /** What the runner accepts for `llm.apiKey`, `llm.model` and `llm.maxTokens`. */
@@ -65,20 +58,6 @@ export type LlmConfig = {
   contextWindowTokens: number | null;
 };
 
-export type LlmConfigState =
-  | {
-      status: "configured";
-      config: LlmConfig;
-      /** Optional variables that were wrong and are ignored (the default is used instead). */
-      warnings: readonly LlmConfigIssue[];
-    }
-  | {
-      status: "misconfigured";
-      /** What stops reviews: the provider or the key. */
-      issues: readonly LlmConfigIssue[];
-      warnings: readonly LlmConfigIssue[];
-    };
-
 type Env = Readonly<Record<string, string | undefined>>;
 
 /**
@@ -97,46 +76,10 @@ export function createLlmConfig(fields: LlmConfig): LlmConfig {
 }
 
 /**
- * Whether the legacy configuration is simply ABSENT: neither the provider nor the key is set. That is the normal
- * state of an instance whose workspaces bring their own key and nothing to report. One that is half set (a key
- * without a provider, or the other way round) or set but wrong is not absent: the instance admin hears about it.
- * The one rule for the resolver, the start-up warning and the notices.
- */
-export function legacyConfigIsAbsent(
-  issues: readonly LlmConfigIssue[],
-): boolean {
-  return (
-    issues.length === 2 &&
-    issues.some((issue) => issue.code === "LLM_API_KEY_MISSING") &&
-    issues.some((issue) => issue.code === "LLM_PROVIDER_MISSING")
-  );
-}
-
-/** Reads and validates the four variables. Never throws; never puts a value into the result. */
-export function loadLlmConfig(env: Env): LlmConfigState {
-  const issues: LlmConfigIssue[] = [];
-  const warnings: LlmConfigIssue[] = [];
-
-  const provider = readProvider(env.LLM_PROVIDER, issues);
-  const apiKey = readApiKey(env.LLM_API_KEY, issues);
-  const model = readModel(env.LLM_MODEL, warnings);
-  const contextWindowTokens = readContextWindow(env.LLM_MAX_TOKENS, warnings);
-
-  if (issues.length > 0 || provider === undefined || apiKey === undefined)
-    return { status: "misconfigured", issues, warnings };
-
-  return {
-    status: "configured",
-    config: createLlmConfig({ provider, model, apiKey, contextWindowTokens }),
-    warnings,
-  };
-}
-
-/**
  * What the environment says about the model and the context window, whether or not it holds a usable
  * provider and key: a workspace brings its own key, but the instance's `LLM_MODEL` and `LLM_MAX_TOKENS`
  * still describe the built-in model and the context window of a model PR-Agent does not know. Wrong values
- * are ignored and recorded as warnings, like in `loadLlmConfig`.
+ * are ignored and recorded as warnings.
  */
 export type LlmDefaults = {
   model: string;
@@ -160,21 +103,6 @@ export function configuredLlmModel(env: Env): string {
   return readModel(env.LLM_MODEL, []);
 }
 
-function readProvider(
-  raw: string | undefined,
-  issues: LlmConfigIssue[],
-): LlmProvider | undefined {
-  const value = raw?.trim().toLowerCase();
-  if (!value) {
-    issues.push({ code: "LLM_PROVIDER_MISSING", variable: "LLM_PROVIDER" });
-    return undefined;
-  }
-  const provider = LLM_PROVIDERS.find((known) => known === value);
-  if (provider === undefined)
-    issues.push({ code: "LLM_PROVIDER_UNKNOWN", variable: "LLM_PROVIDER" });
-  return provider;
-}
-
 /**
  * The one rule for an LLM key, whether it comes from the environment or from a workspace's settings:
  * surrounding whitespace is ignored, an empty key is `missing`, and a key with whitespace or control
@@ -189,22 +117,6 @@ export function checkLlmApiKey(
   if (value.length > MAX_LLM_KEY_CHARS || /[\s\p{Cc}]/u.test(value))
     return { ok: false, problem: "invalid" };
   return { ok: true, key: value };
-}
-
-function readApiKey(
-  raw: string | undefined,
-  issues: LlmConfigIssue[],
-): string | undefined {
-  const checked = checkLlmApiKey(raw);
-  if (checked.ok) return checked.key;
-  issues.push({
-    code:
-      checked.problem === "missing"
-        ? "LLM_API_KEY_MISSING"
-        : "LLM_API_KEY_INVALID",
-    variable: "LLM_API_KEY",
-  });
-  return undefined;
 }
 
 /** The model of `LLM_MODEL`, or the default when it is not set or not valid (a warning is recorded). */

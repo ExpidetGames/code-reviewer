@@ -2,9 +2,12 @@
 
 // The content of the page of one run. `loadRunDetailPage` gathers the data from the service (passed
 // in), `RunDetailPageContent` renders it. An id nobody has gives `not_found`: the page then shows
-// the not-found page and nothing of any other run.
+// the not-found page and nothing of any other run. The trail starts at the Runs list (the area root,
+// epic #165 breadcrumb rule); the repository name is untrusted GitHub text, rendered as text.
 import Link from "next/link";
-import { PageHeader } from "../../ui/page-header.tsx";
+import { Breadcrumbs } from "../../components/breadcrumbs.tsx";
+import { Button } from "../../components/button.tsx";
+import { PageHeader } from "../../components/page-header.tsx";
 import { workspacePath } from "../../workspaces/paths.ts";
 import type { RunsService } from "../runs-service.ts";
 import type { RunDetailSnapshot } from "../run-view.ts";
@@ -36,18 +39,26 @@ export function RunDetailPageContent({
   api?: RunsApi;
 }) {
   const { run } = data.snapshot;
+  const title = `${run.project} #${String(run.prNumber)}`;
   return (
     <>
       <PageHeader
-        title={`${run.project} #${String(run.prNumber)}`}
-        description={`The /${run.command} run on this pull request.`}
+        title={title}
+        breadcrumb={
+          <Breadcrumbs
+            items={[
+              {
+                label: "Runs",
+                href: workspacePath(workspaceSlug, "/runs"),
+              },
+              { label: title },
+            ]}
+          />
+        }
         actions={
-          <Link
-            href={workspacePath(workspaceSlug, "/runs")}
-            className="btn btn-secondary"
-          >
-            All runs
-          </Link>
+          <Button asChild variant="secondary">
+            <Link href={workspacePath(workspaceSlug, "/runs")}>All runs</Link>
+          </Button>
         }
       />
       {/* Keyed on the run. The polled data is tied to the server data it was fetched next to, so a

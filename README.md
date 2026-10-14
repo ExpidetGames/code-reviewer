@@ -13,7 +13,7 @@ Code Reviewer wraps PR-Agent: it runs PR-Agent against pull requests and adds a 
 | `app/` | Web app and API: Next.js 16, TypeScript, pnpm |
 | `runner/` | Worker that runs PR-Agent: Python, uv |
 | `compose.yml` | The whole stack on one machine (app and runner), see "Run with Docker Compose" |
-| `compose.coolify.yml` | The same stack for Coolify (built from the repository, no published port), see "Deploy on Coolify" |
+| `compose.coolify.yml` | The same stack for Coolify (built from the repository, no published port) plus the Dynamic runner, see "Deploy on Coolify" |
 | `docs/` | Guides for operators: [`docs/deployment-coolify.md`](docs/deployment-coolify.md) (deploying on Coolify), [`docs/github-app.md`](docs/github-app.md) (creating and installing the team's GitHub App) |
 | `docs/decisions/` | Architecture decision records, see [`docs/decisions/README.md`](docs/decisions/README.md) |
 | `fakes/` | Fake servers and fixtures used by the tests |
@@ -169,11 +169,13 @@ the real runner and PR-Agent against the fakes.
 
 ## Supported browsers
 
-The web UI is built for current Chrome and Edge (123 or newer), Firefox (120 or newer) and Safari
-17.5 or newer. The color tokens use `light-dark()` and `color-mix()` without a fallback, so an older
-browser shows the page without its colors; there is no polyfill on purpose (a team tool, always
-up to date browsers). The navigation menu on narrow screens and the user menu need JavaScript; the
-sign in, the sign out and the three places themselves are plain links and forms.
+The web UI is built for Tailwind CSS v4's browsers: Chrome and Edge 111 or newer, Firefox 128 or
+newer and Safari 16.4 or newer. The color tokens are plain custom properties per mode in
+`theme.css` (no `light-dark()`), and the stylesheets use `color-mix()` and `:has()` without a
+fallback, so an older browser shows the page without its colors; there is no polyfill on purpose (a
+team tool, always up to date browsers). The navigation menu on narrow screens and the user menu
+need JavaScript; the sign in, the sign out and the three places themselves are plain links and
+forms.
 
 ## Run the runner locally
 
@@ -184,7 +186,7 @@ uv run code-reviewer-runner --version
 
 ### Run one PR-Agent job
 
-`code-reviewer-run-job` runs one PR-Agent command (`review`, `improve`, `describe` or `ask`) for one
+`code-reviewer-run-job` runs one PR-Agent command (`review`) for one
 pull request. The job is JSON on stdin (`runner/src/code_reviewer_runner/job.py` documents the
 shape: pull request URL, command, installation token and bot login, LLM model and key). The result
 is exactly one line of JSON on stdout (`ok`, `durationMs`, `commentUrl`, `errorCode`, `logTail`,
@@ -215,7 +217,7 @@ The build context is the repository root (the images also carry `LICENSE`, `NOTI
 | Image | Build | Notes |
 |---|---|---|
 | `ghcr.io/expidetgames/code-reviewer-app` | `docker build -f app/Dockerfile -t code-reviewer-app .` | Next.js standalone server on port 3000, runs as uid 10001. The database lives in the volume `/data` (`DATABASE_PATH=/data/app.db`); it is created and migrated on start. |
-| `ghcr.io/expidetgames/code-reviewer-runner` | `docker build -f runner/Dockerfile -t code-reviewer-runner .` | Python (version of `runner/.python-version`) with the runner installed by uv from `uv.lock`, runs as uid 10001. Holds PR-Agent (pinned, from `uv.lock`) and its tiktoken encodings, so a job needs no download besides GitHub and the LLM. |
+| `ghcr.io/expidetgames/code-reviewer-runner` | `docker build -f runner/Dockerfile -t code-reviewer-runner .` (the `--target dynamic` image of `compose.dynamic.yml` is built from the checkout and not published) | Python (version of `runner/.python-version`) with the runner installed by uv from `uv.lock`, runs as uid 10001. Holds PR-Agent (pinned, from `uv.lock`) and its tiktoken encodings, so a job needs no download besides GitHub and the LLM. |
 
 ```sh
 docker run --rm -p 3000:3000 -v code-reviewer-data:/data \
@@ -309,6 +311,22 @@ those is in [docs/deployment-coolify.md](docs/deployment-coolify.md), section 9.
 settings: validation of the settings, no runner before a healthy app, the stack comes up, the data
 survives `down` and `up`, an app process that exits by itself is restarted, a backup restores, and a
 `docker compose stop` while a (fake) review runs ends with the runner reporting that review. CI runs the same script for pull requests.
+
+**Large topology (Postgres, several instances).** For a hosted deployment with several app instances
+and several runners on an external Postgres, start from `compose.large.yml` and read
+[docs/deployment-large.md](docs/deployment-large.md): the same product, selected with `DATABASE_URL`
+(`postgres://` or `postgresql://`, or empty for SQLite). The app then schedules no backup — the
+operator backs up the database — and the job queue is safe for concurrent runners.
+
+**Dynamic Review runner (opt-in, off by default).** `compose.dynamic.yml` is an opt-in override that adds a
+separate runner for Dynamic Review, built from the `dynamic` target of `runner/Dockerfile` with the pinned
+stock OpenCode (`docker compose -f compose.yml -f compose.dynamic.yml up -d --build --wait`). The runner
+proves its isolation at start and advertises the engine only if that passes; Dynamic Review itself stays off
+until the instance admin turns on its switch. The default runner image holds no engine.
+[docs/dynamic-review.md](docs/dynamic-review.md) has the activation steps (including how to verify the
+self-check and the admin switch), the sizing, the rollback and the known limitations;
+[docs/deployment-coolify.md](docs/deployment-coolify.md) has the (untested) Coolify variant: there the Dynamic runner
+is a service of `compose.coolify.yml` itself, started with the rest and idle until the gate is turned on.
 
 ## Deploy on Coolify
 

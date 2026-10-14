@@ -4,6 +4,7 @@
 // and the environment variables built from it. The public half is what the fake GitHub checks JWTs
 // with. Knows nothing about the provider, so any test may use it.
 import { generateKeyPairSync } from "node:crypto";
+import type { GithubAppStatus } from "../config-status/status.ts";
 
 export const TEST_APP_ID = "424242";
 export const TEST_APP_SLUG = "code-reviewer-test";
@@ -34,4 +35,9 @@ export function testGithubAppEnv(
     APP_SECRET: "test-app-secret-0123456789-0123456789-abc",
     ...overrides,
   };
+}
+
+/** The GitHub App status the credential store reports for `testGithubAppEnv()`. */
+export function testGithubAppStatus(): GithubAppStatus {
+  return { configured: true, slug: TEST_APP_SLUG };
 }

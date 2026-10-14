@@ -22,7 +22,11 @@ export default async function setup(
   const directory = await mkdtemp(join(tmpdir(), "cr-db-template-"));
   const templatePath = join(directory, "template.db");
 
-  const db = openDatabase({ path: templatePath, busyTimeoutMs: 5000 });
+  const db = openDatabase({
+    driver: "sqlite",
+    path: templatePath,
+    busyTimeoutMs: 5000,
+  });
   await migrateToLatest(db);
   // Fold the write-ahead log into the main file so that copying that one file copies everything.
   await sql`pragma wal_checkpoint(truncate)`.execute(db);

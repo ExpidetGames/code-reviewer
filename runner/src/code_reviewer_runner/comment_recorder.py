@@ -5,16 +5,13 @@
 `PRAgent.handle_request` only returns True or False and no tool returns what it posted. All comment
 writes of the GitHub provider go through two methods, `publish_comment` (create) and `edit_comment`
 (update, which is what a second review of the same pull request does). The recorder wraps both on
-the class, so it also covers the provider instances PR-Agent creates on its own (the `ask` tool).
-It observes only: the original result is always returned unchanged, and a recording problem never
-turns into a failed write.
+the class. It observes only: the original result is always returned unchanged, and a recording
+problem never turns into a failed write.
 """
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
-
-from code_reviewer_runner.job import Command
 
 BODY_HEAD_CHARS = 600
 # Only the hidden marker identifies a comment, as PR-Agent itself does (`comment_matches_identity`):
@@ -25,7 +22,6 @@ _REVIEW_MARKERS = (
     "<!-- pr-agent:review:full -->",
     "<!-- pr-agent:review:incremental -->",
 )
-_IMPROVE_MARKERS = ("<!-- pr-agent:improve:summary -->",)
 _MARKER_LINES = 5
 # The tools publish these when a command fails but they still return normally.
 _FAILURE_PREFIXES = ("Failed to ",)
@@ -81,20 +77,15 @@ class CommentRecorder:
             if not event.temporary and not event.body_head.startswith(_FAILURE_PREFIXES)
         )
 
-    def comment_url(self, command: Command) -> str | None:
-        """URL of the comment that holds the result of `command`, or None."""
+    def comment_url(self) -> str | None:
+        """URL of the review comment that holds the result, or None."""
         candidates = [
             event
             for event in self.events
             if not event.temporary and not event.body_head.startswith(_FAILURE_PREFIXES)
         ]
-        if command is Command.DESCRIBE:
-            return None
-        if command is Command.ASK:
-            return candidates[-1].url if candidates else None
-        markers = _REVIEW_MARKERS if command is Command.REVIEW else _IMPROVE_MARKERS
         for event in reversed(candidates):
-            if _carries_marker(event.body_head, markers):
+            if _carries_marker(event.body_head, _REVIEW_MARKERS):
                 return event.url
         return None
 

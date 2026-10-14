@@ -89,9 +89,7 @@ test.describe("a pull request on its way to a review comment", () => {
     // The LLM key of the workspace, saved the way an Owner does it in the settings (the server has none in its
     // environment). The last journey of the group replaces it and puts this one back.
     await saveWorkspaceKey(page, llmEnv.apiKey);
-    const row = page
-      .getByRole("listitem")
-      .filter({ hasText: WIDGETS.fullName });
+    const row = page.getByRole("row").filter({ hasText: WIDGETS.fullName });
     await expect(row).toBeVisible();
     // A retry finds the project switched on already: clicking the switch again would turn it off.
     if ((await row.getByText("Active", { exact: true }).count()) === 0)
@@ -101,7 +99,7 @@ test.describe("a pull request on its way to a review comment", () => {
     await expect(row.getByText("Active", { exact: true })).toBeVisible();
     await expect(
       page
-        .getByRole("listitem")
+        .getByRole("row")
         .filter({ hasText: DORMANT.fullName })
         .getByText("Active", { exact: true }),
     ).toHaveCount(0);
@@ -130,8 +128,9 @@ test.describe("a pull request on its way to a review comment", () => {
   /** The rows of the Runs page that belong to a pull request. */
   function runsOf(page: Page, repository: string, number: number) {
     return page
-      .getByRole("listitem")
-      .filter({ hasText: `${repository} #${String(number)}` });
+      .locator("[data-run-id]")
+      .filter({ hasText: repository })
+      .filter({ hasText: `#${String(number)}` });
   }
 
   async function openRuns(page: Page) {
@@ -168,7 +167,7 @@ test.describe("a pull request on its way to a review comment", () => {
     expect(answer).toEqual({ status: "accepted", outcome: "trigger_enqueued" });
 
     const run = runsOf(page, WIDGETS.fullName, number);
-    await expect(run.locator(".badge-run")).toContainText(
+    await expect(run.locator("[data-status]")).toContainText(
       "Succeeded",
       RUN_TIMEOUT,
     );
@@ -232,11 +231,11 @@ test.describe("a pull request on its way to a review comment", () => {
     // The push is a second run of the same pull request; both are done when the comment was edited.
     const runs = runsOf(page, WIDGETS.fullName, number);
     await expect(runs).toHaveCount(2, RUN_TIMEOUT);
-    await expect(runs.nth(0).locator(".badge-run")).toContainText(
+    await expect(runs.nth(0).locator("[data-status]")).toContainText(
       "Succeeded",
       RUN_TIMEOUT,
     );
-    await expect(runs.nth(1).locator(".badge-run")).toContainText(
+    await expect(runs.nth(1).locator("[data-status]")).toContainText(
       "Succeeded",
       RUN_TIMEOUT,
     );
@@ -316,28 +315,27 @@ test.describe("a pull request on its way to a review comment", () => {
     });
 
     const run = runsOf(page, WIDGETS.fullName, number);
-    await expect(run.locator(".badge-run")).toContainText(
+    await expect(run.locator("[data-status]")).toContainText(
       "Failed",
       RUN_TIMEOUT,
     );
     await run
       .getByRole("link", { name: `${WIDGETS.fullName} #${String(number)}` })
       .click();
+    // The Runs list stays mounted (hidden) behind the run page; its row carries the same failure
+    // sentence, so every assertion of the page is scoped to the visible run detail.
+    const detail = page
+      .locator('[data-slot="run-detail"]')
+      .filter({ visible: true });
+    await expect(detail.getByText("llm_rate_limit")).toBeVisible();
     await expect(
-      page.getByText("llm_rate_limit").filter({ visible: true }),
-    ).toBeVisible();
-    await expect(
-      page
-        .getByText("The AI provider is limiting requests right now.")
-        .filter({ visible: true }),
+      detail.getByText("The AI provider is limiting requests right now."),
     ).toBeVisible();
 
     // The log of the run shows the error text of the model with the key blanked out, so the check
     // for the key further down looks at text that really held it.
     await expect(
-      page
-        .getByText("Incorrect API key provided: [REDACTED]")
-        .filter({ visible: true }),
+      detail.getByText("Incorrect API key provided: [REDACTED]"),
     ).toBeVisible();
 
     // The model really was asked with the key (so the error text did quote it) ...
@@ -373,6 +371,8 @@ test.describe("a pull request on its way to a review comment", () => {
     });
     await signInThroughTheForm(page, account);
     await page.getByRole("link", { name: "Settings", exact: true }).click();
+    await page.getByRole("link", { name: "LLM access", exact: true }).click();
+    await expect(page).toHaveURL(/\/w\/default\/settings\/llm$/);
     const form = page.getByRole("form", { name: "LLM key" });
     await form.getByLabel("API key").fill(WORKSPACE_KEY);
     await form.getByRole("button", { name: "Save key" }).click();
@@ -396,7 +396,7 @@ test.describe("a pull request on its way to a review comment", () => {
         outcome: "trigger_enqueued",
       });
       const run = runsOf(page, WIDGETS.fullName, number);
-      await expect(run.locator(".badge-run")).toContainText(
+      await expect(run.locator("[data-status]")).toContainText(
         "Succeeded",
         RUN_TIMEOUT,
       );

@@ -7,22 +7,19 @@ import { requireAdmin } from "@/admin/session";
 import { getAdminService } from "@/admin/shared";
 import { getIntegrationsPageData } from "@/github-config/shared";
 import { Overview } from "@/admin/ui/overview";
-import { PageHeader } from "@/ui/page-header";
+import { PageHeader } from "@/components/page-header";
 
 export const metadata: Metadata = { title: "Admin" };
 
 export default async function AdminPage() {
-  const user = await requireAdmin();
+  await requireAdmin();
   const [settings, github] = await Promise.all([
     getAdminService().readSettings(),
-    getIntegrationsPageData(user.id),
+    getIntegrationsPageData(),
   ]);
   return (
     <>
-      <PageHeader
-        title="Admin"
-        description={`The settings of this instance. You are signed in as ${user.email}.`}
-      />
+      <PageHeader title="Admin" />
       <Overview
         settings={settings}
         github={github.view}

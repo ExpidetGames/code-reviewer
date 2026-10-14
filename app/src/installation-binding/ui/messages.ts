@@ -7,6 +7,8 @@ import {
   describeTransportFailure,
   GENERIC_FAILURE,
 } from "../../ui/transport-messages.ts";
+import { GITHUB_NOT_CONFIGURED_COPY } from "../../config-status/notices.ts";
+import { ROLE_NOT_ALLOWED } from "../../copy/messages.ts";
 import type { BindingResultCode } from "../errors.ts";
 import type { ConnectAvailability } from "../service.ts";
 import type { RoleResult } from "../requests.ts";
@@ -43,7 +45,7 @@ export const RESULT_COPY: Record<
   },
   github_app_not_configured: {
     tone: "error",
-    text: "The GitHub App of this instance is not set up yet. Ask the admin of the instance.",
+    text: GITHUB_NOT_CONFIGURED_COPY,
   },
   user_authorization_not_configured: {
     tone: "error",
@@ -107,13 +109,16 @@ export const AVAILABILITY_COPY: Record<
   Exclude<ConnectAvailability, "available">,
   string
 > = {
-  app_not_configured:
-    "The GitHub App of this instance is not set up yet. The admin of the instance sets it up in the admin portal.",
+  app_not_configured: GITHUB_NOT_CONFIGURED_COPY,
   user_authorization_not_configured:
-    "Connecting GitHub is not available yet. It needs the sign in with GitHub of the GitHub App, which the admin of this instance has to set up in the admin portal.",
+    "Connecting GitHub is not available yet. The admin of the instance sets up the sign in with GitHub of the GitHub App in the admin portal.",
   needs_approval:
     "This instance cannot check your rights on GitHub, so the admin of the instance approves every connection. Connect GitHub sends the request.",
 };
+
+/** The "how it works" text of the Connect card, behind its disclosure (#176). */
+export const CONNECT_HELP_COPY =
+  "You connect an installation of the GitHub App if you own the account it is on: a personal account, or an organization you are an owner of. GitHub asks you to authorize the app, which proves that.";
 
 export function describeResultCode(code: string): {
   tone: ResultTone;
@@ -129,9 +134,7 @@ export function describeBindingFailure(code: string): string {
   return (
     describeResultCode(code)?.text ??
     describeTransportFailure(code) ??
-    (code === "forbidden"
-      ? "Your role in this workspace does not allow that."
-      : GENERIC_FAILURE)
+    (code === "forbidden" ? ROLE_NOT_ALLOWED : GENERIC_FAILURE)
   );
 }
 

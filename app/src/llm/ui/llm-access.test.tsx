@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // @vitest-environment jsdom
-// Pins down the "LLM access" section: an Admin or an Owner gets the form (provider, write-only key, save, test,
-// remove); a Member is only told whether reviews have a key; nothing on the page holds the key; changing the
-// provider asks for the key again; the hint "LLM not configured" links to the section and is gone while a key
-// works.
+// Pins down the "LLM access" section: an Admin or an Owner gets the form (provider, write-only key,
+// save, test); a Member is only told whether reviews have a key; nothing on the page holds the key;
+// changing the provider asks for the key again; the hint "LLM not configured" links to the section and
+// is gone while a key works. Removing the key is a destructive action of the "Advanced" sub-page
+// (`remove-workspace-key.tsx`).
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -153,6 +154,51 @@ describe("the LLM access section for an Admin or an Owner", () => {
     );
   });
 
+  // #169: a key of a provider that is no longer offered is not carried over, so the field must be filled.
+  it("says that a key of another provider is not carried over", () => {
+    section({
+      keyStatus: { ...CONFIGURED, provider: "openai" as never },
+      summary: WORKS,
+    });
+
+    expect(screen.getByText(/and is not carried over/)).toBeTruthy();
+  });
+
+  // #169: the "leave the field empty to keep it" hint only makes sense while the key can be kept.
+  it("offers the keep-the-key hint only while the saved key can be kept", () => {
+    const kept = section({ keyStatus: CONFIGURED, summary: WORKS });
+    expect(
+      screen.getByRole("button", { name: "About the saved key" }),
+    ).toBeTruthy();
+    kept.unmount();
+
+    // A key of a provider that is no longer offered is not carried over: the field must be filled.
+    section({
+      keyStatus: { ...CONFIGURED, provider: "openai" as never },
+      summary: WORKS,
+    });
+
+    expect(
+      screen.queryByRole("button", { name: "About the saved key" }),
+    ).toBeNull();
+  });
+
+  it("offers no keep-the-key hint for a key that cannot be read", () => {
+    section({
+      keyStatus: {
+        state: "unreadable",
+        provider: "openrouter",
+        updatedAt: "2026-10-12T08:00:00.000Z",
+        updatedBy: null,
+      },
+      summary: WORKS,
+    });
+
+    expect(
+      screen.queryByRole("button", { name: "About the saved key" }),
+    ).toBeNull();
+  });
+
   it("shows the reason the server gave for a key it refused, next to the field", async () => {
     const user = userEvent.setup();
     const api = fakeApi({
@@ -239,28 +285,13 @@ describe("the LLM access section for an Admin or an Owner", () => {
     ).toBe(true);
   });
 
-  // #104-LK-08
-  it("removes the key after a confirmation", async () => {
-    const user = userEvent.setup();
-    const api = fakeApi();
-    section({ keyStatus: CONFIGURED, summary: WORKS }, api);
-
-    await user.click(screen.getByRole("button", { name: "Remove key" }));
-    expect(api.remove).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "Yes, remove it" }));
-
-    await waitFor(() => expect(api.remove).toHaveBeenCalledTimes(1));
-    expect(await screen.findByText("The key is removed.")).toBeTruthy();
-    expect(navigation.refresh).toHaveBeenCalled();
-  });
-
-  it("offers no removal when there is no key", () => {
-    section();
+  it("offers no removal: removing the key is a destructive action of the Advanced sub-page", () => {
+    section({ keyStatus: CONFIGURED, summary: WORKS });
 
     expect(screen.queryByRole("button", { name: "Remove key" })).toBeNull();
   });
 
-  it("says that a saved key cannot be read and asks for it again", () => {
+  it("says that a saved key cannot be read and asks for it again, not as an alert", () => {
     section({
       keyStatus: {
         state: "unreadable",
@@ -271,6 +302,8 @@ describe("the LLM access section for an Admin or an Owner", () => {
     });
 
     expect(screen.getByText("The saved key cannot be read.")).toBeTruthy();
+    // Server-determined and static: no `role="alert"` (#178 review N1).
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("says that the operator can decrypt the key", () => {
@@ -291,7 +324,15 @@ describe("the LLM access section for a Member", () => {
     });
 
     expect(screen.queryByLabelText("API key")).toBeNull();
-    expect(screen.queryByRole("button")).toBeNull();
+    // A Member gets no form and no action control: the only button is the help disclosure (#169).
+    expect(container.querySelector("form")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /save key|test key|remove key/i }),
+    ).toBeNull();
+    expect(screen.getAllByRole("button")).toHaveLength(1);
+    expect(
+      screen.getByRole("button", { name: "How the key is stored" }),
+    ).toBeTruthy();
     expect(container.textContent).toContain(
       "Reviews of this workspace have an LLM key.",
     );
@@ -329,7 +370,7 @@ describe("the hint 'LLM not configured'", () => {
       screen
         .getByRole("link", { name: "Add a key in the settings" })
         .getAttribute("href"),
-    ).toBe("/w/acme/settings#llm-access");
+    ).toBe("/w/acme/settings/llm");
   });
 
   it("tells a Member to ask an Admin or an Owner, and still links to the section", () => {
@@ -344,7 +385,7 @@ describe("the hint 'LLM not configured'", () => {
     expect(container.textContent).toContain("Ask an Admin or an Owner");
     expect(
       screen.getByRole("link", { name: "settings" }).getAttribute("href"),
-    ).toBe("/w/acme/settings#llm-access");
+    ).toBe("/w/acme/settings/llm");
   });
 
   it("says when the saved key cannot be read", () => {

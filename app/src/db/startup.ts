@@ -10,6 +10,7 @@ import { openDatabase } from "./connection.ts";
 import { DatabaseError } from "./errors.ts";
 import type { MigrationProvider } from "kysely/migration";
 import { migrateToLatest } from "./migrate.ts";
+import { assertPostgresReachable } from "./postgres.ts";
 import type { Database } from "./schema.ts";
 
 /** Opens the database and migrates it. Closes the connection again when that fails. */
@@ -19,6 +20,7 @@ export async function startDatabase(
 ): Promise<{ db: Kysely<Database>; migrationsApplied: string[] }> {
   const db = openDatabase(config);
   try {
+    if (config.driver === "postgres") await assertPostgresReachable(db, config);
     const { executed } = await migrateToLatest(db, provider);
     return { db, migrationsApplied: executed };
   } catch (error) {

@@ -137,6 +137,11 @@ class FakeApp:
                 return answer.status, answer.headers, answer.body
             if kind == "claim":
                 self.claims += 1
+                # #195: the claim request is validated against the contract too, so a runner cannot
+                # send an engines body the app would refuse (or omit it after this version).
+                if body is not None:
+                    for problem in problems("ClaimRequest", body):
+                        self._violation(f"claim request: {problem}")
                 if not self.queue:
                     return 204, {}, None
                 response = self.queue.pop(0)

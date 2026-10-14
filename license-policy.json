@@ -46,6 +46,42 @@
       "reason": "Platform binaries of lightningcss; used unmodified."
     },
     {
+      "ecosystem": "bun",
+      "package": "@openauthjs/openauth",
+      "licenses": ["NONE"],
+      "reason": "A direct dependency of OpenCode that declares no license in its package metadata and ships no license file; it is the SST OpenAuth library and the repository sst/openauth is MIT (the package has no repository field, so that link is inferred from the scope). Bundled unmodified; revisit when upstream declares it."
+    },
+    {
+      "ecosystem": "bun",
+      "package": "poe-oauth",
+      "licenses": ["NONE"],
+      "reason": "Reached through opencode-poe-auth. Declares no license in its package metadata and ships no license file; its repository field names poe-platform/poe-code, which is MIT. Bundled unmodified; revisit when upstream declares it."
+    },
+    {
+      "ecosystem": "bun",
+      "package": "seq-queue",
+      "licenses": ["NONE"],
+      "reason": "Reached only as an optional peer of mysql2 (via drizzle-orm). Its package.json declares no license, but the published tarball ships an MIT LICENSE file and the repository is MIT."
+    },
+    {
+      "ecosystem": "bun",
+      "package": "caniuse-lite",
+      "licenses": ["CC-BY-4.0"],
+      "reason": "Browser support data inside the OpenCode bundle; data, not code. Attribution is in THIRD_PARTY_LICENSES.md."
+    },
+    {
+      "ecosystem": "bun",
+      "package": "postgres",
+      "licenses": ["Unlicense"],
+      "reason": "Peer dependency of drizzle-orm in the OpenCode closure (via peer, the least likely to be bundled); a public domain dedication."
+    },
+    {
+      "ecosystem": "bun",
+      "package": "spdx-exceptions",
+      "licenses": ["CC-BY-3.0"],
+      "reason": "A list of SPDX license exception identifiers (data, not code) inside the OpenCode bundle; attribution is in THIRD_PARTY_LICENSES.md."
+    },
+    {
       "ecosystem": "python",
       "package": "certifi",
       "licenses": ["MPL-2.0"],
@@ -82,6 +118,25 @@
       "reason": "Required by PR-Agent's dependencies; used unmodified."
     }
   ],
+  "binaries": [
+    {
+      "name": "opencode",
+      "pin": "runner/opencode-pin.json",
+      "version": "1.19.0",
+      "commit": "733b2c627e5aec39cb33cc22373bdce33053ef2c",
+      "license": "MIT",
+      "bundledLicenses": "runner/opencode-bundled-licenses.json",
+      "reason": "The engine of Dynamic Review, the unmodified upstream release (a Bun executable; its bundled npm packages are audited from the reviewed snapshot)."
+    },
+    {
+      "name": "ripgrep",
+      "pin": "runner/ripgrep-pin.json",
+      "version": "14.1.1",
+      "commit": "4649aa9700619f94cf9c66876e9549d83420e16c",
+      "license": "MIT",
+      "reason": "The search helper of OpenCode, the unmodified upstream musl release, dual licensed Unlicense OR MIT (the MIT option is used)."
+    }
+  ],
   "notInstalled": [
     {
       "ecosystem": "npm",
@@ -112,6 +167,12 @@
       "package": "@rolldown/binding-*",
       "license": "MIT",
       "reason": "Rolldown binaries for other platforms."
+    },
+    {
+      "ecosystem": "npm",
+      "package": "@tailwindcss/oxide-*",
+      "license": "MIT",
+      "reason": "Platform binaries of the Tailwind CSS Oxide engine that Tailwind v4 uses; only the one for the current platform is installed."
     },
     {
       "ecosystem": "npm",

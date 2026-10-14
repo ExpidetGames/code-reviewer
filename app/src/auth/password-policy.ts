@@ -19,6 +19,18 @@ export const PASSWORD_ERROR_CODES = [
 ] as const;
 export type PasswordErrorCode = (typeof PASSWORD_ERROR_CODES)[number];
 
+/**
+ * The rule under every password field, in one sentence, and the same words wherever the rule is stated
+ * (#169). The numbers are written out so the sentence is a plain literal the copy-ownership test can
+ * find verbatim; that test asserts they are `PASSWORD_MIN_LENGTH` and `PASSWORD_MAX_LENGTH`, so the
+ * copy cannot drift from what the server checks.
+ */
+export const PASSWORD_RULE_HINT =
+  "At least 12 and at most 128 characters, and not a common password.";
+
+/** The two fields of a password form do not hold the same password. */
+export const PASSWORDS_DO_NOT_MATCH = "The two passwords are not the same.";
+
 export type PasswordCheck =
   { ok: true } | { ok: false; code: PasswordErrorCode };
 

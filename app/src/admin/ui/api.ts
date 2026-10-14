@@ -37,6 +37,8 @@ export type SettingChange =
     }
   | { signInMethods: { emailPassword: boolean; github: boolean } }
   | { limits: { maxWorkspacesPerUser: number } }
+  /** The Dynamic Review rollout gate of the instance. */
+  | { dynamicReview: { enabled: boolean } }
   /** `null` removes the mail server. */
   | { smtp: SmtpChange | null }
   /** Hides the notice that the import of an existing installation left. */

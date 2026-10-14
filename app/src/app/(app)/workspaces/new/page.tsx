@@ -5,9 +5,10 @@ import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { currentLookup } from "@/auth/session";
 import { loginPath } from "@/auth/session-user";
+import { PageHeader } from "@/components/page-header";
+import { Card, CardContent } from "@/components/ui/card";
 import { loadAccountView } from "@/workspaces/account-view";
 import { CreateWorkspaceForm } from "@/workspaces/ui/create-workspace-form";
-import { PageHeader } from "@/ui/page-header";
 
 export const metadata: Metadata = { title: "Create a workspace" };
 
@@ -27,9 +28,11 @@ export default async function NewWorkspacePage() {
         title="Create a workspace"
         description="You become its Owner and can invite people."
       />
-      <div className="card auth-card">
-        <CreateWorkspaceForm />
-      </div>
+      <Card className="mt-6 max-w-xl">
+        <CardContent className="pt-6">
+          <CreateWorkspaceForm />
+        </CardContent>
+      </Card>
     </>
   );
 }

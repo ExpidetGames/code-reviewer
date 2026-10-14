@@ -14,6 +14,7 @@ import {
 } from "../db/repositories/runner-jobs-repository.ts";
 import type { Database } from "../db/schema.ts";
 import { JobQueueError } from "./errors.ts";
+import type { RunnerEngine } from "./runner-capabilities.ts";
 import type {
   CancelClaimedResult,
   ClaimResult,
@@ -27,11 +28,17 @@ import type {
 
 export type RunnerQueue = {
   /**
-   * Gives the runner the oldest due job with the lease token of the claim, or null. First puts jobs
-   * whose lease ran out back in the queue (or fails them after the last attempt, or on timeout), so
-   * nothing else has to watch the clock. At most one job per pull request is running at any time.
+   * Gives the runner the oldest due job its engines can run, with the lease token of the claim, or
+   * null. `engines` (#195) is what the runner advertised; a previous-release caller sends none and
+   * is `pr-agent` only. An unsupported job is never selected: it waits, no attempt is counted and no
+   * credential is created. First puts jobs whose lease ran out back in the queue (or fails them after
+   * the last attempt, or on timeout), so nothing else has to watch the clock. At most one job per
+   * pull request is running at any time.
    */
-  claimNext(runnerId: string): Promise<ClaimResult>;
+  claimNext(
+    runnerId: string,
+    engines?: readonly RunnerEngine[],
+  ): Promise<ClaimResult>;
   /**
    * Extends the lease of the claim the token belongs to; `not_holder` for any other token (a stale
    * execution of the same job counts, even under the same runner id) and for a job past the hard
@@ -78,7 +85,7 @@ export function createRunnerQueue(
   const jobs = createRunnerJobsRepository(db, options);
 
   return {
-    claimNext: (runnerId) => jobs.claimNext(runnerId),
+    claimNext: (runnerId, engines) => jobs.claimNext(runnerId, engines),
     heartbeat: (jobId, leaseToken) => jobs.heartbeat(jobId, leaseToken),
     complete: (jobId, leaseToken, outcome) =>
       jobs.complete(jobId, leaseToken, outcome),

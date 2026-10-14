@@ -18,7 +18,7 @@ function read(path: string): string {
 
 type Service = {
   image?: string;
-  build?: { context?: string; dockerfile?: string };
+  build?: { context?: string; dockerfile?: string; target?: string };
   container_name?: string;
   restart?: string;
   ports?: string[];
@@ -69,22 +69,34 @@ function normalized(
 const DIFFERS = "BETTER_AUTH_URL";
 
 describe("compose.coolify.yml services", () => {
-  // CR-39-T02
-  it("defines exactly the services app and runner", () => {
-    expect(Object.keys(coolify.services).sort()).toEqual(["app", "runner"]);
+  // CR-39-T02 #264-T01
+  it("defines exactly the services app, runner and runner-dynamic", () => {
+    expect(Object.keys(coolify.services).sort()).toEqual([
+      "app",
+      "runner",
+      "runner-dynamic",
+    ]);
   });
 
   // CR-39-T02
   // #118-T03 (the context is the repository root, so the images carry the license files)
-  it("builds both images from the checkout instead of pulling them, with the Dockerfile of each folder", () => {
-    for (const name of ["app", "runner"] as const) {
+  // #264-T03 (the Dynamic runner is the `dynamic` target of the runner Dockerfile)
+  it("builds every image from the checkout instead of pulling them, with the Dockerfile of each folder", () => {
+    const folders = {
+      app: "app",
+      runner: "runner",
+      "runner-dynamic": "runner",
+    } as const;
+    for (const [name, folder] of Object.entries(folders)) {
       const definition = service(coolify, name);
 
       expect(definition.build?.context, name).toBe(".");
-      expect(definition.build?.dockerfile, name).toBe(`${name}/Dockerfile`);
+      expect(definition.build?.dockerfile, name).toBe(`${folder}/Dockerfile`);
       expect(definition.image, name).toBeUndefined();
-      expect(statSync(`${repoRoot}${name}/Dockerfile`).isFile()).toBe(true);
+      expect(statSync(`${repoRoot}${folder}/Dockerfile`).isFile()).toBe(true);
     }
+    expect(service(coolify, "runner").build?.target).toBeUndefined();
+    expect(service(coolify, "runner-dynamic").build?.target).toBe("dynamic");
     expect(JSON.stringify(coolify)).not.toContain("ghcr.io");
   });
 
@@ -93,6 +105,7 @@ describe("compose.coolify.yml services", () => {
     for (const [name, definition] of Object.entries(coolify.services))
       expect(definition, name).not.toHaveProperty("ports");
     expect(service(coolify, "runner")).not.toHaveProperty("expose");
+    expect(service(coolify, "runner-dynamic")).not.toHaveProperty("expose");
   });
 
   // CR-39-T02
@@ -118,9 +131,9 @@ describe("compose.coolify.yml services", () => {
   });
 
   // CR-39-T12
-  it("restarts both services after a crash or a reboot unless they were stopped on purpose", () => {
-    expect(service(coolify, "app").restart).toBe("unless-stopped");
-    expect(service(coolify, "runner").restart).toBe("unless-stopped");
+  it("restarts every service after a crash or a reboot unless it was stopped on purpose", () => {
+    for (const name of Object.keys(coolify.services))
+      expect(service(coolify, name).restart, name).toBe("unless-stopped");
   });
 
   // CR-39-T02
@@ -169,13 +182,16 @@ describe("compose.coolify.yml services", () => {
   });
 
   // CR-51-T02
-  it("is compose.yml except for the documented differences: where the images come from, the published port, the address and the project name", () => {
+  it("is compose.yml except for the documented differences: where the images come from, the published port, the address, the project name and the Dynamic runner", () => {
     const rest = (compose: Compose): unknown => {
       const copy = JSON.parse(JSON.stringify(compose)) as Compose & {
         name?: string;
       };
       // Coolify names the project itself.
       delete copy.name;
+      // The opt-in Dynamic runner is only in the Coolify file (#264); it is pinned to
+      // compose.dynamic.yml in compose-dynamic.test.ts.
+      delete copy.services["runner-dynamic"];
       for (const definition of Object.values(copy.services)) {
         delete definition.image;
         delete definition.build;

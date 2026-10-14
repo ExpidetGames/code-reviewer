@@ -67,17 +67,14 @@ test.describe("the project list and the settings pages", () => {
       page.getByRole("button", { name: "Sync from GitHub" }),
     ).toBeVisible();
 
-    const row = page.getByRole("listitem").filter({ hasText: REPOSITORY });
+    const row = page.getByRole("row").filter({ hasText: REPOSITORY });
     await expect(row.getByText("Inactive")).toBeVisible();
 
     await row.getByRole("switch", { name: `Review ${REPOSITORY}` }).click();
     await expect(row.getByText("Active", { exact: true })).toBeVisible();
     await page.reload();
     await expect(
-      page
-        .getByRole("listitem")
-        .filter({ hasText: REPOSITORY })
-        .getByRole("switch"),
+      page.getByRole("row").filter({ hasText: REPOSITORY }).getByRole("switch"),
     ).toHaveAttribute("aria-checked", "true");
 
     await page.getByRole("link", { name: REPOSITORY, exact: true }).click();
@@ -87,21 +84,24 @@ test.describe("the project list and the settings pages", () => {
     await page
       .getByLabel("Most findings per review", { exact: true })
       .fill("12");
-    await page.getByRole("button", { name: "Save project settings" }).click();
+    await page.getByRole("button", { name: "Save review settings" }).click();
     await expect(page.getByRole("status")).toContainText("Saved.");
     await page.reload();
     await expect(
       page.getByLabel("Most findings per review", { exact: true }),
     ).toHaveValue("12");
 
-    await page.getByRole("link", { name: "All projects" }).click();
-    const again = page.getByRole("listitem").filter({ hasText: REPOSITORY });
+    await page
+      .getByRole("navigation", { name: "Main" })
+      .getByRole("link", { name: "Projects" })
+      .click();
+    const again = page.getByRole("row").filter({ hasText: REPOSITORY });
     await again.getByRole("switch", { name: `Review ${REPOSITORY}` }).click();
     await expect(again.getByText("Inactive")).toBeVisible();
     await page.reload();
     await expect(
       page
-        .getByRole("listitem")
+        .getByRole("row")
         .filter({ hasText: REPOSITORY })
         .getByText("Inactive"),
     ).toBeVisible();
@@ -119,7 +119,7 @@ test.describe("the project list and the settings pages", () => {
       "No new repositories.",
     );
     await expect(
-      page.getByRole("listitem").filter({ hasText: REPOSITORY }),
+      page.getByRole("row").filter({ hasText: REPOSITORY }),
     ).toBeVisible();
   });
 
@@ -148,7 +148,7 @@ test.describe("the project list and the settings pages", () => {
       .getByLabel("Model", { exact: true })
       .fill("anthropic/claude-sonnet-5.5");
     await expect(page.getByText(/is above the limit of \$0\.10/)).toBeVisible();
-    await page.getByRole("button", { name: "Save project settings" }).click();
+    await page.getByRole("button", { name: "Save review settings" }).click();
     await expect(
       page.getByRole("status").filter({ hasText: "Saved." }),
     ).toBeVisible();
@@ -174,27 +174,44 @@ test.describe("the project list and the settings pages", () => {
         .filter({ visible: true });
     await expect(budget()).toHaveValue("100000");
     await expect(
-      page.locator(".field", { has: budget() }).getByText("Built-in value"),
+      page
+        .locator("[data-field]", { has: budget() })
+        .getByText("Built-in value"),
     ).toBeVisible();
 
-    await page.getByRole("link", { name: "Settings", exact: true }).click();
+    await page
+      .getByRole("navigation", { name: "Main" })
+      .getByRole("link", { name: "Settings", exact: true })
+      .click();
     await expect(
-      page.getByRole("heading", { level: 1, name: "Settings" }),
+      page.getByRole("heading", { level: 1, name: "General" }),
+    ).toBeVisible();
+    // The review defaults are their own sub-page (#178).
+    await page
+      .getByRole("link", { name: "Review defaults", exact: true })
+      .click();
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Review defaults" }),
     ).toBeVisible();
     await budget().fill("60000");
-    await page.getByRole("button", { name: "Save defaults" }).click();
+    await page.getByRole("button", { name: "Save review defaults" }).click();
     await expect(
       page.getByRole("status").filter({ hasText: "Saved." }),
     ).toBeVisible();
     // No reload here: it would drop the pages Next keeps mounted, which is what this step is about.
-    await page.getByRole("link", { name: "Projects" }).click();
+    await page
+      .getByRole("navigation", { name: "Main" })
+      .getByRole("link", { name: "Projects" })
+      .click();
     await page.getByRole("link", { name: REPOSITORY, exact: true }).click();
     await expect(
       page.getByRole("heading", { level: 1, name: REPOSITORY }),
     ).toBeVisible();
     await expect(budget()).toHaveValue("60000");
     await expect(
-      page.locator(".field", { has: budget() }).getByText("Global default"),
+      page
+        .locator("[data-field]", { has: budget() })
+        .getByText("Global default"),
     ).toBeVisible();
     await page.reload();
     await expect(budget()).toHaveValue("60000");
@@ -210,13 +227,18 @@ test.describe("the project list and the settings pages", () => {
     await page.getByRole("link", { name: "Settings", exact: true }).click();
     // The page left behind stays in the document, hidden, with its own copy of the hint.
     await expect(
-      page.getByRole("heading", { level: 1, name: "Settings" }),
+      page.getByRole("heading", { level: 1, name: "General" }),
     ).toBeVisible();
 
-    // The workspace has no key: the hint links to the form, which an Owner can fill.
+    // The workspace has no key: the hint links to the LLM sub-page, where an Owner fills the form.
     await expect(
       page.getByText("LLM not configured").filter({ visible: true }),
     ).toBeVisible();
+    await page
+      .getByRole("link", { name: "Add a key in the settings" })
+      .filter({ visible: true })
+      .click();
+    await expect(page).toHaveURL(/\/w\/default\/settings\/llm$/);
     await expect(page.getByRole("form", { name: "LLM key" })).toBeVisible();
     await expect(page.getByText(/LLM_API_KEY|GITHUB_APP/)).toHaveCount(0);
 
@@ -230,7 +252,7 @@ test.describe("the project list and the settings pages", () => {
     await expect(admin).toHaveURL(/\/w\/default\/projects$/);
     await admin.goto("/w/default/settings");
     await expect(
-      admin.getByRole("heading", { level: 1, name: "Settings" }),
+      admin.getByRole("heading", { level: 1, name: "General" }),
     ).toBeVisible();
     await expect(admin.getByText("LLM key missing")).toHaveCount(0);
     await context.close();
@@ -244,7 +266,7 @@ test.describe("the project list and the settings pages", () => {
     }) => {
       await signInThroughTheForm(page, account);
       await expect(
-        page.getByRole("listitem").filter({ hasText: REPOSITORY }),
+        page.getByRole("row").filter({ hasText: REPOSITORY }),
       ).toBeVisible();
       const overflow = () =>
         page.evaluate(

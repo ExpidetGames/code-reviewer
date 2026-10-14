@@ -131,9 +131,7 @@ test.describe("the runs pages", () => {
   }) => {
     await syncFromGithubAsAdmin(e2eEnv.appUrl);
     await signInThroughTheForm(page, account);
-    const row = page
-      .getByRole("listitem")
-      .filter({ hasText: WIDGETS.fullName });
+    const row = page.getByRole("row").filter({ hasText: WIDGETS.fullName });
     await row
       .getByRole("switch", { name: `Review ${WIDGETS.fullName}` })
       .click();
@@ -153,16 +151,23 @@ test.describe("the runs pages", () => {
     await openPullRequest(request);
 
     const run = page
-      .getByRole("listitem")
-      .filter({ hasText: `${WIDGETS.fullName} #7` });
-    await expect(run.locator(".badge-run")).toContainText("Waiting", POLL_WAIT);
+      .locator("[data-run-id]")
+      .filter({ hasText: WIDGETS.fullName })
+      .filter({ hasText: "#7" });
+    await expect(run.locator("[data-status]")).toContainText(
+      "Waiting",
+      POLL_WAIT,
+    );
     await expect(run).toContainText("Automatic");
     await expect(
       page.getByRole("heading", { name: "No runs yet" }),
     ).toHaveCount(0);
 
     const claim = await claimNextRun();
-    await expect(run.locator(".badge-run")).toContainText("Running", POLL_WAIT);
+    await expect(run.locator("[data-status]")).toContainText(
+      "Running",
+      POLL_WAIT,
+    );
 
     await completeRun(claim, {
       ok: true,
@@ -175,7 +180,7 @@ test.describe("the runs pages", () => {
         logTruncated: false,
       },
     });
-    await expect(run.locator(".badge-run")).toContainText(
+    await expect(run.locator("[data-status]")).toContainText(
       "Succeeded",
       POLL_WAIT,
     );
@@ -184,25 +189,33 @@ test.describe("the runs pages", () => {
     await expect(
       page.getByRole("heading", { level: 1, name: `${WIDGETS.fullName} #7` }),
     ).toBeVisible();
-    const comment = page.getByRole("link", {
+    // With Cache Components the Runs list stays mounted (hidden) behind the run page; its row carries
+    // the same command and trigger text, so every assertion of the page is scoped to the visible one.
+    const detail = page
+      .locator('[data-slot="run-detail"]')
+      .filter({ visible: true });
+    const comment = detail.getByRole("link", {
       name: "Open the comment on GitHub",
     });
     await expect(comment).toHaveAttribute("href", COMMENT_URL);
     await expect(comment).toHaveAttribute("rel", /noopener/);
-    await expect(page.getByText("posted the review")).toBeVisible();
-    await expect(page.getByText("Automatic", { exact: true })).toBeVisible();
+    await expect(detail.getByText("posted the review")).toBeVisible();
+    await expect(detail.getByText("Automatic", { exact: true })).toBeVisible();
 
     // The Projects page shows the status of the same run as the last run of the repository.
     await page.getByRole("link", { name: "Projects", exact: true }).click();
     const project = page
-      .getByRole("listitem")
+      .getByRole("row")
       .filter({ hasText: WIDGETS.fullName })
       .filter({ visible: true });
-    await expect(project.getByText(/Last run: Succeeded/)).toBeVisible();
+    await expect(project.getByText(/Succeeded/)).toBeVisible();
     await project.getByRole("link", { name: "All runs" }).click();
     await expect(page).toHaveURL(/\/w\/default\/runs\?repository=/);
     await expect(
-      page.getByRole("listitem").filter({ hasText: `${WIDGETS.fullName} #7` }),
+      page
+        .locator("[data-run-id]")
+        .filter({ hasText: WIDGETS.fullName })
+        .filter({ hasText: "#7" }),
     ).toBeVisible();
   });
 
@@ -212,9 +225,7 @@ test.describe("the runs pages", () => {
   }) => {
     await signInThroughTheForm(page, account);
     // The filter offers the repositories that are projects: switch the second one on too.
-    const gadgets = page
-      .getByRole("listitem")
-      .filter({ hasText: GADGETS.fullName });
+    const gadgets = page.getByRole("row").filter({ hasText: GADGETS.fullName });
     await gadgets
       .getByRole("switch", { name: `Review ${GADGETS.fullName}` })
       .click();
@@ -247,24 +258,23 @@ test.describe("the runs pages", () => {
     });
 
     await page.goto("/w/default/runs");
-    const runs = page
-      .getByRole("list", { name: "Runs" })
-      .filter({ visible: true });
-    await expect(runs.getByRole("listitem")).toHaveCount(3);
+    const runs = page.getByRole("table", { name: "Runs" });
+    await expect(runs.locator("[data-run-id]")).toHaveCount(3);
 
-    await page.getByLabel("Project").selectOption({ label: GADGETS.fullName });
-    await page.getByRole("button", { name: "Apply filter" }).click();
+    await page.getByLabel("Project").click();
+    await page.getByRole("option", { name: GADGETS.fullName }).click();
     await expect(page).toHaveURL(/repository=/);
-    await expect(runs.getByRole("listitem")).toHaveCount(2);
+    await expect(runs.locator("[data-run-id]")).toHaveCount(2);
 
-    await page.getByLabel("Status").selectOption({ label: "Failed" });
-    await page.getByRole("button", { name: "Apply filter" }).click();
+    await page.getByLabel("Status").click();
+    await page.getByRole("option", { name: "Failed" }).click();
     await expect(page).toHaveURL(/status=failed/);
-    await expect(runs.getByRole("listitem")).toHaveCount(1);
-    await expect(runs).toContainText(`${GADGETS.fullName} #21`);
+    await expect(runs.locator("[data-run-id]")).toHaveCount(1);
+    await expect(runs).toContainText(GADGETS.fullName);
+    await expect(runs).toContainText("#21");
 
-    await page.getByLabel("Status").selectOption({ label: "Running" });
-    await page.getByRole("button", { name: "Apply filter" }).click();
+    await page.getByLabel("Status").click();
+    await page.getByRole("option", { name: "Running" }).click();
     await expect(
       page.getByRole("heading", { name: "No runs for this filter" }),
     ).toBeVisible();
@@ -273,42 +283,46 @@ test.describe("the runs pages", () => {
       .getByRole("link", { name: "Reset filter" })
       .first()
       .click();
-    await expect(runs.getByRole("listitem")).toHaveCount(3);
+    await expect(runs.locator("[data-run-id]")).toHaveCount(3);
     // The selects follow the reset, they do not keep the old choice.
-    await expect(page.getByLabel("Project")).toHaveValue("");
-    await expect(page.getByLabel("Status")).toHaveValue("");
+    await expect(page.getByLabel("Project")).toContainText("All projects");
+    await expect(page.getByLabel("Status")).toContainText("All statuses");
 
     // Back returns to the page before the reset, selects and list together.
     await page.goBack();
-    await expect(page.getByLabel("Status")).toHaveValue("running");
+    await expect(page.getByLabel("Status")).toContainText("Running");
     await expect(
       page.getByRole("heading", { name: "No runs for this filter" }),
     ).toBeVisible();
     await page.goForward();
-    await expect(page.getByLabel("Status")).toHaveValue("");
-    await expect(runs.getByRole("listitem")).toHaveCount(3);
+    await expect(page.getByLabel("Status")).toContainText("All statuses");
+    await expect(runs.locator("[data-run-id]")).toHaveCount(3);
 
-    await runs.getByRole("link", { name: `${GADGETS.fullName} #21` }).click();
-    // Wait for the run page first. Right after the click the URL is already the run's, but the old
-    // list is still in the document, and its row carries the same sentence as the page, so a text
-    // query made in that moment finds two elements. The sentence of the page sits in its details
-    // list, which the rows do not have.
+    await runs
+      .locator("[data-run-id]")
+      .filter({ hasText: GADGETS.fullName })
+      .filter({ hasText: "#21" })
+      .getByRole("link", { name: `${GADGETS.fullName} #21` })
+      .click();
+    // The Runs list stays mounted (hidden) behind the run page; its row carries the same sentence as
+    // the status banner, so every assertion of the page is scoped to the visible run detail.
     await expect(
       page.getByRole("heading", { level: 1, name: `${GADGETS.fullName} #21` }),
     ).toBeVisible();
+    const detail = page
+      .locator('[data-slot="run-detail"]')
+      .filter({ visible: true });
     await expect(
-      page
-        .locator("dd")
-        .getByText("The AI provider says the credit or quota is used up."),
+      detail.getByText("The AI provider says the credit or quota is used up."),
     ).toBeVisible();
-    await expect(page.getByText("llm_quota")).toBeVisible();
+    await expect(detail.getByText("llm_quota")).toBeVisible();
     await expect(
-      page.getByText("Started by runs-journey", { exact: true }),
+      detail.getByText("Started by runs-journey", { exact: true }),
     ).toBeVisible();
-    await expect(page.getByText("The log was shortened")).toBeVisible();
-    await expect(page.getByText("402 from the provider")).toBeVisible();
+    await expect(detail.getByText("The log was shortened")).toBeVisible();
+    await expect(detail.getByText("402 from the provider")).toBeVisible();
     await expect(
-      page.getByRole("link", { name: "Open the comment on GitHub" }),
+      detail.getByRole("link", { name: "Open the comment on GitHub" }),
     ).toHaveCount(0);
   });
 
@@ -345,9 +359,7 @@ test.describe("the runs pages", () => {
     }) => {
       await signInThroughTheForm(page, account);
       await page.goto("/w/default/runs");
-      await expect(
-        page.getByRole("list", { name: "Runs" }).getByRole("listitem").first(),
-      ).toBeVisible();
+      await expect(page.locator("[data-run-id]").first()).toBeVisible();
       const overflow = () =>
         page.evaluate(
           () =>
@@ -357,7 +369,8 @@ test.describe("the runs pages", () => {
       expect(await overflow()).toBeLessThanOrEqual(0);
 
       await page
-        .getByRole("list", { name: "Runs" })
+        .locator("[data-run-id]")
+        .first()
         .getByRole("link")
         .first()
         .click();

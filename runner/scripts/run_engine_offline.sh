@@ -8,11 +8,15 @@
 #
 #   scripts/run_engine_offline.sh [pytest arguments]
 #
-# The tiktoken cache is filled first, outside the namespace (the one step that needs the internet).
+# The tiktoken cache is filled and the pinned OpenCode is fetched and verified first, outside the
+# namespace (the steps that need the internet). The engine also needs a trusted ripgrep on its PATH,
+# which the pinned release would otherwise download from GitHub on the first grep.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 uv run python scripts/prime_tiktoken_cache.py
+uv run python scripts/fetch_opencode.py
+command -v rg >/dev/null || { echo "ripgrep is not installed (the engine's grep and glob need it)" >&2; exit 1; }
 
 # Inside the namespace the script proves that there is no way out, drops back to the calling user
 # (the tests must not run as root) and runs the suite. `env PATH=...` because sudo replaces PATH.

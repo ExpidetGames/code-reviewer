@@ -1,20 +1,64 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// The sections of the admin portal. One list feeds the links and the active state.
+// The sections of the admin portal, grouped the way the sidebar shows them. One list feeds the
+// links and the active state. The Setup group holds the three sub-pages of the split (#181) and the
+// Integrations group nests the GitHub App page under its index (#182/#185).
 
-export const ADMIN_NAV_ITEMS = [
-  { href: "/admin", label: "Overview", exact: true },
-  { href: "/admin/setup", label: "Setup", exact: false },
-  { href: "/admin/integrations", label: "Integrations", exact: false },
-  { href: "/admin/approvals", label: "Approvals", exact: false },
-  { href: "/admin/mail", label: "Mail", exact: false },
-  { href: "/admin/limits", label: "Limits", exact: false },
-] as const;
+export type AdminNavItem = {
+  href: string;
+  label: string;
+  exact: boolean;
+  /** Sub-pages of this section, rendered nested under its link (for example GitHub App under Integrations). */
+  children?: AdminNavItem[];
+};
+export type AdminNavGroup = { label: string; items: AdminNavItem[] };
+
+export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
+  {
+    label: "Admin",
+    items: [
+      { href: "/admin", label: "Overview", exact: true },
+      { href: "/admin/approvals", label: "Approvals", exact: false },
+    ],
+  },
+  {
+    label: "Setup",
+    items: [
+      { href: "/admin/setup/instance", label: "Instance", exact: false },
+      { href: "/admin/setup/sign-up", label: "Sign-up", exact: false },
+      { href: "/admin/setup/sign-in", label: "Sign-in", exact: false },
+    ],
+  },
+  {
+    label: "Integrations",
+    items: [
+      {
+        href: "/admin/integrations",
+        label: "Integrations",
+        exact: true,
+        // The index owns only its own path; the GitHub App page is its nested child (#182 lead note).
+        children: [
+          {
+            href: "/admin/integrations/github",
+            label: "GitHub App",
+            exact: false,
+          },
+        ],
+      },
+      { href: "/admin/mail", label: "Mail", exact: false },
+    ],
+  },
+];
+
+/** Every section in one list, in the order the sidebar shows them (a parent before its children). */
+export const ADMIN_NAV_ITEMS: AdminNavItem[] = ADMIN_NAV_GROUPS.flatMap(
+  (group) => group.items.flatMap((item) => [item, ...(item.children ?? [])]),
+);
 
 /** Whether `pathname` is the section `item` (Overview only on its own path, the others also below it). */
 export function isCurrentSection(
   pathname: string | null,
-  item: (typeof ADMIN_NAV_ITEMS)[number],
+  item: AdminNavItem,
 ): boolean {
   if (pathname === null) return false;
   if (item.exact) return pathname === item.href;

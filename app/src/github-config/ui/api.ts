@@ -45,8 +45,6 @@ export type GithubApi = {
   }): Promise<RequestResult<{ ok: true } & ManifestStart>>;
   /** Asks GitHub which permissions the App lacks. */
   check(): Promise<RequestResult<{ ok: true; missing: string[] }>>;
-  /** Starts the linking of the admin's own GitHub account: the address of GitHub's authorization page. */
-  startLink(): Promise<RequestResult<{ ok: true; url: string }>>;
 };
 
 export function createGithubApi(
@@ -64,8 +62,6 @@ export function createGithubApi(
     startManifest: (input) =>
       requestJson(fetchImpl, "POST", "/api/admin/github/manifest", input),
     check: () => requestJson(fetchImpl, "POST", "/api/admin/github/check", {}),
-    startLink: () =>
-      requestJson(fetchImpl, "POST", "/api/admin/github/link", {}),
   };
 }
 

@@ -4,10 +4,15 @@
 // the fields of the wizard. The codes are the contract, these sentences are only what the page shows.
 import {
   PASSWORD_ERROR_COPY,
-  PASSWORD_MAX_LENGTH,
-  PASSWORD_MIN_LENGTH,
   type PasswordErrorCode,
 } from "../../auth/password-policy.ts";
+import {
+  CROSS_SITE_REQUEST,
+  ENTRIES_REQUIRED,
+  ENTRY_INVALID,
+  INVALID_EMAIL,
+  TOO_MANY_ENTRIES,
+} from "../../copy/messages.ts";
 import {
   describeTransportFailure,
   GENERIC_FAILURE,
@@ -30,7 +35,7 @@ const FAILURE_COPY: Record<string, string> = {
   email_in_use: "An account with this email address exists already.",
   admin_unusable:
     "This email address or password cannot be used to sign in. Nothing was created: change them and try again.",
-  cross_site_request: "The request did not come from this page. Reload it.",
+  cross_site_request: CROSS_SITE_REQUEST,
 };
 
 /** The sentence for a failed call of the code form or the wizard. */
@@ -48,25 +53,38 @@ export function describeSetupIssue(field: string, code: string): string {
     return PASSWORD_ERROR_COPY[code as PasswordErrorCode];
   switch (code) {
     case "email_invalid":
-      return "Enter a valid email address.";
+      return INVALID_EMAIL;
     case "tenancy_invalid":
       return "Choose single-tenant or multi-tenant.";
     case "sign_up_rule_invalid":
       return "Choose who may sign up.";
     case "entries_required":
-      return "Enter at least one entry.";
+      return ENTRIES_REQUIRED;
     case "entry_invalid":
       return field === "signUp.entries"
-        ? "One of the entries is not valid. Emails look like name@example.com, domains like example.com."
+        ? ENTRY_INVALID
         : "This entry is not valid.";
     case "too_many_entries":
-      return "There are too many entries (500 at most).";
+      return TOO_MANY_ENTRIES;
     default:
       return GENERIC_FAILURE;
   }
 }
 
-export const PASSWORD_REASON = `At least ${String(PASSWORD_MIN_LENGTH)} and at most ${String(PASSWORD_MAX_LENGTH)} characters, and not a common password. There are no other rules: a long passphrase of a few unrelated words is the strongest choice. The same rule applies to every account on this instance.`;
+/**
+ * The longer explanation behind the password field, shown in a HelpDisclosure (#169). The rule itself
+ * is `PASSWORD_RULE_HINT` in `auth/password-policy.ts`; this only says why there are no other rules.
+ */
+export const PASSWORD_REASON =
+  "There are no other rules: a long passphrase of a few unrelated words is the strongest choice. The same rule applies to every account on this instance.";
+
+/**
+ * The one line under a rule that names emails or domains (#172). The shared warning
+ * (`FAIL_CLOSED_WARNING`, #169) states the same in full and sits in the field's InfoHint; this line
+ * only carries what the person has to know without opening it.
+ */
+export const FAIL_CLOSED_LINE =
+  "Until the instance can verify addresses, nobody except you can sign up.";
 
 /** The step of the wizard (1 to 3) a field belongs to, to show the problem where it can be fixed. */
 export function stepOfField(field: string): 1 | 2 | 3 {
