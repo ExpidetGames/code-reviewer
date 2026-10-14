@@ -264,8 +264,9 @@ export function InstanceForm({
               it is on, those runs are queued and wait for a runner that can run
               it; one that no runner claims within 30 minutes is cancelled with{" "}
               <code>no_capable_runner</code>. Turning it off cancels the waiting
-              runs and leaves the running ones to finish. Dynamic Review cannot
-              be activated yet: no runner offers the engine until it ships.
+              runs and leaves the running ones to finish. Deploy a
+              Dynamic-capable runner before turning it on; without one, those
+              runs only wait and are then cancelled.
             </FieldDescription>
           </Field>
           {dynamicEnabled && !settings.dynamicReview.value ? (

@@ -28,7 +28,7 @@ CAPABILITY = "job-capability-0123456789abcdef0123456789abcdef"
 def config() -> dict[str, Any]:
     return build_engine_config(
         proxy_url="http://127.0.0.1:41234",
-        model="deepseek-v4.1-flash",
+        model="deepseek/deepseek-v4.1-flash",
         system_prompt=compose_system_prompt("look for real bugs", HEAD),
         proxy_capability=CAPABILITY,
     )
@@ -67,13 +67,25 @@ def test_the_config_allows_one_loopback_provider_and_no_other() -> None:
     assert entry["options"] == {"baseURL": "http://127.0.0.1:41234/v1", "apiKey": CAPABILITY}
 
 
+# #262-T05
+def test_a_model_id_with_a_slash_stays_one_model_under_the_runner_provider() -> None:
+    document = config()
+
+    # OpenCode reads `provider/model` and splits at the first slash only: the provider is ours and
+    # everything after it, slash included, is the model.
+    ref = document["agent"]["review"]["model"]
+    provider, _, model = ref.partition("/")
+    assert (provider, model) == (PROXY_PROVIDER_ID, "deepseek/deepseek-v4.1-flash")
+    assert document["provider"][PROXY_PROVIDER_ID]["models"] == {"deepseek/deepseek-v4.1-flash": {}}
+
+
 # #197-T03
 def test_the_config_defines_only_the_review_agent_with_the_trusted_prompt() -> None:
     document = config()
     agent = document["agent"]["review"]
 
     assert agent["mode"] == "primary"
-    assert agent["model"] == f"{PROXY_PROVIDER_ID}/deepseek-v4.1-flash"
+    assert agent["model"] == f"{PROXY_PROVIDER_ID}/deepseek/deepseek-v4.1-flash"
     assert agent["prompt"] == compose_system_prompt("look for real bugs", HEAD)
     # The agent has no `tools` map: against the real v1.19.0 binary `{"*": false}` removed every
     # tool, StructuredOutput included. The tool set is the default-deny permission block.

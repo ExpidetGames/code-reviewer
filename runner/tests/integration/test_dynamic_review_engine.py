@@ -161,7 +161,7 @@ def dynamic_job() -> Job:
                 "command": "review",
                 "reviewKind": "dynamic",
                 "dynamic": {
-                    "model": "deepseek-v4.1-flash",
+                    "model": "deepseek/deepseek-v4.1-flash",
                     "skill": "Look for real bugs.",
                     "limits": {"maxFindings": 5},
                 },
@@ -255,7 +255,7 @@ class Fixture:
         proxy = ModelProxy(
             ledger=self.ledger,
             base_path="/v1",
-            model="deepseek-v4.1-flash",
+            model="deepseek/deepseek-v4.1-flash",
             upstream_url=f"{upstream.url}/v1/chat/completions",
             upstream_api_key=API_KEY,
             upstream_model="deepseek/deepseek-v4.1-flash",

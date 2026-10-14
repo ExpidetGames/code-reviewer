@@ -95,7 +95,7 @@ def answer_ok(handler: BaseHTTPRequestHandler) -> None:
 def request_body() -> bytes:
     return json.dumps(
         {
-            "model": "deepseek-v4.1-flash",
+            "model": "deepseek/deepseek-v4.1-flash",
             "messages": [{"role": "user", "content": "hello"}],
             "tool_choice": "required",
         }
@@ -120,7 +120,7 @@ def started_proxy(
     proxy = ModelProxy(
         ledger=ledger or BudgetLedger(DynamicLimits(**limits)),
         base_path="/v1",
-        model="deepseek-v4.1-flash",
+        model="deepseek/deepseek-v4.1-flash",
         upstream_url=f"{upstream_url}/v1/chat/completions",
         upstream_api_key=UPSTREAM_KEY,
         upstream_model="deepseek/deepseek-v4.1-flash",

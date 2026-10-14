@@ -250,7 +250,7 @@ describe("the project-only settings in the form serialization", () => {
     },
     defaults: {
       reviewKind: "diff" as const,
-      dynamicModel: "deepseek-v4.1-flash",
+      dynamicModel: "deepseek/deepseek-v4.1-flash",
       reviewSkill: "shipped skill",
     },
     reviewSkillIsDefault: false,

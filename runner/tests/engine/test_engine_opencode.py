@@ -210,6 +210,9 @@ def test_the_hostile_repository_is_neither_loaded_nor_executed_through_the_real_
     assert run.answer.ok, run.answer.error
     assert run.answer.findings is not None
     assert [finding.path for finding in run.answer.findings.findings] == ["src/app.py"]
+    # #262-T05: the real engine called the slashed OpenRouter id through the proxy provider, and the
+    # model upstream received exactly that id (the proxy refuses any other).
+    assert {request["model"] for request in model.requests} == {"deepseek/deepseek-v4.1-flash"}
 
     # No repository code executed: not a plugin, not a tool, not a nested config.
     assert sorted(path.name for path in sentinels.iterdir()) == []
