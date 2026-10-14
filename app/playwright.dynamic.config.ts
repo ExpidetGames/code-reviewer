@@ -45,7 +45,8 @@ export default defineConfig({
   globalSetup: "./e2e/dynamic/preflight.global-setup.ts",
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 1 : 0,
+  // No retry: the journey and its fixtures are written once per run, and a retry would hide what failed.
+  retries: 0,
   // One runner, one slot, one database: nothing of the lane runs next to anything else.
   workers: 1,
   timeout: 240_000,

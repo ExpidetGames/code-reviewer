@@ -368,7 +368,7 @@ test.describe("a pull request on its way to a Dynamic Review summary", () => {
       body: BODY,
       headSha: fixed,
     });
-    await page.getByRole("link", { name: "Runs", exact: true }).click();
+    await page.goto("/w/default/runs");
     const requestsBefore = fakeLlm().requests().length;
 
     const pushed = await deliverPullRequestEvent(request, {

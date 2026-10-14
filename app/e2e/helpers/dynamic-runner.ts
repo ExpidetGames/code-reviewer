@@ -19,6 +19,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { e2eEnv } from "./e2e-env";
+import { waitUntil } from "./wait-until";
 
 const RUNNER_DIRECTORY = resolve(process.cwd(), "../runner");
 const WRAPPER = resolve(
@@ -40,22 +41,6 @@ export const PRODUCTION_CAPABILITIES = [
   "setpcap",
   "net_admin",
 ] as const;
-
-/** Waits for a condition, looking every 100 ms; fails with `what` when it does not hold in time. */
-async function until(
-  what: string,
-  condition: () => boolean,
-  timeoutMs: number,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!condition()) {
-    if (Date.now() > deadline)
-      throw new Error(
-        `Timed out after ${String(timeoutMs)} ms waiting for ${what}.`,
-      );
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-}
 
 /** The engine user of the Dynamic image: its processes must not outlive the runner. */
 const ENGINE_UID = 10101;
@@ -215,7 +200,7 @@ export async function startDynamicRunner(options: {
   return {
     output: () => output,
     async waitForAdvertisement() {
-      await until(
+      await waitUntil(
         "the runner's verdict on its startup self-check",
         () => advertisementOf(output).state !== "pending" || !isRunning(),
         60_000,
@@ -239,7 +224,7 @@ export async function startDynamicRunner(options: {
           await exited;
           clearTimeout(killer);
         }
-        await until(
+        await waitUntil(
           "the processes of the engine user to be gone after the runner",
           () => engineProcesses().length === 0,
           15_000,
