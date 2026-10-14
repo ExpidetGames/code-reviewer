@@ -19,7 +19,7 @@ help:
 	@echo "make fix-spdx-headers  add the SPDX license header to every source file that lacks it (a unit test fails without it)"
 	@echo "make test-engine       the real PR-Agent and the pinned OpenCode against the fakes (about 5 minutes, not part of verify)"
 	@echo "make test-e2e          Playwright journeys against a production build (ARGS=... to filter)"
-	@echo "make test-images       build both container images and run their smoke tests (needs Docker)"
+	@echo "make test-images       build the container images (the Dynamic runner target too) and run their smoke tests (needs Docker)"
 	@echo "make test-compose      build both images and smoke test the Docker Compose stack (needs Docker)"
 	@echo "make verify            lint, typecheck, unit and host integration tests and the license check; run before every PR"
 
@@ -83,9 +83,11 @@ test-e2e:
 test-images:
 	docker build --file app/Dockerfile --tag code-reviewer-app:local .
 	docker build --file runner/Dockerfile --tag code-reviewer-runner:local .
+	docker build --file runner/Dockerfile --target dynamic --tag code-reviewer-runner-dynamic:local .
 	docker/smoke/app.sh code-reviewer-app:local
 	docker/smoke/upgrade.sh code-reviewer-app:local
 	docker/smoke/runner.sh code-reviewer-runner:local
+	docker/smoke/runner.sh code-reviewer-runner-dynamic:local dynamic
 
 # Builds both images (under tags of their own, so images of other work stay untouched) and runs
 # docker/smoke/compose.sh against them: the stack starts with dummy settings, the runner waits for a

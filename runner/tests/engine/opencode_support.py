@@ -12,6 +12,7 @@ reads is exactly what production would give it. No real model, network or creden
 import importlib.util
 import json
 import os
+import shutil
 import sys
 import threading
 from collections.abc import Callable, Mapping
@@ -69,6 +70,12 @@ def opencode_binary() -> Path:
 
 def extra_path() -> str | None:
     return os.environ.get(EXTRA_PATH_VARIABLE) or None
+
+
+def ripgrep_binary() -> Path | None:
+    """The `rg` of this host that stands in for the image's verified one (None when it has none)."""
+    found = shutil.which("rg", path=f"{extra_path() or ''}:/usr/local/bin:/usr/bin:/bin")
+    return Path(found) if found else None
 
 
 def tool_call(call_id: str, name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
@@ -322,6 +329,7 @@ def run_engine(
             exported_paths=frozenset(content.files) if files is None else files,
             scratch_dir=str(scratch),
             node_bin=extra_path(),
+            ripgrep=ripgrep_binary(),
             startup_seconds=60.0,
         )
         answer = engine.run()

@@ -4,7 +4,8 @@
 
 A runner advertises `opencode` only after the check proved the dedicated unprivileged user, a
 read-only export mechanism and proxy-only egress. A failure drops the capability and names a stable
-isolation code; there is no host-setting or fork fallback. The concrete probes are #202's.
+isolation code; there is no host-setting or fork fallback. The concrete probes are
+`dynamic_review/self_check.py` (#202, `test_dynamic_review_self_check.py`).
 """
 
 import pytest
@@ -16,7 +17,6 @@ from code_reviewer_runner.capabilities import (
     IsolationFacts,
     IsolationSelfCheckError,
     advertised_engines,
-    fail_closed_self_check,
     verify_isolation,
 )
 from code_reviewer_runner.result import ErrorCode
@@ -75,10 +75,14 @@ def test_a_writable_export_or_non_proxy_egress_drops_the_capability() -> None:
         assert ENGINE_DYNAMIC not in engines
 
 
-# #195-T09: until #202 supplies the probes, the configured check fails closed.
-def test_the_configured_self_check_fails_closed() -> None:
-    with pytest.raises(IsolationSelfCheckError) as refused:
-        fail_closed_self_check()()
+# #202-T03: the engines the loop handed to a job process are the ones it may run.
+def test_the_engines_of_a_job_process_come_only_from_the_variable_the_loop_sets() -> None:
+    from code_reviewer_runner.capabilities import ENGINES_VARIABLE, engines_from_environment
 
-    assert refused.value.code is ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED
-    assert advertised_engines(fail_closed_self_check()) == (ENGINE_DIFF,)
+    assert engines_from_environment({}) == ()
+    assert engines_from_environment({ENGINES_VARIABLE: ""}) == ()
+    assert engines_from_environment({ENGINES_VARIABLE: "pr-agent"}) == (ENGINE_DIFF,)
+    assert engines_from_environment({ENGINES_VARIABLE: "pr-agent,opencode"}) == ALL_ENGINES
+    assert engines_from_environment({ENGINES_VARIABLE: "opencode"}) == (ENGINE_DYNAMIC,)
+    # An unknown name is not an engine; a lookalike does not match.
+    assert engines_from_environment({ENGINES_VARIABLE: "opencode-2,OPENCODE, evil"}) == ()

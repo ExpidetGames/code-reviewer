@@ -28,6 +28,7 @@ import time
 from collections.abc import Generator, Mapping, Sequence
 from contextlib import ExitStack, contextmanager
 from dataclasses import replace
+from pathlib import Path
 from typing import Any, TextIO
 
 from loguru import logger
@@ -35,8 +36,9 @@ from loguru import logger
 from code_reviewer_runner import __version__
 from code_reviewer_runner.capabilities import (
     ENGINE_DYNAMIC,
-    advertised_engines,
-    fail_closed_self_check,
+    OPENCODE_COMMAND_VARIABLE,
+    RIPGREP_PATH_VARIABLE,
+    engines_from_environment,
 )
 from code_reviewer_runner.comment_recorder import CommentRecorder, install_comment_recorder
 from code_reviewer_runner.dynamic_review import findings_schema
@@ -207,7 +209,6 @@ def run_job(
     )
 
 
-OPENCODE_COMMAND_VARIABLE = "RUNNER_OPENCODE_COMMAND"
 DYNAMIC_CAPABILITIES_VARIABLE = "RUNNER_DYNAMIC_CAPABILITIES"
 DYNAMIC_NODE_BIN_VARIABLE = "RUNNER_DYNAMIC_NODE_BIN"
 
@@ -255,6 +256,11 @@ def run_dynamic_job(
             started,
             capture,
         )
+    # The `rg` the startup self-check verified, named by the loop and not looked up along the PATH.
+    # Without one the adapter refuses to start the engine.
+    ripgrep = (
+        Path(named_ripgrep) if (named_ripgrep := environment.get(RIPGREP_PATH_VARIABLE)) else None
+    )
     try:
         capabilities = capabilities_from_config(environment.get(DYNAMIC_CAPABILITIES_VARIABLE))
     except LimitError as error:
@@ -326,6 +332,7 @@ def run_dynamic_job(
                     exported_paths=frozenset(content.files),
                     launch=prepared.launch,
                     node_bin=environment.get(DYNAMIC_NODE_BIN_VARIABLE) or None,
+                    ripgrep=ripgrep,
                 )
                 answer = engine.run()
             finally:
@@ -545,7 +552,7 @@ def main(
                     started,
                     saved_env,
                     dynamic_timeout,
-                    engines=advertised_engines(fail_closed_self_check()),
+                    engines=engines_from_environment(saved_env),
                 )
         except KeyboardInterrupt:
             raise

@@ -7,6 +7,7 @@ tests own, and the Git objects are made locally by `fakes/dynamic_git`.
 """
 
 import json
+import os
 import shutil
 import socket
 import subprocess
@@ -82,6 +83,14 @@ RUNNER_ENVIRONMENT = {
 def python3() -> str:
     path = shutil.which("python3", path=TRUSTED_PATH)
     assert path is not None, "a system python3 is needed to run helpers as another user"
+    return path
+
+
+def ripgrep() -> str:
+    """The `rg` of this host that stands in for the image's verified one (the loop names it)."""
+    extra = os.environ.get("OPENCODE_TEST_PATH")
+    path = shutil.which("rg", path=f"{extra}:{TRUSTED_PATH}" if extra else TRUSTED_PATH)
+    assert path is not None, "a ripgrep is needed: the engine's grep and glob run it (apt ripgrep)"
     return path
 
 

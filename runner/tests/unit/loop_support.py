@@ -195,6 +195,8 @@ class Harness:
     """A loop with fakes, started as a task on the running event loop."""
 
     def __init__(self, **settings: Any) -> None:
+        # `environment` is the loop's environment (the rest of the keywords are its settings).
+        environment: Mapping[str, str] = settings.pop("environment", {})
         # The kill of the engine user's leftovers: calls are recorded, the answer is `sweeps_ok`.
         self.sweeps: list[tuple[int, int]] = []
         self.sweeps_ok = True
@@ -215,6 +217,7 @@ class Harness:
                 "RUNNER_TOKEN": RUNNER_TOKEN,
                 "GITHUB__USER_TOKEN": TOKEN,
                 "OPENROUTER__KEY": API_KEY,
+                **environment,
             },
         )
         self.task: asyncio.Task[None] | None = None

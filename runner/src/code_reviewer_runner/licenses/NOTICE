@@ -38,6 +38,34 @@ require us to keep are in THIRD_PARTY_LICENSES.md, in particular:
   Licensed under the Apache License, Version 2.0.
   The fixed core of Dynamic Review adapts the workflow's "Input Demarcation" paragraph.
 
+  OpenCode (https://github.com/anomalyco/opencode)
+  Copyright (c) 2025 opencode
+  Licensed under the MIT License.
+  The Dynamic runner image carries the unmodified release 1.19.0 (source commit
+  733b2c627e5aec39cb33cc22373bdce33053ef2c) as its review engine. The npm packages bundled in the
+  executable are listed, with their licenses, in runner/opencode-bundled-licenses.json (an upper
+  bound, see THIRD_PARTY_LICENSES.md).
+
+  ripgrep (https://github.com/BurntSushi/ripgrep)
+  Copyright (c) 2015 Andrew Gallant
+  Licensed under the MIT License (upstream offers it as an alternative to the Unlicense).
+  The Dynamic runner image carries the unmodified release 14.1.1 (source commit
+  4649aa9700619f94cf9c66876e9549d83420e16c) as the search helper of the engine.
+
+  caniuse-lite (https://github.com/browserslist/caniuse-lite)
+  Credit: Alexis Deveria and the caniuse-lite contributors.
+  Licensed under Creative Commons Attribution 4.0 International
+  (https://creativecommons.org/licenses/by/4.0/). Data, used unmodified, provided without
+  warranties (the license disclaims them). It appears in the build tooling and inside the OpenCode
+  executable of the Dynamic runner image.
+
+  spdx-exceptions (https://github.com/kemitchell/spdx-exceptions.json)
+  Credit: The Linux Foundation.
+  Licensed under Creative Commons Attribution 3.0 Unported
+  (https://creativecommons.org/licenses/by/3.0/). Data, used unmodified, provided without
+  warranties (the license disclaims them). It appears inside the OpenCode executable of the Dynamic
+  runner image.
+
   The exact source URLs, revisions and modifications of every adapted passage are in
   THIRD_PARTY_LICENSES.md.
 

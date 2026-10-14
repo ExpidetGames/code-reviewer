@@ -53,7 +53,9 @@ function documentedRows(): Row[] {
         ? "npm"
         : line.startsWith("### Runner")
           ? "python"
-          : null;
+          : line.startsWith("### Bundled binaries")
+            ? "bun"
+            : null;
       kind = null;
     } else if (line.startsWith("#### ")) {
       kind = line.startsWith("#### Exceptions")
@@ -129,5 +131,74 @@ describe("THIRD_PARTY_LICENSES.md and license-policy.json", () => {
 
   it("document at least the tables that the checks above compare", () => {
     expect(documentedRows().length).toBeGreaterThan(10);
+  });
+
+  // #202-T06
+  describe("prebuilt binaries", () => {
+    /** The rows of the "#### Binaries" table: name, version, license, source commit (or "-"). */
+    function documentedBinaries(): string[] {
+      const rows: string[] = [];
+      let inTable = false;
+      for (const line of section("### Bundled binaries").split("\n")) {
+        if (line.startsWith("#### "))
+          inTable = line.startsWith("#### Binaries");
+        else if (inTable && line.startsWith("|")) {
+          const cells = line
+            .split("|")
+            .slice(1, -1)
+            .map((cell) => cell.trim());
+          const first = cells[0] ?? "";
+          if (first === "Binary" || /^-+$/.test(first)) continue;
+          rows.push(
+            [first, cells[1], cells[2], cells[3]]
+              .map((cell) => (cell ?? "").replaceAll("`", ""))
+              .join(" "),
+          );
+        }
+      }
+      return rows.sort();
+    }
+
+    it("lists the same binaries, versions, licenses and source commits as the policy", () => {
+      const configured = policy.binaries
+        .map((entry) =>
+          [entry.name, entry.version, entry.license, entry.commit ?? "-"].join(
+            " ",
+          ),
+        )
+        .sort();
+
+      expect(documentedBinaries()).toEqual(configured);
+    });
+
+    it("keeps the copyright line and the permission text of OpenCode and ripgrep", () => {
+      expect(document).toContain("Copyright (c) 2025 opencode");
+      expect(document).toContain("Copyright (c) 2015 Andrew Gallant");
+      expect(document).toContain("The Unlicense");
+      expect(
+        document.match(/Permission is hereby granted, free of charge/g)?.length,
+      ).toBeGreaterThanOrEqual(4);
+    });
+
+    it("states what the bundled-dependency snapshot is and what its caveat is", () => {
+      const bundled = policy.binaries.find((entry) => entry.bundledLicenses);
+
+      expect(bundled?.bundledLicenses).toBe(
+        "runner/opencode-bundled-licenses.json",
+      );
+      expect(document).toContain("runner/opencode-bundled-licenses.json");
+      expect(document).toContain("upper bound");
+      expect(document).toContain("runner/scripts/audit_opencode_bundle.py");
+    });
+
+    it("names OpenCode and ripgrep, with version and source commit, in NOTICE", () => {
+      const notice = read("NOTICE");
+
+      for (const entry of policy.binaries) {
+        expect(notice.toLowerCase(), entry.name).toContain(entry.name);
+        expect(notice, entry.name).toContain(entry.version);
+        if (entry.commit) expect(notice, entry.name).toContain(entry.commit);
+      }
+    });
   });
 });
