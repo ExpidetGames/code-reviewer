@@ -319,11 +319,17 @@ assert_no_token_in_log smoke-runner-capable
 # #249-T01: what a compromised root supervisor can leave behind does not survive a restart. A root
 # process inside the container cannot change the tools that run with NET_ADMIN at the next start, and
 # what it writes into the three tmpfs is gone after the restart, which runs the self-check again.
-step "a restart gives back the same clean container: tools unchanged, tmpfs empty, opencode advertised again"
+step "a restart gives back the same clean container: tools unchanged, tmpfs and Docker's /etc files fresh, opencode advertised again"
+tools_hash() { docker exec smoke-runner-capable sha256sum /usr/sbin/nft /usr/bin/tini; }
+tools_before=$(tools_hash) || fail "cannot hash nft and tini"
 docker exec smoke-runner-capable sh -c 'touch /tmp/planted /run/planted /home/runner/planted' ||
   fail "root cannot write to the tmpfs of the container"
-docker exec smoke-runner-capable sh -c 'if cat /dev/null >> /usr/sbin/nft || cat /dev/null >> /usr/bin/tini; then exit 1; fi' 2>/dev/null ||
-  fail "root changed nft or tini on the root filesystem"
+# Docker keeps these three files writable for root; they must be written afresh at every start.
+docker exec smoke-runner-capable sh -c 'for f in /etc/hosts /etc/hostname /etc/resolv.conf; do echo cr-planted >> "$f" || exit 1; done' ||
+  fail "root cannot append to the files Docker binds into /etc"
+# Exit status 0 only if both files exist and neither can be appended to (a missing path also fails).
+docker exec smoke-runner-capable sh -c 'for f in /usr/sbin/nft /usr/bin/tini; do [ -f "$f" ] || exit 2; if cat /dev/null >> "$f"; then exit 1; fi; done' 2>/dev/null ||
+  fail "root changed nft or tini on the root filesystem, or one of them is missing"
 docker restart smoke-runner-capable >/dev/null
 waited=0
 until [ "$(docker logs smoke-runner-capable 2>&1 | grep -c 'opencode is advertised')" -ge 2 ]; do
@@ -333,6 +339,9 @@ until [ "$(docker logs smoke-runner-capable 2>&1 | grep -c 'opencode is advertis
 done
 docker exec smoke-runner-capable sh -c '[ ! -e /tmp/planted ] && [ ! -e /run/planted ] && [ ! -e /home/runner/planted ]' ||
   fail "a file written into a tmpfs survived the restart"
+docker exec smoke-runner-capable sh -c '! grep -q cr-planted /etc/hosts /etc/hostname /etc/resolv.conf' ||
+  fail "a change to /etc/hosts, /etc/hostname or /etc/resolv.conf survived the restart"
+[ "$(tools_hash)" = "$tools_before" ] || fail "nft or tini differ after the restart"
 assert_no_token_in_log smoke-runner-capable
 docker rm --force smoke-runner-capable >/dev/null
 
@@ -422,6 +431,14 @@ problems=$(docker run --rm --network none "${dynamic_caps[@]}" "${dynamic_rootfs
   fail "the read-only check could not run: $problems"
 [ -z "$problems" ] || fail "the root filesystem is not read-only as configured:
 $problems"
+
+# #249 (review of #259, minor 1): a Dynamic runner serves Diff jobs as well. One job through the real
+# PR-Agent, the way the loop runs it (user 10001, HOME in the tmpfs, working directory in /tmp), in the
+# read-only layout: a library or git that writes where nothing is writable fails here, not on the first
+# real Diff job. The fake GitHub and LLM are the engine suite's, on the loopback of the host.
+step "a Diff job through the real PR-Agent runs in the read-only layout, against the fake GitHub and LLM"
+python3 -B "$here/diff_job_fakes.py" "$image" "${dynamic_rootfs[@]}" ||
+  fail "a Diff job does not run in the read-only layout"
 
 # #249-T01: the engine user (and the Diff job user) gain no write path from the layout. The paths a
 # user can write in the container, with the settings of compose.dynamic.yml, must be among those it

@@ -87,12 +87,16 @@ sudo --preserve-env env "PATH=$PATH:/usr/sbin:/sbin" "HOME=$HOME" "OPENCODE_BIN=
     # mount of a disk filesystem, so the repository, the tools and the system cannot be changed by
     # the suite however the CI host lays out its disks. tests/privileged/test_read_only_rootfs.py
     # proves the result.
+    remount_failed=0
     while read -r mountpoint fstype; do
       case "$fstype" in
         ext2 | ext3 | ext4 | xfs | btrfs | vfat | overlay | fuseblk | squashfs | erofs | f2fs)
-          mount -o remount,bind,ro "$mountpoint" || echo "could not make $mountpoint read-only" >&2 ;;
+          mount -o remount,bind,ro "$mountpoint" \
+            || { echo "could not make $mountpoint read-only" >&2; remount_failed=1; } ;;
       esac
     done < <(awk '"'"'{ for (i = 1; i <= NF; i++) if ($i == "-") print $5, $(i + 1) }'"'"' /proc/self/mountinfo)
+    # A disk that stays writable would make the suite judge a layout the container does not have.
+    [ "$remount_failed" = 0 ] || exit 1
     status=0
     setpriv \
       --bounding-set=-all,+chown,+dac_override,+fowner,+kill,+setgid,+setuid,+setpcap,+net_admin \

@@ -135,7 +135,8 @@ namespaces, no host kernel setting beyond the `nf_tables` support every current 
   is what it could write before, `/run` and `/home/runner` are closed to it, and the rest of the
   filesystem is read-only (besides Docker's own `/dev/shm`, as before); the image smoke test checks
   this against the same image without the layout. Docker also keeps `/etc/hosts`, `/etc/hostname`
-  and `/etc/resolv.conf` writable for root; they are rewritten at every start. Because a tmpfs is
+  and `/etc/resolv.conf` writable for root; Docker writes them afresh at every start, which the
+  image smoke test checks with a marker before a `docker restart`. Because a tmpfs is
   charged to the container's memory limit, `/tmp` counts against the 2 GiB (see "Capacity"): a
   repository export is limited to 64 MiB and a preparation to 256 MiB, but a runaway engine that
   fills `/tmp` takes memory, not disk, and ends in the OOM kill of the job, bounded at 512 MiB. Do
@@ -199,9 +200,9 @@ stable reason (never a value) and keeps serving Diff jobs.
 | `engine_user_invalid` | The engine user does not exist with its own group, or is root. Image users are 10101; do not change `RUNNER_DYNAMIC_ENGINE_UID`/`GID` without a matching image |
 | `network_rules_not_installed` | `nft` could not install the rules: no `NET_ADMIN` at container creation, no `nf_tables` in the host kernel, no `nft`, or a slot port inside the kernel's ephemeral range |
 | `capabilities_not_dropped` | The process still holds `NET_ADMIN` or `SETPCAP` |
-| `pin_unreadable` | A pin file in `/opt/code-reviewer/pins/` is missing, malformed or has no entry for this platform (arm64) |
+| `pin_unreadable` | A pin file in `/opt/code-reviewer/pins/` is missing (or a directory above it is), malformed or has no entry for this platform (arm64) |
 | `pin_untrusted` | A pin file, or a directory above it up to `/`, is a link, is not owned by root or can be written by group or others |
-| `engine_binary_missing`, `ripgrep_missing` | The file is absent, a link, or not executable |
+| `engine_binary_missing`, `ripgrep_missing` | The file (or a directory above it) is absent, the file is a link, or not executable |
 | `engine_binary_untrusted`, `ripgrep_untrusted` | The file, or a directory above it up to `/`, is not owned by root, is a link (directories) or can be written by group or others |
 | `engine_binary_checksum_mismatch`, `ripgrep_checksum_mismatch` | Size or SHA-256 differ from the pin |
 | `engine_version_mismatch` | Run offline as the engine user, the engine does not report the pinned version |

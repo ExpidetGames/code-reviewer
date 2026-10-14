@@ -108,7 +108,6 @@ function bytes(value: string): number {
   return Number(match[1]) * unit;
 }
 
-/** The default of `${NAME:-default}`. */
 /** A `tmpfs` entry as its path and its comma separated options. */
 function splitTmpfs(entry: string): { path: string; options: string[] } {
   const colon = entry.indexOf(":");
@@ -118,6 +117,7 @@ function splitTmpfs(entry: string): { path: string; options: string[] } {
   };
 }
 
+/** The default of `${NAME:-default}`. */
 function defaultOf(reference: string | undefined): string {
   const match = /^\$\{[A-Z0-9_]+:-([^}]*)\}$/.exec(reference ?? "");
   if (!match) throw new Error(`no default in ${reference}`);
@@ -362,6 +362,26 @@ describe("compose.dynamic.yml", () => {
     expect(privilegedScript).toMatch(
       /setpriv \\\n\s+--bounding-set=-all[^\n]*\\\n\s+--inh-caps=-all \\\n\s+uv run --no-sync --offline python tests\/privileged\/execve_phase\.py/,
     );
+  });
+
+  // #249-T03
+  it("passes the read-only options to every Dynamic container the smoke test starts", () => {
+    // Continuation lines joined, so a command is one line. Every command that creates a container
+    // like compose.dynamic.yml (the shared capability list, or the one spelled out for the case
+    // without NET_ADMIN) must carry the read-only root filesystem and the tmpfs.
+    const commands = smokeScript.replace(/\\\n\s*/g, " ").split("\n");
+    const dynamic = commands.filter(
+      (line) =>
+        /docker run|start_loop|expect_not_advertised/.test(line) &&
+        (line.includes("${dynamic_caps[@]}") ||
+          line.includes("--cap-add FOWNER")),
+    );
+
+    // The capable runner, the read-only check, and the three "not advertised" cases.
+    expect(dynamic).toHaveLength(5);
+    for (const line of dynamic) {
+      expect(line, line).toContain("${dynamic_rootfs[@]}");
+    }
   });
 
   // #249-T03

@@ -89,7 +89,10 @@ the container is allowed to hold for that.
    `nf_tables`) still end with the drop, and every Dynamic job then fails its probe with
    `dynamic_isolation_self_check_failed` while Diff jobs keep being served. The only process that
    keeps the two capabilities is PID 1 (`tini`), which runs nothing of a job and cannot be reached
-   by the engine user. The alternatives are worse (a per-job network namespace needs `SYS_ADMIN`; a
+   by the engine user. A compromised runner cannot reach it either: after the drop its
+   permitted set no longer covers the capabilities `tini` holds, so the kernel refuses `ptrace`
+   and `/proc/1/mem` access (`cap_ptrace_access_check`), and the container has no `SYS_PTRACE`.
+   The alternatives are worse (a per-job network namespace needs `SYS_ADMIN`; a
    user namespace or slirp is excluded by the lead decisions; a separate container cannot tell the
    supervisor from the engine).
 6. **Nothing is mounted from outside and nothing is shared (AF_UNIX).** The only mounts are the

@@ -74,7 +74,7 @@ def capability_sets(binary: Path, uid: int, gid: int) -> tuple[dict[str, int], i
     return found, int(euid.group(1))
 
 
-# #250-T-execve: the probes are what they say, so the tests below are not vacuous.
+# #249-T05: the probes are what they say, so the tests below are not vacuous.
 def test_the_probes_carry_a_file_capability_and_a_setuid_bit(probes: Path) -> None:
     for name, effective in (("cap-cat", False), ("cap-cat-effective", True)):
         capability = os.getxattr(probes / name, "security.capability")

@@ -516,7 +516,12 @@ The file runs the Dynamic runner's loop as root with a short list of capabilitie
 is fixed by the file, not a setting to change (see "The engine boundary" in `docs/dynamic-review.md`).
 The container runs with a read-only root filesystem and three small tmpfs (#249; see "The engine
 boundary" in `docs/dynamic-review.md`), so a restarted container gets its startup capabilities again
-but runs the image as built. Coolify takes the file's `read_only` and `tmpfs` as they are; keep them. The firewall advice above ("Restrict what the runner can reach") covers this runner too: it needs
+but runs the image as built. Coolify is expected to pass the file's `read_only` and `tmpfs` to Docker
+as they are, but that has **not been verified on a real Coolify** (only Docker Compose is tested in
+CI): after the first deployment, check that the container's root filesystem is read-only (for
+example `docker exec <container> touch /usr/x` must fail) and keep both settings.
+
+The firewall advice above ("Restrict what the runner can reach") covers this runner too: it needs
 GitHub, the model endpoint and the app, and its engine user is confined to the runner's own proxy by
 rules inside the container, which is not a substitute for it.
 
