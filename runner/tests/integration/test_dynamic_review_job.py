@@ -8,6 +8,8 @@ a fake OpenRouter-shaped upstream for the provider. Nothing here is a real model
 """
 
 import json
+import os
+import socket
 import sys
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -29,7 +31,9 @@ from test_dynamic_review_engine import (
 from code_reviewer_runner import runner
 from code_reviewer_runner.capabilities import ALL_ENGINES
 from code_reviewer_runner.dynamic_review.checkout import PreparedContent
+from code_reviewer_runner.dynamic_review.engine_user import EngineLaunch
 from code_reviewer_runner.dynamic_review.limits import CheckoutError
+from code_reviewer_runner.dynamic_review.supervisor import Prepared
 from code_reviewer_runner.job import parse_job
 from code_reviewer_runner.result import ErrorCode
 
@@ -315,3 +319,61 @@ def test_a_configured_model_and_provider_run_through_the_same_protocol_without_s
     assert result.usage.total_tokens == 2 * (usage["prompt_tokens"] + usage["completion_tokens"])
     assert result.usage.cost_usd is None
     assert result.usage.fallback_used is False
+
+
+class LaunchedPreparer(Preparer):
+    """A `Preparer` that also hands out the supervisor's launch for the slot (#244)."""
+
+    def __init__(self, export: Path, script: dict[str, Any], launch: EngineLaunch) -> None:
+        super().__init__(export, script)
+        self.launch = launch
+
+    def __call__(self, job: Any) -> Any:
+        inner = super().__call__(job)
+
+        @contextmanager
+        def lifetime() -> Generator[Prepared]:
+            with inner as content:
+                yield Prepared(content, self.launch)
+
+        return lifetime()
+
+
+def slot_launch(tmp_path: Path, proxy_port: int) -> EngineLaunch:
+    (tmp_path / "job").mkdir()
+    return EngineLaunch(
+        uid=os.getuid(),
+        gid=os.getgid(),
+        home=str(tmp_path),
+        tmpdir=str(tmp_path),
+        config_dir=tmp_path / "job",
+        proxy_port=proxy_port,
+        engine_port=proxy_port + 1,
+    )
+
+
+# #244-T04
+def test_a_slot_whose_proxy_port_is_held_by_somebody_else_fails_closed_before_any_engine(
+    tmp_path: Path,
+) -> None:
+    with socket.socket() as stranger:
+        stranger.bind(("127.0.0.1", 0))
+        stranger.listen(1)
+        taken = int(stranger.getsockname()[1])
+        preparer = LaunchedPreparer(tmp_path / "export", {}, slot_launch(tmp_path, taken))
+
+        with FakeUpstream() as upstream:
+            result = runner.run_dynamic_job(
+                job_for(f"{upstream.url}/v1"),
+                None,
+                0.0,
+                environment(),
+                engines=ALL_ENGINES,
+                prepare=preparer,
+            )
+
+    assert not result.ok
+    assert result.error_code is ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED
+    assert upstream.requests == []
+    assert preparer.events == ["prepared", "released"]
+    assert not (tmp_path / "export" / ".fake-opencode-trace.jsonl").exists()

@@ -1013,6 +1013,7 @@ class ScriptedLaunch(EngineLaunch):
             tmpdir=str(tmp_path / "scratch"),
             config_dir=config_dir,
             config_owner=os.getuid(),  # root in production; this process cannot give files to root
+            engine_port=free_port(),  # the slot's fixed port in production (#244)
         )
         self.calls: list[str] = []
         self.refuse_network = False
@@ -1061,7 +1062,10 @@ def test_a_launched_engine_runs_behind_its_network_rules_and_in_its_users_direct
     # with the launch's options, and nothing of the user is left at the end.
     confine = next(call for call in launch.calls if call.startswith("confine:"))
     proxy_port = int(confine.split(":")[1])
+    # With a dedicated user the engine always gets the slot's fixed port, not a probed one.
     assert proxy_port != int(confine.split(":")[2])
+    assert int(confine.split(":")[2]) == launch.engine_port
+    assert startup["port"] == launch.engine_port
     assert launch.calls.index("spawn_options") > launch.calls.index(confine)
     assert launch.calls[-1] == "close"
     assert "sweep" in launch.calls

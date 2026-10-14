@@ -298,7 +298,20 @@ def run_dynamic_job(
             # The export is the one directory the engine may read; the audit names files relative
             # to it, and a finding may only point at a file it really holds.
             proxy.audit.set_export_root(str(content.export))
-            server = proxy.serve("127.0.0.1").start()
+            # With the dedicated engine user the proxy listens on the slot's fixed port: the
+            # engine user's static network rules name it. Somebody else holding it is a slot that
+            # is not clean, and the job does not start.
+            try:
+                server = proxy.serve(
+                    "127.0.0.1", prepared.launch.proxy_port if prepared.launch else 0
+                ).start()
+            except OSError:
+                return _failure(
+                    ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED,
+                    "the model proxy port of the slot is not free",
+                    started,
+                    capture,
+                )
             try:
                 engine = DynamicEngine(
                     job,

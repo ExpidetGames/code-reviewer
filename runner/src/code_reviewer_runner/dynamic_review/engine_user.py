@@ -9,7 +9,9 @@ container. This module is the supervisor's side of that boundary:
   `setuid()` in the child, no `sudo`, no setuid helper: `no-new-privileges` stays on);
 * the engine's config file, readable by that user and nobody else;
 * the proof that the engine's server port is held by the engine and not by a stranger;
-* the network rules of that user (`netguard.py`), installed per job and proven before the start;
+* the network rules of that user (`netguard.py`): installed once at container start, with
+  `NET_ADMIN` dropped afterwards (`static_isolation.py`); each job checks that the supervisor holds
+  neither and proves the rules with a probe before the engine starts;
 * the end of the job: everything that user still runs is killed, also what left the process group.
 
 A process group alone is not enough: a helper may `setsid()` and leave it. The dedicated user is
@@ -28,7 +30,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .netguard import IsolationError, NetworkConfinement, verify_confinement
+from .netguard import IsolationError, verify_confinement
+from .static_isolation import (
+    DEFAULT_ENGINE_PORT,
+    DEFAULT_PROXY_PORT,
+    require_startup_capabilities_gone,
+)
 
 _TRUSTED_PATH = "/usr/local/bin:/usr/bin:/bin"
 _SWEEP_SECONDS = 10.0
@@ -137,11 +144,10 @@ class EngineLaunch:
     # Who owns the engine's config file: root, the supervisor. Never the engine user, which could
     # then change its mode and rewrite it.
     config_owner: int = 0
-    confinement: NetworkConfinement = field(init=False)
+    # The ports of the single Dynamic slot, which the static network rules allow (#244).
+    proxy_port: int = DEFAULT_PROXY_PORT
+    engine_port: int = DEFAULT_ENGINE_PORT
     _verified: bool = field(default=False, init=False)
-
-    def __post_init__(self) -> None:
-        self.confinement = NetworkConfinement(self.uid)
 
     # -- starting -------------------------------------------------------------
 
@@ -166,15 +172,22 @@ class EngineLaunch:
         return path
 
     def confine(self, proxy_port: int, engine_port: int) -> None:
-        """Install the network rules for this job and, once, prove they are in effect.
+        """Prove, once, that the static network rules confine the engine user to these ports.
+
+        The rules were installed when the container started and `NET_ADMIN` was dropped right
+        after (`static_isolation.py`); nothing is installed per job. This checks that the ports in
+        use are the ones the rules allow, that this process really holds neither `NET_ADMIN` nor
+        `SETPCAP` and that the probe, run as the engine user, reaches the proxy and nothing else.
 
         The first call also ends whatever the user still runs: a job process that was killed
         without a chance to clean up (SIGKILL, an OOM kill) leaves its engine behind, and the
         lease on the user is free again the moment that process is gone.
         """
+        if (proxy_port, engine_port) != (self.proxy_port, self.engine_port):
+            raise IsolationError("the engine ports are not the ones the network rules allow")
         if not self._verified and not self.sweep():
             raise IsolationError("a process of the engine user from an earlier job cannot be ended")
-        self.confinement.apply(proxy_port, engine_port)
+        require_startup_capabilities_gone()
         if not self._verified:
             verify_confinement(self.uid, self.gid, proxy_port)
             self._verified = True
@@ -191,16 +204,13 @@ class EngineLaunch:
         return sweep_user(self.uid, self.gid)
 
     def close(self) -> bool:
-        """End the job's use of the user: nothing of it runs, its network rules are gone.
+        """End the job's use of the user: nothing of it runs. True when that is so.
 
-        True when that is so. If the sweep cannot finish, the rules stay: a process of that user
-        that is still alive must not be left without its boundary. The next job installs its
-        rules over this table (and its first sweep fails closed while the process lives).
+        The network rules are static and stay (they confine the user for the life of the
+        container). If the sweep cannot finish the next job's first sweep fails closed while the
+        process lives, and it refuses to start.
         """
-        if not self.sweep():
-            return False
-        self.confinement.remove()
-        return True
+        return self.sweep()
 
 
 __all__ = ["EngineLaunch", "IsolationError", "listener_uids", "sweep_user", "user_pids"]

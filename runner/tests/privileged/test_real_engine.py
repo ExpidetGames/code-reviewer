@@ -22,8 +22,9 @@ from privileged_support import (
     ENGINE_GID,
     ENGINE_UID,
     Repo,
+    connect_as,
     dynamic_job,
-    nft_tables,
+    listener,
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "engine"))
@@ -39,7 +40,6 @@ from opencode_support import (
 from code_reviewer_runner import runner
 from code_reviewer_runner.capabilities import ALL_ENGINES
 from code_reviewer_runner.dynamic_review.engine_user import user_pids
-from code_reviewer_runner.dynamic_review.netguard import table_name
 from code_reviewer_runner.dynamic_review.supervisor import (
     ENGINE_GID_VARIABLE,
     ENGINE_UID_VARIABLE,
@@ -95,7 +95,6 @@ def test_the_real_engine_reviews_as_the_dedicated_user_and_leaves_nothing_behind
         # The first model call, made by the engine through the proxy: whose process is it?
         pids = user_pids(ENGINE_UID)
         seen["pids"] = pids
-        seen["tables"] = nft_tables()
 
     model = ScriptedModel(
         steps=[
@@ -128,17 +127,18 @@ def test_the_real_engine_reviews_as_the_dedicated_user_and_leaves_nothing_behind
         )
 
     assert result.ok, (result.error_code, result.log_tail)
-    # The engine (and only the dedicated user) was running while the model was being called, behind
-    # its rules.
+    # The engine (and only the dedicated user) was running while the model was being called, and
+    # the call reached the proxy on the slot's fixed port, which the static rules allow.
     assert seen["pids"], "the engine user ran the engine"
-    assert table_name(ENGINE_UID) in str(seen["tables"])
     # The hostile repository did not run, even though the engine user could have written there.
     assert list(sentinels.iterdir()) == []
     # The file it read reached the model through the proxy.
     assert "def handler(user)" in "\n".join(model.tool_results().values())
-    # Nothing is left: no process of the user, no rules, no job files.
+    # Nothing is left: no process of the user and no job files; the static rules stay.
     assert user_pids(ENGINE_UID) == []
-    assert table_name(ENGINE_UID) not in nft_tables()
+    with listener() as elsewhere:
+        reached = connect_as(ENGINE_UID, ENGINE_GID, [("elsewhere", "127.0.0.1", elsewhere)])
+    assert reached["elsewhere"]["connected"] is False
     assert not list((job_dir / "dynamic").glob("job-*"))
 
 

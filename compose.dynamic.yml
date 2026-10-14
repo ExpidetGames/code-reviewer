@@ -33,6 +33,11 @@ services:
     # Diff jobs are dropped to uid 10001 by the loop (RUNNER_DIFF_JOB_USER), so PR-Agent never
     # runs as root. Root here holds exactly the capabilities below and nothing else: the engine user
     # has none, and no-new-privileges means no program can regain one.
+    #
+    # Nothing is mounted and nothing is shared with the host or another container: no `volumes`, no
+    # `network_mode`, `pid` or `ipc`, no Docker socket. A unix socket cannot leave the container, and
+    # the engine user's nft rules do not cover AF_UNIX, so this is what keeps that gap empty
+    # (app/src/ci/compose-dynamic.test.ts fails the day one of them is added, #244).
     user: "0:0"
     cap_drop:
       - ALL
@@ -43,7 +48,14 @@ services:
       - CHOWN # seal the read-only export for the engine user (#196)
       - DAC_OVERRIDE # remove the sealed 0550 export and the tree the engine user filled
       - FOWNER # remove entries of that tree in sticky directories
-      - NET_ADMIN # install the engine user's nft rules: its proxy and nothing else
+      # The next two exist for STARTUP ONLY (#244, ADR 0003). The container is created with exactly
+      # this set, so they must be listed; the runner's entry point installs the engine user's static
+      # nft rules (its proxy and its own port, nothing else), then drops both from every capability
+      # set and from the bounding set, before the job loop and any thread exists. A job process,
+      # the supervisor and the engine never hold them (the privileged suite proves it); if the drop
+      # fails the runner refuses to start.
+      - NET_ADMIN # install the engine user's static nft rules once, at container start
+      - SETPCAP # drop NET_ADMIN (and itself) from the bounding set right after
     security_opt:
       - no-new-privileges:true
     stop_grace_period: 90s

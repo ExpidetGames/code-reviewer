@@ -17,7 +17,6 @@ from code_reviewer_runner.dynamic_review.netguard import (
     IsolationError,
     NetworkConfinement,
     ruleset,
-    table_name,
     verify_confinement,
 )
 from code_reviewer_runner.result import ErrorCode
@@ -72,19 +71,19 @@ def test_rules_are_refused_for_root_or_a_port_out_of_range_or_shared(
         ruleset(uid, proxy_port, engine_port)
 
 
-# #197-T09
-def test_applying_twice_replaces_the_rules_and_removing_deletes_only_this_users_table() -> None:
+# #197-T09 #244-T01
+def test_applying_twice_replaces_the_rules_of_this_users_table_and_never_deletes_it() -> None:
     scripts: list[str] = []
     confinement = NetworkConfinement(UID, run=scripts.append)
 
     confinement.apply(4000, 4002)
     confinement.apply(4000, 4001)
-    confinement.remove()
-    confinement.remove()  # a second remove does nothing
 
-    assert len(scripts) == 3
+    assert len(scripts) == 2
     assert "flush table" in scripts[0] and "4001" in scripts[1]
-    assert scripts[2] == f"delete table inet {table_name(UID)}\n"
+    # The rules are static: the runner has no way to take them out again.
+    assert not any("delete table" in script for script in scripts)
+    assert not hasattr(confinement, "remove")
 
 
 # #197-T09

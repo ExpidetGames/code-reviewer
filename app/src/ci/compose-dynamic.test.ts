@@ -29,9 +29,15 @@ type Service = {
   pids_limit?: number | string;
   cap_drop?: string[];
   cap_add?: string[];
+  volumes?: unknown;
   user?: string;
   privileged?: boolean;
   security_opt?: string[];
+  userns_mode?: string;
+  sysctls?: unknown;
+  configs?: unknown;
+  secrets?: unknown;
+  extends?: unknown;
   stop_grace_period?: string;
   entrypoint?: unknown;
   command?: unknown;
@@ -40,18 +46,27 @@ type Compose = { services: Record<string, Service> };
 
 const source = read("compose.dynamic.yml");
 const privilegedScript = read("runner/scripts/run_privileged_offline.sh");
-// What the root supervisor of the Dynamic job needs (#197): launch the engine as another user
-// (SETUID, SETGID), end what that user runs (KILL), seal and remove the export (CHOWN,
-// DAC_OVERRIDE, FOWNER) and install the user's nft rules (NET_ADMIN).
+const phasesScript = read("runner/scripts/privileged_phases.sh");
+// What the root supervisor of the Dynamic job needs for its whole life (#197): launch the engine as
+// another user (SETUID, SETGID), end what that user runs (KILL) and seal and remove the export
+// (CHOWN, DAC_OVERRIDE, FOWNER).
 const SUPERVISOR_CAPABILITIES = [
   "CHOWN",
   "DAC_OVERRIDE",
   "FOWNER",
   "KILL",
-  "NET_ADMIN",
   "SETGID",
   "SETUID",
 ];
+// What only the startup of the container holds (#244, ADR 0003): NET_ADMIN installs the engine
+// user's static nft rules once, SETPCAP is what allows dropping NET_ADMIN from the bounding set.
+// Both are dropped for good before the job loop runs, so the container has to be created with them
+// and no process holds them afterwards.
+const STARTUP_ONLY_CAPABILITIES = ["NET_ADMIN", "SETPCAP"];
+const CREATED_WITH = [
+  ...SUPERVISOR_CAPABILITIES,
+  ...STARTUP_ONLY_CAPABILITIES,
+].sort();
 const dynamic = parse(source) as Compose;
 const plain = parse(read("compose.yml")) as Compose;
 
@@ -126,17 +141,17 @@ describe("compose.dynamic.yml", () => {
     expect(service.memswap_limit).toBe(service.mem_limit);
   });
 
-  // #197-T04 #202-T08
+  // #197-T04 #202-T08 #244-T13
   it("runs the supervisor as root with exactly the capabilities it needs and no privilege escalation", () => {
     const service = runnerDynamic();
 
     // The job process is the root supervisor (it starts the engine as another user); everything
-    // else is dropped, and no-new-privileges means nothing can regain a capability.
+    // else is dropped, and no-new-privileges means nothing can regain a capability. The two
+    // startup-only capabilities are listed because the container is created with this set; the
+    // runner drops them in-process before its loop (next test).
     expect(service.user).toBe("0:0");
     expect(service.cap_drop).toEqual(["ALL"]);
-    expect([...(service.cap_add ?? [])].sort()).toEqual(
-      SUPERVISOR_CAPABILITIES,
-    );
+    expect([...(service.cap_add ?? [])].sort()).toEqual(CREATED_WITH);
     for (const forbidden of [
       "SYS_ADMIN",
       "SYS_PTRACE",
@@ -144,20 +159,41 @@ describe("compose.dynamic.yml", () => {
       "NET_RAW",
       "NET_BIND_SERVICE",
       "MKNOD",
-      "SETPCAP",
     ]) {
       expect(service.cap_add).not.toContain(forbidden);
     }
+    // cap_add and cap_drop are compared exactly above, so a capability such as SYS_ADMIN fails
+    // there; the loop only documents the ones that matter most, add no further per-name check.
     expect(service.privileged).not.toBe(true);
-    expect(service.security_opt).toContain("no-new-privileges:true");
+    // Exactly this, nothing else: seccomp=unconfined, apparmor=unconfined, systempaths=unconfined
+    // and label=disable would each widen what the container's processes can do.
+    expect(service.security_opt).toEqual(["no-new-privileges:true"]);
     expect(Number(service.pids_limit)).toBeGreaterThan(0);
     expect(Number(service.pids_limit)).toBeLessThanOrEqual(1024);
   });
 
-  // #197-T04
+  // #244-T13
+  it("lists NET_ADMIN and SETPCAP as startup-only and says the runner drops them", () => {
+    const lines = source.split("\n");
+    const comment = lines
+      .slice(
+        lines.findIndex((line) => line.includes("STARTUP ONLY")),
+        lines.findIndex((line) => line.includes("- NET_ADMIN")),
+      )
+      .join("\n");
+
+    expect(comment).toContain("STARTUP ONLY");
+    expect(comment).toMatch(/drops both/);
+    expect(comment).toMatch(/refuses to start/);
+    // Only these two are startup-only; the supervisor's own list is the one every job holds.
+    expect(CREATED_WITH).toEqual([...(runnerDynamic().cap_add ?? [])].sort());
+  });
+
+  // #197-T04 #244-T13
   it("keeps the capability list of the privileged suite equal to the file", () => {
     // The suite runs as root with exactly these capabilities (tests/privileged/conftest.py checks
-    // the effective set), so what it proves is what the container holds.
+    // the effective, permitted and bounding sets), so what it proves is what the container is
+    // created with; its job phase then drops the startup-only two, as the runner does.
     const bounding = /--bounding-set=-all((?:,\+[a-z_]+)+)/.exec(
       privilegedScript,
     );
@@ -168,9 +204,65 @@ describe("compose.dynamic.yml", () => {
       .map((name) => name.slice(1).toUpperCase())
       .sort();
 
-    expect(names).toEqual(SUPERVISOR_CAPABILITIES);
+    expect(names).toEqual(CREATED_WITH);
     expect(privilegedScript).toContain("--no-new-privs");
-    expect(privilegedScript).toContain("unshare --net");
+    expect(privilegedScript).toContain("unshare --net --mount");
+    // The container mounts nothing from the host, so the suite starts without the host's /run.
+    expect(privilegedScript).toContain("mount -t tmpfs tmpfs /run");
+    expect(privilegedScript).toContain("scripts/privileged_phases.sh");
+  });
+
+  // #244-T13
+  it("runs the privileged suite in two phases: startup with the startup-only capabilities, then as a job", () => {
+    expect(phasesScript).toContain(
+      "PRIVILEGED_PHASE=startup uv run --no-sync --offline pytest",
+    );
+    expect(phasesScript).toContain("tests/privileged/startup");
+    // The job phase starts through the production startup step, which drops NET_ADMIN and SETPCAP.
+    expect(phasesScript).toContain(
+      "PRIVILEGED_PHASE=job uv run --no-sync --offline python tests/privileged/job_phase.py",
+    );
+  });
+
+  // #244-T12
+  it("mounts nothing and shares nothing with the host or another container", () => {
+    const service = runnerDynamic();
+    const code = source
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("#"))
+      .join("\n");
+
+    // The nft rules cover TCP, UDP and IPv6 of the engine user, not AF_UNIX. A unix socket cannot
+    // leave the container, so the gap is empty exactly as long as nothing is mounted (a Docker
+    // socket, a credential helper's socket) and no namespace is shared with a process that listens
+    // on one.
+    for (const key of [
+      "volumes",
+      "volumes_from",
+      "tmpfs",
+      "devices",
+      "network_mode",
+      "pid",
+      "ipc",
+      "uts",
+      "cgroup",
+      "privileged",
+      // Keys that change the namespaces or bring files and settings in from elsewhere:
+      "userns_mode",
+      "sysctls",
+      "configs",
+      "secrets",
+      // `extends` could import any of the keys above from another file, past this list.
+      "extends",
+    ]) {
+      expect(service, key).not.toHaveProperty(key);
+    }
+    for (const key of ["volumes", "configs", "secrets", "include"]) {
+      expect(dynamic, key).not.toHaveProperty(key);
+    }
+    expect(code).not.toMatch(/docker\.sock/);
+    expect(code).not.toMatch(/\/var\/run|\/run\//);
+    expect(code).not.toMatch(/^\s*volumes:/m);
   });
 
   // #197-T04

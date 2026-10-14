@@ -29,6 +29,8 @@ from .checkout import PreparedContent, prepare_job_content
 from .engine_user import EngineLaunch, sweep_user
 from .export_isolation import AgentIdentity, prepared_checkout
 from .limits import CheckoutError
+from .netguard import IsolationError
+from .static_isolation import slot_ports
 
 ENGINE_UID_VARIABLE = "RUNNER_DYNAMIC_ENGINE_UID"
 ENGINE_GID_VARIABLE = "RUNNER_DYNAMIC_ENGINE_GID"
@@ -101,6 +103,10 @@ def production_preparer(
     @contextmanager
     def prepare(job: Job) -> Generator[Prepared]:
         identity = engine_identity(environment)
+        try:
+            ports = slot_ports(environment)
+        except IsolationError:
+            raise CheckoutError(ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED) from None
         parent = Path.cwd().resolve() / PARENT_NAME
         with prepared_checkout(
             job,
@@ -118,6 +124,8 @@ def production_preparer(
                     home=lifetime.environment["HOME"],
                     tmpdir=lifetime.environment["TMPDIR"],
                     config_dir=lifetime.root,
+                    proxy_port=ports.proxy,
+                    engine_port=ports.engine,
                 ),
             )
 
