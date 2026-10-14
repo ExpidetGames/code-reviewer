@@ -9,8 +9,15 @@ import {
   lockDynamicReviewGate,
   lockJobRowsInOrder,
 } from "../dynamic-review-lock.ts";
-import type { Kysely } from "kysely";
+import { sql, type Kysely } from "kysely";
 import { decodeJson, encodeJson, formatTimestamp } from "../codecs.ts";
+import { databaseDriver } from "../driver.ts";
+import type { EntitlementsData } from "../../workspaces/entitlements.ts";
+import {
+  EntitlementsError,
+  checkPeriodStartNotBackwards,
+  validateEntitlements,
+} from "../../workspaces/entitlements-validation.ts";
 import type { StoredGithubApp } from "../../github-config/settings.ts";
 import type { ImportNotice } from "../../legacy-import/notice.ts";
 import type { SmtpSettings } from "../../mail/smtp-settings.ts";
@@ -62,6 +69,12 @@ export type InstanceSettingValues = {
    * and turn it off before rolling back to an older app (contracts/README.md).
    */
   dynamic_review: { enabled: boolean };
+  /**
+   * #271: the entitlements of every workspace that has no row of its own (the fields of a workspace row). No
+   * row: such a workspace is unlimited (own key, no limits, not suspended), as before. `set` refuses what
+   * `validateEntitlements` refuses and a `periodStart` earlier than the stored one.
+   */
+  default_entitlements: EntitlementsData;
 };
 export type InstanceSettingKey = keyof InstanceSettingValues;
 
@@ -134,6 +147,56 @@ export function createInstanceSettingsRepository(
     return db.isTransaction ? run(db) : db.transaction().execute(run);
   }
 
+  /**
+   * The default entitlements are validated like a workspace row, and the period start is checked against the
+   * stored one under a lock (an advisory transaction lock on Postgres, where the value is JSON and there may
+   * be no row to lock; SQLite's transactions take the write lock up front).
+   */
+  async function setDefaultEntitlements(
+    value: EntitlementsData,
+    updatedBy: string | null,
+  ): Promise<void> {
+    const moment = now();
+    const checked = validateEntitlements(value, moment);
+    if (!checked.ok) throw new EntitlementsError(checked.code, checked.field);
+    const row = {
+      key: "default_entitlements",
+      value: encodeJson(checked.value),
+      updated_by: updatedBy,
+      updated_at: formatTimestamp(moment),
+    };
+    const write = async (trx: Kysely<Database>) => {
+      if (databaseDriver(trx) === "postgres")
+        await sql`select pg_advisory_xact_lock(271, 1)`.execute(trx);
+      const stored = await trx
+        .selectFrom("instance_settings")
+        .select("value")
+        .where("key", "=", row.key)
+        .executeTakeFirst();
+      const storedStart =
+        stored === undefined
+          ? undefined
+          : decodeJson<EntitlementsData>(stored.value).periodStart;
+      const refused = checkPeriodStartNotBackwards(
+        checked.value.periodStart,
+        storedStart,
+      );
+      if (refused !== undefined) throw new EntitlementsError(refused);
+      await trx
+        .insertInto("instance_settings")
+        .values(row)
+        .onConflict((conflict) =>
+          conflict.column("key").doUpdateSet({
+            value: row.value,
+            updated_by: row.updated_by,
+            updated_at: row.updated_at,
+          }),
+        )
+        .execute();
+    };
+    return db.isTransaction ? write(db) : db.transaction().execute(write);
+  }
+
   return {
     async get(key) {
       const row = await db
@@ -170,6 +233,11 @@ export function createInstanceSettingsRepository(
     },
 
     async set(key, value, updatedBy) {
+      if (key === "default_entitlements")
+        return setDefaultEntitlements(
+          value as InstanceSettingValues["default_entitlements"],
+          updatedBy,
+        );
       const row = {
         key,
         value: encodeJson(value),
