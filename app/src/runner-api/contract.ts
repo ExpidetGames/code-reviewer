@@ -130,6 +130,8 @@ export type ClaimBase = {
   baseRef: string;
   headSha: string;
   previousReviewedSha: string | null;
+  /** #255: heads of earlier jobs of the pull request that did not succeed, newest first; absent when none. */
+  attemptedShas?: string[];
   comparison: "full" | "incremental";
 };
 

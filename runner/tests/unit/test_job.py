@@ -450,3 +450,41 @@ def test_a_refusal_never_contains_a_value_from_the_job() -> None:
 
 def test_input_beyond_the_size_limit_is_an_invalid_job() -> None:
     assert refusal(" " * (1024 * 1024 + 1)).code is ErrorCode.INVALID_JOB
+
+
+def dynamic_job(**base_overrides: Any) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        "repository": "octo/repo",
+        "baseRef": "main",
+        "headSha": "a" * 40,
+        "previousReviewedSha": None,
+        "comparison": "full",
+    }
+    base.update(base_overrides)
+    return valid_job(
+        reviewKind="dynamic",
+        dynamic={"model": "vendor/model", "skill": "s", "limits": {"maxFindings": 5}},
+        base=base,
+    )
+
+
+# #255-T01
+def test_the_attempted_heads_of_a_claim_are_read_and_default_to_none() -> None:
+    job = parse_job(json.dumps(dynamic_job(attemptedShas=["b" * 40, "c" * 40])))
+    assert job.base is not None
+    assert job.base.attempted_shas == ("b" * 40, "c" * 40)
+
+    older = parse_job(json.dumps(dynamic_job()))
+    assert older.base is not None
+    assert older.base.attempted_shas == ()
+
+
+# #255-T02
+@pytest.mark.parametrize(
+    "attempted",
+    ["b" * 40, [1], ["B" * 40], ["short"], ["b" * 40] * 2, [f"{n:040x}" for n in range(21)], None],
+)
+def test_malformed_attempted_heads_are_an_invalid_job(attempted: Any) -> None:
+    with pytest.raises(JobError) as refused:
+        parse_job(json.dumps(dynamic_job(attemptedShas=attempted)))
+    assert refused.value.code is ErrorCode.INVALID_JOB

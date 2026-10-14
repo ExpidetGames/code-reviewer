@@ -12,6 +12,10 @@
     "baseRef": "main",
     "headSha": "1f3a5c7e9b2d4f60a8c1e3b5d7f90a2c4e6b8d01",
     "previousReviewedSha": null,
+    "attemptedShas": [
+      "2222222222222222222222222222222222222222",
+      "3333333333333333333333333333333333333333"
+    ],
     "comparison": "full"
   },
   "git": {

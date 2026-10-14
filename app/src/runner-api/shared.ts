@@ -58,6 +58,14 @@ export function getRunnerApi(): RunnerApi {
         reviewKind: job.reviewKind,
         excludeJobId: job.id,
       }),
+    // #255: the heads of its earlier jobs that did not succeed, which may have written the summary.
+    attemptedShas: (job) =>
+      createJobsRepository(db, job.workspaceId).attemptedShas({
+        repositoryId: job.repositoryId,
+        prNumber: job.prNumber,
+        reviewKind: job.reviewKind,
+        excludeJobId: job.id,
+      }),
     registry: integrationRegistry,
     // A job runs only while its repository has an active project; see claim-guard.ts.
     guard: createProjectClaimGuard({ projects: projectServiceFor }),

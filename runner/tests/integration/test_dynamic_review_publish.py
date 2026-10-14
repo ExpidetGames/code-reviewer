@@ -361,7 +361,7 @@ def test_a_predecessor_that_published_before_losing_its_lease_is_refused_not_rec
     server: FakeGithubComments, publisher: Publisher
 ) -> None:
     publisher.publish(run(finding()), head_sha=SHA, previous_reviewed_sha=None)
-    # The predecessor reviewed NEXT and wrote it, but the app never recorded it as reviewed.
+    # The predecessor reviewed NEXT and wrote it, but this claim does not name NEXT as attempted.
     publisher.publish(run(finding(sha=NEXT), sha=NEXT), head_sha=NEXT, previous_reviewed_sha=SHA)
     before = server.comments[0]["body"]
 
@@ -371,6 +371,116 @@ def test_a_predecessor_that_published_before_losing_its_lease_is_refused_not_rec
         )
 
     assert refused.value.code is ErrorCode.REVIEW_NOT_PUBLISHED
+    assert server.comments[0]["body"] == before
+
+
+# #255-T01
+def test_a_run_that_published_and_then_failed_is_reconciled_from_by_the_next_push(
+    server: FakeGithubComments, publisher: Publisher
+) -> None:
+    publisher.publish(run(finding()), head_sha=SHA, previous_reviewed_sha=None)
+    # NEXT published and then ended failed: the app never recorded it as reviewed, but it did
+    # attempt that head, and says so in the claim.
+    publisher.publish(
+        run(finding("f-2", sha=NEXT, path="src/b.ts", title="Another"), sha=NEXT),
+        head_sha=NEXT,
+        previous_reviewed_sha=SHA,
+    )
+    first_url = server.comments[0]["html_url"]
+
+    published = publisher.publish(
+        run(resolved=("f-2",), sha=THIRD),
+        head_sha=THIRD,
+        previous_reviewed_sha=SHA,
+        attempted_shas=(NEXT,),
+    )
+
+    assert published.created is False
+    assert published.comment_url == first_url
+    assert len(server.comments) == 1
+    state = decode_state(server.comments[0]["body"])
+    assert state is not None
+    assert state.reviewed_sha == THIRD
+    # Resolved only because this run named it; the finding it did not name stays active.
+    assert [item.id for item in state.findings] == ["f-1"]
+    assert [entry.finding.id for entry in state.resolved] == ["f-2"]
+
+
+# #255-T02
+def test_a_head_the_app_never_attempted_still_fails_closed(
+    server: FakeGithubComments, publisher: Publisher
+) -> None:
+    publisher.publish(run(finding()), head_sha=SHA, previous_reviewed_sha=None)
+    publisher.publish(run(finding(sha=NEXT), sha=NEXT), head_sha=NEXT, previous_reviewed_sha=SHA)
+    before = server.comments[0]["body"]
+
+    # The claim names other attempted heads, not the one the comment holds.
+    with pytest.raises(PublishError) as refused:
+        publisher.publish(
+            run(finding(sha=THIRD), sha=THIRD),
+            head_sha=THIRD,
+            previous_reviewed_sha=SHA,
+            attempted_shas=("9" * 40, "8" * 40),
+        )
+
+    assert refused.value.code is ErrorCode.REVIEW_NOT_PUBLISHED
+    assert server.comments[0]["body"] == before
+
+
+# #255-T02
+def test_a_foreign_comment_with_an_attempted_head_is_still_not_the_state(
+    server: FakeGithubComments, publisher: Publisher
+) -> None:
+    publisher.publish(run(finding()), head_sha=SHA, previous_reviewed_sha=None)
+    forged = server.comments[0]["body"].replace(SHA, NEXT)
+    server.comments.clear()
+    server.seed(forged, author="mallory")
+
+    published = publisher.publish(
+        run(finding(sha=THIRD), sha=THIRD),
+        head_sha=THIRD,
+        previous_reviewed_sha=None,
+        attempted_shas=(NEXT,),
+    )
+
+    # The human copy is ignored: the bot writes its own comment next to it.
+    assert published.created is True
+    assert len(server.comments) == 2
+
+
+# #255-T03
+def test_a_lost_edit_response_is_recognised_on_re_read(
+    server: FakeGithubComments, publisher: Publisher
+) -> None:
+    first = publisher.publish(run(finding()), head_sha=SHA, previous_reviewed_sha=None)
+    server.ambiguous_edit = True
+
+    published = publisher.publish(
+        run(finding(sha=NEXT), sha=NEXT), head_sha=NEXT, previous_reviewed_sha=SHA
+    )
+
+    assert published.created is False
+    assert published.comment_url == first.comment_url
+    assert len(server.comments) == 1
+    state = decode_state(server.comments[0]["body"])
+    assert state is not None
+    assert state.reviewed_sha == NEXT
+
+
+# #255-T03
+def test_a_lost_edit_that_did_not_land_is_a_failure(
+    server: FakeGithubComments, publisher: Publisher
+) -> None:
+    publisher.publish(run(finding()), head_sha=SHA, previous_reviewed_sha=None)
+    before = server.comments[0]["body"]
+    server.faults["PATCH"] = (503, {})
+
+    with pytest.raises(PublishError) as refused:
+        publisher.publish(
+            run(finding(sha=NEXT), sha=NEXT), head_sha=NEXT, previous_reviewed_sha=SHA
+        )
+
+    assert refused.value.code is ErrorCode.GIT_UNAVAILABLE
     assert server.comments[0]["body"] == before
 
 

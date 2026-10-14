@@ -32,7 +32,7 @@ publishes as one persistent summary comment. The decisions are in epic
 | Provenance audit of the engine binary and `rg` in `make check-licenses` (source commit, licence, the Bun-lock runtime closure of the pinned commit), notices in `NOTICE` and `THIRD_PARTY_LICENSES.md` | Shipped (#202) |
 | Worst-case memory and OOM measurements, the decision to run more than one Dynamic job at a time | **Manual step, not done** (needs a real deployment target, see "Capacity") |
 | Full path from a signed webhook to the Run: the pull request title, body and previous-review state in the prompt (#251), the review kind proved for every entry point and the model and usage in Runs (#252), and the privileged `e2e-dynamic` journey with the real pinned OpenCode that publishes the summary (#253) | Shipped (#251, #252, #253) |
-| Recovery when a run wrote the summary and then ended failed | **Open (#255), a blocker for switching Dynamic Review on**, see "Known limitations" |
+| Recovery when a run wrote the summary and then ended failed | Shipped (#255): the claim names the heads of earlier unsuccessful runs, see "Known limitations" |
 | Hosted activation | Needs the hosted egress gate (#82) |
 
 ## How a Dynamic job reaches an engine
@@ -293,6 +293,10 @@ the concurrency before the memory matrix exists; a later change can keep Diff jo
 This is the order to follow; every step can be stopped and rolled back. Nothing in it is done by
 installing the files.
 
+**Deploy order.** `base.attemptedShas` (#255) is only sent when it is not empty, and a runner from
+before #255 rejects the key (its job contract is closed). Update the app and the Dynamic runner image
+together, or the runner first. A newer runner with an older app is safe: an absent key means none.
+
 **Before you start.** A Linux Docker host (Docker Engine with Compose v2) whose kernel has
 `nf_tables` (every current distribution kernel; the self-check tells you when it does not), that can
 give the Dynamic runner container at least 2 GiB; an app that is already running with the workspace's
@@ -388,13 +392,23 @@ write-up and needs a separately authorised run.
 These are known and accepted for the switch-on decision, or tracked in an issue. They are not hidden
 by the defaults.
 
-- **A run that wrote the summary and then ended failed blocks the later pushes of that pull request
-  (#255, a blocker for switching Dynamic Review on).** The publisher refuses a comment whose recorded
-  head is neither the current head nor the last *succeeded* head, with `review_not_published`
-  (fail-closed on purpose, #199). If run A edits the comment and then fails (the response of the edit
-  is lost, the watchdog or `SIGTERM` fires after the write, the lease is lost), a push to a new head B
-  finds head A in the comment, and so does every later push, until A is re-reviewed. Recovery needs a
-  design (#255); until then the only repair is to re-review the failed head.
+- **A run that wrote the summary and then ended without success (#255).** The publisher refuses a
+  comment whose recorded head it cannot account for, with `review_not_published` (fail-closed on
+  purpose, #199). A run can edit the comment and then fail (the watchdog or `SIGTERM` fires after the
+  write, the lease is lost, the completion report is lost): the comment says head A while the app has
+  no succeeded review of A. The claim therefore carries `base.attemptedShas`: the heads of the
+  pull request's earlier jobs of the same kind that *ran* and did not succeed (`failed`, or at least
+  one lost attempt; a job superseded or cancelled while still waiting never ran and is not counted),
+  created after the last succeeded job and before the claimed one (newest first, at most 20, the key
+  is left out when there are none). The publisher accepts such a head next to the job's own head and
+  `previousReviewedSha`, reconciles from that state and edits the same comment; the next success
+  makes it the previous review again. A head the app never attempted (foreign, tampered, newer) is
+  still refused. What stays: after 20 or more distinct heads that ran and failed, *without* a success
+  in between, an older state head falls out of the list and every later push fails with
+  `review_not_published`. Re-reviewing the newest head does not repair it (it gets the same window).
+  Until the guaranteed recovery (#257) lands, the repair is to **delete the bot's summary comment**
+  on the pull request: the next review creates a new one (the history of resolved findings is lost).
+  A lost edit response is recognised by re-reading the comment (it must hold exactly the body sent).
 - **Hidden Unicode tag characters in repository files reach the model untouched (#247).** An attacker
   who controls repository text can hide instructions in tag characters.
 - **A restarted container runs with `NET_ADMIN` again (#249).** The capability is dropped per container

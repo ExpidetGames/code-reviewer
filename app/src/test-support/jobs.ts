@@ -117,6 +117,8 @@ export type JobQueueFixture = {
     headSha?: string;
     /** #199: the review kind of the historical review; defaults to the column default (diff). */
     reviewKind?: ProjectReviewKind;
+    /** #255: the lost attempts of the row; defaults to 0 (a job that never ran). */
+    attempts?: number;
     /** For a `running` row: the claim token; defaults to a fixed one, and the lease is live. */
     leaseToken?: string;
     /** For a `running` row: an ISO timestamp; defaults to the fixture's now. */
@@ -251,7 +253,7 @@ export async function createJobQueueFixture(
           delivery_id: null,
           status,
           run_after: timestamp,
-          attempts: 0,
+          attempts: overrides.attempts ?? 0,
           runner_id: running ? "runner-1" : null,
           lease_token: running
             ? (overrides.leaseToken ?? "historical-lease")

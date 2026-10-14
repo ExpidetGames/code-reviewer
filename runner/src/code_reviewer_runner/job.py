@@ -35,7 +35,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, NoReturn
+from typing import Any, NoReturn, cast
 from urllib.parse import SplitResult, urlsplit
 
 from code_reviewer_runner.dynamic_review.prompts import MAX_SKILL_BYTES as MAX_DYNAMIC_SKILL_BYTES
@@ -60,7 +60,20 @@ _GIT_FIELDS = {"provider", "baseUrl", "token", "botLogin"}
 _LLM_FIELDS = {"provider", "model", "apiKey", "baseUrl", "maxTokens", "fallbackModels"}
 _DYNAMIC_FIELDS = {"model", "skill", "limits"}
 _DYNAMIC_LIMIT_FIELDS = {"maxFindings"}
-_BASE_FIELDS = {"repository", "baseRef", "headSha", "previousReviewedSha", "comparison"}
+_BASE_FIELDS = {
+    "repository",
+    "baseRef",
+    "headSha",
+    "previousReviewedSha",
+    "attemptedShas",
+    "comparison",
+}
+# The contract bounds the list; a longer one is not a claim of this app.
+MAX_ATTEMPTED_SHAS = 20
+_ATTEMPTED_SHAS_DETAIL = (
+    f"base.attemptedShas must be a list of at most {MAX_ATTEMPTED_SHAS} distinct "
+    "40 character lower-case commit ids"
+)
 _COMPARISONS = ("full", "incremental")
 _LOWER_SHA = re.compile(r"[0-9a-f]{40}")
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
@@ -143,7 +156,8 @@ class DynamicReview:
 class ClaimBase:
     """The checkout facts (#195).
 
-    Exact head, base identity, declared comparison mode, prior head.
+    Exact head, base identity, declared comparison mode, prior head and (#255) the heads of the
+    app's earlier jobs of this pull request that did not succeed.
     """
 
     repository: str
@@ -151,6 +165,7 @@ class ClaimBase:
     head_sha: str
     previous_reviewed_sha: str | None
     comparison: str
+    attempted_shas: tuple[str, ...] = ()
 
 
 class JobError(Exception):
@@ -451,6 +466,7 @@ def _claim_base(data: dict[str, Any]) -> ClaimBase:
         raise _invalid(
             "base.previousReviewedSha must be null or a 40 character lower-case commit id"
         )
+    attempted = _attempted_shas(base)
     comparison = _string(base, "comparison", "base.")
     if comparison not in _COMPARISONS:
         raise _invalid("base.comparison must be 'full' or 'incremental'")
@@ -460,7 +476,22 @@ def _claim_base(data: dict[str, Any]) -> ClaimBase:
         head_sha=head_sha,
         previous_reviewed_sha=previous,
         comparison=comparison,
+        attempted_shas=attempted,
     )
+
+
+def _attempted_shas(base: dict[str, Any]) -> tuple[str, ...]:
+    """The optional `attemptedShas` (#255): absent means none (an app from before the field)."""
+    if "attemptedShas" not in base:
+        return ()
+    raw: object = base["attemptedShas"]
+    if not isinstance(raw, list):
+        raise _invalid(_ATTEMPTED_SHAS_DETAIL)
+    items = cast("list[object]", raw)
+    shas = [item for item in items if isinstance(item, str) and _LOWER_SHA.fullmatch(item)]
+    if len(shas) != len(items) or len(items) > MAX_ATTEMPTED_SHAS or len(set(shas)) != len(shas):
+        raise _invalid(_ATTEMPTED_SHAS_DETAIL)
+    return tuple(shas)
 
 
 def parse_job(raw: str) -> Job:
