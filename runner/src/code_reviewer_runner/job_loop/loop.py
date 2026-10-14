@@ -539,8 +539,13 @@ class RunnerLoop:
         if result["ok"]:
             self._log.info("job %s finished: ok in %d ms", claimed.id, result["durationMs"])
             return
+        reason = result.get("errorReason")
         self._log.warning(
-            "job %s finished: %s (exit code %d)", claimed.id, result["errorCode"], outcome.exit_code
+            "job %s finished: %s%s (exit code %d)",
+            claimed.id,
+            result["errorCode"],
+            f" [{reason}]" if reason else "",
+            outcome.exit_code,
         )
 
     # -- reporting ----------------------------------------------------------------------------

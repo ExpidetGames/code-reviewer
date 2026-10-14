@@ -149,7 +149,7 @@ namespaces, no host kernel setting beyond the `nf_tables` support every current 
   (`hosts`, `hostname`, `resolv.conf`) are read-only too under `read_only`, which the image smoke
   test checks. Because a tmpfs is
   charged to the container's memory limit, `/tmp` counts against the 2 GiB (see "Capacity"): a
-  repository export is limited to 64 MiB and a preparation to 256 MiB, but a runaway engine that
+  repository export is limited to 64 MiB, a preparation to 256 MiB and a download to 256 MiB (#296), but a runaway engine that
   fills `/tmp` takes memory, not disk, and ends in the OOM kill of the job, bounded at 512 MiB. Do
   not add `volumes` or widen the tmpfs; the file test pins them. It is not a way to a read-only
   Diff runner: only `compose.dynamic.yml` and the `runner-dynamic` service of `compose.coolify.yml` use it.

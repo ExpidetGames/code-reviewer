@@ -151,6 +151,66 @@ describe("the complete body", () => {
     );
   });
 
+  // #296-T10
+  it("keeps the stable reason of a failure and leaves the field out when there is none", () => {
+    const failed = {
+      ok: false,
+      durationMs: 10,
+      errorCode: "checkout_incomplete",
+      errorReason: "budget_preparation",
+      logTail: "checkout_incomplete [budget_preparation]",
+    };
+    const parsed = parseCompleteRequest({ leaseToken: TOKEN, result: failed });
+
+    expect(parsed.ok && parsed.value.result.errorReason).toBe(
+      "budget_preparation",
+    );
+    const plain = parseCompleteRequest({
+      leaseToken: TOKEN,
+      result: { ...failed, errorReason: undefined },
+    });
+    expect(plain.ok && "errorReason" in plain.value.result).toBe(false);
+  });
+
+  // #296-T10
+  it.each(["Budget Prep", "", "../etc", 5, ["a"]])(
+    "refuses a reason that is not a stable name (%j)",
+    (errorReason) => {
+      const parsed = parseCompleteRequest({
+        leaseToken: TOKEN,
+        result: {
+          ok: false,
+          durationMs: 1,
+          errorCode: "checkout_incomplete",
+          errorReason,
+          logTail: "",
+        },
+      });
+
+      expect(fieldsOf(parsed)).toStrictEqual([
+        { field: "result.errorReason", code: "invalid" },
+      ]);
+    },
+  );
+
+  // #296-T10
+  it("refuses a reason that is longer than a stable name", () => {
+    const parsed = parseCompleteRequest({
+      leaseToken: TOKEN,
+      result: {
+        ok: false,
+        durationMs: 1,
+        errorCode: "checkout_incomplete",
+        errorReason: "x".repeat(65),
+        logTail: "",
+      },
+    });
+
+    expect(fieldsOf(parsed)).toStrictEqual([
+      { field: "result.errorReason", code: "too_long" },
+    ]);
+  });
+
   it("refuses a failed result without an error code and a good one with one", () => {
     const failed = parseCompleteRequest({
       leaseToken: TOKEN,

@@ -35,7 +35,11 @@ from code_reviewer_runner.capabilities import ALL_ENGINES
 from code_reviewer_runner.dynamic_findings import DynamicFindings
 from code_reviewer_runner.dynamic_review.checkout import PreparedContent
 from code_reviewer_runner.dynamic_review.engine_user import EngineLaunch
-from code_reviewer_runner.dynamic_review.limits import CheckoutError
+from code_reviewer_runner.dynamic_review.limits import (
+    CheckoutError,
+    CheckoutMetrics,
+    CheckoutReason,
+)
 from code_reviewer_runner.dynamic_review.publish import (
     IDENTITY_MARKER,
     STATE_RESET_CODE,
@@ -115,6 +119,7 @@ def content_at(export: Path) -> PreparedContent:
         metadata=json.dumps({"title": "Add the handler", "body": "Why it is needed."}),
         prior_state="",
         deadline=0.0,
+        metrics=CheckoutMetrics(0, 0, 0, 1, {}, {}),
     )
 
 
@@ -375,13 +380,16 @@ def test_a_state_reset_is_named_in_the_result_log_and_only_then(
     assert (STATE_RESET_CODE in result.log_tail) is reset
 
 
-# #197-T13
-def test_a_finding_outside_the_prepared_export_fails_the_job(tmp_path: Path) -> None:
+# #296-T13
+def test_a_finding_outside_the_prepared_export_is_dropped_and_counted_not_failed(
+    tmp_path: Path,
+) -> None:
     document = findings()
-    document["findings"][0]["path"] = "src/not-in-the-export.ts"
+    document["findings"].append({**document["findings"][0], "id": "f-2", "path": "outside.ts"})
     preparer = Preparer(
         tmp_path / "export", {"proxy_calls": 1, "answer": "structured", "findings": document}
     )
+    publisher = RecordingPublisher(preparer)
 
     with FakeUpstream() as upstream:
         result = runner.run_dynamic_job(
@@ -391,11 +399,14 @@ def test_a_finding_outside_the_prepared_export_fails_the_job(tmp_path: Path) -> 
             environment(),
             engines=ALL_ENGINES,
             prepare=preparer,
+            publish=publisher,
         )
 
-    assert not result.ok
-    assert result.error_code is ErrorCode.CHECKOUT_INCOMPLETE
-    assert preparer.events == ["prepared", "released"]
+    assert result.ok, result.log_tail
+    assert len(publisher.calls[0][1].findings) == len(document["findings"]) - 1
+    assert "outside.ts" not in result.log_tail
+    assert "dropped 1 finding(s): finding_path_not_exported" in result.log_tail
+    assert preparer.events == ["prepared", "released", "published"]
 
 
 # #197-T06
@@ -404,7 +415,7 @@ def test_a_preparation_that_fails_is_its_stable_code_and_no_engine_starts(
 ) -> None:
     @contextmanager
     def refusing(job: Any) -> Generator[PreparedContent]:
-        raise CheckoutError(ErrorCode.CHECKOUT_INCOMPLETE)
+        raise CheckoutError(CheckoutReason.INVALID_REQUEST, ErrorCode.CHECKOUT_INCOMPLETE)
         yield content_at(tmp_path)  # pragma: no cover
 
     with FakeUpstream() as upstream:
@@ -420,6 +431,70 @@ def test_a_preparation_that_fails_is_its_stable_code_and_no_engine_starts(
     assert not result.ok
     assert result.error_code is ErrorCode.CHECKOUT_INCOMPLETE
     assert upstream.requests == []
+
+
+# #296-T09 #296-T12
+def test_a_failed_preparation_reports_its_reason_and_metrics_without_any_content(
+    tmp_path: Path,
+) -> None:
+    @contextmanager
+    def refusing(job: Any) -> Generator[PreparedContent]:
+        error = CheckoutError(CheckoutReason.BUDGET_PREPARATION)
+        error.metrics = CheckoutMetrics(10, 20, 30, 4, {"binary": 1}, {"too_large": 2})
+        raise error
+        yield content_at(tmp_path)  # pragma: no cover
+
+    with FakeUpstream() as upstream:
+        result = runner.run_dynamic_job(
+            job_for(f"{upstream.url}/v1"),
+            None,
+            0.0,
+            environment(),
+            engines=ALL_ENGINES,
+            prepare=refusing,
+        )
+
+    assert result.error_reason == "budget_preparation"
+    assert json.loads(result.to_line())["errorReason"] == "budget_preparation"
+    lines = result.log_tail.splitlines()
+    assert lines[0] == (
+        "checkout_incomplete [budget_preparation]: the pull request could not be prepared"
+    )
+    assert (
+        "checkout: transfer=10 preparation=20 exposed=30 entries=4 "
+        "omitted=binary:1 skipped=too_large:2"
+    ) in lines
+
+
+# #296-T12
+def test_a_good_run_logs_the_checkout_metrics(tmp_path: Path) -> None:
+    script = {
+        "proxy_calls": 2,
+        "answer": "structured",
+        "findings": findings(),
+        "results": {"c1": read_result("src/api/handler.ts")},
+    }
+    with FakeUpstream(
+        [
+            asks(tool_call("c1", "read", {"filePath": "src/api/handler.ts"})),
+            asks(tool_call("c2", "StructuredOutput", findings())),
+        ]
+    ) as upstream:
+        result = runner.run_dynamic_job(
+            job_for(f"{upstream.url}/v1"),
+            None,
+            0.0,
+            environment(),
+            engines=ALL_ENGINES,
+            prepare=Preparer(tmp_path / "export", script),
+            publish=RecordingPublisher(),
+        )
+
+    assert result.ok, result.log_tail
+    assert result.error_reason is None
+    assert "checkout: transfer=0 preparation=0 exposed=0 entries=1 omitted=none skipped=none" in (
+        result.log_tail
+    )
 
 
 # Two different, compatible model and provider configurations. Nothing in them is known to the
@@ -718,8 +793,11 @@ def test_a_publication_that_fails_fails_the_job_with_its_own_code_and_links_no_c
 
 # #253-R03
 def test_a_job_whose_engine_fails_writes_nothing_to_the_pull_request(tmp_path: Path) -> None:
+    # An answer about another head is an engine failure (a finding outside the export is not).
     document = findings()
-    document["findings"][0]["path"] = "src/not-in-the-export.ts"
+    other = "0" * 40
+    document["reviewedSha"] = other
+    document["findings"][0]["reviewedSha"] = other
     preparer = Preparer(
         tmp_path / "export", {"proxy_calls": 1, "answer": "structured", "findings": document}
     )

@@ -48,7 +48,7 @@ export function createGitRepository(directory: string): GitRepository {
   git("init", "--quiet", "--initial-branch=main");
   git("config", "commit.gpgsign", "false");
   git("config", "core.hooksPath", "/dev/null");
-  // What the runner's checkout asks the server for: a filtered fetch, then blobs by object name.
+  // What the runner's checkout asks the server for: a depth-one fetch of a commit with a blob size filter.
   git("config", "uploadpack.allowFilter", "true");
   git("config", "uploadpack.allowAnySHA1InWant", "true");
   return {

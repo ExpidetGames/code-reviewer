@@ -619,8 +619,8 @@ def test_a_hung_provider_ends_the_run_at_the_whole_job_deadline(tmp_path: Path) 
     assert process_is_gone(pid)
 
 
-# #197-T13
-def test_a_finding_outside_the_verified_export_is_rejected(tmp_path: Path) -> None:
+# #296-T13
+def test_a_finding_outside_the_verified_export_is_dropped_and_counted(tmp_path: Path) -> None:
     document = findings()
     document["findings"][0]["path"] = "src/not-in-the-export.ts"
     fixture = Fixture(tmp_path, {"answer": "structured", "findings": document, "proxy_calls": 1})
@@ -628,9 +628,10 @@ def test_a_finding_outside_the_verified_export_is_rejected(tmp_path: Path) -> No
     with FakeUpstream() as upstream:
         answer = fixture.run(upstream)
 
-    assert not answer.ok
-    assert answer.error is not None
-    assert answer.error.code is ErrorCode.CHECKOUT_INCOMPLETE
+    assert answer.ok, answer.error
+    assert answer.findings is not None
+    assert answer.findings.findings == ()
+    assert answer.findings.dropped_outside_export == 1
 
 
 # #197-T13
