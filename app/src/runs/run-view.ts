@@ -151,6 +151,12 @@ export function readStoredResult(result: JsonValue | null): StoredResult {
 /** The longest model name the runner API accepts (`RunnerUsage.model`). */
 const MAX_MODEL_CHARS = 200;
 
+/** The first `max` characters of `text`, never a half of a surrogate pair. */
+function cutCharacters(text: string, max: number): string {
+  const characters = Array.from(text);
+  return characters.length <= max ? text : characters.slice(0, max).join("");
+}
+
 function isCount(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
@@ -174,7 +180,7 @@ export function readStoredUsage(result: JsonValue | null): RunUsageView | null {
   return {
     model:
       typeof model === "string"
-        ? cleanLog(model).slice(0, MAX_MODEL_CHARS)
+        ? cutCharacters(cleanLog(model), MAX_MODEL_CHARS)
         : null,
     totalTokens,
     aiCalls,
@@ -301,5 +307,9 @@ function usageView(
 ): RunUsageView | null {
   const usage = readStoredUsage(job.result);
   if (usage === null || usage.model === null) return usage;
-  return { ...usage, model: redact(usage.model) };
+  // Redaction can lengthen the name: cut again, after it.
+  return {
+    ...usage,
+    model: cutCharacters(redact(usage.model), MAX_MODEL_CHARS),
+  };
 }

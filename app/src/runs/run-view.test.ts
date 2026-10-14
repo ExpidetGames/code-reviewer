@@ -125,7 +125,7 @@ describe("the usage of a run", () => {
     costUsd: 0.04,
   };
 
-  // #201-T01
+  // #201-T22
   it("reads the model, the summed tokens, the model calls and the cost of a stored result, and nothing else of it", () => {
     expect(readStoredUsage({ ok: true, usage })).toEqual({
       model: "vendor/dynamic-model",
@@ -135,14 +135,14 @@ describe("the usage of a run", () => {
     });
   });
 
-  // #201-T01
+  // #201-T23
   it("keeps a cost the runner could not know as unknown instead of zero", () => {
     expect(
       readStoredUsage({ ok: true, usage: { ...usage, costUsd: null } }),
     ).toMatchObject({ costUsd: null });
   });
 
-  // #201-T01
+  // #201-T24
   it.each([
     ["no result", null],
     ["a result without usage", { ok: true }],
@@ -165,7 +165,7 @@ describe("the usage of a run", () => {
     expect(readStoredUsage(stored)).toBeNull();
   });
 
-  // #201-T01
+  // #201-T25
   it("takes a model without a name as unknown and cleans one that has control characters", () => {
     expect(
       readStoredUsage({ ok: true, usage: { ...usage, model: null } }),
@@ -178,7 +178,40 @@ describe("the usage of a run", () => {
     ).toMatchObject({ model: "vendor/model" });
   });
 
-  // #201-T01
+  // #201-T32
+  it("cuts a long model name on a whole character, never inside a surrogate pair", () => {
+    const name = `${"a".repeat(199)}\u{1F600}${"b".repeat(5)}`;
+
+    const model = readStoredUsage({
+      ok: true,
+      usage: { ...usage, model: name },
+    })?.model;
+
+    expect(model).toBe(`${"a".repeat(199)}\u{1F600}`);
+    expect(model?.isWellFormed()).toBe(true);
+  });
+
+  // #201-T33
+  it("keeps the model name within its limit after the redaction, on a whole character", () => {
+    const stored = job({
+      reviewKind: "dynamic",
+      result: {
+        ok: true,
+        commentUrl: null,
+        logTail: "",
+        usage: { ...usage, model: `${"a".repeat(190)}SECRET` },
+      },
+    });
+
+    const { model } = toRunDetailView(stored, "acme/widgets", NOW, (text) =>
+      text.replace("SECRET", "\u{1F600}".repeat(30)),
+    ).usage ?? { model: null };
+
+    expect(Array.from(model ?? "").length).toBeLessThanOrEqual(200);
+    expect(model?.isWellFormed()).toBe(true);
+  });
+
+  // #201-T26
   it("is in the detail of a run, redacted, and not in the row of the list", () => {
     const stored = job({
       reviewKind: "dynamic",
@@ -310,7 +343,15 @@ describe("the detail of a run", () => {
       commentUrl: "https://github.com/acme/widgets/pull/7#issuecomment-9",
       logTail: "reviewed 3 files",
       logTruncated: false,
-      usage: { model: "m", costUsd: 0.01 },
+      usage: {
+        model: "m",
+        promptTokens: 11,
+        completionTokens: 22,
+        totalTokens: 33,
+        aiCalls: 2,
+        fallbackUsed: true,
+        costUsd: 0.01,
+      },
       errorMessage: null,
     },
   });
