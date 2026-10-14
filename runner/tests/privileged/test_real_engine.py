@@ -24,6 +24,7 @@ from privileged_support import (
     Repo,
     connect_as,
     dynamic_job,
+    exec_directory,
     listener,
     no_publication,
     ripgrep,
@@ -52,8 +53,7 @@ from code_reviewer_runner.dynamic_review.supervisor import (
 @pytest.fixture(scope="module")
 def engine_binary() -> Generator[Path]:
     """The verified executable in a directory every user can enter (the cache is the CI user's)."""
-    directory = Path(tempfile.mkdtemp(prefix="cr-privileged-engine-"))
-    directory.chmod(0o755)
+    directory = exec_directory("cr-privileged-engine-")
     target = directory / "opencode"
     shutil.copyfile(opencode_binary(), target)
     target.chmod(0o755)

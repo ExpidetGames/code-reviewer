@@ -66,6 +66,11 @@ sudo --preserve-env env "PATH=$PATH:/usr/sbin:/sbin" "HOME=$HOME" "OPENCODE_BIN=
       getent passwd "$id" >/dev/null \
         || useradd --system --uid "$id" --gid "$id" --no-create-home --shell /usr/sbin/nologin "$name"
     done
+    # Where tests may run a copy of the engine: the container'"'"'s tmpfs are all noexec, the image'"'"'s
+    # tools live in /usr/local/bin. A tmpfs of its own that allows exec (not suid, not dev), root only.
+    CR_EXEC_DIR="$(mktemp -d)"
+    export CR_EXEC_DIR
+    mount -t tmpfs -o rw,exec,nosuid,nodev,size=1g,mode=0755 tmpfs "$CR_EXEC_DIR"
     # The probes of the execve phase: copies of `cat`, one with the file capabilities of the two
     # startup-only capabilities (permitted and inheritable, once with the effective flag too), one
     # setuid root, on a tmpfs that allows exec and setuid (the container'"'"'s own tmpfs allow neither).

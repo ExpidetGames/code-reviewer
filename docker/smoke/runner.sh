@@ -384,13 +384,13 @@ for line in open("/proc/self/mountinfo"):
 if "ro" not in mounts["/"][0]:
     problems.append("the root filesystem is not mounted read-only")
 # Every other writable mount is a tmpfs of ours or one of Docker itself: the pseudo filesystems, /dev
-# and the three files it binds into /etc at every start.
+# the masked paths under /proc and the three files it binds into /etc at every start.
 docker_owned = {"/etc/hosts", "/etc/hostname", "/etc/resolv.conf"}
 pseudo = {"proc", "sysfs", "cgroup", "cgroup2", "devpts", "mqueue"}
 writable = sorted(
     mountpoint for mountpoint, (options, fstype, _) in mounts.items()
     if "rw" in options and fstype not in pseudo and not mountpoint.startswith("/dev")
-    and mountpoint not in docker_owned
+    and mountpoint not in docker_owned and not mountpoint.startswith(("/proc/", "/sys/"))
 )
 if writable != ["/home/runner", "/run", "/tmp"]:
     problems.append(f"writable mounts: {writable}")
