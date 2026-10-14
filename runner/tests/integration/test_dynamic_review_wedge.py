@@ -18,7 +18,11 @@ from code_reviewer_runner.dynamic_findings import DynamicFindings, Finding
 from code_reviewer_runner.dynamic_review.limits import CheckoutError
 from code_reviewer_runner.dynamic_review.pr_context import load_context
 from code_reviewer_runner.dynamic_review.publish import PublishError, publish_run
-from code_reviewer_runner.dynamic_review.render import IDENTITY_MARKER, render_comment
+from code_reviewer_runner.dynamic_review.render import (
+    IDENTITY_MARKER,
+    RESET_NOTICE,
+    render_comment,
+)
 from code_reviewer_runner.dynamic_review.state import ReviewState, decode_state
 from code_reviewer_runner.job import Job, parse_job
 from code_reviewer_runner.result import ErrorCode
@@ -217,6 +221,12 @@ def test_a_truncated_claim_recovers_an_unaccountable_state_head_with_a_full_revi
     assert state.reviewed_sha == HEAD_B
     assert [item.id for item in state.findings] == ["f-b"]
     assert state.resolved == ()
+    assert published.reset is True
+
+    # #257-T05: the summary says it is a reset and no longer claims the old state is kept.
+    body = server.comments[0]["body"]
+    assert RESET_NOTICE in body
+    assert "previous review state is kept" not in body
 
     # And the pull request keeps going: the next push reconciles from B as usual.
     publish_run(
@@ -226,6 +236,8 @@ def test_a_truncated_claim_recovers_an_unaccountable_state_head_with_a_full_revi
     state = decode_state(server.comments[0]["body"])
     assert state is not None
     assert [entry.finding.id for entry in state.resolved] == ["f-b"]
+    # #257-T05: the notice is one-shot; the next normal run does not repeat it.
+    assert RESET_NOTICE not in server.comments[0]["body"]
 
 
 # #257-T01
@@ -236,11 +248,14 @@ def test_a_truncated_claim_whose_state_head_is_accounted_for_reconciles_as_usual
     job = claim(server, HEAD_B, attempted=[HEAD_A, *WINDOW[:-1]], truncated=True)
 
     assert "f-a" in load_context(job).prior_state
-    publish_run(job, review(HEAD_B, finding("f-b", HEAD_B, "src/b.ts")))
+    published = publish_run(job, review(HEAD_B, finding("f-b", HEAD_B, "src/b.ts")))
 
     state = decode_state(server.comments[0]["body"])
     assert state is not None
     assert {item.id for item in state.findings} == {"f-a", "f-b"}
+    # #257-T05: nothing was reset, so nothing says so.
+    assert published.reset is False
+    assert RESET_NOTICE not in server.comments[0]["body"]
 
 
 # #257-T02

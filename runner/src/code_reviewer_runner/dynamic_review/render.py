@@ -47,6 +47,12 @@ PRIORITY_LABELS = {
     "P3": "🔵 P3 · Low",
 }
 _HEADING = "## 🤖 Dynamic Review"
+# Shown once on a summary that was rewritten from scratch after a state reset (#257). It is a
+# constant, never built from untrusted text; the next normal run does not carry it forward.
+RESET_NOTICE = (
+    "> **Full review after a state reset:** earlier findings were not carried over. The findings "
+    "below are re-derived from scratch."
+)
 _MENTION = re.compile(r"(?<![A-Za-z0-9_])@(?=[A-Za-z0-9])")
 _ZERO_WIDTH = "\u200b"
 
@@ -127,7 +133,9 @@ def _resolved_line(entry: ResolvedFinding, *, web_base: str, repository: str, sh
     return f"- ~~{_safe(finding.title)}~~ ({label}, resolved in `{sha}`)"
 
 
-def _visible(state: ReviewState, *, repository: str, web_base: str, detail: int) -> str:
+def _visible(
+    state: ReviewState, *, repository: str, web_base: str, detail: int, reset: bool
+) -> str:
     counts = summary_counts(state.findings)
     active_total = len(state.findings)
     resolved_total = len(state.resolved)
@@ -135,7 +143,10 @@ def _visible(state: ReviewState, *, repository: str, web_base: str, detail: int)
         f"**{active_total} active finding(s)**: "
         f"P0 {counts['P0']} · P1 {counts['P1']} · P2 {counts['P2']} · P3 {counts['P3']}"
     )
-    parts = [IDENTITY_MARKER, _HEADING, "", headline]
+    parts = [IDENTITY_MARKER, _HEADING, ""]
+    if reset:
+        parts.extend([RESET_NOTICE, ""])
+    parts.append(headline)
     if not state.findings:
         parts.append("")
         parts.append("No active findings.")
@@ -173,10 +184,16 @@ def _visible(state: ReviewState, *, repository: str, web_base: str, detail: int)
                 _resolved_line(entry, web_base=web_base, repository=repository, short=detail < 2)
             )
     parts.append("")
-    parts.append(
-        "_Dynamic Review found these with the read-only engine; the previous review state is kept "
-        "below and reconciled on the next push._"
-    )
+    if reset:
+        parts.append(
+            "_Dynamic Review found these with the read-only engine; a new review state starts "
+            "below and is reconciled on the next push._"
+        )
+    else:
+        parts.append(
+            "_Dynamic Review found these with the read-only engine; the previous review state is "
+            "kept below and reconciled on the next push._"
+        )
     return "\n".join(parts)
 
 
@@ -185,8 +202,12 @@ def render_comment(
     *,
     repository: str,
     web_base: str = "",
+    reset: bool = False,
 ) -> str:
     """The full comment body: the visible view plus the hidden state marker.
+
+    `reset` (#257) adds the one-shot notice of a review that started over; it is not part of the
+    state, so the next normal run renders without it.
 
     A state over the caps or the state budget is first reduced by `fit_state` (oldest resolved
     history, then the lowest priority active findings, which the view then counts), so the comment
@@ -200,7 +221,9 @@ def render_comment(
         raise RenderError(error.code, error.detail) from None
     suffix = f"\n\n{marker}" if marker else ""
     for detail in (3, 2, 1):
-        visible = _visible(state, repository=repository, web_base=web_base, detail=detail)
+        visible = _visible(
+            state, repository=repository, web_base=web_base, detail=detail, reset=reset
+        )
         body = f"{visible}{suffix}"
         if _fits(body):
             return body

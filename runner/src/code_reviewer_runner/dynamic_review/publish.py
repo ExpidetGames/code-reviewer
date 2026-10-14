@@ -68,6 +68,9 @@ from code_reviewer_runner.job import Job
 from code_reviewer_runner.redaction import Redactor
 from code_reviewer_runner.result import ErrorCode
 
+# The stable token in the result log that a run started over after a state reset (#257); the Runs
+# view shows the log, so an operator can see it.
+STATE_RESET_CODE = "state_reset_attempted_shas_truncated"
 _EMPTY_STATE = ReviewState(reviewed_sha="", findings=(), resolved=())
 _PR_NUMBER = re.compile(r"/pull/([1-9][0-9]{0,8})(?:$|[/?#])")
 
@@ -85,6 +88,8 @@ class PublishError(Exception):
 class Published:
     comment_url: str
     created: bool
+    # True when the summary was rewritten from scratch after a state reset (#257).
+    reset: bool = False
 
 
 @dataclass
@@ -117,13 +122,14 @@ class Publisher:
         except GitHubError as error:
             raise PublishError(error.code, error.detail) from None
         existing = self._summary_comment(comments)
-        previous = self._previous_state(
+        previous, reset = self._previous_state(
             existing, head_sha, previous_reviewed_sha, attempted_shas, attempted_shas_truncated
         )
         redacted = redact_findings(run, self.redactor)
         state = reconcile(previous, redacted)
-        body = self._render(state)
-        return self._write(existing, body, head_sha)
+        body = self._render(state, reset=reset)
+        published = self._write(existing, body, head_sha)
+        return replace(published, reset=reset)
 
     def read_previous_state(
         self,
@@ -139,13 +145,14 @@ class Publisher:
             comments = self.client.list_comments(self.pr_number)
         except GitHubError as error:
             raise PublishError(error.code, error.detail) from None
-        return self._previous_state(
+        state, _ = self._previous_state(
             self._summary_comment(comments),
             head_sha,
             previous_reviewed_sha,
             attempted_shas,
             attempted_shas_truncated,
         )
+        return state
 
     # -- selection and state ---------------------------------------------------------------
 
@@ -169,9 +176,11 @@ class Publisher:
         previous_reviewed_sha: str | None,
         attempted_shas: Sequence[str],
         attempted_shas_truncated: bool,
-    ) -> ReviewState:
+    ) -> tuple[ReviewState, bool]:
+        """The state to reconcile from and whether it is a reset (#257): the bot's own summary was
+        dropped because its head could not be accounted for."""
         if existing is None:
-            return _EMPTY_STATE
+            return _EMPTY_STATE, False
         try:
             state = decode_state(existing.body)
         except StateError as error:
@@ -188,20 +197,22 @@ class Publisher:
             if attempted_shas_truncated:
                 # The bot's own summary, but its head fell out of the bounded list (#257): a full
                 # review that rewrites it. Nothing is merged from a state it cannot account for.
-                return _EMPTY_STATE
+                return _EMPTY_STATE, True
             # A head this job cannot account for: a newer review (a result that arrived late) or a
             # state the app never produced. Both are refused, never merged.
             raise PublishError(
                 ErrorCode.REVIEW_NOT_PUBLISHED,
                 "a newer review is already published for this pull request",
             )
-        return redact_state(state, self.redactor)
+        return redact_state(state, self.redactor), False
 
     # -- rendering and writing -------------------------------------------------------------
 
-    def _render(self, state: ReviewState) -> str:
+    def _render(self, state: ReviewState, *, reset: bool = False) -> str:
         try:
-            return render_comment(state, repository=self.repository, web_base=self.web_base)
+            return render_comment(
+                state, repository=self.repository, web_base=self.web_base, reset=reset
+            )
         except RenderError as error:
             raise PublishError(error.code, error.detail) from None
 

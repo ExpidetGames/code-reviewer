@@ -35,7 +35,12 @@ from code_reviewer_runner.dynamic_findings import DynamicFindings
 from code_reviewer_runner.dynamic_review.checkout import PreparedContent
 from code_reviewer_runner.dynamic_review.engine_user import EngineLaunch
 from code_reviewer_runner.dynamic_review.limits import CheckoutError
-from code_reviewer_runner.dynamic_review.publish import IDENTITY_MARKER, Published, PublishError
+from code_reviewer_runner.dynamic_review.publish import (
+    IDENTITY_MARKER,
+    STATE_RESET_CODE,
+    Published,
+    PublishError,
+)
 from code_reviewer_runner.dynamic_review.supervisor import Prepared
 from code_reviewer_runner.job import parse_job
 from code_reviewer_runner.result import ErrorCode
@@ -192,6 +197,37 @@ def test_a_dynamic_job_runs_on_the_prepared_export_and_releases_it_afterwards(
     prompt = next(e["message_request"] for e in trace if "message_request" in e)["parts"][0]["text"]
     assert "Add the handler" in prompt and "Why it is needed." in prompt
     assert "diff --git a/src/api/handler.ts" in prompt
+
+
+# #257-T06
+@pytest.mark.parametrize("reset", [True, False])
+def test_a_state_reset_is_named_in_the_result_log_and_only_then(
+    tmp_path: Path, reset: bool
+) -> None:
+    script = {
+        "proxy_calls": 2,
+        "answer": "structured",
+        "findings": findings(),
+        "results": {"c1": read_result("src/api/handler.ts")},
+    }
+    with FakeUpstream(
+        [
+            asks(tool_call("c1", "read", {"filePath": "src/api/handler.ts"})),
+            asks(tool_call("c2", "StructuredOutput", findings())),
+        ]
+    ) as upstream:
+        result = runner.run_dynamic_job(
+            job_for(f"{upstream.url}/v1"),
+            None,
+            0.0,
+            environment(),
+            engines=ALL_ENGINES,
+            prepare=Preparer(tmp_path / "export", script),
+            publish=RecordingPublisher(reset=reset),
+        )
+
+    assert result.ok, result.log_tail
+    assert (STATE_RESET_CODE in result.log_tail) is reset
 
 
 # #197-T13
@@ -427,8 +463,13 @@ class RecordingPublisher:
     URL = "https://github.com/octo/repo/pull/7#issuecomment-4001"
 
     def __init__(
-        self, preparer: Preparer | None = None, *, fail: PublishError | None = None
+        self,
+        preparer: Preparer | None = None,
+        *,
+        fail: PublishError | None = None,
+        reset: bool = False,
     ) -> None:
+        self.reset = reset
         self.calls: list[tuple[Any, DynamicFindings]] = []
         self.preparer = preparer
         self.fail = fail
@@ -439,7 +480,7 @@ class RecordingPublisher:
             self.preparer.events.append("published")
         if self.fail is not None:
             raise self.fail
-        return Published(comment_url=self.URL, created=True)
+        return Published(comment_url=self.URL, created=True, reset=self.reset)
 
 
 def query_findings() -> dict[str, Any]:
