@@ -390,6 +390,30 @@ published.
   them. A provider that reports more completion tokens than the allowance, reasoning included, ends
   the run with `dynamic_accounting_failed` instead of being paid for it.
 
+### How long a turn may take
+
+The engine's turn is one blocking `POST /session/{id}/message` that returns only when the whole
+agentic turn is done, with nothing on the socket meanwhile. Its socket timeout is therefore **the
+time left to the whole-job deadline plus a 5 s margin**, never a fixed cap: a cap of 300 s once
+ended a normal review turn as `dynamic_engine_unavailable: the engine is not reachable` (a
+production run of this repository's own pull request, after about 339 s), before the wrap-up at
+deadline minus 150 s could act. The run's own watch (the ledger's deadline, the proxy's recorded
+limits, the engine process) ends a turn; the socket never does.
+
+A failed engine call says why at the start of its detail, all with the code
+`dynamic_engine_unavailable`: `engine_turn_timeout` (the turn ran into the client timeout before the
+deadline, which the margin makes a defect to report), `engine_exited` (the engine process ended
+during its turn), `engine_unreachable` (it runs but cannot be reached, e.g. a refused connection),
+`engine_timeout` (another call did not answer in time). A failure at the deadline is
+`dynamic_budget_exceeded`. The result log names how long each engine message call took
+(`engine message call: 339.2 s`, numbers only), after a success and after a failure.
+
+`prompt_async` (an immediate `204`, present in v1.19.0) was considered and not used: the result of
+the turn would have to be read back through the session's message list, which answers HTTP 400 once
+a JSON-schema format is stored (the defect of #85, pinned by an engine test), or through the
+`/event` stream, which needs an event reader of its own. That is a follow-up if turns ever need to
+outlive one connection.
+
 ## Context window and compaction
 
 OpenCode can compact a long session itself (`compaction.auto`, with the model's `limit.context` and

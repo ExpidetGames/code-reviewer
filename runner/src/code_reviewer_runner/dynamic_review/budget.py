@@ -277,6 +277,10 @@ class BudgetLedger:
     def started(self) -> float:
         return self._started
 
+    def elapsed_seconds(self) -> float:
+        """The time since the ledger started, on its own clock."""
+        return self._clock() - self._started
+
     def remaining_seconds(self) -> float:
         """The time left before the whole-job deadline. Never negative."""
         return max(self.limits.deadline_seconds - (self._clock() - self._started), 0.0)

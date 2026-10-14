@@ -35,6 +35,11 @@ The audit reads the model requests, not the engine's session: the pinned server 
 session list with HTTP 400 once a JSON-schema format is stored (the defect of #85, still present in
 v1.19.0 and pinned by an engine test).
 
+The message call that runs the turn blocks until the turn is done, so its socket timeout is the time
+left to the whole-job deadline plus a margin, not a cap (`docs/dynamic-review.md`, "How long a
+turn may take"). `prompt_async` exists in v1.19.0 but its result could only be read through the
+session message list (HTTP 400 with a stored JSON-schema format, #85) or the event stream.
+
 ## Found against the real binary
 
 Part 1 shipped against a protocol fake; the real binary showed these, all fixed in part 2a:

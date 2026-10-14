@@ -52,7 +52,11 @@ from code_reviewer_runner.dynamic_findings import (
     FindingsError,
     parse_dynamic_findings,
 )
-from code_reviewer_runner.dynamic_review.budget import BudgetLedger, LimitError
+from code_reviewer_runner.dynamic_review.budget import (
+    TOTAL_DEADLINE_SECONDS,
+    BudgetLedger,
+    LimitError,
+)
 from code_reviewer_runner.dynamic_review.config import (
     PROXY_PROVIDER_ID,
     build_engine_config,
@@ -74,9 +78,14 @@ PINNED_ENGINE_VERSION = "1.19.0"
 STARTUP_SECONDS = 20.0
 # How often a start is attempted on a fresh port when the engine could not bind the one picked.
 START_ATTEMPTS = 3
-# How long one message may take before the adapter ends the run (the whole-job deadline binds
-# first when it is shorter).
-MESSAGE_TIMEOUT_SECONDS = 300.0
+# The message call is one blocking POST that only returns when the whole agentic turn is done, and
+# nothing travels on the socket meanwhile. Its socket timeout therefore must never be what ends a
+# turn: it is the time left to the whole-job deadline plus this margin, so the run's own watch
+# (the ledger's deadline and the wrap-up) always acts first. A fixed cap of 300 s once ended a
+# normal review turn as "not reachable" (#293).
+TURN_TIMEOUT_MARGIN_SECONDS = 5.0
+# The longest a turn can be given: the whole job and the margin.
+MAX_TURN_TIMEOUT_SECONDS = TOTAL_DEADLINE_SECONDS + TURN_TIMEOUT_MARGIN_SECONDS
 # One health check or session request. Before the listening marker the pinned server can accept a
 # connection and never answer, so a poll must give up quickly and try again.
 SHORT_TIMEOUT_SECONDS = 2.0
@@ -133,6 +142,24 @@ class EngineError(Exception):
         self.detail = detail
 
 
+# The stable reasons a failed engine call carries as the start of its detail, so a log tells them
+# apart: the engine ended (`engine_exited`), could not be reached (`engine_unreachable`) or did not
+# answer in time (`engine_timeout`, and `engine_turn_timeout` for the message call of the turn).
+REASON_EXITED = "engine_exited"
+REASON_UNREACHABLE = "engine_unreachable"
+REASON_TIMEOUT = "engine_timeout"
+REASON_TURN_TIMEOUT = "engine_turn_timeout"
+
+
+class EngineTimeout(EngineError):
+    """The engine accepted the call and did not answer within its socket timeout."""
+
+    def __init__(
+        self, detail: str = f"{REASON_TIMEOUT}: the engine did not answer in time"
+    ) -> None:
+        super().__init__(ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE, detail)
+
+
 class EngineExited(EngineError):
     """The engine process ended while it was being waited for."""
 
@@ -168,10 +195,20 @@ def _http_request(
             return response.status, response.read(CLIENT_MAX_BYTES)
     except HTTPError as error:
         return error.code, error.read(CLIENT_MAX_BYTES)
-    except (URLError, TimeoutError, ConnectionError, OSError):
-        raise EngineError(
-            ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE, "the engine is not reachable"
-        ) from None
+    except TimeoutError:
+        raise EngineTimeout() from None
+    except URLError as error:
+        if isinstance(error.reason, TimeoutError):
+            raise EngineTimeout() from None
+        raise _unreachable() from None
+    except (ConnectionError, OSError):
+        raise _unreachable() from None
+
+
+def _unreachable() -> EngineError:
+    return EngineError(
+        ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE, f"{REASON_UNREACHABLE}: the engine is not reachable"
+    )
 
 
 class EngineClient:
@@ -192,7 +229,7 @@ class EngineClient:
         body: Any = None,
         *,
         scoped: bool = True,
-        timeout: float = MESSAGE_TIMEOUT_SECONDS,
+        timeout: float = MAX_TURN_TIMEOUT_SECONDS,
     ) -> tuple[int, bytes]:
         payload = json.dumps(body).encode("utf-8") if body is not None else None
         headers = {"Content-Type": "application/json"} if payload is not None else {}
@@ -265,16 +302,28 @@ class EngineClient:
         model: str,
         parts: list[dict[str, str]],
         schema: Any,
-        timeout: float = MESSAGE_TIMEOUT_SECONDS,
+        timeout: float = MAX_TURN_TIMEOUT_SECONDS,
     ) -> None:
-        """Send one structured turn to the runner-defined review agent."""
+        """Send one structured turn to the runner-defined review agent.
+
+        The call returns when the turn is done, so `timeout` is the time the turn may take (the run
+        gives it what is left of the whole job, plus a margin).
+        """
         body = {
             "agent": REVIEW_AGENT,
             "model": {"providerID": PROXY_PROVIDER_ID, "modelID": model},
             "format": {"type": "json_schema", "schema": schema},
             "parts": parts,
         }
-        status, answer = self._call("POST", f"/session/{session_id}/message", body, timeout=timeout)
+        try:
+            status, answer = self._call(
+                "POST", f"/session/{session_id}/message", body, timeout=timeout
+            )
+        except EngineTimeout:
+            raise EngineTimeout(
+                f"{REASON_TURN_TIMEOUT}: the engine did not finish its turn within the time "
+                "the call was given"
+            ) from None
         if status != 200:
             raise EngineError(ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE, "the engine did not answer")
         self.last_message = answer
@@ -387,6 +436,8 @@ class DynamicEngine:
         )
         self._process: subprocess.Popen[bytes] | None = None
         self._worker: threading.Thread | None = None
+        # How long each message call of the run took, in seconds on the ledger's clock (#293).
+        self.turn_seconds: list[float] = []
 
     # -- process --------------------------------------------------------------
 
@@ -602,7 +653,7 @@ class DynamicEngine:
                     model=dynamic.model,
                     parts=[{"type": "text", "text": prompt}],
                     schema=schema,
-                    timeout=max(min(MESSAGE_TIMEOUT_SECONDS, self.ledger.remaining_seconds()), 1.0),
+                    timeout=self.ledger.remaining_seconds() + TURN_TIMEOUT_MARGIN_SECONDS,
                 )
             except Exception as error:  # re-raised below, in the caller's thread
                 outcome.append(error)
@@ -612,20 +663,35 @@ class DynamicEngine:
         # The message call blocks until the engine is done. It runs beside a watch that ends the
         # run the moment the proxy records a limit or a provider refusal, the deadline passes or
         # the engine dies, instead of waiting for an engine that is retrying a refused call.
+        started = self.ledger.elapsed_seconds()
         self._worker = threading.Thread(target=post, daemon=True)
         self._worker.start()
-        while not finished.wait(WATCH_INTERVAL_SECONDS):
+        try:
+            while not finished.wait(WATCH_INTERVAL_SECONDS):
+                self._raise_recorded_failure()
+                self.ledger.check_deadline()
+                if not self._is_running():
+                    raise EngineError(
+                        ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE,
+                        f"{REASON_EXITED}: the engine process ended during its turn",
+                    )
             self._raise_recorded_failure()
-            self.ledger.check_deadline()
-            if not self._is_running():
-                raise EngineError(ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE, "the engine exited")
-        self._raise_recorded_failure()
-        if outcome:
-            # A call that ran into its timeout at the whole-job deadline is the deadline, not an
-            # unreachable engine: both end at the same moment and the order must not matter. The
-            # socket timeout and the ledger do not read the same clock to the millisecond.
-            self.ledger.check_deadline(tolerance=DEADLINE_TOLERANCE_SECONDS)
-            raise outcome[0]
+            if outcome:
+                # A call that ran into its timeout at the whole-job deadline is the deadline, not
+                # an unreachable engine: both end at the same moment and the order must not
+                # matter. The socket timeout and the ledger do not read the same clock to the
+                # millisecond.
+                self.ledger.check_deadline(tolerance=DEADLINE_TOLERANCE_SECONDS)
+                failure = outcome[0]
+                if isinstance(failure, EngineError) and not self._is_running():
+                    # Whatever the call made of it, the engine process is gone.
+                    raise EngineError(
+                        ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE,
+                        f"{REASON_EXITED}: the engine process ended during its turn",
+                    )
+                raise failure
+        finally:
+            self.turn_seconds.append(self.ledger.elapsed_seconds() - started)
 
     def _validate(self, client: EngineClient) -> EngineAnswer:
         base = self.job.base

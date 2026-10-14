@@ -9,6 +9,7 @@ a fake OpenRouter-shaped upstream for the provider. Nothing here is a real model
 
 import json
 import os
+import re
 import socket
 import sys
 from collections.abc import Generator
@@ -231,6 +232,51 @@ def test_a_run_at_its_cost_limit_is_wrapped_up_published_and_marked(tmp_path: Pa
     assert result.usage is not None
     assert result.usage.stopped_early == "cost_limit"
     assert result.usage.to_json()["stoppedEarly"] == "cost_limit"
+
+
+# #293-T16
+def test_the_result_log_names_how_long_the_engine_message_call_took(tmp_path: Path) -> None:
+    script = {"proxy_calls": 1, "answer": "structured", "findings": findings(), "results": {}}
+    preparer = Preparer(tmp_path / "export", script)
+
+    with FakeUpstream([asks(tool_call("c1", "StructuredOutput", findings()))]) as upstream:
+        result = runner.run_dynamic_job(
+            job_for(f"{upstream.url}/v1"),
+            None,
+            0.0,
+            environment(),
+            engines=ALL_ENGINES,
+            prepare=preparer,
+            publish=RecordingPublisher(),
+        )
+
+    assert result.ok, result.log_tail
+    assert re.search(r"engine message call: \d+\.\d s", result.log_tail), result.log_tail
+
+
+# #293-T16
+def test_a_failed_run_names_how_long_the_message_call_took_after_the_code(
+    tmp_path: Path,
+) -> None:
+    script = {"proxy_calls": 1, "answer": "structured", "findings": findings(), "results": {}}
+    preparer = Preparer(tmp_path / "export", script)
+
+    with FakeUpstream([asks(tool_call("c1", "StructuredOutput", findings()))], status=401) as bad:
+        result = runner.run_dynamic_job(
+            job_for(f"{bad.url}/v1"),
+            None,
+            0.0,
+            environment(),
+            engines=ALL_ENGINES,
+            prepare=preparer,
+            publish=RecordingPublisher(),
+        )
+
+    assert not result.ok
+    assert result.error_code is ErrorCode.LLM_AUTH
+    first_line = result.log_tail.splitlines()[0]
+    assert first_line.startswith("llm_auth:")
+    assert re.search(r"\[engine message call: \d+\.\d s\]$", first_line), first_line
 
 
 # #293-T07
