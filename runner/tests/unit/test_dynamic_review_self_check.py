@@ -382,10 +382,10 @@ def test_an_unexpected_error_in_the_check_never_advertises(world: World) -> None
 def test_the_default_tool_locations_are_the_ones_the_image_installs() -> None:
     dockerfile = (Path(__file__).parents[2] / "Dockerfile").read_text(encoding="utf-8")
 
-    for path in (
-        DEFAULT_TOOLS.opencode,
-        DEFAULT_TOOLS.ripgrep,
-        DEFAULT_TOOLS.opencode_pin,
-        DEFAULT_TOOLS.ripgrep_pin,
-    ):
-        assert str(path) in dockerfile
+    # The executables are copied to their exact paths; the pins are copied into their directory.
+    assert str(DEFAULT_TOOLS.opencode) in dockerfile
+    assert str(DEFAULT_TOOLS.ripgrep) in dockerfile
+    assert DEFAULT_TOOLS.opencode_pin.parent == DEFAULT_TOOLS.ripgrep_pin.parent
+    assert f"{DEFAULT_TOOLS.opencode_pin.parent}/" in dockerfile
+    for pin in (DEFAULT_TOOLS.opencode_pin, DEFAULT_TOOLS.ripgrep_pin):
+        assert f"runner/{pin.name}" in dockerfile
