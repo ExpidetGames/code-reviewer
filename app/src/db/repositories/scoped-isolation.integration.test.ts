@@ -458,7 +458,8 @@ const CASES: Case[] = [
         reviewKind: "diff",
         excludeJobId: b.job.id,
       }),
-    expectAnswer: (answer) => expect(answer).toEqual([]),
+    expectAnswer: (answer) =>
+      expect(answer).toEqual({ shas: [], truncated: false }),
   },
   {
     name: "jobs.enqueue",
@@ -713,7 +714,7 @@ describe("the attempted heads inside the scope that owns them", () => {
       excludeJobId: b.job.id,
     });
 
-    expect(answer).toEqual([FAILED_SHA]);
+    expect(answer).toEqual({ shas: [FAILED_SHA], truncated: false });
   });
 });
 

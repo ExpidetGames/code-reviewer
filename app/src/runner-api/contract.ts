@@ -132,6 +132,8 @@ export type ClaimBase = {
   previousReviewedSha: string | null;
   /** #255: heads of earlier jobs of the pull request that did not succeed, newest first; absent when none. */
   attemptedShas?: string[];
+  /** #257: true when more heads were attempted than `attemptedShas` holds; absent means false. */
+  attemptedShasTruncated?: true;
   comparison: "full" | "incremental";
 };
 
