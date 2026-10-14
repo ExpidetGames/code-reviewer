@@ -256,35 +256,61 @@ Engine suite (`runner/tests/engine/`, `uv run pytest -m engine`, about 5 minutes
 - Upgrading PR-Agent: the suite must pass unchanged, together with the identity patch guard in
   `tests/unit/`. A change in wording that the runner matches (see `error_mapping.py`) shows up here.
 
-Privileged suite (`runner/tests/privileged/`, `uv run pytest -m privileged`, #197 part 2b): what only
-root can prove about the Dynamic runner's engine boundary. It runs **as root with exactly the
-capabilities of `compose.dynamic.yml`** (`CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `KILL`, `SETGID`,
-`SETUID`, `NET_ADMIN`; `tests/privileged/conftest.py` fails unless the effective set is equal, and
-`app/src/ci/compose-dynamic.test.ts` keeps the file and the script equal), with no-new-privileges,
-in a network namespace with a loopback interface and no route out. `scripts/run_privileged_offline.sh`
-arranges that with `sudo`, `unshare --net` and `setpriv --bounding-set`, creates the engine user
-(`10101`), a stranger (`10201`) and the Diff job user (`10001`), and runs the suite; it is a step of the
-engine CI job (`engine.yml`), needs `nft` (apt `nftables`), `rg` and the pinned OpenCode, and is
-deselected by default. Locally without root it fails with the way to run it (never a skip); this is
-**CI-only for developers without root**. It proves, against the real kernel and the real `prepared_checkout`
-(#196) over real Git objects, with loopback sentinels standing in for "another job's proxy" and "an
-external host": the engine user reaches its proxy and nothing else (TCP, UDP, another loopback address,
-IPv6), other users are untouched, refused connections end in an immediate error (a refusal errno, never
-a timeout; the time it takes is not asserted), a UDP flow another process opened and closed cannot be
-reused by the engine user, and the engine user cannot change its own rules (`test_network_confinement.py`);
-the engine process is the dedicated user with its own group only, no capability, cannot become root,
-read the supervisor's state or write the export, has no capability in any set and `no_new_privs`, sees
-no credential, and its config is readable by that user only and cannot be rewritten by it (`test_engine_launch.py`); a helper in a session of its own is confined and killed
-with the engine, a port held by a stranger is not trusted, a tree of sticky and unreadable
-directories the engine user filled is removed with the job and the lease is free again;
+Privileged suite (`runner/tests/privileged/`, `uv run pytest -m privileged`, #197 part 2b, #244): what
+only root can prove about the Dynamic runner's engine boundary. It runs **as root with the
+capabilities of `compose.dynamic.yml`**, with no-new-privileges, in a network namespace with a
+loopback interface and no route out and in a mount namespace with a fresh `/run` (the container
+mounts nothing from the host; a CI host has a Docker socket). It has **two phases**, as the runner
+has two stages of life (`PRIVILEGED_PHASE`, set by `scripts/privileged_phases.sh`;
+`tests/privileged/conftest.py` fails unless the effective, permitted and bounding sets equal the
+phase's):
+
+- **startup** (`tests/privileged/startup/`): exactly what the container is created with (`CHOWN`,
+  `DAC_OVERRIDE`, `FOWNER`, `KILL`, `SETGID`, `SETUID`, plus the startup-only `NET_ADMIN` and
+  `SETPCAP`). It proves the rules as such (`test_network_rules.py`) and the startup step itself,
+  run for real in a process of its own (`startup_process.py`, `test_startup_drop.py`): the static
+  rules for the slot's fixed ports are in the kernel, and the loop, a thread started later, a job
+  process and the engine user's process have no `NET_ADMIN` or `SETPCAP` in any set or in the
+  bounding set, `nft` fails for the supervisor and its job processes, the probe passes, starting
+  again replaces the rules instead of stacking them, and a host without `nft` still loses the
+  capabilities and fails every Dynamic job closed.
+- **job** (everything else): `tests/privileged/job_phase.py` runs the production startup step and
+  then pytest in the same process, so the tests run as a job process sees the container: the
+  capabilities are exactly the six of the supervisor, the bounding set has no `NET_ADMIN` or
+  `SETPCAP`, and the rules (installed by the production code) cannot be read or changed by anyone.
+
+`scripts/run_privileged_offline.sh` arranges the namespaces and the capabilities with `sudo`,
+`unshare --net --mount` and `setpriv --bounding-set`, creates the engine user (`10101`), a stranger
+(`10201`) and the Diff job user (`10001`), and runs both phases; `app/src/ci/compose-dynamic.test.ts`
+keeps the capability list of the script equal to the compose file. It is a step of the engine CI job
+(`engine.yml`), needs `nft` (apt `nftables`), `rg` and the pinned OpenCode, and is deselected by
+default. Locally without root it fails with the way to run it (never a skip); this is **CI-only for
+developers without root**. It proves, against the real kernel and the real `prepared_checkout` (#196)
+over real Git objects, with loopback sentinels standing in for "another job's proxy" and "an
+external host", in the job phase (`test_static_rules.py`): the engine user reaches its proxy and its
+own port and nothing else (TCP, UDP, another loopback address, IPv6), other users are untouched,
+refused connections end in an immediate error (a refusal errno, never a timeout; the time it takes is
+not asserted), a UDP flow another process opened and closed cannot be reused by the engine user, the
+probe passes, and nobody (the supervisor and the engine user) can list or change the rules; no
+AF_UNIX listener other than the engine's own is visible to the engine user while an engine runs,
+and no Docker socket exists, with positive controls so the check cannot pass vacuously
+(`test_unix_sockets.py`); the engine process is the dedicated user with its own group only, no
+capability, cannot become root, read the supervisor's state or write the export, has no capability in
+any set (nor `NET_ADMIN` in its bounding set) and `no_new_privs`, sees no credential, and its config
+is readable by that user only and cannot be rewritten by it (`test_engine_launch.py`); a helper in a
+session of its own is confined and killed with the engine, a port held by a stranger is not trusted
+(the slot's engine port is fixed, so the start fails instead of moving), a tree of sticky and
+unreadable directories the engine user filled is removed with the job and the lease is free again;
 SIGTERM, which is how the job loop ends a job on lease loss, shutdown and timeout, ends the job, its
-engine, its helper, the rules and its files, and a job that was killed without cleanup leaves
-processes that the loop's sweep and the next job's first step clear (`test_job_termination.py`,
-`test_engine_launch.py`; the loop's sweep itself in `tests/unit/test_job_loop_engine_sweep.py`); a root loop starts a Diff job as the
-job user and a Dynamic one as the supervisor (`test_job_users.py`); and the unmodified pinned engine
-reviews a hostile repository through the whole production path as that user behind those rules
+engine, its helper and its files (the static rules stay), and a job that was killed without cleanup
+leaves processes that the loop's sweep and the next job's first step clear (`test_job_termination.py`,
+`test_engine_launch.py`; the loop's sweep itself in `tests/unit/test_job_loop_engine_sweep.py`); a
+root loop starts a Diff job as the job user and a Dynamic one as the supervisor, both with a bounding
+set that has lost the startup-only capabilities (`test_job_users.py`); and the unmodified pinned
+engine reviews a hostile repository through the whole production path as that user behind those rules
 (`test_real_engine.py`). Not covered: the startup self-check that advertises `opencode` and the image
-contents (#202), a kernel without `nf_tables` (the proof fails closed; no test can run there).
+contents (#202), a kernel without `nf_tables` beyond the fail-closed path above (no test can run
+there).
 
 Images (`docker/smoke/`, bash): `app.sh <image>` starts the app image with a fresh named volume on
 `/data` and dummy settings (the master key, the public address and the runner token; without them the server refuses to start, and no `GITHUB_` variable is set), polls `/` until it answers (at most `SMOKE_WAIT_SECONDS`, default 90) and waits for the

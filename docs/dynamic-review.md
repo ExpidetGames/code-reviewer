@@ -58,7 +58,8 @@ namespaces, no host kernel setting beyond the `nf_tables` support every current 
 
 - **Two users in one container.** The job process is the **supervisor** and runs as root with exactly
   the capabilities listed in `compose.dynamic.yml` (`SETUID`, `SETGID`, `KILL`, `CHOWN`,
-  `DAC_OVERRIDE`, `FOWNER`, `NET_ADMIN`; everything else dropped, `no-new-privileges` on). It holds
+  `DAC_OVERRIDE`, `FOWNER` for its whole life; `NET_ADMIN` and `SETPCAP` for container startup only,
+  see below; everything else dropped, `no-new-privileges` on). It holds
   every credential and the model proxy. The **engine** runs as the dedicated unprivileged user
   `10101:10101` of the image, with no capability, no supplementary group, a closed environment, its
   own home and temporary directories, and a config file only it can read. It is started with
@@ -66,37 +67,54 @@ namespaces, no host kernel setting beyond the `nf_tables` support every current 
 - **Why those capabilities.** `SETUID`/`SETGID` start the engine as the other user; `KILL` signals
   its process group and its leftovers; `CHOWN` seals the read-only export (#196); `DAC_OVERRIDE` and
   `FOWNER` remove the sealed export and the tree the engine user may have filled (sticky and
-  unreadable directories included); `NET_ADMIN` installs the user's network rules. `SYS_ADMIN`,
+  unreadable directories included). `SYS_ADMIN`,
   `SYS_PTRACE` and `NET_RAW` are deliberately absent. Diff jobs on the same loop are dropped to uid
   10001 (`RUNNER_DIFF_JOB_USER`) and hold none of these.
-- **Network: one user, one proxy.** Per job the supervisor installs `nftables` output rules keyed on
-  the socket owner. The engine user may open new connections only to this job's proxy port and its
-  own server port on `127.0.0.1`; everything else it tries (another job's loopback service, any other
+- **Network: one user, one proxy.** The runner installs `nftables` output rules keyed on the socket
+  owner **once, when the container starts**, for the single slot's fixed ports
+  (`RUNNER_DYNAMIC_PROXY_PORT`, default 10180; `RUNNER_DYNAMIC_ENGINE_PORT`, default 10181). The
+  engine user may open new connections only to the job's proxy port and its own server port on
+  `127.0.0.1`; everything else it tries (another job's loopback service, any other
   address, IPv6, UDP, a flow that someone else opened and closed) is rejected at once. Only the
   replies of the engine's own server pass as tracked traffic. A per-job network namespace would need `SYS_ADMIN`, and a
   container-level egress rule cannot tell the supervisor (GitHub, the model upstream) from the engine
-  in the same container. The rules are proven before the engine starts, by a probe running as the
-  engine user against sentinel listeners; any other result is `dynamic_isolation_self_check_failed`
-  and no engine is started. The hosted egress gate (#82) is still a separate requirement.
+  in the same container. The rules are proven before every engine starts, by a probe running as the
+  engine user against sentinel listeners (without `NET_ADMIN` not even the supervisor can list the
+  ruleset, so the probe is how a job verifies them); any other result is
+  `dynamic_isolation_self_check_failed` and no engine is started. The hosted egress gate (#82) is
+  still a separate requirement.
 - **Cleanup.** At the end of a job, on SIGTERM (the job loop's way to end a job on lease loss,
   shutdown and timeout) and in the watchdog, the supervisor kills the engine's process group and then
   every process of the engine user, also helpers that left the group with `setsid()`, removes the
-  user's rules and deletes the job directory (the lease on the user and its group is released with the
+  user's processes and deletes the job directory (the rules are static and stay; the lease on the user and its group is released with the
   process). A job that was killed without a chance to clean up (SIGKILL, an OOM kill) leaves its
   engine user's processes behind; the job loop (root) sweeps the user after every Dynamic job process
   has ended, and every job sweeps it again as its first step after taking the lease. If a sweep cannot
-  finish, the rules stay in place and the next job does not start (`dynamic_isolation_self_check_failed`).
+  finish, the next job does not start (`dynamic_isolation_self_check_failed`).
   A second Dynamic job on the same user is refused by the lease with the same code: run one Dynamic
   job at a time per engine user.
-- **`NET_ADMIN` stays for now.** Removing it (static rules at container start, then dropping it from
-  the bounding set) is #244 and blocks enabling `opencode` (#202). Do not run the container with
-  `seccomp=unconfined`.
+- **`NET_ADMIN` is held during startup only (#244).** The container is created with `NET_ADMIN` and
+  `SETPCAP` because the capabilities of a container are fixed at start. The runner's entry point
+  installs the static rules, then drops both from the bounding set and from its own sets, before its
+  event loop and before any other thread exists (a runner that cannot confirm the drop does not
+  start). From then on the loop, every job process, the supervisor and the engine have a bounding set
+  without them: `nft` fails for all of them, root included, and no process can add or remove a rule.
+  If the rules cannot be installed (no `nft`, no `nf_tables`) the capabilities are dropped anyway and
+  every Dynamic job fails with `dynamic_isolation_self_check_failed` while Diff jobs keep running.
+  Only PID 1 (`tini`) keeps them. Do not run the container with `seccomp=unconfined`.
+- **Nothing mounted, nothing shared.** `compose.dynamic.yml` has no `volumes`, `network_mode`, `pid`,
+  `ipc` or Docker socket (a file test fails otherwise); do not add any. The rules do not cover
+  AF_UNIX, and this is what keeps that gap empty. The privileged suite reads `/proc/net/unix` as the
+  engine user and asserts that no listener other than its own exists and that no Docker socket is
+  present.
 - **What it does not give.** The engine can still reach a service on `127.0.0.1` that belongs to the
-  engine user itself, abstract Unix sockets of the container's network namespace and anything the
-  supervisor deliberately exposes there. With a concurrency above one the users and groups are leased
+  engine user itself, a Unix socket (abstract or on a path) of the container's network namespace if
+  one is ever added (none exists, see above) and anything the supervisor deliberately exposes
+  there. The two ports are fixed, so a stranger holding one makes the job fail closed. With a concurrency above one the users and groups are leased
   per job (the image would need one pair per slot); the default is one slot.
-- **Proof.** `runner/tests/privileged` runs as root with exactly the capability list above (TESTING.md,
-  "Privileged suite"); its CI step is part of the engine workflow.
+- **Proof.** `runner/tests/privileged` runs as root with exactly the capability list above, in a
+  startup phase (the container's created-with set) and a job phase (after the production startup
+  step) (TESTING.md, "Privileged suite"); its CI step is part of the engine workflow.
 
 ## The model
 
