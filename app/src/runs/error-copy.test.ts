@@ -60,6 +60,15 @@ describe("the sentences for error codes", () => {
     );
   });
 
+  // #260: the code is also reported when the app could not be asked, not only when the job was lost.
+  it("says for lease_lost that the job may have been lost or that this could not be confirmed, and that nothing was written", () => {
+    const { text } = describeErrorCode("lease_lost");
+
+    expect(text).toMatch(/no longer held/);
+    expect(text).toMatch(/could not be confirmed/);
+    expect(text).toMatch(/nothing was written/);
+  });
+
   // #201-T20
   it("does not say the engine ran when review_not_published can come from the preparation", () => {
     const { text } = describeErrorCode("review_not_published");

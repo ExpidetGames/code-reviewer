@@ -63,7 +63,10 @@ publishes as one persistent summary comment. The decisions are in epic
    nothing, a failed write fails the run with its own stable code, and the Run links the comment.
    Right before the write the process asks the job loop whether the job is still its own (#260): the
    loop beats the heart once and answers from the app (a lost lease and a cancelled job are both
-   409). Anything but a clear yes ends the run with `lease_lost` and writes nothing.
+   409; a 5xx, a reset or a timeout is tried again up to three times within 40 seconds, and a 200
+   counts only as the contract's heartbeat answer for this job). Anything but a clear yes ends the
+   run with `lease_lost` and writes nothing, and so does a Dynamic job that was not handed the
+   channel at all.
 
 PR-Agent-only runners keep processing Diff jobs unchanged. A Dynamic-capable runner also serves Diff
 jobs.
