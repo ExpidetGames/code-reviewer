@@ -358,8 +358,8 @@ its own projects: `prepare` (the first-run setup and the GitHub App of the app),
   event, the real OpenCode reads a file the diff does not touch (the fake LLM's agent script, `scriptAgent`), one
   summary comment, the Runs page shows kind, model, usage (tokens and calls from the proxy) and the link, then a fix
   is pushed and the same comment is edited and lists the finding as resolved. Neither a key nor a token is in the
-  page, the runs API, the runner output or what the model was shown. The run takes about 2 to 4 minutes; the `e2e-dynamic`
-  job, with its installations and the build, stays within the 15 minute budget of a pull request run.
+  page, the runs API, the runner output or what the model was shown. The Playwright run takes about 35 seconds (the journey 20 s), the whole `e2e-dynamic`
+  job, with its installations and the build, about 2.5 minutes: far within the budgets of section 1.
 - Fakes the lane added: the fake GitHub serves Git over smart HTTP (`fakes/github/git-http.ts`, repositories made with
   `fakes/github/git-fixture.ts`, registered through `POST /__fake/git-repositories`), and the fake LLM can answer as the
   model of an agent (`scriptAgent`), tests in `src/integrations/providers/github-app/fake-github-git.integration.test.ts`
