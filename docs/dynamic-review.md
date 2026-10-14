@@ -25,7 +25,9 @@ publishes as one persistent summary comment. The decisions are in epic
 | Engine seam: trusted config, hard limits, per-job model proxy, adapter, process-group cleanup | Shipped (#197 part 1, #202 process-group reuse) |
 | Summary comment, findings state, reconciliation | Shipped (#199) |
 | Opt-in deployment file for a separate Dynamic runner (`compose.dynamic.yml`) | Shipped (#202), cannot claim yet |
-| Pinned OpenCode binary in the image, offline self-check, dedicated engine user, proxy-only network, hostile-repository proof | **Not shipped** (#197 part 2, rest of #202) |
+| Pinned OpenCode fetch (checksum-verified), real-engine fixes, proxy-side audit, hostile-repository proof | Shipped (#197 part 2a) |
+| Launch as the dedicated engine user from the root supervisor, per-user network rules, lease loss and cleanup, proofs as root in CI | Shipped (#197 part 2b) |
+| Pinned OpenCode binary (**linux-x64 glibc only**: `runner/opencode-pin.json` has no other platform, and the fetch script refuses one; an arm64 image needs its own pinned digest), `nft`, a trusted `rg` (CI installs it from apt, unpinned until the provenance audit of #202) and the engine user in the runner image, offline startup self-check that advertises `opencode` | **Not shipped** (rest of #202) |
 | Binary and Bun lock provenance audit in `make check-licenses` | **Not shipped** |
 | Worst-case memory and OOM measurements, the decision to run more than one Dynamic job at a time | **Not shipped** |
 | Hosted activation | Needs the hosted egress gate (#82) |
@@ -48,6 +50,53 @@ publishes as one persistent summary comment. The decisions are in epic
 
 PR-Agent-only runners keep processing Diff jobs unchanged. A Dynamic-capable runner also serves Diff
 jobs.
+
+## The engine boundary
+
+The container, not a sandbox, is the boundary (lead decision of 2026-10-12): no bubblewrap, no user
+namespaces, no host kernel setting beyond the `nf_tables` support every current kernel has.
+
+- **Two users in one container.** The job process is the **supervisor** and runs as root with exactly
+  the capabilities listed in `compose.dynamic.yml` (`SETUID`, `SETGID`, `KILL`, `CHOWN`,
+  `DAC_OVERRIDE`, `FOWNER`, `NET_ADMIN`; everything else dropped, `no-new-privileges` on). It holds
+  every credential and the model proxy. The **engine** runs as the dedicated unprivileged user
+  `10101:10101` of the image, with no capability, no supplementary group, a closed environment, its
+  own home and temporary directories, and a config file only it can read. It is started with
+  `setuid()` in the child process: no `sudo`, no setuid helper, so `no-new-privileges` can stay.
+- **Why those capabilities.** `SETUID`/`SETGID` start the engine as the other user; `KILL` signals
+  its process group and its leftovers; `CHOWN` seals the read-only export (#196); `DAC_OVERRIDE` and
+  `FOWNER` remove the sealed export and the tree the engine user may have filled (sticky and
+  unreadable directories included); `NET_ADMIN` installs the user's network rules. `SYS_ADMIN`,
+  `SYS_PTRACE` and `NET_RAW` are deliberately absent. Diff jobs on the same loop are dropped to uid
+  10001 (`RUNNER_DIFF_JOB_USER`) and hold none of these.
+- **Network: one user, one proxy.** Per job the supervisor installs `nftables` output rules keyed on
+  the socket owner. The engine user may open new connections only to this job's proxy port and its
+  own server port on `127.0.0.1`; everything else it tries (another job's loopback service, any other
+  address, IPv6, UDP, a flow that someone else opened and closed) is rejected at once. Only the
+  replies of the engine's own server pass as tracked traffic. A per-job network namespace would need `SYS_ADMIN`, and a
+  container-level egress rule cannot tell the supervisor (GitHub, the model upstream) from the engine
+  in the same container. The rules are proven before the engine starts, by a probe running as the
+  engine user against sentinel listeners; any other result is `dynamic_isolation_self_check_failed`
+  and no engine is started. The hosted egress gate (#82) is still a separate requirement.
+- **Cleanup.** At the end of a job, on SIGTERM (the job loop's way to end a job on lease loss,
+  shutdown and timeout) and in the watchdog, the supervisor kills the engine's process group and then
+  every process of the engine user, also helpers that left the group with `setsid()`, removes the
+  user's rules and deletes the job directory (the lease on the user and its group is released with the
+  process). A job that was killed without a chance to clean up (SIGKILL, an OOM kill) leaves its
+  engine user's processes behind; the job loop (root) sweeps the user after every Dynamic job process
+  has ended, and every job sweeps it again as its first step after taking the lease. If a sweep cannot
+  finish, the rules stay in place and the next job does not start (`dynamic_isolation_self_check_failed`).
+  A second Dynamic job on the same user is refused by the lease with the same code: run one Dynamic
+  job at a time per engine user.
+- **`NET_ADMIN` stays for now.** Removing it (static rules at container start, then dropping it from
+  the bounding set) is #244 and blocks enabling `opencode` (#202). Do not run the container with
+  `seccomp=unconfined`.
+- **What it does not give.** The engine can still reach a service on `127.0.0.1` that belongs to the
+  engine user itself, abstract Unix sockets of the container's network namespace and anything the
+  supervisor deliberately exposes there. With a concurrency above one the users and groups are leased
+  per job (the image would need one pair per slot); the default is one slot.
+- **Proof.** `runner/tests/privileged` runs as root with exactly the capability list above (TESTING.md,
+  "Privileged suite"); its CI step is part of the engine workflow.
 
 ## The model
 
@@ -86,8 +135,8 @@ epic's 600 seconds and the runner's job timeout.
 
 A limit hit ends the run with `dynamic_budget_exceeded`; a run whose usage cannot be established ends
 with `dynamic_accounting_failed`. The previous summary comment is preserved in both cases. The
-tool, file and result-byte limits are currently observed from the session after the fact; their
-preventive enforcement at the model proxy belongs to the second half of #197.
+tool, file and result-byte limits are enforced at the model proxy, before the request is forwarded
+(#197 part 2a): a model request whose history exceeds one of them never reaches the provider.
 
 ## Errors an operator sees
 
@@ -122,8 +171,8 @@ docker compose -f compose.yml -f compose.dynamic.yml up -d --wait
 | `RUNNER_DYNAMIC_IMAGE` | the runner image | The Dynamic image will carry the engine; today there is none |
 | `RUNNER_DYNAMIC_CAPABILITIES` | empty | The model description above |
 
-The container drops every capability, sets `no-new-privileges`, bounds its process count (512) and
-has no swap, so a memory peak shows up as an OOM kill of the job rather than as a slow host. It
+The container runs the supervisor as root with only the capabilities of "The engine boundary", sets
+`no-new-privileges`, bounds its process count (512) and has no swap, so a memory peak shows up as an OOM kill of the job rather than as a slow host. It
 publishes no port and reaches only the app. The same service block should work for Coolify (copy it
 into the Compose application; untested, see `deployment-coolify.md`, "What is verified"); a
 `compose.coolify.yml` variant follows with the real image.
@@ -133,8 +182,8 @@ slot, because that runner also serves Diff jobs. A Dynamic job can then end with
 although a capable runner exists. Do not raise the concurrency before the memory matrix exists; a later
 change can keep Diff jobs off this runner.
 
-This file does **not** make Dynamic Review work: with today's image the runner starts, fails its
-self-check and keeps serving Diff jobs only. Do not set `RUNNER_OPENCODE_COMMAND` by
+This file does **not** make Dynamic Review work: with today's image (no engine binary, no `nft`, no
+engine user) the runner starts, fails its self-check and keeps serving Diff jobs only. Do not set `RUNNER_OPENCODE_COMMAND` by
 hand to get around that.
 
 ## Activation order (once the engine ships)

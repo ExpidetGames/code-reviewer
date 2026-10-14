@@ -27,9 +27,23 @@ services:
     memswap_limit: ${RUNNER_DYNAMIC_MEMORY_LIMIT:-2g}
     # A bounded number of processes for the job, the engine and its helpers.
     pids_limit: 512
-    # The runner needs no capability; the engine boundary must not rely on one.
+    # The loop and the Dynamic job process run as root: the job process is the SUPERVISOR that
+    # prepares the read-only export, owns every credential and the model proxy, and starts the
+    # engine as a different, unprivileged user (#197, docs/dynamic-review.md "The engine boundary").
+    # Diff jobs are dropped to uid 10001 by the loop (RUNNER_DIFF_JOB_USER), so PR-Agent never
+    # runs as root. Root here holds exactly the capabilities below and nothing else: the engine user
+    # has none, and no-new-privileges means no program can regain one.
+    user: "0:0"
     cap_drop:
       - ALL
+    cap_add:
+      - SETUID # start the engine as the dedicated user (setuid in the child; no sudo, no helper)
+      - SETGID # the same, for its group and no supplementary group
+      - KILL # end the engine's process group and everything else that user runs
+      - CHOWN # seal the read-only export for the engine user (#196)
+      - DAC_OVERRIDE # remove the sealed 0550 export and the tree the engine user filled
+      - FOWNER # remove entries of that tree in sticky directories
+      - NET_ADMIN # install the engine user's nft rules: its proxy and nothing else
     security_opt:
       - no-new-privileges:true
     stop_grace_period: 90s
@@ -38,6 +52,9 @@ services:
         condition: service_healthy
     environment:
       RUNNER_API_URL: http://app:3000
+      # The loop is root here, so the home of the unprivileged job user is set explicitly.
+      HOME: /home/runner
+      RUNNER_DIFF_JOB_USER: "10001:10001"
       RUNNER_TOKEN: ${RUNNER_TOKEN:?RUNNER_TOKEN is required, see .env.example}
       RUNNER_CONCURRENCY: ${RUNNER_DYNAMIC_CONCURRENCY:-1}
       RUNNER_JOB_TIMEOUT_SECONDS: ${RUNNER_JOB_TIMEOUT_SECONDS:-1200}

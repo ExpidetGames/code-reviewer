@@ -17,6 +17,7 @@ when it is reaped (last, after the group is ended; #233).
 
 import asyncio
 import contextlib
+import os
 import shutil
 import subprocess
 import tempfile
@@ -69,6 +70,9 @@ class ProcessSpec:
     argv: tuple[str, ...]
     env: Mapping[str, str]
     stdin: bytes
+    # (uid, gid) the process drops to, with no other group; None runs it as the loop's own user.
+    # A runner whose loop is root (the Dynamic runner) uses it so that PR-Agent never runs as root.
+    run_as: tuple[int, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -214,7 +218,11 @@ class SubprocessLauncher:
         # its working directory, so that directory must hold nothing the runner did not put there.
         workdir = Path(tempfile.mkdtemp(prefix=JOB_WORKDIR_PREFIX))
         process: subprocess.Popen[bytes] | None = None
+        # The unprivileged job user (a root loop only), with none of the loop's other groups.
+        uid, gid = spec.run_as if spec.run_as is not None else (None, None)
         try:
+            if uid is not None and gid is not None:
+                os.chown(workdir, uid, gid)
             process = subprocess.Popen(
                 spec.argv,
                 stdin=subprocess.PIPE,
@@ -223,6 +231,9 @@ class SubprocessLauncher:
                 env=dict(spec.env),
                 cwd=workdir,
                 start_new_session=True,
+                user=uid,
+                group=gid,
+                extra_groups=[] if uid is not None else None,
             )
             pipes = await _connect_pipes(process)
         except BaseException:

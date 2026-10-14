@@ -35,15 +35,15 @@ dev = [
 minversion = "8.0"
 testpaths = ["tests"]
 # Network guard: only loopback is reachable. Unix sockets stay allowed (asyncio needs them).
-# engine tests (the real PR-Agent against loopback fakes) are deselected unless asked for with
-# -m engine.
+# engine tests (the real PR-Agent against loopback fakes) and privileged tests (root, the dedicated
+# engine user, nft) are deselected unless asked for with -m engine / -m privileged.
 addopts = [
     "--strict-markers",
     "--disable-socket",
     "--allow-unix-socket",
     "--allow-hosts=127.0.0.1,::1,localhost",
     "-m",
-    "not engine",
+    "not engine and not privileged",
 ]
 filterwarnings = [
     # pytest-socket warns about every blocked connection; the tests assert the block themselves.
@@ -56,6 +56,7 @@ markers = [
     "integration: real processes or real sockets on loopback",
     "contract: pins the runner API and webhook shapes against the shared contract files",
     "engine: real PR-Agent against the loopback fakes (deselected by default)",
+    "privileged: root with the production capabilities, the dedicated engine user and nft (deselected by default)",
 ]
 
 [tool.ruff]
@@ -75,6 +76,6 @@ select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
 include = ["src", "tests", "scripts", "../fakes"]
 pythonVersion = "3.13"
 typeCheckingMode = "strict"
-extraPaths = ["src", ".."]
+extraPaths = ["src", "..", "tests/engine"]
 venvPath = "."
 venv = ".venv"

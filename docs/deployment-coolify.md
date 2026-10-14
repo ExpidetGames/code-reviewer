@@ -487,7 +487,10 @@ sizing reasoning. The settings, all optional and without secrets, are `RUNNER_DY
 `RUNNER_DYNAMIC_MEMORY_LIMIT` (`2g`), `RUNNER_DYNAMIC_MEMORY_RESERVATION` (`1536m`) and
 `RUNNER_DYNAMIC_CAPABILITIES` (the operator's JSON description of the model). The memory figures are
 an unmeasured, conservative proposal; do not raise the concurrency before the measurements in
-`docs/dynamic-review.md` exist.
+`docs/dynamic-review.md` exist. The file also runs the Dynamic runner's loop as root with a short
+list of capabilities and sets `RUNNER_DIFF_JOB_USER` (`10001:10001`), so that PR-Agent jobs still drop
+to the unprivileged user; that is fixed by the file, not a setting to change (see "The engine
+boundary" in `docs/dynamic-review.md`).
 
 ## 10. One app instance only
 
