@@ -49,7 +49,9 @@ def main(argv: list[str]) -> int:
             environment,
             120.0,
             engines=ALL_ENGINES,
-            prepare=production_preparer(environment, content_for=repo.content_for),
+            prepare=production_preparer(
+                environment, content_for=repo.content_for, context_for=repo.context_for
+            ),
         )
     print(result.to_line())
     return 0

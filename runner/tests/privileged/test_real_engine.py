@@ -123,7 +123,9 @@ def test_the_real_engine_reviews_as_the_dedicated_user_and_leaves_nothing_behind
             environment,
             170.0,
             engines=ALL_ENGINES,
-            prepare=production_preparer(environment, content_for=repo.content_for),
+            prepare=production_preparer(
+                environment, content_for=repo.content_for, context_for=repo.context_for
+            ),
         )
 
     assert result.ok, (result.error_code, result.log_tail)

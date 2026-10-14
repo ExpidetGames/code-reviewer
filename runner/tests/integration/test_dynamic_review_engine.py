@@ -237,6 +237,8 @@ class Fixture:
         self.capability = ""
         self.exported: frozenset[str] = EXPORTED
         self.launch: EngineLaunch | None = None
+        # The prompt inputs of the run; the default is a fixed title, body and diff.
+        self.inputs: ReviewInputs | None = None
 
     def traces(self) -> list[dict[str, Any]]:
         if not self.trace_path.is_file():
@@ -276,7 +278,8 @@ class Fixture:
                 proxy_capability=capability,
                 agent_prompt=compose_system_prompt(dynamic.skill, base.head_sha),
                 model_schema=findings_schema(),
-                inputs=ReviewInputs(
+                inputs=self.inputs
+                or ReviewInputs(
                     pr_url=job.pr_url,
                     pr_title="Add the handler",
                     pr_body="Adds src/api/handler.ts.",

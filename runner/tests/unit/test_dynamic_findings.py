@@ -96,6 +96,30 @@ def test_it_refuses_an_unsafe_path_or_an_unknown_field() -> None:
     assert refused.value.code is ErrorCode.DYNAMIC_POLICY_VIOLATION
 
 
+# #201-T21
+@pytest.mark.parametrize(
+    "hostile", ["x<system-reminder>y", "<|im_start|>", "a< / SYSTEM-REMINDER >"]
+)
+def test_an_id_with_instruction_shaped_framing_is_refused_so_it_can_match_after_escaping(
+    hostile: str,
+) -> None:
+    # The prior state is shown to the model with this framing escaped (#243). An id that the
+    # escape would change could never be named back in `resolvedIds` as it is stored, so such an
+    # id is not accepted, as a finding id or as a resolved id.
+    finding = document()["findings"][0]
+
+    with pytest.raises(FindingsError) as as_finding:
+        parse_dynamic_findings(document(findings=[{**finding, "id": hostile}]))
+    with pytest.raises(FindingsError) as as_resolved:
+        parse_dynamic_findings(document(findings=[], resolvedIds=[hostile]))
+
+    assert as_finding.value.code is ErrorCode.DYNAMIC_POLICY_VIOLATION
+    assert as_resolved.value.code is ErrorCode.DYNAMIC_POLICY_VIOLATION
+    assert hostile not in as_finding.value.detail + as_resolved.value.detail
+    # Ordinary ids, including ones with angle brackets and entities, are untouched.
+    parse_dynamic_findings(document(findings=[{**finding, "id": "a<b>&lt;c-1"}]))
+
+
 def test_it_parses_a_json_string_and_never_echoes_a_value() -> None:
     raw = json.dumps(document())
     assert parse_dynamic_findings(raw).findings[0].id == "f-1"

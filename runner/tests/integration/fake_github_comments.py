@@ -2,21 +2,23 @@
 
 """Test helper, not a test: a GitHub issue-comment API on loopback (#199).
 
-It speaks the three routes the narrow Dynamic client uses, so the publisher runs against a real
-socket with the real `HttpCommentsClient`. It records every request and can be scripted to answer a
-404/401/403/429/503 or to accept a create and then lose the answer, which is what a retry must
-survive.
+It speaks the routes the narrow Dynamic client uses (the three comment calls and the read of one
+pull request), so the publisher runs against a real socket with the real `HttpCommentsClient`. It
+records every request and can be scripted to answer a 404/401/403/429/503 or to accept a create and
+then lose the answer, which is what a retry must survive.
 """
 
 import json
 import re
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, cast
 from urllib.parse import parse_qs, urlsplit
 
 _COMMENTS = re.compile(r"/repos/[^/]+/[^/]+/issues/[0-9]+/comments")
 _COMMENT = re.compile(r"/repos/[^/]+/[^/]+/issues/comments/([0-9]+)")
+_PULL = re.compile(r"/repos/[^/]+/[^/]+/pulls/([0-9]+)")
 
 
 class FakeGithubComments:
@@ -24,9 +26,13 @@ class FakeGithubComments:
         self.token = token
         self.bot_login = bot_login
         self.comments: list[dict[str, Any]] = []
+        # Pull request number -> the title and body GET /pulls/<n> answers (#201).
+        self.pull_requests: dict[int, dict[str, Any]] = {}
         self.requests: list[tuple[str, str]] = []
         self.faults: dict[str, tuple[int, dict[str, str]]] = {}
         self.ambiguous_create = False
+        # Seconds every answer is held back (a slow GitHub), applied before the request is served.
+        self.delay = 0.0
         self._next_id = 1
         self._server: ThreadingHTTPServer | None = None
         self._lock = threading.Lock()
@@ -109,6 +115,8 @@ class FakeGithubComments:
 
     def _route(self, method: str, request: BaseHTTPRequestHandler) -> None:
         parsed = urlsplit(request.path)
+        if self.delay:
+            time.sleep(self.delay)
         with self._lock:
             self.requests.append((method, request.path))
             fault = self.faults.pop(method, None)
@@ -117,6 +125,14 @@ class FakeGithubComments:
                 return
             if fault is not None:
                 _reply(request, fault[0], {"message": "scripted"}, fault[1])
+                return
+            pull = _PULL.fullmatch(parsed.path)
+            if method == "GET" and pull is not None:
+                found = self.pull_requests.get(int(pull.group(1)))
+                if found is None:
+                    _reply(request, 404, {"message": "no pull request"})
+                    return
+                _reply(request, 200, {"number": int(pull.group(1)), **found})
                 return
             if method == "GET" and _COMMENTS.fullmatch(parsed.path):
                 query = parse_qs(parsed.query)
