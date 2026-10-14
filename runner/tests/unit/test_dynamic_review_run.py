@@ -99,14 +99,95 @@ def test_a_dynamic_job_without_an_injected_preparer_needs_the_root_supervisor() 
     assert result.error_code is ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED
 
 
-# #197-T11
-def test_a_dynamic_job_without_a_capability_descriptor_is_refused() -> None:
+OTHER_MODEL = "anthropic/claude-haiku-5.5"
+
+
+def other_model_job() -> Job:
+    document = dynamic_document()
+    document["dynamic"]["model"] = OTHER_MODEL
+    document["llm"]["model"] = OTHER_MODEL
+    return parse_job(json.dumps(document))
+
+
+class Reached(Exception):
+    """Raised by the preparer: the job passed every check that comes before the checkout."""
+
+
+@contextmanager
+def reaching_the_checkout(job: Job) -> Generator[PreparedContent]:
+    raise Reached
+    yield  # pragma: no cover
+
+
+# #197-T11 #264-T11: another model than the shipped default has no built-in descriptor.
+def test_a_dynamic_job_of_another_model_without_a_capability_descriptor_is_refused() -> None:
+    result = runner.run_dynamic_job(
+        other_model_job(),
+        None,
+        0.0,
+        {
+            runner.OPENCODE_COMMAND_VARIABLE: "opencode",
+        },
+        engines=ALL_ENGINES,
+        prepare=never_prepared,
+    )
+
+    assert result.ok is False
+    assert result.error_code is ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED
+
+
+# #264-T11: the shipped default model needs no variable: its descriptor ships with the image.
+@pytest.mark.parametrize("variable", [None, ""])
+def test_a_dynamic_job_of_the_default_model_without_a_descriptor_variable_is_allowed(
+    variable: str | None,
+) -> None:
+    environment = {runner.OPENCODE_COMMAND_VARIABLE: "opencode"}
+    if variable is not None:
+        environment[runner.DYNAMIC_CAPABILITIES_VARIABLE] = variable
+
+    with pytest.raises(Reached):
+        runner.run_dynamic_job(
+            dynamic_job(),
+            None,
+            0.0,
+            environment,
+            engines=ALL_ENGINES,
+            prepare=reaching_the_checkout,
+        )
+
+
+# #264-T11: an empty variable is no licence for another model, however the job spells the default.
+@pytest.mark.parametrize(
+    "model",
+    ["DeepSeek/deepseek-v4.1-flash", "deepseek/deepseek-v4.1-flash:free", "deepseek-v4.1-flash"],
+)
+def test_only_the_exact_default_model_id_gets_the_built_in_descriptor(model: str) -> None:
+    document = dynamic_document()
+    document["dynamic"]["model"] = model
+    document["llm"]["model"] = model
+    result = runner.run_dynamic_job(
+        parse_job(json.dumps(document)),
+        None,
+        0.0,
+        {runner.OPENCODE_COMMAND_VARIABLE: "opencode"},
+        engines=ALL_ENGINES,
+        prepare=never_prepared,
+    )
+
+    assert result.error_code is ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED
+
+
+# #264-T11: what the operator sets keeps its meaning and wins, also for the default model.
+def test_a_descriptor_variable_wins_over_the_built_in_one_for_the_default_model() -> None:
     result = runner.run_dynamic_job(
         dynamic_job(),
         None,
         0.0,
         {
             runner.OPENCODE_COMMAND_VARIABLE: "opencode",
+            runner.DYNAMIC_CAPABILITIES_VARIABLE: json.dumps(
+                {"tool_choice_required": False, "structured_output": True, "max_output_tokens": 1}
+            ),
         },
         engines=ALL_ENGINES,
         prepare=never_prepared,
@@ -238,7 +319,7 @@ def test_a_dynamic_job_with_only_the_diff_engine_advertised_is_refused(
 
 # #202-T01: what the loop advertised is what the job process runs on: with `opencode` handed over
 # the job gets past the engine check (and then stops at the next missing piece, the model
-# description, with its own stable code).
+# description of a model that has no built-in one, with its own stable code).
 def test_a_dynamic_job_with_opencode_advertised_gets_past_the_engine_check(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -246,8 +327,72 @@ def test_a_dynamic_job_with_opencode_advertised_gets_past_the_engine_check(
     monkeypatch.setenv(runner.OPENCODE_COMMAND_VARIABLE, "opencode")
     monkeypatch.delenv(runner.DYNAMIC_CAPABILITIES_VARIABLE, raising=False)
     out = io.StringIO()
+    document = dynamic_document()
+    document["dynamic"]["model"] = OTHER_MODEL
+    document["llm"]["model"] = OTHER_MODEL
 
-    code = runner.main([], stdin=io.StringIO(json.dumps(dynamic_document())), stdout=out)
+    code = runner.main([], stdin=io.StringIO(json.dumps(document)), stdout=out)
 
     assert code == 1
     assert json.loads(out.getvalue())["errorCode"] == "dynamic_model_features_unsupported"
+
+
+# #264-T12: the built-in descriptor describes the destination the request goes to: it follows the
+# upstream model (`llm.model`), not the logical name (`dynamic.model`) that only the engine sees.
+def test_the_built_in_descriptor_follows_the_upstream_model_not_the_logical_name() -> None:
+    environment = {runner.OPENCODE_COMMAND_VARIABLE: "opencode"}
+
+    spoofed = dynamic_document()
+    spoofed["llm"]["model"] = OTHER_MODEL  # logical name is the default, the request is not
+    refused = runner.run_dynamic_job(
+        parse_job(json.dumps(spoofed)),
+        None,
+        0.0,
+        environment,
+        engines=ALL_ENGINES,
+        prepare=never_prepared,
+    )
+    assert refused.error_code is ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED
+
+    alias = dynamic_document()
+    alias["dynamic"]["model"] = "my-alias"  # a logical name, the destination is the default model
+    with pytest.raises(Reached):
+        runner.run_dynamic_job(
+            parse_job(json.dumps(alias)),
+            None,
+            0.0,
+            environment,
+            engines=ALL_ENGINES,
+            prepare=reaching_the_checkout,
+        )
+
+
+# #264-T13: a variable that holds only whitespace is as empty as an empty one (a platform may store
+# a blank field as a space); for the default model the built-in descriptor then applies.
+@pytest.mark.parametrize("blank", [" ", "  ", "\n", "\t \n"])
+def test_a_whitespace_only_descriptor_variable_is_empty(blank: str) -> None:
+    with pytest.raises(Reached):
+        runner.run_dynamic_job(
+            dynamic_job(),
+            None,
+            0.0,
+            {
+                runner.OPENCODE_COMMAND_VARIABLE: "opencode",
+                runner.DYNAMIC_CAPABILITIES_VARIABLE: blank,
+            },
+            engines=ALL_ENGINES,
+            prepare=reaching_the_checkout,
+        )
+
+    result = runner.run_dynamic_job(
+        other_model_job(),
+        None,
+        0.0,
+        {
+            runner.OPENCODE_COMMAND_VARIABLE: "opencode",
+            runner.DYNAMIC_CAPABILITIES_VARIABLE: blank,
+        },
+        engines=ALL_ENGINES,
+        prepare=never_prepared,
+    )
+    assert result.error_code is ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED

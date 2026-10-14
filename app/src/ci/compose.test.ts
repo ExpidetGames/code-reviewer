@@ -207,10 +207,10 @@ const SHIPPED_COMPOSE_FILES = readdirSync(repoRoot).filter((name) =>
 );
 
 describe("compose files and the test command of the runner", () => {
-  it("finds the six compose files of the repository", () => {
+  // #264-T07 (there is no second Coolify file: the Dynamic runner is a service of compose.coolify.yml)
+  it("finds the five compose files of the repository", () => {
     expect(SHIPPED_COMPOSE_FILES.sort()).toEqual([
       "compose.build.yml",
-      "compose.coolify.dynamic.yml",
       "compose.coolify.yml",
       "compose.dynamic.yml",
       "compose.large.yml",
