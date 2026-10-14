@@ -22,6 +22,7 @@ import {
   type AppPart,
   type FakeGithubAppControls,
 } from "./app-api.ts";
+import { basicToken } from "./git-http.ts";
 import { send, sendJson } from "./http.ts";
 import { createInstallPart, type InstallPart } from "./install-flow.ts";
 import {
@@ -281,6 +282,9 @@ export async function startGithubFake(
           ? header.slice(6)
           : undefined;
       if (bearer !== undefined) credentials.push(bearer);
+      // Git over HTTP sends the installation token as the password of Basic authentication.
+      const gitToken = basicToken(header);
+      if (gitToken !== undefined) credentials.push(gitToken);
 
       // The control endpoints of the test itself are not GitHub and never fail on purpose.
       const failure = path.startsWith("/__fake/")
