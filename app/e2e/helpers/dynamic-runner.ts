@@ -9,7 +9,13 @@
 //
 // Needs root and the lane's namespaces (runner/scripts/run_dynamic_e2e.sh); `preflight` says what is missing.
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { e2eEnv } from "./e2e-env";
@@ -243,6 +249,9 @@ export async function startDynamicRunner(options: {
           );
         });
       } finally {
+        // For the report of a failing run: the runner's log is not in any other file.
+        mkdirSync("test-results", { recursive: true });
+        writeFileSync("test-results/dynamic-runner.log", output);
         rmSync(home, { recursive: true, force: true });
       }
     },
