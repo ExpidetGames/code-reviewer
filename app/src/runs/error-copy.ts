@@ -112,6 +112,46 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
   unknown: "The run failed for a reason this version does not know.",
 };
 
+/**
+ * Why a Dynamic Review checkout failed (`RUNNER_CHECKOUT_REASONS`), in words. The runner reports the
+ * name next to the code `checkout_incomplete`; a test requires a sentence for every name.
+ */
+export const CHECKOUT_REASON_COPY: Readonly<Record<string, string>> = {
+  invalid_request:
+    "The job or its limits could not be used to prepare the repository checkout.",
+  ref_moved:
+    "The pull request changed while the checkout was prepared, so nothing was reviewed. The next push reviews again.",
+  ref_missing:
+    "The pull request or its base branch could not be found on GitHub.",
+  protocol: "GitHub answered in a form the checkout could not read.",
+  pack_invalid: "The repository data GitHub sent could not be verified.",
+  object_missing:
+    "A file the checkout needed was missing from what GitHub sent.",
+  tree_invalid: "The file tree of the repository could not be read.",
+  entries: "The repository has more files than a Dynamic Review can prepare.",
+  path_invalid: "A file path in the repository cannot be exported safely.",
+  budget_transfer:
+    "The repository is larger to download than a Dynamic Review allows.",
+  budget_preparation:
+    "The repository is larger to prepare than a Dynamic Review allows.",
+  budget_exposed:
+    "The text files of the repository are more than a Dynamic Review may read.",
+  diff_too_large:
+    "The change of this pull request is larger than a Dynamic Review can read.",
+  input_too_large:
+    "The description or the earlier review state of the pull request is larger than a Dynamic Review can use.",
+  cancelled: "The run was stopped while the checkout was prepared.",
+  timeout: "Preparing the repository checkout took longer than the time limit.",
+  transport:
+    "GitHub refused the request or could not be reached while the checkout was prepared.",
+  isolation: "The checkout could not be sealed safely for the review engine.",
+  context:
+    "The title, the description or the earlier review state of the pull request could not be read.",
+};
+
+export const UNKNOWN_REASON_COPY =
+  "The checkout failed for a reason this version of Code Reviewer does not know. The reason below helps whoever runs the server to look it up.";
+
 export const UNKNOWN_ERROR_COPY =
   "The run ended with an error this version of Code Reviewer does not know. The error code below helps whoever runs the server to look it up.";
 
@@ -137,4 +177,24 @@ export function describeErrorCode(code: string): ErrorDescription {
     };
   }
   return { code: shown, text: UNKNOWN_ERROR_COPY, known: false };
+}
+
+export type ReasonDescription = {
+  code: string;
+  text: string;
+  known: boolean;
+};
+
+/** The sentence for a checkout reason; null when the value is not shaped like a reason (it is never shown). */
+export function describeCheckoutReason(
+  reason: string,
+): ReasonDescription | null {
+  if (!CODE_SHAPE.test(reason)) return null;
+  if (Object.hasOwn(CHECKOUT_REASON_COPY, reason))
+    return {
+      code: reason,
+      text: CHECKOUT_REASON_COPY[reason] ?? UNKNOWN_REASON_COPY,
+      known: true,
+    };
+  return { code: reason, text: UNKNOWN_REASON_COPY, known: false };
 }

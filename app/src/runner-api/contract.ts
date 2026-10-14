@@ -82,6 +82,34 @@ export const RUNNER_ERROR_CODES = [
 ] as const;
 export type RunnerErrorCode = (typeof RUNNER_ERROR_CODES)[number];
 
+/**
+ * Why a Dynamic Review checkout failed (`KnownCheckoutReason` in the contract), reported next to the
+ * code `checkout_incomplete`. A reader accepts any name of the right form and shows an unknown one
+ * with a general sentence.
+ */
+export const RUNNER_CHECKOUT_REASONS = [
+  "invalid_request",
+  "ref_moved",
+  "ref_missing",
+  "protocol",
+  "pack_invalid",
+  "object_missing",
+  "tree_invalid",
+  "entries",
+  "path_invalid",
+  "budget_transfer",
+  "budget_preparation",
+  "budget_exposed",
+  "diff_too_large",
+  "input_too_large",
+  "cancelled",
+  "timeout",
+  "transport",
+  "isolation",
+  "context",
+] as const;
+export type RunnerCheckoutReason = (typeof RUNNER_CHECKOUT_REASONS)[number];
+
 /** The codes the API answers with (`ApiErrorCode` in the contract). */
 export const RUNNER_API_ERROR_CODES = [
   "RUNNER_UNAUTHORIZED",
@@ -211,6 +239,11 @@ export type RunnerResult = {
   /** null if and only if `ok`. Any code of the right form is accepted; see `RUNNER_ERROR_CODES`. */
   errorCode: string | null;
   errorMessage: string | null;
+  /**
+   * The stable finer name of a failure (a `RUNNER_CHECKOUT_REASONS` entry for a checkout failure);
+   * absent when the runner gave none. Any name of the right form is accepted.
+   */
+  errorReason?: string;
   logTail: string;
   logTruncated: boolean;
   usage: RunnerUsage | null;

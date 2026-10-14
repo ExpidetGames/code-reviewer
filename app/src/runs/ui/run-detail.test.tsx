@@ -49,6 +49,7 @@ function detail(overrides: Partial<RunDetailView> = {}): RunDetailView {
     attempts: 0,
     errorCode: null,
     errorCodeKnown: false,
+    errorReason: null,
     commentUrl: "https://github.com/acme/widgets/pull/7#issuecomment-9",
     commentMissing: false,
     log: { text: "reviewed 3 files", truncated: false },
@@ -324,6 +325,61 @@ describe("the detail page", () => {
     expect(text(container)).toContain("GitHub could not be reached.");
     expect(screen.getByText("git_unavailable").tagName).toBe("CODE");
     expect(screen.queryByRole("link", { name: /comment/i })).toBeNull();
+  });
+
+  // #296-T11
+  it("shows the reason of a failed checkout in words, next to its code, with the log", () => {
+    const { container } = render(
+      <RunDetail
+        workspaceSlug="acme"
+        initial={snap(
+          detail({
+            status: "failed",
+            commentUrl: null,
+            reviewKind: "dynamic",
+            errorCode: "checkout_incomplete",
+            errorCodeKnown: true,
+            errorReason: {
+              code: "budget_preparation",
+              text: "The repository is larger to prepare than a Dynamic Review allows.",
+              known: true,
+            },
+            log: {
+              text: "checkout_incomplete [budget_preparation]: the pull request could not be prepared",
+              truncated: false,
+            },
+          }),
+        )}
+        api={apiAnswering([])}
+      />,
+    );
+
+    expect(text(container)).toContain(
+      "The repository is larger to prepare than a Dynamic Review allows.",
+    );
+    expect(screen.getByText("budget_preparation").tagName).toBe("CODE");
+    expect(screen.getByLabelText("Log of the run").textContent).toContain(
+      "[budget_preparation]",
+    );
+  });
+
+  // #296-T11
+  it("shows no reason line for a run without one", () => {
+    const { container } = render(
+      <RunDetail
+        workspaceSlug="acme"
+        initial={snap(
+          detail({
+            status: "failed",
+            errorCode: "timeout",
+            errorCodeKnown: true,
+          }),
+        )}
+        api={apiAnswering([])}
+      />,
+    );
+
+    expect(text(container)).not.toContain("Reason:");
   });
 
   // CR-35-T09

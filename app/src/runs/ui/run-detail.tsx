@@ -348,6 +348,14 @@ export function RunDetail({
             Error code: <code className="font-mono">{run.errorCode}</code>
           </p>
         ) : null}
+        {run.errorReason !== null ? (
+          <p className="text-sm text-muted-foreground">
+            {run.errorReason.text}
+            <span className="block text-xs">
+              Reason: <code className="font-mono">{run.errorReason.code}</code>
+            </span>
+          </p>
+        ) : null}
       </div>
       <FactGroup title="Summary" items={summaryItems} />
       <FactGroup title="Timings" items={timingItems} />

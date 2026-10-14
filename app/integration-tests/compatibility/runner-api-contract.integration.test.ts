@@ -10,6 +10,7 @@ import {
   RUNNER_API_ERROR_CODES,
   RUNNER_ENV_KEY_PATTERN,
   RUNNER_API_VERSION,
+  RUNNER_CHECKOUT_REASONS,
   RUNNER_ERROR_CODES,
 } from "../../src/runner-api/contract.ts";
 import {
@@ -44,6 +45,15 @@ describe("the contract file", () => {
     const listed = readContract().$defs.KnownRunnerErrorCode?.enum;
 
     expect([...RUNNER_ERROR_CODES].sort()).toStrictEqual(
+      [...(listed ?? [])].sort(),
+    );
+  });
+
+  // #296-T10
+  it("lists the same checkout reasons as the app's TypeScript list", () => {
+    const listed = readContract().$defs.KnownCheckoutReason?.enum;
+
+    expect([...RUNNER_CHECKOUT_REASONS].sort()).toStrictEqual(
       [...(listed ?? [])].sort(),
     );
   });
