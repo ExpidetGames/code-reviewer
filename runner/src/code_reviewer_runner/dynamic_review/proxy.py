@@ -65,6 +65,7 @@ from code_reviewer_runner.dynamic_review.completion_stream import completion_as_
 from code_reviewer_runner.dynamic_review.config import PROXY_CAPABILITY_BYTES, PROXY_PROVIDER_ID
 from code_reviewer_runner.dynamic_review.net import no_redirect_opener
 from code_reviewer_runner.error_mapping import is_context_length_exceeded, llm_status_code
+from code_reviewer_runner.job import JobCapabilities
 from code_reviewer_runner.job_loop.jsonvalues import as_object
 from code_reviewer_runner.openrouter_parameters import (
     REQUIRE_PARAMETERS,
@@ -185,17 +186,93 @@ def capabilities_from_config(raw: str | None, model: str | None = None) -> Dynam
     unusable fails closed: the run must not assume a destination can serve the required tool choice
     and structured output. The one exception is no descriptor at all for exactly the shipped
     default model, whose built-in descriptor applies; any descriptor the operator sets, usable or
-    not, takes precedence, and every other model needs one.
+    not, takes precedence, and every other model needs one (or the descriptor the app sends with the
+    job, see `capabilities_for_job`).
     """
+    parsed = _operator_descriptor(raw)
+    if parsed is not None:
+        return parsed[0]
+    if model == DEFAULT_DYNAMIC_MODEL:
+        return DEFAULT_MODEL_CAPABILITIES
+    raise LimitError(
+        ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED,
+        "no trusted capability descriptor is configured for the model",
+    )
+
+
+def capabilities_for_job(
+    raw: str | None, model: str | None, job: JobCapabilities | None
+) -> DynamicCapabilities:
+    """The descriptor a Dynamic run is held to (#279): the job's, narrowed by the operator's.
+
+    Precedence, all of it trusted (the operator's variable, the app's reading of the provider's
+    metadata) and none of it from the repository:
+
+    1. Without a descriptor in the job, exactly `capabilities_from_config`: the operator's value, or
+       the built-in one for the default model, or a refusal.
+    2. With one, and no operator descriptor: the job's. Any tool-capable model runs without the
+       operator describing it. A model whose metadata carries no unit prices has none here, except
+       the default model, which keeps its built-in prices; `dynamic_ledger` refuses the rest.
+    3. With both, the operator's is a ceiling and the result is the intersection: both features
+       must hold, the smaller output limit wins, the smaller window wins when the operator names
+       one, and the higher unit price wins, so the job can only narrow what the operator allows
+       and never lower the price of a reservation. An operator value that is set but unusable
+       fails whatever the job says.
+
+    The built-in descriptor of the default model is a fallback, never a ceiling.
+    """
+    if job is None:
+        return capabilities_from_config(raw, model=model)
+    parsed = _operator_descriptor(raw)
+    unit_costs = _job_unit_costs(job)
+    if unit_costs is None and parsed is None and model == DEFAULT_DYNAMIC_MODEL:
+        unit_costs = DEFAULT_MODEL_CAPABILITIES.unit_costs
+    from_job = DynamicCapabilities(
+        tool_choice_required=job.tool_choice_required,
+        structured_output=job.structured_output,
+        max_output_tokens=job.max_output_tokens,
+        context_window_tokens=job.context_window_tokens,
+        unit_costs=unit_costs,
+    )
+    if parsed is None:
+        return from_job
+    ceiling, window_named = parsed
+    return DynamicCapabilities(
+        tool_choice_required=from_job.tool_choice_required and ceiling.tool_choice_required,
+        structured_output=from_job.structured_output and ceiling.structured_output,
+        max_output_tokens=min(from_job.max_output_tokens, ceiling.max_output_tokens),
+        context_window_tokens=(
+            min(from_job.context_window_tokens, ceiling.context_window_tokens)
+            if window_named
+            else from_job.context_window_tokens
+        ),
+        unit_costs=_higher_costs(from_job.unit_costs, ceiling.unit_costs),
+    )
+
+
+def _job_unit_costs(job: JobCapabilities) -> UnitCosts | None:
+    if job.input_usd_per_mtok is None or job.output_usd_per_mtok is None:
+        return None
+    return UnitCosts(
+        input_usd_per_mtok=job.input_usd_per_mtok, output_usd_per_mtok=job.output_usd_per_mtok
+    )
+
+
+def _higher_costs(first: UnitCosts | None, second: UnitCosts | None) -> UnitCosts | None:
+    if first is None or second is None:
+        return first or second
+    return UnitCosts(
+        input_usd_per_mtok=max(first.input_usd_per_mtok, second.input_usd_per_mtok),
+        output_usd_per_mtok=max(first.output_usd_per_mtok, second.output_usd_per_mtok),
+    )
+
+
+def _operator_descriptor(raw: str | None) -> tuple[DynamicCapabilities, bool] | None:
+    """The operator's descriptor and whether it names a context window; None when it is blank."""
     # A blank value (a platform may store an empty field as a space) is as empty as an empty one.
     raw = raw.strip() if raw else raw
-    if not raw and model == DEFAULT_DYNAMIC_MODEL:
-        return DEFAULT_MODEL_CAPABILITIES
     if not raw:
-        raise LimitError(
-            ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED,
-            "no trusted capability descriptor is configured for the model",
-        )
+        return None
     try:
         value: Any = json.loads(raw)
     except ValueError:
@@ -215,13 +292,14 @@ def capabilities_from_config(raw: str | None, model: str | None = None) -> Dynam
             ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED,
             "the capability descriptor has no output bound",
         )
-    return DynamicCapabilities(
+    descriptor = DynamicCapabilities(
         tool_choice_required=document.get("tool_choice_required") is True,
         structured_output=document.get("structured_output") is True,
         max_output_tokens=output,
         context_window_tokens=_window(document),
         unit_costs=_unit_costs(document),
     )
+    return descriptor, "context_window_tokens" in document
 
 
 def _unusable(detail: str) -> LimitError:
