@@ -37,6 +37,12 @@ const smtpPort = Number(process.env.E2E_SMTP_PORT);
 // in the environment for the worker processes like the others.
 process.env.E2E_LLM_PORT ||= String(61000 + Math.floor(Math.random() * 4000));
 const llmFakePort = Number(process.env.E2E_LLM_PORT);
+// The fake LLM of the journeys that save a Dynamic model (#269): the app checks the model's tool support at
+// this address, so the port has to be known when the app starts. A range of its own, above the others.
+process.env.E2E_MODEL_LLM_PORT ||= String(
+  65000 + Math.floor(Math.random() * 500),
+);
+const modelLlmFakePort = Number(process.env.E2E_MODEL_LLM_PORT);
 
 export const e2eEnv = {
   appPort,
@@ -95,6 +101,9 @@ export const e2eEnv = {
   /** The fake LLM of the LLM key journey; the fifth app is pointed at its `/api/v1` (LLM_API_BASE_URL). */
   llmFakePort,
   llmFakeApiUrl: `http://127.0.0.1:${llmFakePort}/api/v1`,
+  /** The fake LLM that answers the model metadata for the journeys that save a Dynamic model (#269). */
+  modelLlmFakePort,
+  modelLlmFakeApiUrl: `http://127.0.0.1:${modelLlmFakePort}/api/v1`,
   githubClientId: "e2e-client-id",
   githubClientSecret: "e2e-client-secret-value",
   appSecret: "e2e-app-secret-0123456789-0123456789-abcdef",
