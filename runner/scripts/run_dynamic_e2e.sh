@@ -34,7 +34,16 @@ sudo -n true 2>/dev/null \
 # The staging directory is ours; the root part mounts a tmpfs on `lane` (inside its mount namespace
 # only), so what it installs there never reaches the host and this directory stays empty.
 STAGING="$(mktemp -d)"
-trap 'rm -rf "$STAGING"' EXIT
+
+# The root part writes into the trees it runs in (test-results, playwright-report, .next/cache, __pycache__).
+# Whatever root created there is given back to you however the lane ends, so a later build as you or
+# a clean-up does not fail on root-owned files. Nothing is followed: symlinks are changed, not
+# their targets.
+give_back() {
+  sudo -n find "$APP_DIR" "$RUNNER_DIR" -xdev -user root -exec chown -h "$(id -u):$(id -g)" {} + \
+    || echo "Could not give the files that root created back to $(id -un); chown them by hand." >&2
+}
+trap 'rm -rf "$STAGING"; give_back' EXIT
 mkdir "$STAGING/lane"
 
 # Step 1: the pinned tools and the one build.

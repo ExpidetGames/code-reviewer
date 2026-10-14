@@ -59,8 +59,15 @@ mount -t overlay overlay -o "lowerdir=/usr/local/bin,upperdir=$STAGE/bin-upper,w
   || fail "the tools cannot be installed (overlayfs on /usr/local/bin)"
 mount -t overlay overlay -o "lowerdir=/opt,upperdir=$STAGE/opt-upper,workdir=$STAGE/opt-work" /opt \
   || fail "the pin files cannot be installed (overlayfs on /opt)"
-install -m 0755 -o root -g root "$LANE_OPENCODE_BIN" /usr/local/bin/opencode
-install -m 0755 -o root -g root "$LANE_RIPGREP_BIN" /usr/local/bin/rg
+# The fetch scripts leave the tools in a directory of the invoking user. Root installs from a copy on the
+# lane's own tmpfs (root owned, 0700), so nothing can swap a file between the copy and the install. The
+# copy is not the integrity check: the pin files (size and SHA-256) are, in the fetch scripts, in the
+# preflight and in the runner's own startup self-check, which refuses any other bytes.
+install -d -m 0700 -o root -g root "$STAGE/tools"
+cp "$LANE_OPENCODE_BIN" "$STAGE/tools/opencode"
+cp "$LANE_RIPGREP_BIN" "$STAGE/tools/rg"
+install -m 0755 -o root -g root "$STAGE/tools/opencode" /usr/local/bin/opencode
+install -m 0755 -o root -g root "$STAGE/tools/rg" /usr/local/bin/rg
 install -d -m 0755 -o root -g root /opt/code-reviewer /opt/code-reviewer/pins
 install -m 0644 -o root -g root "$LANE_RUNNER_DIR/opencode-pin.json" "$LANE_RUNNER_DIR/ripgrep-pin.json" /opt/code-reviewer/pins/
 
