@@ -5,6 +5,7 @@
 // bodies through both and requires the same verdict. A refusal lists fields and reasons, never
 // values: the bodies of these requests hold a lease token and a log.
 import type {
+  StoppedEarly,
   ClaimEngine,
   ClaimFeature,
   ClaimRequest,
@@ -15,7 +16,11 @@ import type {
   RunnerResult,
   RunnerUsage,
 } from "./contract.ts";
-import { CLAIM_ENGINES, CLAIM_FEATURES } from "./contract.ts";
+import {
+  CLAIM_ENGINES,
+  CLAIM_FEATURES,
+  STOPPED_EARLY_REASONS,
+} from "./contract.ts";
 
 export type Parsed<T> =
   { ok: true; value: T } | { ok: false; fields: FieldError[] };
@@ -31,6 +36,7 @@ export const UNKNOWN_RUNNER_ID = "unknown";
 export const LEASE_TOKEN_LENGTH = { min: 8, max: 256 } as const;
 export const MAX_LOG_TAIL_CHARS = 8192;
 export const MAX_ERROR_MESSAGE_CHARS = 2000;
+export const MAX_ERROR_REASON_CHARS = 64;
 export const MAX_COMMENT_URL_CHARS = 2048;
 export const MAX_DURATION_MS = 604_800_000;
 const MAX_MODEL_CHARS = 200;
@@ -240,6 +246,12 @@ function parseUsage(
     costUsd === null ||
     (typeof costUsd === "number" && costUsd >= 0 && Number.isFinite(costUsd));
   if (!costOk) check.fail(`${prefix}costUsd`, "invalid");
+  const stoppedEarly = value.stoppedEarly ?? null;
+  const stoppedOk =
+    stoppedEarly === null ||
+    (typeof stoppedEarly === "string" &&
+      (STOPPED_EARLY_REASONS as readonly string[]).includes(stoppedEarly));
+  if (!stoppedOk) check.fail(`${prefix}stoppedEarly`, "invalid");
   if (
     check.fields.length > before ||
     model === undefined ||
@@ -248,7 +260,8 @@ function parseUsage(
     totalTokens === undefined ||
     aiCalls === undefined ||
     typeof fallbackUsed !== "boolean" ||
-    !costOk
+    !costOk ||
+    !stoppedOk
   )
     return undefined;
   return {
@@ -259,6 +272,7 @@ function parseUsage(
     aiCalls,
     fallbackUsed,
     costUsd: costUsd as number | null,
+    stoppedEarly: stoppedEarly as StoppedEarly | null,
   };
 }
 
@@ -284,6 +298,14 @@ function parseResult(check: Checker, value: unknown): RunnerResult | undefined {
     "result.errorMessage",
     MAX_ERROR_MESSAGE_CHARS,
   );
+  const errorReason = check.optionalString(
+    value,
+    "errorReason",
+    "result.errorReason",
+    MAX_ERROR_REASON_CHARS,
+  );
+  if (typeof errorReason === "string" && !ERROR_CODE.test(errorReason))
+    check.fail("result.errorReason", "invalid");
   const commentUrl = check.optionalString(
     value,
     "commentUrl",
@@ -329,6 +351,7 @@ function parseResult(check: Checker, value: unknown): RunnerResult | undefined {
     commentUrl,
     errorCode,
     errorMessage,
+    ...(typeof errorReason === "string" ? { errorReason } : {}),
     logTail,
     logTruncated: logTruncated === true,
     usage,

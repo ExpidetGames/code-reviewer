@@ -42,7 +42,7 @@ from code_reviewer_runner.dynamic_review.github import (
     HttpCommentsClient,
     PullRequestText,
 )
-from code_reviewer_runner.dynamic_review.limits import CheckoutError
+from code_reviewer_runner.dynamic_review.limits import CheckoutError, CheckoutReason
 from code_reviewer_runner.dynamic_review.publish import PublishError, publisher_for
 from code_reviewer_runner.dynamic_review.state import ReviewState, render_previous_state
 from code_reviewer_runner.dynamic_review.tagescape import escape_text
@@ -126,7 +126,7 @@ def load_context(
     """
     base = job.base
     if base is None:
-        raise CheckoutError(ErrorCode.DYNAMIC_POLICY_VIOLATION)
+        raise CheckoutError(CheckoutReason.INVALID_REQUEST, ErrorCode.DYNAMIC_POLICY_VIOLATION)
     deadline = clock() + deadline_seconds
 
     def time_left() -> float:
@@ -152,7 +152,7 @@ def load_context(
         )
         _may_continue(cancelled, time_left)
     except (GitHubError, PublishError) as error:
-        raise CheckoutError(error.code) from None
+        raise CheckoutError(CheckoutReason.CONTEXT, error.code) from None
     return PreparationContext(
         metadata=metadata_text(text.title, text.body), prior_state=prior_state_text(state)
     )
@@ -160,6 +160,6 @@ def load_context(
 
 def _may_continue(cancelled: Callable[[], bool], time_left: Callable[[], float]) -> None:
     if cancelled():
-        raise CheckoutError()
+        raise CheckoutError(CheckoutReason.CANCELLED)
     if time_left() <= 0:
-        raise CheckoutError(ErrorCode.GIT_UNAVAILABLE)
+        raise CheckoutError(CheckoutReason.TIMEOUT, ErrorCode.GIT_UNAVAILABLE)

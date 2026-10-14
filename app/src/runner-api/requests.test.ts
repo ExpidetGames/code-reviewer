@@ -131,6 +131,7 @@ describe("the complete body", () => {
     expect(parsed.ok && parsed.value.result).toStrictEqual({
       ...GOOD_RESULT,
       errorMessage: null,
+      usage: { ...GOOD_RESULT.usage, stoppedEarly: null },
     });
   });
 
@@ -149,6 +150,66 @@ describe("the complete body", () => {
     expect(parsed.ok && parsed.value.result.errorMessage).toBe(
       "The key was refused.",
     );
+  });
+
+  // #296-T10
+  it("keeps the stable reason of a failure and leaves the field out when there is none", () => {
+    const failed = {
+      ok: false,
+      durationMs: 10,
+      errorCode: "checkout_incomplete",
+      errorReason: "budget_preparation",
+      logTail: "checkout_incomplete [budget_preparation]",
+    };
+    const parsed = parseCompleteRequest({ leaseToken: TOKEN, result: failed });
+
+    expect(parsed.ok && parsed.value.result.errorReason).toBe(
+      "budget_preparation",
+    );
+    const plain = parseCompleteRequest({
+      leaseToken: TOKEN,
+      result: { ...failed, errorReason: undefined },
+    });
+    expect(plain.ok && "errorReason" in plain.value.result).toBe(false);
+  });
+
+  // #296-T10
+  it.each(["Budget Prep", "", "../etc", 5, ["a"]])(
+    "refuses a reason that is not a stable name (%j)",
+    (errorReason) => {
+      const parsed = parseCompleteRequest({
+        leaseToken: TOKEN,
+        result: {
+          ok: false,
+          durationMs: 1,
+          errorCode: "checkout_incomplete",
+          errorReason,
+          logTail: "",
+        },
+      });
+
+      expect(fieldsOf(parsed)).toStrictEqual([
+        { field: "result.errorReason", code: "invalid" },
+      ]);
+    },
+  );
+
+  // #296-T10
+  it("refuses a reason that is longer than a stable name", () => {
+    const parsed = parseCompleteRequest({
+      leaseToken: TOKEN,
+      result: {
+        ok: false,
+        durationMs: 1,
+        errorCode: "checkout_incomplete",
+        errorReason: "x".repeat(65),
+        logTail: "",
+      },
+    });
+
+    expect(fieldsOf(parsed)).toStrictEqual([
+      { field: "result.errorReason", code: "too_long" },
+    ]);
   });
 
   it("refuses a failed result without an error code and a good one with one", () => {
@@ -204,6 +265,48 @@ describe("the complete body", () => {
     expect(parsed.value.result.usage?.costUsd).toBe(
       JSON.parse('{"costUsd":5.79e-05}').costUsd,
     );
+  });
+
+  // #293-T08
+  it("keeps the reason a Dynamic Review stopped early, and null when it did not", () => {
+    for (const stoppedEarly of ["cost_limit", "time_limit"] as const) {
+      const parsed = parseCompleteRequest({
+        leaseToken: TOKEN,
+        result: {
+          ...GOOD_RESULT,
+          usage: { ...GOOD_RESULT.usage, stoppedEarly },
+        },
+      });
+
+      expect(parsed.ok).toBe(true);
+      if (!parsed.ok) return;
+      expect(parsed.value.result.usage?.stoppedEarly).toBe(stoppedEarly);
+    }
+    const complete = parseCompleteRequest({
+      leaseToken: TOKEN,
+      result: GOOD_RESULT,
+    });
+    expect(complete.ok).toBe(true);
+    if (!complete.ok) return;
+    expect(complete.value.result.usage?.stoppedEarly).toBeNull();
+  });
+
+  // #293-T08
+  it("refuses a reason for stopping early that the contract does not name", () => {
+    for (const stoppedEarly of ["budget", "", 1, true, ["cost_limit"]]) {
+      const parsed = parseCompleteRequest({
+        leaseToken: TOKEN,
+        result: {
+          ...GOOD_RESULT,
+          usage: { ...GOOD_RESULT.usage, stoppedEarly },
+        },
+      });
+
+      expect(fieldsOf(parsed)).toContainEqual({
+        field: "result.usage.stoppedEarly",
+        code: "invalid",
+      });
+    }
   });
 
   // #267-T07

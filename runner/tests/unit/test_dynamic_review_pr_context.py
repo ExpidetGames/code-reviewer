@@ -25,7 +25,7 @@ from code_reviewer_runner.dynamic_findings import Finding
 from code_reviewer_runner.dynamic_review import supervisor
 from code_reviewer_runner.dynamic_review.github import Comment, PullRequestText
 from code_reviewer_runner.dynamic_review.inputs import review_inputs
-from code_reviewer_runner.dynamic_review.limits import CheckoutError
+from code_reviewer_runner.dynamic_review.limits import CheckoutError, CheckoutReason
 from code_reviewer_runner.dynamic_review.pr_context import (
     TRUNCATION_MARKER,
     PreparationContext,
@@ -233,7 +233,7 @@ def test_a_refused_isolation_never_reads_the_pull_request(
     def refused(
         job: Job, parent: Path, identity: Any, **options: Any
     ) -> Generator[tuple[Any, Any]]:
-        raise CheckoutError(ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED)
+        raise CheckoutError(CheckoutReason.ISOLATION, ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED)
         yield  # pragma: no cover
 
     monkeypatch.setattr(supervisor, "prepared_checkout", refused)
@@ -254,7 +254,7 @@ def test_a_pull_request_that_cannot_be_read_ends_the_preparation_with_its_code(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     def context_for(job: Job, **options: Any) -> PreparationContext:
-        raise CheckoutError(ErrorCode.PR_NOT_FOUND)
+        raise CheckoutError(CheckoutReason.TRANSPORT, ErrorCode.PR_NOT_FOUND)
 
     @contextmanager
     def fake_checkout(

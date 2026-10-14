@@ -439,6 +439,7 @@ export function goodResult(
       aiCalls: 2,
       fallbackUsed: false,
       costUsd: 0.04,
+      stoppedEarly: null,
     },
     ...overrides,
   };

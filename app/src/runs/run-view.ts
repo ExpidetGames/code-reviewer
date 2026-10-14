@@ -7,10 +7,18 @@
 // that came from outside (the question of an `/ask`, a login, the log of the runner) is data and is
 // rendered as text; the one link made from stored data is checked here.
 import type { JsonValue, StoredReviewCommand } from "../integrations/types.ts";
+import {
+  STOPPED_EARLY_REASONS,
+  type StoppedEarly,
+} from "../runner-api/contract.ts";
 import type { JobStatus } from "../jobs/job-status.ts";
 import type { Job, JobTriggerKind } from "../jobs/job-types.ts";
 import type { ProjectReviewKind } from "../review-settings/settings.ts";
-import { describeErrorCode } from "./error-copy.ts";
+import {
+  describeCheckoutReason,
+  describeErrorCode,
+  type ReasonDescription,
+} from "./error-copy.ts";
 import { runDurationMs } from "./run-duration.ts";
 
 /** The most characters of a log the detail page shows (the runner's own limit). */
@@ -54,6 +62,8 @@ export type RunUsageView = {
   aiCalls: number;
   /** The cost in US dollars; null when it is not known (a Dynamic Review never guesses it). */
   costUsd: number | null;
+  /** Why a Dynamic Review was wrapped up early and may be incomplete (#293); null otherwise. */
+  stoppedEarly: StoppedEarly | null;
 };
 
 export type RunDetailView = RunRowView & {
@@ -65,6 +75,8 @@ export type RunDetailView = RunRowView & {
   errorCode: string | null;
   /** Whether the error code has a sentence of its own (an unknown one is shown with the general text). */
   errorCodeKnown: boolean;
+  /** Why a Dynamic Review checkout failed, in words; null when the run has no reason (or none that is shaped like one). */
+  errorReason: ReasonDescription | null;
   /** Only an `https://github.com/` address; null when the run has no comment or the address is not one. */
   commentUrl: string | null;
   /** The run succeeded but the runner could not find the comment it wrote. */
@@ -134,17 +146,25 @@ type StoredResult = {
   commentUrl: string | null;
   logTail: string;
   logTruncated: boolean;
+  errorReason: string | null;
 };
 
-/** Reads the three fields the pages use from the stored result; everything else stays on the server. */
+/** Reads the four fields the pages use from the stored result; everything else stays on the server. */
 export function readStoredResult(result: JsonValue | null): StoredResult {
   if (typeof result !== "object" || result === null || Array.isArray(result))
-    return { commentUrl: null, logTail: "", logTruncated: false };
+    return {
+      commentUrl: null,
+      logTail: "",
+      logTruncated: false,
+      errorReason: null,
+    };
   return {
     commentUrl:
       typeof result.commentUrl === "string" ? result.commentUrl : null,
     logTail: typeof result.logTail === "string" ? result.logTail : "",
     logTruncated: result.logTruncated === true,
+    errorReason:
+      typeof result.errorReason === "string" ? result.errorReason : null,
   };
 }
 
@@ -185,6 +205,11 @@ export function readStoredUsage(result: JsonValue | null): RunUsageView | null {
     totalTokens,
     aiCalls,
     costUsd: costKnown ? costUsd : null,
+    stoppedEarly:
+      typeof usage.stoppedEarly === "string" &&
+      (STOPPED_EARLY_REASONS as readonly string[]).includes(usage.stoppedEarly)
+        ? (usage.stoppedEarly as StoppedEarly)
+        : null,
   };
 }
 
@@ -290,6 +315,10 @@ export function toRunDetailView(
     attempts: job.attempts,
     errorCode: error?.code ?? null,
     errorCodeKnown: error?.known ?? false,
+    errorReason:
+      job.status === "failed" && stored.errorReason !== null
+        ? describeCheckoutReason(stored.errorReason)
+        : null,
     commentUrl,
     commentMissing: job.status === "succeeded" && commentUrl === null,
     log: {

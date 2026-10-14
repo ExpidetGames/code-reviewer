@@ -64,6 +64,11 @@ from code_reviewer_runner.dynamic_review.budget import (
 from code_reviewer_runner.dynamic_review.completion_stream import completion_as_stream
 from code_reviewer_runner.dynamic_review.config import PROXY_CAPABILITY_BYTES, PROXY_PROVIDER_ID
 from code_reviewer_runner.dynamic_review.net import no_redirect_opener
+from code_reviewer_runner.dynamic_review.wrap_up import (
+    WRAP_UP_INSTRUCTION,
+    offers_structured_output,
+    wrap_up_request,
+)
 from code_reviewer_runner.error_mapping import is_context_length_exceeded, llm_status_code
 from code_reviewer_runner.job import JobCapabilities
 from code_reviewer_runner.job_loop.jsonvalues import as_object
@@ -73,10 +78,9 @@ from code_reviewer_runner.openrouter_parameters import (
 )
 from code_reviewer_runner.result import ErrorCode
 
-# The protocol the run requires. The pinned OpenCode uses tool calling for its StructuredOutput
-# return, so a destination that cannot force a tool choice is not usable.
-REQUIRED_TOOL_CHOICE = "required"
-STRUCTURED_OUTPUT_TOOL = "StructuredOutput"
+# The protocol the run requires (`wrap_up.py` names the tool and the choice). The pinned OpenCode
+# uses tool calling for its StructuredOutput return, so a destination that cannot force a tool
+# choice is not usable.
 
 _REQUEST_TIMEOUT_SECONDS = 120.0
 # The only request fields that reach the provider. Everything else the engine sends is dropped, and
@@ -457,7 +461,13 @@ class ModelProxy:
         reservation = self.ledger.reserve_call(
             forwarded.decode("utf-8", errors="replace"),
             output_tokens=self._output_allowance(request),
+            can_wrap_up=offers_structured_output(request),
+            wrap_up_text=WRAP_UP_INSTRUCTION,
         )
+        if reservation.final:
+            # The ledger decided, from its own cost and clock, that this is the last call of the
+            # run (#293): it can only return the answer, whatever the request asked for.
+            forwarded = self._forward_body(wrap_up_request(request))
         try:
             status, response_body = self._post(
                 self.upstream_url,

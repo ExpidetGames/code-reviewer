@@ -123,6 +123,31 @@
         "comparison": { "type": "string", "enum": ["full", "incremental"] }
       }
     },
+    "KnownCheckoutReason": {
+      "description": "Why a Dynamic Review checkout failed (CheckoutReason in the runner), reported as errorReason next to the code checkout_incomplete. A caller branches on the reason, never on a message. The app accepts any reason of the form below and shows an unknown one with a general sentence.",
+      "type": "string",
+      "enum": [
+        "invalid_request",
+        "ref_moved",
+        "ref_missing",
+        "protocol",
+        "pack_invalid",
+        "object_missing",
+        "tree_invalid",
+        "entries",
+        "path_invalid",
+        "budget_transfer",
+        "budget_preparation",
+        "budget_exposed",
+        "diff_too_large",
+        "input_too_large",
+        "cancelled",
+        "timeout",
+        "transport",
+        "isolation",
+        "context"
+      ]
+    },
     "KnownRunnerErrorCode": {
       "description": "The error codes the runner reports in a result (ErrorCode in the runner, plus runner_shutdown from the job loop). A caller branches on the code, never on a message. The app accepts any code of the form below and stores an unknown one as 'unknown' (the original stays in the stored result), so a newer runner never loses a result.",
       "type": "string",
@@ -329,6 +354,10 @@
           "description": "The cost in US dollars, or null when it is not known. A Dynamic Review reports the exact sum of the charges its model provider reported for every call, and null when any call has no reported charge; it never estimates one.",
           "type": ["number", "null"],
           "minimum": 0
+        },
+        "stoppedEarly": {
+          "description": "Why a Dynamic Review was wrapped up before it was done: the model was asked for its answer right away because the run reached its cost limit or its time limit. Absent or null for a complete run; the review it produced is published and says it may be incomplete.",
+          "enum": ["cost_limit", "time_limit", null]
         }
       }
     },
@@ -347,6 +376,11 @@
         },
         "errorCode": {
           "description": "null if and only if ok is true. See KnownRunnerErrorCode.",
+          "type": ["string", "null"],
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        },
+        "errorReason": {
+          "description": "Optional stable finer name of a failure, never free text. For a Dynamic Review checkout failure it is one of KnownCheckoutReason. Absent when the runner gave none; the app stores only a name of the form below.",
           "type": ["string", "null"],
           "pattern": "^[a-z][a-z0-9_]{0,63}$"
         },
