@@ -252,13 +252,17 @@ project's model on that instance:
  "context_window_tokens": 1048576, "input_usd_per_mtok": 0.5, "output_usd_per_mtok": 2}
 ```
 
+`input_usd_per_mtok` and `output_usd_per_mtok` are what a million input and output tokens cost in
+USD, used only to reserve the cost of a call before it is sent (see "Hard limits").
 `context_window_tokens` is the model's context window (what a request and its output allowance must
-fit); `input_usd_per_mtok` and `output_usd_per_mtok` are what a million input and output tokens cost
-in USD, used only to reserve the cost of a call before it is sent (see "Hard limits"). The last
-three are optional: without a window the conservative default of 128,000 tokens applies, and
-without unit costs a call reserves a fixed floor. A window that is not a positive integer larger
-than `max_output_tokens`, or only one of the two unit costs, fails the run with
-`dynamic_model_features_unsupported`. The built-in description of the default model carries the
+fit). **Operators must give the unit costs for every model other than the built-in default**: a
+descriptor without them (or any descriptor that is set for the default model, since it replaces the
+built-in one) ends the job with `dynamic_config_invalid`, because a cost that cannot be priced
+cannot be bounded before it is spent. Take them from the provider's price list. The window is
+optional: without it the conservative default of 128,000 tokens applies. A window that is not a
+positive integer larger than `max_output_tokens`, or only one of the two unit costs, or an unusable
+unit cost, fails the run with `dynamic_model_features_unsupported`. Later the app can supply the
+prices from OpenRouter's model metadata (#269, #279). The built-in description of the default model carries the
 window that OpenRouter's public model list gives for it (1,048,576 tokens, read on 2026-10-14,
 `https://openrouter.ai/api/v1/models`) and the unit costs of that list (`runner/src/code_reviewer_runner/dynamic_review/proxy.py`).
 
@@ -293,17 +297,21 @@ Removed in #290: 30 model calls, 120,000 total tokens, 200 tool calls and 100 di
 of the technical limits blocks a normal review of a medium repository, report it with evidence
 instead of raising it.
 
-**How the cost is bounded.** Before every call the ledger reserves what the call could cost. With
-the unit costs of the model's description that is the input estimate and the output allowance at
-those costs; without them it is a floor of 0.05 USD or twice the dearest call settled so far,
-whichever is more. The call is refused (`dynamic_budget_exceeded`, before the provider sees it) when
+**How the cost is bounded.** Before every call the ledger reserves what the call could cost: the
+input estimate and the output allowance at the unit costs of the model's description (a model
+without unit costs does not run, see above). The call is refused (`dynamic_budget_exceeded`, before the provider sees it) when
 what is spent, what is reserved for calls in flight and this reservation would together pass the
 limit. After the call the reservation is replaced by the `usage.cost` the provider reported (the
 credits it charged, #286). **A call that reports no cost ends the run with
 `dynamic_accounting_failed`**: without it the run cannot be bounded by money, and a missing cost is
-never read as zero. A cost of 0 (a free model) is a cost. Without unit costs the bound is best
-effort within one call: a run can end above the limit by the amount by which its last call cost
-more than twice the call before it. Repository and pull request input never set any of this.
+never read as zero. A cost of 0 (a free model) is a cost. What can still end above the limit
+is the estimate's error: the input estimate can be up to 3 times too low for dense input (base64,
+minified code), and a price list that changed after it was read under-prices the reservation; both
+are paid for one call at most, and the next call is refused. The output cannot exceed its allowance
+(the proxy sets `max_tokens`). A call that failed or was retried keeps its reservation (it may
+still have been billed), so many provider retries can use up the limit without spending. With
+OpenRouter's bring-your-own-key routing `usage.cost` may exclude the upstream provider's charge.
+Repository and pull request input never set any of this.
 
 **The input estimate.** Bytes divided by 3 (real text has about 3 to 4 bytes per token; the old
 estimate of one token per byte was 3 to 4 times too high, which refused a request of about 92 KB
@@ -315,9 +323,14 @@ accepted up to the proven byte bound (a token is never fewer than one byte); abo
 accounting failure (`dynamic_accounting_failed`).
 
 **The window is a backstop.** The window of a run is the model's, from its description
-(`context_window_tokens`). A request whose estimate plus output allowance exceeds it is refused
-before it is sent (`dynamic_budget_exceeded`); the provider's own limit is the final backstop, and
-its "context length exceeded" answer ends the run with `llm_context_length_exceeded`. The project's
+(`context_window_tokens`). The runner refuses a request before it is sent (`dynamic_budget_exceeded`)
+only when it cannot fit even at 6 bytes per token, a density no natural text reaches (text has 3
+to 4.5), so it never refuses what the provider would accept; that is a choice against the
+production symptom, where an estimate that was too high refused a request the provider would have
+taken. Every other case is the provider's: its "context length exceeded" answer (read from the
+answer's `error.code` and `error.message` only, never from text elsewhere in the body) ends the run
+with `llm_context_length_exceeded`. The conservative estimate (bytes over 3) is used for the cost
+reservation only. The project's
 Diff Review "Token budget" (`llm.maxTokens`) is **ignored** by Dynamic Review: it is another concept
 (the size PR-Agent gives a diff), the review kind card hides it for Dynamic, and using it as the
 window is what refused real reviews. It is neither a window nor an extra cap.
@@ -366,7 +379,7 @@ run is bounded by the cost limit and the model's window.
 | `dynamic_isolation_self_check_failed` | The startup self-check did not prove user, export and network | The runner logs the failed property, never a value |
 | `dynamic_model_features_unsupported` | The model or destination lacks tool choice or structured output | `RUNNER_DYNAMIC_CAPABILITIES`, the model |
 | `lease_lost` | Right before the summary would have been written the job was no longer held by this runner (lease lost, job cancelled), or the app could not be asked; nothing was written | Normal after a requeue or a cancel. Often: the app was unreachable at that moment; the next push reviews again |
-| `dynamic_config_invalid` | Model, skill or limits of the job are unusable | The project's settings page |
+| `dynamic_config_invalid` | Model, skill or limits of the job are unusable; or the model's description has no unit costs; or `RUNNER_DYNAMIC_MAX_COST_USD` is not a number up to the ceiling | The project's settings page; `RUNNER_DYNAMIC_CAPABILITIES` (`input_usd_per_mtok`, `output_usd_per_mtok`) |
 | `dynamic_budget_exceeded`, `dynamic_accounting_failed`, `dynamic_policy_violation` | A hard limit or rule stopped the run. Accounting also fails when a call reports no cost | The Runs page; `RUNNER_DYNAMIC_MAX_COST_USD` |
 | `llm_context_length_exceeded` | The provider said the request is larger than the model's context | The model's `context_window_tokens` in `RUNNER_DYNAMIC_CAPABILITIES`; a smaller pull request |
 
@@ -427,7 +440,8 @@ model you choose, the knowledge of what it supports (tool choice "required" and 
    are upgraded.
 2. **Describe the model** in `.env` only if projects use a model other than the default:
    `RUNNER_DYNAMIC_CAPABILITIES={"tool_choice_required": true, "structured_output": true,
-   "max_output_tokens": 8192}` (use what your model and destination really support; it applies to every
+   "max_output_tokens": 8192, "input_usd_per_mtok": 0.5, "output_usd_per_mtok": 2}` (use what your
+   model and destination really support, with the unit costs of the provider's price list; it applies to every
    Dynamic job of this runner). The default model needs nothing. Review the memory settings of the
    table above.
 3. **Deploy the Dynamic runner:**
