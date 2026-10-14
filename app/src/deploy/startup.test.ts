@@ -157,7 +157,7 @@ describe("checking the operator API token when the server starts", () => {
 
     expect(exit).toHaveBeenCalledWith(1);
     expect(String(log.mock.calls[0]?.[0])).toContain(
-      "OPERATOR_API_TOKEN must differ from APP_SECRET",
+      "OPERATOR_API_TOKEN must differ from BETTER_AUTH_SECRET",
     );
     expect(String(log.mock.calls[0]?.[0])).not.toContain(secret);
   });

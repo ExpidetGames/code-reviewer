@@ -43,13 +43,13 @@ export function operatorTokenReuseProblem(env: Env): string | null {
   if (token === undefined) return null;
   if (token === trimmed(env.RUNNER_TOKEN))
     return "must differ from RUNNER_TOKEN";
-  // The master key is APP_SECRET, or the deprecated BETTER_AUTH_SECRET while APP_SECRET is not set
-  // (src/crypto/app-secret.ts); either one is the same credential.
-  if (
-    token === trimmed(env.APP_SECRET) ||
-    token === trimmed(env.BETTER_AUTH_SECRET)
-  )
-    return "must differ from APP_SECRET";
+  // Either variable is a secret of the instance. BETTER_AUTH_SECRET is the master key while APP_SECRET is not set
+  // (src/crypto/app-secret.ts) and stays a credential of its own while both are set (sessions and stored tokens
+  // made with it, read by the legacy import), so a token equal to it is refused in both cases; the message names
+  // the variable that matched.
+  if (token === trimmed(env.APP_SECRET)) return "must differ from APP_SECRET";
+  if (token === trimmed(env.BETTER_AUTH_SECRET))
+    return "must differ from BETTER_AUTH_SECRET";
   return null;
 }
 

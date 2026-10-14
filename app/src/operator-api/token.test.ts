@@ -91,9 +91,26 @@ describe("judging the configured operator token", () => {
       BETTER_AUTH_SECRET: SECRET,
     };
 
-    expect(operatorTokenProblem(env)).toBe("must differ from APP_SECRET");
-    expect(operatorTokenReuseProblem(env)).toBe("must differ from APP_SECRET");
+    expect(operatorTokenProblem(env)).toBe(
+      "must differ from BETTER_AUTH_SECRET",
+    );
+    expect(operatorTokenReuseProblem(env)).toBe(
+      "must differ from BETTER_AUTH_SECRET",
+    );
     expect(configuredOperatorToken(env)).toBeUndefined();
+  });
+
+  // #275-T02
+  it("still refuses the old master key variable while APP_SECRET is set, naming the variable that matched", () => {
+    const env = {
+      OPERATOR_API_TOKEN: SECRET,
+      APP_SECRET: "a-different-master-key-0123456789-0123456789",
+      BETTER_AUTH_SECRET: SECRET,
+    };
+
+    expect(operatorTokenProblem(env)).toBe(
+      "must differ from BETTER_AUTH_SECRET",
+    );
   });
 
   // #275-T02
