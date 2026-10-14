@@ -97,7 +97,9 @@ test.describe("a pull request on its way to a Dynamic Review summary", () => {
   test.beforeAll(async ({ browser, baseURL }) => {
     if (baseURL === undefined)
       throw new Error("The journey project has no baseURL.");
-    llm = await startLlmFake();
+    // At the address the app asks for the metadata of the Dynamic model it saves (#269).
+    llm = await startLlmFake({ port: e2eEnv.modelLlmFakePort });
+    llm.setModel(MODEL, [{ supported_parameters: ["tools", "tool_choice"] }]);
     // The real Dynamic runner: root, the capabilities of the container, the self-check on the pinned files.
     runner = await startDynamicRunner({
       appUrl: baseURL,

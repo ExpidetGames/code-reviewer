@@ -40,9 +40,32 @@ export const REVIEW_SETTING_ISSUE_CODES = [
    * Reported on `maxTokens` when the request sets it, otherwise on the model that became too small.
    */
   "EXCEEDS_MODEL_CONTEXT",
+  /**
+   * The provider's model metadata lists no endpoint with both `tools` and `tool_choice` for the Dynamic model
+   * of a save; Dynamic Review needs tool calling (#269). Never reported by the validation itself.
+   */
+  "DYNAMIC_MODEL_TOOLS_UNSUPPORTED",
+  /** The provider has no such model (#269). Never reported by the validation itself. */
+  "DYNAMIC_MODEL_UNKNOWN",
 ] as const;
 export type ReviewSettingIssueCode =
   (typeof REVIEW_SETTING_ISSUE_CODES)[number];
+
+export const REVIEW_SETTING_WARNING_CODES = [
+  /**
+   * The Dynamic model of a save could not be checked against the provider's metadata (unreachable, slow, an
+   * answer that could not be read). The save went through; the run-time check still applies (#269).
+   */
+  "DYNAMIC_MODEL_UNVERIFIED",
+] as const;
+export type ReviewSettingWarningCode =
+  (typeof REVIEW_SETTING_WARNING_CODES)[number];
+
+/** A note on a save that succeeded. */
+export type ReviewSettingWarning = {
+  field: ReviewSettingIssue["field"];
+  code: ReviewSettingWarningCode;
+};
 
 export type ReviewSettingIssue = {
   /** The field the problem is about; `settings` when it is about the whole object. */

@@ -914,3 +914,86 @@ describe("the composition of the form for both kinds after the command removal",
     },
   );
 });
+
+// #269-T05 #269-T06 #269-T07
+describe("the outcomes of the check of the Dynamic model", () => {
+  async function saveModel(
+    result: Awaited<ReturnType<SettingsApi["save"]>>,
+  ): Promise<HTMLElement> {
+    const user = userEvent.setup();
+    const { api } = fakeApi(result);
+    renderForm(projectModel({}, dynamicView({ reviewKind: "dynamic" })), api);
+    const model = screen.getByLabelText("Dynamic Review model");
+    await user.clear(model);
+    await user.type(model, "vendor/agent-1");
+    await user.click(screen.getByRole("button", SAVE));
+    return model;
+  }
+
+  it("says in plain words that a model without tool calling cannot be used, next to the field", async () => {
+    const model = await saveModel({
+      ok: false,
+      status: 400,
+      code: "REVIEW_SETTINGS_INVALID",
+      issues: [
+        { field: "dynamicModel", code: "DYNAMIC_MODEL_TOOLS_UNSUPPORTED" },
+      ],
+    });
+
+    await waitFor(() => expect(document.activeElement).toBe(model));
+    const field = model.closest("[data-field]") as HTMLElement;
+    expect(
+      within(field).getByText(/does not support tool calling/),
+    ).toBeTruthy();
+    expect(screen.queryByText(/DYNAMIC_MODEL/)).toBeNull();
+    expect(screen.queryByText(/Saved\./)).toBeNull();
+  });
+
+  it("says in plain words that the provider does not know the model, next to the field", async () => {
+    const model = await saveModel({
+      ok: false,
+      status: 400,
+      code: "REVIEW_SETTINGS_INVALID",
+      issues: [{ field: "dynamicModel", code: "DYNAMIC_MODEL_UNKNOWN" }],
+    });
+
+    await waitFor(() => expect(document.activeElement).toBe(model));
+    const field = model.closest("[data-field]") as HTMLElement;
+    expect(within(field).getByText(/no model with this name/)).toBeTruthy();
+    expect(screen.queryByText(/DYNAMIC_MODEL/)).toBeNull();
+  });
+
+  it("confirms the save and says the model could not be checked when the provider could not be asked", async () => {
+    const saved = projectModel(
+      {},
+      dynamicView({ reviewKind: "dynamic", dynamicModel: "vendor/agent-1" }),
+    );
+    await saveModel({
+      ok: true,
+      data: {
+        ...answerFor(saved),
+        warnings: [{ field: "dynamicModel", code: "DYNAMIC_MODEL_UNVERIFIED" }],
+      },
+    });
+
+    const status = await screen.findByText(/Saved\./);
+    expect(status).toBeTruthy();
+    const warning = screen.getByText(/could not be checked for tool support/);
+    expect(warning.textContent).toMatch(/fails/);
+    expect(screen.queryByText(/DYNAMIC_MODEL/)).toBeNull();
+  });
+
+  it("shows no warning for a save without one", async () => {
+    const saved = projectModel(
+      {},
+      dynamicView({ reviewKind: "dynamic", dynamicModel: "vendor/agent-1" }),
+    );
+    await saveModel({
+      ok: true,
+      data: { ...answerFor(saved), warnings: [] },
+    });
+
+    await screen.findByText(/Saved\./);
+    expect(screen.queryByText(/could not be checked/)).toBeNull();
+  });
+});
