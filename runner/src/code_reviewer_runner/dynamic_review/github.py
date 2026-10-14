@@ -17,7 +17,7 @@ import json
 import re
 import urllib.error
 import urllib.request
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
@@ -109,6 +109,7 @@ class HttpCommentsClient:
         token: str,
         *,
         request_timeout: float = 30.0,
+        time_left: Callable[[], float] | None = None,
     ) -> None:
         if not _REPOSITORY.fullmatch(repository):
             raise GitHubError(ErrorCode.GIT_PROVIDER_INIT, "the repository name is not owner/repo")
@@ -116,6 +117,9 @@ class HttpCommentsClient:
         self._repository = repository
         self._token = token
         self._timeout = request_timeout
+        # Seconds left of a caller's overall deadline (#201): no request starts after it and none
+        # may wait longer than what is left, however many pages the caller reads.
+        self._time_left = time_left
         self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirects)
 
     # -- the three calls ----------------------------------------------------------------------
@@ -187,8 +191,14 @@ class HttpCommentsClient:
                 "Content-Type": "application/json",
             },
         )
+        timeout = self._timeout
+        if self._time_left is not None:
+            left = self._time_left()
+            if left <= 0:
+                raise GitHubError(ErrorCode.GIT_UNAVAILABLE, "the time for reading GitHub ran out")
+            timeout = min(timeout, left)
         try:
-            with self._opener.open(request, timeout=self._timeout) as response:
+            with self._opener.open(request, timeout=timeout) as response:
                 return _Reply(
                     response.status, dict(response.headers), response.read(MAX_RESPONSE_BYTES)
                 )

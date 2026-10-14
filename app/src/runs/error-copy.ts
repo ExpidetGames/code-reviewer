@@ -66,7 +66,7 @@ export const ERROR_COPY: Readonly<Record<string, string>> = {
   runner_error: "The runner hit an unexpected error.",
   command_failed: "The review engine reported an error.",
   review_not_published:
-    "The review engine finished, but no review was posted on the pull request.",
+    "No review was posted on the pull request. Either the engine did not post one, or the earlier review on the pull request belongs to a commit this run cannot account for.",
   review_state_truncated:
     "The review was posted, but it grew past GitHub's comment size limit, so earlier findings are no longer tracked.",
   review_text_truncated:

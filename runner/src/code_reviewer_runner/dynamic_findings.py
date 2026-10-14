@@ -16,6 +16,7 @@ from collections.abc import Collection
 from dataclasses import dataclass
 from typing import Any
 
+from code_reviewer_runner.dynamic_review.tagescape import escape_text
 from code_reviewer_runner.result import ErrorCode
 
 MAX_FINDINGS = 30
@@ -108,6 +109,17 @@ def _string(data: dict[str, Any], key: str, *, max_chars: int) -> str:
     return value
 
 
+def _id(value: Any, *, field: str) -> str:
+    """A finding id or a resolved id. The prior state shows ids to the model with instruction-shaped
+    framing escaped (#243); an id the escape would change could never be named back as it is
+    stored, so it is not accepted."""
+    if not isinstance(value, str) or value == "" or len(value) > 128:
+        raise _invalid(f"{field} must be a non-empty string of at most 128 characters")
+    if escape_text(value) != value:
+        raise _invalid(f"{field} must not hold instruction-shaped framing")
+    return value
+
+
 def _integer(data: dict[str, Any], key: str) -> int:
     value = data.get(key)
     if isinstance(value, bool):
@@ -127,8 +139,7 @@ def _ids(value: Any) -> tuple[str, ...]:
         raise _invalid(f"resolvedIds may hold at most {MAX_RESOLVED_IDS} ids")
     ids: list[str] = []
     for entry in entries:
-        if not isinstance(entry, str) or entry == "" or len(entry) > 128:
-            raise _invalid("resolvedIds must hold non-empty ids")
+        entry = _id(entry, field="resolvedIds entry")
         if entry in ids:
             raise _invalid("resolvedIds must not repeat an id")
         ids.append(entry)
@@ -154,7 +165,7 @@ def _finding(
         },
         "",
     )
-    finding_id = _string(data, "id", max_chars=128)
+    finding_id = _id(data.get("id"), field="id")
     priority = data.get("priority")
     if not isinstance(priority, str) or priority not in PRIORITIES:
         raise _invalid("priority must be one of P0, P1, P2, P3")

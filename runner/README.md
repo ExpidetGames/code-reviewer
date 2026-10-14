@@ -299,11 +299,15 @@ input and the boundaries around it (the epic's binding decision). Modules:
   production preparer reads the job's own pull request with the job's token (title and body) and the
   active findings of the bot-owned persisted summary of that pull request (the publisher's own
   selection, validation and head accounting), inside the preparation after the isolation checks.
-  Both are untrusted data: capped in bytes (title 1 KiB, body 16 KiB, prior state 16 KiB, a cut says
-  so), their `<system-reminder>` and chat-template framing escaped like tool results (#232/#243),
-  then redacted and counted by the preparation and shown only in the fenced data blocks of the user
-  prompt. A corrupt or unaccountable state or a GitHub failure ends the job with its stable code;
-  an empty state is never substituted.
+  Both are untrusted data: their `<system-reminder>` and chat-template framing is escaped like tool
+  results (#232/#243), then they are capped in bytes (title 1 KiB, body 16 KiB, prior state 16 KiB,
+  a cut says so; escaped first, so the cap bounds the final size and a cut cannot leave half of a
+  tag), then redacted and counted by the preparation and shown only in the fenced data blocks of
+  the user prompt. A finding id that the escape would change is refused by the findings parser, so
+  every id in the prior state can be named back in `resolvedIds`. A corrupt or unaccountable state,
+  a GitHub failure or a read that takes longer than its own 60 s deadline (all requests together,
+  at most 10 s each) ends the job with its stable code (`git_unavailable` for the deadline); an
+  empty state is never substituted.
 - `dynamic_review/adapter.py` starts the engine in its own process group on a private loopback port
   (no ripgrep on the engine `PATH` is a refusal, because the pinned release would download one),
   waits for a healthy pinned server (short per-request timeouts: before its listening marker the server

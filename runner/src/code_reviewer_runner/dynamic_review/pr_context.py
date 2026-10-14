@@ -14,14 +14,24 @@ its byte budget:
   state.
 
 Everything read here is untrusted data (a person wrote the title and the body, a model wrote the
-earlier findings). It is capped in bytes first, so it counts against the review input bound as a
-small, fixed share, and its instruction-shaped framing (`<system-reminder>`, chat-template tokens)
-is escaped like tool results are (#232/#243, `tagescape.py`). It then travels only in the fenced,
-digest-closed data blocks of the user prompt (#198); it never reaches the system prompt, the
-engine config, a command or a permission.
+earlier findings). Its instruction-shaped framing (`<system-reminder>`, chat-template tokens) is
+escaped like tool results are (#232/#243, `tagescape.py`), and then it is capped in bytes, so the
+cap bounds the final size even after `<` has grown to `&lt;` and a cut can never leave half of a
+tag. It counts against the review input bound as a small, fixed share. It then travels only in the
+fenced, digest-closed data blocks of the user prompt (#198); it never reaches the system prompt,
+the engine config, a command or a permission.
+
+The whole read has its own deadline (`CONTEXT_DEADLINE_SECONDS`, across every request and every
+page), far below the job's: a slow GitHub ends the preparation with `git_unavailable` instead of
+holding the user lease and the slot.
+
+The prior state lists finding ids as the model stored them. They reach the model escaped like the
+rest, so an id that the escape would change could never be named back in `resolvedIds`; the
+findings parser therefore refuses such an id (`dynamic_findings.py`), and none is ever stored.
 """
 
 import json
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
@@ -46,6 +56,11 @@ MAX_TITLE_BYTES = 1024
 MAX_BODY_BYTES = 16 * 1024
 MAX_PRIOR_STATE_BYTES = 16 * 1024
 TRUNCATION_MARKER = "\n[cut by the runner: longer than the review input allows]"
+# All the requests of one context read together (the pull request and every page of comments), and
+# the longest any one of them may wait. The job's own deadline is far longer; this read must not
+# spend it, nor hold the user lease and the slot, on a slow GitHub.
+CONTEXT_DEADLINE_SECONDS = 60.0
+CONTEXT_REQUEST_TIMEOUT_SECONDS = 10.0
 
 
 @dataclass(frozen=True)
@@ -76,6 +91,8 @@ def _capped(text: str, cap: int) -> str:
 
 
 def _untrusted(text: str, cap: int) -> str:
+    # Escape, then cap: the cap bounds the final size, and a cut inside `&lt;` or at a lone `<`
+    # cannot form a tag.
     return _capped(escape_text(text), cap)
 
 
@@ -98,23 +115,37 @@ def load_context(
     *,
     client: ContextClient | None = None,
     cancelled: Callable[[], bool] = lambda: False,
+    deadline_seconds: float = CONTEXT_DEADLINE_SECONDS,
+    clock: Callable[[], float] = time.monotonic,
 ) -> PreparationContext:
     """Read the title, body and prior state of the job's own pull request, or fail closed.
 
     Only the repository and the pull request the claim names are read, with the job's token and the
     publisher's own comment selection. A failure is a `CheckoutError` with the stable code; its
-    text never carries a value from GitHub.
+    text never carries a value from GitHub. The whole read must end within `deadline_seconds`.
     """
     base = job.base
     if base is None:
         raise CheckoutError(ErrorCode.DYNAMIC_POLICY_VIOLATION)
-    client = client or HttpCommentsClient(job.git.base_url, base.repository, job.git.token)
+    deadline = clock() + deadline_seconds
+
+    def time_left() -> float:
+        return deadline - clock()
+
     try:
+        client = client or HttpCommentsClient(
+            job.git.base_url,
+            base.repository,
+            job.git.token,
+            request_timeout=CONTEXT_REQUEST_TIMEOUT_SECONDS,
+            time_left=time_left,
+        )
         publisher = publisher_for(job, client)
-        _not_cancelled(cancelled)
+        _may_continue(cancelled, time_left)
         text = client.get_pull_request(publisher.pr_number)
-        _not_cancelled(cancelled)
+        _may_continue(cancelled, time_left)
         state = publisher.read_previous_state(base.head_sha, base.previous_reviewed_sha)
+        _may_continue(cancelled, time_left)
     except (GitHubError, PublishError) as error:
         raise CheckoutError(error.code) from None
     return PreparationContext(
@@ -122,6 +153,8 @@ def load_context(
     )
 
 
-def _not_cancelled(cancelled: Callable[[], bool]) -> None:
+def _may_continue(cancelled: Callable[[], bool], time_left: Callable[[], float]) -> None:
     if cancelled():
         raise CheckoutError()
+    if time_left() <= 0:
+        raise CheckoutError(ErrorCode.GIT_UNAVAILABLE)

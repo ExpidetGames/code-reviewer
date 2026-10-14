@@ -60,6 +60,17 @@ describe("the sentences for error codes", () => {
     );
   });
 
+  // #201-T20
+  it("does not say the engine ran when review_not_published can come from the preparation", () => {
+    const { text } = describeErrorCode("review_not_published");
+
+    // The Dynamic preparation raises this code before any engine starts, when the earlier review
+    // on the pull request cannot be used as the starting point.
+    expect(text).not.toMatch(/engine finished/i);
+    expect(text).toMatch(/earlier review/i);
+    expect(text).toMatch(/no review was posted/i);
+  });
+
   it("has no sentence for a code that does not exist", () => {
     const extra = Object.keys(ERROR_COPY).filter(
       (code) => !ALL_CODES.includes(code),

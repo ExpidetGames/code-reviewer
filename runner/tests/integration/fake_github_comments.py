@@ -11,6 +11,7 @@ then lose the answer, which is what a retry must survive.
 import json
 import re
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, cast
 from urllib.parse import parse_qs, urlsplit
@@ -30,6 +31,8 @@ class FakeGithubComments:
         self.requests: list[tuple[str, str]] = []
         self.faults: dict[str, tuple[int, dict[str, str]]] = {}
         self.ambiguous_create = False
+        # Seconds every answer is held back (a slow GitHub), applied before the request is served.
+        self.delay = 0.0
         self._next_id = 1
         self._server: ThreadingHTTPServer | None = None
         self._lock = threading.Lock()
@@ -112,6 +115,8 @@ class FakeGithubComments:
 
     def _route(self, method: str, request: BaseHTTPRequestHandler) -> None:
         parsed = urlsplit(request.path)
+        if self.delay:
+            time.sleep(self.delay)
         with self._lock:
             self.requests.append((method, request.path))
             fault = self.faults.pop(method, None)
