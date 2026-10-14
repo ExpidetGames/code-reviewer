@@ -46,7 +46,7 @@ from code_reviewer_runner.job import parse_job
 from code_reviewer_runner.result import ErrorCode
 
 
-def job_for(
+def job_document(
     upstream_url: str,
     *,
     model: str = "deepseek-v4.1-flash",
@@ -55,40 +55,40 @@ def job_for(
     pr_url: str = "https://github.com/octo/repo/pull/7",
     git_base_url: str = "https://api.github.com",
     git_token: str = "dummy-installation-token-0123456789",
-) -> Any:
-    return parse_job(
-        json.dumps(
-            {
-                "prUrl": pr_url,
-                "command": "review",
-                "reviewKind": "dynamic",
-                "dynamic": {
-                    "model": model,
-                    "skill": "Look.",
-                    "limits": {"maxFindings": 5},
-                },
-                "base": {
-                    "repository": "octo/repo",
-                    "baseRef": "main",
-                    "headSha": HEAD,
-                    "previousReviewedSha": None,
-                    "comparison": "full",
-                },
-                "git": {
-                    "provider": "github",
-                    "baseUrl": git_base_url,
-                    "token": git_token,
-                    "botLogin": "code-reviewer[bot]",
-                },
-                "llm": {
-                    "provider": "openrouter",
-                    "model": upstream_model,
-                    "apiKey": api_key,
-                    "baseUrl": upstream_url,
-                },
-            }
-        )
-    )
+) -> dict[str, Any]:
+    return {
+        "prUrl": pr_url,
+        "command": "review",
+        "reviewKind": "dynamic",
+        "dynamic": {
+            "model": model,
+            "skill": "Look.",
+            "limits": {"maxFindings": 5},
+        },
+        "base": {
+            "repository": "octo/repo",
+            "baseRef": "main",
+            "headSha": HEAD,
+            "previousReviewedSha": None,
+            "comparison": "full",
+        },
+        "git": {
+            "provider": "github",
+            "baseUrl": git_base_url,
+            "token": git_token,
+            "botLogin": "code-reviewer[bot]",
+        },
+        "llm": {
+            "provider": "openrouter",
+            "model": upstream_model,
+            "apiKey": api_key,
+            "baseUrl": upstream_url,
+        },
+    }
+
+
+def job_for(upstream_url: str, **options: Any) -> Any:
+    return parse_job(json.dumps(job_document(upstream_url, **options)))
 
 
 def content_at(export: Path) -> PreparedContent:

@@ -61,6 +61,12 @@ publishes as one persistent summary comment. The decisions are in epic
    place** by every later run (a person's comment that merely quotes the marker is never edited). It
    writes with the job's own installation token; the engine never sees it. A failed run writes
    nothing, a failed write fails the run with its own stable code, and the Run links the comment.
+   Right before the write the process asks the job loop whether the job is still its own (#260): the
+   loop beats the heart once and answers from the app (a lost lease and a cancelled job are both
+   409; a 5xx, a reset or a timeout is tried again up to three times within 40 seconds, and a 200
+   counts only as the contract's heartbeat answer for this job). Anything but a clear yes ends the
+   run with `lease_lost` and writes nothing, and so does a Dynamic job that was not handed the
+   channel at all.
 
 PR-Agent-only runners keep processing Diff jobs unchanged. A Dynamic-capable runner also serves Diff
 jobs.
@@ -270,6 +276,7 @@ tool, file and result-byte limits are enforced at the model proxy, before the re
 | `dynamic_engine_unavailable` | The runner got a Dynamic job but has no engine | The job should only reach a capable runner; report it |
 | `dynamic_isolation_self_check_failed` | The startup self-check did not prove user, export and network | The runner logs the failed property, never a value |
 | `dynamic_model_features_unsupported` | The model or destination lacks tool choice or structured output | `RUNNER_DYNAMIC_CAPABILITIES`, the model |
+| `lease_lost` | Right before the summary would have been written the job was no longer held by this runner (lease lost, job cancelled), or the app could not be asked; nothing was written | Normal after a requeue or a cancel. Often: the app was unreachable at that moment; the next push reviews again |
 | `dynamic_config_invalid` | Model, skill or limits of the job are unusable | The project's settings page |
 | `dynamic_budget_exceeded`, `dynamic_accounting_failed`, `dynamic_policy_violation` | A hard limit or rule stopped the run | The Runs page |
 
@@ -441,6 +448,10 @@ by the defaults.
   is not part of the state, so the next normal run renders without it. A comment that is not the bot's, a corrupt state and a claim that was not
   truncated stay fail-closed. Residual risk: on a truncated claim a late result of an older run can no
   longer be told from a lost head and may overwrite a newer review; the next push reviews again.
+  Since #260 the run asks for its lease right before it writes (see "How a Dynamic job reaches an
+  engine"), so only a run that loses the lease *after* that check and before its write lands (a few
+  requests of GitHub) can still overwrite; the check is not a lock and the write is not fenced by the
+  app. The check also makes a run on a plain (not truncated) claim publish nothing as a zombie.
   A lost edit response is recognised by re-reading the comment (it must hold exactly the body sent).
 - **Hidden Unicode tag characters in repository files reach the model untouched (#247).** An attacker
   who controls repository text can hide instructions in tag characters.

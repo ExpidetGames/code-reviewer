@@ -58,6 +58,9 @@ class ErrorCode(StrEnum):
     DYNAMIC_BUDGET_EXCEEDED = "dynamic_budget_exceeded"
     DYNAMIC_ACCOUNTING_FAILED = "dynamic_accounting_failed"
     DYNAMIC_MODEL_FEATURES_UNSUPPORTED = "dynamic_model_features_unsupported"
+    # The job is not ours any more (its lease was lost, or it was cancelled), or that could not be
+    # confirmed right before the summary would have been written (#260). Nothing was written.
+    LEASE_LOST = "lease_lost"
     UNKNOWN = "unknown"
 
 
