@@ -88,6 +88,11 @@ export type FakeGithubOptions = {
    * and the API address of a job are on the same host. Default false.
    */
   selfLinks?: boolean;
+  /**
+   * The address the links of comments (`html_url`) point to, for example `https://github.com`: what a real
+   * GitHub answers with whatever API address is used. Default: the same as the other links. GitHub App API only.
+   */
+  commentLinks?: string;
   /** Default 127.0.0.1. */
   host?: string;
   /** Default 0: a free port. */
@@ -211,6 +216,9 @@ export async function startGithubFake(
             ...(options.selfLinks === true
               ? { webBase: () => baseUrl, apiBase: () => baseUrl }
               : {}),
+            ...(options.commentLinks === undefined
+              ? {}
+              : { commentWebBase: options.commentLinks }),
           },
           registry,
         )

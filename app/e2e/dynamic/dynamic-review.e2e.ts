@@ -337,6 +337,15 @@ test.describe("a pull request on its way to a Dynamic Review summary", () => {
     await expect(
       detail.getByRole("link", { name: "Open the comment on GitHub" }),
     ).toHaveAttribute("href", summary?.htmlUrl ?? "missing");
+    expect(summary?.htmlUrl).toMatch(
+      /^https:\/\/github\.com\/dynamic-journey\/widgets\/pull\/\d+#issuecomment-\d+$/,
+    );
+    await expect(
+      detail.getByRole("link", { name: `#${String(number)} on GitHub` }),
+    ).toHaveAttribute(
+      "href",
+      `https://github.com/${WIDGETS.fullName}/pull/${String(number)}`,
+    );
 
     // The fix is pushed: the same comment is edited and shows the finding as resolved.
     const fixed = repo().commit(

@@ -32,7 +32,9 @@ const PULL: FakePullRequest = {
   author: { login: "alice", id: 1001 },
 };
 
-async function setup(options: { selfLinks?: boolean } = {}) {
+async function setup(
+  options: { selfLinks?: boolean; commentLinks?: string } = {},
+) {
   const fake = await startGithubFake({
     appId: TEST_APP_ID,
     publicKeyPem: testAppKeys().publicKey,
@@ -345,5 +347,35 @@ describe("comments below a pull request", () => {
     );
 
     expect(answer.status).toBe(401);
+  });
+});
+
+describe("the links of comments", () => {
+  // #253-F06
+  it("can point to github.com while every other link stays on the fake, like the links a real GitHub answers with", async () => {
+    const { fake, client } = await setup({
+      selfLinks: true,
+      commentLinks: "https://github.com",
+    });
+    const token = await tokenWith(client, REVIEWER);
+
+    const created = await call(
+      fake,
+      token,
+      "POST",
+      "/repos/acme/widgets/issues/7/comments",
+      { body: "review" },
+    );
+    const pull = await call(fake, token, "GET", "/repos/acme/widgets/pulls/7");
+
+    expect((created.json as Json).html_url).toMatch(
+      /^https:\/\/github\.com\/acme\/widgets\/pull\/7#issuecomment-\d+$/,
+    );
+    expect((pull.json as Json).html_url).toBe(
+      `${fake.baseUrl}/acme/widgets/pull/7`,
+    );
+    expect(fake.pullRequestComments("acme/widgets", 7)[0]?.htmlUrl).toBe(
+      (created.json as Json).html_url,
+    );
   });
 });

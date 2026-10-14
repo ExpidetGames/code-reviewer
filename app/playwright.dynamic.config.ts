@@ -90,6 +90,8 @@ export default defineConfig({
         // The links of the fake point to the fake, so that a pull request and the API address of a job
         // are on one host, which the runner demands.
         GITHUB_FAKE_SELF_LINKS: "true",
+        // The comments carry github.com links, like a real GitHub's (the Runs page links only to those).
+        GITHUB_FAKE_COMMENT_LINKS: "https://github.com",
       },
       url: `${e2eEnv.githubUrl}/__fake/health`,
       reuseExistingServer: false,

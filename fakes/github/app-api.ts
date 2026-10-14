@@ -130,6 +130,8 @@ export type FakeAppOptions = {
   webBase?: () => string;
   /** The address of the REST API in `url` fields. Default the same as `webBase`. */
   apiBase?: () => string;
+  /** The address the links of comments point to (`html_url`), no trailing slash. Default `webBase`. */
+  commentWebBase?: string;
 };
 
 export type FakeTokenRequest = {
@@ -295,9 +297,13 @@ export function createAppPart(
   const now = options.now ?? Date.now;
   const webBase = options.webBase ?? (() => DEFAULT_WEB_BASE);
   const apiBase = options.apiBase ?? webBase;
+  const { commentWebBase } = options;
   const review = createReviewApi({
     webBase,
     apiBase,
+    ...(commentWebBase === undefined
+      ? {}
+      : { commentWebBase: () => commentWebBase }),
     botLogin: `${options.appSlug ?? "fake-app"}[bot]`,
   });
 
