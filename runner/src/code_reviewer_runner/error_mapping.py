@@ -10,8 +10,10 @@ Exceptions are matched by class name and attributes instead of imported classes,
 no dependency on litellm, openai or PyGithub being importable.
 """
 
+import json
 import re
 from collections.abc import Sequence
+from typing import Any
 
 from code_reviewer_runner.result import ErrorCode
 
@@ -55,6 +57,39 @@ def llm_status_code(status: int) -> ErrorCode | None:
     if code is not None:
         return code
     return ErrorCode.LLM_UNAVAILABLE if status >= 500 else None
+
+
+# The ways providers say that a request does not fit the model's context: OpenAI's error code, and
+# the texts of OpenRouter and of the providers behind it ("maximum context length is N tokens",
+# "prompt is too long", "exceeds the context window").
+_CONTEXT_LENGTH = re.compile(
+    r"context[_ ]length|context window|prompt is too long|input is too long", re.IGNORECASE
+)
+_CONTEXT_LENGTH_STATUSES = frozenset({400, 413})
+
+
+def is_context_length_exceeded(status: int, text: str) -> bool:
+    """True for a provider answer that says the request is larger than the model's context.
+
+    Only for a status a provider uses for it (400, 413), and only what the provider says in its own
+    error fields counts: `error.code` and `error.message` (or `error` itself when it is the text).
+    The same words elsewhere in the answer (an echo of the request, a nested payload, a pull
+    request quoted back) are no reason, and an answer that is no JSON object is not read at all.
+    Anything else stays `llm_bad_request`.
+    """
+    if status not in _CONTEXT_LENGTH_STATUSES:
+        return False
+    try:
+        document = json.loads(text)
+    except ValueError:
+        return False
+    if not isinstance(document, dict):
+        return False
+    error: Any = document.get("error")  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
+    fields: list[Any] = [error]
+    if isinstance(error, dict):
+        fields = [error.get("code"), error.get("message")]  # pyright: ignore[reportUnknownMemberType]
+    return any(isinstance(f, str) and _CONTEXT_LENGTH.search(f) for f in fields)
 
 
 _GITHUB_STATUS = {

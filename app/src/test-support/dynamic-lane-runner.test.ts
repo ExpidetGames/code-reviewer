@@ -70,6 +70,10 @@ describe("the runner of the privileged Dynamic e2e lane", () => {
       tool_choice_required: true,
       structured_output: true,
       max_output_tokens: 4096,
+      // A descriptor that is set wins over the built-in one, prices included, and a model
+      // without unit costs does not run (#290).
+      input_usd_per_mtok: 1,
+      output_usd_per_mtok: 4,
     });
     expect(environment.PR_AGENT_COMMAND).toContain(OPTIONS.wrapper);
     expect(environment.PR_AGENT_COMMAND).toContain(OPTIONS.llmBaseUrl);

@@ -54,11 +54,17 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request
 
 from code_reviewer_runner.dynamic_review.audit import ToolAudit
-from code_reviewer_runner.dynamic_review.budget import BudgetLedger, LimitError, exact_cost
+from code_reviewer_runner.dynamic_review.budget import (
+    DEFAULT_WINDOW_TOKENS,
+    BudgetLedger,
+    LimitError,
+    UnitCosts,
+    exact_cost,
+)
 from code_reviewer_runner.dynamic_review.completion_stream import completion_as_stream
 from code_reviewer_runner.dynamic_review.config import PROXY_CAPABILITY_BYTES, PROXY_PROVIDER_ID
 from code_reviewer_runner.dynamic_review.net import no_redirect_opener
-from code_reviewer_runner.error_mapping import llm_status_code
+from code_reviewer_runner.error_mapping import is_context_length_exceeded, llm_status_code
 from code_reviewer_runner.job_loop.jsonvalues import as_object
 from code_reviewer_runner.openrouter_parameters import (
     REQUIRE_PARAMETERS,
@@ -120,6 +126,12 @@ class DynamicCapabilities:
     tool_choice_required: bool
     structured_output: bool
     max_output_tokens: int
+    # The model's context window in tokens: what a request and its output allowance must fit. It
+    # belongs to the model, not to the project (the Diff "Token budget" is a different thing and
+    # plays no part here). A descriptor that omits it gets the conservative default.
+    context_window_tokens: int = DEFAULT_WINDOW_TOKENS
+    # What a call reserves before it is sent. Optional: without it a call reserves a floor.
+    unit_costs: UnitCosts | None = None
 
     def check_required(self) -> None:
         if not self.tool_choice_required:
@@ -137,6 +149,11 @@ class DynamicCapabilities:
                 ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED,
                 "the configured model has no usable output bound",
             )
+        if self.context_window_tokens <= self.max_output_tokens:
+            raise LimitError(
+                ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED,
+                "the configured model has no usable context window",
+            )
 
 
 # The model id the app ships as the default Dynamic model (`DEFAULT_DYNAMIC_MODEL` in
@@ -145,8 +162,19 @@ class DynamicCapabilities:
 # structured outputs are supported. It ships with the image, so a fix reaches every deployment with
 # the next build, whatever a platform stored as a variable.
 DEFAULT_DYNAMIC_MODEL = "deepseek/deepseek-v4.1-flash"
+# The window and the unit costs are the ones OpenRouter's public model list gives for it
+# (https://openrouter.ai/api/v1/models, read on 2026-10-14: context_length 1048576, pricing prompt
+# 0.00000002016 and completion 0.000000891 USD per token). They only size a reservation: a window
+# the provider does not really give ends in its own context error, and the cost of a call is
+# always the `usage.cost` it reports.
 DEFAULT_MODEL_CAPABILITIES = DynamicCapabilities(
-    tool_choice_required=True, structured_output=True, max_output_tokens=8192
+    tool_choice_required=True,
+    structured_output=True,
+    max_output_tokens=8192,
+    context_window_tokens=1_048_576,
+    unit_costs=UnitCosts(
+        input_usd_per_mtok=Decimal("0.02016"), output_usd_per_mtok=Decimal("0.891")
+    ),
 )
 
 
@@ -191,7 +219,37 @@ def capabilities_from_config(raw: str | None, model: str | None = None) -> Dynam
         tool_choice_required=document.get("tool_choice_required") is True,
         structured_output=document.get("structured_output") is True,
         max_output_tokens=output,
+        context_window_tokens=_window(document),
+        unit_costs=_unit_costs(document),
     )
+
+
+def _unusable(detail: str) -> LimitError:
+    return LimitError(ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED, detail)
+
+
+def _window(document: dict[str, Any]) -> int:
+    if "context_window_tokens" not in document:
+        return DEFAULT_WINDOW_TOKENS
+    window: Any = document["context_window_tokens"]
+    if isinstance(window, bool) or not isinstance(window, int) or window < 1:
+        raise _unusable("the capability descriptor has no usable context window")
+    return window
+
+
+def _unit_costs(document: dict[str, Any]) -> UnitCosts | None:
+    present = {"input_usd_per_mtok", "output_usd_per_mtok"} & document.keys()
+    if not present:
+        return None
+    if len(present) == 1:
+        raise _unusable("the capability descriptor names only one of the two unit costs")
+    costs: list[Decimal] = []
+    for key in ("input_usd_per_mtok", "output_usd_per_mtok"):
+        value = exact_cost(document[key])
+        if value is None:
+            raise _unusable("the capability descriptor has an unusable unit cost")
+        costs.append(value)
+    return UnitCosts(input_usd_per_mtok=costs[0], output_usd_per_mtok=costs[1])
 
 
 @dataclass(frozen=True)
@@ -483,6 +541,11 @@ class ModelProxy:
         ):
             code = ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED
             return error_body(code, "no provider supports every parameter of the request"), code
+        # The request does not fit the model's context: the real limit of the provider, behind the
+        # estimate and the window check of the ledger. A code of its own, not a bad request.
+        if is_context_length_exceeded(status, body.decode("utf-8", errors="replace")):
+            code = ErrorCode.LLM_CONTEXT_LENGTH_EXCEEDED
+            return error_body(code, "the request is larger than the model's context"), code
         # The static path's table (error_mapping.py); a status it has no rule for is a bad request.
         code = llm_status_code(status) or ErrorCode.LLM_BAD_REQUEST
         return error_body(code, "the model provider refused the request"), code
