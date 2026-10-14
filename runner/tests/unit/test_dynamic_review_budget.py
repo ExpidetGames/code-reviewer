@@ -485,6 +485,7 @@ def test_a_negative_zero_is_a_cost_of_plain_zero() -> None:
     subject = ledger()
     settled(subject, cost)
     reported = subject.usage("vendor/model").cost_usd
+    assert reported is not None
     assert reported == 0.0 and math.copysign(1.0, reported) == 1.0
 
 
