@@ -599,6 +599,23 @@ describe("compose.coolify.yml runner-dynamic", () => {
     expect(read(".env.example")).toMatch(/^#?\s?RUNNER_DYNAMIC_CAPABILITIES=/m);
   });
 
+  // #290-T11
+  it("passes the operator cost limit through with an empty default, in both files and the example", () => {
+    const value = coolifyDynamic().environment?.RUNNER_DYNAMIC_MAX_COST_USD;
+
+    expect(value).toBe("${RUNNER_DYNAMIC_MAX_COST_USD:-}");
+    expect(runnerDynamic().environment?.RUNNER_DYNAMIC_MAX_COST_USD).toBe(
+      value,
+    );
+    // The default and the ceiling are in the runner, not in deployment files: a value written
+    // here would win over a later fix of the default.
+    expect(coolifySource).not.toMatch(
+      /RUNNER_DYNAMIC_MAX_COST_USD:\s*\$\{[^}]*:-[0-9]/,
+    );
+    expect(read(".env.example")).toMatch(/^# RUNNER_DYNAMIC_MAX_COST_USD=$/m);
+    expect(read(".env.example")).not.toMatch(/^RUNNER_DYNAMIC_MAX_COST_USD=/m);
+  });
+
   // #264-T08
   it("says in its comments that the Dynamic runner is part of this file and that the gate keeps it off", () => {
     const header = coolifySource.split("\n").slice(0, 40).join("\n");

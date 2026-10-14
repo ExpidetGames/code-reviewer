@@ -10,12 +10,19 @@ stable code; nothing falls back to another model, provider or engine.
 
 import http.client
 import json
+from decimal import Decimal
 from typing import Any
 from urllib.error import URLError
 
 import pytest
 
-from code_reviewer_runner.dynamic_review.budget import BudgetLedger, DynamicLimits, LimitError
+from code_reviewer_runner.dynamic_review.budget import (
+    DEFAULT_WINDOW_TOKENS,
+    BudgetLedger,
+    DynamicLimits,
+    LimitError,
+    UnitCosts,
+)
 from code_reviewer_runner.dynamic_review.config import new_proxy_capability
 from code_reviewer_runner.dynamic_review.proxy import (
     DEFAULT_DYNAMIC_MODEL,
@@ -35,6 +42,10 @@ CAPABILITIES = json.dumps(
 )
 
 
+# 1 USD per million input tokens, 4 USD per million output tokens: a call has a price.
+UNIT_COSTS = UnitCosts(input_usd_per_mtok=Decimal(1), output_usd_per_mtok=Decimal(4))
+
+
 class Upstream:
     """A stand-in for the provider: records what it got, answers what the test scripts."""
 
@@ -52,11 +63,13 @@ class Upstream:
         return self.status, json.dumps(self.body).encode("utf-8")
 
 
-def answer_with_usage(prompt: int = 10, completion: int = 5) -> dict[str, Any]:
+def answer_with_usage(
+    prompt: int = 10, completion: int = 5, cost: float | None = 0.0001
+) -> dict[str, Any]:
     return {
         "id": "chatcmpl-1",
         "choices": [{"message": {"role": "assistant", "content": "{}"}}],
-        "usage": {"prompt_tokens": prompt, "completion_tokens": completion},
+        "usage": {"prompt_tokens": prompt, "completion_tokens": completion, "cost": cost},
     }
 
 
@@ -73,7 +86,7 @@ def request_body(*, model: str = "deepseek/deepseek-v4.1-flash", **extra: Any) -
 
 def proxy(upstream: UpstreamPost, **overrides: Any) -> ModelProxy:
     configured: dict[str, Any] = {
-        "ledger": BudgetLedger(DynamicLimits()),
+        "ledger": BudgetLedger(DynamicLimits(), unit_costs=UNIT_COSTS),
         "base_path": "/v1",
         "model": "deepseek/deepseek-v4.1-flash",
         "upstream_url": "https://openrouter.ai/api/v1/chat/completions",
@@ -133,6 +146,154 @@ def test_a_destination_that_cannot_serve_the_required_features_is_refused() -> N
         with pytest.raises(LimitError) as refused:
             proxy(Upstream(), capabilities=capabilities_from_config(document))
         assert refused.value.code is ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED
+
+
+# #290-T01
+def test_the_default_model_has_a_built_in_window_and_unit_costs() -> None:
+    capabilities = capabilities_from_config(None, model=DEFAULT_DYNAMIC_MODEL)
+
+    # The window OpenRouter's public model list gives for the default model (checked 2026-10-14).
+    assert capabilities.context_window_tokens == 1_048_576
+    assert capabilities.unit_costs is not None
+    assert capabilities.unit_costs.input_usd_per_mtok > 0
+    assert capabilities.unit_costs.output_usd_per_mtok > 0
+    capabilities.check_required()
+
+
+# #290-T01
+def test_an_operator_descriptor_sets_the_window_and_the_unit_costs() -> None:
+    capabilities = capabilities_from_config(
+        json.dumps(
+            {
+                "tool_choice_required": True,
+                "structured_output": True,
+                "max_output_tokens": 4096,
+                "context_window_tokens": 200_000,
+                "input_usd_per_mtok": 0.5,
+                "output_usd_per_mtok": 2,
+            }
+        ),
+        model="acme/large",
+    )
+
+    assert capabilities.context_window_tokens == 200_000
+    assert capabilities.unit_costs == UnitCosts(Decimal("0.5"), Decimal("2"))
+
+
+# #290-T01
+def test_a_descriptor_without_a_window_or_unit_costs_gets_the_conservative_defaults() -> None:
+    capabilities = capabilities_from_config(CAPABILITIES, model="acme/large")
+
+    assert capabilities.context_window_tokens == DEFAULT_WINDOW_TOKENS
+    assert capabilities.unit_costs is None
+
+
+def descriptor(**extra: Any) -> str:
+    return json.dumps(
+        {"tool_choice_required": True, "structured_output": True, "max_output_tokens": 4096} | extra
+    )
+
+
+# #290-T01
+@pytest.mark.parametrize("window", [True, 0, -5, "200000", 1.5, None, [], 4096])
+def test_an_unusable_window_is_refused_not_defaulted(window: Any) -> None:
+    # 4096 is not larger than the output allowance: no room for a request.
+    with pytest.raises(LimitError) as refused:
+        capabilities_from_config(descriptor(context_window_tokens=window)).check_required()
+    assert refused.value.code is ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED
+
+
+# #290-T01
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"input_usd_per_mtok": 1},
+        {"output_usd_per_mtok": 1},
+        {"input_usd_per_mtok": -1, "output_usd_per_mtok": 1},
+        {"input_usd_per_mtok": "1", "output_usd_per_mtok": 1},
+        {"input_usd_per_mtok": True, "output_usd_per_mtok": 1},
+        {"input_usd_per_mtok": None, "output_usd_per_mtok": 1},
+        {"input_usd_per_mtok": float("nan"), "output_usd_per_mtok": 1},
+        {"input_usd_per_mtok": float("inf"), "output_usd_per_mtok": 1},
+    ],
+)
+def test_unit_costs_must_be_both_present_and_non_negative_numbers(extra: dict[str, Any]) -> None:
+    with pytest.raises(LimitError) as refused:
+        capabilities_from_config(descriptor(**extra))
+    assert refused.value.code is ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED
+
+
+# #290-T06
+CONTEXT_LENGTH_BODIES: list[Any] = [
+    {"error": {"code": "context_length_exceeded", "message": "x"}},
+    {
+        "error": {
+            "code": 400,
+            "message": "This endpoint's maximum context length is 1048576 tokens.",
+        }
+    },
+    {"error": {"message": "prompt is too long: 250000 tokens > 200000 maximum"}},
+    {"error": {"message": "Input exceeds the context window of this model"}},
+    {"error": "This model's maximum context length is 8192 tokens"},
+]
+
+
+# #290-T06
+@pytest.mark.parametrize("body", CONTEXT_LENGTH_BODIES)
+def test_a_provider_context_overflow_has_its_own_stable_code(body: Any) -> None:
+    subject = proxy(Upstream(status=400, body=body))
+
+    response = post(subject, request_body())
+
+    assert response.status == 400
+    assert error_code(response) == ErrorCode.LLM_CONTEXT_LENGTH_EXCEEDED.value
+    # The provider's own message never reaches the engine.
+    assert b"maximum" not in response.body and b"250000" not in response.body
+    assert subject.ledger.failure is not None
+    assert subject.ledger.failure.code is ErrorCode.LLM_CONTEXT_LENGTH_EXCEEDED
+
+
+# #290-T06: only the provider's own error fields count. Text that is merely somewhere in the answer
+# (an echo of the request, a nested provider payload, a pull request quoted back) is not a reason.
+NOT_THE_PROVIDERS_REASON: list[Any] = [
+    {"error": {"message": "Invalid value for tool_choice"}, "echo": "the context length of it"},
+    {"error": {"message": "Invalid value", "metadata": {"raw": "maximum context length"}}},
+    {"error": {"message": "Invalid value", "param": "prompt is too long"}},
+    {"detail": "This model's maximum context length is 8192 tokens"},
+    {"error": {"message": ["maximum context length"]}},
+    ["maximum context length"],
+]
+
+
+# #290-T06
+@pytest.mark.parametrize("body", NOT_THE_PROVIDERS_REASON)
+def test_the_words_outside_the_providers_error_fields_do_not_make_a_context_overflow(
+    body: Any,
+) -> None:
+    subject = proxy(Upstream(status=400, body=body))
+
+    assert error_code(post(subject, request_body())) == ErrorCode.LLM_BAD_REQUEST.value
+
+
+# #290-T06
+def test_an_answer_that_is_no_json_is_no_context_overflow() -> None:
+    def upstream(url: str, body: bytes, headers: dict[str, str], limit: int) -> tuple[int, bytes]:
+        return 400, b"maximum context length is 8192 tokens"
+
+    assert error_code(post(proxy(upstream), request_body())) == ErrorCode.LLM_BAD_REQUEST.value
+
+
+# #290-T06
+def test_another_bad_request_and_other_statuses_keep_their_codes() -> None:
+    other = {"error": {"message": "Invalid value for tool_choice"}}
+    assert error_code(post(proxy(Upstream(status=400, body=other)), request_body())) == (
+        ErrorCode.LLM_BAD_REQUEST.value
+    )
+    # The phrase alone is no reason on a status that is not a bad request.
+    overflow = CONTEXT_LENGTH_BODIES[1]
+    assert error_code(post(proxy(Upstream(status=503, body=overflow)), request_body())) == (
+        ErrorCode.LLM_UNAVAILABLE.value
+    )
 
 
 # #197-T11
@@ -197,7 +358,9 @@ def test_a_request_that_names_another_model_is_refused_and_never_forwarded() -> 
 # #197-T12
 def test_a_request_over_the_protocol_byte_bound_is_refused_before_forwarding() -> None:
     upstream = Upstream()
-    subject = proxy(upstream, ledger=BudgetLedger(DynamicLimits(max_request_bytes=100)))
+    subject = proxy(
+        upstream, ledger=BudgetLedger(DynamicLimits(max_request_bytes=100), unit_costs=UNIT_COSTS)
+    )
 
     response = post(subject, request_body())
 
@@ -208,7 +371,9 @@ def test_a_request_over_the_protocol_byte_bound_is_refused_before_forwarding() -
 # #197-T12
 def test_an_answer_over_the_response_byte_bound_is_refused() -> None:
     upstream = Upstream(body={"choices": [], "usage": {"prompt_tokens": 1, "completion_tokens": 1}})
-    subject = proxy(upstream, ledger=BudgetLedger(DynamicLimits(max_response_bytes=10)))
+    subject = proxy(
+        upstream, ledger=BudgetLedger(DynamicLimits(max_response_bytes=10), unit_costs=UNIT_COSTS)
+    )
 
     response = post(subject, request_body())
 
@@ -318,28 +483,19 @@ def test_a_provider_status_with_no_rule_is_a_bad_request(status: int) -> None:
     assert subject.ledger.failure.code is ErrorCode.LLM_BAD_REQUEST
 
 
-# #197-T05
-def test_the_call_budget_stops_the_run_at_the_proxy() -> None:
-    upstream = Upstream()
-    subject = proxy(upstream, ledger=BudgetLedger(DynamicLimits(max_model_calls=1)))
+# #290-T08
+def test_a_call_that_would_cross_the_cost_limit_is_refused_before_the_provider_sees_it() -> None:
+    # Each call reserves its 4,096 output tokens at 4 USD per million: about 0.0164 USD.
+    upstream = Upstream(body=answer_with_usage(prompt=100, completion=50, cost=0.04))
+    subject = proxy(
+        upstream,
+        ledger=BudgetLedger(DynamicLimits(max_cost_usd=Decimal("0.05")), unit_costs=UNIT_COSTS),
+    )
 
     assert post(subject, request_body()).status == 200
     second = post(subject, request_body())
 
-    assert error_code(second) == ErrorCode.DYNAMIC_BUDGET_EXCEEDED.value
-    assert len(upstream.requests) == 1
-
-
-# #231-T04
-def test_a_call_that_would_cross_the_token_cap_is_refused_before_the_provider_sees_it() -> None:
-    # The descriptor allows 4096 output tokens, so each call reserves its request plus 4096.
-    upstream = Upstream(body=answer_with_usage(prompt=100, completion=4096))
-    subject = proxy(upstream, ledger=BudgetLedger(DynamicLimits(max_total_tokens=5000)))
-
-    assert post(subject, request_body()).status == 200
-    second = post(subject, request_body())
-
-    # 4196 settled + the second request and its allowance is over 5000, with nothing in flight.
+    # 0.04 spent + 0.0164 for the second call is over 0.05, with nothing in flight.
     assert second.status == 403
     assert error_code(second) == ErrorCode.DYNAMIC_BUDGET_EXCEEDED.value
     assert len(upstream.requests) == 1
@@ -347,16 +503,40 @@ def test_a_call_that_would_cross_the_token_cap_is_refused_before_the_provider_se
     assert subject.ledger.failure is not None
 
 
+# #290-T09
+def test_an_answer_without_a_cost_stops_the_run_with_the_accounting_code() -> None:
+    for usage_cost in (None, "0.5", -1.0, True):
+        body = answer_with_usage()
+        body["usage"]["cost"] = usage_cost
+        subject = proxy(Upstream(body=body))
+
+        response = post(subject, request_body())
+
+        assert error_code(response) == ErrorCode.DYNAMIC_ACCOUNTING_FAILED.value, usage_cost
+        assert subject.ledger.failure is not None
+        assert subject.ledger.failure.code is ErrorCode.DYNAMIC_ACCOUNTING_FAILED
+        # The tokens the provider did report stay on record.
+        assert subject.ledger.usage("m").total_tokens == 15
+
+
+# #290-T09
+def test_an_answer_that_cost_nothing_is_accepted() -> None:
+    subject = proxy(Upstream(body=answer_with_usage(cost=0)))
+
+    assert post(subject, request_body()).status == 200
+    assert subject.ledger.usage("m").cost_usd == 0.0
+
+
 # #231-T07
 def test_a_provider_error_keeps_its_reservation_spent() -> None:
     # Conservative on purpose: a refused call is not given back, so a retry cannot reopen it.
     upstream = Upstream(status=503, body={"error": "unavailable"})
-    ledger = BudgetLedger(DynamicLimits(max_total_tokens=5000))
+    ledger = BudgetLedger(DynamicLimits(max_cost_usd=Decimal("0.02")), unit_costs=UNIT_COSTS)
     subject = proxy(upstream, ledger=ledger)
 
     assert post(subject, request_body()).status == 503
 
-    # Nothing settled, yet the reservation (request plus the 4096 output allowance) still counts.
+    # Nothing settled, yet the reservation (about 0.0164) still counts: twice that is over 0.02.
     with pytest.raises(LimitError) as refused:
         ledger.reserve_call("x" * 1000, output_tokens=4096)
     assert refused.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
@@ -407,7 +587,7 @@ def test_a_transport_failure_is_a_distinct_stable_code_and_never_a_budget_refusa
 
 # #236-T02
 def test_a_transport_failure_keeps_its_reservation_spent() -> None:
-    ledger = BudgetLedger(DynamicLimits(max_total_tokens=5000))
+    ledger = BudgetLedger(DynamicLimits(max_cost_usd=Decimal("0.02")), unit_costs=UNIT_COSTS)
     subject = proxy(Broken(ConnectionResetError("reset")), ledger=ledger)
 
     assert post(subject, request_body()).status == 502
@@ -419,7 +599,7 @@ def test_a_transport_failure_keeps_its_reservation_spent() -> None:
 
 # #236-T03
 def test_a_later_budget_refusal_does_not_replace_the_recorded_transport_cause() -> None:
-    ledger = BudgetLedger(DynamicLimits(max_total_tokens=5000))
+    ledger = BudgetLedger(DynamicLimits(max_cost_usd=Decimal("0.02")), unit_costs=UNIT_COSTS)
     subject = proxy(Broken(TimeoutError("timed out")), ledger=ledger)
 
     first = post(subject, request_body())
@@ -518,7 +698,9 @@ def test_the_runner_generates_an_unguessable_capability_per_job() -> None:
 # #197-T12
 def test_the_transport_is_told_to_read_at_most_one_byte_past_the_response_bound() -> None:
     upstream = Upstream()
-    subject = proxy(upstream, ledger=BudgetLedger(DynamicLimits(max_response_bytes=1234)))
+    subject = proxy(
+        upstream, ledger=BudgetLedger(DynamicLimits(max_response_bytes=1234), unit_costs=UNIT_COSTS)
+    )
 
     post(subject, request_body())
 
@@ -626,7 +808,7 @@ def message_answer(message: dict[str, Any], *, finish: str = "stop") -> dict[str
         "created": 1,
         "model": "deepseek/deepseek-v4.1-flash",
         "choices": [{"message": message, "finish_reason": finish}],
-        "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "cost": 0.0001},
     }
 
 
@@ -668,7 +850,7 @@ def test_a_streamed_request_is_answered_from_the_bounded_whole_answer() -> None:
     assert delta["role"] == "assistant"
     assert delta["tool_calls"] == [{**tool_call, "index": 0}]
     assert closing["choices"][0]["finish_reason"] == "stop"
-    assert closing["usage"] == {"prompt_tokens": 10, "completion_tokens": 5}
+    assert closing["usage"] == {"prompt_tokens": 10, "completion_tokens": 5, "cost": 0.0001}
     assert subject.ledger.usage(None).total_tokens == 15
 
 
@@ -682,23 +864,13 @@ def test_a_request_that_does_not_stream_gets_the_plain_answer() -> None:
     assert json.loads(response.body)["choices"][0]["message"]["content"] == "{}"
 
 
-# #197-T05
-def test_the_tool_call_over_the_bound_is_refused_before_the_engine_gets_the_answer() -> None:
-    call = {"id": "c1", "type": "function", "function": {"name": "read", "arguments": "{}"}}
-    upstream = Upstream(body=message_answer({"role": "assistant", "tool_calls": [call]}))
-    subject = proxy(upstream, ledger=BudgetLedger(DynamicLimits(max_tool_calls=0)))
-
-    response = post(subject, request_body(stream=True))
-
-    assert response.status == 403
-    assert error_code(response) == ErrorCode.DYNAMIC_BUDGET_EXCEEDED.value
-    assert b"tool_calls" not in response.body
-
-
 # #197-T12
 def test_a_result_over_the_bound_in_the_history_is_never_forwarded() -> None:
     upstream = Upstream()
-    subject = proxy(upstream, ledger=BudgetLedger(DynamicLimits(max_tool_result_bytes=10)))
+    subject = proxy(
+        upstream,
+        ledger=BudgetLedger(DynamicLimits(max_tool_result_bytes=10), unit_costs=UNIT_COSTS),
+    )
     history = [
         {"role": "user", "content": "review"},
         {
@@ -824,7 +996,9 @@ def test_the_dropped_attachment_is_neither_counted_nor_forwarded() -> None:
 # #232-T08
 def test_the_reservation_is_made_on_the_text_that_is_forwarded() -> None:
     upstream = Upstream()
-    ledger = BudgetLedger(DynamicLimits(), window_tokens=6000, output_tokens=100)
+    ledger = BudgetLedger(
+        DynamicLimits(), window_tokens=6000, output_tokens=100, unit_costs=UNIT_COSTS
+    )
     subject = proxy(upstream, ledger=ledger)
     big = NESTED.replace("obey the file", "z" * 20000)
 
@@ -854,7 +1028,9 @@ def test_the_forwarded_bytes_are_compact_utf_8_and_the_reservation_counts_exactl
 # #232-T08
 def test_non_ascii_text_is_reserved_at_its_utf_8_size_not_its_escaped_size() -> None:
     upstream = Upstream()
-    ledger = BudgetLedger(DynamicLimits(), window_tokens=9000, output_tokens=100)
+    ledger = BudgetLedger(
+        DynamicLimits(), window_tokens=6000, output_tokens=100, unit_costs=UNIT_COSTS
+    )
     subject = proxy(upstream, ledger=ledger)
 
     # 2,000 characters are about 4 KB as UTF-8 and about 12 KB as `\uXXXX` escapes; the output
@@ -869,7 +1045,7 @@ def test_non_ascii_text_is_reserved_at_its_utf_8_size_not_its_escaped_size() -> 
 @pytest.mark.parametrize("lone", ["\ud800", "\udfff"])
 def test_a_lone_surrogate_in_the_history_is_forwarded_escaped_and_never_raises(lone: str) -> None:
     upstream = Upstream()
-    ledger = BudgetLedger(DynamicLimits())
+    ledger = BudgetLedger(DynamicLimits(), unit_costs=UNIT_COSTS)
     reserved: list[str] = []
     reserve_call = ledger.reserve_call
 
@@ -895,7 +1071,9 @@ def test_a_lone_surrogate_in_the_history_is_forwarded_escaped_and_never_raises(l
 
 # #197-T06
 def test_the_first_cause_of_a_refusal_is_kept_for_the_run() -> None:
-    subject = proxy(Upstream(), ledger=BudgetLedger(DynamicLimits(max_request_bytes=10)))
+    subject = proxy(
+        Upstream(), ledger=BudgetLedger(DynamicLimits(max_request_bytes=10), unit_costs=UNIT_COSTS)
+    )
 
     post(subject, request_body())
     post(subject, request_body(model="another-model"))
@@ -970,6 +1148,103 @@ def test_a_blank_descriptor_is_an_empty_one() -> None:
     assert refused.value.code is ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED
 
 
+# The words OpenRouter answers with (HTTP 404) when no provider can serve every parameter.
+NO_PROVIDER_ANSWER = {
+    "error": {
+        "message": "No endpoints found that can handle the requested parameters. "
+        "To learn more about provider routing, visit: https://openrouter.ai/docs/provider-routing",
+        "code": 404,
+    }
+}
+
+
+# #270-T01
+def test_a_call_to_openrouter_is_forwarded_with_required_parameters_and_allowed_fields() -> None:
+    upstream = Upstream()
+    subject = proxy(upstream, require_parameters=True)
+
+    response = post(subject, request_body(temperature=0.1, user="someone", n=5))
+
+    assert response.status == 200
+    forwarded = json.loads(upstream.requests[0][1])
+    assert forwarded["provider"] == {"require_parameters": True}
+    assert set(forwarded) == {
+        "model",
+        "messages",
+        "tools",
+        "tool_choice",
+        "temperature",
+        "max_tokens",
+        "stream",
+        "provider",
+    }
+
+
+# #270-T02
+def test_an_engine_that_sends_a_routing_field_still_stops_the_run_and_its_value_never_leaves() -> (
+    None
+):
+    for field, value in (
+        ("provider", {"require_parameters": False}),
+        ("provider", {"order": ["attacker-host"], "require_parameters": True}),
+        ("models", ["other/model"]),
+        ("route", "fallback"),
+        ("plugins", [{"id": "web"}]),
+    ):
+        upstream = Upstream()
+        subject = proxy(upstream, require_parameters=True)
+
+        body = request_body()
+        body[field] = value
+        response = post(subject, body)
+
+        assert error_code(response) == ErrorCode.DYNAMIC_POLICY_VIOLATION.value, field
+        assert upstream.requests == [], field
+        assert subject.ledger.model_calls == 0, field
+
+
+# #270-T04
+def test_a_destination_that_is_not_openrouter_gets_the_request_unchanged() -> None:
+    upstream = Upstream()
+    subject = proxy(upstream)
+
+    post(subject, request_body())
+
+    assert "provider" not in json.loads(upstream.requests[0][1])
+
+
+# #270-T05
+def test_openrouter_finding_no_provider_for_the_parameters_ends_the_run_without_a_fallback() -> (
+    None
+):
+    upstream = Upstream(status=404, body=NO_PROVIDER_ANSWER)
+    subject = proxy(upstream, require_parameters=True)
+
+    response = post(subject, request_body())
+
+    assert response.status == 404
+    assert error_code(response) == ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED.value
+    # The provider's own message never reaches the engine; the ledger keeps the stable cause.
+    assert b"provider-routing" not in response.body
+    assert subject.ledger.failure is not None
+    assert subject.ledger.failure.code is ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED
+    # One call to the one configured model: nothing was retried on another model.
+    assert len(upstream.requests) == 1
+    assert json.loads(upstream.requests[0][1])["model"] == "deepseek/deepseek-v4.1-flash"
+
+
+# #270-T05
+def test_another_not_found_answer_keeps_the_unknown_model_code() -> None:
+    subject = proxy(
+        Upstream(status=404, body={"error": {"message": "No endpoints found for some/model."}}),
+        require_parameters=True,
+    )
+
+    response = post(subject, request_body())
+
+    assert error_code(response) == ErrorCode.MODEL_UNKNOWN.value
+
+
 def answer_with_cost(cost: Any, prompt: int = 10, completion: int = 5) -> dict[str, Any]:
     answer = answer_with_usage(prompt, completion)
     answer["usage"]["cost"] = cost
@@ -1014,10 +1289,11 @@ def test_a_streamed_request_records_the_cost_and_the_engine_still_sees_the_usage
     assert subject.ledger.usage(None).cost_usd == 0.0007
 
 
-# #267-T04
-# #267-T05
-def test_a_call_without_a_usable_cost_makes_the_cost_unknown_and_changes_nothing_else() -> None:
-    answers: list[dict[str, Any]] = [answer_with_usage()]  # no cost field at all
+# #267-T04, #267-T05, #290-T09
+def test_a_call_without_a_usable_cost_stops_the_run_and_keeps_the_tokens() -> None:
+    no_field = answer_with_usage()
+    del no_field["usage"]["cost"]
+    answers: list[dict[str, Any]] = [no_field]
     unusable_costs: list[Any] = [None, "0.01", True, [], {}, -0.5, 1e999, float("nan")]
     answers += [answer_with_cost(unusable) for unusable in unusable_costs]
     for answer in answers:
@@ -1025,25 +1301,31 @@ def test_a_call_without_a_usable_cost_makes_the_cost_unknown_and_changes_nothing
 
         response = post(subject, request_body())
 
-        assert response.status == 200, answer
+        assert response.status == 403, answer
+        assert error_code(response) == ErrorCode.DYNAMIC_ACCOUNTING_FAILED.value, answer
         usage = subject.ledger.usage(None)
         assert usage.cost_usd is None, answer
         assert (usage.prompt_tokens, usage.completion_tokens, usage.ai_calls) == (10, 5, 1)
 
 
-# #267-T04
-def test_one_call_without_a_cost_makes_the_whole_run_unknown_not_a_partial_sum() -> None:
+# #267-T04, #290-T09
+def test_one_call_without_a_cost_stops_the_run_at_that_call() -> None:
     priced = answer_with_cost(0.2)
-    unpriced = answer_with_usage()
+    unpriced = answer_with_cost(None)
     answers = iter([priced, unpriced, priced])
+    sent: list[int] = []
 
     def upstream(url: str, body: bytes, headers: dict[str, str], limit: int) -> tuple[int, bytes]:
+        sent.append(1)
         return 200, json.dumps(next(answers)).encode("utf-8")
 
     subject = proxy(upstream)
-    for _ in range(3):
-        assert post(subject, request_body()).status == 200
+    statuses = [post(subject, request_body()).status for _ in range(2)]
 
+    assert statuses == [200, 403]
+    # The run is over: the recorded cause is the accounting failure, the cost is not a partial sum.
+    assert subject.ledger.failure is not None
+    assert subject.ledger.failure.code is ErrorCode.DYNAMIC_ACCOUNTING_FAILED
     assert subject.ledger.usage(None).cost_usd is None
 
 
@@ -1064,3 +1346,46 @@ def test_a_call_the_provider_refused_leaves_the_cost_unknown() -> None:
     # reported charge, so it cannot claim an exact total.
     assert statuses == [200, 503, 200]
     assert subject.ledger.usage(None).cost_usd is None
+
+
+# The 404 texts OpenRouter gives when no endpoint supports what the request asks for, each seen in
+# public reports (HTTP 404 from https://openrouter.ai/api/v1/chat/completions): the same words as
+# the one above, a request that offers tools, and a `tool_choice` value.
+NO_ENDPOINT_FOR_PARAMETERS = (
+    "No endpoints found that can handle the requested parameters.",
+    "No endpoints found that support tool use. To learn more about provider routing, visit: "
+    "https://openrouter.ai/docs/provider-routing",
+    "No endpoints found that support the provided 'tool_choice' value.",
+)
+
+
+# #270-T05
+@pytest.mark.parametrize("message", NO_ENDPOINT_FOR_PARAMETERS)
+def test_every_openrouter_answer_that_no_endpoint_supports_the_request_is_unsupported_features(
+    message: str,
+) -> None:
+    upstream = Upstream(status=404, body={"error": {"message": message, "code": 404}})
+    subject = proxy(upstream, require_parameters=True)
+
+    response = post(subject, request_body())
+
+    assert error_code(response) == ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED.value
+    assert len(upstream.requests) == 1
+
+
+# #270-T05
+@pytest.mark.parametrize(
+    "message",
+    [
+        "No endpoints found for some/model.",
+        "No endpoints found matching your data policy.",
+        "Model not found",
+    ],
+)
+def test_other_openrouter_not_found_answers_keep_the_unknown_model_code(message: str) -> None:
+    subject = proxy(
+        Upstream(status=404, body={"error": {"message": message, "code": 404}}),
+        require_parameters=True,
+    )
+
+    assert error_code(post(subject, request_body())) == ErrorCode.MODEL_UNKNOWN.value

@@ -217,6 +217,10 @@ services:
       # ships with the image. For any other model, empty makes the job fail with
       # dynamic_model_features_unsupported; a value set here always wins (docs/dynamic-review.md).
       RUNNER_DYNAMIC_CAPABILITIES: ${RUNNER_DYNAMIC_CAPABILITIES:-}
+      # The most one Dynamic run may cost, in USD (the operator's cost limit, docs/dynamic-review.md).
+      # Empty is the normal case: the runner's default applies. Trusted runner configuration with a
+      # hard ceiling in the runner; nothing in a repository or a pull request can raise it.
+      RUNNER_DYNAMIC_MAX_COST_USD: ${RUNNER_DYNAMIC_MAX_COST_USD:-}
 
 volumes:
   data:

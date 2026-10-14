@@ -45,17 +45,21 @@ from code_reviewer_runner.dynamic_findings import DynamicFindings
 from code_reviewer_runner.dynamic_review import findings_schema
 from code_reviewer_runner.dynamic_review.adapter import DynamicEngine, shutdown_engines
 from code_reviewer_runner.dynamic_review.budget import (
-    DEFAULT_WINDOW_TOKENS,
     TOTAL_DEADLINE_SECONDS,
     BudgetLedger,
     DynamicLimits,
     LimitError,
+    max_cost_from_environment,
 )
 from code_reviewer_runner.dynamic_review.config import new_proxy_capability
 from code_reviewer_runner.dynamic_review.inputs import review_inputs
 from code_reviewer_runner.dynamic_review.limits import CheckoutError
 from code_reviewer_runner.dynamic_review.prompts import compose_system_prompt
-from code_reviewer_runner.dynamic_review.proxy import ModelProxy, capabilities_from_config
+from code_reviewer_runner.dynamic_review.proxy import (
+    DynamicCapabilities,
+    ModelProxy,
+    capabilities_from_config,
+)
 from code_reviewer_runner.dynamic_review.publish import (
     STATE_RESET_CODE,
     Published,
@@ -96,6 +100,10 @@ from code_reviewer_runner.pr_agent_config import InvalidOption, build_environmen
 from code_reviewer_runner.pr_agent_runtime import JobTimeout, execute
 from code_reviewer_runner.redaction import REDACTED, RedactingStream, Redactor
 from code_reviewer_runner.repo_settings_guard import install_repo_settings_guard
+from code_reviewer_runner.require_parameters_patch import (
+    RequireParametersPatchError,
+    apply_require_parameters_patch,
+)
 from code_reviewer_runner.result import ErrorCode, JobResult
 from code_reviewer_runner.review_state_watch import (
     ReviewStateWatch,
@@ -143,8 +151,19 @@ def run_job(
 
             litellm.suppress_debug_info = True
             patches.callback(apply_identity_patch(job.git.bot_login))
+            if job.llm.require_parameters:
+                # Every OpenRouter request carries `provider.require_parameters` (#270).
+                patches.callback(apply_require_parameters_patch())
         except IdentityPatchError as error:
             return _failure(error.code, error.detail, started, capture)
+        except RequireParametersPatchError as error:
+            # Fails closed: no request goes out without the field. The cause is named in the result.
+            return _failure(
+                ErrorCode.RUNNER_ERROR,
+                f"cannot patch the OpenRouter request controls of PR-Agent: {error}",
+                started,
+                capture,
+            )
         except Exception as error:
             capture.add(_ERROR_LEVEL, "ERROR", "cannot load PR-Agent", error)
             return _failure(ErrorCode.RUNNER_ERROR, "cannot load PR-Agent", started, capture)
@@ -222,7 +241,40 @@ def run_job(
 
 
 DYNAMIC_CAPABILITIES_VARIABLE = "RUNNER_DYNAMIC_CAPABILITIES"
+DYNAMIC_MAX_COST_VARIABLE = "RUNNER_DYNAMIC_MAX_COST_USD"
 DYNAMIC_NODE_BIN_VARIABLE = "RUNNER_DYNAMIC_NODE_BIN"
+
+
+def dynamic_ledger(
+    capabilities: DynamicCapabilities, environment: Mapping[str, str], deadline: float
+) -> BudgetLedger:
+    """The ledger of one Dynamic run, from trusted runner configuration only (#290).
+
+    The window and the unit costs are the model's (its descriptor, and a model without unit costs
+    is refused); the cost limit is the operator's (`RUNNER_DYNAMIC_MAX_COST_USD`, up to a ceiling
+    in code). Nothing of the job takes part: the project's Diff "Token budget" (`llm.maxTokens`)
+    is not the window of a Dynamic run, and neither the claim nor the repository can name a limit.
+    """
+    # A model that cannot serve the run at all is named first, then one that cannot be priced.
+    capabilities.check_required()
+    limits = DynamicLimits(
+        deadline_seconds=deadline,
+        max_cost_usd=max_cost_from_environment(environment.get(DYNAMIC_MAX_COST_VARIABLE)),
+    )
+    # A cost that cannot be priced cannot be bounded before it is spent: a model without unit
+    # costs (only the default model has them built in) does not run, and nothing is assumed.
+    if capabilities.unit_costs is None:
+        raise LimitError(
+            ErrorCode.DYNAMIC_CONFIG_INVALID,
+            "the capability descriptor of the model has no unit costs "
+            "(input_usd_per_mtok and output_usd_per_mtok)",
+        )
+    return BudgetLedger(
+        limits,
+        window_tokens=capabilities.context_window_tokens,
+        output_tokens=capabilities.max_output_tokens,
+        unit_costs=capabilities.unit_costs,
+    )
 
 
 def run_dynamic_job(
@@ -288,11 +340,10 @@ def run_dynamic_job(
     deadline = TOTAL_DEADLINE_SECONDS
     if timeout_seconds is not None:
         deadline = min(deadline, timeout_seconds)
-    ledger = BudgetLedger(
-        DynamicLimits(deadline_seconds=deadline),
-        window_tokens=job.llm.max_tokens or DEFAULT_WINDOW_TOKENS,
-        output_tokens=capabilities.max_output_tokens,
-    )
+    try:
+        ledger = dynamic_ledger(capabilities, environment, deadline)
+    except LimitError as error:
+        return _failure(error.code, error.detail, started, capture)
     upstream = job.llm.base_url or "https://openrouter.ai/api/v1"
     # One unguessable capability per job: the proxy demands it, the engine config carries it.
     capability = new_proxy_capability()
@@ -306,6 +357,7 @@ def run_dynamic_job(
             upstream_model=job.llm.model,
             capabilities=capabilities,
             capability=capability,
+            require_parameters=job.llm.require_parameters,
         )
     except LimitError as error:
         # The destination cannot serve the run: fail before the engine starts, with no fallback.

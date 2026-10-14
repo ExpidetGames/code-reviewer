@@ -17,6 +17,7 @@ import time
 from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, cast
 
@@ -42,13 +43,16 @@ from privileged_support import (
 
 from code_reviewer_runner.dynamic_review import findings_schema
 from code_reviewer_runner.dynamic_review.adapter import DynamicEngine, EngineError
-from code_reviewer_runner.dynamic_review.budget import BudgetLedger, DynamicLimits
+from code_reviewer_runner.dynamic_review.budget import BudgetLedger, DynamicLimits, UnitCosts
 from code_reviewer_runner.dynamic_review.config import new_proxy_capability
 from code_reviewer_runner.dynamic_review.engine_user import EngineLaunch, user_pids
 from code_reviewer_runner.dynamic_review.export_isolation import AgentIdentity, prepared_job
 from code_reviewer_runner.dynamic_review.prompts import ReviewInputs
 from code_reviewer_runner.dynamic_review.supervisor import Prepared, production_preparer
 from code_reviewer_runner.result import ErrorCode
+
+# 1 USD per million input tokens, 4 USD per million output tokens: a call has a price.
+UNIT_COSTS = UnitCosts(input_usd_per_mtok=Decimal(1), output_usd_per_mtok=Decimal(4))
 
 
 @dataclass
@@ -100,7 +104,7 @@ def started_engine(
         capability = new_proxy_capability()
         engine = DynamicEngine(
             job,
-            ledger=BudgetLedger(DynamicLimits()),
+            ledger=BudgetLedger(DynamicLimits(), unit_costs=UNIT_COSTS),
             command=[python3(), str(tools / "stub_engine.py"), *flags],
             directory=str(prepared.content.export),
             proxy_url=f"http://127.0.0.1:{proxy_port}",

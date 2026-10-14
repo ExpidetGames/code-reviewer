@@ -74,10 +74,11 @@ LEASE_CHECK_ATTEMPTS = 3
 LEASE_CHECK_PAUSE_SECONDS = 1.0
 LEASE_CHECK_BUDGET_SECONDS = 40.0
 # The operator's non-secret Dynamic configuration, read by the Dynamic job process: the model
-# description and the engine user and ports of the slot (the names of `supervisor.py` and
-# `static_isolation.py`).
+# description, the cost limit of a run (#290) and the engine user and ports of the slot (the names
+# of `supervisor.py` and `static_isolation.py`).
 DYNAMIC_PASSTHROUGH_VARIABLES = (
     "RUNNER_DYNAMIC_CAPABILITIES",
+    "RUNNER_DYNAMIC_MAX_COST_USD",
     "RUNNER_DYNAMIC_ENGINE_UID",
     "RUNNER_DYNAMIC_ENGINE_GID",
     "RUNNER_DYNAMIC_PROXY_PORT",

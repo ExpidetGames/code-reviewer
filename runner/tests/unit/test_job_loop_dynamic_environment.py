@@ -27,6 +27,8 @@ OPERATOR = {
     "RUNNER_DYNAMIC_ENGINE_GID": "10101",
     "RUNNER_DYNAMIC_PROXY_PORT": "10180",
     "RUNNER_DYNAMIC_ENGINE_PORT": "10181",
+    # #290-T11: the operator cost limit reaches the Dynamic job process, and only that one.
+    "RUNNER_DYNAMIC_MAX_COST_USD": "2.5",
 }
 USERS = {"diff_job_user": (10001, 10001), "dynamic_engine_user": (10101, 10101)}
 

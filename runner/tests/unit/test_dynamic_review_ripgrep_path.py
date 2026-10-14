@@ -10,6 +10,7 @@ PATH and refuses to start without it.
 
 import shutil
 import stat
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -18,9 +19,12 @@ from test_dynamic_review_deadline_order import dynamic_job
 
 from code_reviewer_runner.dynamic_review import findings_schema
 from code_reviewer_runner.dynamic_review.adapter import DynamicEngine, EngineError
-from code_reviewer_runner.dynamic_review.budget import BudgetLedger, DynamicLimits
+from code_reviewer_runner.dynamic_review.budget import BudgetLedger, DynamicLimits, UnitCosts
 from code_reviewer_runner.dynamic_review.prompts import ReviewInputs
 from code_reviewer_runner.result import ErrorCode
+
+# 1 USD per million input tokens, 4 USD per million output tokens: a call has a price.
+UNIT_COSTS = UnitCosts(input_usd_per_mtok=Decimal(1), output_usd_per_mtok=Decimal(4))
 
 
 def executable(path: Path) -> Path:
@@ -40,7 +44,7 @@ def engine_with(
     job = dynamic_job()
     return DynamicEngine(
         job,
-        ledger=BudgetLedger(DynamicLimits(deadline_seconds=4.0)),
+        ledger=BudgetLedger(DynamicLimits(deadline_seconds=4.0), unit_costs=UNIT_COSTS),
         command=["unused"],
         directory=str(tmp_path / "export"),
         proxy_url="http://127.0.0.1:9",
