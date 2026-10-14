@@ -6,6 +6,14 @@
 # (runner/Dockerfile.dockerignore keeps everything else out):
 #   docker build -f runner/Dockerfile -t code-reviewer-runner .
 #
+# Two images come out of this file (#202). The default target, `runtime`, is the PR-Agent-only
+# runner and is the LAST stage, so the command above builds it. The `dynamic` target is the same
+# runner plus what Dynamic Review needs and a Diff-only installation should not carry (size and
+# attack surface): the pinned stock OpenCode (about 186 MB), `nft`, a pinned `rg` and the dedicated
+# engine user 10101. Neither image enables anything by itself; compose.dynamic.yml does, for the
+# Dynamic one:
+#   docker build -f runner/Dockerfile --target dynamic -t code-reviewer-runner-dynamic .
+#
 # The Python minor version must match .python-version (a test checks it). Update the digests with
 #   docker pull python:3.13-slim-bookworm && docker image inspect python:3.13-slim-bookworm --format '{{index .RepoDigests 0}}'
 # The uv version should match the one CI uses on the host (.github/workflows/ci.yml, setup-uv).
@@ -46,11 +54,20 @@ ENV DATA_GYM_CACHE_DIR=/opt/bpe-cache
 RUN mkdir -p "$DATA_GYM_CACHE_DIR" \
     && /opt/venv/bin/python -c "import tiktoken; tiktoken.get_encoding('o200k_base'); tiktoken.get_encoding('cl100k_base')"
 
-# ---- runtime: Python, the venv and nothing else (no uv, no compiler, no sources) ----
-FROM ${PYTHON_IMAGE} AS runtime
-LABEL org.opencontainers.image.title="Code Reviewer runner" \
-      org.opencontainers.image.description="Worker that runs PR-Agent for Code Reviewer" \
-      org.opencontainers.image.source="https://github.com/ExpidetGames/code-reviewer" \
+# ---- engine-tools: the pinned OpenCode and ripgrep, verified, for the dynamic target only ----
+# The one build step with the internet besides the dependency install. Both scripts accept a
+# download only with the pinned size and SHA-256 (runner/opencode-pin.json, runner/ripgrep-pin.json),
+# unpack only the one pinned file and check the version it reports. The scripts find their pin
+# one directory above them. Nothing at run time downloads anything.
+FROM ${PYTHON_IMAGE} AS engine-tools
+COPY runner/scripts/fetch_opencode.py runner/scripts/fetch_ripgrep.py /fetch/scripts/
+COPY runner/opencode-pin.json runner/ripgrep-pin.json /fetch/
+RUN python /fetch/scripts/fetch_opencode.py --dest /engine-tools \
+    && python /fetch/scripts/fetch_ripgrep.py --dest /engine-tools
+
+# ---- runtime-base: Python, the venv and nothing else (no uv, no compiler, no sources) ----
+FROM ${PYTHON_IMAGE} AS runtime-base
+LABEL org.opencontainers.image.source="https://github.com/ExpidetGames/code-reviewer" \
       org.opencontainers.image.licenses="Apache-2.0"
 # LITELLM_LOCAL_MODEL_COST_MAP makes LiteLLM use its bundled price list instead of fetching it from
 # GitHub when it is imported (the runner sets it for every job as well).
@@ -77,3 +94,37 @@ COPY --from=builder /opt/bpe-cache /opt/bpe-cache
 USER 10001:10001
 WORKDIR /home/runner
 ENTRYPOINT ["/usr/bin/tini", "--", "code-reviewer-runner"]
+
+# ---- dynamic: the runner plus the engine, for compose.dynamic.yml (#202) ----
+# Still starts as the unprivileged user 10001: without the override of compose.dynamic.yml
+# (`user: "0:0"` and its capability list) the runner is not the root supervisor, has no engine user
+# configured and serves Diff jobs only. What this stage adds is installed root-owned and not
+# writable by anyone else; the runner's startup self-check hashes both executables against the pins
+# that travel with them (dynamic_review/self_check.py) before it advertises `opencode`.
+FROM runtime-base AS dynamic
+LABEL org.opencontainers.image.title="Code Reviewer runner (Dynamic Review)" \
+      org.opencontainers.image.description="Worker that runs PR-Agent and, when its self-check passes, the stock OpenCode engine for Dynamic Review"
+USER 0:0
+# nft installs the engine user's network rules once, at container start (ADR 0003). Debian's signed
+# package, NOT version-pinned (like tini): apt takes the version the Debian repository has when the
+# image is built, so two builds on different days can differ even on the same base image digest. A
+# `nftables=<version>` pin would not make it reproducible: the Debian mirrors drop superseded
+# versions, so the build would break at the next point release instead.
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends nftables \
+    && rm -rf /var/lib/apt/lists/*
+# The dedicated engine user: its own numeric ids, distinct from the Diff job user 10001, no home
+# directory, no shell, no supplementary group. The runner gives the engine a home per job.
+RUN groupadd --system --gid 10101 engine \
+    && useradd --system --uid 10101 --gid engine --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin engine
+COPY --from=engine-tools --chown=0:0 --chmod=0755 /engine-tools/opencode /usr/local/bin/opencode
+COPY --from=engine-tools --chown=0:0 --chmod=0755 /engine-tools/rg /usr/local/bin/rg
+# The directory first: COPY would create it with the mode given to the files (0644, not enterable).
+RUN install -d -m 0755 -o 0 -g 0 /opt/code-reviewer/pins
+COPY --chown=0:0 --chmod=0644 runner/opencode-pin.json runner/ripgrep-pin.json /opt/code-reviewer/pins/
+USER 10001:10001
+
+# ---- runtime: the default target, PR-Agent only (the last stage, so a plain build gives it) ----
+FROM runtime-base AS runtime
+LABEL org.opencontainers.image.title="Code Reviewer runner" \
+      org.opencontainers.image.description="Worker that runs PR-Agent for Code Reviewer"

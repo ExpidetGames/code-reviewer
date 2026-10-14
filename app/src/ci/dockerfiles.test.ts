@@ -25,6 +25,60 @@ function instructions(dockerfile: string): string[] {
     .map((line) => line.replace(/\s+/g, " "));
 }
 
+/**
+ * The instructions that make up the image of the final stage: those of the stage itself and of the
+ * stages it extends (`FROM runtime-base AS runtime`), as one "FROM ..." block per stage. The runner
+ * Dockerfile ends on a thin default stage built on a shared base (#202).
+ */
+function finalImage(dockerfile: string): string {
+  const blocks = instructions(dockerfile)
+    .join("\n")
+    .split(/^FROM /m)
+    .slice(1);
+  let image = blocks.at(-1) ?? "";
+  let base = image.split(" ")[0] ?? "";
+  for (;;) {
+    const parent = blocks.find((block) => block.includes(` AS ${base}\n`));
+    if (!parent) return image;
+    image = `${parent}\n${image}`;
+    base = parent.split(" ")[0] ?? "";
+  }
+}
+
+/**
+ * The COPY and ADD instructions of the image of one named stage (and its parents) that read the build
+ * context other than through `--from=` and other than the pin files the stage names exactly.
+ */
+function contextCopyViolations(dockerfile: string, target: string): string[] {
+  const blocks = instructions(dockerfile)
+    .join("\n")
+    .split(/^FROM /m)
+    .slice(1);
+  const own = blocks.find((block) => block.includes(` AS ${target}\n`));
+  if (!own) throw new Error(`no stage ${target}`);
+  const chain: string[] = [own];
+  for (;;) {
+    const base = chain[0]?.split(" ")[0] ?? "";
+    const parent = blocks.find((block) => block.includes(` AS ${base}\n`));
+    if (!parent) break;
+    chain.unshift(parent);
+  }
+  return chain
+    .flatMap((block) => block.split("\n"))
+    .filter((line) => line.startsWith("COPY ") || line.startsWith("ADD "))
+    .filter((line) => !line.includes("--from="))
+    .filter((line) => {
+      const sources = line
+        .split(" ")
+        .slice(1)
+        .filter((word) => !word.startsWith("--"))
+        .slice(0, -1);
+      return !sources.every((source) =>
+        /^runner\/[a-z]+-pin\.json$/.test(source),
+      );
+    });
+}
+
 function argDefault(dockerfile: string, name: string): string {
   const line = instructions(dockerfile).find((entry) =>
     entry.startsWith(`ARG ${name}=`),
@@ -104,9 +158,9 @@ describe("Dockerfile security", () => {
   it.each(dockerfiles)(
     "ends the $name image on a numeric non-root user",
     ({ source }) => {
-      const users = instructions(source).filter((line) =>
-        line.startsWith("USER "),
-      );
+      const users = finalImage(source)
+        .split("\n")
+        .filter((line) => line.startsWith("USER "));
       const last = users.at(-1)?.slice("USER ".length) ?? "";
 
       expect(last).toMatch(/^[1-9][0-9]*(:[1-9][0-9]*)?$/);
@@ -133,11 +187,7 @@ describe("Dockerfile security", () => {
   it.each(dockerfiles)(
     "copies the build context into the $name image only through a stage, never a whole host directory into the final stage",
     ({ source }) => {
-      const finalStage =
-        instructions(source)
-          .join("\n")
-          .split(/^FROM /m)
-          .at(-1) ?? "";
+      const finalStage = finalImage(source);
       const copies = finalStage
         .split("\n")
         .filter((line) => line.startsWith("COPY ") || line.startsWith("ADD "));
@@ -245,11 +295,7 @@ describe("license files in the images", () => {
     "copies LICENSE, NOTICE and THIRD_PARTY_LICENSES.md of the repository root into the $name image under /licenses",
     ({ source }) => {
       const lines = instructions(source);
-      const finalStage =
-        lines
-          .join("\n")
-          .split(/^FROM /m)
-          .at(-1) ?? "";
+      const finalStage = finalImage(source);
 
       expect(lines).toContain("FROM scratch AS licenses");
       expect(lines).toContain(`COPY ${LICENSE_FILES} /`);
@@ -277,7 +323,8 @@ describe("license files in the images", () => {
       for (const copy of copies) {
         expect(copy, copy).toMatch(
           new RegExp(
-            `^COPY (${name}/|${LICENSE_FILES.replace(/\./g, "\\.")} )`,
+            // Flags (--chown, --chmod) come before the sources.
+            `^COPY (--\\S+ )*(${name}/|${LICENSE_FILES.replace(/\./g, "\\.")} )`,
           ),
         );
       }
@@ -395,4 +442,33 @@ describe("root .dockerignore for the classic builder", () => {
       expect(own.filter((entry) => !root.includes(entry))).toEqual([]);
     },
   );
+});
+
+describe("the dynamic stage of the runner Dockerfile", () => {
+  // CR-17-T09, #202: the `dynamic` target is not the last stage, so the guard above never sees it.
+  it("copies the build context only through a stage, except the two pin files", () => {
+    expect(contextCopyViolations(runnerDockerfile, "dynamic")).toEqual([]);
+  });
+
+  it("flags a whole host directory copied into the dynamic stage", () => {
+    const broad = runnerDockerfile.replace(
+      "COPY --chown=0:0 --chmod=0644 runner/opencode-pin.json runner/ripgrep-pin.json /opt/code-reviewer/pins/",
+      "COPY --chown=0:0 runner /opt/code-reviewer/pins/",
+    );
+
+    expect(broad).not.toBe(runnerDockerfile);
+    expect(contextCopyViolations(broad, "dynamic")).toEqual([
+      "COPY --chown=0:0 runner /opt/code-reviewer/pins/",
+    ]);
+  });
+
+  it("flags a pin file path that is a wildcard", () => {
+    const wildcard = runnerDockerfile.replace(
+      "--chmod=0644 runner/opencode-pin.json runner/ripgrep-pin.json",
+      "--chmod=0644 runner/*-pin.json",
+    );
+
+    expect(wildcard).not.toBe(runnerDockerfile);
+    expect(contextCopyViolations(wildcard, "dynamic")).toHaveLength(1);
+  });
 });

@@ -56,7 +56,8 @@ Order:
 
 1. Deploy every app instance with the version that routes by `review_kind` (this change). New runners
    are safe next to old apps.
-2. Only then set `dynamic_review` to `{ enabled: true }` (and after #202 ships the engine).
+2. Only then set `dynamic_review` to `{ enabled: true }`, once a Dynamic runner is deployed and
+   advertises `opencode` (`docs/dynamic-review.md`, "Activation, step by step").
 3. To roll back, keep every app instance on this gate-aware version while calling the instance
    settings repository's `set("dynamic_review", { enabled: false }, operatorId)`. Wait for commit:
    it stops new Dynamic enqueue and cancels **queued** Dynamic jobs with `dynamic_review_disabled`.
@@ -75,8 +76,8 @@ Removing the setting is equivalent to disabling it. Use the repository setter, n
 would bypass the lock and cancellation. The operator control is the instance admin's **Dynamic Review**
 card on the portal's Instance page (`PUT /api/admin/settings` with `{ "dynamicReview": { "enabled":
 boolean } }`, admin only, server side), which calls that setter; it asks the admin to confirm step 1
-before it turns the gate on. It stays off until #202's real runner checks ship; the status and the
-activation steps are in `docs/dynamic-review.md`.
+before it turns the gate on. It is off in every shipped configuration; the activation steps and the
+rollback are in `docs/dynamic-review.md`.
 
 ### Queue lock order
 

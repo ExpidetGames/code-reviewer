@@ -18,6 +18,7 @@ function read(path: string): string {
 
 type Service = {
   image?: string;
+  build?: { context?: string; dockerfile?: string; target?: string };
   restart?: string;
   ports?: string[];
   profiles?: string[];
@@ -110,10 +111,20 @@ describe("compose.dynamic.yml", () => {
   });
 
   // #202-T08
-  it("takes its image from a variable of its own, because the Dynamic image differs from the Diff one", () => {
-    expect(runnerDynamic().image).toMatch(
-      /^\$\{RUNNER_DYNAMIC_IMAGE:-ghcr\.io\/expidetgames\/code-reviewer-runner:development\}$/,
+  it("builds the dynamic target of the runner Dockerfile from the checkout, under an image name of its own", () => {
+    const service = runnerDynamic();
+
+    // The Dynamic image differs from the Diff one (it carries the engine), so it has a variable and
+    // a tag of its own; like the other topologies it is built from this checkout, not pulled.
+    expect(service.image).toBe(
+      "${RUNNER_DYNAMIC_IMAGE:-code-reviewer-runner-dynamic:local}",
     );
+    expect(service.build).toEqual({
+      context: ".",
+      dockerfile: "runner/Dockerfile",
+      target: "dynamic",
+    });
+    expect(plain.services.runner?.image).not.toContain("dynamic");
   });
 
   // #202-T05
@@ -300,6 +311,11 @@ describe("compose.dynamic.yml", () => {
     // The checkout and the node directory belong to the per-job preparation, not to deployment.
     expect(Object.keys(environment)).not.toContain("RUNNER_DYNAMIC_CHECKOUT");
     expect(Object.keys(environment)).not.toContain("RUNNER_DYNAMIC_NODE_BIN");
+    // The engine command and the advertised engines are decided by the runner's startup self-check
+    // and handed to its job processes; nothing in deployment configuration can set them.
+    expect(Object.keys(environment)).not.toContain("RUNNER_OPENCODE_COMMAND");
+    expect(Object.keys(environment)).not.toContain("RUNNER_ADVERTISED_ENGINES");
+    expect(Object.keys(environment)).not.toContain("RUNNER_DYNAMIC_RIPGREP");
   });
 
   // #202-T08
@@ -314,10 +330,64 @@ describe("compose.dynamic.yml", () => {
   });
 
   // #202-T08
-  it("says in its first lines that Dynamic Review cannot be activated with it yet", () => {
-    const header = source.split("\n").slice(0, 12).join("\n");
+  it("says in its first lines that it is opt-in and that the gate is a separate, default-off switch", () => {
+    const header = source.split("\n").slice(0, 20).join("\n");
 
-    expect(header).toMatch(/not (yet )?activatable|cannot be activated/i);
+    expect(header).toMatch(/opt-in/i);
     expect(header).toContain("docs/dynamic-review.md");
+    expect(header).toMatch(/gate/i);
+    // The statements of the first slice no longer hold: the engine is in the image.
+    expect(header).not.toMatch(/not (yet )?activatable|cannot be activated/i);
+    expect(header).not.toMatch(/engine is not in the (runner )?image/i);
+  });
+});
+
+describe("compose.coolify.dynamic.yml", () => {
+  // #202-T07: Coolify takes one Compose file per resource, so the Dynamic runner of a Coolify
+  // installation is a second resource built from this standalone file. It must stay the same runner.
+  const coolify = parse(read("compose.coolify.dynamic.yml")) as Compose;
+  const coolifySource = read("compose.coolify.dynamic.yml");
+
+  it("adds exactly the one service and nothing else", () => {
+    expect(Object.keys(coolify.services)).toEqual(["runner-dynamic"]);
+    expect(coolify).not.toHaveProperty("volumes");
+    expect(read("compose.coolify.yml")).not.toContain("runner-dynamic");
+  });
+
+  it("is the service of compose.dynamic.yml, except that it reaches the app by its address and builds without a local tag", () => {
+    const own = { ...(coolify.services["runner-dynamic"] ?? {}) };
+    const shared = { ...runnerDynamic() };
+
+    // What differs on purpose: no sibling `app` service to wait for, the address of the app, and the
+    // image name (Coolify names the images it builds).
+    for (const service of [own, shared]) {
+      delete service.depends_on;
+      delete service.image;
+      service.environment = {
+        ...service.environment,
+        RUNNER_API_URL: "<differs>",
+      };
+    }
+    expect(own).toEqual(shared);
+  });
+
+  it("takes the address of the app from a required variable, not from a sibling service", () => {
+    const environment = coolify.services["runner-dynamic"]?.environment ?? {};
+
+    expect(environment.RUNNER_API_URL).toMatch(
+      /^\$\{RUNNER_API_URL:\?[^}]*\}$/,
+    );
+    expect(coolify.services["runner-dynamic"]).not.toHaveProperty("depends_on");
+    expect(environment.RUNNER_TOKEN).toBe(
+      runnerDynamic().environment?.RUNNER_TOKEN,
+    );
+  });
+
+  it("says that it is untested on Coolify and points to the guide", () => {
+    const header = coolifySource.split("\n").slice(0, 20).join("\n");
+
+    expect(header).toMatch(/not (yet )?(been )?(tested|verified)/i);
+    expect(header).toContain("docs/deployment-coolify.md");
+    expect(coolifySource).not.toContain("PR_AGENT_COMMAND");
   });
 });

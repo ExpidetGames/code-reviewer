@@ -328,6 +328,35 @@ jobs:
       - name: Smoke test the image
         run: docker/smoke/runner.sh code-reviewer-runner:ci
 
+  # The Dynamic runner image (#202): the `dynamic` target of the same Dockerfile. Its smoke test
+  # proves the exact pinned OpenCode and ripgrep, the engine user, and runs the real startup
+  # self-check in a container created like compose.dynamic.yml creates it (root, the capability
+  # list, no network): `opencode` is advertised, and not when NET_ADMIN, the engine user or the
+  # binary is wrong. It is not published (compose.dynamic.yml builds it from the checkout), so only
+  # this job and pull requests into main build it.
+  image-runner-dynamic:
+    name: "Image: Dynamic runner build & smoke test"
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && (github.base_ref == 'main' || needs.changes.outputs.runner == 'true') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build the image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: runner/Dockerfile
+          target: dynamic
+          load: true
+          push: false
+          tags: code-reviewer-runner-dynamic:ci
+          cache-from: type=gha,scope=runner-dynamic
+          cache-to: type=gha,mode=max,scope=runner-dynamic
+      - name: Smoke test the image
+        run: docker/smoke/runner.sh code-reviewer-runner-dynamic:ci dynamic
+
   # The Docker Compose stack (compose.yml): both images are built here and the stack is started
   # with dummy settings by docker/smoke/compose.sh. Nothing is pushed; the job has no login and only
   # the read-only token of the workflow. Pushes to development and main are covered by the publish
@@ -383,7 +412,7 @@ jobs:
   # fails on any failed or cancelled job and accepts skipped jobs (path filter).
   ci-passed:
     name: All checks passed?
-    needs: [changes, app-fast, runner-fast, engine, e2e, licenses, image-app, image-runner, compose, actionlint]
+    needs: [changes, app-fast, runner-fast, engine, e2e, licenses, image-app, image-runner, image-runner-dynamic, compose, actionlint]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5

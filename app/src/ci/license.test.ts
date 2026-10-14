@@ -98,6 +98,61 @@ describe("THIRD_PARTY_LICENSES.md", () => {
   });
 });
 
+// #202: CC-BY asks for the creator, the licence and a link to it, a notice of no warranties, and a
+// statement of what was changed. Both data packages are used unmodified.
+describe("the Creative Commons attribution", () => {
+  const packages = [
+    {
+      name: "caniuse-lite",
+      licenseUrl: "https://creativecommons.org/licenses/by/4.0/",
+      creator: "Alexis Deveria",
+    },
+    {
+      name: "spdx-exceptions",
+      licenseUrl: "https://creativecommons.org/licenses/by/3.0/",
+      creator: "The Linux Foundation",
+    },
+  ] as const;
+
+  function section(text: string, name: string): string {
+    const start = text.indexOf(`### Attribution: ${name}`);
+    if (start < 0) return "";
+    const end = text.indexOf("\n#", start + 1);
+    return text.slice(start, end < 0 ? undefined : end).replace(/\s+/g, " ");
+  }
+
+  it.each(packages)(
+    "gives $name's creator, licence link, no-warranties notice and unmodified statement in THIRD_PARTY_LICENSES.md",
+    ({ name, licenseUrl, creator }) => {
+      const entry = section(read("THIRD_PARTY_LICENSES.md"), name);
+
+      expect(entry).toContain(creator);
+      expect(entry).toContain(licenseUrl);
+      expect(entry).toMatch(/no warranties/i);
+      expect(entry).toMatch(/unmodified/i);
+    },
+  );
+
+  it.each(packages)(
+    "names $name and its licence link in NOTICE",
+    ({ name, licenseUrl }) => {
+      const notice = read("NOTICE").replace(/\s+/g, " ");
+
+      expect(notice).toContain(name);
+      expect(notice).toContain(licenseUrl);
+      expect(notice).toMatch(/unmodified/i);
+    },
+  );
+
+  it("ships the same files in the runner package as the repository root holds", () => {
+    for (const file of ["NOTICE", "THIRD_PARTY_LICENSES.md"]) {
+      expect(read(`runner/src/code_reviewer_runner/licenses/${file}`)).toBe(
+        read(file),
+      );
+    }
+  });
+});
+
 describe("license metadata", () => {
   it("declares Apache-2.0 in the app package.json", () => {
     const manifest = JSON.parse(read("app/package.json")) as {

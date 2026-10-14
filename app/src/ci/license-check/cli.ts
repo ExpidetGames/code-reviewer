@@ -5,8 +5,9 @@
 //   node src/ci/license-check/cli.ts          (or: pnpm licenses:check, make check-licenses)
 //
 // It lists the installed packages of the app (pnpm) and the runner (uv) with their licenses, reads
-// pnpm-lock.yaml and uv.lock, and judges everything against license-policy.json at the repository
-// root. Exit code 0 when every license is allowed, 1 for a violation or when the data could not be
+// pnpm-lock.yaml and uv.lock, audits the prebuilt binaries of the runner image (OpenCode, ripgrep:
+// their pins, the documents and the snapshot of the packages bundled in OpenCode, see binaries.ts),
+// and judges everything against license-policy.json at the repository root. Exit code 0 when every license is allowed, 1 for a violation or when the data could not be
 // collected. Everything it reads is local metadata: no network.
 //
 // Node runs this file as it is (TypeScript types are stripped): relative imports with the .ts
@@ -18,17 +19,26 @@ import {
   describeViolation,
   findStalePolicyEntries,
 } from "./check.ts";
+import { auditBinaries, describeBinaryViolation } from "./binaries.ts";
 import { collectAll, type Collected } from "./collect.ts";
 import { parsePolicy, type Policy } from "./policy.ts";
 
 type Dependencies = {
   policy: Policy;
   collect: () => Collected;
+  /** Reads a file of the repository by its path from the root; undefined when it cannot be read. */
+  readText?: (path: string) => string | undefined;
   out: (line: string) => void;
   err: (line: string) => void;
 };
 
-export function runCli({ policy, collect, out, err }: Dependencies): number {
+export function runCli({
+  policy,
+  collect,
+  readText = () => undefined,
+  out,
+  err,
+}: Dependencies): number {
   let data: Collected;
   try {
     data = collect();
@@ -36,23 +46,31 @@ export function runCli({ policy, collect, out, err }: Dependencies): number {
     err(error instanceof Error ? error.message : String(error));
     return 1;
   }
-  const result = checkLicenses({ policy, ...data });
+  const binaries = auditBinaries({ policy, readText });
+  const installed = [...data.installed, ...binaries.installed];
+  const locked = [...data.locked, ...binaries.locked];
+  const result = checkLicenses({ policy, installed, locked });
   const violations = [
-    ...result.violations,
-    ...findStalePolicyEntries(policy, data.locked),
+    ...binaries.violations.map(describeBinaryViolation),
+    ...[...result.violations, ...findStalePolicyEntries(policy, locked)].map(
+      describeViolation,
+    ),
   ];
   if (violations.length > 0) {
     err(`${violations.length} license problem(s):`);
-    for (const violation of violations)
-      err(`  ${describeViolation(violation)}`);
+    for (const violation of violations) err(`  ${violation}`);
     err(
       "A new license needs a decision: allow it in license-policy.json and THIRD_PARTY_LICENSES.md, or choose another dependency.",
     );
     return 1;
   }
+  const bundled =
+    binaries.binaries > 0
+      ? ` ${binaries.binaries} binary pin(s) and ${result.checked.bun} package(s) bundled in them audited.`
+      : "";
   out(
     `Licenses ok: ${result.checked.npm} npm and ${result.checked.python} python packages installed, ` +
-      `${data.locked.length} in the lockfiles.`,
+      `${data.locked.length} in the lockfiles.${bundled}`,
   );
   return 0;
 }
@@ -68,6 +86,13 @@ if (import.meta.main) {
   process.exitCode = runCli({
     policy,
     collect: () => collectAll(repoRoot),
+    readText: (path) => {
+      try {
+        return readFileSync(`${repoRoot}/${path}`, "utf8");
+      } catch {
+        return undefined;
+      }
+    },
     out: (line) => console.log(line),
     err: (line) => console.error(line),
   });

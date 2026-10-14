@@ -217,7 +217,7 @@ The build context is the repository root (the images also carry `LICENSE`, `NOTI
 | Image | Build | Notes |
 |---|---|---|
 | `ghcr.io/expidetgames/code-reviewer-app` | `docker build -f app/Dockerfile -t code-reviewer-app .` | Next.js standalone server on port 3000, runs as uid 10001. The database lives in the volume `/data` (`DATABASE_PATH=/data/app.db`); it is created and migrated on start. |
-| `ghcr.io/expidetgames/code-reviewer-runner` | `docker build -f runner/Dockerfile -t code-reviewer-runner .` | Python (version of `runner/.python-version`) with the runner installed by uv from `uv.lock`, runs as uid 10001. Holds PR-Agent (pinned, from `uv.lock`) and its tiktoken encodings, so a job needs no download besides GitHub and the LLM. |
+| `ghcr.io/expidetgames/code-reviewer-runner` | `docker build -f runner/Dockerfile -t code-reviewer-runner .` (the `--target dynamic` image of `compose.dynamic.yml` is built from the checkout and not published) | Python (version of `runner/.python-version`) with the runner installed by uv from `uv.lock`, runs as uid 10001. Holds PR-Agent (pinned, from `uv.lock`) and its tiktoken encodings, so a job needs no download besides GitHub and the LLM. |
 
 ```sh
 docker run --rm -p 3000:3000 -v code-reviewer-data:/data \
@@ -318,11 +318,14 @@ and several runners on an external Postgres, start from `compose.large.yml` and 
 (`postgres://` or `postgresql://`, or empty for SQLite). The app then schedules no backup — the
 operator backs up the database — and the job queue is safe for concurrent runners.
 
-**Dynamic Review runner (not yet activatable).** `compose.dynamic.yml` is an opt-in override that adds a
-separate runner for Dynamic Review (`docker compose -f compose.yml -f compose.dynamic.yml up -d`). The
-engine is not in the runner image yet, so that runner serves Diff jobs only and no Dynamic job is
-claimed. [docs/dynamic-review.md](docs/dynamic-review.md) has the status, the sizing, the activation
-order (including the instance admin's Dynamic Review switch) and the rollback.
+**Dynamic Review runner (opt-in, off by default).** `compose.dynamic.yml` is an opt-in override that adds a
+separate runner for Dynamic Review, built from the `dynamic` target of `runner/Dockerfile` with the pinned
+stock OpenCode (`docker compose -f compose.yml -f compose.dynamic.yml up -d --build --wait`). The runner
+proves its isolation at start and advertises the engine only if that passes; Dynamic Review itself stays off
+until the instance admin turns on its switch. The default runner image holds no engine.
+[docs/dynamic-review.md](docs/dynamic-review.md) has the activation steps (including how to verify the
+self-check and the admin switch), the sizing, the rollback and the known limitations;
+[docs/deployment-coolify.md](docs/deployment-coolify.md) has the (untested) Coolify variant.
 
 ## Deploy on Coolify
 

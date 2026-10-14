@@ -151,3 +151,14 @@ def test_unusable_slot_ports_stop_the_runner_from_starting(extra: dict[str, str]
 def test_an_engine_user_that_is_the_diff_job_user_or_root_is_refused(extra: dict[str, str]) -> None:
     with pytest.raises(SettingsError, match=r"RUNNER_DYNAMIC_ENGINE_[UG]ID"):
         settings_from_environment({**BASE, "RUNNER_DIFF_JOB_USER": "10001:10001", **extra})
+
+
+# #202-T03: settings alone never advertise opencode; only the startup self-check can add it.
+def test_the_settings_alone_advertise_diff_only() -> None:
+    from code_reviewer_runner.capabilities import ENGINE_DIFF
+
+    root = {**BASE, "RUNNER_DIFF_JOB_USER": "10001:10001"}
+
+    assert settings_from_environment(BASE).engines == (ENGINE_DIFF,)
+    assert settings_from_environment(root).engines == (ENGINE_DIFF,)
+    assert settings_from_environment(root).dynamic_command is None

@@ -341,6 +341,7 @@ class DynamicEngine:
         scratch_dir: str | None = None,
         launch: EngineLaunch | None = None,
         node_bin: str | None = None,
+        ripgrep: Path | None = None,
         require_ripgrep: bool = True,
         startup_seconds: float = STARTUP_SECONDS,
         transport: Transport = _http_request,
@@ -364,6 +365,7 @@ class DynamicEngine:
         self.inputs = inputs
         self.exported_paths = exported_paths
         self.node_bin = node_bin
+        self.ripgrep = ripgrep
         self.require_ripgrep = require_ripgrep
         self.startup_seconds = startup_seconds
         self._transport = transport
@@ -417,6 +419,7 @@ class DynamicEngine:
             home=home,
             scratch_dir=str(self._scratch),
             node_bin=self.node_bin,
+            tools_dir=str(self.ripgrep.parent) if self.ripgrep is not None else None,
         )
         # The one file the engine reads its configuration from (confirmed against the pinned
         # release). `OPENCODE_CONFIG_DIR` is deliberately not set: a config directory makes the
@@ -426,10 +429,13 @@ class DynamicEngine:
         # The engine's grep and glob run ripgrep. Without one on its PATH the pinned release
         # downloads a binary from GitHub on first use (seen against the real binary): a runtime
         # download the runner never allows, and one that fails anyway without network. The trusted
-        # image supplies `rg`; a missing one is a refusal to start, not an attempt to fetch it.
-        if self.require_ripgrep and shutil.which("rg", path=environment["PATH"]) is None:
+        # image supplies `rg` and the startup self-check verified exactly that file, so it is the
+        # file that runs: its directory leads the engine's PATH and no lookup may find another. A
+        # missing one is a refusal to start, not an attempt to fetch it.
+        if self.require_ripgrep and not self._verified_ripgrep_leads(environment["PATH"]):
             raise EngineError(
-                ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE, "no ripgrep on the engine search path"
+                ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE,
+                "no verified ripgrep on the engine search path",
             )
         # Without a dedicated user the port is only probed free, not held: the engine binds it
         # itself a moment later. If a stranger took it in between, our engine exits instead of
@@ -459,6 +465,12 @@ class DynamicEngine:
                 raise
             return client
         raise EngineExited()  # unreachable: the last attempt raises
+
+    def _verified_ripgrep_leads(self, search_path: str) -> bool:
+        """The verified `rg` is an executable file and the first `rg` on the engine's PATH."""
+        if self.ripgrep is None or not os.access(self.ripgrep, os.X_OK):
+            return False
+        return shutil.which("rg", path=search_path) == str(self.ripgrep)
 
     def _require_own_listener(self, port: int) -> None:
         """The answer came from our engine: its user, and nobody else, listens on that port."""

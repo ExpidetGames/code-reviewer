@@ -42,6 +42,7 @@ const policy: Policy = {
       reason: "windows only",
     },
   ],
+  binaries: [],
 };
 
 const npm = (
@@ -90,7 +91,7 @@ describe("checkLicenses", () => {
     ]);
 
     expect(result.violations).toEqual([]);
-    expect(result.checked).toEqual({ npm: 1, python: 1 });
+    expect(result.checked).toEqual({ npm: 1, python: 1, bun: 0 });
   });
 
   // #118-T01
@@ -157,6 +158,74 @@ describe("checkLicenses", () => {
     expect(result.violations.map(describeViolation)).toEqual([
       "LICENSE_NOT_ALLOWED: python giteapy@1.0.0 is NONE, which is not allowed",
     ]);
+  });
+
+  // #202-T06
+  describe("packages bundled in a prebuilt binary (ecosystem bun)", () => {
+    const bun = (
+      name: string,
+      license: string,
+      version = "1.0.0",
+    ): InstalledPackage => ({ ecosystem: "bun", name, version, license });
+    const withBunException: Policy = {
+      ...policy,
+      exceptions: [
+        ...policy.exceptions,
+        {
+          ecosystem: "bun",
+          package: "mpl-lib",
+          licenses: ["MPL-2.0"],
+          reason: "used unmodified",
+        },
+      ],
+    };
+
+    it("judges them like any other package and counts them", () => {
+      const result = run([bun("a", "MIT"), bun("b", "GPL-3.0-only")]);
+
+      expect(result.checked).toEqual({ npm: 0, python: 0, bun: 2 });
+      expect(result.violations.map(describeViolation)).toEqual([
+        "LICENSE_NOT_ALLOWED: bun b@1.0.0 is GPL-3.0-only, which is not allowed",
+      ]);
+    });
+
+    it("fails for a package that declares no license or whose license could not be read", () => {
+      const result = run([bun("a", "NONE"), bun("b", "UNRESOLVED")]);
+
+      expect(result.violations.map((violation) => violation.package)).toEqual([
+        "a",
+        "b",
+      ]);
+    });
+
+    it("allows an exception of the bun ecosystem only for bun packages", () => {
+      expect(
+        run([bun("mpl-lib", "MPL-2.0")], { policy: withBunException })
+          .violations,
+      ).toEqual([]);
+      expect(
+        run([npm("mpl-lib", "MPL-2.0")], { policy: withBunException })
+          .violations,
+      ).toHaveLength(1);
+    });
+
+    it("reports an exception for a package that is not in the snapshot as stale", () => {
+      const packages = locked([bun("other", "MIT")]);
+
+      expect(
+        findStalePolicyEntries(withBunException, packages)
+          .filter((entry) => entry.ecosystem === "bun")
+          .map(describeViolation),
+      ).toEqual([
+        "STALE_EXCEPTION: bun mpl-lib matches no package in the lockfile; remove it from exceptions in license-policy.json",
+      ]);
+      expect(
+        findStalePolicyEntries(
+          withBunException,
+          locked([bun("mpl-lib", "MPL-2.0")]),
+        ).filter((entry) => entry.ecosystem === "bun"),
+      ).toEqual([]);
+    });
   });
 
   describe("packages of the lockfile that are not installed", () => {
