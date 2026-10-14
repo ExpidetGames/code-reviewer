@@ -488,3 +488,22 @@ def test_malformed_attempted_heads_are_an_invalid_job(attempted: Any) -> None:
     with pytest.raises(JobError) as refused:
         parse_job(json.dumps(dynamic_job(attemptedShas=attempted)))
     assert refused.value.code is ErrorCode.INVALID_JOB
+
+
+# #257-T04
+def test_the_truncation_flag_of_a_claim_is_read_and_defaults_to_false() -> None:
+    truncated = parse_job(json.dumps(dynamic_job(attemptedShasTruncated=True)))
+    assert truncated.base is not None
+    assert truncated.base.attempted_shas_truncated is True
+
+    older = parse_job(json.dumps(dynamic_job()))
+    assert older.base is not None
+    assert older.base.attempted_shas_truncated is False
+
+
+# #257-T04
+@pytest.mark.parametrize("flag", ["true", 1, None, [True]])
+def test_a_malformed_truncation_flag_is_an_invalid_job(flag: Any) -> None:
+    with pytest.raises(JobError) as refused:
+        parse_job(json.dumps(dynamic_job(attemptedShasTruncated=flag)))
+    assert refused.value.code is ErrorCode.INVALID_JOB

@@ -66,6 +66,7 @@ _BASE_FIELDS = {
     "headSha",
     "previousReviewedSha",
     "attemptedShas",
+    "attemptedShasTruncated",
     "comparison",
 }
 # The contract bounds the list; a longer one is not a claim of this app.
@@ -157,7 +158,8 @@ class ClaimBase:
     """The checkout facts (#195).
 
     Exact head, base identity, declared comparison mode, prior head and (#255) the heads of the
-    app's earlier jobs of this pull request that did not succeed.
+    app's earlier jobs of this pull request that did not succeed, and (#257) whether that list was
+    cut at its bound.
     """
 
     repository: str
@@ -166,6 +168,7 @@ class ClaimBase:
     previous_reviewed_sha: str | None
     comparison: str
     attempted_shas: tuple[str, ...] = ()
+    attempted_shas_truncated: bool = False
 
 
 class JobError(Exception):
@@ -477,6 +480,7 @@ def _claim_base(data: dict[str, Any]) -> ClaimBase:
         previous_reviewed_sha=previous,
         comparison=comparison,
         attempted_shas=attempted,
+        attempted_shas_truncated=_attempted_shas_truncated(base),
     )
 
 
@@ -492,6 +496,16 @@ def _attempted_shas(base: dict[str, Any]) -> tuple[str, ...]:
     if len(shas) != len(items) or len(items) > MAX_ATTEMPTED_SHAS or len(set(shas)) != len(shas):
         raise _invalid(_ATTEMPTED_SHAS_DETAIL)
     return tuple(shas)
+
+
+def _attempted_shas_truncated(base: dict[str, Any]) -> bool:
+    """The optional `attemptedShasTruncated` (#257): absent means false (an app from before it)."""
+    if "attemptedShasTruncated" not in base:
+        return False
+    raw: object = base["attemptedShasTruncated"]
+    if not isinstance(raw, bool):
+        raise _invalid("base.attemptedShasTruncated must be a boolean")
+    return raw
 
 
 def parse_job(raw: str) -> Job:
