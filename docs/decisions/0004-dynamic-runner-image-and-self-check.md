@@ -51,9 +51,10 @@ Docker Compose or Coolify gets the runner.
 5. **Built from the checkout, not published.** `compose.dynamic.yml` builds the `dynamic` target
    (`up --build`), like `compose.build.yml` and `compose.coolify.yml` build theirs; the GHCR packages
    are private (#89 is open) and a second published image would be a release decision. Coolify takes
-   one Compose file per resource, so `compose.coolify.dynamic.yml` is a standalone second resource that
-   reaches the app by address; a test keeps its service equal to `compose.dynamic.yml`. It is untested
-   on a real Coolify and says so.
+   one Compose file per resource; this decision first shipped `compose.coolify.dynamic.yml` as a
+   standalone second resource, which #264 replaced (owner decision of 2026-10-14): the same service is
+   now `runner-dynamic` in `compose.coolify.yml`, so the existing resource builds and starts it, and a
+   test keeps it equal to `compose.dynamic.yml`. It is untested on a real Coolify and says so.
 6. **Provenance in `make check-licenses`.** The two binaries are audited from their pin files (source
    commit, licence, digests, notices) and the Bun-lock runtime closure of OpenCode's pinned commit is a
    committed snapshot judged by the same licence policy, offline.

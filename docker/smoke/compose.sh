@@ -127,12 +127,32 @@ BETTER_AUTH_URL=https://reviews.example.com docker compose --project-name "$proj
   fail "docker compose config failed on compose.coolify.yml with a complete configuration"
 coolify_services=$(BETTER_AUTH_URL=https://reviews.example.com docker compose --project-name "$project" \
   --project-directory "$repo_root" --env-file /dev/null --file "$coolify_file" config --services | sort | tr '\n' ' ')
-[ "$coolify_services" = "app runner " ] || fail "compose.coolify.yml defines '$coolify_services', expected 'app runner'"
+[ "$coolify_services" = "app runner runner-dynamic " ] ||
+  fail "compose.coolify.yml defines '$coolify_services', expected 'app runner runner-dynamic'"
 if message=$(env -u BETTER_AUTH_URL docker compose --project-name "$project" \
   --project-directory "$repo_root" --env-file /dev/null --file "$coolify_file" config --quiet 2>&1); then
   fail "compose.coolify.yml is valid without BETTER_AUTH_URL"
 fi
 grep -q 'BETTER_AUTH_URL' <<<"$message" || fail "the message does not name BETTER_AUTH_URL: $message"
+
+# #264-T05: the Dynamic runner of the Coolify file describes the default model by default, as the
+# JSON it was written as, and the variable replaces it. The default contains braces, which the
+# interpolation of Compose must not cut at the first one.
+step "compose.coolify.yml gives the Dynamic runner the descriptor of the default model, overridable"
+capabilities_of() {
+  docker compose --project-name "$project" --project-directory "$repo_root" --env-file /dev/null \
+    --file "$coolify_file" config --format json |
+    python3 -I -c 'import json, sys
+print(json.load(sys.stdin)["services"]["runner-dynamic"]["environment"]["RUNNER_DYNAMIC_CAPABILITIES"])'
+}
+default_capabilities=$(unset RUNNER_DYNAMIC_CAPABILITIES; BETTER_AUTH_URL=https://reviews.example.com capabilities_of) ||
+  fail "docker compose config failed on the Dynamic runner of compose.coolify.yml"
+[ "$default_capabilities" = '{"tool_choice_required":true,"structured_output":true,"max_output_tokens":8192}' ] ||
+  fail "the Dynamic runner got '$default_capabilities' as its default model descriptor"
+override_capabilities=$(export RUNNER_DYNAMIC_CAPABILITIES='{"tool_choice_required":false}'
+  BETTER_AUTH_URL=https://reviews.example.com capabilities_of) || fail "docker compose config failed with an override"
+[ "$override_capabilities" = '{"tool_choice_required":false}' ] ||
+  fail "the variable did not replace the default model descriptor: '$override_capabilities'"
 
 # CR-37-T08: a missing required setting stops `up` with a message naming it, before any container.
 step "a missing runner token stops the start before a container is created"

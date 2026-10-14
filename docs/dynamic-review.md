@@ -28,7 +28,7 @@ publishes as one persistent summary comment. The decisions are in epic
 | Real pinned OpenCode fetch, proxy-side audit, hostile-repository proof; launch as the dedicated engine user, static per-user network rules, `NET_ADMIN` dropped after startup | Shipped (#197 parts 2a and 2b, #244) |
 | The Dynamic runner image: the `dynamic` target of `runner/Dockerfile` with the pinned OpenCode, a pinned `rg`, `nft` and the engine user (**linux-x64 glibc only**: the pins have no other platform, an arm64 image needs its own pinned digests) | Shipped (#202) |
 | Startup self-check that advertises `opencode` only when everything holds, with a stable logged reason otherwise | Shipped (#202) |
-| Opt-in deployment: `compose.dynamic.yml` (Docker Compose) and `compose.coolify.dynamic.yml` (Coolify, **untested on a real Coolify**) | Shipped (#202) |
+| Deployment: `compose.dynamic.yml` (Docker Compose, opt-in override file) and the `runner-dynamic` service of `compose.coolify.yml` (Coolify, built and started with the rest, **untested on a real Coolify**) | Shipped (#202, #264) |
 | Provenance audit of the engine binary and `rg` in `make check-licenses` (source commit, licence, the Bun-lock runtime closure of the pinned commit), notices in `NOTICE` and `THIRD_PARTY_LICENSES.md` | Shipped (#202) |
 | Worst-case memory and OOM measurements, the decision to run more than one Dynamic job at a time | **Manual step, not done** (needs a real deployment target, see "Capacity") |
 | Full path from a signed webhook to the Run: the pull request title, body and previous-review state in the prompt (#251), the review kind proved for every entry point and the model and usage in Runs (#252), and the privileged `e2e-dynamic` journey with the real pinned OpenCode that publishes the summary (#253) | Shipped (#251, #252, #253) |
@@ -147,7 +147,7 @@ namespaces, no host kernel setting beyond the `nf_tables` support every current 
   repository export is limited to 64 MiB and a preparation to 256 MiB, but a runaway engine that
   fills `/tmp` takes memory, not disk, and ends in the OOM kill of the job, bounded at 512 MiB. Do
   not add `volumes` or widen the tmpfs; the file test pins them. It is not a way to a read-only
-  Diff runner: only `compose.dynamic.yml` and `compose.coolify.dynamic.yml` use it.
+  Diff runner: only `compose.dynamic.yml` and the `runner-dynamic` service of `compose.coolify.yml` use it.
 - **Nothing mounted, nothing shared.** Besides those three tmpfs, `compose.dynamic.yml` has no
   `volumes`, `network_mode`, `pid`, `ipc` or Docker socket (a file test fails otherwise); do not add any. The rules do not cover
   AF_UNIX, and this is what keeps that gap empty. The privileged suite reads `/proc/net/unix` as the
@@ -368,9 +368,12 @@ model you choose, the knowledge of what it supports (tool choice "required" and 
    left and that no Dynamic job is `queued` or `running`, as `contracts/README.md` says. Switching a
    project from Dynamic back to Diff starts a fresh summary comment.
 
-**Coolify.** `compose.coolify.dynamic.yml` is the same service as a standalone file for a second
-Coolify resource; read the section "Dynamic Review runner" of `docs/deployment-coolify.md` first. It
-has **not been tested on a real Coolify instance**.
+**Coolify.** The `runner-dynamic` service is part of `compose.coolify.yml` (#264): the existing
+Coolify resource builds and starts it with the app and the Diff runner after the next release, and a
+file test keeps it equal to the service of `compose.dynamic.yml`. It does nothing until the gate is
+turned on, and it carries the capability descriptor of the default model by default. Read the section
+"Dynamic Review runner" of `docs/deployment-coolify.md` first. It has **not been tested on a real
+Coolify instance**.
 
 ## Capacity: slots, memory and what is not measured
 

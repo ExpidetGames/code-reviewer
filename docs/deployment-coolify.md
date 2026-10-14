@@ -6,9 +6,11 @@ against Coolify's current documentation (links in each step); the first deployme
 what verifies it on a real instance, see [What is verified](#what-is-verified).
 
 What you end up with: one Coolify application of type *Docker Compose*, built from this repository,
-with two containers: the **app** (web UI, API, webhook receiver, SQLite database, daily backups) behind
-Coolify's proxy under your domain with HTTPS, and the **runner** (runs PR-Agent) that has no domain and
-no port and only talks to the app.
+with three containers: the **app** (web UI, API, webhook receiver, SQLite database, daily backups) behind
+Coolify's proxy under your domain with HTTPS, the **runner** (runs PR-Agent) that has no domain and
+no port and only talks to the app, and the **runner-dynamic** (the Dynamic Review runner: built and
+started with the rest, but idle until an instance admin turns Dynamic Review on, see
+[Dynamic Review runner](#dynamic-review-runner)).
 
 ## Contents
 
@@ -52,6 +54,7 @@ no port and only talks to the app.
 | Branch | `main` | `main` holds released versions; `development` is the integration branch. |
 | Domain | One domain on the service `app`, `https://<domain>:3000` | The proxy terminates TLS; the `:3000` is the port inside the container. |
 | Storage | Two named volumes: `data` (the SQLite database) and `backups` | Both survive redeploys. They live in the Compose file. |
+| Dynamic Review runner | A third service, `runner-dynamic`, **in the same file and resource** | Coolify takes one Compose file per resource; a second resource would need a manual path and variables. It stays off until the instance gate `dynamic_review` is turned on, so nothing changes for existing projects. [Dynamic Review runner](#dynamic-review-runner). |
 | Instances | **Exactly one** app instance | [Section 10](#10-one-app-instance-only). |
 | Updates | Push or merge to `main` (automatic or manual deploy), or press Redeploy | [Section 11](#11-updates-and-rollback). |
 
@@ -210,12 +213,15 @@ value), set Literal.
 | `RUNNER_JOB_TIMEOUT_SECONDS` | optional | A number of seconds | Hard timeout of one review; the runner ends a longer one and reports `timeout`. Empty: 1200 (20 minutes). |
 | `RUNNER_POLL_INTERVAL_SECONDS` | optional | A number of seconds | How long the runner waits between two requests for work when nothing is waiting. Empty: 5. |
 | `RUNNER_ID` | optional | A name | Shown in the app's logs as the name of this runner (letters, digits and `._:@-`). Empty: `runner-<container host name>`. |
+| `RUNNER_DYNAMIC_CONCURRENCY` | optional | A whole number from 1 to 32 | Dynamic jobs at once on `runner-dynamic`. Empty: 1. Do not raise it before the measurements of `docs/dynamic-review.md` exist ([Dynamic Review runner](#dynamic-review-runner)). |
+| `RUNNER_DYNAMIC_MEMORY_LIMIT`, `RUNNER_DYNAMIC_MEMORY_RESERVATION` | optional | A Docker memory size such as `2g` or `1536m` | The memory limit (also the swap limit: there is no swap) and the soft reservation of `runner-dynamic`. Empty: `2g` and `1536m`. |
+| `RUNNER_DYNAMIC_CAPABILITIES` | optional | JSON, for example `{"tool_choice_required":true,"structured_output":true,"max_output_tokens":8192}` | What the model of the Dynamic runner supports. Empty: that example, the description of the default model `deepseek/deepseek-v4.1-flash`. Set it only when you choose another model. |
 
 Variables that exist in `.env.example` but that you **do not set on Coolify**:
 
 | Variable | Required | Why not |
 |---|---|---|
-| `APP_IMAGE`, `RUNNER_IMAGE` | not used | Only `compose.yml` pulls images by these names. Coolify builds them. |
+| `APP_IMAGE`, `RUNNER_IMAGE`, `RUNNER_DYNAMIC_IMAGE` | not used | Only `compose.yml` and `compose.dynamic.yml` pull or tag images by these names. Coolify builds them. |
 | `APP_PORT`, `APP_BIND_ADDRESS` | not used | Only `compose.yml` publishes a port. |
 | `GITHUB_APP_PRIVATE_KEY_PATH` | not used | The Compose file mounts no key file; use `GITHUB_APP_PRIVATE_KEY`. |
 | `DATABASE_URL`, `DATABASE_POOL_MAX` | not used | Only the large (Postgres) topology sets them; on Coolify the database is the SQLite file in the data volume ([deployment-large.md](deployment-large.md)). |
@@ -432,6 +438,15 @@ are estimates, a deployment builds the images on the same machine, and a redeplo
 containers. On a 4 GB server use `RUNNER_CONCURRENCY=2` and `RUNNER_MEMORY_LIMIT=1536m`. Disk: the images
 need about 1 GB, Docker's build cache more.
 
+**The Dynamic runner adds to this.** `runner-dynamic` is limited to **2 GiB** (`RUNNER_DYNAMIC_MEMORY_LIMIT`,
+no swap, 1.5 GiB reserved) and is built on the same server, so it adds 2 GiB to the figures above only
+while a Dynamic job runs (idle it uses little). That is why the recommended server for an installation
+that will use Dynamic Review is **8 GB RAM or more**; the 4 GB minimum above is for the Diff runner alone,
+and a 4 GB server should leave the gate off or set `RUNNER_DYNAMIC_MEMORY_LIMIT=1536m` and
+`RUNNER_DYNAMIC_MEMORY_RESERVATION=1g` only after the measurements of `docs/dynamic-review.md`
+("Capacity") exist. The second image adds about 60 MB for the pinned engine and some build time to every
+deployment.
+
 ### Stopping the runner
 
 A stop (`docker compose stop`, and in the same way a redeploy that replaces the container) sends the runner
@@ -474,52 +489,65 @@ by whoever runs it (neither is part of the shipped files nor tested):
 After either, run a review (`/review` on a test pull request) and check the runner log for
 `no answer from the app` or model and GitHub errors (`git_unavailable`, `llm_unavailable`).
 
-### Dynamic Review runner (opt-in, untested on Coolify)
+### Dynamic Review runner
 
-Dynamic Review needs a runner of its own, sized separately from the PR-Agent runner above, and the app
-instance's Dynamic Review switch (default off). **This section has not been tested on a real Coolify
-instance**: the Compose file and the image are tested in CI (file tests against `compose.dynamic.yml`,
-the image build and its smoke test, which starts the runner in a container created like the file creates
-it), but how Coolify handles `user: "0:0"`, the capability list and `no-new-privileges`, and whether the
-Docker host's kernel has `nf_tables`, is for the first deployment to find out. A Coolify installation that
-does not use Dynamic Review needs nothing from it; nothing in `compose.coolify.yml` changes.
+`compose.coolify.yml` has a third service, `runner-dynamic`, the runner of Dynamic Review
+(`docs/dynamic-review.md`). It is part of **the same Coolify resource**: after the next release the
+resource that deploys this file builds the `dynamic` target of `runner/Dockerfile` on the server (it
+downloads the pinned engine, about 60 MB, and rejects it if it is not the pinned file) and starts the
+runner with the app and the Diff runner. There is no second resource, no new path and no new variable
+to enter: it uses the existing `RUNNER_TOKEN`, reaches the app at `http://app:3000` over the Docker
+network like the Diff runner, and carries the description of the default model
+(`RUNNER_DYNAMIC_CAPABILITIES`, above) as its default.
 
-Coolify takes one Compose file per resource, so the Dynamic runner is a **second resource** next to the
-application of this guide:
+**Nothing changes for existing projects.** Dynamic Review is off until an instance admin turns the
+gate on (Admin, Setup, Instance, Dynamic Review; default off, see `docs/dynamic-review.md`,
+"Activation, step by step"). Until then `runner-dynamic` claims no Dynamic job and every project is
+reviewed by the Diff runner as before. **This section has not been tested on a real Coolify
+instance**: the Compose file and the image are tested in CI (the service is pinned equal to the one of
+`compose.dynamic.yml`, the image build and its smoke test start the runner in a container created like the
+file creates it), but how Coolify handles `user: "0:0"`, the capability list, `no-new-privileges`,
+`read_only` and the tmpfs, and whether the Docker host's kernel has `nf_tables`, is for the first
+deployment to find out. If Coolify refuses the file, the whole deployment fails, not only this service:
+see [section 13](#13-when-something-does-not-work).
 
-1. In the same project and environment, add a resource of the same type (**Docker Compose**, public or
-   private repository, the same repository and branch). Set **Docker Compose Location** to
-   `/compose.coolify.dynamic.yml`. Coolify builds the `dynamic` target of `runner/Dockerfile` on the
-   server (it downloads the pinned engine, about 60 MB, and rejects it if it is not the pinned file).
-2. Variables (Coolify turns every reference of the file into a variable): `RUNNER_TOKEN` (the same
-   value as the application's) and `RUNNER_API_URL`, the address of the app as the runner reaches it:
-   the app's public https address, the value of `BETTER_AUTH_URL` (the two resources do not share a Docker
-   network by default, and the runner API is protected by the token). Optional and without secrets:
-   `RUNNER_DYNAMIC_CONCURRENCY` (default 1: one Dynamic job at a time),
-   `RUNNER_DYNAMIC_MEMORY_LIMIT` (`2g`), `RUNNER_DYNAMIC_MEMORY_RESERVATION` (`1536m`) and
-   `RUNNER_DYNAMIC_CAPABILITIES` (the operator's JSON description of the model; empty makes every
-   Dynamic job fail with `dynamic_model_features_unsupported`). The memory figures are an unmeasured,
-   conservative proposal; do not raise the concurrency before the measurements in
-   `docs/dynamic-review.md` exist. `RUNNER_DYNAMIC_IMAGE` does not apply: Coolify names the image it
-   builds.
-3. Deploy, then read the resource's log: it must contain `Dynamic Review: opencode is advertised, the
-   startup self-check passed`. If it says `opencode is not advertised`, the reason is on the same line;
-   the table in `docs/dynamic-review.md` ("The startup self-check") lists them. Typical on a managed
-   host: `network_rules_not_installed` (the host kernel has no `nf_tables`, or the platform stripped
-   `NET_ADMIN`) or `not_root_supervisor` (the platform ignored `user: "0:0"`). The runner then serves Diff
-   jobs only, and the Diff runner of the application is not affected.
-4. Only then follow "Activation, step by step" of `docs/dynamic-review.md` from the step that turns the
-   gate on. To roll back, switch the gate off first, then stop or delete the resource.
+1. **Deploy** as usual (a release into `main`, or **Redeploy**). Server sizing for the extra 2 GiB is in
+   [section 9](#9-runner-sizing-and-runner_concurrency).
+2. **Check the self-check.** Read the log of `runner-dynamic`: it must contain `Dynamic Review: opencode is
+   advertised, the startup self-check passed`. If it says `opencode is not advertised`, the reason is on
+   the same line; the table in `docs/dynamic-review.md` ("The startup self-check") lists them. Typical on
+   a managed host: `network_rules_not_installed` (the host kernel has no `nf_tables`, or Coolify stripped
+   `NET_ADMIN`) or `not_root_supervisor` (the platform ignored `user: "0:0"`). The runner then **serves
+   Diff jobs only**, logs why, and the app and the Diff runner are not affected. One case stops the
+   container instead: if Coolify drops `SETPCAP`, the runner cannot end its startup capabilities and
+   refuses to start (`cannot start: dynamic_isolation_self_check_failed` in the log). Only that container
+   is affected; it restarts in a loop until the setting is fixed or the service is removed from your copy
+   of the file.
+3. **Check that the hardening took effect.** The passing self-check of step 2 already proves the root
+   supervisor, the engine user, the network rules and that `NET_ADMIN` and `SETPCAP` are gone. What it does not
+   show is what Coolify did to the rest of the file. In the Coolify terminal of `runner-dynamic` (or
+   `docker exec` on the server) `touch /usr/x` must fail with "Read-only file system" (`read_only`), and
+   `mount | grep -E ' /(tmp|run|home/runner) '` must show those three paths as `tmpfs` with `noexec,nosuid,nodev`.
+   On the server, `docker inspect <container> --format '{{json .HostConfig}}'` must show `ReadonlyRootfs`
+   true, `CapDrop` `ALL`, `CapAdd` with exactly the eight capabilities of the file, `no-new-privileges` in
+   `SecurityOpt`, the three `Tmpfs` entries, no `Binds`, no `Devices`, not `Privileged`, the memory limit
+   of 2 GiB with the same swap limit, and `PidsLimit` 512. If one of them differs, Coolify changed a setting
+   of the file: do not turn the gate on.
+4. **Turn Dynamic Review on** only when 2 and 3 hold: follow "Activation, step by step" of
+   `docs/dynamic-review.md` from the step that turns the gate on. To roll back, switch the gate off first
+   (running jobs finish), then stop the service in Coolify.
+
+**It cannot be left out of the file by a setting.** Every deployment of this file builds and starts
+`runner-dynamic`; the gate, not a variable, is what keeps it idle. A self-hoster who does not want the
+container at all (for example on a small server) deletes the `runner-dynamic` service from their copy of
+`compose.coolify.yml` (a fork, or a Compose file of their own), or simply leaves the gate off and stops the
+service in Coolify's UI; the app and the Diff runner never depend on it.
 
 The file runs the Dynamic runner's loop as root with a short list of capabilities and sets
 `RUNNER_DIFF_JOB_USER` (`10001:10001`), so that PR-Agent jobs still drop to the unprivileged user; that
 is fixed by the file, not a setting to change (see "The engine boundary" in `docs/dynamic-review.md`).
-The container runs with a read-only root filesystem and three small tmpfs (#249; see "The engine
-boundary" in `docs/dynamic-review.md`), so a restarted container gets its startup capabilities again
-but runs the image as built. Coolify is expected to pass the file's `read_only` and `tmpfs` to Docker
-as they are, but that has **not been verified on a real Coolify** (only Docker Compose is tested in
-CI): after the first deployment, check that the container's root filesystem is read-only (for
-example `docker exec <container> touch /usr/x` must fail) and keep both settings.
+The container runs with a read-only root filesystem and three small tmpfs (#249), so a restarted
+container gets its startup capabilities again but runs the image as built. Keep these settings.
 
 The firewall advice above ("Restrict what the runner can reach") covers this runner too: it needs
 GitHub, the model endpoint and the app, and its engine user is confined to the runner's own proxy by
@@ -733,12 +761,15 @@ Do this once with the whole team in the room; it is the acceptance test of the d
 | A webhook delivery shows a timeout, 502 or 503 | The app is unreachable: domain, proxy, health. |
 | A run fails with `llm_not_configured` | The workspace of the run has no LLM key, or the saved key cannot be read (an Admin enters it again under Settings, LLM access). An `LLM_API_KEY` in the environment is not a fallback any more: the update imported it once into the default workspace (the update log says `VARIABLE_NOT_IMPORTED` if it could not). |
 | The update does not start and the log says `UPDATE_BACKUP_FAILED` or `IMPORT_FAILED` | The update takes a backup first and stops, without touching the database, when it cannot write it: mount the `backups` volume and make it writable, then redeploy ([updating an installation from before accounts](#updating-an-installation-from-before-accounts)). `IMPORT_FAILED` rolled everything back; read the line, fix the cause and start again. |
+| Coolify refuses or fails the deployment after the release that added `runner-dynamic`, with an error about `user`, `cap_add`, `read_only`, `tmpfs` or `security_opt` | The Coolify version does not accept a setting of the Dynamic runner. Delete the `runner-dynamic` service from your copy of `compose.coolify.yml` to deploy without it, and report the Coolify version and the error ([Dynamic Review runner](#dynamic-review-runner)). |
+| `runner-dynamic` restarts in a loop | Its log says why (`cannot start: ...`); Coolify probably dropped `SETPCAP`. The app and the Diff runner keep working. |
+| A build error in the `dynamic` target (the pinned engine cannot be downloaded) | The server cannot reach the download host during the build, or the bytes differ from the pin. The deployment fails; retry, or remove the service from your copy of the file. |
 | The build is killed or the server is unresponsive during a deployment | Not enough memory for the build: more RAM, or a [build server](https://coolify.io/docs/troubleshoot/server/crash-during-build). |
 
 ## What is verified
 
-- Automatically, on every pull request: `compose.coolify.yml` is a valid Compose file that builds both
-  images from the repository, publishes no port, requires the runner token and the public address and stays in step with `compose.yml`;
+- Automatically, on every pull request: `compose.coolify.yml` is a valid Compose file that builds its
+  images (app, runner and the Dynamic runner) from the repository, publishes no port, requires the runner token and the public address and stays in step with `compose.yml`;
   this guide mentions every variable of `.env.example`; its sizing table matches the formula; the smoke
   script `docker/smoke/instance.sh` is tested against fake instances and runs against the Docker Compose
   stack in CI. The update of an installation from before accounts is rehearsed on every pull request that
@@ -746,6 +777,11 @@ Do this once with the whole team in the room; it is the acceptance test of the d
   the old environment (backup, import, setup code, webhook, restart, removal of the old variables), and
   the journey `app/e2e/upgrade/update-from-previous-release.e2e.ts` adds the real runner and PR-Agent against the
   fakes.
+- Automatically, for the Dynamic runner of this file: its `runner-dynamic` service is pinned equal to the one of
+  `compose.dynamic.yml` (user, capabilities, `read_only`, tmpfs, limits, no volumes or ports), asks for no new
+  variable, and its default `RUNNER_DYNAMIC_CAPABILITIES` survives `docker compose config` and is replaced by
+  the variable (`docker/smoke/compose.sh`); the runner serves Diff jobs only when its self-check fails
+  (`runner/tests/unit/test_job_loop_advertise.py`).
 - **Not yet, and left to the first deployment with the customer:** everything that needs a real Coolify
   instance, a domain, a certificate, GitHub's real deliveries and a real model: that Coolify accepts and
   parses the Compose file as described, the domain and certificate, the persistence across a redeploy, the
