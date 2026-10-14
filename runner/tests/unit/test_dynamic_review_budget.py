@@ -22,6 +22,7 @@ import pytest
 from code_reviewer_runner.dynamic_review.budget import (
     DEFAULT_OUTPUT_TOKENS,
     DEFAULT_WINDOW_TOKENS,
+    FINAL_CALL_GROWTH_BYTES,
     MAX_COST_USD,
     MAX_COST_USD_CEILING,
     BudgetLedger,
@@ -361,6 +362,151 @@ def test_concurrent_reservations_cannot_together_exceed_the_cost_limit() -> None
 
     assert outcomes.count(True) == 3
     assert shared.model_calls == 3
+
+
+# -- wrap-up (#293) ---------------------------------------------------------------------------------
+# A call of 3,000 bytes is 1,000 estimated tokens: with 100 output tokens it costs 0.0014 USD at the
+# round unit costs above. The call that would follow it can hold two more tool results of history.
+
+
+def final_reserve_after(text_bytes: int, output_tokens: int) -> Decimal:
+    """What a final call after a call of this size is reserved at."""
+    estimate = -(-text_bytes // 3) + -(-FINAL_CALL_GROWTH_BYTES // 3)
+    return UNIT_COSTS.of_call(estimate, output_tokens)
+
+
+# #293-T01
+def test_a_call_that_leaves_room_for_a_final_call_is_a_normal_call() -> None:
+    subject = ledger(max_cost_usd=Decimal("0.05"))
+
+    reservation = subject.reserve_call("x" * 3000, output_tokens=100, can_wrap_up=True)
+
+    assert reservation.final is False
+    assert subject.stopped_early is None
+    assert subject.usage("m").stopped_early is None
+
+
+# #293-T01
+def test_the_call_after_which_no_final_call_would_fit_is_the_final_call() -> None:
+    subject = ledger(max_cost_usd=Decimal("0.05"))
+    first = subject.reserve_call("x" * 3000, output_tokens=100, can_wrap_up=True)
+    subject.settle_call(first, prompt_tokens=900, completion_tokens=50, cost=Decimal("0.0036"))
+    # 0.0036 spent + 0.0014 for this call + the final call after it is over 0.05.
+    assert Decimal("0.0036") + Decimal("0.0014") + final_reserve_after(3000, 100) > Decimal("0.05")
+
+    second = subject.reserve_call("x" * 3000, output_tokens=100, can_wrap_up=True)
+
+    assert second.final is True
+    assert subject.stopped_early == "cost_limit"
+    assert subject.usage("m").stopped_early == "cost_limit"
+
+
+# #293-T01
+def test_a_call_that_cannot_be_rewritten_keeps_the_plain_rule() -> None:
+    subject = ledger(max_cost_usd=Decimal("0.05"))
+    first = subject.reserve_call("x" * 3000, output_tokens=100)
+    subject.settle_call(first, prompt_tokens=900, completion_tokens=50, cost=Decimal("0.0036"))
+
+    second = subject.reserve_call("x" * 3000, output_tokens=100)  # fits the limit by itself
+
+    assert second.final is False
+    assert subject.stopped_early is None
+
+
+# #293-T01
+def test_the_final_call_is_reserved_with_the_instruction_it_carries() -> None:
+    subject = ledger(max_cost_usd=Decimal("0.0015"))
+
+    final = subject.reserve_call(
+        "x" * 3000, output_tokens=100, can_wrap_up=True, wrap_up_text="y" * 300
+    )
+
+    assert final.final is True
+    assert final.input_tokens == 1100  # (3,000 + 300) / 3
+    assert final.cost == UNIT_COSTS.of_call(1100, 100)
+
+
+# #293-T01
+def test_the_final_call_must_itself_fit_the_cost_limit() -> None:
+    subject = ledger(max_cost_usd=Decimal("0.001"))  # the call costs 0.0014
+
+    with pytest.raises(LimitError) as refused:
+        subject.reserve_call("x" * 3000, output_tokens=100, can_wrap_up=True)
+    assert refused.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
+    assert refused.value.detail == "the cost limit is used up"
+    assert subject.model_calls == 0
+
+
+# #293-T02
+def test_the_final_call_is_the_one_that_starts_inside_the_clock_reserve() -> None:
+    clock = Clock()
+    subject = BudgetLedger(
+        DynamicLimits(max_cost_usd=Decimal(100)), clock=clock, unit_costs=UNIT_COSTS
+    )
+    clock.advance(449.0)  # 151 s left, the reserve is 150 s
+    early = subject.reserve_call("a", output_tokens=1, can_wrap_up=True)
+    assert early.final is False and subject.stopped_early is None
+
+    clock.advance(2.0)  # 149 s left
+    late = subject.reserve_call("a", output_tokens=1, can_wrap_up=True)
+
+    assert late.final is True
+    assert subject.stopped_early == "time_limit"
+
+
+# #293-T02
+def test_a_short_deadline_scales_the_clock_reserve() -> None:
+    clock = Clock()
+    subject = BudgetLedger(
+        DynamicLimits(deadline_seconds=100.0, max_cost_usd=Decimal(100)),
+        clock=clock,
+        unit_costs=UNIT_COSTS,
+    )
+    clock.advance(74.0)  # 26 s left; a quarter of 100 s is 25 s
+    assert subject.reserve_call("a", output_tokens=1, can_wrap_up=True).final is False
+
+    clock.advance(2.0)  # 24 s left
+    assert subject.reserve_call("a", output_tokens=1, can_wrap_up=True).final is True
+
+
+# #293-T02
+def test_a_call_that_cannot_be_rewritten_ignores_the_clock_reserve() -> None:
+    clock = Clock()
+    subject = BudgetLedger(
+        DynamicLimits(max_cost_usd=Decimal(100)), clock=clock, unit_costs=UNIT_COSTS
+    )
+    clock.advance(500.0)
+
+    assert subject.reserve_call("a", output_tokens=1).final is False
+    assert subject.stopped_early is None
+
+
+# #293-T03
+def test_after_the_final_call_no_other_call_is_granted() -> None:
+    subject = ledger(max_cost_usd=Decimal("0.0015"))
+    final = subject.reserve_call("x" * 3000, output_tokens=100, can_wrap_up=True)
+    assert final.final is True
+
+    for can_wrap_up in (True, False):
+        with pytest.raises(LimitError) as refused:
+            subject.reserve_call("a", output_tokens=1, can_wrap_up=can_wrap_up)
+        assert refused.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
+        assert refused.value.detail == "the run asked for a call after its final call"
+
+    assert subject.model_calls == 1
+    assert subject.stopped_early == "cost_limit"
+
+
+# #293-T03
+def test_the_final_call_settles_like_any_other_call() -> None:
+    subject = ledger(max_cost_usd=Decimal("0.0015"))
+    final = subject.reserve_call("x" * 3000, output_tokens=100, can_wrap_up=True)
+
+    subject.settle_call(final, prompt_tokens=900, completion_tokens=50, cost=Decimal("0.0012"))
+
+    usage = subject.usage("m")
+    assert usage.cost_usd == 0.0012
+    assert usage.stopped_early == "cost_limit"
 
 
 class TestToolsAndBytes:
