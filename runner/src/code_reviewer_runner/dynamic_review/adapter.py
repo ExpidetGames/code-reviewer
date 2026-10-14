@@ -31,6 +31,7 @@ The order is deliberate and mirrors the epic's:
 
 import contextlib
 import json
+import logging
 import os
 import shutil
 import signal
@@ -57,7 +58,9 @@ from code_reviewer_runner.dynamic_review.config import (
     build_engine_config,
     engine_environment,
 )
+from code_reviewer_runner.dynamic_review.engine_user import EngineLaunch
 from code_reviewer_runner.dynamic_review.net import no_redirect_opener
+from code_reviewer_runner.dynamic_review.netguard import IsolationError
 from code_reviewer_runner.dynamic_review.prompts import ReviewInputs, compose_user_prompt
 from code_reviewer_runner.dynamic_review.schema import engine_schema
 from code_reviewer_runner.job import Job
@@ -80,6 +83,8 @@ SHORT_TIMEOUT_SECONDS = 2.0
 SESSION_TIMEOUT_SECONDS = 30.0
 # How often the run checks the ledger, the deadline and the engine process while a message runs.
 WATCH_INTERVAL_SECONDS = 0.05
+# A failed message call this close before the whole-job deadline is counted as the deadline.
+DEADLINE_TOLERANCE_SECONDS = 0.25
 # The agent the runner defines and selects; the request may never name another.
 REVIEW_AGENT = "review"
 # The largest startup/answer body the adapter will read before the ledger refuses it.
@@ -93,16 +98,30 @@ SESSION_TITLE = "code-reviewer-read-only-review"
 # cannot have been given to an unrelated group; the lock keeps the watchdog thread from signalling
 # an id while it is taken off the registry.
 _RUNNING_ENGINES: set[int] = set()
+# The dedicated users whose engines run, so the watchdog also ends what left the process group.
+_RUNNING_LAUNCHES: list[EngineLaunch] = []
 _ENGINES_LOCK = threading.Lock()
+_log = logging.getLogger(__name__)
+_SURVIVOR = (
+    "a process of the engine's dedicated user could not be ended; its network rules stay and the "
+    "next Dynamic job refuses to start until it is gone"
+)
 
 
 def shutdown_engines() -> None:
-    """End every engine process group this process started. Safe to call twice or with none."""
+    """End every engine this process started, groups and users. Safe to call twice or with none."""
     with _ENGINES_LOCK:
         for pgid in list(_RUNNING_ENGINES):
             with contextlib.suppress(ProcessLookupError, PermissionError):
                 os.killpg(pgid, signal.SIGKILL)
         _RUNNING_ENGINES.clear()
+        launches = list(_RUNNING_LAUNCHES)
+        _RUNNING_LAUNCHES.clear()
+    # Whatever the dedicated user still runs (a helper in a session of its own) goes too, and its
+    # network rules with it.
+    for launch in launches:
+        if not launch.close():
+            _log.warning(_SURVIVOR)
 
 
 class EngineError(Exception):
@@ -320,11 +339,13 @@ class DynamicEngine:
         inputs: ReviewInputs,
         exported_paths: Collection[str] | None,
         scratch_dir: str | None = None,
+        launch: EngineLaunch | None = None,
         node_bin: str | None = None,
         require_ripgrep: bool = True,
         startup_seconds: float = STARTUP_SECONDS,
         transport: Transport = _http_request,
         port_source: Callable[[], int] = lambda: _free_port(),
+        popen: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
     ) -> None:
         if job.dynamic is None or job.base is None:
             raise EngineError(
@@ -347,10 +368,20 @@ class DynamicEngine:
         self.startup_seconds = startup_seconds
         self._transport = transport
         self._port_source = port_source
+        self._popen = popen
+        # Set by the supervisor: the engine then runs as the dedicated user with its own network
+        # rules, and its home, temporary files and config live where `export_isolation` prepared
+        # them (removed with the job's lifetime). Without it (the unprivileged engine suite and
+        # the scripted tests) the engine runs as the current user in a private scratch directory.
+        self.launch = launch
         # The export is read-only and belongs to the engine user; the runner's own config, home and
         # cache live in a private directory outside it, removed when the run ends.
         self._scratch = (
-            Path(scratch_dir) if scratch_dir else Path(tempfile.mkdtemp(prefix="cr-engine-"))
+            Path(scratch_dir)
+            if scratch_dir
+            else Path(launch.tmpdir)
+            if launch
+            else Path(tempfile.mkdtemp(prefix="cr-engine-"))
         )
         self._process: subprocess.Popen[bytes] | None = None
         self._worker: threading.Thread | None = None
@@ -361,23 +392,29 @@ class DynamicEngine:
         """Write the trusted config, start the engine and wait for it to become healthy."""
         dynamic = self.job.dynamic
         assert dynamic is not None  # narrowed in __init__
-        self._scratch.mkdir(parents=True, exist_ok=True)
-        os.chmod(self._scratch, 0o700)
-        (self._scratch / "home").mkdir(parents=True, exist_ok=True)
         config = build_engine_config(
             proxy_url=self.proxy_url,
             model=dynamic.model,
             system_prompt=self.agent_prompt,
             proxy_capability=self._proxy_capability,
         )
-        config_path = self._scratch / "opencode.json"
-        # The config carries the job's proxy capability: owner-only, in the private scratch.
-        descriptor = os.open(config_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-            stream.write(json.dumps(config))
+        if self.launch is not None:
+            # The dedicated user's own directories exist and are its own; the config is its file.
+            config_path = self.launch.write_config(config)
+            home = self.launch.home
+        else:
+            self._scratch.mkdir(parents=True, exist_ok=True)
+            os.chmod(self._scratch, 0o700)
+            (self._scratch / "home").mkdir(parents=True, exist_ok=True)
+            config_path = self._scratch / "opencode.json"
+            # The config carries the job's proxy capability: owner-only, in the private scratch.
+            descriptor = os.open(config_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                stream.write(json.dumps(config))
+            home = str(self._scratch / "home")
         environment = engine_environment(
             proxy_url=self.proxy_url,
-            home=str(self._scratch / "home"),
+            home=home,
             scratch_dir=str(self._scratch),
             node_bin=self.node_bin,
         )
@@ -399,12 +436,17 @@ class DynamicEngine:
         # another port; an answer is only trusted while our own process is alive.
         for attempt in range(START_ATTEMPTS):
             port = self._port_source()
+            if self.launch is not None:
+                # The user's network is closed to everything but this job's proxy (and the
+                # engine's own server) before the engine exists, and proven once.
+                self.launch.confine(_port_of(self.proxy_url), port)
             self._spawn(environment, port)
             client = EngineClient(
                 f"http://127.0.0.1:{port}", self.directory, transport=self._transport
             )
             try:
                 client.wait_healthy(self.startup_seconds, self._is_running)
+                self._require_own_listener(port)
             except EngineExited:
                 self._end_process()
                 if attempt + 1 == START_ATTEMPTS:
@@ -416,6 +458,14 @@ class DynamicEngine:
             return client
         raise EngineExited()  # unreachable: the last attempt raises
 
+    def _require_own_listener(self, port: int) -> None:
+        """The answer came from our engine: its user, and nobody else, listens on that port."""
+        if self.launch is None or self.launch.owns_listener(port):
+            return
+        raise EngineError(
+            ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE, "the engine port is not held by the engine user"
+        )
+
     def _spawn(self, environment: dict[str, str], port: int) -> None:
         argv = [
             *self.command,
@@ -426,8 +476,9 @@ class DynamicEngine:
             str(port),
             "--print-logs",
         ]
+        options: dict[str, Any] = self.launch.spawn_options() if self.launch else {}
         try:
-            process = subprocess.Popen(
+            process = self._popen(
                 argv,
                 env=environment,
                 cwd=self.directory,
@@ -435,6 +486,7 @@ class DynamicEngine:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,
+                **options,
             )
         except OSError:
             raise EngineError(
@@ -443,15 +495,28 @@ class DynamicEngine:
         self._process = process
         with _ENGINES_LOCK:
             _RUNNING_ENGINES.add(process.pid)
+            if self.launch is not None and self.launch not in _RUNNING_LAUNCHES:
+                _RUNNING_LAUNCHES.append(self.launch)
 
     def _is_running(self) -> bool:
         # Looking must not reap the engine: while its group is alive its id has to stay ours.
         return self._process is not None and not has_exited(self._process)
 
     def stop(self) -> None:
-        """End the whole owned process group and remove the private scratch directory."""
+        """End the whole owned process group, then the user's leftovers, and the private scratch.
+
+        With a dedicated user the scratch belongs to the job's lifetime (`export_isolation`
+        removes it); here only what the user still runs and its network rules end.
+        """
         self._end_process()
-        shutil.rmtree(self._scratch, ignore_errors=True)
+        if self.launch is not None:
+            with _ENGINES_LOCK:
+                if self.launch in _RUNNING_LAUNCHES:
+                    _RUNNING_LAUNCHES.remove(self.launch)
+            if not self.launch.close():
+                _log.warning(_SURVIVOR)
+        else:
+            shutil.rmtree(self._scratch, ignore_errors=True)
 
     def _end_process(self) -> None:
         process = self._process
@@ -462,6 +527,9 @@ class DynamicEngine:
             with _ENGINES_LOCK:
                 _RUNNING_ENGINES.discard(process.pid)
             end_group(process)
+            if self.launch is not None:
+                # A helper that left the group is still the dedicated user's process.
+                self.launch.sweep()
         self._process = None
 
     # -- run ------------------------------------------------------------------
@@ -482,6 +550,8 @@ class DynamicEngine:
             return EngineAnswer(findings=None, error=EngineError(error.code, error.detail))
         except EngineError as error:
             return EngineAnswer(findings=None, error=error)
+        except IsolationError as error:
+            return EngineAnswer(findings=None, error=EngineError(error.code, error.detail))
         except FindingsError as error:
             return EngineAnswer(findings=None, error=EngineError(error.code, error.detail))
         except OSError:
@@ -537,6 +607,10 @@ class DynamicEngine:
                 raise EngineError(ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE, "the engine exited")
         self._raise_recorded_failure()
         if outcome:
+            # A call that ran into its timeout at the whole-job deadline is the deadline, not an
+            # unreachable engine: both end at the same moment and the order must not matter. The
+            # socket timeout and the ledger do not read the same clock to the millisecond.
+            self.ledger.check_deadline(tolerance=DEADLINE_TOLERANCE_SECONDS)
             raise outcome[0]
 
     def _validate(self, client: EngineClient) -> EngineAnswer:
@@ -564,6 +638,11 @@ class DynamicEngine:
                 "the answer was made against another reviewed head",
             )
         return EngineAnswer(findings=findings, error=None)
+
+
+def _port_of(url: str) -> int:
+    """The port of an `http://127.0.0.1:<port>` address the runner itself built."""
+    return int(url.rsplit(":", 1)[-1].split("/", 1)[0])
 
 
 def _free_port() -> int:

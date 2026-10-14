@@ -195,6 +195,9 @@ class Harness:
     """A loop with fakes, started as a task on the running event loop."""
 
     def __init__(self, **settings: Any) -> None:
+        # The kill of the engine user's leftovers: calls are recorded, the answer is `sweeps_ok`.
+        self.sweeps: list[tuple[int, int]] = []
+        self.sweeps_ok = True
         self.clock = ManualClock()
         self.api = FakeApi()
         self.api.clock = self.clock
@@ -205,6 +208,7 @@ class Harness:
             self.api,
             self.launcher,
             clock=self.clock,
+            sweeper=self._sweep,
             environment={
                 "PATH": "/usr/bin",
                 "HOME": "/home/runner",
@@ -214,6 +218,10 @@ class Harness:
             },
         )
         self.task: asyncio.Task[None] | None = None
+
+    def _sweep(self, uid: int, gid: int) -> bool:
+        self.sweeps.append((uid, gid))
+        return self.sweeps_ok
 
     async def start(self) -> None:
         self.task = asyncio.create_task(self.loop.run())

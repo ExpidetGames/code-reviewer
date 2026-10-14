@@ -72,6 +72,18 @@ def _api_key() -> str:
     return key if isinstance(key, str) else ""
 
 
+def _model() -> str:
+    """The model id the runner wrote into the trusted config, like the engine would call it."""
+    path = _env("OPENCODE_CONFIG")
+    config = (
+        as_object(_read_json(Path(path).read_bytes())) if path and Path(path).is_file() else None
+    )
+    providers = as_object(config.get("provider")) if config else None
+    entry = as_object(providers.get("review-proxy")) if providers else None
+    models = as_object(entry.get("models")) if entry else None
+    return next(iter(models), "deepseek-v4.1-flash") if models else "deepseek-v4.1-flash"
+
+
 def _workdir() -> Path:
     return Path.cwd()
 
@@ -231,7 +243,7 @@ class Handler(BaseHTTPRequestHandler):
         the one the runner wrote into the trusted config. Returns the assistant message."""
         url = f"{_env('REVIEW_PROXY_URL')}/v1/chat/completions"
         document: dict[str, Any] = {
-            "model": "review-proxy/deepseek-v4.1-flash",
+            "model": f"review-proxy/{_model()}",
             "messages": messages,
             "tools": [{"type": "function", "function": {"name": "StructuredOutput"}}],
             "tool_choice": "required",

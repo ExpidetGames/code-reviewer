@@ -21,11 +21,12 @@ import asyncio
 import logging
 import os
 import shlex
+import signal
 import sys
 import threading
 import time
-from collections.abc import Callable, Mapping, Sequence
-from contextlib import AbstractContextManager, ExitStack
+from collections.abc import Generator, Mapping, Sequence
+from contextlib import ExitStack, contextmanager
 from dataclasses import replace
 from typing import Any, TextIO
 
@@ -47,12 +48,16 @@ from code_reviewer_runner.dynamic_review.budget import (
     DynamicLimits,
     LimitError,
 )
-from code_reviewer_runner.dynamic_review.checkout import PreparedContent
 from code_reviewer_runner.dynamic_review.config import new_proxy_capability
 from code_reviewer_runner.dynamic_review.inputs import review_inputs
 from code_reviewer_runner.dynamic_review.limits import CheckoutError
 from code_reviewer_runner.dynamic_review.prompts import compose_system_prompt
 from code_reviewer_runner.dynamic_review.proxy import ModelProxy, capabilities_from_config
+from code_reviewer_runner.dynamic_review.supervisor import (
+    ContentPreparer,
+    Prepared,
+    production_preparer,
+)
 from code_reviewer_runner.error_mapping import classify_failure
 from code_reviewer_runner.identity_patch import (
     IdentityPatchError,
@@ -207,12 +212,6 @@ DYNAMIC_CAPABILITIES_VARIABLE = "RUNNER_DYNAMIC_CAPABILITIES"
 DYNAMIC_NODE_BIN_VARIABLE = "RUNNER_DYNAMIC_NODE_BIN"
 
 
-# Prepares the sanitized, read-only export of one claimed Dynamic job (#196) and keeps it for the
-# lifetime of the `with` block. The supervisor that owns the privileges (the dedicated engine user,
-# the root-owned job directory) supplies it; `run_dynamic_job` never builds an export itself.
-ContentPreparer = Callable[[Job], AbstractContextManager[PreparedContent]]
-
-
 def run_dynamic_job(
     job: Job,
     capture: LogCapture | None,
@@ -256,10 +255,6 @@ def run_dynamic_job(
             started,
             capture,
         )
-    if prepare is None:
-        return _failure(
-            ErrorCode.CHECKOUT_INCOMPLETE, "no prepared checkout is configured", started, capture
-        )
     try:
         capabilities = capabilities_from_config(environment.get(DYNAMIC_CAPABILITIES_VARIABLE))
     except LimitError as error:
@@ -290,8 +285,16 @@ def run_dynamic_job(
     except LimitError as error:
         # The destination cannot serve the run: fail before the engine starts, with no fallback.
         return _failure(error.code, error.detail, started, capture)
+    # Without an injected preparer this is the root supervisor: the export is prepared and sealed
+    # for the dedicated engine user, and the engine is launched as that user (#197). A process
+    # that is not the supervisor is refused there; the engine never runs unconfined.
+    prepare = prepare or production_preparer(
+        environment, cancelled=lambda: ledger.remaining_seconds() <= 0
+    )
     try:
-        with prepare(job) as content:
+        with prepare(job) as prepared:
+            prepared = prepared if isinstance(prepared, Prepared) else Prepared(prepared)
+            content = prepared.content
             # The export is the one directory the engine may read; the audit names files relative
             # to it, and a finding may only point at a file it really holds.
             proxy.audit.set_export_root(str(content.export))
@@ -308,6 +311,7 @@ def run_dynamic_job(
                     model_schema=findings_schema(),
                     inputs=review_inputs(job.pr_url, content),
                     exported_paths=frozenset(content.files),
+                    launch=prepared.launch,
                     node_bin=environment.get(DYNAMIC_NODE_BIN_VARIABLE) or None,
                 )
                 answer = engine.run()
@@ -402,6 +406,44 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+# After a SIGTERM the job unwinds (engine, proxy, export and leases are released by the `finally`
+# blocks); if that has not finished in this time the engines are killed and the process ends. The
+# job loop sends SIGKILL after its own grace (five seconds by default), so this is shorter.
+SIGTERM_BACKSTOP_SECONDS = 3.0
+
+
+def _stop_hard() -> None:
+    shutdown_engines()
+    os._exit(128 + signal.SIGTERM)
+
+
+@contextmanager
+def _unwind_on_sigterm() -> Generator[None]:
+    """A Dynamic job that gets SIGTERM ends its engine, helpers, proxy and export (#197-T07).
+
+    The job loop ends a job this way on lease loss, shutdown and timeout. The engine leads a
+    process group of its own (and runs as another user), so the default action (die at once) would
+    leave it running. The handler unwinds the job as a `KeyboardInterrupt` and arms a backstop
+    that kills everything if the unwinding takes too long.
+    """
+
+    def on_term(signum: int, frame: object) -> None:
+        backstop = threading.Timer(SIGTERM_BACKSTOP_SECONDS, _stop_hard)
+        backstop.daemon = True
+        backstop.start()
+        raise KeyboardInterrupt
+
+    try:
+        previous = signal.signal(signal.SIGTERM, on_term)
+    except ValueError:  # not the main thread: nothing to install
+        yield
+        return
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+
 def _start_watchdog(
     seconds: float,
     channel: _ResultChannel,
@@ -483,14 +525,15 @@ def main(
             else None
         )
         try:
-            result = run_dynamic_job(
-                job,
-                None,
-                started,
-                saved_env,
-                dynamic_timeout,
-                engines=advertised_engines(fail_closed_self_check()),
-            )
+            with _unwind_on_sigterm():
+                result = run_dynamic_job(
+                    job,
+                    None,
+                    started,
+                    saved_env,
+                    dynamic_timeout,
+                    engines=advertised_engines(fail_closed_self_check()),
+                )
         except KeyboardInterrupt:
             raise
         except BaseException:

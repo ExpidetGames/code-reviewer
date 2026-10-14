@@ -187,3 +187,38 @@ def test_a_download_url_that_is_not_https_is_refused() -> None:
 
     with pytest.raises(script.PinError):
         script.https_download("http://example.invalid/x", Path("/nonexistent"), 10)
+
+
+# #197-nit
+@pytest.mark.parametrize(
+    "target", ["http://example.invalid/asset", "ftp://example.invalid/asset", "file:///etc/passwd"]
+)
+def test_a_redirect_to_anything_but_https_is_refused(target: str) -> None:
+    import urllib.request
+
+    script = load_script()
+    handler = script._HttpsOnlyRedirects()  # pyright: ignore[reportPrivateUsage]
+    request = urllib.request.Request("https://example.invalid/asset")
+
+    with pytest.raises(script.PinError, match="redirect"):
+        handler.redirect_request(request, io.BytesIO(), 302, "Found", {}, target)  # pyright: ignore[reportArgumentType]
+
+
+# #197-nit
+def test_a_redirect_to_another_https_url_is_followed() -> None:
+    import urllib.request
+
+    script = load_script()
+    handler = script._HttpsOnlyRedirects()  # pyright: ignore[reportPrivateUsage]
+    request = urllib.request.Request("https://example.invalid/asset")
+
+    followed = handler.redirect_request(
+        request,
+        io.BytesIO(),  # pyright: ignore[reportArgumentType]
+        302,
+        "Found",
+        {},  # pyright: ignore[reportArgumentType]
+        "https://objects.example.invalid/asset",
+    )
+
+    assert followed is not None and followed.full_url == "https://objects.example.invalid/asset"

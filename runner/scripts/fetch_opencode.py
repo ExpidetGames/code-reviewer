@@ -72,11 +72,25 @@ def digest_of(path: Path) -> str:
     return sha.hexdigest()
 
 
+class _HttpsOnlyRedirects(urllib.request.HTTPRedirectHandler):
+    """The release asset is served through a redirect (GitHub's object storage); never to http."""
+
+    def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str):  # type: ignore[no-untyped-def,override]
+        if not newurl.startswith("https://"):
+            raise PinError("the download was redirected to something other than https")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 def https_download(url: str, target: Path, limit: int) -> None:
-    """Download `url` to `target`, at most `limit` bytes. Only https; the checks come after."""
+    """Download `url` to `target`, at most `limit` bytes. Only https, also after a redirect.
+
+    The size and digest checks come after; they are what makes the content trustworthy, the https
+    rule is about not sending the request, and a credential-free one at that, over plain http.
+    """
     if not url.startswith("https://"):
         raise PinError("the pinned URL is not https")
-    with urllib.request.urlopen(url, timeout=120) as response, target.open("wb") as stream:
+    opener = urllib.request.build_opener(_HttpsOnlyRedirects)
+    with opener.open(url, timeout=120) as response, target.open("wb") as stream:
         written = 0
         while chunk := response.read(CHUNK):
             written += len(chunk)

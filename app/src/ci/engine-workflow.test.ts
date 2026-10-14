@@ -15,6 +15,10 @@ const script = readFileSync(
   `${repoRoot}runner/scripts/run_engine_offline.sh`,
   "utf8",
 );
+const privilegedScript = readFileSync(
+  `${repoRoot}runner/scripts/run_privileged_offline.sh`,
+  "utf8",
+);
 
 type Step = {
   name?: string;
@@ -99,6 +103,31 @@ describe("engine workflow", () => {
     );
     expect(cache?.with?.path).toBe("~/.cache/code-reviewer/opencode");
     expect(String(cache?.with?.key)).toContain("opencode-pin.json");
+  });
+
+  // #197-T09
+  it("runs the privileged suite after the engine suite, as root with the production capabilities and no network", () => {
+    const lines = commandLines();
+
+    expect(lines).toContain("scripts/run_privileged_offline.sh");
+    expect(lines.indexOf("scripts/run_privileged_offline.sh")).toBeGreaterThan(
+      lines.indexOf("scripts/run_engine_offline.sh"),
+    );
+    // nftables is what the engine user's network rules are proven with.
+    expect(lines.join("\n")).toContain("nftables");
+    // Root, but only with the capabilities of compose.dynamic.yml (compose-dynamic.test.ts pins
+    // the list), without new privileges, in a namespace that has loopback and no route out.
+    expect(privilegedScript).toContain("sudo");
+    expect(privilegedScript).toContain("unshare --net");
+    expect(privilegedScript).toContain("ip link set lo up");
+    expect(privilegedScript).toMatch(/setpriv[\s\\]+--bounding-set=-all/);
+    expect(privilegedScript).toMatch(/--no-new-privs/);
+    expect(privilegedScript).toContain("pytest -m privileged");
+    // The pinned engine is fetched before the namespace, the only step with the internet.
+    expect(privilegedScript).toContain("scripts/fetch_opencode.py");
+    expect(privilegedScript.indexOf("scripts/fetch_opencode.py")).toBeLessThan(
+      privilegedScript.indexOf("unshare --net"),
+    );
   });
 
   // CR-41-T15
