@@ -137,8 +137,8 @@ characters without control or formatting characters (they end up in mails and pa
 
 ## Entitlements
 
-An operator who serves many workspaces can state, per workspace, what it may do (#271; epic #268). This is the data
-model only: no endpoint, no page, nothing is enforced yet (the operator API, the usage records, the managed key
+An operator who serves many workspaces can state, per workspace, what it may do (#271; epic #268). The data
+model, and the operator API that sets it (#275): no page, nothing is enforced yet (the usage records, the managed key
 and the enforcement are later issues of the epic). A self-hosted instance configures nothing and nothing changes.
 
 - **Data.** One row per workspace in `workspace_entitlements` (`src/db/repositories/workspace-entitlements-repository.ts`)
@@ -174,13 +174,11 @@ and the enforcement are later issues of the epic). A self-hosted instance config
   `_` and `-`, starting with a letter, at most 64 characters; checked even when not suspended). A valid code is
   kept only while suspended: clearing the suspension clears the code. The repositories throw `EntitlementsError`
   with the code.
-- **Left to #275 (the operator API).** A write must carry a `periodStart` not earlier than the stored one, so a
-  partial update (a suspension toggle, a limit change) with a stale start is refused as a whole with
-  `period_start_backwards`: either merge with the stored row when the field is absent, or document the
-  read-then-write rule. A `remove` of the row (or of the setting `default_entitlements`) ends the guard against an
-  earlier start; decide there whether it is offered and how it keeps the guard (for example by remembering the
-  last start). Numbers above 2^53 lose precision in `JSON.parse` before they reach the validation; test that
-  case there.
+- **The operator API (#275).** `src/operator-api/README.md` and `contracts/operator-api.v1.json`. It decided the
+  three follow-ups of #271: a body without `periodStart` keeps the stored start (a stale start cannot block an unrelated
+  update); `DELETE` of a workspace's row is offered and ends the "never backwards" guard for it (documented, not
+  prevented), while the default cannot be removed through the API; and a number above 2^53 is refused as
+  `limit_invalid`.
 
 ## Not here
 

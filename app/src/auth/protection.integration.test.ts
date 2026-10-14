@@ -48,6 +48,11 @@ const PUBLIC_ROUTES = [
   "/api/runners/v1/claim",
   "/api/runners/v1/jobs/[id]/heartbeat",
   "/api/runners/v1/jobs/[id]/complete",
+  // The operator sends its own bearer token; the routes do not exist until it is set (src/operator-api/README.md).
+  "/api/operator/v1/workspaces",
+  "/api/operator/v1/workspaces/[id]/entitlements",
+  "/api/operator/v1/entitlements/default",
+  "/api/operator/v1/[...path]",
 ] as const;
 const PROTECTED_ROUTES = [
   "/",
