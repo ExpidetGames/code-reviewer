@@ -45,6 +45,37 @@ function finalImage(dockerfile: string): string {
   }
 }
 
+/**
+ * The COPY and ADD instructions of the image of one named stage (and its parents) that read the build
+ * context other than through `--from=` and other than the pin files the stage names exactly.
+ */
+function contextCopyViolations(dockerfile: string, target: string): string[] {
+  const blocks = instructions(dockerfile).join("\n").split(/^FROM /m).slice(1);
+  const own = blocks.find((block) => block.includes(` AS ${target}\n`));
+  if (!own) throw new Error(`no stage ${target}`);
+  const chain: string[] = [own];
+  for (;;) {
+    const base = chain[0]?.split(" ")[0] ?? "";
+    const parent = blocks.find((block) => block.includes(` AS ${base}\n`));
+    if (!parent) break;
+    chain.unshift(parent);
+  }
+  return chain
+    .flatMap((block) => block.split("\n"))
+    .filter((line) => line.startsWith("COPY ") || line.startsWith("ADD "))
+    .filter((line) => !line.includes("--from="))
+    .filter((line) => {
+      const sources = line
+        .split(" ")
+        .slice(1)
+        .filter((word) => !word.startsWith("--"))
+        .slice(0, -1);
+      return !sources.every((source) =>
+        /^runner\/[a-z]+-pin\.json$/.test(source),
+      );
+    });
+}
+
 function argDefault(dockerfile: string, name: string): string {
   const line = instructions(dockerfile).find((entry) =>
     entry.startsWith(`ARG ${name}=`),
@@ -408,4 +439,33 @@ describe("root .dockerignore for the classic builder", () => {
       expect(own.filter((entry) => !root.includes(entry))).toEqual([]);
     },
   );
+});
+
+describe("the dynamic stage of the runner Dockerfile", () => {
+  // CR-17-T09, #202: the `dynamic` target is not the last stage, so the guard above never sees it.
+  it("copies the build context only through a stage, except the two pin files", () => {
+    expect(contextCopyViolations(runnerDockerfile, "dynamic")).toEqual([]);
+  });
+
+  it("flags a whole host directory copied into the dynamic stage", () => {
+    const broad = runnerDockerfile.replace(
+      "COPY --chown=0:0 --chmod=0644 runner/opencode-pin.json runner/ripgrep-pin.json /opt/code-reviewer/pins/",
+      "COPY --chown=0:0 runner /opt/code-reviewer/pins/",
+    );
+
+    expect(broad).not.toBe(runnerDockerfile);
+    expect(contextCopyViolations(broad, "dynamic")).toEqual([
+      "COPY --chown=0:0 runner /opt/code-reviewer/pins/",
+    ]);
+  });
+
+  it("flags a pin file path that is a wildcard", () => {
+    const wildcard = runnerDockerfile.replace(
+      "--chmod=0644 runner/opencode-pin.json runner/ripgrep-pin.json",
+      "--chmod=0644 runner/*-pin.json",
+    );
+
+    expect(wildcard).not.toBe(runnerDockerfile);
+    expect(contextCopyViolations(wildcard, "dynamic")).toHaveLength(1);
+  });
 });

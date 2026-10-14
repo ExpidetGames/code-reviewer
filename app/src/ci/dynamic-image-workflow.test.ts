@@ -139,4 +139,15 @@ describe("the smoke test of the runner image", () => {
       /--network none --user 10101:10101[^\n]*\\\n[^\n]*opencode/,
     );
   });
+
+  // #202-T01: "no setuid binary added" is a measurement, not a reading of the package list.
+  it("compares the setuid and setgid binaries of the Dynamic image with those of its base image", () => {
+    expect(smoke).toMatch(/-perm -4000/);
+    expect(smoke).toMatch(/-perm -2000/);
+    // The base image is the one the Dockerfile pins, read from its ARG.
+    expect(smoke).toContain("ARG PYTHON_IMAGE=");
+    expect(smoke).toMatch(/setuid_in_image\s+"\$base_image"/);
+    expect(smoke).toMatch(/setuid_in_image\s+"\$image"/);
+    expect(smoke).toMatch(/added setuid or setgid/);
+  });
 });

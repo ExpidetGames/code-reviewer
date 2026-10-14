@@ -267,6 +267,25 @@ rg_reported=${rg_output%%$'\n'*}
 step "nft is installed"
 in_image "$image" sh -c 'command -v nft >/dev/null || [ -x /usr/sbin/nft ]' || fail "nft is not installed in the image"
 
+# #202-T01: nothing in the Dynamic image runs with more privilege than in its base image. The base
+# image is the one runner/Dockerfile pins (its ARG), measured the same way, so the Debian packages the
+# Dynamic target adds (nftables and its libraries) are held to the base image's own set of setuid and
+# setgid files (the shadow and util-linux tools), not to a list typed here.
+setuid_in_image() {
+  docker run --rm --network none --user 0 --entrypoint find "$1" / -xdev -type f \
+    \( -perm -4000 -o -perm -2000 \) | sort
+}
+
+step "the Dynamic image adds no setuid or setgid file to those of its base image"
+base_image=$(sed -n 's/^ARG PYTHON_IMAGE=//p' "$repo_root/runner/Dockerfile")
+[ -n "$base_image" ] || fail "no ARG PYTHON_IMAGE in runner/Dockerfile"
+base_setuid=$(setuid_in_image "$base_image")
+image_setuid=$(setuid_in_image "$image")
+added_setuid=$(comm -13 <(printf '%s\n' "$base_setuid") <(printf '%s\n' "$image_setuid"))
+[ -z "$added_setuid" ] || fail "the Dynamic image has added setuid or setgid files:
+$added_setuid"
+printf '    %s setuid or setgid files, all of them in the base image\n' "$(grep -c . <<<"$image_setuid" || true)"
+
 step "the engine user 10101 exists with its own group, no shell and no other group; 10001 stays the Diff user"
 [ "$(in_image "$image" id 10101)" = "uid=10101(engine) gid=10101(engine) groups=10101(engine)" ] ||
   fail "unexpected engine user: $(in_image "$image" id 10101)"
