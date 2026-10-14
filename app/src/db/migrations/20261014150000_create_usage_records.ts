@@ -6,19 +6,22 @@
 //
 // `id` is a sequence, on purpose: it is the one table whose rows are read page by page by an outside reader (the
 // cursor is `(settled_at, id)`), and the sequence is the stable tie-break. Every other identifier is text. A
-// record is kept; there is no retention. The checks restate what the repository already keeps true, so a direct
+// record is kept; there is no retention. The sequence is the one statement written for a dialect (SQLite
+// `integer primary key autoincrement`, Postgres `serial`), because Kysely renders `autoIncrement()` for SQLite only. The checks restate what the repository already keeps true, so a direct
 // write cannot store an unknown state, key mode or kind, a settled record without its time, or a cost on a
 // record that is not settled. Written out because a check cannot take bound values; the lists are the same as
 // USAGE_STATES, KEY_MODES and PROJECT_REVIEW_KINDS in the code.
 import { sql } from "kysely";
 import type { Migration } from "kysely/migration";
+import { databaseDriver } from "../driver.ts";
 
 export const migration: Migration = {
   async up(db) {
+    const postgres = databaseDriver(db) === "postgres";
     await db.schema
       .createTable("usage_records")
-      .addColumn("id", "integer", (column) =>
-        column.primaryKey().autoIncrement(),
+      .addColumn("id", postgres ? "serial" : "integer", (column) =>
+        postgres ? column.primaryKey() : column.primaryKey().autoIncrement(),
       )
       .addColumn("workspace_id", "text", (column) =>
         column.notNull().references("workspaces.id"),
