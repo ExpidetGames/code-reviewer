@@ -319,14 +319,16 @@ assert_no_token_in_log smoke-runner-capable
 # #249-T01: what a compromised root supervisor can leave behind does not survive a restart. A root
 # process inside the container cannot change the tools that run with NET_ADMIN at the next start, and
 # what it writes into the three tmpfs is gone after the restart, which runs the self-check again.
-step "a restart gives back the same clean container: tools unchanged, tmpfs and Docker's /etc files fresh, opencode advertised again"
+step "a restart gives back the same clean container: tools unchanged, tmpfs empty, Docker's /etc files read-only, opencode advertised again"
 tools_hash() { docker exec smoke-runner-capable sha256sum /usr/sbin/nft /usr/bin/tini; }
 tools_before=$(tools_hash) || fail "cannot hash nft and tini"
 docker exec smoke-runner-capable sh -c 'touch /tmp/planted /run/planted /home/runner/planted' ||
   fail "root cannot write to the tmpfs of the container"
-# Docker keeps these three files writable for root; they must be written afresh at every start.
-docker exec smoke-runner-capable sh -c 'for f in /etc/hosts /etc/hostname /etc/resolv.conf; do echo cr-planted >> "$f" || exit 1; done' ||
-  fail "root cannot append to the files Docker binds into /etc"
+# The three files Docker binds into /etc (hosts, hostname, resolv.conf) live in the host's container
+# directory and would outlive a restart if root could write them. With `read_only` they are read-only
+# too; a root that could append would be a persistence path, so it is checked, not assumed.
+docker exec smoke-runner-capable sh -c 'for f in /etc/hosts /etc/hostname /etc/resolv.conf; do [ -f "$f" ] || exit 2; if cat /dev/null >> "$f"; then exit 1; fi; done' 2>/dev/null ||
+  fail "root can write to /etc/hosts, /etc/hostname or /etc/resolv.conf, or one of them is missing"
 # Exit status 0 only if both files exist and neither can be appended to (a missing path also fails).
 docker exec smoke-runner-capable sh -c 'for f in /usr/sbin/nft /usr/bin/tini; do [ -f "$f" ] || exit 2; if cat /dev/null >> "$f"; then exit 1; fi; done' 2>/dev/null ||
   fail "root changed nft or tini on the root filesystem, or one of them is missing"
@@ -339,8 +341,6 @@ until [ "$(docker logs smoke-runner-capable 2>&1 | grep -c 'opencode is advertis
 done
 docker exec smoke-runner-capable sh -c '[ ! -e /tmp/planted ] && [ ! -e /run/planted ] && [ ! -e /home/runner/planted ]' ||
   fail "a file written into a tmpfs survived the restart"
-docker exec smoke-runner-capable sh -c '! grep -q cr-planted /etc/hosts /etc/hostname /etc/resolv.conf' ||
-  fail "a change to /etc/hosts, /etc/hostname or /etc/resolv.conf survived the restart"
 [ "$(tools_hash)" = "$tools_before" ] || fail "nft or tini differ after the restart"
 assert_no_token_in_log smoke-runner-capable
 docker rm --force smoke-runner-capable >/dev/null
@@ -393,13 +393,12 @@ for line in open("/proc/self/mountinfo"):
 if "ro" not in mounts["/"][0]:
     problems.append("the root filesystem is not mounted read-only")
 # Every other writable mount is a tmpfs of ours or one of Docker itself: the pseudo filesystems, /dev
-# the masked paths under /proc and the three files it binds into /etc at every start.
-docker_owned = {"/etc/hosts", "/etc/hostname", "/etc/resolv.conf"}
+# and the masked paths under /proc. The files Docker binds into /etc are read-only with read_only.
 pseudo = {"proc", "sysfs", "cgroup", "cgroup2", "devpts", "mqueue"}
 writable = sorted(
     mountpoint for mountpoint, (options, fstype, _) in mounts.items()
     if "rw" in options and fstype not in pseudo and not mountpoint.startswith("/dev")
-    and mountpoint not in docker_owned and not mountpoint.startswith(("/proc/", "/sys/"))
+    and not mountpoint.startswith(("/proc/", "/sys/"))
 )
 if writable != ["/home/runner", "/run", "/tmp"]:
     problems.append(f"writable mounts: {writable}")

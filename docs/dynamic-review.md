@@ -134,9 +134,9 @@ namespaces, no host kernel setting beyond the `nf_tables` support every current 
   Diff job user 10001, mode 0700: its HOME). The engine user (10101) has **no new write path**: `/tmp`
   is what it could write before, `/run` and `/home/runner` are closed to it, and the rest of the
   filesystem is read-only (besides Docker's own `/dev/shm`, as before); the image smoke test checks
-  this against the same image without the layout. Docker also keeps `/etc/hosts`, `/etc/hostname`
-  and `/etc/resolv.conf` writable for root; Docker writes them afresh at every start, which the
-  image smoke test checks with a marker before a `docker restart`. Because a tmpfs is
+  this against the same image without the layout. The three files Docker binds into `/etc`
+  (`hosts`, `hostname`, `resolv.conf`) are read-only too under `read_only`, which the image smoke
+  test checks. Because a tmpfs is
   charged to the container's memory limit, `/tmp` counts against the 2 GiB (see "Capacity"): a
   repository export is limited to 64 MiB and a preparation to 256 MiB, but a runaway engine that
   fills `/tmp` takes memory, not disk, and ends in the OOM kill of the job, bounded at 512 MiB. Do
