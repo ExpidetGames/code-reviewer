@@ -429,6 +429,7 @@ def run_dynamic_job(
                 )
                 answer = engine.run()
                 turn_note = _turn_note(engine.turn_seconds)
+                recovery_note = engine.recovery
             finally:
                 server.stop()
     except CheckoutError as error:
@@ -476,6 +477,10 @@ def run_dynamic_job(
         summary += f"; {STATE_RESET_CODE}"
     if findings.stopped_early is not None:
         summary += f"; stopped early ({findings.stopped_early})"
+    if recovery_note is not None:
+        # A turn ended without an answer and one more turn returned it (#309): a complete review,
+        # not a limit, so it is in the log and not in the comment.
+        summary += f"; recovered after a turn without an answer ({recovery_note})"
     if turn_note:
         summary += f"; {turn_note}"
     summary += f"\ncheckout: {content.metrics.describe()}"

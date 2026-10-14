@@ -61,6 +61,11 @@ def completion_as_stream(completion: Mapping[str, Any]) -> bytes | None:
     if streamed:
         delta["tool_calls"] = streamed
     finish: Any = first.get("finish_reason")
+    if finish == "stop" and streamed:
+        # A provider may say `stop` for a step that asked for tools. The pinned engine takes that
+        # for the end of the turn and, with no structured answer yet, fails it (#309), although
+        # the step is a tool step. Report what the step is.
+        finish = "tool_calls"
     usage: Any = completion.get("usage")
     return (
         _chunk(base, {"index": 0, "delta": delta, "finish_reason": None})
