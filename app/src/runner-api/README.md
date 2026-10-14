@@ -116,7 +116,7 @@ advertised `opencode`, and its `input` is tagged:
 - `dynamic`: `{ model, skill, limits: { maxFindings } }` — model/skill/limits only, a closed object.
   There is no field for the fixed core, a permission, an executable command or an endpoint, and the
   skill is literal data;
-- `base`: `{ repository, baseRef, headSha, previousReviewedSha, attemptedShas, comparison }` — the exact queued head,
+- `base`: `{ repository, baseRef, headSha, previousReviewedSha, attemptedShas, attemptedShasTruncated, comparison }` — the exact queued head,
   the base identity the provider reported, and the _declared_ comparison mode (`full` in this stage;
   the checkout verifies completeness before it trusts it). `previousReviewedSha` is the head of the
   last successful review of the same kind (#199), or `null` when there is none; `attemptedShas`
@@ -124,7 +124,10 @@ advertised `opencode`, and its `input` is tagged:
   are the heads of the pull request's earlier jobs of that kind that ran and did not succeed (`failed`
   or at least one lost attempt; created after the last succeeded job and before this one, newest
   first, at most 20): a run may have written the summary before it ended, and the publisher accepts
-  exactly these heads as the comment's state;
+  exactly these heads as the comment's state; `attemptedShasTruncated` (#257, optional: sent only as
+  `true`, so a runner from before #257 still accepts the job) says that more heads qualified than the
+  list holds, and lets the publisher recover a bot-owned summary whose head fell out of it with a full
+  review;
 - `env: {}`: no PR-Agent option is promoted into the Dynamic job.
 
 The kind, the engines and the tagged shape are also the contract `ClaimRequest`, `Engine`,

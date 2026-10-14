@@ -19,6 +19,7 @@
 // Nothing in here logs or keeps a credential: the revealed access exists only as a local value that
 // is built as late as possible and dropped with the response.
 import "server-only";
+import type { AttemptedShas } from "../db/repositories/jobs-repository.ts";
 import type { IntegrationsRepository } from "../db/repositories/integrations-repository.ts";
 import type { RepositoriesRepository } from "../db/repositories/repositories-repository.ts";
 import { IntegrationError } from "../integrations/errors.ts";
@@ -110,9 +111,10 @@ export type ClaimDeps = {
   /**
    * The heads of the earlier jobs of that pull request that did not succeed (#255), newest first. A
    * run may have written the summary before it ended; the publisher accepts these heads as a state
-   * it can account for, so one lost run never wedges the pull request. Only a Dynamic claim asks.
+   * it can account for, so one lost run never wedges the pull request. `truncated` (#257) says the
+   * list was cut, so the runner can recover a state head that fell out of it. Only a Dynamic claim asks.
    */
-  attemptedShas: (job: Job) => Promise<string[]>;
+  attemptedShas: (job: Job) => Promise<AttemptedShas>;
   registry: IntegrationRegistry;
   guard: ClaimGuard;
   jobOptions: JobOptionsSource;
@@ -238,22 +240,25 @@ function dynamicOptionsOf(options: JobOptions): DynamicReviewOptions | null {
  * identity the provider reported. `comparison` is a declared mode, not proof: the checkout verifies
  * completeness before it trusts it, and `previousReviewedSha` is the head of the last successful
  * review of the same kind (#199), or null; `attemptedShas` are the heads of the earlier jobs that did
- * not succeed (#255, left out when there are none). Nothing here is a permission or an endpoint.
+ * not succeed (#255, left out when there are none) and `attemptedShasTruncated` (#257) says the list was
+ * cut, left out unless true. Nothing here is a permission or an endpoint.
  */
 function claimBaseOf(
   repositoryFullName: string,
   baseRef: string,
   headSha: string,
   previousReviewedSha: string | null,
-  attemptedShas: string[],
+  attempted: AttemptedShas,
 ): ClaimBase {
   return {
     repository: repositoryFullName,
     baseRef,
     headSha,
     previousReviewedSha,
-    // Left out when empty: a runner from before #255 has a closed job contract and rejects the key.
-    ...(attemptedShas.length === 0 ? {} : { attemptedShas }),
+    // Left out when empty or false: a runner from before #255/#257 has a closed job contract and
+    // rejects a key it does not know.
+    ...(attempted.shas.length === 0 ? {} : { attemptedShas: attempted.shas }),
+    ...(attempted.truncated ? { attemptedShasTruncated: true } : {}),
     comparison: "full",
   };
 }
@@ -389,8 +394,10 @@ async function prepare(
   // can compare against it. A Diff job never carries a base, so it is not looked up.
   const previousReviewedSha =
     job.reviewKind === "dynamic" ? await deps.previousReviewedSha(job) : null;
-  const attemptedShas =
-    job.reviewKind === "dynamic" ? await deps.attemptedShas(job) : [];
+  const attempted: AttemptedShas =
+    job.reviewKind === "dynamic"
+      ? await deps.attemptedShas(job)
+      : { shas: [], truncated: false };
   // The exact legacy Diff payload for every Diff job, whatever kind of runner asked: the keys are in
   // the order the previous release wrote them, byte for byte (prUrl, command, git, llm, env;
   // llm.provider, model, apiKey, maxTokens), so a golden serialization matches. A Dynamic job is only
@@ -424,7 +431,7 @@ async function prepare(
             baseRef,
             job.headSha,
             previousReviewedSha,
-            attemptedShas,
+            attempted,
           ),
           git: {
             provider: "github",

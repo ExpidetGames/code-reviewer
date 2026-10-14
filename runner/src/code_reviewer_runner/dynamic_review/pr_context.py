@@ -145,7 +145,10 @@ def load_context(
         text = client.get_pull_request(publisher.pr_number)
         _may_continue(cancelled, time_left)
         state = publisher.read_previous_state(
-            base.head_sha, base.previous_reviewed_sha, base.attempted_shas
+            base.head_sha,
+            base.previous_reviewed_sha,
+            base.attempted_shas,
+            base.attempted_shas_truncated,
         )
         _may_continue(cancelled, time_left)
     except (GitHubError, PublishError) as error:

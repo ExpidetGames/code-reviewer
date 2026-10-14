@@ -32,7 +32,7 @@ publishes as one persistent summary comment. The decisions are in epic
 | Provenance audit of the engine binary and `rg` in `make check-licenses` (source commit, licence, the Bun-lock runtime closure of the pinned commit), notices in `NOTICE` and `THIRD_PARTY_LICENSES.md` | Shipped (#202) |
 | Worst-case memory and OOM measurements, the decision to run more than one Dynamic job at a time | **Manual step, not done** (needs a real deployment target, see "Capacity") |
 | Full path from a signed webhook to the Run: the pull request title, body and previous-review state in the prompt (#251), the review kind proved for every entry point and the model and usage in Runs (#252), and the privileged `e2e-dynamic` journey with the real pinned OpenCode that publishes the summary (#253) | Shipped (#251, #252, #253) |
-| Recovery when a run wrote the summary and then ended failed | Shipped (#255): the claim names the heads of earlier unsuccessful runs, see "Known limitations" |
+| Recovery when a run wrote the summary and then ended failed | Shipped (#255, #257): the claim names the heads of earlier unsuccessful runs and says when that list was cut, see "Known limitations" |
 | Hosted activation | Needs the hosted egress gate (#82) |
 
 ## How a Dynamic job reaches an engine
@@ -293,9 +293,10 @@ the concurrency before the memory matrix exists; a later change can keep Diff jo
 This is the order to follow; every step can be stopped and rolled back. Nothing in it is done by
 installing the files.
 
-**Deploy order.** `base.attemptedShas` (#255) is only sent when it is not empty, and a runner from
-before #255 rejects the key (its job contract is closed). Update the app and the Dynamic runner image
-together, or the runner first. A newer runner with an older app is safe: an absent key means none.
+**Deploy order.** `base.attemptedShas` (#255) is only sent when it is not empty and
+`base.attemptedShasTruncated` (#257) only when it is true; a runner from before the respective issue
+rejects the key (its job contract is closed). Update the app and the Dynamic runner image together, or
+the runner first. A newer runner with an older app is safe: an absent key means none and false.
 
 **Before you start.** A Linux Docker host (Docker Engine with Compose v2) whose kernel has
 `nf_tables` (every current distribution kernel; the self-check tells you when it does not), that can
@@ -403,11 +404,22 @@ by the defaults.
   is left out when there are none). The publisher accepts such a head next to the job's own head and
   `previousReviewedSha`, reconciles from that state and edits the same comment; the next success
   makes it the previous review again. A head the app never attempted (foreign, tampered, newer) is
-  still refused. What stays: after 20 or more distinct heads that ran and failed, *without* a success
-  in between, an older state head falls out of the list and every later push fails with
-  `review_not_published`. Re-reviewing the newest head does not repair it (it gets the same window).
-  Until the guaranteed recovery (#257) lands, the repair is to **delete the bot's summary comment**
-  on the pull request: the next review creates a new one (the history of resolved findings is lost).
+  still refused.
+- **The attempted-heads list is bounded, so a truncated claim recovers with a full review (#257).**
+  After more than 20 distinct heads that ran and failed *without* a success in between, an older head
+  of the summary comment can fall out of the list. The app then also sends `base.attemptedShasTruncated:
+  true` (left out otherwise), and a state head the job cannot account for on the **bot-owned** summary
+  (author and exact identity marker, and a valid state) no longer ends in `review_not_published`: the
+  run is a full review (the checkout is full whatever `comparison` the claim declares), the old state
+  is dropped (nothing of it is carried over as active or resolved, nothing is resolved by inference)
+  and the same comment is rewritten. The history of resolved findings restarts **and the active
+  findings are re-derived from scratch too**: a finding of the earlier summary is only on the pull
+  request again if this run finds it. The rewritten summary says so in a one-shot notice ("Full
+  review after a state reset: ..."), its footer no longer claims the previous state is kept, and the
+  result log of the run carries `state_reset_attempted_shas_truncated` (visible in Runs). The notice
+  is not part of the state, so the next normal run renders without it. A comment that is not the bot's, a corrupt state and a claim that was not
+  truncated stay fail-closed. Residual risk: on a truncated claim a late result of an older run can no
+  longer be told from a lost head and may overwrite a newer review; the next push reviews again.
   A lost edit response is recognised by re-reading the comment (it must hold exactly the body sent).
 - **Hidden Unicode tag characters in repository files reach the model untouched (#247).** An attacker
   who controls repository text can hide instructions in tag characters.

@@ -67,6 +67,12 @@ export const MAX_ATTEMPTED_SHAS = 20;
 // Rows read before the heads are made distinct; many reruns of one head must not hide an older one.
 const ATTEMPTED_SCAN_LIMIT = 200;
 
+/**
+ * The heads a claim names as attempted (#255), newest first and bounded. `truncated` (#257) says that
+ * more distinct heads qualified than `shas` holds, or that the scan filled up before it could tell.
+ */
+export type AttemptedShas = { shas: string[]; truncated: boolean };
+
 /** The lookup of the last reviewed head for one pull request and review kind (#199). */
 export type PreviousReviewedShaInput = {
   repositoryId: string;
@@ -117,7 +123,7 @@ export type JobsRepository = {
   previousReviewedSha(input: PreviousReviewedShaInput): Promise<string | null>;
   /**
    * The heads of this pull request's earlier jobs of the same review kind that ran and did not succeed
-   * (#255), newest first and bounded, or an empty list. A run that wrote the summary and then did not
+   * (#255), newest first and bounded, or an empty list, and whether the list was cut (#257). A run that wrote the summary and then did not
    * end `succeeded` (failed, or requeued and then superseded or cancelled) leaves its head in the
    * comment; the publisher accepts exactly these heads as a state it can account for. A job that never
    * ran (superseded or cancelled while waiting: `attempts = 0`, not `failed`) cannot have published and
@@ -126,7 +132,7 @@ export type JobsRepository = {
    * before it) and strictly before the claimed one (a newer job is a newer review, not a predecessor).
    * Ids are random, so jobs created in the same millisecond have no known order and are left out.
    */
-  attemptedShas(input: PreviousReviewedShaInput): Promise<string[]>;
+  attemptedShas(input: PreviousReviewedShaInput): Promise<AttemptedShas>;
 };
 
 /**
@@ -568,7 +574,7 @@ export function createJobsRepository(
         .select("created_at")
         .where("id", "=", input.excludeJobId)
         .executeTakeFirst();
-      if (claimed === undefined) return [];
+      if (claimed === undefined) return { shas: [], truncated: false };
       const last = await lastSucceeded(input);
       let query = scopeOf(input)
         .select("head_sha")
@@ -584,12 +590,16 @@ export function createJobsRepository(
       const rows = await query
         .orderBy("created_at", "desc")
         .orderBy("id", "desc")
-        .limit(ATTEMPTED_SCAN_LIMIT)
+        // One row more than the scan: a full scan cannot tell whether an older head is left out.
+        .limit(ATTEMPTED_SCAN_LIMIT + 1)
         .execute();
-      return [...new Set(rows.map((row) => row.head_sha))].slice(
-        0,
-        MAX_ATTEMPTED_SHAS,
-      );
+      const distinct = [...new Set(rows.map((row) => row.head_sha))];
+      return {
+        shas: distinct.slice(0, MAX_ATTEMPTED_SHAS),
+        truncated:
+          rows.length > ATTEMPTED_SCAN_LIMIT ||
+          distinct.length > MAX_ATTEMPTED_SHAS,
+      };
     },
   };
 }

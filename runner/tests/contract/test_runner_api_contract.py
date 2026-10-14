@@ -370,6 +370,8 @@ def test_the_tagged_dynamic_job_input_is_accepted_and_keeps_exact_shas_and_bound
     assert parsed.base.previous_reviewed_sha is None
     # #255: the shared golden job carries the attempted heads.
     assert parsed.base.attempted_shas == ("2" * 40, "3" * 40)
+    # #257: and the truncation flag, which the app only sends when it is true.
+    assert parsed.base.attempted_shas_truncated is True
 
 
 def test_the_contract_and_the_runner_refuse_a_dynamic_job_with_an_unknown_authority_field() -> None:
@@ -442,6 +444,10 @@ def test_the_tagged_union_is_bidirectional_and_both_sides_give_the_same_verdict(
         # #255: optional, absent means none.
         {**dynamic, "base": {**base, "attemptedShas": ["b" * 40, "c" * 40]}},
         {**dynamic, "base": {**base, "attemptedShas": []}},
+        # #257: optional, true only when the list was cut; absent means false.
+        {**dynamic, "base": {**base, "attemptedShasTruncated": True}},
+        {**dynamic, "base": {**base, "attemptedShasTruncated": False}},
+        {**dynamic, "base": {k: v for k, v in base.items() if k != "attemptedShasTruncated"}},
         # An app that has nothing to name leaves the key out (an older runner rejects it).
         {**dynamic, "base": {k: v for k, v in base.items() if k != "attemptedShas"}},
     ]
@@ -456,6 +462,9 @@ def test_the_tagged_union_is_bidirectional_and_both_sides_give_the_same_verdict(
         {**dynamic, "base": {**base, "attemptedShas": ["b" * 40, "b" * 40]}},
         {**dynamic, "base": {**base, "attemptedShas": [f"{n:040x}" for n in range(21)]}},
         {**dynamic, "base": {**base, "attemptedShas": "b" * 40}},
+        {**dynamic, "base": {**base, "attemptedShasTruncated": "true"}},
+        {**dynamic, "base": {**base, "attemptedShasTruncated": 1}},
+        {**dynamic, "base": {**base, "attemptedShasTruncated": None}},
         {**dynamic, "dynamic": {**options, "model": "bad model name"}},
         {**diff_shape, "dynamic": options},
         {**diff_shape, "base": base},
