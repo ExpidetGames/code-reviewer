@@ -18,7 +18,7 @@ publishes as one persistent summary comment. The decisions are in epic
 
 | Part | State |
 |---|---|
-| Project setting `review_kind` (Diff or Dynamic), editable skill, default model `deepseek-v4.1-flash` | Shipped (#194, #200) |
+| Project setting `review_kind` (Diff or Dynamic), editable skill, default model `deepseek/deepseek-v4.1-flash` | Shipped (#194, #200) |
 | Rollout gate `dynamic_review` (instance setting, default off), admin control | Shipped (#195, #202) |
 | Job tag, capability matching, `no_capable_runner`, `dynamic_review_disabled` | Shipped (#195) |
 | Sanitised read-only checkout of the pull request head | Shipped (#196) |
@@ -229,9 +229,10 @@ a runner without `opencode` in that list is refused with `dynamic_engine_unavail
 
 ## The model
 
-Dynamic Review is model- and provider-agnostic. The default model name is `deepseek-v4.1-flash`; it
-is a default, not an allow-list, and there is no provider routing or fallback. The workspace's
-existing encrypted BYOK credential is used (no new key variable, no per-project key).
+Dynamic Review is model- and provider-agnostic. The default model is `deepseek/deepseek-v4.1-flash`,
+the id OpenRouter serves (the name is sent to the provider as it is). It is a default, not an
+allow-list, and there is no provider routing or fallback. The workspace's existing encrypted BYOK
+credential is used (no new key variable, no per-project key).
 
 The operator describes what the selected model and destination can do in
 `RUNNER_DYNAMIC_CAPABILITIES` (trusted runner configuration, never repository input):

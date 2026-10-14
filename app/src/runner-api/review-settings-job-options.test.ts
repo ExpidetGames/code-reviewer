@@ -72,6 +72,31 @@ function job(reviewKind: ProjectReviewKind): Job {
 }
 
 describe("the job options of a claimed job", () => {
+  // #262-T02
+  it("gives a Dynamic job of a project without a model override the OpenRouter id, in both model fields", async () => {
+    const source = createReviewSettingsJobOptionsSource({
+      settings: () => ({
+        resolveForRepository: async () => ({
+          ...resolveReviewSettings({
+            builtIn: builtInReviewSettings("diff-model"),
+          }),
+          dynamic: resolveProjectDynamicSettings({
+            builtIn: builtInProjectDynamicSettings(),
+            project: { reviewKind: "dynamic" },
+            defaultSkill: "the shipped skill",
+          }),
+        }),
+      }),
+    });
+
+    const options = await source.optionsFor(job("dynamic"));
+
+    expect(options.dynamic).toMatchObject({
+      model: "deepseek/deepseek-v4.1-flash",
+    });
+    expect(options.llm?.model).toBe("deepseek/deepseek-v4.1-flash");
+  });
+
   // #195 finding 2
   it("gives a claimed Dynamic job its Dynamic options even after the project turned Diff", async () => {
     const options = await sourceFor("diff").optionsFor(job("dynamic"));

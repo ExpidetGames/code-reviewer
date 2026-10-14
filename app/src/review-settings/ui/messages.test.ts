@@ -107,7 +107,7 @@ describe("the copy for a problem with one setting", () => {
   it("asks for a model name of the provider for the Dynamic model, not for an OpenRouter one", () => {
     expect(describeIssue("dynamicModel", "EMPTY")).toBe("Enter a model name.");
     expect(describeIssue("dynamicModel", "INVALID_FORMAT")).toMatch(
-      /deepseek-v4\.1-flash/,
+      /deepseek\/deepseek-v4\.1-flash/,
     );
   });
 
