@@ -126,22 +126,73 @@ def test_discovery_credentials_and_symlinks_are_not_read_or_relocated(
     )
 
 
-# #196-T04 #196-T10
-@pytest.mark.parametrize(
-    "name,value",
-    [
-        ("opencode.json", b"{}"),
-        (".env.local", b"secret"),
-        ("link", ("120000", b"/etc/passwd")),
-    ],
-)
-def test_required_denied_or_unsafe_changes_fail_the_review(
-    repo: GitFixture, tmp_path: Path, name: str, value: bytes | tuple[str, bytes]
+_DENIED = [
+    (".claude/skills/review/SKILL.md", b"payload-sentinel", "engine_discovery"),
+    (".agents/skills/review/SKILL.md", b"payload-sentinel", "engine_discovery"),
+    (".opencode/agent/review.md", b"payload-sentinel", "engine_discovery"),
+    ("opencode.json", b"{}", "engine_discovery"),
+    (".env", b"payload-sentinel", "credential_path"),
+    ("config/.env.production", b"payload-sentinel", "credential_path"),
+    ("deploy.key", b"payload-sentinel", "credential_path"),
+    ("link", ("120000", b"/etc/passwd"), "unsafe_mode"),
+]
+
+
+# #296-T06 #296-T07
+@pytest.mark.parametrize("name,value,reason", _DENIED)
+@pytest.mark.parametrize("orphan", [False, True], ids=["known-merge-base", "unknown-merge-base"])
+def test_a_changed_denied_or_unsafe_path_is_skipped_and_never_fails_the_review(
+    repo: GitFixture,
+    tmp_path: Path,
+    name: str,
+    value: bytes | tuple[str, bytes],
+    reason: str,
+    orphan: bool,
 ) -> None:
-    repo.set_head({"README.md": b"base\n", name: value})
-    with pytest.raises(CheckoutError, match="checkout_incomplete"):
-        prepare_content(claim(repo), 196, LocalTransport(repo.path), tmp_path / "job", Redactor(()))
-    assert not (tmp_path / "job").exists()
+    import json
+
+    repo.set_head(
+        {"README.md": b"base\n", "src/app.py": b"print('x')\n", name: value}, orphan=orphan
+    )
+    result = prepare_content(
+        claim(repo), 196, LocalTransport(repo.path), tmp_path / "job", Redactor(())
+    )
+    assert set(result.files) == {"README.md", "src/app.py"}
+    assert (name, reason) in {(x.path, x.reason) for x in result.skipped}
+    assert (name, reason) in {(x.path, x.reason) for x in result.omissions}
+    assert "src/app.py" in result.diff and name not in result.diff
+    evidence = json.loads((result.root / "evidence.json").read_bytes())
+    assert {"path": name, "reason": reason} in evidence["skipped"]
+    assert not any(
+        b"payload-sentinel" in p.read_bytes() for p in (tmp_path / "job").rglob("*") if p.is_file()
+    )
+    assert result.metrics.skipped == {reason: 1} and result.metrics.omitted == {reason: 1}
+
+
+# #296-T06
+def test_a_deleted_denied_path_is_skipped_in_the_comparison(
+    repo: GitFixture, tmp_path: Path
+) -> None:
+    repo.base = repo.commit({"README.md": b"base\n", ".env": b"payload-sentinel"})
+    git(repo.path, "update-ref", "refs/heads/main", repo.base)
+    repo.set_head({"README.md": b"changed\n"})
+    result = prepare_content(
+        claim(repo), 196, LocalTransport(repo.path), tmp_path / "job", Redactor(())
+    )
+    assert [(x.path, x.reason) for x in result.skipped] == [(".env", "credential_path")]
+    assert "README.md" in result.diff and ".env" not in result.diff
+
+
+# #296-T07
+def test_the_content_of_a_skipped_denied_path_never_leaves_the_private_staging(
+    repo: GitFixture, tmp_path: Path
+) -> None:
+    repo.set_head({"README.md": b"base\n", ".env": b"payload-sentinel"})
+    job = tmp_path / "job"
+    result = prepare_content(claim(repo), 196, LocalTransport(repo.path), job, Redactor(()))
+    assert not (job / "objects").exists()
+    assert ".env" not in result.files
+    assert not (result.export / ".env").exists()
 
 
 # #196-T04 #196-T05
@@ -993,20 +1044,21 @@ def test_preparation_reports_peak_bytes_entries_and_omissions_without_paths(
             "README.md": b"base\n",
             "src/code.py": b"print('x')\n",
             "assets/logo.bin": b"\0\1\2",
+            ".env.local": b"secret=1\n",
         }
     )
     result = prepare_content(
         claim(repo), 196, LocalTransport(repo.path), tmp_path / "job", Redactor(())
     )
     metrics = result.metrics
-    assert metrics.entries == 3
+    assert metrics.entries == 4
     assert metrics.transfer_bytes > 0
     assert metrics.preparation_bytes >= metrics.exposed_bytes > 0
-    assert metrics.omitted == {"binary": 1}
-    assert metrics.skipped == {"binary": 1}
+    assert metrics.omitted == {"binary": 1, "credential_path": 1}
+    assert metrics.skipped == {"binary": 1, "credential_path": 1}
     line = metrics.describe()
-    assert "entries=3" in line and "omitted=binary:1" in line and "skipped=binary:1" in line
-    assert not any(name in line for name in ("logo", "code.py", "README"))
+    assert "entries=4" in line and "omitted=binary:1,credential_path:1" in line
+    assert not any(name in line for name in ("logo", "env", "code.py", "README"))
 
 
 # #296-T12

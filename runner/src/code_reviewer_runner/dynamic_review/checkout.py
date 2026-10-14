@@ -38,10 +38,19 @@ _SHA = re.compile(r"[0-9a-f]{40}")
 
 
 class SkipReason(StrEnum):
-    """Stable reason codes for changed content excluded from the review rather than failed."""
+    """Stable reason codes for changed content excluded from the review rather than failed.
+
+    `binary` and `too_large` are about the content. The other three are the deny list: a path the
+    engine must never be able to read (discovery files, credentials) or a mode that is not a
+    regular file. None of them is ever fetched, read or exported, so excluding it exposes nothing;
+    the review is told that the file was not reviewed.
+    """
 
     BINARY = "binary"
     TOO_LARGE = "too_large"
+    ENGINE_DISCOVERY = "engine_discovery"
+    CREDENTIAL_PATH = "credential_path"
+    UNSAFE_MODE = "unsafe_mode"
 
 
 @dataclass(frozen=True)
@@ -234,12 +243,9 @@ def prepare_content(
                 if reason is not None:
                     omissions[path] = Omission(redact_text(path, redactor), reason)
                     if path in required:
-                        # A changed binary or oversized file is excluded from the checkout and
-                        # reported as skipped; denied or unsafe content still fails closed.
-                        skip_reason = _skip_reason(reason)
-                        if skip_reason is None:
-                            raise CheckoutError(CheckoutReason.INVALID_REQUEST)
-                        tree_skips[index][path] = skip_reason
+                        # A changed file that is binary, oversized, denied or not a regular file
+                        # is excluded from the checkout and reported as skipped.
+                        tree_skips[index][path] = _skip_reason(reason)
         # Classify per comparison: a path is skipped in a diff only when one of that diff's two
         # sides is binary or oversized, so a third revision cannot hide a text change.
         base_skips = _pair_skips(head, base_tree, tree_skips[0], tree_skips[1])
@@ -384,12 +390,10 @@ def _resolve_merge_base(
     return found if found in store.objects else None
 
 
-def _skip_reason(reason: OmissionReason) -> SkipReason | None:
-    if reason is OmissionReason.BINARY:
-        return SkipReason.BINARY
+def _skip_reason(reason: OmissionReason) -> SkipReason:
     if reason is OmissionReason.LARGE_FILE:
         return SkipReason.TOO_LARGE
-    return None
+    return SkipReason(reason.value)
 
 
 def _pair_skips(
