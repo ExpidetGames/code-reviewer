@@ -3,9 +3,9 @@
 Issue #196 supplies trusted preparation in
 `runner/src/code_reviewer_runner/dynamic_review/`. It launches no OpenCode engine and does not
 advertise `opencode`, enable the instance gate, compose a prompt or publish a comment. Those
-boundaries remain with #197–#202. The current runner image still runs as its existing non-root
-runner user; the root supervisor and dedicated engine users must be supplied by #202 before
-this preparation can be used for an agent.
+boundaries are #197–#202. The default runner image runs as its existing non-root runner user; the
+`dynamic` image target run by `compose.dynamic.yml` supplies the root supervisor and the dedicated
+engine user (#202) that this preparation is used under.
 
 ## Integration and lifetime
 
@@ -64,7 +64,7 @@ the existing job-loop `SubprocessLauncher` working directory: its collector kill
 and removes that directory after forced termination too, when Python cannot run a `finally`.
 The integration suite proves blocked preparation/helper termination and independent job cleanup
 through that existing supervisor. No engine/network self-check is implied by permission sealing;
-#197/#202 must still supply proxy-only egress and whole-engine supervision before launch.
+#197 supplies proxy-only egress and whole-engine supervision before launch (ADR 0003).
 
 ## Exact acquisition and hard bounds
 
@@ -111,8 +111,9 @@ Trusted limit overrides can only lower these fixed limits. The accounting is del
 conservative: cumulative transfer, expansion and writes are charged even when earlier staging
 has already been deleted. Download accounting is application-level HTTP/Git bytes, not TLS/TCP
 record overhead. Disk accounting bounds runner-written content and rounds file/directory
-allocations; it is not a filesystem-wide quota on unrelated container activity. #197/#202 own
-engine scratch, whole-job/container memory and deployment capacity.
+allocations; it is not a filesystem-wide quota on unrelated container activity. #197 owns engine
+scratch; whole-job/container memory and deployment capacity are measured by hand
+(`docs/dynamic-review.md`, "Capacity").
 
 Only eligible regular `100644`/`100755` tracked blobs are exported, without executable bits.
 Symlinks, submodule/gitlink and other modes are omitted; Git does not represent tracked hardlinks,
@@ -187,7 +188,9 @@ is unmodified. No bubblewrap/user namespaces, provider-specific routing or host 
 and the loopback smart HTTP server in `fakes/dynamic_git/`. Its actual-uid probe uses a root helper
 (or passwordless `sudo -n` on a non-root Linux test host); absence of that prerequisite fails
 loudly, never skips. The probe runs here inside the development container and on CI's Linux host;
-#202 still owes tests of the final runner image, its users, mounts and proxy-only egress.
+the image smoke test (`docker/smoke/runner.sh` in `dynamic` mode, #202) covers the final runner image,
+its users and the startup self-check, and the privileged suite covers the users and proxy-only
+egress.
 
 Remaining rollout validation: live installation-token access to private fork PR refs, unadvertised
 eligible blob wants and named GHES versions; no-filter servers and force pushes are covered locally

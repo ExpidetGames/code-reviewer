@@ -204,3 +204,50 @@ def test_sigterm_unwinds_a_dynamic_job_and_arms_a_backstop_that_ends_the_engines
     while not stopped and time.monotonic() < deadline:
         time.sleep(0.01)
     assert stopped == ["hard stop"]
+
+
+# #202-T09: the job process takes its engines from the loop alone; with nothing handed to it, a
+# Dynamic job entering through the real entry point is refused and no checkout is prepared.
+def test_a_dynamic_job_entering_the_entry_point_without_advertised_engines_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("RUNNER_ADVERTISED_ENGINES", raising=False)
+    monkeypatch.setenv(runner.OPENCODE_COMMAND_VARIABLE, "opencode")
+    out = io.StringIO()
+
+    code = runner.main([], stdin=io.StringIO(json.dumps(dynamic_document())), stdout=out)
+
+    result = json.loads(out.getvalue())
+    assert code == 1
+    assert result["errorCode"] == ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE.value
+
+
+# #202-T09: a loop that advertised Diff only hands the job process exactly that.
+def test_a_dynamic_job_with_only_the_diff_engine_advertised_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RUNNER_ADVERTISED_ENGINES", ENGINE_DIFF)
+    monkeypatch.setenv(runner.OPENCODE_COMMAND_VARIABLE, "opencode")
+    out = io.StringIO()
+
+    code = runner.main([], stdin=io.StringIO(json.dumps(dynamic_document())), stdout=out)
+
+    assert code == 1
+    assert json.loads(out.getvalue())["errorCode"] == "dynamic_engine_unavailable"
+
+
+# #202-T01: what the loop advertised is what the job process runs on: with `opencode` handed over
+# the job gets past the engine check (and then stops at the next missing piece, the model
+# description, with its own stable code).
+def test_a_dynamic_job_with_opencode_advertised_gets_past_the_engine_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RUNNER_ADVERTISED_ENGINES", "pr-agent,opencode")
+    monkeypatch.setenv(runner.OPENCODE_COMMAND_VARIABLE, "opencode")
+    monkeypatch.delenv(runner.DYNAMIC_CAPABILITIES_VARIABLE, raising=False)
+    out = io.StringIO()
+
+    code = runner.main([], stdin=io.StringIO(json.dumps(dynamic_document())), stdout=out)
+
+    assert code == 1
+    assert json.loads(out.getvalue())["errorCode"] == "dynamic_model_features_unsupported"

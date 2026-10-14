@@ -126,14 +126,19 @@ def build_engine_config(
 
 
 def engine_environment(
-    *, proxy_url: str, home: str, scratch_dir: str, node_bin: str | None = None
+    *,
+    proxy_url: str,
+    home: str,
+    scratch_dir: str,
+    node_bin: str | None = None,
+    tools_dir: str | None = None,
 ) -> dict[str, str]:
     """The minimal environment of the engine process.
 
-    Only `PATH` (plus an optional pinned Node runtime), the empty per-job `HOME`, the proxy address
-    as the only provider base URL and the disable flags. No `GITHUB_*`, no `OPENROUTER_*`, no runner
-    or lease token, no inherited `XDG_*`/config home: an empty home is what keeps global discovery
-    out even when a flag is missing.
+    Only `PATH` (the directory of the verified tools first, then an optional pinned Node runtime),
+    the empty per-job `HOME`, the proxy address as the only provider base URL and the disable flags.
+    No `GITHUB_*`, no `OPENROUTER_*`, no runner or lease token, no inherited `XDG_*`/config home: an
+    empty home is what keeps global discovery out even when a flag is missing.
     """
     environment = dict(_DISABLED_FLAGS)
     environment["HOME"] = home
@@ -147,6 +152,8 @@ def engine_environment(
     environment["OPENCODE_DISABLE_TELEMETRY"] = "true"
     # The engine talks to the proxy only; the proxy is the one that talks upstream.
     environment["REVIEW_PROXY_URL"] = proxy_url
-    environment["PATH"] = f"{node_bin}:" if node_bin else ""
+    # The verified tools come first, so no `rg` further along the PATH can be the one that runs.
+    environment["PATH"] = f"{tools_dir}:" if tools_dir else ""
+    environment["PATH"] += f"{node_bin}:" if node_bin else ""
     environment["PATH"] += "/usr/local/bin:/usr/bin:/bin"
     return environment

@@ -118,7 +118,7 @@ export function checkLicenses(input: {
 }): CheckResult {
   const { policy, installed, locked } = input;
   const violations: Violation[] = [];
-  const checked: Record<Ecosystem, number> = { npm: 0, python: 0 };
+  const checked: Record<Ecosystem, number> = { npm: 0, python: 0, bun: 0 };
   const installedKeys = new Set<string>();
 
   for (const entry of installed) {

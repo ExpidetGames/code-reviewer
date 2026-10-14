@@ -474,23 +474,50 @@ by whoever runs it (neither is part of the shipped files nor tested):
 After either, run a review (`/review` on a test pull request) and check the runner log for
 `no answer from the app` or model and GitHub errors (`git_unavailable`, `llm_unavailable`).
 
-### Dynamic Review runner (not yet activatable)
+### Dynamic Review runner (opt-in, untested on Coolify)
 
-Dynamic Review needs a runner of its own, sized separately from the PR-Agent runner above. The opt-in
-override file `compose.dynamic.yml` describes it for plain Docker Compose; it is **not yet
-activatable**, because the engine is not in the runner image and the runner's isolation self-check
-still fails closed, so no runner claims a Dynamic job. Nothing in `compose.coolify.yml` changes and a
-Coolify installation needs nothing from it today. When the engine ships, a Coolify variant follows;
-until then [`docs/dynamic-review.md`](dynamic-review.md) has the status, the activation order and the
-sizing reasoning. The settings, all optional and without secrets, are `RUNNER_DYNAMIC_IMAGE`,
-`RUNNER_DYNAMIC_CONCURRENCY` (default 1: one Dynamic job at a time),
-`RUNNER_DYNAMIC_MEMORY_LIMIT` (`2g`), `RUNNER_DYNAMIC_MEMORY_RESERVATION` (`1536m`) and
-`RUNNER_DYNAMIC_CAPABILITIES` (the operator's JSON description of the model). The memory figures are
-an unmeasured, conservative proposal; do not raise the concurrency before the measurements in
-`docs/dynamic-review.md` exist. The file also runs the Dynamic runner's loop as root with a short
-list of capabilities and sets `RUNNER_DIFF_JOB_USER` (`10001:10001`), so that PR-Agent jobs still drop
-to the unprivileged user; that is fixed by the file, not a setting to change (see "The engine
-boundary" in `docs/dynamic-review.md`).
+Dynamic Review needs a runner of its own, sized separately from the PR-Agent runner above, and the app
+instance's Dynamic Review switch (default off). **This section has not been tested on a real Coolify
+instance**: the Compose file and the image are tested in CI (file tests against `compose.dynamic.yml`,
+the image build and its smoke test, which starts the runner in a container created like the file creates
+it), but how Coolify handles `user: "0:0"`, the capability list and `no-new-privileges`, and whether the
+Docker host's kernel has `nf_tables`, is for the first deployment to find out. A Coolify installation that
+does not use Dynamic Review needs nothing from it; nothing in `compose.coolify.yml` changes.
+
+Coolify takes one Compose file per resource, so the Dynamic runner is a **second resource** next to the
+application of this guide:
+
+1. In the same project and environment, add a resource of the same type (**Docker Compose**, public or
+   private repository, the same repository and branch). Set **Docker Compose Location** to
+   `/compose.coolify.dynamic.yml`. Coolify builds the `dynamic` target of `runner/Dockerfile` on the
+   server (it downloads the pinned engine, about 60 MB, and rejects it if it is not the pinned file).
+2. Variables (Coolify turns every reference of the file into a variable): `RUNNER_TOKEN` (the same
+   value as the application's) and `RUNNER_API_URL`, the address of the app as the runner reaches it:
+   the app's public https address, the value of `BETTER_AUTH_URL` (the two resources do not share a Docker
+   network by default, and the runner API is protected by the token). Optional and without secrets:
+   `RUNNER_DYNAMIC_CONCURRENCY` (default 1: one Dynamic job at a time),
+   `RUNNER_DYNAMIC_MEMORY_LIMIT` (`2g`), `RUNNER_DYNAMIC_MEMORY_RESERVATION` (`1536m`) and
+   `RUNNER_DYNAMIC_CAPABILITIES` (the operator's JSON description of the model; empty makes every
+   Dynamic job fail with `dynamic_model_features_unsupported`). The memory figures are an unmeasured,
+   conservative proposal; do not raise the concurrency before the measurements in
+   `docs/dynamic-review.md` exist. `RUNNER_DYNAMIC_IMAGE` does not apply: Coolify names the image it
+   builds.
+3. Deploy, then read the resource's log: it must contain `Dynamic Review: opencode is advertised, the
+   startup self-check passed`. If it says `opencode is not advertised`, the reason is on the same line;
+   the table in `docs/dynamic-review.md` ("The startup self-check") lists them. Typical on a managed
+   host: `network_rules_not_installed` (the host kernel has no `nf_tables`, or the platform stripped
+   `NET_ADMIN`) or `not_root_supervisor` (the platform ignored `user: "0:0"`). The runner then serves Diff
+   jobs only, and the Diff runner of the application is not affected.
+4. Only then follow "Activation, step by step" of `docs/dynamic-review.md` from the step that turns the
+   gate on. To roll back, switch the gate off first, then stop or delete the resource.
+
+The file runs the Dynamic runner's loop as root with a short list of capabilities and sets
+`RUNNER_DIFF_JOB_USER` (`10001:10001`), so that PR-Agent jobs still drop to the unprivileged user; that
+is fixed by the file, not a setting to change (see "The engine boundary" in `docs/dynamic-review.md`).
+The restart caveat of the boundary (#249) applies: a restarted container gets its startup capabilities
+again. The firewall advice above ("Restrict what the runner can reach") covers this runner too: it needs
+GitHub, the model endpoint and the app, and its engine user is confined to the runner's own proxy by
+rules inside the container, which is not a substitute for it.
 
 ## 10. One app instance only
 

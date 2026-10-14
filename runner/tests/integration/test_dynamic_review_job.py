@@ -126,18 +126,25 @@ def environment() -> dict[str, str]:
     return {
         runner.OPENCODE_COMMAND_VARIABLE: f"{sys.executable} {FAKE_ENGINE}",
         runner.DYNAMIC_CAPABILITIES_VARIABLE: CAPABILITIES,
-        # The fake engine never searches; the production default (a ripgrep is required) stays.
+        # The fake engine never searches; the production default (a verified ripgrep is required)
+        # stays: the loop names it, the fixture below provides one.
+        runner.RIPGREP_PATH_VARIABLE: str(FAKE_RIPGREP["path"]),
     }
 
 
-@pytest.fixture(autouse=True)
-def fake_engine_needs_no_ripgrep(monkeypatch: pytest.MonkeyPatch) -> None:
-    # `run_dynamic_job` builds the engine with the production default (ripgrep required); the fake
-    # engine in these tests has no search tool, so the preflight is satisfied by the test host.
-    def ripgrep_found(*args: object, **kwargs: object) -> str:
-        return "/usr/bin/rg"
+# The file the loop would name as the verified ripgrep; set per test by the fixture below.
+FAKE_RIPGREP: dict[str, Path] = {}
 
-    monkeypatch.setattr("code_reviewer_runner.dynamic_review.adapter.shutil.which", ripgrep_found)
+
+@pytest.fixture(autouse=True)
+def fake_engine_needs_no_ripgrep(tmp_path: Path) -> None:
+    # `run_dynamic_job` requires the verified ripgrep the loop names to be an executable file called
+    # `rg`; the fake engine has no search tool, so an empty executable stands in for it.
+    ripgrep = tmp_path / "tools" / "rg"
+    ripgrep.parent.mkdir()
+    ripgrep.write_text("#!/bin/sh\n", encoding="utf-8")
+    ripgrep.chmod(0o755)
+    FAKE_RIPGREP["path"] = ripgrep
 
 
 # #197-T01
@@ -376,4 +383,31 @@ def test_a_slot_whose_proxy_port_is_held_by_somebody_else_fails_closed_before_an
     assert result.error_code is ErrorCode.DYNAMIC_ISOLATION_SELF_CHECK_FAILED
     assert upstream.requests == []
     assert preparer.events == ["prepared", "released"]
+    assert not (tmp_path / "export" / ".fake-opencode-trace.jsonl").exists()
+
+
+# #202-T04
+@pytest.mark.parametrize("named", [None, "missing"])
+def test_a_job_without_the_verified_ripgrep_file_does_not_start_the_engine(
+    tmp_path: Path, named: str | None
+) -> None:
+    env = environment()
+    if named is None:
+        del env[runner.RIPGREP_PATH_VARIABLE]
+    else:
+        env[runner.RIPGREP_PATH_VARIABLE] = str(tmp_path / named / "rg")
+    preparer = Preparer(tmp_path / "export", {"proxy_calls": 0, "answer": "structured"})
+
+    with FakeUpstream() as upstream:
+        result = runner.run_dynamic_job(
+            job_for(f"{upstream.url}/v1"),
+            None,
+            0.0,
+            env,
+            engines=ALL_ENGINES,
+            prepare=preparer,
+        )
+
+    assert not result.ok
+    assert result.error_code is ErrorCode.DYNAMIC_ENGINE_UNAVAILABLE
     assert not (tmp_path / "export" / ".fake-opencode-trace.jsonl").exists()

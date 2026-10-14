@@ -12,6 +12,7 @@ import {
   findStalePolicyEntries,
   type LockedPackage,
 } from "./check.ts";
+import { auditBinaries, describeBinaryViolation } from "./binaries.ts";
 import { parsePnpmLock, parseUvLock } from "./collect.ts";
 import { matchesPackage, parsePolicy } from "./policy.ts";
 
@@ -21,10 +22,22 @@ function read(path: string): string {
   return readFileSync(`${repoRoot}${path}`, "utf8");
 }
 
+function readIfThere(path: string): string | undefined {
+  try {
+    return read(path);
+  } catch {
+    return undefined;
+  }
+}
+
 const policy = parsePolicy(JSON.parse(read("license-policy.json")));
+// The packages that the prebuilt binaries bundle (runner/opencode-bundled-licenses.json), read the
+// way `make check-licenses` reads them.
+const binaries = auditBinaries({ policy, readText: readIfThere });
 const locked: LockedPackage[] = [
   ...parsePnpmLock(read("app/pnpm-lock.yaml")),
   ...parseUvLock(read("runner/uv.lock")),
+  ...binaries.locked,
 ];
 
 describe("license-policy.json", () => {
@@ -72,5 +85,58 @@ describe("license-policy.json", () => {
         entry.package,
       ).toBe(true);
     }
+  });
+
+  // #202-T06
+  describe("binaries", () => {
+    it("names the OpenCode and the ripgrep pin, each with its version, license and reason", () => {
+      expect(
+        policy.binaries.map((entry) => [entry.name, entry.pin, entry.license]),
+      ).toEqual([
+        ["opencode", "runner/opencode-pin.json", "MIT"],
+        ["ripgrep", "runner/ripgrep-pin.json", "MIT"],
+      ]);
+      for (const entry of policy.binaries) {
+        expect(entry.version, entry.name).toMatch(/^\d+\.\d+\.\d+$/);
+        expect(entry.reason, entry.name).not.toBe("");
+      }
+      expect(
+        policy.binaries.find((entry) => entry.name === "opencode")?.commit,
+      ).toMatch(/^[0-9a-f]{40}$/);
+    });
+
+    it("passes the audit of the real pins, documents and snapshot", () => {
+      expect(binaries.violations.map(describeBinaryViolation)).toEqual([]);
+      expect(binaries.binaries).toBe(2);
+      expect(binaries.installed.length).toBeGreaterThan(100);
+    });
+
+    it("allows the license of every package bundled in OpenCode, by the allow list or by name", () => {
+      const result = checkLicenses({
+        policy,
+        installed: binaries.installed,
+        locked: binaries.locked,
+      });
+
+      expect(result.violations.map(describeViolation)).toEqual([]);
+    });
+
+    it("rejects a policy file without binaries or with a field it does not know", () => {
+      const withoutBinaries = Object.fromEntries(
+        Object.entries(policy).filter(([key]) => key !== "binaries"),
+      );
+      const [first] = policy.binaries;
+
+      expect(() => parsePolicy(withoutBinaries)).toThrow();
+      expect(() =>
+        parsePolicy({ ...policy, binaries: [{ ...first, extra: 1 }] }),
+      ).toThrow();
+      expect(() =>
+        parsePolicy({
+          ...policy,
+          binaries: [{ ...first, commit: "not-a-commit" }],
+        }),
+      ).toThrow();
+    });
   });
 });

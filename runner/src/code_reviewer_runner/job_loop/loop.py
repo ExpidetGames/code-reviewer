@@ -23,9 +23,16 @@ Rules the code below follows (see the CR-29 decisions):
 import asyncio
 import json
 import logging
+import shlex
 from collections.abc import Callable, Mapping
 from typing import Any
 
+from code_reviewer_runner.capabilities import (
+    ENGINE_DYNAMIC,
+    ENGINES_VARIABLE,
+    OPENCODE_COMMAND_VARIABLE,
+    RIPGREP_PATH_VARIABLE,
+)
 from code_reviewer_runner.dynamic_review.engine_user import sweep_user
 from code_reviewer_runner.job import Job, JobError, ReviewKind, parse_job
 from code_reviewer_runner.job_loop.api import (
@@ -60,6 +67,16 @@ from code_reviewer_runner.pr_agent_config import PASSTHROUGH_VARIABLES
 from code_reviewer_runner.result import ErrorCode
 
 TIMEOUT_VARIABLE = "RUNNER_JOB_TIMEOUT_SECONDS"
+# The operator's non-secret Dynamic configuration, read by the Dynamic job process: the model
+# description and the engine user and ports of the slot (the names of `supervisor.py` and
+# `static_isolation.py`).
+DYNAMIC_PASSTHROUGH_VARIABLES = (
+    "RUNNER_DYNAMIC_CAPABILITIES",
+    "RUNNER_DYNAMIC_ENGINE_UID",
+    "RUNNER_DYNAMIC_ENGINE_GID",
+    "RUNNER_DYNAMIC_PROXY_PORT",
+    "RUNNER_DYNAMIC_ENGINE_PORT",
+)
 # The pause after a failure never starts below this, however short the poll interval is.
 MIN_BACKOFF_SECONDS = 5.0
 # A shutdown report is tried for this long; the process is going away either way.
@@ -254,7 +271,7 @@ class RunnerLoop:
         finally:
             self._masker.discard(claimed.id)
 
-    def _child_environment(self) -> dict[str, str]:
+    def _child_environment(self, job: Job) -> dict[str, str]:
         """Only the plain runtime variables; never the runner token or anything of another job."""
         env = {
             name: self._environment[name]
@@ -262,6 +279,28 @@ class RunnerLoop:
             if name in self._environment
         }
         env[TIMEOUT_VARIABLE] = f"{self._settings.job_timeout:g}"
+        if job.review_kind is ReviewKind.DYNAMIC:
+            env.update(self._dynamic_environment())
+        return env
+
+    def _dynamic_environment(self) -> dict[str, str]:
+        """What only a Dynamic job process gets (#202), all of it decided by trusted configuration.
+
+        The engines the startup self-check advertised, the engine command and `rg` it verified
+        (never ones the operator typed) and the operator's description of the model and of the
+        slot. A runner whose check failed hands over no command: the job process then refuses with
+        `dynamic_engine_unavailable`.
+        """
+        env = {
+            name: self._environment[name]
+            for name in DYNAMIC_PASSTHROUGH_VARIABLES
+            if name in self._environment
+        }
+        env[ENGINES_VARIABLE] = ",".join(self._settings.engines)
+        if ENGINE_DYNAMIC in self._settings.engines and self._settings.dynamic_command:
+            env[OPENCODE_COMMAND_VARIABLE] = shlex.join(self._settings.dynamic_command)
+            if self._settings.dynamic_ripgrep:
+                env[RIPGREP_PATH_VARIABLE] = self._settings.dynamic_ripgrep
         return env
 
     def _ms_since(self, started: float) -> int:
@@ -286,7 +325,7 @@ class RunnerLoop:
             # process reads the same JSON.
             spec = ProcessSpec(
                 argv=self._settings.job_command,
-                env=self._child_environment(),
+                env=self._child_environment(job),
                 stdin=json.dumps(claimed.input).encode("ascii"),
                 # A Dynamic job is the root supervisor (it drops the engine to its own user); every
                 # other job drops to the unprivileged job user when the loop itself is root.

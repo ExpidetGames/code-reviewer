@@ -21,6 +21,7 @@ from privileged_support import (
     Repo,
     dynamic_job,
     python3,
+    ripgrep,
 )
 
 from code_reviewer_runner import runner
@@ -38,6 +39,7 @@ def main(argv: list[str]) -> int:
     environment = {
         runner.OPENCODE_COMMAND_VARIABLE: f"{python3()} {tools}/stub_engine.py --escape-helper",
         runner.DYNAMIC_CAPABILITIES_VARIABLE: CAPABILITIES,
+        runner.RIPGREP_PATH_VARIABLE: ripgrep(),
         ENGINE_UID_VARIABLE: str(ENGINE_UID),
         ENGINE_GID_VARIABLE: str(ENGINE_GID),
     }

@@ -25,6 +25,7 @@ from privileged_support import (
     connect_as,
     dynamic_job,
     listener,
+    ripgrep,
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "engine"))
@@ -108,6 +109,7 @@ def test_the_real_engine_reviews_as_the_dedicated_user_and_leaves_nothing_behind
     environment = {
         runner.OPENCODE_COMMAND_VARIABLE: str(engine_binary),
         runner.DYNAMIC_CAPABILITIES_VARIABLE: CAPABILITIES,
+        runner.RIPGREP_PATH_VARIABLE: ripgrep(),
         ENGINE_UID_VARIABLE: str(ENGINE_UID),
         ENGINE_GID_VARIABLE: str(ENGINE_GID),
     }

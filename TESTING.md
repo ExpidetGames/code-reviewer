@@ -194,8 +194,8 @@ needs passwordless `sudo -n` for that isolated helper (available on CI). Missing
 failure, never a skipped security test. The helper holds no real credential, starts only fixed
 trusted commands, creates private per-job directories and drops uid/gid/supplementary groups for
 its access attempts. It proves the permission mechanism here in the development container and
-on CI's host; #202 supplies final-image/network startup checks. No Docker or OpenCode executable
-is needed for this suite. All fake threads, helpers and owned job directories are joined/removed.
+on CI's host; the final-image checks are the image smoke test (below, #202). No Docker or OpenCode
+executable is needed for this suite. All fake threads, helpers and owned job directories are joined/removed.
 
 Engine suite (`runner/tests/engine/`, `uv run pytest -m engine`, about 5 minutes, `make test-engine`):
 
@@ -206,7 +206,7 @@ Engine suite (`runner/tests/engine/`, `uv run pytest -m engine`, about 5 minutes
   `~/.cache/code-reviewer/opencode/<digest prefix>/` (`OPENCODE_BIN` overrides it; `OPENCODE_TEST_PATH`
   adds a directory with `rg` to the engine PATH on a machine that has none). A missing executable fails
   loudly with the command to run, never a skip. Without a ripgrep on its PATH the pinned release
-  downloads one on the first grep, so the adapter refuses to start it. The tests prove, with the real
+  downloads one on the first grep, so the adapter refuses to start it; the engine gets the verified `rg` file (named by the job loop in `RUNNER_DYNAMIC_RIPGREP`) first on its PATH, and a different `rg` earlier in `PATH` is never used. The tests prove, with the real
   binary and no real model: a hostile repository (plugins in `.opencode/` and named by an
   `opencode.json`, nested config, agents, commands, tools, skills, AGENTS.md, instruction files) goes
   through the real #196 export and nothing is loaded or executed, with the same tree unsanitized as the
@@ -308,15 +308,24 @@ leaves processes that the loop's sweep and the next job's first step clear (`tes
 root loop starts a Diff job as the job user and a Dynamic one as the supervisor, both with a bounding
 set that has lost the startup-only capabilities (`test_job_users.py`); and the unmodified pinned
 engine reviews a hostile repository through the whole production path as that user behind those rules
-(`test_real_engine.py`). Not covered: the startup self-check that advertises `opencode` and the image
-contents (#202), a kernel without `nf_tables` beyond the fail-closed path above (no test can run
-there).
+(`test_real_engine.py`). The startup self-check that advertises `opencode` (#202) is pinned at three
+levels: its decisions, reasons and order with the facts injected (`tests/unit/test_dynamic_review_self_check.py`,
+`test_job_loop_advertise.py`: a failed check never advertises, the default runner never passes, the
+loop hands a Dynamic job process only the verified command), the real kernel, users and pinned engine
+(`tests/privileged/test_self_check.py` in the job phase: the check passes and advertises; an engine
+user without the network rules fails the probe; a missing user, a foreign group, a tampered binary and
+another pinned version are each refused; `startup/test_self_check_capabilities.py` in the startup
+phase: a process that still holds `NET_ADMIN` is refused) and the built image (below). Not covered:
+a kernel without `nf_tables` beyond the fail-closed path above (no test can run there), and the
+worst-case memory and OOM measurements on a real deployment target, which are a manual step
+(`docs/dynamic-review.md`, "Capacity"), as is following the Docker/Coolify guide on a documented
+target (#202-T07).
 
 Images (`docker/smoke/`, bash): `app.sh <image>` starts the app image with a fresh named volume on
 `/data` and dummy settings (the master key, the public address and the runner token; without them the server refuses to start, and no `GITHUB_` variable is set), polls `/` until it answers (at most `SMOKE_WAIT_SECONDS`, default 90) and waits for the
 container's own health check; it then checks that the log has exactly one setup code line, that `/` shows the setup (and not the code), that the API, the webhook and the runner API answer 503 `setup_required`, finishes the setup through the API, and checks that afterwards `/setup` is a 404, `/` redirects to `/login` and `/api/health` answers `ok` (the setup gate, the access guard and the database work in the built server), the image user and the uid of PID 1, that the standalone
 server runs, that `/data/app.db` exists, belongs to the unprivileged user and holds a recorded
-migration, and that the log reports no database error. `runner.sh <image>` checks `--version` against
+migration, and that the log reports no database error. `runner.sh <image> [diff|dynamic]` checks `--version` against
 `runner/pyproject.toml`, the PR-Agent version and offline behavior (see the end of this paragraph), the user, a writable `/tmp` and home directory. Both run the secrets scan of
 `lib.sh` (no `.env*`, `.git`, key or database files, no private key material, no secret-looking
 variable in the image configuration or build history). The private key scan is proven first on files made for it (`docker/smoke/test-key-scan.sh`, also run at the start of every scan): a PEM file, a JSON embedded key, a split, joined or URL encoded key are caught, the harmless `indexOf("-----BEGIN ...")` comparison of a bundled library is not. The scans run as root in a throwaway container and the script stops if a scan itself fails (docker, `find` or `grep` error), so a broken scan can never pass as a clean one; the key content scan covers project-owned paths only, not third-party packages, and the file name scan lets two public files of third-party packages pass (a public key of LiteLLM and the root certificates of gRPC). Containers and volumes are removed on exit,
@@ -326,7 +335,18 @@ smoke covers that once the fakes exist). `runner.sh` also checks the PR-Agent pa
 image: the installed version equals the pin in `runner/pyproject.toml`, PR-Agent imports and still has
 the method the identity patch replaces, the tiktoken encodings load without network, an invalid job
 gets an `invalid_job` result, and a job through the real PR-Agent with no network at all ends in a
-well formed `git_unavailable` result without a secret in any output.
+well formed `git_unavailable` result without a secret in any output. Both modes also start the loop in
+a container with no network and assert that a runner with the image's own settings serves Diff jobs
+only (`not_a_dynamic_runner`) and that the image sets no Dynamic variable. `diff` (the default image)
+asserts that it holds no OpenCode, no `rg`, no `nft` and no engine user (#202-T03). `dynamic` (the
+`dynamic` target, a CI job of its own) asserts that `opencode` and `rg` equal the pinned SHA-256 and
+size, are root-owned and not writable by others, that the pin files in the image equal the repository's,
+that `opencode --version` reports the pinned version as the engine user with no network, that `nft`
+and the engine user 10101 exist (distinct from 10001), and then starts the runner in a container
+created like `compose.dynamic.yml` creates it (root, the same capability list, no-new-privileges, no
+network): `opencode` is advertised; and not advertised, with the stable reason in the log and the
+runner still running, without `NET_ADMIN`, with an engine user that does not exist and with an engine
+binary that is not the pinned one (#202-T01, T09).
 
 Compose (`docker/smoke/compose.sh <app image> <runner image>`): works in a temporary directory with a copy
 of `compose.yml`, a project name of its own and dummy settings (the GitHub App key is generated on the
@@ -368,7 +388,7 @@ no process identifiers in titles), `verify:server-only-canary`, the Docker test 
 | Integration tests (host) | `make test-integration`   | `pnpm test:int`; `pytest -m "integration or contract"`                                                                                                                                                                                                                                                                                   |
 | Dependency licenses      | `make check-licenses`     | `pnpm licenses:check`: every installed package of the app (`pnpm licenses list`) and the runner (`scripts/list_licenses.py`, from the installed metadata) and every package of `pnpm-lock.yaml` and `uv.lock`, against `license-policy.json`. Needs `make install`, no network (see "Dependency license check" below)                    |
 | E2E                      | `make test-e2e`           | `pnpm test:e2e` (`ARGS="--grep @smoke"` filters); needs the runner installed and the tiktoken cache primed for the journey with the real runner (see section 6)                                                                                                                                                                          |
-| Image smoke tests        | `make test-images`        | builds both images with `docker build` (context: the repository root), then runs `docker/smoke/app.sh`, `docker/smoke/upgrade.sh` (the update from the previous release) and `docker/smoke/runner.sh`, which also check that `/licenses` holds `LICENSE`, `NOTICE` and `THIRD_PARTY_LICENSES.md` byte for byte and that the image has the license label (needs a Docker daemon; not part of `make verify`) |
+| Image smoke tests        | `make test-images`        | builds the images with `docker build` (context: the repository root; the Dynamic runner is `--target dynamic`), then runs `docker/smoke/app.sh`, `docker/smoke/upgrade.sh` (the update from the previous release) and `docker/smoke/runner.sh` (for the Dynamic runner image with the argument `dynamic`), which also check that `/licenses` holds `LICENSE`, `NOTICE` and `THIRD_PARTY_LICENSES.md` byte for byte and that the image has the license label (needs a Docker daemon; not part of `make verify`) |
 | Compose smoke test       | `make test-compose`       | builds both images under the tags `code-reviewer-*:compose`, then runs `docker/smoke/compose.sh` (needs a Docker daemon; not part of `make verify`)                                                                                                                                                                                      |
 
 Inside `app/`: `pnpm dev | build | start | lint | typecheck | test | test:watch | test:int | test:e2e`.
@@ -462,7 +482,8 @@ Planned, added with the suites they run: the Docker stack job (`integration`) an
 - `collect.ts` gathers the installed packages (`pnpm licenses list --json`; `runner/scripts/list_licenses.py`, which prints the `METADATA` of what uv installed) and the packages of `pnpm-lock.yaml` and `uv.lock`. All of it is local, nothing is fetched.
 - `python-license.ts` turns Python's three ways of naming a license (expression, free text, trove classifiers) into one SPDX expression; `spdx.ts` reads expressions (`OR` needs one allowed side, `AND` needs both).
 - `check.ts` judges: a license outside the allow list and not granted to the package by name fails; a lockfile package that is not installed and not declared in `notInstalled` fails (its license cannot be read); an exception that matches no lockfile package fails (so the list shrinks with the dependencies).
-- `THIRD_PARTY_LICENSES.md` has the same allow list and the same tables; `policy-doc.test.ts` fails when they differ, `policy.test.ts` checks the policy against the real lockfiles, `check.test.ts` and `cli.test.ts` cover the rules with made-up packages (an unlisted copyleft dependency exits with 1).
+- `binaries.ts` audits the prebuilt binaries of the Dynamic runner image (the `binaries` list of the policy: OpenCode and ripgrep), offline, from their pin files (`runner/opencode-pin.json`, `runner/ripgrep-pin.json`). It fails (`BINARY_*` codes) when a pin file is missing or unreadable, when its `repository` or `licenseUrl` is missing, when its license is not on the allow list or differs from the policy entry (version, source commit and license must agree), when a pinned platform lacks a SHA-256 (64 hex digits) for the archive or the executable, or when `THIRD_PARTY_LICENSES.md` or `NOTICE` does not name the binary, its version and its source commit in one entry. OpenCode is a Bun-compiled executable whose bundled npm packages the other collectors cannot see, so the check also reads the reviewed snapshot `runner/opencode-bundled-licenses.json` (`BUNDLED_SNAPSHOT_*` codes: unreadable, or generated for another commit than the pin) and judges every package of it like a dependency (ecosystem `bun`: allow list, exceptions, stale exceptions). The snapshot is an upper bound (a superset of what Bun embedded), written by `runner/scripts/audit_opencode_bundle.py --fetch` (a person, with the internet, when the pin changes; the script refuses the network without `--fetch` and its unit tests inject the fetcher, `runner/tests/unit/test_audit_opencode_bundle.py`). A package that declares no license is recorded as `NONE` and fails the check until someone decides. `binaries.test.ts` covers the rules with made-up pins, documents and snapshots.
+- `THIRD_PARTY_LICENSES.md` has the same allow list and the same tables, and the table of binaries; `policy-doc.test.ts` fails when they differ, `policy.test.ts` checks the policy against the real lockfiles, `check.test.ts` and `cli.test.ts` cover the rules with made-up packages (an unlisted copyleft dependency exits with 1).
 
 ### SPDX headers
 
