@@ -3,6 +3,7 @@
 """The process's side of the lease question (#260): only a clear `held` allows the write."""
 
 import socket
+import threading
 
 import pytest
 
@@ -19,10 +20,9 @@ def asking(answer: bytes | None) -> LeaseState:
     with loop_end:
         check = lease_check_from_environment({LEASE_CHECK_FD_VARIABLE: str(process_end.detach())})
         assert check is not None
-        if answer is None:
-            loop_end.close()
-        else:
+        if answer is not None:
             loop_end.sendall(answer)
+        loop_end.shutdown(socket.SHUT_WR)  # the loop says nothing more
         return check()
 
 
@@ -53,3 +53,32 @@ def test_a_channel_that_is_named_but_unusable_never_allows(descriptor: str) -> N
 
     assert check is not None
     assert check() is LeaseState.UNCONFIRMED
+
+
+def test_a_channel_that_is_required_but_missing_never_allows() -> None:
+    check = lease_check_from_environment({}, required=True)
+
+    assert check is not None
+    assert check() is LeaseState.UNCONFIRMED
+
+
+# #260: the answer is read up to its newline, however the bytes arrive.
+def test_an_answer_that_arrives_in_pieces_is_read_to_its_end() -> None:
+    process_end, loop_end = socket.socketpair()
+    with loop_end:
+        check = lease_check_from_environment({LEASE_CHECK_FD_VARIABLE: str(process_end.detach())})
+        assert check is not None
+        loop_end.sendall(b"he")
+        rest = threading.Timer(0.05, lambda: loop_end.sendall(b"ld\n"))
+        rest.start()
+        try:
+            assert check() is LeaseState.HELD
+        finally:
+            rest.join()
+
+
+@pytest.mark.parametrize(
+    "answer", [b"held", b"x" * 4096], ids=["no newline before the end", "longer than any answer"]
+)
+def test_an_answer_without_its_newline_or_beyond_the_bound_never_allows(answer: bytes) -> None:
+    assert asking(answer) is LeaseState.UNCONFIRMED

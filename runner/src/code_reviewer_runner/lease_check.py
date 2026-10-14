@@ -14,6 +14,7 @@ lease token, but the comment is outside its reach); it closes the window of a wh
 
 import os
 import socket
+import time
 from collections.abc import Callable, Mapping
 from enum import StrEnum
 
@@ -36,27 +37,47 @@ class LeaseState(StrEnum):
 LeaseCheck = Callable[[], LeaseState]
 
 
-def lease_check_from_environment(environment: Mapping[str, str]) -> LeaseCheck | None:
+def _read_line(channel: socket.socket) -> bytes:
+    """The answer up to its newline (without it). A longer line, or a channel that ends first, is
+    an error: only a complete, short answer counts."""
+    answer = bytearray()
+    deadline = time.monotonic() + ANSWER_SECONDS
+    while len(answer) <= _MAX_ANSWER_BYTES:
+        # One budget for the whole answer, however slowly its bytes come.
+        channel.settimeout(max(deadline - time.monotonic(), 0.001))
+        byte = channel.recv(1)
+        if not byte:
+            raise ValueError("the channel ended before the answer did")
+        if byte == b"\n":
+            return bytes(answer)
+        answer += byte
+    raise ValueError("the answer is longer than any answer")
+
+
+def lease_check_from_environment(
+    environment: Mapping[str, str], *, required: bool = False
+) -> LeaseCheck | None:
     """The check over the descriptor the loop named, or None for a process started without one.
 
-    A descriptor that is named but unusable is a loop that wanted the check: it never allows.
+    A descriptor that is named but unusable is a loop that wanted the check: it never allows. So
+    does a missing one when the caller `required` it (a Dynamic job is only ever started by the
+    loop, which always hands the descriptor over).
     """
     raw = environment.get(LEASE_CHECK_FD_VARIABLE)
     if raw is None:
-        return None
+        return (lambda: LeaseState.UNCONFIRMED) if required else None
     try:
         # Not inherited by anything this process starts (the engine must never hold it).
         os.set_inheritable(int(raw), False)
         channel = socket.socket(fileno=int(raw))
     except (OSError, ValueError):
         return lambda: LeaseState.UNCONFIRMED
-    channel.settimeout(ANSWER_SECONDS)
 
     def check() -> LeaseState:
         try:
+            channel.settimeout(ANSWER_SECONDS)
             channel.sendall(QUESTION)
-            answer = channel.recv(_MAX_ANSWER_BYTES).strip()
-            return LeaseState(answer.decode("ascii"))
+            return LeaseState(_read_line(channel).decode("ascii"))
         except (OSError, ValueError):
             return LeaseState.UNCONFIRMED
 
