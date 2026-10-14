@@ -10,6 +10,14 @@ import { createRateLimitsRepository } from "../db/repositories/rate-limits-repos
 import { createWorkspaceLlm, type WorkspaceLlmAssembly } from "./assemble.ts";
 import { llmApiBaseUrl } from "./endpoint.ts";
 import { createLlmKeyTestService, type LlmKeyTestService } from "./key-test.ts";
+import { createModelCapabilityChecker } from "./model-capabilities.ts";
+
+// One checker for the process, so a supported answer is remembered across requests and workspaces: the
+// metadata is public and the same for everybody. The settings save (#269) and the claim of a Dynamic job
+// (#279) both read through it. The address is read on every ask (the test stack's switch).
+export const modelCapabilities = createModelCapabilityChecker({
+  baseUrl: () => llmApiBaseUrl(process.env, "openrouter").url,
+});
 
 export function getWorkspaceLlm(): WorkspaceLlmAssembly {
   return createWorkspaceLlm({

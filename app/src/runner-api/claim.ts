@@ -40,13 +40,17 @@ import {
   MIN_LLM_CONTEXT_TOKENS,
   MODEL_NAME_PATTERN,
 } from "../llm/config.ts";
+import { dynamicCapabilitiesOf } from "../llm/dynamic-capabilities.ts";
+import type { ModelCapabilityChecker } from "../llm/model-capabilities.ts";
 import type { ClaimedKeys } from "./claimed-keys.ts";
 import type { ClaimGuard } from "./claim-guard.ts";
 import {
   RUNNER_API_VERSION,
   RUNNER_ENV_KEY_PATTERN,
   type ClaimBase,
+  type ClaimFeature,
   type ClaimResponse,
+  type DynamicModelCapabilities,
   type DynamicReviewOptions,
   type RunnerJobInput,
 } from "./contract.ts";
@@ -76,6 +80,8 @@ export const CLAIM_FAILURE_CODES = [
   // Dynamic options are missing/unusable. The runner is never silently given the other engine.
   "dynamic_engine_unavailable",
   "dynamic_config_invalid",
+  // #279: the provider's metadata says the model lacks tool calling or a required tool choice.
+  "dynamic_model_features_unsupported",
 ] as const;
 
 /** Why a job is given back (the code becomes the job's error code if it was the last attempt). */
@@ -125,6 +131,12 @@ export type ClaimDeps = {
   loadLlm: (workspaceId: string) => Promise<LlmAccessResult>;
   /** Where the key handed out with a claim is noted (encrypted, in the database), so a rotated key can still be masked. */
   claimedKeys: Pick<ClaimedKeys, "remember">;
+  /**
+   * #279: where the metadata of a Dynamic job's model is read when its claim is built (the provider's
+   * public endpoint metadata, cached for a short time). Left out, a claim reads none and a Dynamic job
+   * carries no capabilities, as before.
+   */
+  modelCapabilities?: ModelCapabilityChecker;
   now: () => Date;
   logger: RunnerApiLogger;
   heartbeatIntervalSeconds: number;
@@ -263,10 +275,51 @@ function claimBaseOf(
   };
 }
 
+type ModelCapabilitiesDecision =
+  | { kind: "send"; capabilities: DynamicModelCapabilities }
+  /** Nothing is sent: the runner's own descriptor applies, exactly as without this feature. */
+  | { kind: "none" }
+  | { kind: "unsupported" };
+
+/**
+ * #279: what the provider's metadata says about the job's Dynamic model, read when the claim is built (a
+ * short cache sits in front of the provider, so this is not a request per claim). Three outcomes:
+ *
+ * - A model whose metadata says it cannot do what Dynamic Review needs ends the job, whatever runner
+ *   claimed it, before any credential exists.
+ * - Metadata that cannot be read (provider unreachable, model unknown to it, no usable window) sends
+ *   nothing and the claim goes on: the runner falls back to its own descriptor, and nothing is invented.
+ * - Otherwise the descriptor goes to a runner that advertised `dynamic_capabilities` and only to such a
+ *   runner: the job input of a previous-release runner is closed and would refuse the key.
+ */
+async function modelCapabilitiesOf(
+  deps: ClaimDeps,
+  job: Job,
+  model: string,
+  features: readonly ClaimFeature[],
+): Promise<ModelCapabilitiesDecision> {
+  if (deps.modelCapabilities === undefined) return { kind: "none" };
+  const result = await deps.modelCapabilities.check(model);
+  if (result.outcome === "unsupported") return { kind: "unsupported" };
+  const fallback = (why: string): ModelCapabilitiesDecision => {
+    deps.logger.info(
+      `[runner-api] job=${job.id} model capabilities not read (${why}); the runner's own descriptor applies`,
+    );
+    return { kind: "none" };
+  };
+  if (result.outcome !== "supported") return fallback(result.outcome);
+  const capabilities = dynamicCapabilitiesOf(result.capabilities);
+  if (capabilities === null) return fallback("no_context_window");
+  if (!features.includes("dynamic_capabilities")) return { kind: "none" };
+  deps.logger.info(`[runner-api] job=${job.id} model capabilities sent`);
+  return { kind: "send", capabilities };
+}
+
 async function prepare(
   deps: ClaimDeps,
   claimed: NonNullable<ClaimResult>,
   engines: readonly RunnerEngine[],
+  features: readonly ClaimFeature[],
 ): Promise<Prepared> {
   const { job, leaseToken } = claimed;
 
@@ -307,6 +360,19 @@ async function prepare(
     if (!engines.includes("opencode"))
       return refuse("dynamic_engine_unavailable");
     if (dynamic === null) return refuse("dynamic_config_invalid");
+  }
+  // #279: the model's capabilities, read before any credential is created.
+  let capabilities: DynamicModelCapabilities | undefined;
+  if (dynamic !== null) {
+    const decision = await modelCapabilitiesOf(
+      deps,
+      job,
+      dynamic.model,
+      features,
+    );
+    if (decision.kind === "unsupported")
+      return refuse("dynamic_model_features_unsupported");
+    if (decision.kind === "send") capabilities = decision.capabilities;
   }
 
   if (job.leaseExpiresAt === null)
@@ -425,7 +491,8 @@ async function prepare(
           prUrl,
           command,
           reviewKind: "dynamic",
-          dynamic,
+          dynamic:
+            capabilities === undefined ? dynamic : { ...dynamic, capabilities },
           base: claimBaseOf(
             repo.fullName,
             baseRef,
@@ -541,6 +608,7 @@ export async function handleClaim(
   deps: ClaimDeps,
   runnerId: string,
   engines: readonly RunnerEngine[],
+  features: readonly ClaimFeature[] = [],
 ): Promise<Response> {
   for (let refused = 0; refused < MAX_REFUSED_PER_REQUEST; refused += 1) {
     const claimed = await deps.queue.claimNext(runnerId, engines);
@@ -549,7 +617,7 @@ export async function handleClaim(
     // Whatever goes wrong from here on, the job is given back instead of staying under a lease that
     // nobody uses (it would only run out after two minutes).
     try {
-      const prepared = await prepare(deps, claimed, engines);
+      const prepared = await prepare(deps, claimed, engines, features);
 
       if (prepared.kind === "refused") {
         await endJob(

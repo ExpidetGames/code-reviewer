@@ -4,6 +4,7 @@
 // answers (through the real handler) is valid against the file, what the app accepts from a runner
 // is exactly what the file allows, and the lists the app keeps in TypeScript (error codes, commands)
 // are the lists of the file. The runner checks the same file in runner/tests/contract.
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { REVIEW_COMMANDS } from "../../src/integrations/types.ts";
 import {
@@ -418,6 +419,17 @@ describe("what the app accepts from a runner", () => {
       ["engines as text", { engines: "pr-agent" }],
       ["null", null],
       ["an array", []],
+      // #279-T07
+      [
+        "a feature next to the engines",
+        { engines: ["opencode"], features: ["dynamic_capabilities"] },
+      ],
+      ["no features", { features: [] }],
+      ["a feature this app does not know", { features: ["a_future_feature"] }],
+      ["features as text", { features: "dynamic_capabilities" }],
+      ["a feature that is no name", { features: [1] }],
+      ["a feature with a bad name", { features: ["Bad Name"] }],
+      ["too many features", { features: Array(17).fill("some_feature") }],
     ];
 
     for (const [name, body] of cases)
@@ -427,5 +439,76 @@ describe("what the app accepts from a runner", () => {
       });
     // The absent body never reaches parseClaimRequest from JSON; the API maps it to pr-agent only.
     expect(parseClaimRequest(undefined)).toEqual({ ok: true, value: {} });
+  });
+});
+
+// #279-T07: a Dynamic claim is valid with and without the model capabilities, and the real answer of
+// the app with them is the shape of the file.
+describe("the model capabilities of a Dynamic job", () => {
+  const FIXTURES = new URL("../../../fakes/fixtures/", import.meta.url);
+  const read = (name: string): Record<string, unknown> =>
+    JSON.parse(readFileSync(new URL(name, FIXTURES), "utf8")) as Record<
+      string,
+      unknown
+    >;
+
+  it.each(["dynamic-review-job.json", "dynamic-review-job-capabilities.json"])(
+    "accepts the golden Dynamic job %s",
+    (name) => {
+      expectValid("RunnerJobInput", read(name));
+    },
+  );
+
+  it("refuses a capability object that is not closed or typed", () => {
+    for (const change of [
+      { command: "x" },
+      { maxOutputTokens: 0 },
+      { inputUsdPerMtok: 0.6 },
+      { inputUsdPerMtok: "1e3" },
+      { toolChoiceRequired: "yes" },
+    ]) {
+      const job = read("dynamic-review-job-capabilities.json") as {
+        dynamic: { capabilities: Record<string, unknown> };
+      };
+      Object.assign(job.dynamic.capabilities, change);
+      expect(contract.check("RunnerJobInput", job).valid).toBe(false);
+    }
+  });
+
+  it("gives the real claim answer of the app the shape of the file", async () => {
+    const h = await startRunnerApiHarness({
+      projects: true,
+      modelCapabilities: {
+        check: async () => ({
+          outcome: "supported",
+          capabilities: {
+            tools: true,
+            toolChoice: true,
+            toolChoiceRequired: true,
+            responseFormat: true,
+            structuredOutputs: true,
+            maxCompletionTokens: 8192,
+            smallestCompletionTokens: 8192,
+            contextLength: 200_000,
+            inputUsdPerMtok: "0.02016",
+            outputUsdPerMtok: "0.891",
+          },
+        }),
+      },
+    });
+    await h.projectService.activateProject(h.repositoryId);
+    await h.reviewSettings.updateProjectSettings(h.repositoryId, {
+      reviewKind: "dynamic",
+      dynamicModel: "vendor/dynamic-model",
+    });
+    await h.enqueueNew();
+
+    const claim = await h.claimed({
+      engines: ["opencode"],
+      features: ["dynamic_capabilities"],
+    });
+
+    expect(claim.job.input.dynamic?.capabilities).toBeDefined();
+    expectValid("ClaimResponse", claim);
   });
 });

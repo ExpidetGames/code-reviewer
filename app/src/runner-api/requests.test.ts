@@ -4,6 +4,7 @@
 // bodies of heartbeat and complete. A refusal names fields and reasons, never the values.
 import { describe, expect, it } from "vitest";
 import {
+  parseClaimRequest,
   parseCompleteRequest,
   parseHeartbeatRequest,
   parseJobId,
@@ -290,5 +291,38 @@ describe("the complete body", () => {
       field: "result.commentUrl",
       code: "invalid",
     });
+  });
+});
+
+describe("the features of a claim (#279)", () => {
+  // #279-T07
+  it("keeps the features it knows and ignores the ones it does not", () => {
+    expect(
+      parseClaimRequest({
+        engines: ["opencode"],
+        features: ["a_future_feature", "dynamic_capabilities"],
+      }),
+    ).toEqual({
+      ok: true,
+      value: { engines: ["opencode"], features: ["dynamic_capabilities"] },
+    });
+  });
+
+  // #279-T07: an old runner's claim has no features and reads the same as before.
+  it("reads a claim without features exactly as before", () => {
+    expect(parseClaimRequest({ engines: ["pr-agent"] })).toEqual({
+      ok: true,
+      value: { engines: ["pr-agent"] },
+    });
+    expect(parseClaimRequest({})).toEqual({ ok: true, value: {} });
+  });
+
+  it("refuses features that are not a list of plain names", () => {
+    for (const features of ["dynamic_capabilities", [1], ["Bad Name"], {}]) {
+      expect(parseClaimRequest({ features })).toEqual({
+        ok: false,
+        fields: [{ field: "features", code: "invalid" }],
+      });
+    }
   });
 });
