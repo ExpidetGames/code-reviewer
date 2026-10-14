@@ -20,7 +20,14 @@ from .content_policy import (
     redact_text,
 )
 from .evidence import Entry, changed_paths, endpoint_diff, merge_base, tracked_tree
-from .limits import DEFAULT_LIMITS, Budget, CheckoutError, Limits, ObjectUnavailable
+from .limits import (
+    DEFAULT_LIMITS,
+    Budget,
+    CheckoutError,
+    CheckoutReason,
+    Limits,
+    ObjectUnavailable,
+)
 from .objects import ObjectStore
 from .paths import validate_path
 from .protocol import advertisement, fetch_pack
@@ -78,14 +85,14 @@ def prepare_job_content(
     budget: Budget | None = None,
 ) -> PreparedContent:
     if job.base is None or job.git.provider != "github":
-        raise CheckoutError()
+        raise CheckoutError(CheckoutReason.INVALID_REQUEST)
     url = repository_url(job.base.repository, job.git.base_url)
     pr_parts = job.pr_url.rsplit("/", 4)
     if len(pr_parts) != 5 or "/".join(pr_parts[1:3]) != job.base.repository:
-        raise CheckoutError()
+        raise CheckoutError(CheckoutReason.INVALID_REQUEST)
     number = pr_parts[-1]
     if not re.fullmatch(r"[1-9][0-9]{0,8}", number):
-        raise CheckoutError()
+        raise CheckoutError(CheckoutReason.INVALID_REQUEST)
     return prepare_content(
         job.base,
         int(number),
@@ -119,30 +126,30 @@ def prepare_content(
     remove that name only; successful lifetime/lease/shutdown cleanup belongs to prepared_job.
     """
     if budget is not None and budget.limits != limits:
-        raise CheckoutError()
+        raise CheckoutError(CheckoutReason.INVALID_REQUEST)
     budget = budget or Budget(limits, cancelled)
     # Validate authority fields independently of parse_job: ClaimBase can be constructed directly.
     repository_url(base.repository, "https://api.github.com")
     if not _SHA.fullmatch(base.head_sha) or not 1 <= number <= 999_999_999:
-        raise CheckoutError()
+        raise CheckoutError(CheckoutReason.INVALID_REQUEST)
     if (
         not base.base_ref
         or base.base_ref.startswith("-")
         or any(c in base.base_ref for c in " ~^:?*[\\\x00\n\r")
         or ".." in base.base_ref
     ):
-        raise CheckoutError()
+        raise CheckoutError(CheckoutReason.INVALID_REQUEST)
     if base.previous_reviewed_sha is not None and not _SHA.fullmatch(base.previous_reviewed_sha):
-        raise CheckoutError()
+        raise CheckoutError(CheckoutReason.INVALID_REQUEST)
     budget.charge(4096)
     directory.mkdir(mode=0o700)
     try:
         refs, caps = advertisement(transport, budget)
         if refs.get(f"refs/pull/{number}/head") != base.head_sha:
-            raise CheckoutError()
+            raise CheckoutError(CheckoutReason.REF_MOVED)
         base_sha = refs.get(f"refs/heads/{base.base_ref}")
         if base_sha is None:
-            raise CheckoutError()
+            raise CheckoutError(CheckoutReason.REF_MISSING)
         store = ObjectStore(directory / "objects", budget)
         store.unpack(fetch_pack(transport, base.head_sha, caps, budget))
         head = tracked_tree(store, base.head_sha)
@@ -189,7 +196,7 @@ def prepare_content(
                 if reason is not None:
                     omissions[path] = Omission(redact_text(path, redactor), reason)
                     if path in required:
-                        raise CheckoutError()
+                        raise CheckoutError(CheckoutReason.INVALID_REQUEST)
                     continue
                 if entry.oid not in store.objects:
                     (eligible if index < 2 else prior_eligible).add(entry.oid)
@@ -225,7 +232,7 @@ def prepare_content(
                 if reason is None:
                     obj = store.objects.get(entry.oid)
                     if obj is None or obj.kind != "blob":
-                        raise CheckoutError()
+                        raise CheckoutError(CheckoutReason.OBJECT_MISSING)
                     if obj.size > limits.file_bytes:
                         reason = OmissionReason.LARGE_FILE
                     else:
@@ -243,7 +250,7 @@ def prepare_content(
                         # reported as skipped; denied or unsafe content still fails closed.
                         skip_reason = _skip_reason(reason)
                         if skip_reason is None:
-                            raise CheckoutError()
+                            raise CheckoutError(CheckoutReason.INVALID_REQUEST)
                         tree_skips[index][path] = skip_reason
         # Classify per comparison: a path is skipped in a diff only when one of that diff's two
         # sides is binary or oversized, so a third revision cannot hide a text change.
@@ -280,7 +287,7 @@ def prepare_content(
             budget.check()
             raw = text.encode()
             if len(raw) > limits.file_bytes:
-                raise CheckoutError()
+                raise CheckoutError(CheckoutReason.INPUT_TOO_LARGE)
             budget.charge(len(raw), exposed=True)
             target = export.joinpath(*validate_path(path, limits))
             _parents(target.parent, export, budget)
@@ -304,7 +311,7 @@ def prepare_content(
             ensure_ascii=True,
         ).encode()
         if len(evidence) > limits.diff_bytes + limits.response_bytes:
-            raise CheckoutError()
+            raise CheckoutError(CheckoutReason.INPUT_TOO_LARGE)
         budget.charge(len(evidence), exposed=True)
         budget.charge(((len(evidence) + 4095) // 4096) * 4096)
         (directory / "evidence.json").write_bytes(evidence)
@@ -313,7 +320,7 @@ def prepare_content(
         budget.check()
         final_refs, _ = advertisement(transport, budget)
         if final_refs.get(f"refs/pull/{number}/head") != base.head_sha:
-            raise CheckoutError()
+            raise CheckoutError(CheckoutReason.REF_MOVED)
         return PreparedContent(
             directory,
             export,
@@ -333,7 +340,7 @@ def prepare_content(
         )
     except (UnicodeError, ValueError):
         shutil.rmtree(directory)
-        raise CheckoutError() from None
+        raise CheckoutError(CheckoutReason.TREE_INVALID) from None
     except BaseException:
         shutil.rmtree(directory)
         raise
@@ -386,7 +393,7 @@ def _diffable(tree: dict[str, Entry], skipped: dict[str, SkipReason]) -> dict[st
 
 def _bounded_text(text: str, budget: Budget, redactor: Redactor) -> str:
     if len(text.encode()) > budget.limits.response_bytes:
-        raise CheckoutError()
+        raise CheckoutError(CheckoutReason.INPUT_TOO_LARGE)
     budget.charge(len(text.encode()))
     return redact_text(text, redactor)
 

@@ -3,7 +3,7 @@
 
 import re
 
-from .limits import CheckoutError, Limits
+from .limits import CheckoutError, CheckoutReason, Limits
 
 _WINDOWS_RESERVED = re.compile(r"(?i)(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\..*)?")
 
@@ -25,5 +25,5 @@ def validate_path(path: str, limits: Limits) -> tuple[str, ...]:
             for part in parts
         )
     ):
-        raise CheckoutError()
+        raise CheckoutError(CheckoutReason.PATH_INVALID)
     return parts

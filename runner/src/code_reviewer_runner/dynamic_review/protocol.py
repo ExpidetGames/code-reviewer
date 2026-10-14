@@ -5,7 +5,7 @@ import re
 from collections.abc import Generator
 from contextlib import closing
 
-from .limits import Budget, CheckoutError, ObjectUnavailable
+from .limits import Budget, CheckoutError, CheckoutReason, ObjectUnavailable
 from .transport import Transport, packet
 
 _SHA = re.compile(rb"[0-9a-f]{40}")
@@ -26,7 +26,7 @@ class Packets:
             try:
                 self.pending.extend(next(self.source))
             except StopIteration:
-                raise CheckoutError() from None
+                raise CheckoutError(CheckoutReason.PROTOCOL) from None
         result = bytes(self.pending[:count])
         del self.pending[:count]
         return result
@@ -42,12 +42,12 @@ class Packets:
                 try:
                     size = int(self.read(4), 16)
                 except ValueError:
-                    raise CheckoutError() from None
+                    raise CheckoutError(CheckoutReason.PROTOCOL) from None
                 if size == 0:
                     yield None
                     continue
                 if not 4 <= size <= 65520:
-                    raise CheckoutError()
+                    raise CheckoutError(CheckoutReason.PROTOCOL)
                 yield self.read(size - 4)
         finally:
             self.source.close()
@@ -67,7 +67,7 @@ def advertisement(transport: Transport, budget: Budget) -> tuple[dict[str, str],
             # the same cumulative preparation envelope as the rest of the transfer (the
             # transport charges the raw bytes) rather than the small per-field response cap.
             if total > budget.limits.preparation_bytes:
-                raise CheckoutError()
+                raise CheckoutError(CheckoutReason.BUDGET_TRANSFER)
             if line.startswith(b"# service=git-upload-pack"):
                 continue
             record, _, caps = line.rstrip(b"\n").partition(b"\0")
@@ -75,10 +75,10 @@ def advertisement(transport: Transport, budget: Budget) -> tuple[dict[str, str],
                 capabilities.update(caps.decode("ascii").split())
             sha, _, name = record.partition(b" ")
             if not _SHA.fullmatch(sha) or not name:
-                raise CheckoutError()
+                raise CheckoutError(CheckoutReason.PROTOCOL)
             refs[name.decode("utf-8")] = sha.decode()
     if "side-band-64k" not in capabilities:
-        raise CheckoutError()
+        raise CheckoutError(CheckoutReason.PROTOCOL)
     return refs, capabilities
 
 
@@ -99,9 +99,9 @@ def fetch_pack(
     """
     shas = (sha,) if isinstance(sha, str) else sha
     if not 1 <= len(shas) <= 32 or any(not _SHA.fullmatch(oid.encode()) for oid in shas):
-        raise CheckoutError()
+        raise CheckoutError(CheckoutReason.INVALID_REQUEST)
     if history is not None and not 1 <= history <= _MAX_HISTORY_DEPTH:
-        raise CheckoutError()
+        raise CheckoutError(CheckoutReason.INVALID_REQUEST)
     caps = "side-band-64k"
     if "no-progress" in capabilities:
         caps += " no-progress"
@@ -128,11 +128,11 @@ def fetch_pack(
             if line.startswith(
                 (b"ERR upload-pack: not our ref ", b"\x03fatal: git upload-pack: not our ref ")
             ):
-                raise ObjectUnavailable()
+                raise ObjectUnavailable(CheckoutReason.OBJECT_MISSING)
             if line.startswith(b"\x01"):
                 pack.extend(line[1:])
             elif not line.startswith(b"\x02"):
-                raise CheckoutError()
+                raise CheckoutError(CheckoutReason.PROTOCOL)
     if not pack.startswith(b"PACK"):
-        raise CheckoutError()
+        raise CheckoutError(CheckoutReason.PROTOCOL)
     return bytes(pack)

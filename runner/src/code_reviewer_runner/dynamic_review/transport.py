@@ -21,7 +21,7 @@ from urllib.parse import urlsplit
 from code_reviewer_runner.process_group import end_group, exited_with_zero, wait_for_exit
 from code_reviewer_runner.result import ErrorCode
 
-from .limits import Budget, CheckoutError
+from .limits import Budget, CheckoutError, CheckoutReason
 
 
 class Transport(Protocol):
@@ -30,7 +30,7 @@ class Transport(Protocol):
 
 def packet(data: bytes) -> bytes:
     if len(data) > 65516:
-        raise CheckoutError()
+        raise CheckoutError(CheckoutReason.INVALID_REQUEST)
     return f"{len(data) + 4:04x}".encode() + data
 
 
@@ -53,7 +53,7 @@ class _BudgetReader(io.BufferedIOBase):
         if self.headers:
             available = min(available, self.budget.limits.response_bytes - self.header_bytes)
         if available <= 0:
-            raise CheckoutError()
+            raise CheckoutError(CheckoutReason.BUDGET_TRANSFER)
         return min(available, size if size >= 0 else 16 * 1024)
 
     def _charge(self, data: bytes) -> bytes:
@@ -78,7 +78,7 @@ class _BudgetReader(io.BufferedIOBase):
             if chunk == b"\n":
                 return bytes(line)
         if len(line) == bound:
-            raise CheckoutError()
+            raise CheckoutError(CheckoutReason.BUDGET_TRANSFER)
         return bytes(line)
 
     def read(self, size: int | None = -1, /) -> bytes:
@@ -117,7 +117,7 @@ class HttpTransport:
             or parts.query
             or parts.fragment
         ):
-            raise CheckoutError()
+            raise CheckoutError(CheckoutReason.INVALID_REQUEST)
         self._parts = parts
         self._authorization = (
             "Basic " + base64.b64encode(f"x-access-token:{token}".encode()).decode()
@@ -174,7 +174,7 @@ class HttpTransport:
                     404: ErrorCode.PR_NOT_FOUND,
                     429: ErrorCode.GIT_RATE_LIMIT,
                 }.get(response.status, ErrorCode.GIT_UNAVAILABLE)
-                raise CheckoutError(code)
+                raise CheckoutError(CheckoutReason.TRANSPORT, code)
             # read1 returns available bytes, so a peer dribbling data cannot reset the deadline.
             while not response.isclosed():
                 budget.check()
@@ -186,7 +186,7 @@ class HttpTransport:
                 yield chunk
         except (OSError, http.client.HTTPException):
             budget.check()
-            raise CheckoutError(ErrorCode.GIT_UNAVAILABLE) from None
+            raise CheckoutError(CheckoutReason.TRANSPORT, ErrorCode.GIT_UNAVAILABLE) from None
         finally:
             connection.close()
 
@@ -234,7 +234,7 @@ class LocalTransport:
                     continue
                 available = budget.limits.preparation_bytes - budget.preparation
                 if available <= 0:
-                    raise CheckoutError()
+                    raise CheckoutError(CheckoutReason.BUDGET_TRANSFER)
                 chunk = os.read(process.stdout.fileno(), min(16 * 1024, available))
                 if not chunk:
                     break
@@ -243,9 +243,9 @@ class LocalTransport:
             # Observe the exit without reaping: the group id stays ours until it is ended below.
             if not wait_for_exit(process, budget.remaining()):
                 budget.check()
-                raise CheckoutError(ErrorCode.TIMEOUT)
+                raise CheckoutError(CheckoutReason.TIMEOUT, ErrorCode.TIMEOUT)
             if not exited_with_zero(process):
-                raise CheckoutError(ErrorCode.GIT_UNAVAILABLE)
+                raise CheckoutError(CheckoutReason.TRANSPORT, ErrorCode.GIT_UNAVAILABLE)
         finally:
             end_group(process, grace=0)
             if process.stdin is not None:
@@ -256,9 +256,9 @@ class LocalTransport:
 
 def repository_url(repository: str, api_url: str) -> str:
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
-        raise CheckoutError()
+        raise CheckoutError(CheckoutReason.INVALID_REQUEST)
     if any(part in (".", "..") for part in repository.split("/")):
-        raise CheckoutError()
+        raise CheckoutError(CheckoutReason.INVALID_REQUEST)
     api = urlsplit(api_url)
     host = "github.com" if api.hostname == "api.github.com" else api.netloc
     return f"{api.scheme}://{host}/{repository}.git"

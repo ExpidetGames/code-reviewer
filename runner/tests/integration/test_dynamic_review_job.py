@@ -34,7 +34,7 @@ from code_reviewer_runner.capabilities import ALL_ENGINES
 from code_reviewer_runner.dynamic_findings import DynamicFindings
 from code_reviewer_runner.dynamic_review.checkout import PreparedContent
 from code_reviewer_runner.dynamic_review.engine_user import EngineLaunch
-from code_reviewer_runner.dynamic_review.limits import CheckoutError
+from code_reviewer_runner.dynamic_review.limits import CheckoutError, CheckoutReason
 from code_reviewer_runner.dynamic_review.publish import (
     IDENTITY_MARKER,
     STATE_RESET_CODE,
@@ -299,7 +299,7 @@ def test_a_preparation_that_fails_is_its_stable_code_and_no_engine_starts(
 ) -> None:
     @contextmanager
     def refusing(job: Any) -> Generator[PreparedContent]:
-        raise CheckoutError(ErrorCode.CHECKOUT_INCOMPLETE)
+        raise CheckoutError(CheckoutReason.INVALID_REQUEST, ErrorCode.CHECKOUT_INCOMPLETE)
         yield content_at(tmp_path)  # pragma: no cover
 
     with FakeUpstream() as upstream:
