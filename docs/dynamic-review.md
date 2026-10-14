@@ -229,10 +229,10 @@ a runner without `opencode` in that list is refused with `dynamic_engine_unavail
 
 ## The model
 
-Dynamic Review is model- and provider-agnostic. The default model is `deepseek/deepseek-v4.1-flash`, the id OpenRouter serves (the name is sent
-to the provider as it is); it
-is a default, not an allow-list, and there is no provider routing or fallback. The workspace's
-existing encrypted BYOK credential is used (no new key variable, no per-project key).
+Dynamic Review is model- and provider-agnostic. The default model is `deepseek/deepseek-v4.1-flash`,
+the id OpenRouter serves (the name is sent to the provider as it is). It is a default, not an
+allow-list, and there is no provider routing or fallback. The workspace's existing encrypted BYOK
+credential is used (no new key variable, no per-project key).
 
 The operator describes what the selected model and destination can do in
 `RUNNER_DYNAMIC_CAPABILITIES` (trusted runner configuration, never repository input):

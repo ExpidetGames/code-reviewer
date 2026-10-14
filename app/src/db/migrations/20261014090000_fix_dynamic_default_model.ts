@@ -6,9 +6,11 @@
 // at the provider, so every stored `dynamicModel` of exactly the old name becomes the OpenRouter id.
 // Any other model, every other field and every other setting stay as they are.
 //
-// Forward-only and harmless to repeat: once the rows are rewritten the update matches nothing. A row
-// whose JSON cannot be read is left alone. The migration runs in the one transaction of the start
-// (../migrate.ts).
+// Forward-only. Each row is rewritten with an update that also compares the stored text with the
+// text this migration read, so a settings save that lands between the read and the write is never
+// overwritten (the row is simply not touched). Running the same body again finds no row with the old
+// name and changes nothing. A row whose JSON cannot be read, or is not an object, is left alone. The
+// migration runs in the one transaction of the start (../migrate.ts).
 import { sql, type Kysely } from "kysely";
 import type { Migration } from "kysely/migration";
 
@@ -19,7 +21,7 @@ const OLD_MODEL = "deepseek-v4.1-flash";
 const NEW_MODEL = "deepseek/deepseek-v4.1-flash";
 
 /** The new JSON text of a stored settings object, or `undefined` when nothing has to change. */
-function rewritten(text: unknown): string | undefined {
+export function rewritten(text: unknown): string | undefined {
   if (typeof text !== "string") return undefined;
   let parsed: unknown;
   try {
@@ -34,6 +36,34 @@ function rewritten(text: unknown): string | undefined {
   return JSON.stringify({ ...object, dynamicModel: NEW_MODEL });
 }
 
+/** Rewrites one `app_settings` value if it still holds `read`; false when it changed meanwhile. */
+export async function updateDefaultsIfUnchanged(
+  db: AnyDb,
+  row: { workspaceId: string; key: string },
+  read: string,
+  next: string,
+): Promise<boolean> {
+  const result = await sql`
+    update app_settings
+    set value = ${next}
+    where workspace_id = ${row.workspaceId} and key = ${row.key} and value = ${read}
+  `.execute(db);
+  return Number(result.numAffectedRows ?? 0) > 0;
+}
+
+/** Rewrites one project's settings if they still hold `read`; false when they changed meanwhile. */
+export async function updateProjectIfUnchanged(
+  db: AnyDb,
+  id: string,
+  read: string,
+  next: string,
+): Promise<boolean> {
+  const result = await sql`
+    update projects set settings = ${next} where id = ${id} and settings = ${read}
+  `.execute(db);
+  return Number(result.numAffectedRows ?? 0) > 0;
+}
+
 export const migration: Migration = {
   async up(db: AnyDb): Promise<void> {
     // The workspace review defaults live in one `app_settings` row per workspace.
@@ -43,13 +73,14 @@ export const migration: Migration = {
       value: string;
     }>`select workspace_id, key, value from app_settings`.execute(db);
     for (const row of appSettings.rows) {
-      const value = rewritten(row.value);
-      if (value === undefined) continue;
-      await sql`
-        update app_settings
-        set value = ${value}
-        where workspace_id = ${row.workspace_id} and key = ${row.key}
-      `.execute(db);
+      const next = rewritten(row.value);
+      if (next === undefined) continue;
+      await updateDefaultsIfUnchanged(
+        db,
+        { workspaceId: row.workspace_id, key: row.key },
+        row.value,
+        next,
+      );
     }
 
     // A project's overrides live in `projects.settings`.
@@ -58,11 +89,9 @@ export const migration: Migration = {
       settings: string | null;
     }>`select id, settings from projects`.execute(db);
     for (const row of projects.rows) {
-      const settings = rewritten(row.settings);
-      if (settings === undefined) continue;
-      await sql`update projects set settings = ${settings} where id = ${row.id}`.execute(
-        db,
-      );
+      const next = rewritten(row.settings);
+      if (next === undefined || row.settings === null) continue;
+      await updateProjectIfUnchanged(db, row.id, row.settings, next);
     }
   },
 };
