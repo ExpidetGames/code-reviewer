@@ -59,7 +59,16 @@ the container is allowed to hold for that.
    rules (decision 3) and then drops both capabilities from the bounding set (`prctl(PR_CAPBSET_DROP)`)
    and from its own permitted, effective and inheritable sets (`capset`), reading `/proc/self/status`
    back to confirm. Every process the loop starts afterwards (job processes, the engine) inherits the
-   smaller bounding set, so none of them, root included, can touch the rules. Each Dynamic job checks
+   smaller bounding set, so none of them, root included, can touch the rules for the life of the
+   container. That boundary is per container lifetime: the container restarts
+   (`restart: unless-stopped`) with a writable root filesystem and a root supervisor that has
+   `DAC_OVERRIDE`, so a compromised supervisor could overwrite `nft`, `tini` or the runner source,
+   crash the container, and get a restart that runs the modified code with `NET_ADMIN`. The engine
+   user cannot do this (it cannot write those files), but the drop is only as strong as the
+   supervisor's integrity until a read-only root filesystem or an entrypoint that drops the
+   capabilities before the runner starts closes it (#249). The slot ports must also lie outside the
+   kernel's ephemeral port range, which startup reads from `/proc/sys/net/ipv4/ip_local_port_range`
+   (a port inside it, or an unreadable range, counts as rules not installable). Each Dynamic job checks
    that its own process holds neither capability, then runs the probe. Failure behaviour: a drop that
    cannot be confirmed stops the runner from starting; rules that cannot be installed (no `nft`, no
    `nf_tables`) still end with the drop, and every Dynamic job then fails its probe with

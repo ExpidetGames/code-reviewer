@@ -98,9 +98,17 @@ namespaces, no host kernel setting beyond the `nf_tables` support every current 
   installs the static rules, then drops both from the bounding set and from its own sets, before its
   event loop and before any other thread exists (a runner that cannot confirm the drop does not
   start). From then on the loop, every job process, the supervisor and the engine have a bounding set
-  without them: `nft` fails for all of them, root included, and no process can add or remove a rule.
+  without them: `nft` fails for all of them, root included, and no process can add or remove a rule
+  for the life of the container. It is per container, not forever: the container restarts
+  (`restart: unless-stopped`) with a writable root filesystem, so a compromised root supervisor
+  could change `nft`, `tini` or the runner source, crash the container, and get the restart with
+  `NET_ADMIN`. The engine user cannot write those files. Closing this is tracked in #249.
   If the rules cannot be installed (no `nft`, no `nf_tables`) the capabilities are dropped anyway and
   every Dynamic job fails with `dynamic_isolation_self_check_failed` while Diff jobs keep running.
+  The fixed slot ports are checked at startup against the kernel's ephemeral port range
+  (`/proc/sys/net/ipv4/ip_local_port_range`); a port inside it, or a range that cannot be read,
+  means the rules are not installed and every Dynamic job fails closed. Keep the defaults (10180,
+  10181) or other ports below the range.
   Only PID 1 (`tini`) keeps them. Do not run the container with `seccomp=unconfined`.
 - **Nothing mounted, nothing shared.** `compose.dynamic.yml` has no `volumes`, `network_mode`, `pid`,
   `ipc` or Docker socket (a file test fails otherwise); do not add any. The rules do not cover
