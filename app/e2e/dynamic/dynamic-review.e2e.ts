@@ -99,7 +99,15 @@ test.describe("a pull request on its way to a Dynamic Review summary", () => {
       throw new Error("The journey project has no baseURL.");
     // At the address the app asks for the metadata of the Dynamic model it saves (#269).
     llm = await startLlmFake({ port: e2eEnv.modelLlmFakePort });
-    llm.setModel(MODEL, [{ supported_parameters: ["tools", "tool_choice"] }]);
+    // The claim reads the same metadata (#279): the window and the prices reach the real runner as
+    // the job's capabilities, next to the operator's descriptor it is narrowed by.
+    llm.setModel(MODEL, [
+      {
+        supported_parameters: ["tools", "tool_choice"],
+        context_length: 200_000,
+        pricing: { prompt: "0.0000005", completion: "0.000002" },
+      },
+    ]);
     // The real Dynamic runner: root, the capabilities of the container, the self-check on the pinned files.
     runner = await startDynamicRunner({
       appUrl: baseURL,

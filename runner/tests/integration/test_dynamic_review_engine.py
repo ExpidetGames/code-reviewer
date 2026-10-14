@@ -481,17 +481,18 @@ def test_a_second_call_that_would_cross_the_cost_limit_is_refused_before_the_pro
     fixture = Fixture(
         tmp_path,
         {"answer": "structured", "findings": findings(), "proxy_calls": 3},
-        limits=DynamicLimits(max_cost_usd=Decimal("0.05")),
+        limits=DynamicLimits(max_cost_usd=Decimal("0.08")),
     )
 
-    # The first call settles at 0.04; the second would reserve about 0.0164 more (4,096 output
-    # tokens), end above the limit and never leaves the proxy.
+    # The first call is a normal call (it and a final call after it are reserved at about 0.077
+    # USD) and settles at 0.065; the second would reserve about 0.0164 more (4,096 output tokens),
+    # end above the limit and never leaves the proxy.
     with FakeUpstream(
         [
             asks(tool_call("c1", "read", {"filePath": "src/api/handler.ts"})),
             asks(tool_call("c3", "StructuredOutput", findings())),
         ],
-        usage={"prompt_tokens": 1, "completion_tokens": 10, "cost": 0.04},
+        usage={"prompt_tokens": 1, "completion_tokens": 10, "cost": 0.065},
     ) as upstream:
         answer = fixture.run(upstream)
     assert not answer.ok

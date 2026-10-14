@@ -35,6 +35,7 @@ detail ends up in the result JSON and in logs. Details name fields, never conten
 import json
 import re
 from dataclasses import dataclass, field
+from decimal import Decimal
 from enum import StrEnum
 from typing import Any, NoReturn, cast
 from urllib.parse import SplitResult, urlsplit
@@ -67,7 +68,19 @@ _LLM_FIELDS = {
     "maxTokens",
     "fallbackModels",
 }
-_DYNAMIC_FIELDS = {"model", "skill", "limits"}
+_DYNAMIC_FIELDS = {"model", "skill", "limits", "capabilities"}
+_CAPABILITY_FIELDS = {
+    "toolChoiceRequired",
+    "structuredOutput",
+    "maxOutputTokens",
+    "contextWindowTokens",
+    "inputUsdPerMtok",
+    "outputUsdPerMtok",
+}
+MAX_OUTPUT_TOKENS_LIMIT = 10_000_000
+MAX_WINDOW_TOKENS_LIMIT = 100_000_000
+# Exact decimal text, no sign and no exponent: the same pattern as `UnitPrice` in the contract.
+_UNIT_PRICE = re.compile(r"(0|[1-9][0-9]{0,5})(\.[0-9]{1,18})?")
 _DYNAMIC_LIMIT_FIELDS = {"maxFindings"}
 _BASE_FIELDS = {
     "repository",
@@ -151,6 +164,24 @@ class DynamicLimits:
 
 
 @dataclass(frozen=True)
+class JobCapabilities:
+    """What the app read from the provider's model metadata about the job's model (#279).
+
+    Optional on the wire and only sent to a runner that advertised it. It comes from the app, a
+    trusted party, never from the repository; the runner still intersects it with its operator's
+    descriptor (`dynamic_review.proxy.capabilities_for_job`), so it can only narrow. The two unit
+    prices are both present or both absent.
+    """
+
+    tool_choice_required: bool
+    structured_output: bool
+    max_output_tokens: int
+    context_window_tokens: int
+    input_usd_per_mtok: Decimal | None = None
+    output_usd_per_mtok: Decimal | None = None
+
+
+@dataclass(frozen=True)
 class DynamicReview:
     """The Dynamic options (#195): model, skill and the output limit.
 
@@ -160,6 +191,7 @@ class DynamicReview:
     model: str
     skill: str
     limits: DynamicLimits
+    capabilities: JobCapabilities | None = None
 
 
 @dataclass(frozen=True)
@@ -478,7 +510,58 @@ def _dynamic_review(data: dict[str, Any]) -> DynamicReview:
         or not 1 <= max_findings <= 30
     ):
         raise _invalid("dynamic.limits.maxFindings must be an integer between 1 and 30")
-    return DynamicReview(model=model, skill=skill, limits=DynamicLimits(max_findings=max_findings))
+    return DynamicReview(
+        model=model,
+        skill=skill,
+        limits=DynamicLimits(max_findings=max_findings),
+        capabilities=_job_capabilities(dynamic),
+    )
+
+
+def _capability_integer(document: dict[str, Any], key: str, upper: int) -> int:
+    value = document.get(key)
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= upper:
+        raise _invalid(f"dynamic.capabilities.{key} must be an integer between 1 and {upper}")
+    return value
+
+
+def _capability_boolean(document: dict[str, Any], key: str) -> bool:
+    value = document.get(key)
+    if not isinstance(value, bool):
+        raise _invalid(f"dynamic.capabilities.{key} must be a boolean")
+    return value
+
+
+def _unit_price(document: dict[str, Any], key: str) -> Decimal:
+    value = document[key]
+    if not isinstance(value, str) or not _UNIT_PRICE.fullmatch(value):
+        raise _invalid(f"dynamic.capabilities.{key} must be an exact decimal text")
+    return Decimal(value)
+
+
+def _job_capabilities(dynamic: dict[str, Any]) -> JobCapabilities | None:
+    """The model descriptor the app read from provider metadata (#279), or None when absent.
+
+    Closed and typed like the contract's `DynamicModelCapabilities`. It never carries a command,
+    endpoint or credential, and a malformed one is a refused job, not a guess.
+    """
+    if "capabilities" not in dynamic:
+        return None
+    document = _object(dynamic["capabilities"], "dynamic.capabilities")
+    _check_fields(document, _CAPABILITY_FIELDS, "dynamic.capabilities.")
+    prices = {"inputUsdPerMtok", "outputUsdPerMtok"} & document.keys()
+    if len(prices) == 1:
+        raise _invalid("dynamic.capabilities must name both unit prices or neither")
+    return JobCapabilities(
+        tool_choice_required=_capability_boolean(document, "toolChoiceRequired"),
+        structured_output=_capability_boolean(document, "structuredOutput"),
+        max_output_tokens=_capability_integer(document, "maxOutputTokens", MAX_OUTPUT_TOKENS_LIMIT),
+        context_window_tokens=_capability_integer(
+            document, "contextWindowTokens", MAX_WINDOW_TOKENS_LIMIT
+        ),
+        input_usd_per_mtok=_unit_price(document, "inputUsdPerMtok") if prices else None,
+        output_usd_per_mtok=_unit_price(document, "outputUsdPerMtok") if prices else None,
+    )
 
 
 def _claim_base(data: dict[str, Any]) -> ClaimBase:

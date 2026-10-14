@@ -58,7 +58,7 @@ from code_reviewer_runner.dynamic_review.prompts import compose_system_prompt
 from code_reviewer_runner.dynamic_review.proxy import (
     DynamicCapabilities,
     ModelProxy,
-    capabilities_from_config,
+    capabilities_for_job,
 )
 from code_reviewer_runner.dynamic_review.publish import (
     STATE_RESET_CODE,
@@ -350,9 +350,11 @@ def run_dynamic_job(
     # The descriptor describes the destination the request really goes to, so it is chosen by the
     # upstream model (`llm.model`); `dynamic.model` is the logical name the engine sees, and the app
     # sends the same name in both.
+    # The app's reading of the provider's metadata (#279) is narrowed by the operator's variable
+    # and never widens it; without one this is the operator's descriptor alone, as before.
     try:
-        capabilities = capabilities_from_config(
-            environment.get(DYNAMIC_CAPABILITIES_VARIABLE), model=job.llm.model
+        capabilities = capabilities_for_job(
+            environment.get(DYNAMIC_CAPABILITIES_VARIABLE), job.llm.model, dynamic.capabilities
         )
     except LimitError as error:
         return _failure(error.code, error.detail, started, capture)
@@ -427,6 +429,7 @@ def run_dynamic_job(
                 )
                 answer = engine.run()
                 turn_note = _turn_note(engine.turn_seconds)
+                recovery_note = engine.recovery
             finally:
                 server.stop()
     except CheckoutError as error:
@@ -474,6 +477,10 @@ def run_dynamic_job(
         summary += f"; {STATE_RESET_CODE}"
     if findings.stopped_early is not None:
         summary += f"; stopped early ({findings.stopped_early})"
+    if recovery_note is not None:
+        # A turn ended without an answer and one more turn returned it (#309): a complete review,
+        # not a limit, so it is in the log and not in the comment.
+        summary += f"; recovered after a turn without an answer ({recovery_note})"
     if turn_note:
         summary += f"; {turn_note}"
     summary += f"\ncheckout: {content.metrics.describe()}"

@@ -20,7 +20,10 @@ from code_reviewer_runner import runner
 from code_reviewer_runner.capabilities import ALL_ENGINES, ENGINE_DIFF
 from code_reviewer_runner.dynamic_review.budget import LimitError
 from code_reviewer_runner.dynamic_review.checkout import PreparedContent
-from code_reviewer_runner.dynamic_review.proxy import capabilities_from_config
+from code_reviewer_runner.dynamic_review.proxy import (
+    capabilities_for_job,
+    capabilities_from_config,
+)
 from code_reviewer_runner.job import Job, JobError, parse_job
 from code_reviewer_runner.result import ErrorCode
 
@@ -534,3 +537,106 @@ def test_a_whitespace_only_descriptor_variable_is_empty(blank: str) -> None:
         prepare=never_prepared,
     )
     assert result.error_code is ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED
+
+
+def job_with_capabilities(model: str = OTHER_MODEL, **capabilities: Any) -> Job:
+    document = dynamic_document()
+    document["dynamic"]["model"] = model
+    document["llm"]["model"] = model
+    document["dynamic"]["capabilities"] = {
+        "toolChoiceRequired": True,
+        "structuredOutput": True,
+        "maxOutputTokens": 4096,
+        "contextWindowTokens": 200_000,
+        "inputUsdPerMtok": "0.5",
+        "outputUsdPerMtok": "2",
+        **capabilities,
+    }
+    return parse_job(json.dumps(document))
+
+
+# #279-T02: the app's descriptor is what lets any other model run without operator configuration.
+def test_a_dynamic_job_of_another_model_runs_on_the_descriptor_the_app_sent() -> None:
+    with pytest.raises(Reached):
+        runner.run_dynamic_job(
+            job_with_capabilities(),
+            None,
+            0.0,
+            {runner.OPENCODE_COMMAND_VARIABLE: "opencode"},
+            engines=ALL_ENGINES,
+            prepare=reaching_the_checkout,
+        )
+
+
+# #279-T03: the operator's variable stays a ceiling for the descriptor of the job.
+def test_the_operators_descriptor_can_still_refuse_what_the_job_descriptor_claims() -> None:
+    result = runner.run_dynamic_job(
+        job_with_capabilities(),
+        None,
+        0.0,
+        {
+            runner.OPENCODE_COMMAND_VARIABLE: "opencode",
+            runner.DYNAMIC_CAPABILITIES_VARIABLE: json.dumps(
+                {"tool_choice_required": False, "structured_output": True, "max_output_tokens": 99}
+            ),
+        },
+        engines=ALL_ENGINES,
+        prepare=never_prepared,
+    )
+
+    assert result.ok is False
+    assert result.error_code is ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED
+
+
+# #279: a model whose metadata has no price still fails closed.
+def test_a_job_descriptor_without_unit_prices_fails_closed_before_anything_is_prepared() -> None:
+    document = dynamic_document()
+    document["dynamic"]["model"] = OTHER_MODEL
+    document["llm"]["model"] = OTHER_MODEL
+    document["dynamic"]["capabilities"] = {
+        "toolChoiceRequired": True,
+        "structuredOutput": True,
+        "maxOutputTokens": 4096,
+        "contextWindowTokens": 200_000,
+    }
+
+    result = runner.run_dynamic_job(
+        parse_job(json.dumps(document)),
+        None,
+        0.0,
+        {runner.OPENCODE_COMMAND_VARIABLE: "opencode"},
+        engines=ALL_ENGINES,
+        prepare=never_prepared,
+    )
+
+    assert result.ok is False
+    assert result.error_code is ErrorCode.DYNAMIC_CONFIG_INVALID
+
+
+# #279: a model whose metadata says it lacks tool choice does not run, even with a good variable.
+def test_a_job_descriptor_without_tool_choice_ends_with_features_unsupported() -> None:
+    result = runner.run_dynamic_job(
+        job_with_capabilities(toolChoiceRequired=False),
+        None,
+        0.0,
+        {
+            runner.OPENCODE_COMMAND_VARIABLE: "opencode",
+            runner.DYNAMIC_CAPABILITIES_VARIABLE: CAPABILITIES,
+        },
+        engines=ALL_ENGINES,
+        prepare=never_prepared,
+    )
+
+    assert result.ok is False
+    assert result.error_code is ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED
+
+
+# #279: the window of the run is the model's, from the job descriptor.
+def test_the_window_and_prices_of_a_run_are_the_job_descriptors_without_a_variable() -> None:
+    job = job_with_capabilities()
+    assert job.dynamic is not None
+    capabilities = capabilities_for_job(None, job.llm.model, job.dynamic.capabilities)
+
+    ledger = runner.dynamic_ledger(capabilities, {}, 600.0)
+
+    assert ledger.window_tokens == 200_000

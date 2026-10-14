@@ -105,3 +105,67 @@ describe("checking the deployment settings when the server starts", () => {
     expect(log).not.toHaveBeenCalled();
   });
 });
+
+describe("checking the operator API token when the server starts", () => {
+  // #275-T01
+  it("lets a deployment without an operator token start unchanged", async () => {
+    const { exit, log } = await run({
+      ...validEnv,
+      OPERATOR_API_TOKEN: undefined,
+    });
+
+    expect(exit).not.toHaveBeenCalled();
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  // #275-T02
+  it("stops the start when the operator token equals RUNNER_TOKEN or APP_SECRET, naming only the variables", async () => {
+    const same = await run({
+      ...validEnv,
+      OPERATOR_API_TOKEN: validEnv.RUNNER_TOKEN,
+    });
+    const secret = "m".repeat(40);
+    const sameSecret = await run({
+      ...validEnv,
+      APP_SECRET: secret,
+      OPERATOR_API_TOKEN: secret,
+    });
+
+    expect(same.exit).toHaveBeenCalledWith(1);
+    expect(String(same.log.mock.calls[0]?.[0])).toContain(
+      "OPERATOR_API_TOKEN must differ from RUNNER_TOKEN",
+    );
+    expect(sameSecret.exit).toHaveBeenCalledWith(1);
+    expect(String(sameSecret.log.mock.calls[0]?.[0])).toContain(
+      "OPERATOR_API_TOKEN must differ from APP_SECRET",
+    );
+    expect(String(same.log.mock.calls[0]?.[0])).not.toContain(
+      validEnv.RUNNER_TOKEN,
+    );
+    expect(String(sameSecret.log.mock.calls[0]?.[0])).not.toContain(secret);
+  });
+
+  // #275-T02
+  it("stops the start when the operator token equals BETTER_AUTH_SECRET and APP_SECRET is not set", async () => {
+    const secret = "o".repeat(40);
+    const { exit, log } = await run({
+      ...validEnv,
+      APP_SECRET: "",
+      BETTER_AUTH_SECRET: secret,
+      OPERATOR_API_TOKEN: secret,
+    });
+
+    expect(exit).toHaveBeenCalledWith(1);
+    expect(String(log.mock.calls[0]?.[0])).toContain(
+      "OPERATOR_API_TOKEN must differ from BETTER_AUTH_SECRET",
+    );
+    expect(String(log.mock.calls[0]?.[0])).not.toContain(secret);
+  });
+
+  // #275-T02
+  it("lets a weak operator token start: the API stays off and a warning says why (operator-api/startup.ts)", async () => {
+    const { exit } = await run({ ...validEnv, OPERATOR_API_TOKEN: "short" });
+
+    expect(exit).not.toHaveBeenCalled();
+  });
+});

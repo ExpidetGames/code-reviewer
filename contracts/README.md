@@ -7,6 +7,7 @@ other way round, so a change to the format has to change the file and both sides
 | File                         | What                                                                                                                                                                                         |
 | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `runner-api.v1.json`         | The wire format of the runner API v1 (JSON Schema, draft 2020-12): the claim request, the claim response, the heartbeat and complete requests and responses, and every error. The `$defs` are the named bodies. |
+| `operator-api.v1.json`       | The wire format of the operator API (#275, `app/src/operator-api/README.md`): the workspace list, the entitlements of a workspace and of the instance default, the write body and every error. For an external service that sets limits; it exists only while the app has an `OPERATOR_API_TOKEN`. `examples/operator-api/<Definition>.json` holds one valid example per body. |
 | `examples/<Definition>.json` | One valid document per body. Both test suites validate them, so an example can never drift from the schema. They hold dummy values only.                                                     |
 | `dynamic-review/schema.v1.json` | The neutral findings of a Dynamic Review (#195), before the runner renders them: opaque id, P0–P3, confidence, bounded title/body, a lexically safe repository-relative path, a line range (ordering is the runner's semantic check), evidence references, and the reviewed SHA. Resolutions of earlier findings sit on the run envelope (`resolvedIds`), so a run that leaves no current finding can still report them. No permission, provider, routing, endpoint or command field. `dynamic-review/example.v1.json` and `example-resolved.v1.json` are validated by both suites. |
 
@@ -20,6 +21,16 @@ other way round, so a change to the format has to change the file and both sides
   valid, and the rules the runner relies on hold (the job input is closed, because the runner refuses
   unknown fields; the only command is `review`; a previous release's review payload — the legacy `args`
   and the removed tools' env families — is still accepted; the error code rules of a result).
+
+## The operator API contract
+
+`operator-api.v1.json` is checked by the app only (`app/integration-tests/compatibility/operator-api-contract.integration.test.ts`, with
+Ajv): the examples are valid, the real answers of the API (success and every kind of error) are valid, the
+bodies the app accepts and refuses agree with `EntitlementsWrite` for the cases the schema can express (the
+rest, such as a start in the future or backwards, is the app's rule and documented in the definition), and the
+error codes, key modes, limit names and id pattern equal the app's lists. The version is in the path
+(`/api/operator/v1`) and in every body (`"version": 1`); the file only grows in ways readers may ignore, and a
+reader ignores fields it does not know. It identifies workspaces by id and slug only. No runner reads it.
 
 ## Rules of version 1
 
@@ -54,6 +65,18 @@ other way round, so a change to the format has to change the file and both sides
   `attemptedShas` holds. The app leaves the key out unless it is true (never sends `false`), and a runner
   from before #257 rejects it when present: update the runner before or together with the app. A newer
   runner with an older app is safe: absent means false, and the publisher stays fail-closed.
+
+- #279 adds the optional `DynamicReview.capabilities` (`DynamicModelCapabilities`: the features, the
+  context window, the output allowance and the unit prices the app read from the provider's model
+  metadata) and the optional `ClaimRequest.features`. `RunnerJobInput` is closed, so a runner from
+  before #279 rejects a `dynamic.capabilities` it receives. The rule is therefore the opposite of the
+  two above: the **app** never sends the field unless the claim names the feature
+  `dynamic_capabilities`. A new runner always names it; an old runner names no feature and gets
+  exactly the previous payload; an old app ignores `features` and sends no descriptor, so the new
+  runner uses its operator's description as before. Either side can be upgraded first and neither
+  breaks the other. Unknown feature names are ignored (a newer runner may name features an older app
+  does not know), unlike unknown engines. `golden` fixtures: `fakes/fixtures/dynamic-review-job.json`
+  (without) and `dynamic-review-job-capabilities.json` (with the field), validated by both suites.
 
 ### Rolling out Dynamic Review (#195, finding 4)
 

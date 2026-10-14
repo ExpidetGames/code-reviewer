@@ -74,6 +74,28 @@ def answer_with_usage(
     }
 
 
+def answer_with_structured_output(**usage: Any) -> dict[str, Any]:
+    """A provider answer that returns the review through the structured-output tool."""
+    answer = answer_with_usage(**usage)
+    answer["choices"] = [
+        {
+            "message": {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "StructuredOutput", "arguments": "{}"},
+                    }
+                ],
+            },
+            "finish_reason": "tool_calls",
+        }
+    ]
+    return answer
+
+
 def request_body(*, model: str = "deepseek/deepseek-v4.1-flash", **extra: Any) -> dict[str, Any]:
     body: dict[str, Any] = {
         "model": model,
@@ -487,7 +509,9 @@ def test_a_provider_status_with_no_rule_is_a_bad_request(status: int) -> None:
 # #290-T08
 def test_a_call_that_would_cross_the_cost_limit_is_refused_before_the_provider_sees_it() -> None:
     # Each call reserves its 4,096 output tokens at 4 USD per million: about 0.0164 USD.
-    upstream = Upstream(body=answer_with_usage(prompt=100, completion=50, cost=0.04))
+    # The first call is the final call of the wrap-up; it returns the answer, so the refusal of the
+    # second is the cost limit's.
+    upstream = Upstream(body=answer_with_structured_output(prompt=100, completion=50, cost=0.04))
     subject = proxy(
         upstream,
         ledger=BudgetLedger(DynamicLimits(max_cost_usd=Decimal("0.05")), unit_costs=UNIT_COSTS),
@@ -850,7 +874,9 @@ def test_a_streamed_request_is_answered_from_the_bounded_whole_answer() -> None:
     delta = first["choices"][0]["delta"]
     assert delta["role"] == "assistant"
     assert delta["tool_calls"] == [{**tool_call, "index": 0}]
-    assert closing["choices"][0]["finish_reason"] == "stop"
+    # The step asked for a tool: it is reported as a tool step, whatever the provider called it
+    # (#309; `test_dynamic_review_recovery.py`).
+    assert closing["choices"][0]["finish_reason"] == "tool_calls"
     assert closing["usage"] == {"prompt_tokens": 10, "completion_tokens": 5, "cost": 0.0001}
     assert subject.ledger.usage(None).total_tokens == 15
 
@@ -1119,7 +1145,9 @@ def test_the_default_model_has_a_built_in_descriptor_and_no_other_model_has() ->
 
     built_in = capabilities_from_config(None, model=DEFAULT_DYNAMIC_MODEL)
     assert (built_in.tool_choice_required, built_in.structured_output) == (True, True)
-    assert built_in.max_output_tokens == 8192
+    # #309: a full review plus reasoning tokens does not fit 8192; 32768 is below the smallest
+    # completion limit of any endpoint of the model (131072, OpenRouter, read on 2026-10-14).
+    assert built_in.max_output_tokens == 32_768
     built_in.check_required()
     assert capabilities_from_config("", model=DEFAULT_DYNAMIC_MODEL) == built_in
 
@@ -1491,7 +1519,7 @@ def test_a_request_without_the_structured_output_tool_is_never_rewritten() -> No
 
 # #293-T03
 def test_nothing_is_forwarded_after_the_final_call() -> None:
-    upstream = Upstream()
+    upstream = Upstream(body=answer_with_structured_output())
     subject = proxy(upstream, ledger=wrap_up_ledger())
     assert post(subject, loop_request()).status == 200
 
