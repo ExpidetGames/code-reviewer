@@ -1018,10 +1018,8 @@ def test_a_streamed_request_records_the_cost_and_the_engine_still_sees_the_usage
 # #267-T05
 def test_a_call_without_a_usable_cost_makes_the_cost_unknown_and_changes_nothing_else() -> None:
     answers: list[dict[str, Any]] = [answer_with_usage()]  # no cost field at all
-    answers += [
-        answer_with_cost(unusable)
-        for unusable in (None, "0.01", True, [], {}, -0.5, 1e999, float("nan"))
-    ]
+    unusable_costs: list[Any] = [None, "0.01", True, [], {}, -0.5, 1e999, float("nan")]
+    answers += [answer_with_cost(unusable) for unusable in unusable_costs]
     for answer in answers:
         subject = proxy(Upstream(body=answer))
 

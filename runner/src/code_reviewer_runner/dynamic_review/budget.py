@@ -107,10 +107,10 @@ class _Counters:
 
 
 def exact_cost(value: object) -> Decimal | None:
-    """The charge the provider reported for one call, or None when it did not report a usable one.
+    """The charge the provider reported for one call, or None when it reported no usable one.
 
-    Only a finite, non-negative number counts. A missing, null, boolean, textual or negative value is
-    not a cost; it is never read as zero. The decimal is the value as the provider wrote it (the
+    Only a finite, non-negative number counts. A missing, null, boolean, textual or negative value
+    is not a cost; it is never read as zero. The decimal is the value as the provider wrote it (the
     shortest text of the parsed number), so adding calls up does not drift the way a float sum does.
     """
     if isinstance(value, bool) or not isinstance(value, (int, float)):

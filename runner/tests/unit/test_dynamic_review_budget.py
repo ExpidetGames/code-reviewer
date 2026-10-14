@@ -9,6 +9,7 @@ counted as zero or ignored.
 """
 
 import ast
+import math
 import threading
 import time
 from decimal import Decimal
@@ -437,7 +438,8 @@ def test_only_a_finite_non_negative_number_is_an_exact_cost() -> None:
     assert exact_cost(0.0123) == Decimal("0.0123")
     assert exact_cost(0) == Decimal("0")
     assert exact_cost(2) == Decimal("2")
-    for unusable in (None, True, False, "0.5", [], {}, -0.01, float("nan"), float("inf")):
+    unusable_values: list[Any] = [None, True, False, "0.5", [], {}, -0.01, math.nan, math.inf]
+    for unusable in unusable_values:
         assert exact_cost(unusable) is None
 
 
