@@ -11,6 +11,7 @@ import json
 import subprocess
 import time
 from collections.abc import Awaitable, Callable
+from importlib import import_module
 from typing import Any
 
 import pytest
@@ -419,9 +420,8 @@ def test_the_identity_patch_is_active_while_the_command_runs(
 
 def openrouter_extra_body() -> dict[str, Any]:
     """The `extra_body` PR-Agent's OpenRouter request controls build for a call, as seen now."""
-    from pr_agent.algo.ai_handlers.litellm_ai_handler import LiteLLMAIHandler
-
-    handler: Any = object.__new__(LiteLLMAIHandler)
+    module = import_module("pr_agent.algo.ai_handlers.litellm_ai_handler")
+    handler: Any = object.__new__(module.LiteLLMAIHandler)
     handler._openrouter_controls = {}
     kwargs: dict[str, Any] = handler._apply_openrouter_request_controls("openrouter/v/m", {}, None)
     return kwargs.get("extra_body", {})

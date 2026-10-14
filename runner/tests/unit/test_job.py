@@ -343,9 +343,7 @@ def test_the_llm_endpoint_can_only_be_overridden_with_a_loopback_address() -> No
 
 
 # #270-T04
-def test_only_the_default_openrouter_destination_requires_parameters_unless_a_test_double_asks() -> (
-    None
-):
+def test_only_openrouter_requires_parameters_unless_a_test_double_asks() -> None:
     llm = valid_job()["llm"]
     loopback = "http://127.0.0.1:4011/api/v1"
 

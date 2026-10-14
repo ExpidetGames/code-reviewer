@@ -7,7 +7,9 @@ always reached at its provider), so a test stack that wants the real PR-Agent to
 cannot get the address through the job. This wrapper is set as `PR_AGENT_COMMAND` of the runner. It
 reads the job from stdin like the entry point, adds `llm.baseUrl` and hands the job on to the real
 entry point (`python -m code_reviewer_runner.runner`), whose strict validation still decides about
-it: it accepts the address only for loopback, and every other check of the job (the host of
+it: it accepts the address (and `llm.requireParameters`, which makes the runner send
+OpenRouter's `provider.require_parameters` to the fake as it does to OpenRouter) only for loopback,
+and every other check of the job (the host of
 `prUrl` against `git.baseUrl`, the token, the model) stays untouched.
 
     python run_job_against_fake_llm.py http://127.0.0.1:<port>/api/v1
@@ -31,6 +33,8 @@ def main(argv: list[str]) -> int:
     try:
         job: Any = json.loads(raw)
         job["llm"]["baseUrl"] = argv[1]
+        # The fake stands in for OpenRouter, so it asks for what OpenRouter always gets (#270).
+        job["llm"]["requireParameters"] = True
         text = json.dumps(job)
     except (ValueError, KeyError, TypeError):
         # Not a job this wrapper can extend: let the real entry point report it, as it would.

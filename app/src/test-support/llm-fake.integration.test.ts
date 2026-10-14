@@ -20,6 +20,7 @@ async function ask(
   baseUrl: string,
   system: string,
   key = "dummy-key",
+  extra: Record<string, unknown> = {},
 ): Promise<{ status: number; json: Record<string, unknown> }> {
   const response = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
@@ -33,6 +34,7 @@ async function ask(
         { role: "system", content: system },
         { role: "user", content: "the diff of the pull request" },
       ],
+      ...extra,
     }),
   });
   return {
@@ -64,6 +66,22 @@ describe("the fake LLM", () => {
       },
     ]);
     expect(llm.requests()[0]?.prompt).toContain("the diff of the pull request");
+  });
+
+  // #270-T07
+  it("records the provider field of a request, null when there is none", async () => {
+    const llm = await setup();
+    const system = "You are PR-Reviewer, a language model designed to review.";
+
+    await ask(llm.baseUrl, system, "k", {
+      provider: { require_parameters: true },
+    });
+    await ask(llm.baseUrl, system);
+
+    expect(llm.requests().map((request) => request.provider)).toEqual([
+      { require_parameters: true },
+      null,
+    ]);
   });
 
   it("answers with another text when a reply is replaced and with the canned one again after a reset", async () => {

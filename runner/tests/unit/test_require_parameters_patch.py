@@ -9,10 +9,10 @@ written for, like the identity patch."""
 
 import inspect
 from collections.abc import Iterator
+from importlib import import_module
 from typing import Any
 
 import pytest
-from pr_agent.algo.ai_handlers.litellm_ai_handler import LiteLLMAIHandler
 
 from code_reviewer_runner.error_mapping import classify_failure
 from code_reviewer_runner.require_parameters_patch import (
@@ -20,6 +20,11 @@ from code_reviewer_runner.require_parameters_patch import (
     apply_require_parameters_patch,
 )
 from code_reviewer_runner.result import ErrorCode
+
+# PR-Agent ships no type information: the class is `Any` on purpose.
+LiteLLMAIHandler: Any = import_module(
+    "pr_agent.algo.ai_handlers.litellm_ai_handler"
+).LiteLLMAIHandler
 
 
 class NoControls:
@@ -112,7 +117,7 @@ def test_a_pr_agent_that_does_not_fit_the_patch_is_refused_and_nothing_is_change
 
 # #270-T03
 def test_the_method_the_patch_wraps_still_has_the_shape_it_was_written_for() -> None:
-    method = LiteLLMAIHandler._apply_openrouter_request_controls  # pyright: ignore[reportPrivateUsage]
+    method = LiteLLMAIHandler._apply_openrouter_request_controls
 
     assert list(inspect.signature(method).parameters) == [
         "self",

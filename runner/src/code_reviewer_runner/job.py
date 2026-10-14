@@ -11,7 +11,7 @@ Shape (basis of the runner contract v1, see the lead decisions for CR-10):
               "token": "<installation token>", "botLogin": "<app slug>[bot]"},
       "llm": {"provider": "openrouter", "model": "<vendor>/<model>", "apiKey": "<key>",
               "baseUrl": "http://127.0.0.1:<port>/api/v1",     // optional, loopback only (fakes)
-              "requireParameters": true,                       // optional, only with baseUrl (fakes)
+              "requireParameters": true,                       // optional, with baseUrl (fakes)
               "maxTokens": 163840,                             // optional, context window
               "fallbackModels": ["<vendor>/<model>"]},         // optional, at most five
       "env": {"PR_REVIEWER__EXTRA_INSTRUCTIONS": "<string>"}   // optional, tool settings only

@@ -981,9 +981,7 @@ NO_PROVIDER_ANSWER = {
 
 
 # #270-T01
-def test_a_call_to_openrouter_is_forwarded_with_required_parameters_and_the_allowed_fields_only() -> (
-    None
-):
+def test_a_call_to_openrouter_is_forwarded_with_required_parameters_and_allowed_fields() -> None:
     upstream = Upstream()
     subject = proxy(upstream, require_parameters=True)
 
@@ -1018,7 +1016,9 @@ def test_an_engine_that_sends_a_routing_field_still_stops_the_run_and_its_value_
         upstream = Upstream()
         subject = proxy(upstream, require_parameters=True)
 
-        response = post(subject, request_body(**{field: value}))
+        body = request_body()
+        body[field] = value
+        response = post(subject, body)
 
         assert error_code(response) == ErrorCode.DYNAMIC_POLICY_VIOLATION.value, field
         assert upstream.requests == [], field

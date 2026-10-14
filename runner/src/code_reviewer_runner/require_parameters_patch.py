@@ -10,17 +10,20 @@ arguments; LiteLLM sends their `extra_body` verbatim. The patch adds the field t
 after PR-Agent has built it and leaves everything else as it was.
 
 The patch reaches into a private method, so it is tied to the version it was written and tested for
-(`identity_patch.check_pr_agent_version` runs before it, and the method's signature is checked here).
+(`identity_patch.check_pr_agent_version` runs before it, and the signature of the method is
+checked here).
 Any other shape is refused instead of being patched blindly. A job with a destination that is not
 OpenRouter simply does not apply the patch.
 """
 
 import inspect
 from collections.abc import Callable
+from importlib import import_module
 from typing import Any
 
 from code_reviewer_runner.openrouter_parameters import REQUIRE_PARAMETERS
 
+_HANDLER_MODULE = "pr_agent.algo.ai_handlers.litellm_ai_handler"
 _METHOD = "_apply_openrouter_request_controls"
 _EXPECTED_SIGNATURE = ["self", "model", "kwargs", "inherited_reasoning_effort"]
 # Set on the replacement, so a second application finds the real method instead of wrapping it.
@@ -37,17 +40,15 @@ def apply_require_parameters_patch(handler_class: type[Any] | None = None) -> Ca
     Everything the patch relies on is checked first, and a failed check changes nothing. Applying
     the patch twice does not wrap it twice.
     """
-    if handler_class is None:
-        from pr_agent.algo.ai_handlers.litellm_ai_handler import LiteLLMAIHandler
-
-        handler_class = LiteLLMAIHandler
-    current = getattr(handler_class, _METHOD, None)
+    # PR-Agent ships no type information: the class is `Any` on purpose.
+    target: Any = handler_class or import_module(_HANDLER_MODULE).LiteLLMAIHandler
+    current = getattr(target, _METHOD, None)
     if not callable(current):
-        raise RequireParametersPatchError(f"{handler_class.__name__}.{_METHOD} does not exist")
-    original = getattr(current, _ORIGINAL_ATTRIBUTE, current)
+        raise RequireParametersPatchError(f"{target.__name__}.{_METHOD} does not exist")
+    original: Callable[..., Any] = getattr(current, _ORIGINAL_ATTRIBUTE, current)
     if list(inspect.signature(original).parameters) != _EXPECTED_SIGNATURE:
         raise RequireParametersPatchError(
-            f"{handler_class.__name__}.{_METHOD} has a different signature: expected "
+            f"{target.__name__}.{_METHOD} has a different signature: expected "
             f"({', '.join(_EXPECTED_SIGNATURE)}), found {inspect.signature(original)}"
         )
 
@@ -62,9 +63,9 @@ def apply_require_parameters_patch(handler_class: type[Any] | None = None) -> Ca
         return controlled
 
     setattr(with_required_parameters, _ORIGINAL_ATTRIBUTE, original)
-    setattr(handler_class, _METHOD, with_required_parameters)
+    setattr(target, _METHOD, with_required_parameters)
 
     def undo() -> None:
-        setattr(handler_class, _METHOD, original)
+        setattr(target, _METHOD, original)
 
     return undo
