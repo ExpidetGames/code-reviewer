@@ -9,6 +9,11 @@
 // - a canned reply; `/review` is the only tool (#203), so every prompt gets the review reply;
 // - an error for every request (429, 401, ...), optionally quoting the received key in the message
 //   like a provider that says "Incorrect API key provided";
+// - an agent script (`scriptAgent`, the Dynamic e2e lane, #253): the answers the real, pinned OpenCode gets
+//   from the runner's model proxy. A request that offers tools gets the next scripted tool calls and, when they
+//   are used up, the structured findings through the engine's `StructuredOutput` tool; a request without tools
+//   (the engine's title request) gets plain text. The engine suite has its own Python twin of this
+//   (`ScriptedModel` in runner/tests/engine/opencode_support.py);
 // - `GET <api base>/key`, the cheap call that tells whether a key is accepted (the app's "test key"
 //   button): 200 for an accepted key, 401 for any other once `acceptKeys` names the accepted ones. The
 //   keys that arrived are recorded apart (`keyChecks`), so a test can see which key a check carried.
@@ -29,6 +34,23 @@ export type FakeLlmRequest = {
   kind: PromptKind;
   /** The system and the user messages joined: what the model was asked. */
   prompt: string;
+  /** The names of the tools the request offered (an agent: the engine's tools), in order. */
+  tools: string[];
+  /** The result of every tool call the request carries, by the id of the call. */
+  toolResults: Record<string, string>;
+};
+
+/** One request's tool calls of the agent script. */
+export type AgentToolCall = {
+  name: string;
+  arguments: Record<string, unknown>;
+};
+
+/** What the agent answers: `steps[i]` for the i-th request that offers tools, then `final` for every later one. */
+export type AgentScript = {
+  steps: AgentToolCall[][];
+  /** The structured answer (Dynamic findings, schema version 1) given through `StructuredOutput`. */
+  final: Record<string, unknown>;
 };
 
 export type FakeLlmError = { status: number; message: string };
@@ -48,12 +70,36 @@ export type FakeLlm = {
   acceptKeys(keys: string[] | null): void;
   /** The whole `Authorization` header of every `GET /key` received, in order. */
   keyChecks(): string[];
+  /** Answers like the model of a Dynamic Review (see `AgentScript`); null is the canned reply again. */
+  scriptAgent(script: AgentScript | null): void;
   /** Normal replies, no error, no recorded requests. */
   reset(): void;
   close(): Promise<void>;
 };
 
-type ChatMessage = { role?: unknown; content?: unknown };
+type ChatMessage = {
+  role?: unknown;
+  content?: unknown;
+  tool_call_id?: unknown;
+};
+
+function toolNames(tools: unknown): string[] {
+  if (!Array.isArray(tools)) return [];
+  return (tools as Array<{ function?: { name?: unknown } }>).flatMap((tool) =>
+    typeof tool.function?.name === "string" ? [tool.function.name] : [],
+  );
+}
+
+function toolResultsOf(messages: ChatMessage[]): Record<string, string> {
+  const results: Record<string, string> = {};
+  for (const message of messages)
+    if (message.role === "tool" && typeof message.tool_call_id === "string")
+      results[message.tool_call_id] =
+        typeof message.content === "string"
+          ? message.content
+          : JSON.stringify(message.content);
+  return results;
+}
 
 function textOf(messages: ChatMessage[], role: string): string {
   return messages
@@ -92,6 +138,35 @@ function completion(model: string, content: string) {
   };
 }
 
+/** A completion that asks for tool calls, with the fixed token counts a journey can check. */
+function toolCompletion(model: string, id: string, calls: AgentToolCall[]) {
+  return {
+    id: "chatcmpl-fake-agent",
+    object: "chat.completion",
+    created: 1_700_000_000,
+    model,
+    choices: [
+      {
+        index: 0,
+        message: {
+          role: "assistant",
+          content: null,
+          tool_calls: calls.map((call, position) => ({
+            id: `${id}_${String(position)}`,
+            type: "function",
+            function: {
+              name: call.name,
+              arguments: JSON.stringify(call.arguments),
+            },
+          })),
+        },
+        finish_reason: "tool_calls",
+      },
+    ],
+    usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 },
+  };
+}
+
 export async function startLlmFake(
   options: { host?: string; port?: number } = {},
 ): Promise<FakeLlm> {
@@ -102,6 +177,8 @@ export async function startLlmFake(
   let quoteKey = false;
   let accepted: string[] | null = null;
   let keyChecks: string[] = [];
+  let agent: AgentScript | null = null;
+  let agentRequests = 0;
 
   const server: Server = createServer((request, response) => {
     const chunks: Buffer[] = [];
@@ -163,6 +240,8 @@ export async function startLlmFake(
         model,
         kind,
         prompt: `${system}\n${textOf(messages, "user")}`,
+        tools: toolNames((body as { tools?: unknown }).tools),
+        toolResults: toolResultsOf(messages),
       });
 
       if (error !== null) {
@@ -170,6 +249,16 @@ export async function startLlmFake(
           ? `Incorrect API key provided: ${authorization.split(" ").at(-1) ?? ""}`
           : error.message;
         return send(error.status, { error: { message, code: error.status } });
+      }
+      if (agent !== null) {
+        if (toolNames((body as { tools?: unknown }).tools).length === 0)
+          return send(200, completion(model, "ok"));
+        const index = agentRequests;
+        agentRequests += 1;
+        const calls = agent.steps[index] ?? [
+          { name: "StructuredOutput", arguments: agent.final },
+        ];
+        return send(200, toolCompletion(model, `call_${String(index)}`, calls));
       }
       send(200, completion(model, replies[kind]));
     });
@@ -197,7 +286,13 @@ export async function startLlmFake(
       accepted = keys;
     },
     keyChecks: () => [...keyChecks],
+    scriptAgent(script) {
+      agent = script;
+      agentRequests = 0;
+    },
     reset() {
+      agent = null;
+      agentRequests = 0;
       log = [];
       replies = defaultReplies();
       error = null;
