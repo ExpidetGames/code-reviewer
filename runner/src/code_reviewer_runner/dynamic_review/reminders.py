@@ -23,23 +23,19 @@ The wrapper is recognised by its place, not by a search for the tag: every line 
 followed by a blank line and `<system-reminder>` is the engine's. Whatever the attached text
 contains after that point cannot move the boundary. Any tag text left over, in a wrapper of another
 shape or in file lines, is escaped (`<` becomes `&lt;`), so no `<system-reminder>` or
-`</system-reminder>` tag survives in any tool result.
+`</system-reminder>` tag survives in any tool result. The escape also covers lookalike spellings and
+chat-template tokens, and tags split across text parts (#243, `tagescape.py`).
 """
 
-import re
 from typing import Any
 
+from code_reviewer_runner.dynamic_review.tagescape import escape_text, escape_texts
 from code_reviewer_runner.job_loop.jsonvalues import as_object
 
 # The engine's wrapper starts here (read.ts) and ends the result, so a result without this exact
 # tail has no wrapper in the engine's sense.
 _WRAPPER_START = "\n</content>\n\n<system-reminder>\n"
 _WRAPPER_END = "\n</system-reminder>"
-
-# Any spelling of the tag that a reader could take for it: case, inner spaces, closing slash. One
-# run of whitespace and slashes: two adjacent `\s*` would backtrack quadratically on a hostile file
-# (`<` followed by tens of thousands of spaces) on every request.
-_TAG = re.compile(r"<([\s/]*)(system-reminder)", re.IGNORECASE)
 
 
 def dropped_notice(attached_bytes: int) -> str:
@@ -56,26 +52,36 @@ def neutralize_content(tool: str, content: object) -> Any:
     The result has the shape of the argument (a JSON value in, the same kind out).
     """
     if isinstance(content, str):
-        return _neutralize_text(tool, content)
+        return escape_text(_drop_wrapper_of(tool, content))
     if isinstance(content, list):
         parts: list[Any] = content  # pyright: ignore[reportUnknownVariableType]
-        return [_neutralize_part(tool, part) for part in parts]
+        return _neutralize_parts(tool, parts)
     return _escape_nested(content)
 
 
-def _neutralize_part(tool: str, part: object) -> object:
-    entries = as_object(part)
-    text: Any = entries.get("text") if entries else None
-    if entries is None or not isinstance(text, str):
-        return _escape_nested(part)
-    rest = {key: _escape_nested(value) for key, value in entries.items() if key != "text"}
-    return {**rest, "text": _neutralize_text(tool, text)}
+def _neutralize_parts(tool: str, parts: list[Any]) -> list[Any]:
+    # The text parts of one result are matched as one text, so a tag cannot hide by being split
+    # between two of them.
+    entries = [as_object(part) for part in parts]
+    texts: dict[int, str] = {}
+    for index, entry in enumerate(entries):
+        text: Any = entry.get("text") if entry is not None else None
+        if isinstance(text, str):
+            texts[index] = _drop_wrapper_of(tool, text)
+    escaped = dict(zip(texts, escape_texts(list(texts.values())), strict=True))
+    neutral: list[Any] = []
+    for index, part in enumerate(parts):
+        entry = entries[index]
+        if entry is None or index not in escaped:
+            neutral.append(_escape_nested(part))
+            continue
+        rest = {key: _escape_nested(value) for key, value in entry.items() if key != "text"}
+        neutral.append({**rest, "text": escaped[index]})
+    return neutral
 
 
-def _neutralize_text(tool: str, text: str) -> str:
-    if tool == "read":
-        text = _drop_engine_wrapper(text)
-    return _escape(text)
+def _drop_wrapper_of(tool: str, text: str) -> str:
+    return _drop_engine_wrapper(text) if tool == "read" else text
 
 
 def _drop_engine_wrapper(text: str) -> str:
@@ -91,13 +97,9 @@ def _drop_engine_wrapper(text: str) -> str:
     return text[:kept_to] + dropped_notice(len(attached.encode("utf-8", errors="replace")))
 
 
-def _escape(text: str) -> str:
-    return _TAG.sub(r"&lt;\1\2", text)
-
-
 def _escape_nested(value: object) -> object:
     if isinstance(value, str):
-        return _escape(value)
+        return escape_text(value)
     if isinstance(value, list):
         items: list[Any] = value  # pyright: ignore[reportUnknownVariableType]
         return [_escape_nested(item) for item in items]
