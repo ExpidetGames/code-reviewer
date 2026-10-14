@@ -36,7 +36,7 @@ CAPABILITIES = json.dumps(
 ANSWER = {
     "id": "chatcmpl-1",
     "choices": [{"message": {"role": "assistant", "content": "{}"}}],
-    "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+    "usage": {"prompt_tokens": 10, "completion_tokens": 5, "cost": 0.0001},
 }
 
 

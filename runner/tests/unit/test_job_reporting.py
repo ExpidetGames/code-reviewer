@@ -6,10 +6,11 @@ import json
 from decimal import Decimal
 from typing import Any
 
+import pytest
 from loop_support import outcome, result_line
 from support import API_KEY, TOKEN
 
-from code_reviewer_runner.dynamic_review.budget import BudgetLedger, DynamicLimits
+from code_reviewer_runner.dynamic_review.budget import BudgetLedger, DynamicLimits, LimitError
 from code_reviewer_runner.job_loop.process import ProcessOutcome
 from code_reviewer_runner.job_loop.reporting import (
     MAX_LOG_TAIL_CHARS,
@@ -155,7 +156,9 @@ def test_the_exact_cost_of_a_dynamic_run_reaches_the_reported_result_unchanged()
 def test_an_unknown_cost_of_a_dynamic_run_stays_unknown_in_the_reported_result() -> None:
     ledger = BudgetLedger(DynamicLimits())
     reservation = ledger.reserve_call("a request", output_tokens=1)
-    ledger.settle_call(reservation, prompt_tokens=9, completion_tokens=1)
+    # A call without a cost stops the run (#290), and the result still reports its tokens.
+    with pytest.raises(LimitError):
+        ledger.settle_call(reservation, prompt_tokens=9, completion_tokens=1)
 
     result = reported(outcome(stdout=result_line(usage=ledger.usage("vendor/model").to_json())))
 

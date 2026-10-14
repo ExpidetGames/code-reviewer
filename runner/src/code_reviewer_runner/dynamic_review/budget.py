@@ -2,14 +2,14 @@
 
 """The limits of one Dynamic Review and the ledger that enforces them (#197, #290).
 
-The one budget of a run is an operator cost limit in USD (default 1.00, `RUNNER_DYNAMIC_MAX_COST_USD`,
-never above a ceiling in code). Besides it only technical limits stay: the 600 seconds of the whole
-job (the lease and the runner's capacity depend on it), 64 KiB per tool result, 4 MiB of cumulative
-content returned to the model, 2 MiB of untrusted input and the protocol byte caps. They protect
-the machine and the isolation, they are not a budget. There is no limit on tokens, model calls,
-tool calls or files: a tool loop sends its whole history again with every call, so those counts
-say little about what a run costs, and the cost does. All of them are operator-owned and never
-come from the repository, the skill or the model.
+The one budget of a run is an operator cost limit in USD (default 1.00, never above a ceiling in
+code, `RUNNER_DYNAMIC_MAX_COST_USD`). Besides it only technical limits stay: the 600 seconds of
+the whole job (the lease and the runner's capacity depend on it), 64 KiB per tool result, 4 MiB of
+cumulative content returned to the model, 2 MiB of untrusted input and the protocol byte caps.
+They protect the machine and the isolation, they are not a budget. There is no limit on tokens,
+model calls, tool calls or files: a tool loop sends its whole history again with every call, so
+those counts say little about what a run costs, and the cost does. All of them are operator-owned
+and never come from the repository, the skill or the model.
 
 Enforcement lives here and in the model proxy, **outside** the engine and its prompt: a bound that
 is only asked for in the prompt or only observed after the fact is not enforced. Every model call
@@ -64,8 +64,9 @@ DEFAULT_OUTPUT_TOKENS = 8_192
 # Used when the model's descriptor names no context window: deliberately small, so a descriptor
 # that forgets the field is refused early rather than trusted with a window it does not have.
 DEFAULT_WINDOW_TOKENS = 128_000
-# Density of the input estimate: the bytes of text one token is assumed to hold. Real text has about 3 to 4; 3 errs on the side of more
-# tokens, and a denser previous call tightens it, down to the proven 1.
+# Density of the input estimate: the bytes of text one token is assumed to hold. Real text has
+# about 3 to 4; 3 errs on the side of more tokens, and a denser previous call tightens it, down
+# to the proven 1.
 ASSUMED_DENSITY = 3.0
 # What a call reserves when the descriptor has no unit costs: the floor, or twice the dearest call
 # settled so far when that is more. A call's cost grows with its history, and a tool result adds

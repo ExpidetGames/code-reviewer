@@ -19,6 +19,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
+from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -49,7 +50,7 @@ OTHER_SHA = "0000000000000000000000000000000000000000"
 CAPABILITIES = json.dumps(
     {"tool_choice_required": True, "structured_output": True, "max_output_tokens": 4096}
 )
-UPSTREAM_USAGE = {"prompt_tokens": 11, "completion_tokens": 7}
+UPSTREAM_USAGE = {"prompt_tokens": 11, "completion_tokens": 7, "cost": 0.0002}
 EXPORTED = frozenset({"src/api/handler.ts", "src/other.ts"})
 
 
@@ -370,8 +371,8 @@ def test_the_adapter_drives_the_engine_and_returns_the_validated_findings(tmp_pa
     assert usage.prompt_tokens == 2 * UPSTREAM_USAGE["prompt_tokens"]
     assert usage.completion_tokens == 2 * UPSTREAM_USAGE["completion_tokens"]
     assert usage.ai_calls == 2
-    # This provider reported no cost, so the run reports none; it is never derived from tokens.
-    assert usage.cost_usd is None
+    # The cost is what the provider reported for each call; it is never derived from tokens.
+    assert usage.cost_usd == pytest.approx(2 * UPSTREAM_USAGE["cost"], rel=0, abs=1e-12)
 
     # The tool loop is audited at the proxy from the requests themselves: three calls (the final
     # StructuredOutput included), two distinct files, and the bytes the model was shown.
@@ -463,25 +464,24 @@ def test_the_message_list_defect_of_the_pinned_server_cannot_fail_or_blind_a_run
     assert not any(entry.get("messages_requested") for entry in fixture.traces())
 
 
-# #231-T05
-def test_a_second_call_that_would_cross_the_token_cap_is_refused_before_the_provider(
+# #290-T08
+def test_a_second_call_that_would_cross_the_cost_limit_is_refused_before_the_provider(
     tmp_path: Path,
 ) -> None:
     fixture = Fixture(
         tmp_path,
         {"answer": "structured", "findings": findings(), "proxy_calls": 3},
-        limits=DynamicLimits(max_total_tokens=6_000),
+        limits=DynamicLimits(max_cost_usd=Decimal("0.06")),
     )
 
-    # Each call reserves its request (a few hundred bytes) plus the 4096 output tokens the
-    # descriptor allows, so each fits 6,000 alone. The first settles at 4097; the second would end
-    # above the cap and never leaves the proxy.
+    # The first call settles at 0.04; the second would reserve twice that (0.08), end above the
+    # limit and never leaves the proxy.
     with FakeUpstream(
         [
             asks(tool_call("c1", "read", {"filePath": "src/api/handler.ts"})),
             asks(tool_call("c3", "StructuredOutput", findings())),
         ],
-        usage={"prompt_tokens": 1, "completion_tokens": 4096},
+        usage={"prompt_tokens": 1, "completion_tokens": 10, "cost": 0.04},
     ) as upstream:
         answer = fixture.run(upstream)
     assert not answer.ok
@@ -491,6 +491,28 @@ def test_a_second_call_that_would_cross_the_token_cap_is_refused_before_the_prov
     assert fixture.ledger.model_calls == 1
     answers = next(e["proxy_answers"] for e in fixture.traces() if "proxy_answers" in e)
     assert answers == [200, 403]
+
+
+# #290-T09
+def test_a_call_without_a_cost_ends_the_run_with_the_accounting_code(tmp_path: Path) -> None:
+    fixture = Fixture(
+        tmp_path,
+        {"answer": "structured", "findings": findings(), "proxy_calls": 3},
+    )
+
+    with FakeUpstream(
+        [
+            asks(tool_call("c1", "read", {"filePath": "src/api/handler.ts"})),
+            asks(tool_call("c3", "StructuredOutput", findings())),
+        ],
+        usage={"prompt_tokens": 11, "completion_tokens": 7},
+    ) as upstream:
+        answer = fixture.run(upstream)
+
+    assert not answer.ok
+    assert answer.error is not None
+    assert answer.error.code is ErrorCode.DYNAMIC_ACCOUNTING_FAILED
+    assert len(upstream.requests) == 1
 
 
 # #197-T05
@@ -523,33 +545,6 @@ def test_a_tool_result_over_the_per_result_bound_is_never_forwarded(tmp_path: Pa
 
 
 # #197-T05
-def test_the_tool_call_that_crosses_the_bound_is_not_handed_to_the_engine(tmp_path: Path) -> None:
-    fixture = Fixture(
-        tmp_path,
-        {"answer": "structured", "findings": findings(), "proxy_calls": 3},
-        limits=DynamicLimits(max_tool_calls=2),
-    )
-
-    with FakeUpstream(
-        [
-            asks(tool_call("c1", "read", {"filePath": "src/a.ts"})),
-            asks(
-                tool_call("c2", "read", {"filePath": "src/b.ts"}),
-                tool_call("c3", "read", {"filePath": "src/c.ts"}),
-            ),
-        ]
-    ) as upstream:
-        answer = fixture.run(upstream)
-
-    assert not answer.ok
-    assert answer.error is not None
-    assert answer.error.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
-    # The answer with the third call was refused at the proxy: the engine got a 403, not the call.
-    answers = next(e["proxy_answers"] for e in fixture.traces() if "proxy_answers" in e)
-    assert answers == [200, 403]
-
-
-# #197-T05
 def test_grep_and_glob_count_the_files_they_name_not_their_patterns(tmp_path: Path) -> None:
     export = str(tmp_path / "export")
     fixture = Fixture(
@@ -578,34 +573,6 @@ def test_grep_and_glob_count_the_files_they_name_not_their_patterns(tmp_path: Pa
     assert fixture.ledger.tool_calls == 3
     # Two files, whichever tool named them and however they were spelled: one identity each.
     assert fixture.ledger.files == 2
-
-
-# #197-T05
-def test_a_file_over_the_distinct_file_bound_fails_the_run_at_the_proxy(tmp_path: Path) -> None:
-    export = str(tmp_path / "export")
-    fixture = Fixture(
-        tmp_path,
-        {
-            "answer": "structured",
-            "findings": findings(),
-            "proxy_calls": 3,
-            "results": {"c1": grep_result(f"{export}/a.ts", f"{export}/b.ts", f"{export}/c.ts")},
-        },
-        limits=DynamicLimits(max_files=2),
-    )
-
-    with FakeUpstream(
-        [
-            asks(tool_call("c1", "grep", {"pattern": "x"})),
-            asks(tool_call("c2", "StructuredOutput", findings())),
-        ]
-    ) as upstream:
-        answer = fixture.run(upstream)
-
-    assert not answer.ok
-    assert answer.error is not None
-    assert answer.error.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
-    assert len(upstream.requests) == 1
 
 
 # #197-T06

@@ -567,7 +567,9 @@ def test_a_negative_zero_is_a_cost_of_plain_zero() -> None:
 
 
 # #267-T09
-def test_the_cost_is_what_the_provider_reported_whatever_the_token_counts_or_unit_costs_are() -> None:
+def test_the_cost_is_what_the_provider_reported_whatever_the_token_counts_or_unit_costs_are() -> (
+    None
+):
     reported = [Decimal("0.0003"), Decimal("0.0002")]
     for prompt in (1, 50, 90):
         for subject in (rich(), cheap(max_cost_usd=Decimal(10**500))):

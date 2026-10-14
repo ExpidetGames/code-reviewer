@@ -157,7 +157,7 @@ class ScriptedModel:
         return {
             "id": "chatcmpl-test",
             "choices": [{"message": message, "finish_reason": finish}],
-            "usage": {"prompt_tokens": 50, "completion_tokens": 10},
+            "usage": {"prompt_tokens": 50, "completion_tokens": 10, "cost": 0.0001},
         }
 
     @property

@@ -10,6 +10,7 @@ stable code; nothing falls back to another model, provider or engine.
 
 import http.client
 import json
+from decimal import Decimal
 from typing import Any
 from urllib.error import URLError
 
@@ -52,11 +53,13 @@ class Upstream:
         return self.status, json.dumps(self.body).encode("utf-8")
 
 
-def answer_with_usage(prompt: int = 10, completion: int = 5) -> dict[str, Any]:
+def answer_with_usage(
+    prompt: int = 10, completion: int = 5, cost: float | None = 0.0001
+) -> dict[str, Any]:
     return {
         "id": "chatcmpl-1",
         "choices": [{"message": {"role": "assistant", "content": "{}"}}],
-        "usage": {"prompt_tokens": prompt, "completion_tokens": completion},
+        "usage": {"prompt_tokens": prompt, "completion_tokens": completion, "cost": cost},
     }
 
 
@@ -318,28 +321,16 @@ def test_a_provider_status_with_no_rule_is_a_bad_request(status: int) -> None:
     assert subject.ledger.failure.code is ErrorCode.LLM_BAD_REQUEST
 
 
-# #197-T05
-def test_the_call_budget_stops_the_run_at_the_proxy() -> None:
-    upstream = Upstream()
-    subject = proxy(upstream, ledger=BudgetLedger(DynamicLimits(max_model_calls=1)))
+# #290-T08
+def test_a_call_that_would_cross_the_cost_limit_is_refused_before_the_provider_sees_it() -> None:
+    # Without unit costs each call reserves the floor (0.05), or twice the dearest call so far.
+    upstream = Upstream(body=answer_with_usage(prompt=100, completion=50, cost=0.04))
+    subject = proxy(upstream, ledger=BudgetLedger(DynamicLimits(max_cost_usd=Decimal("0.1"))))
 
     assert post(subject, request_body()).status == 200
     second = post(subject, request_body())
 
-    assert error_code(second) == ErrorCode.DYNAMIC_BUDGET_EXCEEDED.value
-    assert len(upstream.requests) == 1
-
-
-# #231-T04
-def test_a_call_that_would_cross_the_token_cap_is_refused_before_the_provider_sees_it() -> None:
-    # The descriptor allows 4096 output tokens, so each call reserves its request plus 4096.
-    upstream = Upstream(body=answer_with_usage(prompt=100, completion=4096))
-    subject = proxy(upstream, ledger=BudgetLedger(DynamicLimits(max_total_tokens=5000)))
-
-    assert post(subject, request_body()).status == 200
-    second = post(subject, request_body())
-
-    # 4196 settled + the second request and its allowance is over 5000, with nothing in flight.
+    # 0.04 spent + 0.08 (twice the dearest call) is over 0.1, with nothing in flight.
     assert second.status == 403
     assert error_code(second) == ErrorCode.DYNAMIC_BUDGET_EXCEEDED.value
     assert len(upstream.requests) == 1
@@ -347,16 +338,40 @@ def test_a_call_that_would_cross_the_token_cap_is_refused_before_the_provider_se
     assert subject.ledger.failure is not None
 
 
+# #290-T09
+def test_an_answer_without_a_cost_stops_the_run_with_the_accounting_code() -> None:
+    for usage_cost in (None, "0.5", -1.0, True):
+        body = answer_with_usage()
+        body["usage"]["cost"] = usage_cost
+        subject = proxy(Upstream(body=body))
+
+        response = post(subject, request_body())
+
+        assert error_code(response) == ErrorCode.DYNAMIC_ACCOUNTING_FAILED.value, usage_cost
+        assert subject.ledger.failure is not None
+        assert subject.ledger.failure.code is ErrorCode.DYNAMIC_ACCOUNTING_FAILED
+        # The tokens the provider did report stay on record.
+        assert subject.ledger.usage("m").total_tokens == 15
+
+
+# #290-T09
+def test_an_answer_that_cost_nothing_is_accepted() -> None:
+    subject = proxy(Upstream(body=answer_with_usage(cost=0)))
+
+    assert post(subject, request_body()).status == 200
+    assert subject.ledger.usage("m").cost_usd == 0.0
+
+
 # #231-T07
 def test_a_provider_error_keeps_its_reservation_spent() -> None:
     # Conservative on purpose: a refused call is not given back, so a retry cannot reopen it.
     upstream = Upstream(status=503, body={"error": "unavailable"})
-    ledger = BudgetLedger(DynamicLimits(max_total_tokens=5000))
+    ledger = BudgetLedger(DynamicLimits(max_cost_usd=Decimal("0.06")))
     subject = proxy(upstream, ledger=ledger)
 
     assert post(subject, request_body()).status == 503
 
-    # Nothing settled, yet the reservation (request plus the 4096 output allowance) still counts.
+    # Nothing settled, yet the reservation (the 0.05 floor) still counts: 0.10 is over 0.06.
     with pytest.raises(LimitError) as refused:
         ledger.reserve_call("x" * 1000, output_tokens=4096)
     assert refused.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
@@ -407,7 +422,7 @@ def test_a_transport_failure_is_a_distinct_stable_code_and_never_a_budget_refusa
 
 # #236-T02
 def test_a_transport_failure_keeps_its_reservation_spent() -> None:
-    ledger = BudgetLedger(DynamicLimits(max_total_tokens=5000))
+    ledger = BudgetLedger(DynamicLimits(max_cost_usd=Decimal("0.06")))
     subject = proxy(Broken(ConnectionResetError("reset")), ledger=ledger)
 
     assert post(subject, request_body()).status == 502
@@ -419,7 +434,7 @@ def test_a_transport_failure_keeps_its_reservation_spent() -> None:
 
 # #236-T03
 def test_a_later_budget_refusal_does_not_replace_the_recorded_transport_cause() -> None:
-    ledger = BudgetLedger(DynamicLimits(max_total_tokens=5000))
+    ledger = BudgetLedger(DynamicLimits(max_cost_usd=Decimal("0.06")))
     subject = proxy(Broken(TimeoutError("timed out")), ledger=ledger)
 
     first = post(subject, request_body())
@@ -626,7 +641,7 @@ def message_answer(message: dict[str, Any], *, finish: str = "stop") -> dict[str
         "created": 1,
         "model": "deepseek/deepseek-v4.1-flash",
         "choices": [{"message": message, "finish_reason": finish}],
-        "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "cost": 0.0001},
     }
 
 
@@ -668,7 +683,7 @@ def test_a_streamed_request_is_answered_from_the_bounded_whole_answer() -> None:
     assert delta["role"] == "assistant"
     assert delta["tool_calls"] == [{**tool_call, "index": 0}]
     assert closing["choices"][0]["finish_reason"] == "stop"
-    assert closing["usage"] == {"prompt_tokens": 10, "completion_tokens": 5}
+    assert closing["usage"] == {"prompt_tokens": 10, "completion_tokens": 5, "cost": 0.0001}
     assert subject.ledger.usage(None).total_tokens == 15
 
 
@@ -680,19 +695,6 @@ def test_a_request_that_does_not_stream_gets_the_plain_answer() -> None:
 
     assert response.content_type == "application/json"
     assert json.loads(response.body)["choices"][0]["message"]["content"] == "{}"
-
-
-# #197-T05
-def test_the_tool_call_over_the_bound_is_refused_before_the_engine_gets_the_answer() -> None:
-    call = {"id": "c1", "type": "function", "function": {"name": "read", "arguments": "{}"}}
-    upstream = Upstream(body=message_answer({"role": "assistant", "tool_calls": [call]}))
-    subject = proxy(upstream, ledger=BudgetLedger(DynamicLimits(max_tool_calls=0)))
-
-    response = post(subject, request_body(stream=True))
-
-    assert response.status == 403
-    assert error_code(response) == ErrorCode.DYNAMIC_BUDGET_EXCEEDED.value
-    assert b"tool_calls" not in response.body
 
 
 # #197-T12
@@ -854,7 +856,7 @@ def test_the_forwarded_bytes_are_compact_utf_8_and_the_reservation_counts_exactl
 # #232-T08
 def test_non_ascii_text_is_reserved_at_its_utf_8_size_not_its_escaped_size() -> None:
     upstream = Upstream()
-    ledger = BudgetLedger(DynamicLimits(), window_tokens=9000, output_tokens=100)
+    ledger = BudgetLedger(DynamicLimits(), window_tokens=6000, output_tokens=100)
     subject = proxy(upstream, ledger=ledger)
 
     # 2,000 characters are about 4 KB as UTF-8 and about 12 KB as `\uXXXX` escapes; the output
@@ -1111,10 +1113,11 @@ def test_a_streamed_request_records_the_cost_and_the_engine_still_sees_the_usage
     assert subject.ledger.usage(None).cost_usd == 0.0007
 
 
-# #267-T04
-# #267-T05
-def test_a_call_without_a_usable_cost_makes_the_cost_unknown_and_changes_nothing_else() -> None:
-    answers: list[dict[str, Any]] = [answer_with_usage()]  # no cost field at all
+# #267-T04, #267-T05, #290-T09
+def test_a_call_without_a_usable_cost_stops_the_run_and_keeps_the_tokens() -> None:
+    no_field = answer_with_usage()
+    del no_field["usage"]["cost"]
+    answers: list[dict[str, Any]] = [no_field]
     unusable_costs: list[Any] = [None, "0.01", True, [], {}, -0.5, 1e999, float("nan")]
     answers += [answer_with_cost(unusable) for unusable in unusable_costs]
     for answer in answers:
@@ -1122,25 +1125,31 @@ def test_a_call_without_a_usable_cost_makes_the_cost_unknown_and_changes_nothing
 
         response = post(subject, request_body())
 
-        assert response.status == 200, answer
+        assert response.status == 403, answer
+        assert error_code(response) == ErrorCode.DYNAMIC_ACCOUNTING_FAILED.value, answer
         usage = subject.ledger.usage(None)
         assert usage.cost_usd is None, answer
         assert (usage.prompt_tokens, usage.completion_tokens, usage.ai_calls) == (10, 5, 1)
 
 
-# #267-T04
-def test_one_call_without_a_cost_makes_the_whole_run_unknown_not_a_partial_sum() -> None:
+# #267-T04, #290-T09
+def test_one_call_without_a_cost_stops_the_run_at_that_call() -> None:
     priced = answer_with_cost(0.2)
-    unpriced = answer_with_usage()
+    unpriced = answer_with_cost(None)
     answers = iter([priced, unpriced, priced])
+    sent: list[int] = []
 
     def upstream(url: str, body: bytes, headers: dict[str, str], limit: int) -> tuple[int, bytes]:
+        sent.append(1)
         return 200, json.dumps(next(answers)).encode("utf-8")
 
     subject = proxy(upstream)
-    for _ in range(3):
-        assert post(subject, request_body()).status == 200
+    statuses = [post(subject, request_body()).status for _ in range(2)]
 
+    assert statuses == [200, 403]
+    # The run is over: the recorded cause is the accounting failure, the cost is not a partial sum.
+    assert subject.ledger.failure is not None
+    assert subject.ledger.failure.code is ErrorCode.DYNAMIC_ACCOUNTING_FAILED
     assert subject.ledger.usage(None).cost_usd is None
 
 

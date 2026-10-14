@@ -329,6 +329,7 @@ MODEL_FIXTURES = {
         "usage": {
             "prompt_tokens": 40,
             "completion_tokens": 9,
+            "cost": 0.0003,
             "completion_tokens_details": {"reasoning_tokens": 5},
         },
     },
@@ -341,6 +342,7 @@ MODEL_FIXTURES = {
             "prompt_tokens": 61,
             "completion_tokens": 12,
             "total_tokens": 73,
+            "cost": 0.0004,
             "prompt_tokens_details": {"cached_tokens": 30},
         },
     },
