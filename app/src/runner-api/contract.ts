@@ -201,7 +201,13 @@ export type RunnerUsage = {
   aiCalls: number;
   fallbackUsed: boolean;
   costUsd: number | null;
+  /** Why a Dynamic Review was wrapped up before it was done (#293); null for a complete run. */
+  stoppedEarly: StoppedEarly | null;
 };
+
+/** The reasons a Dynamic Review stops early: its cost limit or its time limit. */
+export const STOPPED_EARLY_REASONS = ["cost_limit", "time_limit"] as const;
+export type StoppedEarly = (typeof STOPPED_EARLY_REASONS)[number];
 
 /** The result of a job as the runner reports it, after the checks and with every field filled. */
 export type RunnerResult = {
