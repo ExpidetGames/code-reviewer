@@ -228,6 +228,24 @@ and 2.10):
   instance level; `src/runner-api/claimed-keys.ts`). A row goes with its job and with the cleanup a week after the
   job finished.
 
+### Workspace entitlements
+
+Migration `20261014120000_create_workspace_entitlements` (#271; epic #268). It adds an empty table and touches no
+existing row:
+
+- `workspace_entitlements` (`workspace_id` as the primary key, `plan_label`, `key_mode` `own` or `managed`, `limits`
+  as JSON text, `period_start`, `suspended` as 0 or 1, `suspension_code`, `updated_at`, `updated_by`): what an
+  operator allows one workspace (`workspace-entitlements-repository.ts`, scoped; one row per workspace, so
+  `get`, `put` and `remove` take no id). The checks refuse a key mode other than the two, a suspended flag other
+  than 0 and 1, and a suspension code on a workspace that is not suspended. The row goes with its workspace.
+  `put` validates (`src/workspaces/entitlements-validation.ts`) and never lets `period_start` move to an earlier
+  time: one upsert whose `where` compares the stored and the new start, so a repeated or late reset is harmless.
+- The instance setting `default_entitlements` (`instance-settings-repository.ts`, the same fields without the
+  workspace) applies to every workspace without a row. `set` validates it the same way and checks the period
+  start under a transaction lock (an advisory lock on Postgres).
+- No row and no default means unlimited, as before. Only `resolveEntitlements` (`src/workspaces/entitlements.ts`)
+  interprets the data; see `src/workspaces/README.md`, "Entitlements".
+
 ## Workspace scoping
 
 Every repository that reads or writes customer data is created for one workspace:

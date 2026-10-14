@@ -135,6 +135,29 @@ characters without control or formatting characters (they end up in mails and pa
 - **Single-tenant**, no workspace: "Ask an admin of this instance for an invitation". No access, no automatic
   join, however the account was made; `POST /api/workspaces` answers `multi_tenant_required`.
 
+## Entitlements
+
+An operator who serves many workspaces can state, per workspace, what it may do (#271; epic #268). This is the data
+model only: no endpoint, no page, nothing is enforced yet (the operator API, the usage records, the managed key
+and the enforcement are later issues of the epic). A self-hosted instance configures nothing and nothing changes.
+
+- **Data.** One row per workspace in `workspace_entitlements` (`src/db/repositories/workspace-entitlements-repository.ts`)
+  and one instance setting `default_entitlements` for the workspaces without a row. Both hold the same fields:
+  `planLabel` (a label for display and audit, at most 64 printable characters; the code never branches on it),
+  `keyMode` (`own` or `managed`), `limits` (`diffRunsPerPeriod`, `dynamicRunsPerPeriod`,
+  `managedCostLimitMicroUsd`, each a non-negative integer up to 2^53-1 or `null` for unlimited), `periodStart` (usage
+  counts from here), `suspended` and `suspensionCode`.
+- **Resolver.** `resolveEntitlements(row, default)` in `entitlements.ts` is the one place that interprets the data. A
+  row wins entirely (no field-wise merge with the default); without a row the default applies; with neither the
+  answer is `{ kind: "unlimited" }` (own key, no limits, not suspended). A limited answer says whether it came from
+  the `workspace` or the `default`.
+- **Validation.** `entitlements-validation.ts` returns stable codes: `plan_label_invalid`, `key_mode_invalid`,
+  `limits_invalid` (not an object, a missing or an unknown key), `limit_invalid` (with the name of the limit),
+  `period_start_invalid`, `period_start_in_future` (more than five minutes ahead), `period_start_backwards` (earlier
+  than the stored one; the same value again is accepted), `suspended_invalid`, `suspension_code_invalid` (lower case
+  letters, digits, `_` and `-`, starting with a letter, at most 64 characters). A suspension code is kept only while
+  suspended: clearing the suspension clears the code. The repositories throw `EntitlementsError` with the code.
+
 ## Not here
 
 Deleting workspaces, transferring data, SSO and teams below the workspace are out of scope. A GitHub App installation
@@ -153,7 +176,8 @@ violation of the slug, so a collision never becomes a 500), see the comment in `
 
 ## Tests
 
-`permissions.test.ts`, `names.test.ts`, `paths.test.ts`, `access.test.ts`, `guard-rule.test.ts`: the pure
+`permissions.test.ts`, `names.test.ts`, `paths.test.ts`, `access.test.ts`, `guard-rule.test.ts`,
+`entitlements.test.ts`, `entitlements-validation.test.ts`: the pure
 rules and the structure rules. `members.integration.test.ts`, `invitations.integration.test.ts`,
 `create-workspace.integration.test.ts`, `last-owner-race.integration.test.ts`, `http.integration.test.ts`,
 `fresh-user.integration.test.ts`, `invitation-sign-up.integration.test.ts`: the services and handlers over a
