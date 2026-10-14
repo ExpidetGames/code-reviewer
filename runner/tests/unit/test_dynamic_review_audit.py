@@ -43,7 +43,7 @@ def read_file(path: str) -> str:
     return f"<path>{path}</path>\n<type>file</type>\n<content>\n1: x\n</content>"
 
 
-def audit(**limits: int) -> tuple[ToolAudit, BudgetLedger]:
+def audit(**limits: Any) -> tuple[ToolAudit, BudgetLedger]:
     ledger = BudgetLedger(DynamicLimits(**limits))
     return ToolAudit(ledger, export_root=EXPORT), ledger
 

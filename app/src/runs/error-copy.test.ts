@@ -60,6 +60,16 @@ describe("the sentences for error codes", () => {
     );
   });
 
+  // #290-T06
+  it("tells a person that the request was larger than the model's context window", () => {
+    const { text, known } = describeErrorCode("llm_context_length_exceeded");
+
+    expect(known).toBe(true);
+    expect(text).toMatch(/context window/);
+    expect(text).toMatch(/^[A-Z].*\.$/);
+    expect(text).not.toContain("llm_context_length_exceeded");
+  });
+
   // #260: the code is also reported when the app could not be asked, not only when the job was lost.
   it("says for lease_lost that the job may have been lost or that this could not be confirmed, and that nothing was written", () => {
     const { text } = describeErrorCode("lease_lost");

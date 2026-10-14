@@ -115,7 +115,7 @@ def call(url: str, token: str | None) -> tuple[int, Any]:
 
 
 def started_proxy(
-    upstream_url: str, capability: str, ledger: BudgetLedger | None = None, **limits: int
+    upstream_url: str, capability: str, ledger: BudgetLedger | None = None, **limits: Any
 ) -> Any:
     proxy = ModelProxy(
         ledger=ledger or BudgetLedger(DynamicLimits(**limits)),

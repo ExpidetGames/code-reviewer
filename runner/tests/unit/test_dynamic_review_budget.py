@@ -77,6 +77,30 @@ def test_the_input_estimate_is_bytes_over_three_rounded_up() -> None:
     assert subject.model_calls == 1
 
 
+# #197-T05
+def test_a_call_is_settled_with_the_provider_usage_and_cost() -> None:
+    subject = ledger()
+    reservation = subject.reserve_call("x" * 100, output_tokens=50)
+    assert subject.model_calls == 1
+
+    subject.settle_call(reservation, prompt_tokens=30, completion_tokens=40, cost=Decimal("0.002"))
+    usage = subject.usage("vendor/model")
+
+    assert (usage.prompt_tokens, usage.completion_tokens, usage.total_tokens) == (30, 40, 70)
+    assert usage.ai_calls == 1
+    assert usage.cost_usd == 0.002
+
+
+# #197-T05
+def test_a_retry_is_a_call_like_any_other() -> None:
+    subject = ledger(max_cost_usd=Decimal("0.05"))
+    subject.reserve_call("a", output_tokens=1)  # the first attempt, never answered
+
+    with pytest.raises(LimitError) as refused:
+        subject.reserve_call("a", output_tokens=1)  # the retry has its own reservation
+    assert refused.value.code is ErrorCode.DYNAMIC_BUDGET_EXCEEDED
+
+
 # #290-T03
 def test_a_denser_previous_call_tightens_the_estimate_of_the_next_one() -> None:
     subject = ledger()

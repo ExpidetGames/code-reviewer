@@ -248,8 +248,19 @@ runner configuration, never repository input); one value per runner, so it must 
 project's model on that instance:
 
 ```json
-{"tool_choice_required": true, "structured_output": true, "max_output_tokens": 8192}
+{"tool_choice_required": true, "structured_output": true, "max_output_tokens": 8192,
+ "context_window_tokens": 1048576, "input_usd_per_mtok": 0.5, "output_usd_per_mtok": 2}
 ```
+
+`context_window_tokens` is the model's context window (what a request and its output allowance must
+fit); `input_usd_per_mtok` and `output_usd_per_mtok` are what a million input and output tokens cost
+in USD, used only to reserve the cost of a call before it is sent (see "Hard limits"). The last
+three are optional: without a window the conservative default of 128,000 tokens applies, and
+without unit costs a call reserves a fixed floor. A window that is not a positive integer larger
+than `max_output_tokens`, or only one of the two unit costs, fails the run with
+`dynamic_model_features_unsupported`. The built-in description of the default model carries the
+window that OpenRouter's public model list gives for it (1,048,576 tokens, read on 2026-10-14,
+`https://openrouter.ai/api/v1/models`) and the unit costs of that list (`runner/src/code_reviewer_runner/dynamic_review/proxy.py`).
 
 A value that is set always wins, including over the built-in description for the default model. If a
 job's model has no description (unset variable, another model), the value is not JSON, or it lacks a
@@ -258,26 +269,92 @@ to another model or to a Diff review.
 
 ## Hard limits
 
-The limits are fixed in the code (`runner/src/code_reviewer_runner/dynamic_review/budget.py`); no
-project setting or pull request text widens them, and the wall-clock limit is the minimum of the
-epic's 600 seconds and the runner's job timeout.
+The limits are fixed in the code (`runner/src/code_reviewer_runner/dynamic_review/budget.py`) or are
+trusted runner configuration; no project setting or pull request text widens them, and the
+wall-clock limit is the minimum of 600 seconds and the runner's job timeout.
 
-| Limit | Value |
-|---|---|
-| Wall clock | 600 s (lower when `RUNNER_JOB_TIMEOUT_SECONDS` is lower) |
-| Model calls | 30 |
-| Total tokens consumed (cumulative, not the context window) | 120,000 |
-| Tool calls | 200 |
-| Distinct files read | 100 |
-| One tool result | 64 KiB |
-| All tool results together | 4 MiB |
-| Untrusted input to the engine | 2 MiB |
-| Findings | 30 |
+**The one budget is money (#290).** A Dynamic run is bounded by an operator cost limit in USD, not by
+tokens, model calls, tool calls or files: a tool loop sends its whole history again with every call,
+so those counts say little about what a run costs, and a count tight enough to protect an operator
+stopped normal reviews of a medium repository. The tokens, calls, tool calls and files are still
+counted and shown in the Run; they just stop nothing.
 
-A limit hit ends the run with `dynamic_budget_exceeded`; a run whose usage cannot be established ends
-with `dynamic_accounting_failed`. The previous summary comment is preserved in both cases. The
-tool, file and result-byte limits are enforced at the model proxy, before the request is forwarded
-(#197 part 2a): a model request whose history exceeds one of them never reaches the provider.
+| Limit | Value | Kind |
+|---|---|---|
+| Cost of one run | 1.00 USD; `RUNNER_DYNAMIC_MAX_COST_USD` sets it (a plain decimal number above 0, up to the ceiling of 20 USD in the code; anything else fails the job with `dynamic_config_invalid`) | budget |
+| Wall clock | 600 s (lower when `RUNNER_JOB_TIMEOUT_SECONDS` is lower) | technical: the lease and the runner's capacity depend on it |
+| One tool result | 64 KiB | technical |
+| All tool results together | 4 MiB | technical |
+| Untrusted input to the engine | 2 MiB | technical |
+| One model request, one answer, one stream | 4 MiB, 256 KiB, 1 MiB | technical |
+| Findings | 30 | output size: the summary comment, GitHub's comment limit and the persisted review state are bounded by it (the project setting is 1 to 30) |
+
+Removed in #290: 30 model calls, 120,000 total tokens, 200 tool calls and 100 distinct files. If one
+of the technical limits blocks a normal review of a medium repository, report it with evidence
+instead of raising it.
+
+**How the cost is bounded.** Before every call the ledger reserves what the call could cost. With
+the unit costs of the model's description that is the input estimate and the output allowance at
+those costs; without them it is a floor of 0.05 USD or twice the dearest call settled so far,
+whichever is more. The call is refused (`dynamic_budget_exceeded`, before the provider sees it) when
+what is spent, what is reserved for calls in flight and this reservation would together pass the
+limit. After the call the reservation is replaced by the `usage.cost` the provider reported (the
+credits it charged, #286). **A call that reports no cost ends the run with
+`dynamic_accounting_failed`**: without it the run cannot be bounded by money, and a missing cost is
+never read as zero. A cost of 0 (a free model) is a cost. Without unit costs the bound is best
+effort within one call: a run can end above the limit by the amount by which its last call cost
+more than twice the call before it. Repository and pull request input never set any of this.
+
+**The input estimate.** Bytes divided by 3 (real text has about 3 to 4 bytes per token; the old
+estimate of one token per byte was 3 to 4 times too high, which refused a request of about 92 KB
+against a 100,000-token window), tightened to what the provider settled on the previous call when
+that was denser (only from requests of 4 KiB up), and never below the last settled prompt. The
+margin: every call also reserves its whole output allowance at the output cost, though most calls
+use a small part of it. The provider's reported usage replaces the estimate after the call. It is
+accepted up to the proven byte bound (a token is never fewer than one byte); above that it is an
+accounting failure (`dynamic_accounting_failed`).
+
+**The window is a backstop.** The window of a run is the model's, from its description
+(`context_window_tokens`). A request whose estimate plus output allowance exceeds it is refused
+before it is sent (`dynamic_budget_exceeded`); the provider's own limit is the final backstop, and
+its "context length exceeded" answer ends the run with `llm_context_length_exceeded`. The project's
+Diff Review "Token budget" (`llm.maxTokens`) is **ignored** by Dynamic Review: it is another concept
+(the size PR-Agent gives a diff), the review kind card hides it for Dynamic, and using it as the
+window is what refused real reviews. It is neither a window nor an extra cap.
+
+A run whose limit is hit ends with `dynamic_budget_exceeded`, a run whose usage or cost cannot be
+established with `dynamic_accounting_failed`. The previous summary comment is preserved in both
+cases. The tool, file and result-byte checks are enforced at the model proxy, before the request is
+forwarded (#197 part 2a): a model request whose history exceeds one of them never reaches the
+provider.
+
+## Context window and compaction
+
+OpenCode can compact a long session itself (`compaction.auto`, with the model's `limit.context` and
+`limit.output` in the provider config, and `compaction.prune`). Both stay **off** (decision of #290,
+re-check with every engine pin), because of a defect found against the real pinned v1.19.0 binary:
+
+- After an automatic compaction the engine's next requests to the model no longer offer the
+  `StructuredOutput` tool and no longer force a tool choice (`tool_choice` is `auto`). The
+  structured-output format lives on the user message that started the turn; compaction replaces that
+  message with a summary and a synthetic "continue" message that carries no format
+  (`session/prompt.ts` and `session/compaction.ts` at the pinned commit). The model then answers in
+  prose and the run ends without a typed answer (`dynamic_policy_violation: the findings are not
+  valid JSON`). A run cannot finish after a compaction.
+- The same lost format would defeat any later "answer now" step.
+- What the model sees after a compaction also changes in trust: the review task (the pull request
+  title, body and the diff, which are untrusted input) is replaced by a summary the model wrote, in
+  an assistant-role message. Text from the repository can be carried into that summary and then reads
+  like the model's own earlier words. The engine's permissions, the read-only tool set, the proxy's
+  audits and the typed findings validation do not depend on that text, so this cannot widen what
+  the engine can do, but it can make injected text more persuasive. The trusted system prompt (the
+  fixed core and the skill) is the agent's own prompt and is sent again with every request, also
+  after a compaction; the compaction request itself goes through the proxy like any other call, so it
+  is counted and priced.
+
+A compaction therefore needs either the engine to keep the format (an upstream fix) or a way for the
+runner to keep it that is not a workaround of the proxy's rules; that is a follow-up. Until then the
+run is bounded by the cost limit and the model's window.
 
 ## Errors an operator sees
 
@@ -290,7 +367,8 @@ tool, file and result-byte limits are enforced at the model proxy, before the re
 | `dynamic_model_features_unsupported` | The model or destination lacks tool choice or structured output | `RUNNER_DYNAMIC_CAPABILITIES`, the model |
 | `lease_lost` | Right before the summary would have been written the job was no longer held by this runner (lease lost, job cancelled), or the app could not be asked; nothing was written | Normal after a requeue or a cancel. Often: the app was unreachable at that moment; the next push reviews again |
 | `dynamic_config_invalid` | Model, skill or limits of the job are unusable | The project's settings page |
-| `dynamic_budget_exceeded`, `dynamic_accounting_failed`, `dynamic_policy_violation` | A hard limit or rule stopped the run | The Runs page |
+| `dynamic_budget_exceeded`, `dynamic_accounting_failed`, `dynamic_policy_violation` | A hard limit or rule stopped the run. Accounting also fails when a call reports no cost | The Runs page; `RUNNER_DYNAMIC_MAX_COST_USD` |
+| `llm_context_length_exceeded` | The provider said the request is larger than the model's context | The model's `context_window_tokens` in `RUNNER_DYNAMIC_CAPABILITIES`; a smaller pull request |
 
 Switching a project from Dynamic to Diff (or back) starts a fresh summary comment; findings are not
 carried across kinds (lead decision of 2026-10-13, see #199). Cancelling a run kills its engine's
@@ -312,6 +390,7 @@ docker compose -f compose.yml -f compose.dynamic.yml up -d --build --wait
 | `RUNNER_DYNAMIC_MEMORY_LIMIT` | `2g` | At least 1 GiB per Dynamic slot plus the runner and proxy reserve (the spike's conservative, unvalidated proposal) |
 | `RUNNER_DYNAMIC_MEMORY_RESERVATION` | `1536m` | The soft reservation under the limit |
 | `RUNNER_DYNAMIC_IMAGE` | `code-reviewer-runner-dynamic:local` | Name of the image compose builds; set it to use a prebuilt one |
+| `RUNNER_DYNAMIC_MAX_COST_USD` | empty | The most one run may cost, in USD; empty is 1.00; up to 20 (see "Hard limits") |
 | `RUNNER_DYNAMIC_CAPABILITIES` | empty | The model description (see "The model"); empty applies the description built into the runner for the default model only, and makes a job of any other model fail with `dynamic_model_features_unsupported` |
 
 The container runs the supervisor as root with only the capabilities of "The engine boundary", sets
