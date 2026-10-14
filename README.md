@@ -13,7 +13,7 @@ Code Reviewer wraps PR-Agent: it runs PR-Agent against pull requests and adds a 
 | `app/` | Web app and API: Next.js 16, TypeScript, pnpm |
 | `runner/` | Worker that runs PR-Agent: Python, uv |
 | `compose.yml` | The whole stack on one machine (app and runner), see "Run with Docker Compose" |
-| `compose.coolify.yml` | The same stack for Coolify (built from the repository, no published port), see "Deploy on Coolify" |
+| `compose.coolify.yml` | The same stack for Coolify (built from the repository, no published port) plus the Dynamic runner, see "Deploy on Coolify" |
 | `docs/` | Guides for operators: [`docs/deployment-coolify.md`](docs/deployment-coolify.md) (deploying on Coolify), [`docs/github-app.md`](docs/github-app.md) (creating and installing the team's GitHub App) |
 | `docs/decisions/` | Architecture decision records, see [`docs/decisions/README.md`](docs/decisions/README.md) |
 | `fakes/` | Fake servers and fixtures used by the tests |
@@ -325,7 +325,8 @@ proves its isolation at start and advertises the engine only if that passes; Dyn
 until the instance admin turns on its switch. The default runner image holds no engine.
 [docs/dynamic-review.md](docs/dynamic-review.md) has the activation steps (including how to verify the
 self-check and the admin switch), the sizing, the rollback and the known limitations;
-[docs/deployment-coolify.md](docs/deployment-coolify.md) has the (untested) Coolify variant.
+[docs/deployment-coolify.md](docs/deployment-coolify.md) has the (untested) Coolify variant: there the Dynamic runner
+is a service of `compose.coolify.yml` itself, started with the rest and idle until the gate is turned on.
 
 ## Deploy on Coolify
 

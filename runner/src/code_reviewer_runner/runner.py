@@ -275,8 +275,13 @@ def run_dynamic_job(
     ripgrep = (
         Path(named_ripgrep) if (named_ripgrep := environment.get(RIPGREP_PATH_VARIABLE)) else None
     )
+    # The descriptor describes the destination the request really goes to, so it is chosen by the
+    # upstream model (`llm.model`); `dynamic.model` is the logical name the engine sees, and the app
+    # sends the same name in both.
     try:
-        capabilities = capabilities_from_config(environment.get(DYNAMIC_CAPABILITIES_VARIABLE))
+        capabilities = capabilities_from_config(
+            environment.get(DYNAMIC_CAPABILITIES_VARIABLE), model=job.llm.model
+        )
     except LimitError as error:
         return _failure(error.code, error.detail, started, capture)
 

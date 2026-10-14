@@ -18,6 +18,7 @@ import pytest
 from code_reviewer_runner.dynamic_review.budget import BudgetLedger, DynamicLimits, LimitError
 from code_reviewer_runner.dynamic_review.config import new_proxy_capability
 from code_reviewer_runner.dynamic_review.proxy import (
+    DEFAULT_DYNAMIC_MODEL,
     ModelProxy,
     ProxyResponse,
     UpstreamPost,
@@ -930,3 +931,40 @@ def test_an_authenticated_request_is_the_only_way_to_record_a_failure() -> None:
     subject.handle("POST", "/v1/chat/completions", b"not json", bearer(OTHER_CAPABILITY))
 
     assert subject.ledger.failure is None
+
+
+# #264-T11: the descriptor of the shipped default model is built in (verified on OpenRouter: tools,
+# tool_choice and structured outputs), and only for that exact model id.
+def test_the_default_model_has_a_built_in_descriptor_and_no_other_model_has() -> None:
+    assert DEFAULT_DYNAMIC_MODEL == "deepseek/deepseek-v4.1-flash"
+
+    built_in = capabilities_from_config(None, model=DEFAULT_DYNAMIC_MODEL)
+    assert (built_in.tool_choice_required, built_in.structured_output) == (True, True)
+    assert built_in.max_output_tokens == 8192
+    built_in.check_required()
+    assert capabilities_from_config("", model=DEFAULT_DYNAMIC_MODEL) == built_in
+
+    for model in (None, "", "anthropic/claude-haiku-5.5", DEFAULT_DYNAMIC_MODEL.upper()):
+        with pytest.raises(LimitError) as refused:
+            capabilities_from_config(None, model=model)
+        assert refused.value.code is ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED
+
+
+# #264-T11: a descriptor the operator sets keeps its meaning and precedence, even an unusable one.
+def test_a_configured_descriptor_wins_over_the_built_in_one() -> None:
+    configured = capabilities_from_config(CAPABILITIES, model=DEFAULT_DYNAMIC_MODEL)
+    assert configured.max_output_tokens == 4096
+
+    with pytest.raises(LimitError) as refused:
+        capabilities_from_config("not json", model=DEFAULT_DYNAMIC_MODEL)
+    assert refused.value.code is ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED
+
+
+# #264-T13
+def test_a_blank_descriptor_is_an_empty_one() -> None:
+    assert capabilities_from_config(
+        "  \n", model=DEFAULT_DYNAMIC_MODEL
+    ) == capabilities_from_config(None, model=DEFAULT_DYNAMIC_MODEL)
+    with pytest.raises(LimitError) as refused:
+        capabilities_from_config(" ", model="anthropic/claude-haiku-5.5")
+    assert refused.value.code is ErrorCode.DYNAMIC_MODEL_FEATURES_UNSUPPORTED

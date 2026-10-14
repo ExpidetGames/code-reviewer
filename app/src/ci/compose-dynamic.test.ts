@@ -135,7 +135,6 @@ describe("compose.dynamic.yml", () => {
   it("is opt-in: a file of its own, not a profile that a stray flag could switch on", () => {
     expect(runnerDynamic()).not.toHaveProperty("profiles");
     expect(read("compose.yml")).not.toContain("runner-dynamic");
-    expect(read("compose.coolify.yml")).not.toContain("runner-dynamic");
     expect(read("compose.large.yml")).not.toContain("runner-dynamic");
   });
 
@@ -460,52 +459,153 @@ describe("compose.dynamic.yml", () => {
   });
 });
 
-describe("compose.coolify.dynamic.yml", () => {
-  // #202-T07: Coolify takes one Compose file per resource, so the Dynamic runner of a Coolify
-  // installation is a second resource built from this standalone file. It must stay the same runner.
-  const coolify = parse(read("compose.coolify.dynamic.yml")) as Compose;
-  const coolifySource = read("compose.coolify.dynamic.yml");
+// #264: Coolify takes one Compose file per resource, and the existing resource deploys
+// compose.coolify.yml, so the Dynamic runner is a third service of that file (no second resource).
+// It must stay the very same hardened runner as the one of compose.dynamic.yml: this pins the two
+// services equal, except for what Coolify needs differently.
+describe("compose.coolify.yml runner-dynamic", () => {
+  const coolifySource = read("compose.coolify.yml");
+  const coolify = parse(coolifySource) as Compose;
 
-  it("adds exactly the one service and nothing else", () => {
-    expect(Object.keys(coolify.services)).toEqual(["runner-dynamic"]);
-    expect(coolify).not.toHaveProperty("volumes");
-    expect(read("compose.coolify.yml")).not.toContain("runner-dynamic");
-  });
+  function coolifyDynamic(): Service {
+    const found = coolify.services["runner-dynamic"];
+    if (!found)
+      throw new Error('compose.coolify.yml has no service "runner-dynamic"');
+    return found;
+  }
 
-  it("is the service of compose.dynamic.yml, except that it reaches the app by its address and builds without a local tag", () => {
-    const own = { ...(coolify.services["runner-dynamic"] ?? {}) };
-    const shared = { ...runnerDynamic() };
+  /** `${NAME:?some message}` and `${NAME:?}` are the same requirement; only the message differs. */
+  function withoutMessage(value: string): string {
+    return value.replace(/(\$\{[A-Z0-9_]+:\?)[^}]*\}/, "$1}");
+  }
 
-    // What differs on purpose: no sibling `app` service to wait for, the address of the app, and the
-    // image name (Coolify names the images it builds).
+  // #264-T02 #264-T03
+  it("is the service of compose.dynamic.yml, except for the image name and the message of the token", () => {
+    const own = JSON.parse(JSON.stringify(coolifyDynamic())) as Service;
+    const shared = JSON.parse(JSON.stringify(runnerDynamic())) as Service;
+
+    // What differs on purpose: Coolify names the images it builds, and shows a required variable by
+    // its name alone (a message would break its recognition of `:?`).
     for (const service of [own, shared]) {
-      delete service.depends_on;
       delete service.image;
-      service.environment = {
-        ...service.environment,
-        RUNNER_API_URL: "<differs>",
-      };
+      service.environment = Object.fromEntries(
+        Object.entries(service.environment ?? {}).map(([key, value]) => [
+          key,
+          withoutMessage(String(value)),
+        ]),
+      );
     }
     expect(own).toEqual(shared);
   });
 
-  it("takes the address of the app from a required variable, not from a sibling service", () => {
-    const environment = coolify.services["runner-dynamic"]?.environment ?? {};
+  // #264-T02
+  it("is created with exactly the hardening of the Dynamic runner: root with the listed capabilities, read-only, three tmpfs, limits", () => {
+    const service = coolifyDynamic();
 
-    expect(environment.RUNNER_API_URL).toMatch(
-      /^\$\{RUNNER_API_URL:\?[^}]*\}$/,
+    expect(service.user).toBe("0:0");
+    expect(service.cap_drop).toEqual(["ALL"]);
+    expect([...(service.cap_add ?? [])].sort()).toEqual(CREATED_WITH);
+    expect(service.security_opt).toEqual(["no-new-privileges:true"]);
+    expect(service.read_only).toBe(true);
+    expect([...(service.tmpfs ?? [])].sort()).toEqual(READ_ONLY_TMPFS);
+    expect(service.mem_limit).toBe("${RUNNER_DYNAMIC_MEMORY_LIMIT:-2g}");
+    expect(service.memswap_limit).toBe(service.mem_limit);
+    expect(Number(service.pids_limit)).toBe(512);
+    expect(service.stop_grace_period).toBe("90s");
+    expect(service.restart).toBe("unless-stopped");
+    expect(service.privileged).not.toBe(true);
+    for (const key of [
+      "ports",
+      "expose",
+      "volumes",
+      "volumes_from",
+      "devices",
+      "network_mode",
+      "pid",
+      "ipc",
+      "uts",
+      "cgroup",
+      "privileged",
+      "userns_mode",
+      "sysctls",
+      "configs",
+      "secrets",
+      "extends",
+      "profiles",
+      "entrypoint",
+      "command",
+    ]) {
+      expect(service, key).not.toHaveProperty(key);
+    }
+    const code = coolifySource
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("#"))
+      .join("\n");
+    expect(code).not.toMatch(/docker\.sock/);
+    // The one top-level `volumes` of the file belongs to the app; no service but the app mounts one.
+    for (const [name, definition] of Object.entries(coolify.services))
+      if (name !== "app")
+        expect(definition, name).not.toHaveProperty("volumes");
+  });
+
+  // #264-T03
+  it("builds the dynamic target from the checkout and reaches the app over the Docker network with the one runner token", () => {
+    const service = coolifyDynamic();
+
+    expect(service.build).toEqual({
+      context: ".",
+      dockerfile: "runner/Dockerfile",
+      target: "dynamic",
+    });
+    expect(service).not.toHaveProperty("image");
+    expect(service.depends_on?.app?.condition).toBe("service_healthy");
+    expect(service.environment?.RUNNER_API_URL).toBe("http://app:3000");
+    expect(service.environment?.RUNNER_API_URL).toBe(
+      coolify.services.runner?.environment?.RUNNER_API_URL,
     );
-    expect(coolify.services["runner-dynamic"]).not.toHaveProperty("depends_on");
-    expect(environment.RUNNER_TOKEN).toBe(
-      runnerDynamic().environment?.RUNNER_TOKEN,
+    expect(service.environment?.RUNNER_TOKEN).toBe("${RUNNER_TOKEN:?}");
+    expect(service.environment?.RUNNER_TOKEN).toBe(
+      coolify.services.runner?.environment?.RUNNER_TOKEN,
     );
   });
 
-  it("says that it is untested on Coolify and points to the guide", () => {
-    const header = coolifySource.split("\n").slice(0, 20).join("\n");
+  // #264-T04
+  it("adds no required variable: an existing Coolify resource redeploys without the owner entering anything", () => {
+    const required = new Set<string>();
+    for (const definition of Object.values(coolify.services))
+      for (const [key, value] of Object.entries(definition.environment ?? {}))
+        if (String(value).includes(":?")) required.add(key);
 
-    expect(header).toMatch(/not (yet )?(been )?(tested|verified)/i);
-    expect(header).toContain("docs/deployment-coolify.md");
+    expect([...required].sort()).toEqual(["BETTER_AUTH_URL", "RUNNER_TOKEN"]);
+    expect(coolifySource).not.toMatch(/\$\{RUNNER_API_URL/);
+    for (const [key, value] of Object.entries(
+      coolifyDynamic().environment ?? {},
+    ))
+      if (key !== "RUNNER_TOKEN")
+        expect(String(value), key).not.toContain(":?");
+  });
+
+  // #264-T05 #264-T11
+  it("passes the model descriptor through with an empty default, like compose.dynamic.yml: the default model's one is built into the runner", () => {
+    const value = coolifyDynamic().environment?.RUNNER_DYNAMIC_CAPABILITIES;
+
+    expect(value).toBe("${RUNNER_DYNAMIC_CAPABILITIES:-}");
+    expect(value).toBe(
+      runnerDynamic().environment?.RUNNER_DYNAMIC_CAPABILITIES,
+    );
+    // No JSON in the file: Coolify stores a default on its first parse and a stored value would win
+    // over every later fix of the file, which is why the default model's descriptor is in the image.
+    expect(coolifySource).not.toMatch(/tool_choice_required|max_output_tokens/);
+    expect(read(".env.example")).toMatch(/^#?\s?RUNNER_DYNAMIC_CAPABILITIES=/m);
+  });
+
+  // #264-T08
+  it("says in its comments that the Dynamic runner is part of this file and that the gate keeps it off", () => {
+    const header = coolifySource.split("\n").slice(0, 40).join("\n");
+
+    expect(coolifySource).toMatch(/runner-dynamic/);
+    expect(header).toMatch(/Dynamic/);
+    expect(header).toMatch(/gate/i);
     expect(coolifySource).not.toContain("PR_AGENT_COMMAND");
   });
 });

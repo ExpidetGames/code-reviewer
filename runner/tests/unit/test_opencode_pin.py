@@ -11,6 +11,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import platform
 import re
 import sys
 import tarfile
@@ -222,3 +223,61 @@ def test_a_redirect_to_another_https_url_is_followed() -> None:
     )
 
     assert followed is not None and followed.full_url == "https://objects.example.invalid/asset"
+
+
+# #264-T10: the image build must never fail on a platform without a pin (an arm64 Coolify server
+# builds this stage too). With the flag the Dockerfile passes, the script installs nothing, says so
+# and exits 0; the strict default (CI, `make fetch-opencode`) still refuses.
+def test_the_image_build_flag_turns_a_missing_pin_into_a_clear_message_and_no_engine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    script = load_script()
+    monkeypatch.setattr(platform, "machine", lambda: "aarch64")
+
+    assert script.main(["--dest", str(tmp_path / "tools"), "--allow-unpinned-platform"]) == 0
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "linux-aarch64" in captured.err
+    assert "no pin" in captured.err
+    assert "Dynamic Review is disabled" in captured.err
+    assert list((tmp_path / "tools").iterdir()) == []
+
+
+# #264-T10
+def test_without_the_flag_a_missing_pin_still_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    script = load_script()
+    monkeypatch.setattr(platform, "machine", lambda: "aarch64")
+
+    assert script.main(["--dest", str(tmp_path / "tools")]) == 1
+    assert "cannot install the pinned OpenCode" in capsys.readouterr().err
+
+
+# #264-T10: the flag is only for a missing pin; a download that is not the pinned one still fails.
+def test_the_flag_does_not_excuse_an_artifact_that_is_not_the_pinned_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    script = load_script()
+
+    def tampered(*args: Any, **options: Any) -> Path:
+        raise script.PinError("the archive SHA-256 is not the pinned digest")
+
+    monkeypatch.setattr(script, "install", tampered)
+
+    assert script.main(["--dest", str(tmp_path), "--allow-unpinned-platform"]) == 1
+
+
+# #264-T10: an x86_64 host must find its pin. If the platform key were wrong there, the flagged
+# image build would skip the engine with one log line instead of failing.
+@pytest.mark.parametrize("machine", ["x86_64", "amd64", "AMD64"])
+def test_an_x86_64_host_is_the_pinned_linux_x64_platform(
+    monkeypatch: pytest.MonkeyPatch, machine: str
+) -> None:
+    script = load_script()
+    monkeypatch.setattr(platform, "machine", lambda: machine)
+    monkeypatch.setattr(sys, "platform", "linux")
+
+    assert script.platform_key() == "linux-x64"
+    assert script.artifact(json.loads(PIN.read_text(encoding="utf-8")), script.platform_key())

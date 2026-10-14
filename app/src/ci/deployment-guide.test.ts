@@ -31,6 +31,7 @@ const publishWorkflow = read(".github/workflows/publish-images.yml");
 type Service = {
   environment?: Record<string, string>;
   mem_limit?: string;
+  mem_reservation?: string;
 };
 type Compose = {
   services: Record<string, Service>;
@@ -111,22 +112,33 @@ describe("the Coolify guide and the environment variables", () => {
 
   // CR-39-T03, #97-SU-17
   it("marks as optional, deprecated or checked by the app exactly the settings the Compose file passes on with a default", () => {
+    const dynamic = coolify.services["runner-dynamic"];
     const withDefault = [
       ...Object.entries(appEnvironment),
       ...Object.entries(coolify.services.runner?.environment ?? {}),
-      // The memory limit of the runner is a setting too, though not an environment variable.
+      // #264-T08: the Dynamic runner reads some of its own variables into the names the runner
+      // uses (RUNNER_CONCURRENCY from RUNNER_DYNAMIC_CONCURRENCY), so it is the reference that counts.
+      ...Object.values(dynamic?.environment ?? {}).map((value) => [
+        /^\$\{([A-Z0-9_]+):-/.exec(String(value))?.[1] ?? "",
+        String(value),
+      ]),
+      // The memory limits are settings too, though not environment variables.
       ["RUNNER_MEMORY_LIMIT", String(coolify.services.runner?.mem_limit)],
+      ["RUNNER_DYNAMIC_MEMORY_LIMIT", String(dynamic?.mem_limit)],
+      ["RUNNER_DYNAMIC_MEMORY_RESERVATION", String(dynamic?.mem_reservation)],
     ]
       .filter(([, value]) => /^\$\{[A-Z0-9_]+:-/.test(String(value)))
       .map(([name]) => name);
 
     expect(
       [
-        ...byRequirement("optional"),
-        ...byRequirement("by the app"),
-        ...byRequirement("deprecated"),
+        ...new Set([
+          ...byRequirement("optional"),
+          ...byRequirement("by the app"),
+          ...byRequirement("deprecated"),
+        ]),
       ].sort(),
-    ).toEqual(withDefault.sort());
+    ).toEqual([...new Set(withDefault)].sort());
   });
 
   // #97-SU-17
