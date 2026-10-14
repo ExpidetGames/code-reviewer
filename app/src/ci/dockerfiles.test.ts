@@ -50,7 +50,10 @@ function finalImage(dockerfile: string): string {
  * context other than through `--from=` and other than the pin files the stage names exactly.
  */
 function contextCopyViolations(dockerfile: string, target: string): string[] {
-  const blocks = instructions(dockerfile).join("\n").split(/^FROM /m).slice(1);
+  const blocks = instructions(dockerfile)
+    .join("\n")
+    .split(/^FROM /m)
+    .slice(1);
   const own = blocks.find((block) => block.includes(` AS ${target}\n`));
   if (!own) throw new Error(`no stage ${target}`);
   const chain: string[] = [own];

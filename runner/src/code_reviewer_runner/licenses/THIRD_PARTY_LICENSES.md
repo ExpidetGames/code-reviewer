@@ -377,6 +377,30 @@ packages inside OpenCode (`runner/opencode-bundled-licenses.json`, reviewed 2026
 | `postgres`        | Unlicense | A peer dependency of `drizzle-orm` in the OpenCode closure (the least likely to be bundled). A public domain dedication. Author: Rasmus Porsager, https://github.com/porsager/postgres |
 | `spdx-exceptions` | CC-BY-3.0 | A list of SPDX license exception identifiers inside the OpenCode bundle. Data, not code. Attribution: The Linux Foundation, https://github.com/kemitchell/spdx-exceptions.json         |
 
+### Attribution: caniuse-lite
+
+`caniuse-lite` (browser support data) is licensed under CC-BY-4.0 (https://creativecommons.org/licenses/by/4.0/). It is data, not code.
+
+- Creator: Alexis Deveria and the caniuse-lite contributors, https://github.com/browserslist/caniuse-lite.
+- License: Creative Commons Attribution 4.0 International, https://creativecommons.org/licenses/by/4.0/. The license text is at that address; this file gives the credit it
+  asks for, the link to the license and the statements below.
+- Changes: none. Code Reviewer uses the data unmodified and only as published on the npm registry. It appears in the build tooling of the app (not shipped to users) and inside the OpenCode executable of the Dynamic runner image, where it is bundled as published by the OpenCode release, unmodified.
+- No warranties: the data is provided "as is". The licensor makes no warranties of any kind about it,
+  and the license disclaims implied warranties of merchantability, fitness for a particular purpose
+  and non-infringement; the licensor is not liable for any damages arising from its use.
+
+### Attribution: spdx-exceptions
+
+`spdx-exceptions` (a list of SPDX license exception identifiers) is licensed under CC-BY-3.0 (https://creativecommons.org/licenses/by/3.0/). It is data, not code.
+
+- Creator: The Linux Foundation, https://github.com/kemitchell/spdx-exceptions.json.
+- License: Creative Commons Attribution 3.0 Unported, https://creativecommons.org/licenses/by/3.0/. The license text is at that address; this file gives the credit it
+  asks for, the link to the license and the statements below.
+- Changes: none. Code Reviewer uses the data unmodified and only as published on the npm registry. It appears only inside the OpenCode executable of the Dynamic runner image, bundled as published by the OpenCode release, unmodified.
+- No warranties: the data is provided "as is". The licensor makes no warranties of any kind about it,
+  and the license disclaims implied warranties of merchantability, fitness for a particular purpose
+  and non-infringement; the licensor is not liable for any damages arising from its use.
+
 ## Updating this file
 
 The scan catches a new license by itself. When it fails, decide whether the license is acceptable

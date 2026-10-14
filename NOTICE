@@ -52,6 +52,20 @@ require us to keep are in THIRD_PARTY_LICENSES.md, in particular:
   The Dynamic runner image carries the unmodified release 14.1.1 (source commit
   4649aa9700619f94cf9c66876e9549d83420e16c) as the search helper of the engine.
 
+  caniuse-lite (https://github.com/browserslist/caniuse-lite)
+  Credit: Alexis Deveria and the caniuse-lite contributors.
+  Licensed under Creative Commons Attribution 4.0 International
+  (https://creativecommons.org/licenses/by/4.0/). Data, used unmodified, provided without
+  warranties (the license disclaims them). It appears in the build tooling and inside the OpenCode
+  executable of the Dynamic runner image.
+
+  spdx-exceptions (https://github.com/kemitchell/spdx-exceptions.json)
+  Credit: The Linux Foundation.
+  Licensed under Creative Commons Attribution 3.0 Unported
+  (https://creativecommons.org/licenses/by/3.0/). Data, used unmodified, provided without
+  warranties (the license disclaims them). It appears inside the OpenCode executable of the Dynamic
+  runner image.
+
   The exact source URLs, revisions and modifications of every adapted passage are in
   THIRD_PARTY_LICENSES.md.
 
