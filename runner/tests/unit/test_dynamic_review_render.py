@@ -24,6 +24,7 @@ from code_reviewer_runner.dynamic_review.state import (
     decode_state,
     encode_state,
 )
+from code_reviewer_runner.dynamic_review.wrap_up import STOPPED_EARLY_NOTICES
 from code_reviewer_runner.result import ErrorCode
 
 SHA = "0123456789abcdef0123456789abcdef01234567"
@@ -193,3 +194,28 @@ def test_a_reset_summary_says_so_and_does_not_claim_the_old_state_is_kept() -> N
     assert "previous review state is kept" in normal
     # The notice is part of the visible text only: the hidden state does not carry it forward.
     assert decode_state(body) == decode_state(normal)
+
+
+# #293-T07
+@pytest.mark.parametrize("reason", sorted(STOPPED_EARLY_NOTICES))
+def test_a_review_that_stopped_early_says_so_in_neutral_words(reason: str) -> None:
+    body = render_comment(state(finding()), repository="acme/repo", stopped_early=reason)
+    normal = render_comment(state(finding()), repository="acme/repo")
+
+    assert STOPPED_EARLY_NOTICES[reason] in body
+    assert "stopped early" in body and "may be incomplete" in body
+    assert "stopped early" not in normal
+    # The notice is part of the visible text only: the hidden state does not carry it forward.
+    assert decode_state(body) == decode_state(normal)
+    # The notice comes first: it is the first thing a reader sees under the heading.
+    assert body.index(STOPPED_EARLY_NOTICES[reason]) < body.index("active finding")
+
+
+# #293-T07
+def test_the_notice_is_one_of_two_constants_never_built_from_the_value_it_is_given() -> None:
+    body = render_comment(
+        state(finding()), repository="acme/repo", stopped_early="<script>alert(1)</script>"
+    )
+
+    assert "<script>" not in body
+    assert "stopped early" not in body

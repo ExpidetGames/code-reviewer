@@ -213,11 +213,34 @@ describe("merging the instance admin with an imported operator", () => {
         updated_at: "2026-10-11T08:00:00.000Z",
       })
       .execute();
+    // The same for the entitlements the operator saved for the workspace (#271).
+    await ctx.db
+      .insertInto("workspace_entitlements")
+      .values({
+        workspace_id: ctx.workspace.id,
+        plan_label: "team",
+        key_mode: "own",
+        limits: "{}",
+        period_start: "2026-10-01T00:00:00.000Z",
+        suspended: 0,
+        suspension_code: null,
+        updated_at: "2026-10-11T08:00:00.000Z",
+        updated_by: "operator",
+      })
+      .execute();
     expect(await githubIdentityLinked(ctx.db, "admin")).toBe(false);
 
     const result = await ctx.link(ADMIN);
 
     expect(result).toEqual({ ok: true, outcome: "merged" });
+    expect(
+      (
+        await ctx.db
+          .selectFrom("workspace_entitlements")
+          .select("updated_by")
+          .executeTakeFirstOrThrow()
+      ).updated_by,
+    ).toBe("admin");
     expect(
       await ctx.db
         .selectFrom("installation_link_requests")

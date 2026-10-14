@@ -20,7 +20,15 @@ from .content_policy import (
     redact_text,
 )
 from .evidence import Entry, changed_paths, endpoint_diff, merge_base, tracked_tree
-from .limits import DEFAULT_LIMITS, Budget, CheckoutError, Limits, ObjectUnavailable
+from .limits import (
+    DEFAULT_LIMITS,
+    Budget,
+    CheckoutError,
+    CheckoutMetrics,
+    CheckoutReason,
+    Limits,
+    ObjectUnavailable,
+)
 from .objects import ObjectStore
 from .paths import validate_path
 from .protocol import advertisement, fetch_pack
@@ -30,10 +38,19 @@ _SHA = re.compile(r"[0-9a-f]{40}")
 
 
 class SkipReason(StrEnum):
-    """Stable reason codes for changed content excluded from the review rather than failed."""
+    """Stable reason codes for changed content excluded from the review rather than failed.
+
+    `binary` and `too_large` are about the content. The other three are the deny list: a path the
+    engine must never be able to read (discovery files, credentials) or a mode that is not a
+    regular file. None of them is ever fetched, read or exported, so excluding it exposes nothing;
+    the review is told that the file was not reviewed.
+    """
 
     BINARY = "binary"
     TOO_LARGE = "too_large"
+    ENGINE_DISCOVERY = "engine_discovery"
+    CREDENTIAL_PATH = "credential_path"
+    UNSAFE_MODE = "unsafe_mode"
 
 
 @dataclass(frozen=True)
@@ -65,6 +82,7 @@ class PreparedContent:
     metadata: str
     prior_state: str
     deadline: float
+    metrics: CheckoutMetrics
 
 
 def prepare_job_content(
@@ -78,14 +96,14 @@ def prepare_job_content(
     budget: Budget | None = None,
 ) -> PreparedContent:
     if job.base is None or job.git.provider != "github":
-        raise CheckoutError()
+        raise CheckoutError(CheckoutReason.INVALID_REQUEST)
     url = repository_url(job.base.repository, job.git.base_url)
     pr_parts = job.pr_url.rsplit("/", 4)
     if len(pr_parts) != 5 or "/".join(pr_parts[1:3]) != job.base.repository:
-        raise CheckoutError()
+        raise CheckoutError(CheckoutReason.INVALID_REQUEST)
     number = pr_parts[-1]
     if not re.fullmatch(r"[1-9][0-9]{0,8}", number):
-        raise CheckoutError()
+        raise CheckoutError(CheckoutReason.INVALID_REQUEST)
     return prepare_content(
         job.base,
         int(number),
@@ -119,38 +137,50 @@ def prepare_content(
     remove that name only; successful lifetime/lease/shutdown cleanup belongs to prepared_job.
     """
     if budget is not None and budget.limits != limits:
-        raise CheckoutError()
+        raise CheckoutError(CheckoutReason.INVALID_REQUEST)
     budget = budget or Budget(limits, cancelled)
+    entries = 0
+    omissions: dict[str, Omission] = {}
+    skipped: dict[str, Skipped] = {}
+
+    def metrics() -> CheckoutMetrics:
+        return _metrics(budget, entries, omissions, skipped)
+
     # Validate authority fields independently of parse_job: ClaimBase can be constructed directly.
     repository_url(base.repository, "https://api.github.com")
     if not _SHA.fullmatch(base.head_sha) or not 1 <= number <= 999_999_999:
-        raise CheckoutError()
+        raise CheckoutError(CheckoutReason.INVALID_REQUEST)
     if (
         not base.base_ref
         or base.base_ref.startswith("-")
         or any(c in base.base_ref for c in " ~^:?*[\\\x00\n\r")
         or ".." in base.base_ref
     ):
-        raise CheckoutError()
+        raise CheckoutError(CheckoutReason.INVALID_REQUEST)
     if base.previous_reviewed_sha is not None and not _SHA.fullmatch(base.previous_reviewed_sha):
-        raise CheckoutError()
+        raise CheckoutError(CheckoutReason.INVALID_REQUEST)
     budget.charge(4096)
     directory.mkdir(mode=0o700)
     try:
         refs, caps = advertisement(transport, budget)
         if refs.get(f"refs/pull/{number}/head") != base.head_sha:
-            raise CheckoutError()
+            raise CheckoutError(CheckoutReason.REF_MOVED)
         base_sha = refs.get(f"refs/heads/{base.base_ref}")
         if base_sha is None:
-            raise CheckoutError()
+            raise CheckoutError(CheckoutReason.REF_MISSING)
         store = ObjectStore(directory / "objects", budget)
-        store.unpack(fetch_pack(transport, base.head_sha, caps, budget))
+        # Blobs above the file limit are left out by the server and never transferred. Blobs wanted
+        # by name would ignore the filter, so no blob is ever wanted by name.
+        blob_limit = limits.file_bytes + 1
+        filtered = "filter" in caps
+        store.unpack(fetch_pack(transport, base.head_sha, caps, budget, blob_limit=blob_limit))
         head = tracked_tree(store, base.head_sha)
+        entries = len(head)
         # The base-to-head ("Files changed") diff is against the merge base, never the moving
         # base-ref snapshot. If the ancestry walk cannot find one within its bound, review the
         # whole head instead of guessing a base.
         merge_base_sha = _resolve_merge_base(
-            store, transport, caps, base.head_sha, base_sha, budget
+            store, transport, caps, base.head_sha, base_sha, budget, blob_limit
         )
         base_tree: dict[str, Entry] = {}
         if merge_base_sha is not None:
@@ -165,7 +195,15 @@ def prepare_content(
         ):
             try:
                 if base.previous_reviewed_sha not in store.objects:
-                    store.unpack(fetch_pack(transport, base.previous_reviewed_sha, caps, budget))
+                    store.unpack(
+                        fetch_pack(
+                            transport,
+                            base.previous_reviewed_sha,
+                            caps,
+                            budget,
+                            blob_limit=blob_limit,
+                        )
+                    )
                 previous = tracked_tree(store, base.previous_reviewed_sha)
             except ObjectUnavailable:
                 budget.check()
@@ -173,49 +211,11 @@ def prepare_content(
         required = changed_paths(head, base_tree)
         if previous is not None:
             required |= changed_paths(head, previous)
-        omissions: dict[str, Omission] = {}
         # Per tree (head, base, previous): changed paths whose content is binary or oversized.
         tree_skips: list[dict[str, SkipReason]] = [{}, {}, {}]
         texts: dict[str, str] = {}
         cache: dict[str, str | None] = {}
-        eligible: set[str] = set()
-        prior_eligible: set[str] = set()
-        for index, tree in enumerate((head, base_tree, previous or {})):
-            for path, entry in tree.items():
-                budget.check()
-                reason = omission_reason(path, entry.mode)
-                if redact_text(path, redactor) != path:
-                    reason = OmissionReason.CREDENTIAL_PATH
-                if reason is not None:
-                    omissions[path] = Omission(redact_text(path, redactor), reason)
-                    if path in required:
-                        raise CheckoutError()
-                    continue
-                if entry.oid not in store.objects:
-                    (eligible if index < 2 else prior_eligible).add(entry.oid)
-
-        def hydrate(oids: set[str]) -> None:
-            missing = sorted(oids - store.objects.keys())
-            for offset in range(0, len(missing), 32):
-                store.unpack(
-                    fetch_pack(
-                        transport, tuple(missing[offset : offset + 32]), caps, budget, blobs=True
-                    )
-                )
-
-        hydrate(eligible)
-        try:
-            hydrate(prior_eligible)
-        except ObjectUnavailable:
-            budget.check()
-            previous = None
-            required = changed_paths(head, base_tree)
-            omissions = {
-                path: omission
-                for path, omission in omissions.items()
-                if path in head or path in base_tree
-            }
-        # Apply policy to every endpoint before any blob reads, including deleted evidence.
+        # Apply policy to every endpoint, including deleted evidence, before its blob is read.
         for index, tree in enumerate((head, base_tree, previous or {})):
             for path, entry in tree.items():
                 budget.check()
@@ -224,9 +224,13 @@ def prepare_content(
                     reason = OmissionReason.CREDENTIAL_PATH
                 if reason is None:
                     obj = store.objects.get(entry.oid)
-                    if obj is None or obj.kind != "blob":
-                        raise CheckoutError()
-                    if obj.size > limits.file_bytes:
+                    if obj is None and filtered:
+                        # The size filter left the blob out: it is above the limit and was
+                        # never transferred, so its exact size is unknown and not needed.
+                        reason = OmissionReason.LARGE_FILE
+                    elif obj is None or obj.kind != "blob":
+                        raise CheckoutError(CheckoutReason.OBJECT_MISSING)
+                    elif obj.size > limits.file_bytes:
                         reason = OmissionReason.LARGE_FILE
                     else:
                         if entry.oid not in cache:
@@ -239,12 +243,9 @@ def prepare_content(
                 if reason is not None:
                     omissions[path] = Omission(redact_text(path, redactor), reason)
                     if path in required:
-                        # A changed binary or oversized file is excluded from the checkout and
-                        # reported as skipped; denied or unsafe content still fails closed.
-                        skip_reason = _skip_reason(reason)
-                        if skip_reason is None:
-                            raise CheckoutError()
-                        tree_skips[index][path] = skip_reason
+                        # A changed file that is binary, oversized, denied or not a regular file
+                        # is excluded from the checkout and reported as skipped.
+                        tree_skips[index][path] = _skip_reason(reason)
         # Classify per comparison: a path is skipped in a diff only when one of that diff's two
         # sides is binary or oversized, so a third revision cannot hide a text change.
         base_skips = _pair_skips(head, base_tree, tree_skips[0], tree_skips[1])
@@ -267,10 +268,12 @@ def prepare_content(
             if previous is not None
             else ""
         )
-        skipped = {
-            path: Skipped(redact_text(path, redactor), reason)
-            for path, reason in {**previous_skips, **base_skips}.items()
-        }
+        skipped.update(
+            {
+                path: Skipped(redact_text(path, redactor), reason)
+                for path, reason in {**previous_skips, **base_skips}.items()
+            }
+        )
         metadata = _bounded_text(metadata, budget, redactor)
         prior_state = _bounded_text(prior_state, budget, redactor)
         export = directory / "checkout"
@@ -280,7 +283,7 @@ def prepare_content(
             budget.check()
             raw = text.encode()
             if len(raw) > limits.file_bytes:
-                raise CheckoutError()
+                raise CheckoutError(CheckoutReason.INPUT_TOO_LARGE)
             budget.charge(len(raw), exposed=True)
             target = export.joinpath(*validate_path(path, limits))
             _parents(target.parent, export, budget)
@@ -304,7 +307,7 @@ def prepare_content(
             ensure_ascii=True,
         ).encode()
         if len(evidence) > limits.diff_bytes + limits.response_bytes:
-            raise CheckoutError()
+            raise CheckoutError(CheckoutReason.INPUT_TOO_LARGE)
         budget.charge(len(evidence), exposed=True)
         budget.charge(((len(evidence) + 4095) // 4096) * 4096)
         (directory / "evidence.json").write_bytes(evidence)
@@ -313,7 +316,7 @@ def prepare_content(
         budget.check()
         final_refs, _ = advertisement(transport, budget)
         if final_refs.get(f"refs/pull/{number}/head") != base.head_sha:
-            raise CheckoutError()
+            raise CheckoutError(CheckoutReason.REF_MOVED)
         return PreparedContent(
             directory,
             export,
@@ -330,13 +333,40 @@ def prepare_content(
             metadata,
             prior_state,
             budget.deadline,
+            metrics(),
         )
     except (UnicodeError, ValueError):
         shutil.rmtree(directory)
-        raise CheckoutError() from None
-    except BaseException:
+        error = CheckoutError(CheckoutReason.TREE_INVALID)
+        error.metrics = metrics()
+        raise error from None
+    except BaseException as error:
         shutil.rmtree(directory)
+        if isinstance(error, CheckoutError) and error.metrics is None:
+            error.metrics = metrics()
         raise
+
+
+def _metrics(
+    budget: Budget,
+    entries: int,
+    omissions: dict[str, Omission],
+    skipped: dict[str, Skipped],
+) -> CheckoutMetrics:
+    omitted: dict[str, int] = {}
+    for omission in omissions.values():
+        omitted[omission.reason.value] = omitted.get(omission.reason.value, 0) + 1
+    skips: dict[str, int] = {}
+    for skip in skipped.values():
+        skips[skip.reason.value] = skips.get(skip.reason.value, 0) + 1
+    return CheckoutMetrics(
+        transfer_bytes=budget.transfer,
+        preparation_bytes=budget.preparation,
+        exposed_bytes=budget.exposed,
+        entries=entries,
+        omitted=omitted,
+        skipped=skips,
+    )
 
 
 def _resolve_merge_base(
@@ -346,25 +376,24 @@ def _resolve_merge_base(
     head: str,
     base_sha: str,
     budget: Budget,
+    blob_limit: int,
 ) -> str | None:
     try:
         found = merge_base(store, transport, capabilities, head, base_sha, budget)
         if found is None or found == head:
             return found
         # The ancestry walk is commits-only; fetch the merge base commit with its tree.
-        store.unpack(fetch_pack(transport, found, capabilities, budget))
+        store.unpack(fetch_pack(transport, found, capabilities, budget, blob_limit=blob_limit))
     except ObjectUnavailable:
         budget.check()
         return None
     return found if found in store.objects else None
 
 
-def _skip_reason(reason: OmissionReason) -> SkipReason | None:
-    if reason is OmissionReason.BINARY:
-        return SkipReason.BINARY
+def _skip_reason(reason: OmissionReason) -> SkipReason:
     if reason is OmissionReason.LARGE_FILE:
         return SkipReason.TOO_LARGE
-    return None
+    return SkipReason(reason.value)
 
 
 def _pair_skips(
@@ -386,7 +415,7 @@ def _diffable(tree: dict[str, Entry], skipped: dict[str, SkipReason]) -> dict[st
 
 def _bounded_text(text: str, budget: Budget, redactor: Redactor) -> str:
     if len(text.encode()) > budget.limits.response_bytes:
-        raise CheckoutError()
+        raise CheckoutError(CheckoutReason.INPUT_TOO_LARGE)
     budget.charge(len(text.encode()))
     return redact_text(text, redactor)
 

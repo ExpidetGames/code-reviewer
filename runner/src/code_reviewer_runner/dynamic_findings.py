@@ -82,11 +82,21 @@ class Finding:
     reviewed_sha: str
 
 
+# The stable name of the reason a finding was dropped before it could be rendered.
+DROPPED_OUTSIDE_EXPORT = "finding_path_not_exported"
+
+
 @dataclass(frozen=True)
 class DynamicFindings:
     reviewed_sha: str
     findings: tuple[Finding, ...]
     resolved_ids: tuple[str, ...]
+    # Findings that named a file the verified export does not hold (a hallucinated or excluded
+    # path): not rendered, not an error, and counted so the run can say so.
+    dropped_outside_export: int = 0
+    # Why the run was wrapped up before it was done (`cost_limit`, `time_limit`, #293). It is set
+    # by the runner from its ledger after the answer was validated, never by the model.
+    stopped_early: str | None = None
 
 
 def _object(value: Any, path: str) -> dict[str, Any]:
@@ -226,9 +236,11 @@ def parse_dynamic_findings(
 ) -> DynamicFindings:
     """Parse and validate the findings DTO. Raises `FindingsError`; never returns a half valid run.
 
-    `exported_paths` is the set of files the runner prepared; a finding outside it fails with
-    `checkout_incomplete`. Pass None to skip the membership check (for example a re-render of a
-    previously validated output).
+    `exported_paths` is the set of files the runner prepared; a finding outside it is not a review
+    of anything the engine could read, so it is dropped and counted (`dropped_outside_export`)
+    instead of failing the run. A finding that is malformed in any other way still fails the run.
+    Pass None to skip the membership check (for example a re-render of a previously validated
+    output).
     """
     if isinstance(raw, str):
         try:
@@ -252,8 +264,16 @@ def parse_dynamic_findings(
     entries: list[Any] = findings_value  # pyright: ignore[reportUnknownVariableType]
     if len(entries) > MAX_FINDINGS:
         raise _invalid(f"findings may hold at most {MAX_FINDINGS} entries")
-    findings = tuple(
-        _finding(_object(entry, "a finding"), reviewed_sha, exported_paths) for entry in entries
+    parsed = tuple(_finding(_object(entry, "a finding"), reviewed_sha, None) for entry in entries)
+    findings = (
+        parsed
+        if exported_paths is None
+        else tuple(finding for finding in parsed if finding.path in exported_paths)
     )
     resolved_ids = _ids(document.get("resolvedIds"))
-    return DynamicFindings(reviewed_sha=reviewed_sha, findings=findings, resolved_ids=resolved_ids)
+    return DynamicFindings(
+        reviewed_sha=reviewed_sha,
+        findings=findings,
+        resolved_ids=resolved_ids,
+        dropped_outside_export=len(parsed) - len(findings),
+    )

@@ -13,7 +13,10 @@ import {
   CROSS_SITE_REQUEST_RELOAD_PAGE,
   REQUEST_NOT_UNDERSTOOD,
 } from "../../copy/messages.ts";
-import type { ReviewSettingIssueCode } from "../validate.ts";
+import type {
+  ReviewSettingIssueCode,
+  ReviewSettingWarningCode,
+} from "../validate.ts";
 import type { ReviewSettingsErrorCode } from "../errors.ts";
 import {
   describeTransportFailure,
@@ -93,6 +96,10 @@ const ISSUE_COPY: Record<ReviewSettingIssueCode, (field: string) => string> = {
     field === "maxTokens"
       ? "The token budget is larger than the context window of the chosen model. Lower it or choose a model with a larger context window."
       : "The context window of this model is smaller than the token budget. Choose another model or lower the token budget.",
+  DYNAMIC_MODEL_TOOLS_UNSUPPORTED: () =>
+    "This model does not support tool calling, which Dynamic Review needs. Choose another model.",
+  DYNAMIC_MODEL_UNKNOWN: () =>
+    `The provider lists no model with this name. Check the spelling, for example ${DEFAULT_DYNAMIC_MODEL}.`,
 };
 
 function hasIssueCopy(code: string): code is ReviewSettingIssueCode {
@@ -105,6 +112,21 @@ export function describeIssue(
   code: string,
 ): string {
   return hasIssueCopy(code) ? ISSUE_COPY[code](field) : GENERIC_ISSUE;
+}
+
+const WARNING_COPY: Record<ReviewSettingWarningCode, string> = {
+  DYNAMIC_MODEL_UNVERIFIED:
+    "The model could not be checked for tool support right now, so it was saved unchecked. A Dynamic review fails if the model does not support tool calling.",
+};
+
+/** The sentence for a note on a save that went through, or null for a note this version does not know. */
+export function describeWarning(
+  _field: ReviewSettingField | string,
+  code: string,
+): string | null {
+  return Object.hasOwn(WARNING_COPY, code)
+    ? WARNING_COPY[code as ReviewSettingWarningCode]
+    : null;
 }
 
 const SAVE_FAILURE_COPY: Record<ReviewSettingsErrorCode, string> = {

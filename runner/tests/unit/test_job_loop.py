@@ -520,6 +520,62 @@ def test_a_result_the_app_finds_too_large_is_sent_again_as_a_bare_verdict() -> N
     run(scenario)
 
 
+# #296-T10
+def test_the_reason_reaches_the_app_even_when_the_full_result_is_refused() -> None:
+    async def scenario() -> None:
+        harness = Harness()
+        harness.api.claims = [make_claim(1)]
+        harness.api.complete_errors = [ApiRejected("bad", 400, "RUNNER_BAD_REQUEST")]
+        await harness.start()
+        only(harness.launcher.processes).finish(
+            outcome(
+                exit_code=1,
+                stdout=result_line(
+                    ok=False,
+                    errorCode="checkout_incomplete",
+                    errorReason="budget_preparation",
+                    commentUrl=None,
+                    logTail="a long log",
+                ),
+            )
+        )
+        await settle()
+
+        assert len(harness.api.completions) == 2
+        bare = harness.api.completions[1][2]
+        assert bare["errorCode"] == "checkout_incomplete"
+        assert bare["errorReason"] == "budget_preparation"
+        assert bare["logTail"] == "checkout_incomplete [budget_preparation]"
+        await harness.stop()
+
+    run(scenario)
+
+
+# #296-T09
+def test_the_finished_line_of_a_failed_job_names_the_reason(caplog: Any) -> None:
+    async def scenario() -> None:
+        harness = Harness()
+        harness.api.claims = [make_claim(1)]
+        await harness.start()
+        only(harness.launcher.processes).finish(
+            outcome(
+                exit_code=1,
+                stdout=result_line(
+                    ok=False,
+                    errorCode="checkout_incomplete",
+                    errorReason="budget_preparation",
+                    commentUrl=None,
+                ),
+            )
+        )
+        await settle()
+        assert "finished: checkout_incomplete [budget_preparation] (exit code 1)" in caplog.text
+        await harness.stop()
+
+    caplog.set_level(logging.INFO, logger="code_reviewer_runner.loop")
+    run(scenario)
+
+
 # CR-29-T17
 def test_a_job_with_a_command_that_is_not_allowed_starts_no_process_and_fails_with_a_code() -> None:
     async def scenario() -> None:

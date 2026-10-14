@@ -27,6 +27,7 @@ import {
   type EffectiveReviewSettings,
   type SettingSource,
 } from "./effective.ts";
+import type { ModelCapabilityChecker } from "../llm/model-capabilities.ts";
 import { ReviewSettingsError } from "./errors.ts";
 import type { ReviewSettingsHooks } from "./hooks.ts";
 import { noopReviewSettingsHooks } from "./hooks.ts";
@@ -49,6 +50,7 @@ import {
   validateReviewSettingsPatch,
   type ProjectSettingsPatch,
   type ReviewSettingIssue,
+  type ReviewSettingWarning,
 } from "./validate.ts";
 
 /** The key of the global defaults in `app_settings`. */
@@ -117,6 +119,12 @@ export type ProjectDynamicView = {
   limits: { reviewSkillMaxBytes: number };
 };
 
+/** The answer of a project save: the new view and the notes on it (#269). */
+export type ProjectSettingsSaved = ProjectSettingsView & {
+  /** Notes on a save that went through, for example a Dynamic model that could not be checked. */
+  warnings: ReviewSettingWarning[];
+};
+
 export type ReviewSettingsService = {
   getGlobalSettings(): Promise<GlobalSettingsView>;
   /**
@@ -136,12 +144,14 @@ export type ReviewSettingsService = {
   /**
    * Replaces the overrides of a project with the given fields (a field left out is inherited). A
    * repository that was never activated gets an inactive project, so it can be configured first.
-   * Throws `REVIEW_SETTINGS_INVALID` or `REVIEW_SETTINGS_PROJECT_NOT_FOUND`.
+   * A Dynamic model that is set is checked against the provider's model metadata first (#269): one
+   * without tool calling or an unknown one is refused, one that cannot be checked is accepted with a
+   * warning. Throws `REVIEW_SETTINGS_INVALID` or `REVIEW_SETTINGS_PROJECT_NOT_FOUND`.
    */
   updateProjectSettings(
     repositoryId: string,
     input: unknown,
-  ): Promise<ProjectSettingsView>;
+  ): Promise<ProjectSettingsSaved>;
   /**
    * Removes every override of a project, so it follows the global defaults again. A repository
    * without a project has none to remove: nothing is written.
@@ -277,6 +287,11 @@ export function createReviewSettingsService(deps: {
   defaultSkill?: () => DefaultReviewSkill;
   /** What reacts to a settings change; #195 cancels waiting reviews on a kind change. */
   hooks?: ReviewSettingsHooks;
+  /**
+   * Checks the Dynamic model of a project save (#269). Without it nothing is checked, which is what a
+   * test of another behavior wants; the running server always passes the real one.
+   */
+  modelCapabilities?: ModelCapabilityChecker;
 }): ReviewSettingsService {
   const { appSettings, projects } = deps;
   const dynamicDefaults =
@@ -392,6 +407,40 @@ export function createReviewSettingsService(deps: {
     return projectView(repositoryId, entry.project ?? undefined);
   }
 
+  /**
+   * Asks the provider whether the Dynamic model of a save supports tool calling. Only a model that this
+   * request sets is asked about: a cleared model (`null`), a request without one and a value that is already
+   * stored are left alone (#269-T09).
+   */
+  async function checkDynamicModel(
+    model: string | null | undefined,
+  ): Promise<ReviewSettingWarning[]> {
+    if (typeof model !== "string" || deps.modelCapabilities === undefined)
+      return [];
+    const result = await deps.modelCapabilities.check(model);
+    switch (result.outcome) {
+      case "supported":
+        return [];
+      case "unverifiable":
+        return [{ field: "dynamicModel", code: "DYNAMIC_MODEL_UNVERIFIED" }];
+      case "unsupported":
+      case "unknown_model":
+        throw new ReviewSettingsError(
+          "REVIEW_SETTINGS_INVALID",
+          "Some settings are not valid.",
+          [
+            {
+              field: "dynamicModel",
+              code:
+                result.outcome === "unsupported"
+                  ? "DYNAMIC_MODEL_TOOLS_UNSUPPORTED"
+                  : "DYNAMIC_MODEL_UNKNOWN",
+            },
+          ],
+        );
+    }
+  }
+
   return {
     getGlobalSettings: globalView,
 
@@ -412,6 +461,7 @@ export function createReviewSettingsService(deps: {
 
     async updateProjectSettings(repositoryId, input) {
       const patch = checkedProject(input);
+      const warnings = await checkDynamicModel(patch.dynamic.dynamicModel);
       refuseBudgetAboveContext(
         patch.review,
         resolveReviewSettings({
@@ -444,7 +494,7 @@ export function createReviewSettingsService(deps: {
         },
       );
       if (project === undefined) throw notFound();
-      return projectView(repositoryId, project);
+      return { ...(await projectView(repositoryId, project)), warnings };
     },
 
     async resetProjectSettings(repositoryId) {

@@ -13,6 +13,7 @@ import { defaultWorkspaceId } from "./workspaces.ts";
 import { createReviewSettingsService } from "../review-settings/service.ts";
 import { builtInReviewSettings } from "../review-settings/settings.ts";
 import { readDefaultReviewSkill } from "../review-settings/default-skill.ts";
+import type { ModelCapabilityChecker } from "../llm/model-capabilities.ts";
 import type { ReviewSettingsHooks } from "../review-settings/hooks.ts";
 
 export const TEST_MODEL = "deepseek/deepseek-v3.2";
@@ -49,7 +50,10 @@ export async function seedRepositories(
 
 export async function setupReviewSettings(
   db?: Kysely<Database>,
-  options: { hooks?: ReviewSettingsHooks } = {},
+  options: {
+    hooks?: ReviewSettingsHooks;
+    modelCapabilities?: ModelCapabilityChecker;
+  } = {},
 ) {
   const database = db ?? (await createTestDatabase()).db;
   const workspaceId = await defaultWorkspaceId(database);
@@ -63,6 +67,9 @@ export async function setupReviewSettings(
     builtIn: () => builtInReviewSettings(model),
     defaultSkill: () => TEST_DEFAULT_SKILL,
     ...(options.hooks === undefined ? {} : { hooks: options.hooks }),
+    ...(options.modelCapabilities === undefined
+      ? {}
+      : { modelCapabilities: options.modelCapabilities }),
   });
   return {
     db: database,

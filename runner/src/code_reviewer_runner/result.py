@@ -76,9 +76,11 @@ class Usage:
     ai_calls: int
     fallback_used: bool
     cost_usd: float | None
+    # Why a Dynamic Review was wrapped up before it was done (`cost_limit`, `time_limit`, #293).
+    stopped_early: str | None = None
 
     def to_json(self) -> dict[str, Any]:
-        return {
+        document: dict[str, Any] = {
             "model": self.model,
             "promptTokens": self.prompt_tokens,
             "completionTokens": self.completion_tokens,
@@ -87,6 +89,9 @@ class Usage:
             "fallbackUsed": self.fallback_used,
             "costUsd": self.cost_usd,
         }
+        if self.stopped_early is not None:
+            document["stoppedEarly"] = self.stopped_early
+        return document
 
 
 @dataclass(frozen=True)
@@ -99,9 +104,12 @@ class JobResult:
     # True when the log held more than `log_tail` shows (older lines or characters were cut).
     log_truncated: bool = False
     usage: Usage | None = None
+    # A finer, stable name for the failure next to `error_code` (for a Dynamic checkout failure
+    # the `CheckoutReason`). Never free text; None where a failure has no finer name.
+    error_reason: str | None = None
 
     def to_json(self) -> dict[str, Any]:
-        return {
+        document: dict[str, Any] = {
             "ok": self.ok,
             "durationMs": self.duration_ms,
             "commentUrl": self.comment_url,
@@ -110,6 +118,9 @@ class JobResult:
             "logTruncated": self.log_truncated,
             "usage": self.usage.to_json() if self.usage else None,
         }
+        if self.error_reason is not None:
+            document["errorReason"] = self.error_reason
+        return document
 
     def to_line(self) -> str:
         """One line of JSON, ASCII only, so nothing in a log can break the framing."""
