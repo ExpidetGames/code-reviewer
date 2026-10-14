@@ -33,11 +33,14 @@ from .netguard import IsolationError, NetworkConfinement
 
 PROXY_PORT_VARIABLE = "RUNNER_DYNAMIC_PROXY_PORT"
 ENGINE_PORT_VARIABLE = "RUNNER_DYNAMIC_ENGINE_PORT"
-# Below the kernel's ephemeral range (32768 and up), so no outgoing connection can be using them.
+# Below the kernel's default ephemeral range (32768 and up). The range can be lowered, so startup
+# reads the real one (`require_ports_outside_ephemeral_range`) before it installs anything.
 DEFAULT_PROXY_PORT = 10180
 DEFAULT_ENGINE_PORT = 10181
 _LOWEST_PORT = 1024
 _HIGHEST_PORT = 32767
+EPHEMERAL_RANGE_FILE = Path("/proc/sys/net/ipv4/ip_local_port_range")
+THREAD_DIRECTORY = Path("/proc/self/task")
 
 CAP_SETPCAP = 8
 CAP_NET_ADMIN = 12
@@ -80,6 +83,25 @@ def slot_ports(environment: Mapping[str, str]) -> SlotPorts:
     if ports.proxy == ports.engine:
         raise IsolationError(f"{PROXY_PORT_VARIABLE} and {ENGINE_PORT_VARIABLE} must differ")
     return ports
+
+
+def require_ports_outside_ephemeral_range(
+    ports: SlotPorts, source: Path = EPHEMERAL_RANGE_FILE
+) -> None:
+    """Raise `IsolationError` unless both ports lie outside the kernel's ephemeral port range.
+
+    An outgoing connection of any process may be given a port of that range; a fixed port inside
+    it could then be taken by a stranger before the supervisor or the engine binds it. An
+    unreadable or unparsable range counts as unsafe.
+    """
+    try:
+        low, high = (int(part) for part in source.read_text(encoding="ascii").split())
+    except (OSError, ValueError):
+        raise IsolationError("the kernel's ephemeral port range cannot be read") from None
+    if low > high:
+        raise IsolationError("the kernel's ephemeral port range cannot be read")
+    if any(low <= port <= high for port in (ports.proxy, ports.engine)):
+        raise IsolationError("a fixed slot port lies inside the kernel's ephemeral port range")
 
 
 # -- what the process holds ---------------------------------------------------
@@ -135,14 +157,21 @@ class _Data(ctypes.Structure):
     ]
 
 
-def drop_startup_capabilities() -> None:
+def drop_startup_capabilities(task_directory: Path = THREAD_DIRECTORY) -> None:
     """Remove `NET_ADMIN` and `SETPCAP` from this process and from everything it will start.
 
     Capability sets belong to a thread, and a new thread copies its creator's: this must run
     before any other thread exists. The bounding set goes first (it needs `SETPCAP`, which is
     therefore dropped last); then the process's own sets lose both. The result is read back.
+
+    "Other threads" means OS threads: `threading.active_count()` does not see those of a native
+    extension, so the kernel's own list (`/proc/self/task`) has to hold exactly this one thread.
     """
-    if threading.active_count() != 1:
+    try:
+        os_threads = len(list(task_directory.iterdir()))
+    except OSError:
+        os_threads = -1
+    if threading.active_count() != 1 or os_threads != 1:
         raise IsolationError("the capabilities can only be dropped before other threads exist")
     machine = platform.machine()
     if machine not in _CAPGET:
@@ -180,10 +209,12 @@ def secure_startup(
     *,
     install: Install | None = None,
     drop: Drop = drop_startup_capabilities,
+    ephemeral_range: Path = EPHEMERAL_RANGE_FILE,
 ) -> bool:
     """Install the engine user's rules once, then drop `NET_ADMIN` for good.
 
-    Returns True when the rules were installed. If they could not be (no `nft`, no `nf_tables`),
+    Returns True when the rules were installed. If they could not be (no `nft`, no `nf_tables`,
+    a fixed port inside the kernel's ephemeral range),
     the capabilities are dropped all the same and False is returned: no Dynamic job then passes
     its probe, so each fails closed with `dynamic_isolation_self_check_failed`, while Diff jobs
     are unaffected. If the drop fails, `IsolationError` is raised and the runner must not start:
@@ -191,6 +222,7 @@ def secure_startup(
     """
     installed = True
     try:
+        require_ports_outside_ephemeral_range(ports, ephemeral_range)
         (install or NetworkConfinement(uid).apply)(ports.proxy, ports.engine)
     except IsolationError as error:
         installed = False

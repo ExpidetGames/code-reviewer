@@ -40,19 +40,14 @@ def prepare_dynamic_runtime(
     """The Dynamic runner's one-time network setup, before the loop and any thread exist (#244).
 
     Installs the engine user's static nft rules and drops `NET_ADMIN` for good. Returns False when
-    the rules could not be installed (Dynamic jobs then fail closed). Raises `IsolationError` when
-    the capabilities could not be dropped: such a runner must not start. A runner without an
-    engine user (Diff only) has nothing to do.
+    the rules could not be installed (Dynamic jobs then fail closed; `secure_startup` logs why).
+    Raises `IsolationError` when the capabilities could not be dropped: such a runner must not
+    start. A runner without an engine user (Diff only) has nothing to do.
     """
     user, ports = settings.dynamic_engine_user, settings.dynamic_ports
     if user is None or ports is None:
         return True
-    installed = startup(user[0], ports)
-    if not installed:
-        logging.getLogger(LOGGER_NAME).warning(
-            "Dynamic jobs on this runner fail closed until the engine network rules are installed"
-        )
-    return installed
+    return startup(user[0], ports)
 
 
 async def serve(
