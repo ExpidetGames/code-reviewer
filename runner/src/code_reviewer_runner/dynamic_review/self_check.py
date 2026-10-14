@@ -57,6 +57,7 @@ class SelfCheckReason(StrEnum):
     NETWORK_RULES_NOT_INSTALLED = "network_rules_not_installed"
     CAPABILITIES_NOT_DROPPED = "capabilities_not_dropped"
     PIN_UNREADABLE = "pin_unreadable"
+    PIN_UNTRUSTED = "pin_untrusted"
     ENGINE_BINARY_MISSING = "engine_binary_missing"
     ENGINE_BINARY_UNTRUSTED = "engine_binary_untrusted"
     ENGINE_BINARY_CHECKSUM_MISMATCH = "engine_binary_checksum_mismatch"
@@ -229,6 +230,8 @@ def check_dynamic_runner(
     tools: ToolPaths = DEFAULT_TOOLS,
     platform: str | None = None,
     trusted_owner: int = 0,
+    chain_root: Path = Path("/"),
+    lstat: Callable[[Path], os.stat_result] = os.lstat,
     euid: Callable[[], int] = os.geteuid,
     capabilities_gone: Callable[[], None] = require_startup_capabilities_gone,
     user_group: GroupOf = group_of,

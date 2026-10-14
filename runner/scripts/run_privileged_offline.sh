@@ -11,13 +11,17 @@
 # module); it needs `nft`, `rg`, `setpriv`, `unshare` and `ip`. On a developer machine without root,
 # run the unprivileged suites instead.
 #
-# Two phases, as in production (ADR 0003):
+# Three phases, as in production (ADR 0003):
 #   startup  tests/privileged/startup: the capabilities the container is created with, NET_ADMIN and
 #            SETPCAP included (they exist only until the engine user's static rules are installed):
 #            the rules as such, and the startup step itself, run for real in a process of its own;
 #   job      everything else, run by tests/privileged/job_phase.py: it runs the production startup
 #            step (static rules, then NET_ADMIN and SETPCAP dropped from the bounding set for good)
-#            and then pytest in the same process, so every test sees the container as a job does.
+#            and then pytest in the same process, so every test sees the container as a job does;
+#   execve   tests/privileged/execve (#249): the same, started WITHOUT no-new-privileges, so that the
+#            bounding set alone is what keeps a file-capability or setuid binary from giving back
+#            NET_ADMIN and SETPCAP. The probe binaries are made here, before the drop (a job holds
+#            no SETFCAP and no mount), on a tmpfs that allows exec and setuid.
 #
 #   scripts/run_privileged_offline.sh [pytest arguments]
 #
@@ -27,7 +31,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 OPENCODE_BIN="$(uv run python scripts/fetch_opencode.py)"
-for tool in rg nft setpriv unshare ip; do
+for tool in rg nft setpriv unshare ip setcap; do
   command -v "$tool" >/dev/null || [ -x "/usr/sbin/$tool" ] || { echo "$tool is not installed" >&2; exit 1; }
 done
 
@@ -53,8 +57,27 @@ sudo --preserve-env env "PATH=$PATH:/usr/sbin:/sbin" "HOME=$HOME" "OPENCODE_BIN=
       getent passwd "$id" >/dev/null \
         || useradd --system --uid "$id" --gid "$id" --no-create-home --shell /usr/sbin/nologin "$name"
     done
-    exec setpriv \
+    # The probes of the execve phase: copies of `cat`, one with the file capabilities of the two
+    # startup-only capabilities (permitted and inheritable, once with the effective flag too), one setuid root, on a tmpfs
+    # that allows exec and setuid (the container'"'"'s own tmpfs allow neither).
+    CR_PROBE_DIR="$(mktemp -d)"
+    export CR_PROBE_DIR
+    mount -t tmpfs -o rw,exec,suid,dev,size=8m,mode=0755 tmpfs "$CR_PROBE_DIR"
+    for probe in cap-cat cap-cat-effective suid-cat; do
+      cp "$(command -v cat)" "$CR_PROBE_DIR/$probe"
+    done
+    setcap cap_net_admin,cap_setpcap+ip "$CR_PROBE_DIR/cap-cat"
+    setcap cap_net_admin,cap_setpcap+eip "$CR_PROBE_DIR/cap-cat-effective"
+    chmod 4755 "$CR_PROBE_DIR/suid-cat"
+    status=0
+    setpriv \
       --bounding-set=-all,+chown,+dac_override,+fowner,+kill,+setgid,+setuid,+setpcap,+net_admin \
       --inh-caps=-all --no-new-privs \
-      scripts/privileged_phases.sh "$@"
+      scripts/privileged_phases.sh "$@" || status=1
+    # The execve phase: the same capabilities and the same startup step, but without no-new-privileges.
+    PRIVILEGED_PHASE=job setpriv \
+      --bounding-set=-all,+chown,+dac_override,+fowner,+kill,+setgid,+setuid,+setpcap,+net_admin \
+      --inh-caps=-all \
+      uv run --no-sync --offline python tests/privileged/execve_phase.py || status=1
+    exit "$status"
   ' privileged "$@"

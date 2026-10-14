@@ -301,13 +301,146 @@ dynamic_caps=(
   --security-opt no-new-privileges:true
 )
 dynamic_env=(--env HOME=/home/runner --env RUNNER_DIFF_JOB_USER=10001:10001)
+# #249: the root filesystem is read-only, and the only writable paths are three private tmpfs (the
+# `read_only` and `tmpfs` of compose.dynamic.yml; app/src/ci/compose-dynamic.test.ts keeps them equal).
+dynamic_rootfs=()
 
 step "the self-check of the Dynamic runner passes and opencode is advertised"
-start_loop smoke-runner-capable "${dynamic_caps[@]}" "${dynamic_env[@]}"
+start_loop smoke-runner-capable "${dynamic_caps[@]}" "${dynamic_rootfs[@]}" "${dynamic_env[@]}"
 wait_for_log smoke-runner-capable 'opencode is advertised' 90
 [ "$(docker inspect --format '{{.State.Running}}' smoke-runner-capable)" = true ] || fail "the capable runner stopped"
 assert_no_token_in_log smoke-runner-capable
+
+# #249-T01: what a compromised root supervisor can leave behind does not survive a restart. A root
+# process inside the container cannot change the tools that run with NET_ADMIN at the next start, and
+# what it writes into the three tmpfs is gone after the restart, which runs the self-check again.
+step "a restart gives back the same clean container: tools unchanged, tmpfs empty, opencode advertised again"
+docker exec smoke-runner-capable sh -c 'touch /tmp/planted /run/planted /home/runner/planted' ||
+  fail "root cannot write to the tmpfs of the container"
+docker exec smoke-runner-capable sh -c 'if cat /dev/null >> /usr/sbin/nft || cat /dev/null >> /usr/bin/tini; then exit 1; fi' 2>/dev/null ||
+  fail "root changed nft or tini on the root filesystem"
+docker restart smoke-runner-capable >/dev/null
+waited=0
+until [ "$(docker logs smoke-runner-capable 2>&1 | grep -c 'opencode is advertised')" -ge 2 ]; do
+  [ "$waited" -lt 90 ] || { docker logs smoke-runner-capable >&2 || true; fail "opencode was not advertised again after the restart"; }
+  sleep 1
+  waited=$((waited + 1))
+done
+docker exec smoke-runner-capable sh -c '[ ! -e /tmp/planted ] && [ ! -e /run/planted ] && [ ! -e /home/runner/planted ]' ||
+  fail "a file written into a tmpfs survived the restart"
+assert_no_token_in_log smoke-runner-capable
 docker rm --force smoke-runner-capable >/dev/null
+
+# #249-T01 / T02: the layout, judged from inside a container created like compose.dynamic.yml creates
+# it, by the strongest process of a job: root with its capabilities (DAC_OVERRIDE, CHOWN, FOWNER).
+readonly_check='
+import errno, os, shutil, subprocess
+import code_reviewer_runner
+
+problems = []
+paths = [
+    shutil.which("nft"), shutil.which("tini"), "/usr/local/bin/opencode", "/usr/local/bin/rg",
+    "/opt/code-reviewer/pins/opencode-pin.json", "/opt/code-reviewer/pins/ripgrep-pin.json",
+    "/etc/passwd", "/opt/venv/bin/code-reviewer-runner", os.path.realpath(code_reviewer_runner.__file__),
+]
+for path in paths:
+    if not path or not os.path.exists(path):
+        problems.append(f"missing: {path}")
+        continue
+    directory = os.path.dirname(path)
+    attempts = {
+        "append": lambda: open(path, "ab").close(),
+        "chmod": lambda: os.chmod(path, os.stat(path).st_mode),
+        "unlink": lambda: os.unlink(path),
+        "create next to it": lambda: os.close(os.open(directory + "/.planted", os.O_CREAT | os.O_WRONLY)),
+    }
+    for what, attempt in attempts.items():
+        try:
+            attempt()
+        except OSError as error:
+            if error.errno != errno.EROFS:
+                problems.append(f"{path}: {what}: {error}")
+        else:
+            problems.append(f"{path}: {what} succeeded")
+for directory in ("/", "/usr", "/usr/local/bin", "/opt", "/opt/venv", "/etc", "/var", "/home"):
+    try:
+        os.close(os.open(directory + "/.planted", os.O_CREAT | os.O_WRONLY))
+    except OSError as error:
+        if error.errno != errno.EROFS:
+            problems.append(f"{directory}: create: {error}")
+    else:
+        problems.append(f"{directory}: create succeeded")
+
+mounts = {}
+for line in open("/proc/self/mountinfo"):
+    before, _, after = line.partition(" - ")
+    fields, rest = before.split(), after.split()
+    mounts[fields[4]] = (set(fields[5].split(",")), rest[0], set(rest[2].split(",")))
+if "ro" not in mounts["/"][0]:
+    problems.append("the root filesystem is not mounted read-only")
+# Every other writable mount is a tmpfs of ours or one of Docker itself: the pseudo filesystems, /dev
+# and the three files it binds into /etc at every start.
+docker_owned = {"/etc/hosts", "/etc/hostname", "/etc/resolv.conf"}
+pseudo = {"proc", "sysfs", "cgroup", "cgroup2", "devpts", "mqueue"}
+writable = sorted(
+    mountpoint for mountpoint, (options, fstype, _) in mounts.items()
+    if "rw" in options and fstype not in pseudo and not mountpoint.startswith("/dev")
+    and mountpoint not in docker_owned
+)
+if writable != ["/home/runner", "/run", "/tmp"]:
+    problems.append(f"writable mounts: {writable}")
+for mountpoint, owner, mode in (("/tmp", 0, 0o1777), ("/run", 0, 0o755), ("/home/runner", 10001, 0o700)):
+    options, fstype, super_options = mounts[mountpoint]
+    if fstype != "tmpfs" or not {"noexec", "nosuid", "nodev"} <= options:
+        problems.append(f"{mountpoint}: {fstype} {sorted(options)}")
+    if not any(option.startswith("size=") for option in super_options):
+        problems.append(f"{mountpoint}: no size limit")
+    facts = os.stat(mountpoint)
+    if (facts.st_uid, facts.st_mode & 0o7777) != (owner, mode):
+        problems.append(f"{mountpoint}: owner {facts.st_uid} mode {facts.st_mode & 0o7777:o}")
+    path = mountpoint + "/written-by-root"
+    with open(path, "w") as stream:
+        stream.write("ok")
+    os.chmod(path, 0o755)
+    try:
+        subprocess.run([path], check=False)
+    except OSError as error:
+        if error.errno != errno.EACCES:
+            problems.append(f"{mountpoint}: exec: {error}")
+    else:
+        problems.append(f"{mountpoint}: a file written there could be executed")
+    os.unlink(path)
+print("\n".join(problems))
+'
+step "the root filesystem is read-only: root with its capabilities changes nothing outside the three tmpfs"
+problems=$(docker run --rm --network none "${dynamic_caps[@]}" "${dynamic_rootfs[@]}" --entrypoint python "$image" -c "$readonly_check") ||
+  fail "the read-only check could not run: $problems"
+[ -z "$problems" ] || fail "the root filesystem is not read-only as configured:
+$problems"
+
+# #249-T01: the engine user (and the Diff job user) gain no write path from the layout. The paths a
+# user can write in the container, with the settings of compose.dynamic.yml, must be among those it
+# can write in the same image without them.
+writable_by() {
+  local user=$1
+  shift
+  # find exits non-zero for the directories the user may not enter; only what it prints matters.
+  { docker run --rm --network none --user "$user" --workdir / --cap-drop ALL \
+    --security-opt no-new-privileges:true "$@" --entrypoint find "$image" / \
+    \( -path /proc -o -path /sys \) -prune -o \( -type d -o -type f \) -writable -print 2>/dev/null || true; } | sort
+}
+for user in 10101:10101 10001:10001; do
+  step "user $user can write nowhere that it could not before: the layout adds no write path"
+  before=$(writable_by "$user")
+  after=$(writable_by "$user" "${dynamic_rootfs[@]}")
+  added=$(comm -13 <(printf '%s\n' "$before") <(printf '%s\n' "$after"))
+  [ -z "$added" ] || fail "the read-only layout lets $user write in addition:
+$added"
+  printf '    %s\n' "$(tr '\n' ' ' <<<"$after")"
+done
+step "the engine user can write only in /tmp, besides Docker's own /dev mounts"
+engine_writable=$(writable_by 10101:10101 "${dynamic_rootfs[@]}" | grep -vE '^/dev/(shm|mqueue)$' || true)
+[ "$engine_writable" = "/tmp" ] || fail "the engine user can write in: $engine_writable"
 
 # #202-T09: each broken prerequisite is "not advertised", with its stable reason, and the runner
 # keeps running to serve Diff jobs.
@@ -326,11 +459,11 @@ step "without NET_ADMIN the network rules cannot be installed: not advertised"
 expect_not_advertised smoke-runner-no-rules network_rules_not_installed \
   --user 0:0 --cap-drop ALL --cap-add SETUID --cap-add SETGID --cap-add KILL --cap-add CHOWN \
   --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETPCAP --security-opt no-new-privileges:true \
-  "${dynamic_env[@]}"
+  "${dynamic_rootfs[@]}" "${dynamic_env[@]}"
 
 step "with an engine user that does not exist: not advertised"
 expect_not_advertised smoke-runner-wrong-user engine_user_invalid \
-  "${dynamic_caps[@]}" "${dynamic_env[@]}" --env RUNNER_DYNAMIC_ENGINE_UID=10999 --env RUNNER_DYNAMIC_ENGINE_GID=10999
+  "${dynamic_caps[@]}" "${dynamic_rootfs[@]}" "${dynamic_env[@]}" --env RUNNER_DYNAMIC_ENGINE_UID=10999 --env RUNNER_DYNAMIC_ENGINE_GID=10999
 
 step "with an engine binary that is not the pinned one: not advertised"
 replaced=$(mktemp)
@@ -338,6 +471,6 @@ extra_cleanup() { rm -f "$replaced"; }
 printf '#!/bin/sh\necho 1.19.0\n' >"$replaced"
 chmod 755 "$replaced"
 expect_not_advertised smoke-runner-wrong-binary 'engine_binary_(untrusted|checksum_mismatch)' \
-  "${dynamic_caps[@]}" "${dynamic_env[@]}" --volume "$replaced:/usr/local/bin/opencode:ro"
+  "${dynamic_caps[@]}" "${dynamic_rootfs[@]}" "${dynamic_env[@]}" --volume "$replaced:/usr/local/bin/opencode:ro"
 
 step "runner image smoke test passed"
