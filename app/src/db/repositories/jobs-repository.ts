@@ -63,6 +63,11 @@ export const JOB_LIST_DEFAULT_LIMIT = 100;
 export const JOB_LIST_MAX_LIMIT = 500;
 
 /** The lookup of the last reviewed head for one pull request and review kind (#199). */
+/** The most heads a claim names as attempted (#255); the contract bounds the list by the same number. */
+export const MAX_ATTEMPTED_SHAS = 20;
+// Rows read before the heads are made distinct; many reruns of one head must not hide an older one.
+const ATTEMPTED_SCAN_LIMIT = 200;
+
 export type PreviousReviewedShaInput = {
   repositoryId: string;
   prNumber: number;
@@ -110,6 +115,15 @@ export type JobsRepository = {
    * never its own previous review.
    */
   previousReviewedSha(input: PreviousReviewedShaInput): Promise<string | null>;
+  /**
+   * The heads of this pull request's earlier jobs of the same review kind that did not succeed (#255),
+   * newest first and bounded, or an empty list. A run that wrote the summary and then did not end
+   * `succeeded` (failed, superseded, cancelled after a lost lease) leaves its head in the comment; the
+   * publisher accepts exactly these heads as a state it can account for. Only jobs created after the
+   * last successful review count (its state already includes everything before it), and a job created
+   * after the claimed one never does: that is a newer review, not a predecessor.
+   */
+  attemptedShas(input: PreviousReviewedShaInput): Promise<string[]>;
 };
 
 /**
@@ -540,6 +554,44 @@ export function createJobsRepository(
         .limit(1)
         .executeTakeFirst();
       return row?.head_sha ?? null;
+    },
+
+    async attemptedShas(input) {
+      const scope = db
+        .selectFrom("jobs")
+        .where("workspace_id", "=", workspaceId)
+        .where("repository_id", "=", input.repositoryId)
+        .where("pr_number", "=", input.prNumber)
+        .where("review_kind", "=", input.reviewKind);
+      const claimed = await scope
+        .select("created_at")
+        .where("id", "=", input.excludeJobId)
+        .executeTakeFirst();
+      if (claimed === undefined) return [];
+      const lastSucceeded = await scope
+        .select("created_at")
+        .where("status", "=", "succeeded")
+        .where("id", "!=", input.excludeJobId)
+        .orderBy("finished_at", "desc")
+        .orderBy("created_at", "desc")
+        .limit(1)
+        .executeTakeFirst();
+      let query = scope
+        .select("head_sha")
+        .where("status", "!=", "succeeded")
+        .where("id", "!=", input.excludeJobId)
+        .where("created_at", "<=", claimed.created_at);
+      if (lastSucceeded !== undefined)
+        query = query.where("created_at", ">=", lastSucceeded.created_at);
+      const rows = await query
+        .orderBy("created_at", "desc")
+        .orderBy("id", "desc")
+        .limit(ATTEMPTED_SCAN_LIMIT)
+        .execute();
+      return [...new Set(rows.map((row) => row.head_sha))].slice(
+        0,
+        MAX_ATTEMPTED_SHAS,
+      );
     },
   };
 }

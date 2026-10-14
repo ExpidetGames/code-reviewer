@@ -396,3 +396,102 @@ describe("the previous reviewed head of a Dynamic job", () => {
     expect(body.job.input.base).toMatchObject({ previousReviewedSha: null });
   });
 });
+
+describe("the heads the app attempted for a Dynamic job", () => {
+  const engines = ["pr-agent", "opencode"];
+
+  async function seedDynamic(
+    h: Awaited<ReturnType<typeof startDynamicHarness>>,
+    headSha: string,
+    status: "succeeded" | "failed" | "superseded" | "cancelled" | "queued",
+    overrides: { prNumber?: number; reviewKind?: "dynamic" | "diff" } = {},
+  ) {
+    h.clock.advance(1000);
+    await h.seedHistoricalJob({
+      command: "review",
+      prNumber: overrides.prNumber ?? 8,
+      headSha,
+      reviewKind: overrides.reviewKind ?? "dynamic",
+      status,
+      errorCode: status === "failed" ? "timeout" : null,
+    });
+  }
+
+  async function claimNew(
+    h: Awaited<ReturnType<typeof startDynamicHarness>>,
+    headSha = "f".repeat(40),
+  ) {
+    h.clock.advance(1000);
+    await h.enqueueNew({ prNumber: 8, headSha, reviewKind: "dynamic" });
+    return h.claimed({ engines });
+  }
+
+  // #255-T01 (app side)
+  it("names the head of a failed run, which may have written the summary before it failed", async () => {
+    const h = await startDynamicHarness();
+    await seedDynamic(h, "e".repeat(40), "failed");
+
+    const body = await claimNew(h);
+
+    expect(body.job.input.base).toMatchObject({
+      previousReviewedSha: null,
+      attemptedShas: ["e".repeat(40)],
+    });
+    expectValid("ClaimResponse", body);
+  });
+
+  // #255-T01 (app side)
+  it("names a superseded or cancelled run too, and every head since the last success, newest first", async () => {
+    const h = await startDynamicHarness();
+    await seedDynamic(h, "1".repeat(40), "failed");
+    await seedDynamic(h, "2".repeat(40), "succeeded");
+    await seedDynamic(h, "3".repeat(40), "failed");
+    await seedDynamic(h, "4".repeat(40), "superseded");
+    await seedDynamic(h, "5".repeat(40), "cancelled");
+    await seedDynamic(h, "3".repeat(40), "failed");
+
+    const body = await claimNew(h);
+
+    // The run before the last success is accounted for by that success's own state.
+    expect(body.job.input.base).toMatchObject({
+      previousReviewedSha: "2".repeat(40),
+      attemptedShas: ["3".repeat(40), "5".repeat(40), "4".repeat(40)],
+    });
+    expectValid("ClaimResponse", body);
+  });
+
+  // #255-T02 (app side)
+  it("never names a newer job, another pull request or the other review kind", async () => {
+    const h = await startDynamicHarness();
+    await seedDynamic(h, "a".repeat(40), "failed", { prNumber: 9 });
+    await seedDynamic(h, "b".repeat(40), "failed", { reviewKind: "diff" });
+    h.clock.advance(1000);
+    const claimed = await h.enqueueNew({
+      prNumber: 8,
+      headSha: "f".repeat(40),
+      reviewKind: "dynamic",
+    });
+    // A job pushed after this one was queued is a newer review, never a predecessor.
+    await seedDynamic(h, "c".repeat(40), "queued");
+
+    const body = await h.claimed({ engines });
+
+    expect(body.job.id).toBe(claimed.id);
+    expect(body.job.input.base).toMatchObject({ attemptedShas: [] });
+  });
+
+  // #255-T01 (app side)
+  it("is bounded: the 20 newest distinct heads", async () => {
+    const h = await startDynamicHarness();
+    for (let n = 1; n <= 25; n += 1)
+      await seedDynamic(h, n.toString(16).padStart(40, "0"), "failed");
+
+    const body = await claimNew(h);
+
+    const attempted: string[] = body.job.input.base?.attemptedShas ?? [];
+    expect(attempted).toHaveLength(20);
+    expect(attempted[0]).toBe((25).toString(16).padStart(40, "0"));
+    expect(new Set(attempted).size).toBe(20);
+    expectValid("ClaimResponse", body);
+  });
+});

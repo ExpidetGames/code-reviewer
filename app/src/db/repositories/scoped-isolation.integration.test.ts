@@ -420,6 +420,17 @@ const CASES: Case[] = [
     expectAnswer: (answer) => expect(answer).toBeNull(),
   },
   {
+    name: "jobs.attemptedShas",
+    run: (a, b) =>
+      a.jobs.attemptedShas({
+        repositoryId: b.repository.id,
+        prNumber: 7,
+        reviewKind: "dynamic",
+        excludeJobId: b.job.id,
+      }),
+    expectAnswer: (answer) => expect(answer).toEqual([]),
+  },
+  {
     name: "jobs.enqueue",
     run: (a, b) =>
       settle(() =>
